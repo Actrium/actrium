@@ -29,8 +29,11 @@
 //!
 //!     let message = b"Hello, World!".to_vec();
 //!
-//!     // Enqueue message (from is the sender's ActrId as Protobuf bytes)
-//!     let message_id = mailbox.enqueue(from_bytes, message, MessagePriority::Normal).await?;
+//!     // Enqueue message (from is the sender's ActrId as Protobuf bytes; the
+//!     // sender's verified ActrType, when known, goes alongside it)
+//!     let message_id = mailbox
+//!         .enqueue(from_bytes, None, message, MessagePriority::Normal)
+//!         .await?;
 //!
 //!     // Dequeue messages
 //!     let messages = mailbox.dequeue().await?;

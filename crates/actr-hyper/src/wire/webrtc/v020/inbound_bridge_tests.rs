@@ -35,6 +35,7 @@ impl Mailbox for BlockingMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
+        _from_type: Option<Vec<u8>>,
         _payload: Vec<u8>,
         _priority: MessagePriority,
     ) -> StorageResult<Uuid> {
@@ -70,6 +71,7 @@ impl Mailbox for CapturingMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
+        _from_type: Option<Vec<u8>>,
         _payload: Vec<u8>,
         _priority: MessagePriority,
     ) -> StorageResult<Uuid> {
@@ -97,7 +99,11 @@ async fn bridge_routes_rpc_to_mailbox() {
     let pending: crate::transport::correlation::PendingRequestsMap =
         std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
-    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        registry,
+        Default::default(),
+    ));
     let mailbox = CapturingMailbox::new();
     let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -140,7 +146,11 @@ async fn bridge_drops_message_when_mailbox_not_set() {
     let pending: crate::transport::correlation::PendingRequestsMap =
         std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
-    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        registry,
+        Default::default(),
+    ));
     let slot: MailboxSlot = Arc::new(RwLock::new(None)); // mailbox not set
     let shutdown = tokio_util::sync::CancellationToken::new();
     let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
@@ -164,7 +174,11 @@ async fn bridge_shutdown_cancels_a_blocked_dispatch_and_converges() {
     let pending: crate::transport::correlation::PendingRequestsMap =
         std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
-    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        registry,
+        Default::default(),
+    ));
     let mailbox = Arc::new(BlockingMailbox {
         entered: Notify::new(),
     });

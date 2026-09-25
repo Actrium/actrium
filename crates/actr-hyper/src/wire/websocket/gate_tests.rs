@@ -186,11 +186,10 @@ async fn verify_credential_valid_returns_some() {
     let source_bytes = actr_protocol::prost::Message::encode_to_vec(&actor);
 
     let result = WebSocketGate::verify_credential(&credential, &source_bytes, &ctx).await;
-    assert!(result.is_some(), "valid credential should pass");
     assert_eq!(
-        ctx.peer_types.read().unwrap().get(&actor),
-        Some(&test_actor_type()),
-        "the verified Actor type is recorded for the inbound ACL"
+        result,
+        Some(test_actor_type()),
+        "valid credential should pass and yield the verified Actor type"
     );
 }
 
@@ -382,6 +381,7 @@ async fn verify_credential_unknown_key_id_returns_none() {
 struct CapturingMailbox {
     enqueue_count: AtomicUsize,
     last_priority: std::sync::Mutex<Option<MessagePriority>>,
+    last_from_type: std::sync::Mutex<Option<Vec<u8>>>,
 }
 
 impl CapturingMailbox {
@@ -389,6 +389,7 @@ impl CapturingMailbox {
         Arc::new(Self {
             enqueue_count: AtomicUsize::new(0),
             last_priority: std::sync::Mutex::new(None),
+            last_from_type: std::sync::Mutex::new(None),
         })
     }
 }
@@ -398,11 +399,13 @@ impl Mailbox for CapturingMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
         _payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid> {
         self.enqueue_count.fetch_add(1, Ordering::SeqCst);
         *self.last_priority.lock().unwrap() = Some(priority);
+        *self.last_from_type.lock().unwrap() = from_type;
         Ok(Uuid::new_v4())
     }
     async fn dequeue(&self) -> StorageResult<Vec<MessageRecord>> {
@@ -470,6 +473,7 @@ async fn finish_lane_task_last_lane_removes_sink_and_fires_disconnect() {
         Some(peer.clone()),
         Some(hook),
         inbound_sinks.clone(),
+        PeerTypes::default(),
     )
     .await;
 
@@ -511,6 +515,7 @@ async fn finish_lane_task_non_last_lane_keeps_sink_and_skips_disconnect() {
         Some(peer.clone()),
         Some(hook),
         inbound_sinks.clone(),
+        PeerTypes::default(),
     )
     .await;
 
@@ -524,6 +529,7 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
     let peer = test_actor_id(300);
     let source_id = actr_protocol::prost::Message::encode_to_vec(&peer);
     let inbound_sinks: InboundSinkMap = Arc::new(RwLock::new(HashMap::new()));
+    let peer_types = PeerTypes::default();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let hook: HookCallback = Arc::new(move |event| {
         let tx = tx.clone();
@@ -535,11 +541,13 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
     WebSocketGate::spawn_connection_tasks(
         crate::wire::websocket::connection::WebSocketConnection::new("ws://127.0.0.1:0".into()),
         source_id,
+        test_actor_type(),
         empty_pending(),
         Arc::new(DataChunkRegistry::new()),
         CapturingMailbox::new(),
         Some(hook),
         inbound_sinks.clone(),
+        peer_types.clone(),
     )
     .await;
 
@@ -559,6 +567,11 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
 
     assert_eq!(disconnected_peer, peer);
     assert!(!inbound_sinks.read().await.contains_key(&peer));
+    assert_eq!(
+        peer_types.get(&peer),
+        None,
+        "the closed connection no longer holds the peer's type"
+    );
 }
 
 /// RPC request with no pending entry should go to the mailbox with normal priority.
@@ -572,6 +585,7 @@ async fn handle_envelope_request_goes_to_mailbox_with_normal_priority() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![1u8, 2, 3],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -597,6 +611,7 @@ async fn handle_envelope_rpc_signal_uses_high_priority() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcSignal,
         pending,
@@ -623,6 +638,7 @@ async fn handle_envelope_missing_direction_is_dropped_not_enqueued() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -649,6 +665,7 @@ async fn handle_envelope_unspecified_direction_is_dropped_not_enqueued() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -675,6 +692,7 @@ async fn handle_envelope_unknown_direction_is_dropped_not_enqueued() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -707,6 +725,7 @@ async fn handle_envelope_tell_direction_is_enqueued() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending.clone(),
@@ -745,6 +764,7 @@ async fn handle_envelope_response_resolves_pending_not_mailbox() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending.clone(),
@@ -781,6 +801,7 @@ async fn handle_envelope_response_both_payload_and_error_gives_decode_failure() 
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -815,6 +836,7 @@ async fn handle_envelope_response_error_only_gives_unavailable() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -845,6 +867,7 @@ async fn handle_envelope_response_removes_pending_entry() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending.clone(),
@@ -875,6 +898,7 @@ async fn handle_envelope_explicit_response_with_no_pending_is_dropped_not_enqueu
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -908,6 +932,7 @@ async fn handle_envelope_explicit_request_always_enqueues() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending.clone(),
@@ -948,6 +973,7 @@ async fn handle_envelope_explicit_response_with_pending_wakes_caller() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,

@@ -68,6 +68,8 @@ struct StoredMessage {
     id: String,
     /// Sender ActrId bytes
     from: Vec<u8>,
+    /// Sender's verified ActrType bytes, when known (absent in older records)
+    from_type: Option<Vec<u8>>,
     /// Message payload bytes
     payload: Vec<u8>,
     /// Human-readable priority string: "High" | "Normal"
@@ -174,6 +176,7 @@ impl IndexedDbMailbox {
         StoredMessage {
             id: record.id.to_string(),
             from: record.from.clone(),
+            from_type: record.from_type.clone(),
             payload: record.payload.clone(),
             priority: Self::priority_to_string(record.priority).to_string(),
             priority_num: Self::priority_to_num(record.priority),
@@ -196,6 +199,7 @@ impl IndexedDbMailbox {
         Ok(MessageRecord {
             id,
             from: stored.from,
+            from_type: stored.from_type,
             payload: stored.payload,
             priority: Self::priority_from_string(&stored.priority),
             status: Self::status_from_string(&stored.status),
@@ -219,6 +223,7 @@ impl Mailbox for IndexedDbMailbox {
     async fn enqueue(
         &self,
         from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
         payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid> {
@@ -232,6 +237,7 @@ impl Mailbox for IndexedDbMailbox {
         let record = MessageRecord {
             id,
             from,
+            from_type,
             payload,
             priority,
             status: MessageStatus::Queued,
@@ -466,6 +472,7 @@ impl IndexedDbMailbox {
     /// {
     ///   id: "uuid-string",
     ///   from: Uint8Array,
+    ///   from_type: Uint8Array,  // only when known
     ///   payload: Uint8Array,
     ///   priority: "High" | "Normal",
     ///   priority_num: 1 | 2,
@@ -482,6 +489,12 @@ impl IndexedDbMailbox {
         let from_arr = Uint8Array::new_with_length(stored.from.len() as u32);
         from_arr.copy_from(&stored.from);
         set_prop(&obj, "from", &from_arr.into())?;
+
+        if let Some(from_type) = &stored.from_type {
+            let from_type_arr = Uint8Array::new_with_length(from_type.len() as u32);
+            from_type_arr.copy_from(from_type);
+            set_prop(&obj, "from_type", &from_type_arr.into())?;
+        }
 
         let payload_arr = Uint8Array::new_with_length(stored.payload.len() as u32);
         payload_arr.copy_from(&stored.payload);
@@ -514,11 +527,16 @@ impl IndexedDbMailbox {
         let created_at = get_f64_prop(js_val, "created_at")?;
 
         let from = get_uint8array_prop(js_val, "from")?;
+        let from_type = Reflect::get(js_val, &JsValue::from_str("from_type"))
+            .ok()
+            .filter(|val| !val.is_undefined() && !val.is_null())
+            .map(|val| Uint8Array::new(&val).to_vec());
         let payload = get_uint8array_prop(js_val, "payload")?;
 
         Ok(StoredMessage {
             id,
             from,
+            from_type,
             payload,
             priority,
             priority_num,

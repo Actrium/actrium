@@ -352,10 +352,8 @@ impl SignalingTransport for V020SignalingTransport {
                     };
                     let source = relay.source.clone();
                     let target = relay.target.clone();
-                    if let Some(source_type) = relay.source_type
-                        && let Ok(mut types) = self.peer_types.write()
-                    {
-                        types.insert(source.clone(), source_type);
+                    if let Some(source_type) = relay.source_type {
+                        self.peer_types.record(source.clone(), source_type);
                     }
                     if let Some(payload) = relay.payload
                         && let Some(message) = Self::payload_to_message(payload)
@@ -669,7 +667,7 @@ mod tests {
             .expect("scripted relay");
 
         assert_eq!(peer, remote);
-        assert_eq!(peer_types.read().unwrap().get(&remote), Some(&remote_type));
+        assert_eq!(peer_types.get(&remote), Some(remote_type));
     }
 
     #[tokio::test]

@@ -71,13 +71,113 @@ fn error_response_for_wire(error: &ActrError) -> actr_protocol::ErrorResponse {
     }
 }
 
-/// Verified Actor types of peers, keyed by `ActrId`.
+/// Verified Actor types of connected peers, keyed by `ActrId`.
 ///
 /// Filled from `ActrRelay.source_type` (written by Signaling from the
 /// sender's verified credential) and from `IdentityClaims.actor_type` on
-/// locally verified WebSocket connections. The inbound ACL reads it; a peer
-/// with no entry has an unknown type and matches no ACL rule.
-pub(crate) type PeerTypes = Arc<std::sync::RwLock<HashMap<ActrId, ActrType>>>;
+/// locally verified WebSocket connections. An inbound message takes its
+/// sender's type from here when it is enqueued and keeps it in the mailbox
+/// row; the inbound ACL checks that recorded type. A peer with no known type
+/// matches no ACL rule.
+///
+/// Each peer also carries a count of its open connections (inbound WebSocket
+/// connections and the WebRTC connection together); the entry is dropped
+/// when the last one closes.
+#[derive(Clone, Default)]
+pub(crate) struct PeerTypes(Arc<std::sync::Mutex<HashMap<ActrId, PeerTypeEntry>>>);
+
+#[derive(Default)]
+struct PeerTypeEntry {
+    actor_type: Option<ActrType>,
+    connections: usize,
+}
+
+impl PeerTypes {
+    fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<ActrId, PeerTypeEntry>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Record the verified type of `peer`.
+    pub(crate) fn record(&self, peer: ActrId, actor_type: ActrType) {
+        self.entries().entry(peer).or_default().actor_type = Some(actor_type);
+    }
+
+    /// The verified type of `peer`, if known.
+    pub(crate) fn get(&self, peer: &ActrId) -> Option<ActrType> {
+        self.entries()
+            .get(peer)
+            .and_then(|entry| entry.actor_type.clone())
+    }
+
+    /// A connection to `peer` opened.
+    pub(crate) fn connection_opened(&self, peer: &ActrId) {
+        self.entries().entry(peer.clone()).or_default().connections += 1;
+    }
+
+    /// A connection to `peer` closed; the last one drops the entry.
+    pub(crate) fn connection_closed(&self, peer: &ActrId) {
+        let mut entries = self.entries();
+        if let Some(entry) = entries.get_mut(peer) {
+            entry.connections = entry.connections.saturating_sub(1);
+            if entry.connections == 0 {
+                entries.remove(peer);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn connections(&self, peer: &ActrId) -> usize {
+        self.entries()
+            .get(peer)
+            .map_or(0, |entry| entry.connections)
+    }
+
+    /// Count every peer the WebRTC manager holds as one open connection,
+    /// until the manager lets it go, and stop at `shutdown`.
+    #[cfg(feature = "webrtc-v020")]
+    pub(crate) async fn follow_webrtc_peers(
+        self,
+        manager: Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        shutdown: CancellationToken,
+    ) {
+        let mut changes = manager.subscribe_peers();
+        let mut counted = std::collections::HashSet::new();
+        loop {
+            let current: std::collections::HashSet<ActrId> =
+                manager.peer_ids().await.into_iter().collect();
+            for peer in current.difference(&counted) {
+                self.connection_opened(peer);
+            }
+            for peer in counted.difference(&current) {
+                self.connection_closed(peer);
+            }
+            counted = current;
+            tokio::select! {
+                _ = shutdown.cancelled() => return,
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The caller of an inbound message: its `ActrId` and, when known, the
+/// verified `ActrType` recorded when the message arrived.
+pub type IncomingCaller<'a> = (&'a ActrId, Option<&'a ActrType>);
+
+/// The sender type recorded with a mailbox message; an undecodable one
+/// counts as unknown.
+fn recorded_caller_type(record: &actr_runtime_mailbox::MessageRecord) -> Option<ActrType> {
+    record
+        .from_type
+        .as_deref()
+        .and_then(|bytes| ActrType::decode(bytes).ok())
+}
 
 pub(crate) type MailboxTail = Pin<Box<dyn Future<Output = ()> + Send>>;
 type MailboxDepthCallback = Arc<dyn Fn(usize) + Send + Sync + 'static>;
@@ -1802,7 +1902,7 @@ impl Inner {
     pub async fn handle_incoming(
         &self,
         envelope: RpcEnvelope,
-        caller_id: Option<&ActrId>,
+        caller: Option<IncomingCaller<'_>>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingOutcome {
@@ -1811,7 +1911,7 @@ impl Inner {
         // bit-for-bit the pre-B2 path (ACL → dedup → ctx → dispatch → dedup
         // complete), used directly by the mailbox lane and by the in-proc lane
         // when the dispatch gate is off.
-        self.admit_incoming(envelope, caller_id, reply_sink, scope)
+        self.admit_incoming(envelope, caller, reply_sink, scope)
             .await
             .await
     }
@@ -1856,10 +1956,12 @@ impl Inner {
     pub(crate) async fn admit_incoming(
         &self,
         mut envelope: RpcEnvelope,
-        caller_id: Option<&ActrId>,
+        caller: Option<IncomingCaller<'_>>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingContinuation {
+        let caller_id = caller.map(|(id, _)| id);
+        let caller_type = caller.and_then(|(_, actor_type)| actor_type);
         // Package-less routes emitted by older generators had one leading
         // dot (`.Service.Method`). Normalize it before every admission-stage
         // consumer (reply-mode lookup, scheduler, and all runner variants)
@@ -1893,16 +1995,11 @@ impl Inner {
             }
         };
 
-        // 0.1. ACL Permission Check (before processing message)
-        let caller_type = caller_id.and_then(|id| {
-            self.peer_types
-                .read()
-                .ok()
-                .and_then(|types| types.get(id).cloned())
-        });
+        // 0.1. ACL Permission Check (before processing message), against the
+        // caller type recorded when the message arrived.
         let acl_allowed = match check_acl_permission(
             caller_id,
-            caller_type.as_ref(),
+            caller_type,
             actor_id,
             self.config.acl.as_ref(),
         ) {
@@ -3192,6 +3289,7 @@ impl Inner {
                     Arc::new(crate::inbound::dispatcher::InboundDispatcher::new(
                         pending_requests.clone(),
                         self.data_chunk_registry.clone(),
+                        self.peer_types.clone(),
                     ));
                 let (inbound_handler, inbound_dispatch_tasks) =
                     v020::inbound_bridge::dispatcher_bridge(
@@ -3276,6 +3374,10 @@ impl Inner {
                     }
                 });
                 task_handles.push(router_handle);
+                task_handles.push(tokio::spawn(self.peer_types.clone().follow_webrtc_peers(
+                    v020_manager.clone(),
+                    self.shutdown_token.child_token(),
+                )));
 
                 // Pull forward the snapshot→hook projection (B3): subscribe
                 // to each peer's snapshot and fire the 3 hooks on transitions.
@@ -4582,9 +4684,13 @@ impl Inner {
 
                                                 // Decode caller_id from MessageRecord.from (transport layer)
                                                 let caller_id_result = ActrId::decode(&msg_record.from[..]);
-                                                let caller_id_ref = caller_id_result.as_ref().ok();
+                                                let caller_type = recorded_caller_type(&msg_record);
+                                                let caller_ref = caller_id_result
+                                                    .as_ref()
+                                                    .ok()
+                                                    .map(|id| (id, caller_type.as_ref()));
 
-                                                if caller_id_ref.is_none() {
+                                                if caller_ref.is_none() {
                                                     tracing::warn!(
                                                         request_id = %request_id,
                                                         "⚠️  Failed to decode caller_id from MessageRecord.from"
@@ -4615,7 +4721,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let cont = node
-                                                        .admit_incoming(envelope.clone(), caller_id_ref, Some(reply_sink), None)
+                                                        .admit_incoming(envelope.clone(), caller_ref, Some(reply_sink), None)
                                                         .await;
                                                     inflight.push(Box::pin(async move {
                                                         match cont.await {
@@ -4642,7 +4748,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let handle_incoming_fut =
-                                                        node.handle_incoming(envelope.clone(), caller_id_ref, Some(reply_sink), None);
+                                                        node.handle_incoming(envelope.clone(), caller_ref, Some(reply_sink), None);
                                                     #[cfg(feature = "opentelemetry")]
                                                     let handle_incoming_fut =
                                                         handle_incoming_fut.instrument(span.clone());

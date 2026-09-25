@@ -76,7 +76,7 @@ async fn sqlite_enqueue_observer_wakes_idle_dequeue_without_poll_delay() {
     enqueued.as_mut().enable();
     let before = tokio::time::Instant::now();
     mailbox
-        .enqueue(vec![1], vec![2], MessagePriority::Normal)
+        .enqueue(vec![1], None, vec![2], MessagePriority::Normal)
         .await
         .expect("test message should enqueue");
 
@@ -2714,4 +2714,246 @@ fn delivery_uncertain_wire_code_does_not_reinterpret_malformed_v1_payload() {
             if operation_id == "unknown"
                 && cause == "delivery-uncertain-v1:3:3:ab\u{001e}tail"
     ));
+}
+
+// ── inbound ACL against the sender type recorded with the message ──────
+
+fn acl_client_type() -> actr_protocol::ActrType {
+    actr_protocol::ActrType {
+        publisher: "acme".to_string(),
+        name: "client".to_string(),
+        version: "0.1.0".to_string(),
+    }
+}
+
+fn acl_peer(serial_number: u64) -> ActrId {
+    ActrId {
+        realm: "test7@example.com".to_string(),
+        serial_number,
+    }
+}
+
+/// An `Inner` whose ACL allows only `acme/client@0.1.0` and whose handler
+/// answers every call.
+async fn acl_inner(dir: &tempfile::TempDir) -> Arc<Inner> {
+    let (entered_tx, _entered_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (_release_tx, release) = tokio::sync::watch::channel(true);
+    let handle = GatedLinkedHandle {
+        entered_tx,
+        release,
+        runs: Arc::new(AtomicUsize::new(0)),
+        result: || Ok(FrameworkBytes::from_static(b"ok")),
+    };
+    let workload = Workload::Linked(Arc::new(handle) as Arc<dyn LinkedWorkloadHandle>);
+    let mut config = dedup_test_config(dir);
+    config.acl = Some(actr_protocol::Acl {
+        rules: vec![actr_protocol::AclRule {
+            permission: actr_protocol::acl_rule::Permission::Allow as i32,
+            from_type: acl_client_type(),
+            source_realm: None,
+        }],
+    });
+    let actor_id = ActrId {
+        realm: config.realm.clone(),
+        serial_number: 1,
+    };
+    let mut inner = Inner::build(
+        config,
+        workload,
+        None,
+        None,
+        None,
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .expect("Inner::build must succeed with in-memory mailbox");
+    inner.actor_id = Some(actor_id);
+    inner.credential_state = Some(CredentialState::new(AIdCredential::default(), None, None));
+    Arc::new(inner)
+}
+
+/// Deliver a tell from `caller` through the production inbound dispatcher.
+async fn deliver_tell(
+    mailbox: &Arc<dyn actr_runtime_mailbox::Mailbox>,
+    peer_types: &PeerTypes,
+    caller: &ActrId,
+    request_id: &str,
+) {
+    use actr_protocol::prost::Message as _;
+    let dispatcher = crate::inbound::dispatcher::InboundDispatcher::new(
+        Arc::new(crate::transport::correlation::RpcCorrelation::new()),
+        Arc::new(crate::inbound::DataChunkRegistry::new()),
+        peer_types.clone(),
+    );
+    dispatcher
+        .dispatch(
+            caller.encode_to_vec(),
+            FrameworkBytes::from(tell_envelope(request_id).encode_to_vec()),
+            PayloadType::RpcReliable,
+            mailbox,
+        )
+        .await;
+}
+
+/// Admit a dequeued message the way the mailbox loop does.
+async fn admit_dequeued(
+    inner: &Inner,
+    record: &actr_runtime_mailbox::MessageRecord,
+) -> ActorResult<FrameworkBytes> {
+    use actr_protocol::prost::Message as _;
+    let envelope = RpcEnvelope::decode(&record.payload[..]).expect("stored envelope");
+    let caller = ActrId::decode(&record.from[..]).expect("stored caller");
+    let caller_type = recorded_caller_type(record);
+    match inner
+        .handle_incoming(envelope, Some((&caller, caller_type.as_ref())), None, None)
+        .await
+    {
+        IncomingOutcome::Replied(result) => result,
+        IncomingOutcome::Deferred => unreachable!("no EXPLICIT in ACL tests"),
+    }
+}
+
+async fn dequeue_by_request(
+    mailbox: &Arc<dyn actr_runtime_mailbox::Mailbox>,
+) -> HashMap<String, actr_runtime_mailbox::MessageRecord> {
+    use actr_protocol::prost::Message as _;
+    mailbox
+        .dequeue()
+        .await
+        .expect("dequeue")
+        .into_iter()
+        .map(|record| {
+            let request_id = RpcEnvelope::decode(&record.payload[..])
+                .expect("stored envelope")
+                .request_id;
+            (request_id, record)
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_queued_message_keeps_its_sender_type_after_the_sender_disconnects() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let inner = acl_inner(&dir).await;
+    let mailbox: Arc<dyn actr_runtime_mailbox::Mailbox> = Arc::new(
+        actr_runtime_mailbox::SqliteMailbox::new(dir.path().join("mailbox.db"))
+            .await
+            .unwrap(),
+    );
+    let peer_types = PeerTypes::default();
+    let client = acl_peer(2);
+    let stranger = acl_peer(3);
+
+    peer_types.record(client.clone(), acl_client_type());
+    peer_types.connection_opened(&client);
+    deliver_tell(&mailbox, &peer_types, &client, "from-client").await;
+    deliver_tell(&mailbox, &peer_types, &stranger, "from-stranger").await;
+
+    // The client disconnects before its message is dequeued.
+    peer_types.connection_closed(&client);
+    assert_eq!(peer_types.get(&client), None);
+
+    let records = dequeue_by_request(&mailbox).await;
+    assert_eq!(
+        admit_dequeued(&inner, &records["from-client"])
+            .await
+            .expect("the client's recorded type passes the ACL"),
+        FrameworkBytes::from_static(b"ok")
+    );
+    assert!(matches!(
+        admit_dequeued(&inner, &records["from-stranger"]).await,
+        Err(ActrError::PermissionDenied(_))
+    ));
+}
+
+#[tokio::test]
+async fn a_recovered_message_is_judged_by_its_recorded_sender_type() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("mailbox.db");
+    let client = acl_peer(2);
+    {
+        let mailbox: Arc<dyn actr_runtime_mailbox::Mailbox> = Arc::new(
+            actr_runtime_mailbox::SqliteMailbox::new(&path)
+                .await
+                .unwrap(),
+        );
+        let peer_types = PeerTypes::default();
+        peer_types.record(client.clone(), acl_client_type());
+        peer_types.connection_opened(&client);
+        deliver_tell(&mailbox, &peer_types, &client, "before-restart").await;
+    }
+
+    // After a restart nothing about the client is known in memory.
+    let inner = acl_inner(&dir).await;
+    let mailbox: Arc<dyn actr_runtime_mailbox::Mailbox> = Arc::new(
+        actr_runtime_mailbox::SqliteMailbox::new(&path)
+            .await
+            .unwrap(),
+    );
+    let records = dequeue_by_request(&mailbox).await;
+    assert_eq!(
+        admit_dequeued(&inner, &records["before-restart"])
+            .await
+            .expect("the recovered message passes the ACL"),
+        FrameworkBytes::from_static(b"ok")
+    );
+}
+
+#[cfg(feature = "webrtc-v020")]
+#[tokio::test]
+async fn a_peer_type_lasts_until_its_last_connection_closes() {
+    use crate::wire::webrtc::v020::manager::RtcConnectionManager;
+
+    async fn wait_for(what: &str, condition: impl Fn() -> bool) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !condition() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+    }
+
+    let (signaling_tx, _signaling_rx) = tokio::sync::mpsc::channel(16);
+    let manager = Arc::new(RtcConnectionManager::new(
+        Arc::new(ResponsePathSessionFactory),
+        signaling_tx,
+    ));
+    let peer_types = PeerTypes::default();
+    let shutdown = CancellationToken::new();
+    let follow = tokio::spawn(
+        peer_types
+            .clone()
+            .follow_webrtc_peers(manager.clone(), shutdown.clone()),
+    );
+    let peer = acl_peer(2);
+
+    // A WebSocket connection and a WebRTC connection to the same peer.
+    peer_types.record(peer.clone(), acl_client_type());
+    peer_types.connection_opened(&peer);
+    manager.ensure_controller(peer.clone()).await;
+    wait_for("the WebRTC connection to be counted", || {
+        peer_types.connections(&peer) == 2
+    })
+    .await;
+
+    // The WebSocket connection closes; the WebRTC one still holds the type.
+    peer_types.connection_closed(&peer);
+    assert_eq!(peer_types.get(&peer), Some(acl_client_type()));
+
+    // The WebRTC connection closes too.
+    manager.close_peer(&peer).await;
+    wait_for("the peer's type to be dropped", || {
+        peer_types.get(&peer).is_none()
+    })
+    .await;
+    assert_eq!(peer_types.connections(&peer), 0);
+
+    shutdown.cancel();
+    follow.await.unwrap();
+    manager.close_all().await;
 }

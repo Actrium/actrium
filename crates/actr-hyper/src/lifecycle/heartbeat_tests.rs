@@ -68,6 +68,7 @@ impl Mailbox for EmptyMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
+        _from_type: Option<Vec<u8>>,
         _payload: Vec<u8>,
         _priority: MessagePriority,
     ) -> actr_runtime_mailbox::StorageResult<Uuid> {
