@@ -375,12 +375,11 @@ async fn register_publisher(args: &RegisterPublisherArgs) -> Result<Value> {
     if args.print {
         return Ok(request);
     }
-    let client = reqwest::Client::new();
     let endpoint = match &args.endpoint {
         Some(endpoint) => endpoint.clone(),
-        None => realm_management_endpoint(&client, &args.provider).await?,
+        None => realm_management_endpoint(&args.provider).await?,
     };
-    let response = client
+    let response = realm_members::http_client()?
         .post(&endpoint)
         .json(&request)
         .send()
@@ -395,9 +394,9 @@ async fn register_publisher(args: &RegisterPublisherArgs) -> Result<Value> {
 }
 
 /// The `realm-management` link of the Realm Provider's authority descriptor.
-async fn realm_management_endpoint(client: &reqwest::Client, provider: &str) -> Result<String> {
+async fn realm_management_endpoint(provider: &str) -> Result<String> {
     let url = format!("https://{provider}/.well-known/actr");
-    let descriptor: actr_protocol::AuthorityDescriptor = client
+    let descriptor: actr_protocol::AuthorityDescriptor = realm_members::discovery_client()?
         .get(&url)
         .send()
         .await

@@ -8,13 +8,18 @@
 use actr_protocol::realm_membership::{
     MembershipOp, MembershipRequest, RealmClientKeyFile, RealmInvite, Role,
 };
+use actr_protocol::realm_profile::{RealmProfile, RealmStatus, realm_profile_urls};
+use actr_protocol::uri::{ActrUri, parse_realm_name};
+use actr_protocol::{AuthorityDescriptor, RealmSigningKeys};
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use clap::Args;
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
+use std::future::Future;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use super::realm::write_private;
 
@@ -33,13 +38,13 @@ pub struct JoinArgs {
     /// Key file to write the new Realm client key to
     #[arg(long, short = 'o', value_name = "FILE")]
     pub output: PathBuf,
-    /// Issuer URL of the Realm (`issuer.url` of its Realm Profile). An
-    /// invite's embedded Realm Profile is not verified here, so it is not
-    /// used.
+    /// Issuer URL, for a Realm without a Realm Profile. Otherwise the
+    /// Issuer and Realm Provider come from the Realm Profile, verified with
+    /// the `realm_signing_keys` of `https://<domain>/.well-known/actr`.
     #[arg(long, value_name = "URL")]
-    pub issuer: String,
-    /// Realm Provider ID; defaults to the Issuer URL's `host[:port]`
-    #[arg(long, value_name = "ID")]
+    pub issuer: Option<String>,
+    /// Realm Provider ID with `--issuer`; defaults to its `host[:port]`
+    #[arg(long, value_name = "ID", requires = "issuer")]
     pub provider: Option<String>,
     /// Name of this client, shown to the Realm owner
     #[arg(long, value_name = "TEXT")]
@@ -125,10 +130,7 @@ struct Member {
 
 impl Member {
     fn load(args: &KeyArgs) -> Result<Self> {
-        let text = std::fs::read_to_string(&args.key)
-            .with_context(|| format!("Failed to read key file: {}", args.key.display()))?;
-        let (file, key) = RealmClientKeyFile::parse(&text)
-            .with_context(|| format!("Not a Realm client key file: {}", args.key.display()))?;
+        let (file, key) = RealmClientKeyFile::read(&args.key)?;
         Ok(Self { file, key })
     }
 
@@ -175,10 +177,145 @@ impl From<SendError> for anyhow::Error {
     }
 }
 
+/// Connect timeout of the CLI's Realm requests.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Timeout of a whole Realm request, reply included.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// HTTP client for membership and realm-management requests: with
+/// timeouts, and without redirects, so a signed request (or an invite
+/// secret) goes nowhere but where it was sent.
+pub(super) fn http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("Failed to create the HTTP client")
+}
+
+/// HTTP client for public discovery documents: HTTPS only (every redirect
+/// too), at most five redirects (`authority-discovery.md`), with timeouts.
+pub(super) fn discovery_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .context("Failed to create the HTTP client")
+}
+
+/// GET the public document at `url`: the body of a 2xx reply.
+async fn fetch_public(client: &reqwest::Client, url: String) -> Result<Vec<u8>> {
+    let response = client
+        .get(&url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .with_context(|| format!("Failed to fetch {url}"))?;
+    let body = response
+        .bytes()
+        .await
+        .with_context(|| format!("Failed to read {url}"))?;
+    Ok(body.to_vec())
+}
+
+/// The Realm Profile of `realm` (`realm-profile.md` sections 3 and 5): the
+/// domain's `realm_signing_keys` from `https://<domain>/.well-known/actr`,
+/// then the first Realm Profile from its `realms` links that verifies with
+/// them. `embedded`, an invite's Realm Profile, counts only if it verifies
+/// with the same keys; if both do, the higher sequence is taken, and it must
+/// be a valid successor of the other.
+async fn realm_profile<F, Fut>(
+    realm: &str,
+    embedded: Option<&Value>,
+    fetch: F,
+) -> Result<RealmProfile>
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Result<Vec<u8>>>,
+{
+    const HINT: &str = "a Realm without a Realm Profile is joined with --issuer";
+    let uri = parse_realm_name(realm)?;
+    let url = uri
+        .discovery_url()
+        .with_context(|| format!("Realm {realm} has no Realm Profile; {HINT}"))?;
+    let document = fetch(url.clone()).await.context(HINT)?;
+    let mut value: Value =
+        serde_json::from_slice(&document).with_context(|| format!("{url} is not JSON"))?;
+    let descriptor: AuthorityDescriptor = serde_json::from_value(value.clone())
+        .with_context(|| format!("{url} is not an authority descriptor"))?;
+    descriptor
+        .validate_for(&ActrUri::from_domain(uri.domain())?)
+        .with_context(|| format!("{url} is not a valid authority descriptor"))?;
+    let member = value
+        .get_mut("realm_signing_keys")
+        .map(Value::take)
+        .with_context(|| format!("{url} lists no realm_signing_keys"))?;
+    let (keys, _) = RealmSigningKeys::accept(&member, None)
+        .with_context(|| format!("{url}: realm_signing_keys"))?;
+
+    let mut failures = Vec::new();
+    let mut fetched = None;
+    for url in realm_profile_urls(&descriptor, realm)? {
+        let verified = match fetch(url.clone()).await {
+            Ok(document) => RealmProfile::verify(&document, realm, &keys).map_err(Into::into),
+            Err(error) => Err(error),
+        };
+        match verified {
+            Ok(profile) => {
+                fetched = Some(profile);
+                break;
+            }
+            Err(error) => failures.push(format!("{url}: {error:#}")),
+        }
+    }
+    let embedded = match embedded {
+        Some(document) => {
+            match RealmProfile::verify(document.to_string().as_bytes(), realm, &keys) {
+                Ok(profile) => Some(profile),
+                Err(error) => {
+                    failures.push(format!("the invite's Realm Profile: {error}"));
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
+    let profile = match (fetched, embedded) {
+        (Some(a), Some(b)) => {
+            let (lower, higher) = if a.sequence <= b.sequence {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            lower.check_successor(&higher)?;
+            higher
+        }
+        (Some(profile), None) | (None, Some(profile)) => profile,
+        (None, None) => {
+            let failures = if failures.is_empty() {
+                format!("{url} lists no realms location")
+            } else {
+                failures.join("; ")
+            };
+            bail!("No verified Realm Profile for {realm} ({HINT}): {failures}");
+        }
+    };
+    if profile.realm.status == RealmStatus::Retired {
+        bail!("Realm {realm} is retired");
+    }
+    Ok(profile)
+}
+
 /// POST `document` to `<issuer>/membership`; the reply, or its error.
 async fn send(issuer: &str, document: &Value) -> std::result::Result<Value, SendError> {
     let url = format!("{}/membership", issuer.trim_end_matches('/'));
-    let response = reqwest::Client::new()
+    let response = http_client()
+        .map_err(SendError::Refused)?
         .post(&url)
         .header("Content-Type", "application/json")
         .body(document.to_string())
@@ -204,10 +341,21 @@ async fn send(issuer: &str, document: &Value) -> std::result::Result<Value, Send
 
 /// The key of a key file for `realm` at `issuer` that an interrupted `join`
 /// left at `path`, if any.
-fn interrupted_join_key(path: &std::path::Path, realm: &str, issuer: &str) -> Option<SigningKey> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let (file, key) = RealmClientKeyFile::parse(&text).ok()?;
-    (file.realm == realm && file.issuer == issuer).then_some(key)
+fn interrupted_join_key(
+    path: &std::path::Path,
+    realm: &str,
+    issuer: &str,
+) -> Result<Option<SigningKey>> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    match RealmClientKeyFile::parse(&text) {
+        Ok((file, _)) if file.realm == realm && file.issuer == issuer => {
+            // Reused only if it is still readable by its owner alone.
+            Ok(Some(RealmClientKeyFile::read(path)?.1))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Redeem the invite. The key file is written before the request is sent,
@@ -216,22 +364,44 @@ fn interrupted_join_key(path: &std::path::Path, realm: &str, issuer: &str) -> Op
 /// retry of that redemption with its result (or `conflict` if the key is
 /// already registered otherwise).
 pub async fn join(args: &JoinArgs) -> Result<Value> {
+    let client = discovery_client()?;
+    join_with(args, move |url| {
+        let client = client.clone();
+        async move { fetch_public(&client, url).await }
+    })
+    .await
+}
+
+/// [`join`], fetching public documents with `fetch`.
+async fn join_with<F, Fut>(args: &JoinArgs, fetch: F) -> Result<Value>
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Result<Vec<u8>>>,
+{
     let text = if args.invite == "-" {
         std::io::read_to_string(std::io::stdin())?
     } else {
         args.invite.clone()
     };
     let invite = RealmInvite::decode(&text)?;
-    // The invite's embedded Realm Profile is unverified: it must not choose
-    // where the invite secret goes.
-    let issuer = args.issuer.clone();
-    let provider = match &args.provider {
-        Some(provider) => provider.clone(),
-        None => url_authority(&issuer)?,
+    // The invite secret goes only to an Issuer the domain's keys vouch for,
+    // or to the one given on the command line.
+    let (issuer, provider) = match &args.issuer {
+        Some(issuer) => {
+            let provider = match &args.provider {
+                Some(provider) => provider.clone(),
+                None => url_authority(issuer)?,
+            };
+            (issuer.clone(), provider)
+        }
+        None => {
+            let profile = realm_profile(&invite.realm, invite.profile.as_ref(), fetch).await?;
+            (profile.issuer.url, profile.provider.id)
+        }
     };
 
     let reused = if args.output.exists() && !args.force {
-        let key = interrupted_join_key(&args.output, &invite.realm, &issuer);
+        let key = interrupted_join_key(&args.output, &invite.realm, &issuer)?;
         if key.is_none() {
             bail!(
                 "Key file already exists: {}\nUse --force to overwrite.",
@@ -348,6 +518,7 @@ pub async fn leave(args: &KeyArgs) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actr_protocol::realm_profile::sign_document;
     use axum::{Json, Router, routing::post};
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
@@ -387,7 +558,7 @@ mod tests {
         let join_args = JoinArgs {
             invite: RealmInvite::new(REALM, &secret).encode(),
             output: output.clone(),
-            issuer: issuer.clone(),
+            issuer: Some(issuer.clone()),
             provider: None,
             label: Some("laptop".into()),
             force: false,
@@ -504,7 +675,7 @@ mod tests {
         let args = JoinArgs {
             invite: RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([3u8; 32])).encode(),
             output: output.clone(),
-            issuer: lost,
+            issuer: Some(lost),
             provider: Some("p.example".into()),
             label: None,
             force: false,
@@ -546,7 +717,7 @@ mod tests {
         let error = join(&JoinArgs {
             invite: RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([4u8; 32])).encode(),
             output: output.clone(),
-            issuer: format!("http://{address}/issuer"),
+            issuer: Some(format!("http://{address}/issuer")),
             provider: None,
             label: None,
             force: false,
@@ -571,7 +742,7 @@ mod tests {
         let sent = join(&JoinArgs {
             invite: invite.encode(),
             output: dir.path().join("client.json"),
-            issuer: issuer.clone(),
+            issuer: Some(issuer.clone()),
             provider: None,
             label: None,
             force: false,
@@ -579,6 +750,243 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(sent["provider_id"], url_authority(&issuer).unwrap());
+    }
+
+    /// A Realm signing key's self-signed `realm_signing_keys` member in an
+    /// authority descriptor of `acme.com` whose `realms` link is
+    /// `https://acme.com/actr/realms/`.
+    fn descriptor(key: &SigningKey) -> Value {
+        let mut member = serde_json::json!({
+            "sequence": 1,
+            "keys": [{
+                "id": "rs-1", "algorithm": "Ed25519", "status": "active",
+                "public_key": BASE64.encode(key.verifying_key().to_bytes()),
+            }],
+        });
+        sign_document(&mut member, "rs-1", key);
+        serde_json::json!({
+            "version": 1,
+            "authority": "actr://acme.com",
+            "services": [{
+                "rel": "realms",
+                "href": "https://acme.com/actr/realms/",
+                "protocol": "actr-realm-profile/1",
+            }],
+            "realm_signing_keys": member,
+        })
+    }
+
+    /// A Realm Profile of `REALM` naming `issuer` and `provider`, signed by
+    /// `key` as `rs-1`.
+    fn profile(key: &SigningKey, sequence: u64, issuer: &str, provider: &str) -> Value {
+        let mut profile = serde_json::json!({
+            "schema": "actr.realm/v1",
+            "sequence": sequence,
+            "realm": { "name": REALM, "display_name": "Notes", "status": "active" },
+            "package": {
+                "href": "https://cdn.example/a.actr", "sha256": "ab".repeat(32),
+                "type": "acme.com/notes@1.0.0",
+            },
+            "issuer": { "url": issuer, "keys": [{
+                "id": "7", "algorithm": "Ed25519", "status": "active",
+                "public_key": BASE64.encode([2u8; 32]),
+            }] },
+            "provider": { "id": provider, "signaling": [], "ice": [] },
+            "policy": { "membership": "invite-only" },
+            "issued_at": "2026-09-25T00:00:00Z",
+        });
+        sign_document(&mut profile, "rs-1", key);
+        profile
+    }
+
+    /// A fixture of `https://acme.com` (descriptor of `key`, and the Realm
+    /// Profile `served` makes from the base URL, if any) and of its Issuer's
+    /// membership endpoint; returns the base URL.
+    async fn serve_domain(key: &SigningKey, served: impl FnOnce(&str) -> Option<Value>) -> String {
+        use axum::routing::get;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let descriptor = descriptor(key);
+        let served = served(&base);
+        let app =
+            Router::new()
+                .route(
+                    "/.well-known/actr",
+                    get(move || async move { Json(descriptor) }),
+                )
+                .route(
+                    "/actr/realms/k7m2q9xh",
+                    get(move || async move {
+                        served.map(Json).ok_or(axum::http::StatusCode::NOT_FOUND)
+                    }),
+                )
+                .route(
+                    "/issuer/membership",
+                    post(|body: axum::body::Bytes| async move {
+                        MembershipRequest::parse(&body)
+                            .unwrap()
+                            .verify_join()
+                            .unwrap();
+                        Json(serde_json::from_slice::<Value>(&body).unwrap())
+                    }),
+                );
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    }
+
+    /// Fetches `https://acme.com/…` from the fixture at `base`.
+    fn fetch_from(
+        base: String,
+    ) -> impl Fn(String) -> futures_util::future::BoxFuture<'static, Result<Vec<u8>>> {
+        move |url: String| {
+            let url = url.replace("https://acme.com", &base);
+            Box::pin(async move {
+                let reply = reqwest::get(&url).await?.error_for_status()?;
+                Ok(reply.bytes().await?.to_vec())
+            })
+        }
+    }
+
+    fn join_args(invite: RealmInvite, output: PathBuf) -> JoinArgs {
+        JoinArgs {
+            invite: invite.encode(),
+            output,
+            issuer: None,
+            provider: None,
+            label: None,
+            force: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn join_takes_the_issuer_from_the_verified_realm_profile() {
+        let key = SigningKey::from_bytes(&[8; 32]);
+        let base = serve_domain(&key, |base| {
+            Some(profile(&key, 3, &format!("{base}/issuer"), "p.example"))
+        })
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("client.json");
+        let secret = URL_SAFE_NO_PAD.encode([5u8; 32]);
+
+        let sent = join_with(
+            &join_args(RealmInvite::new(REALM, &secret), output.clone()),
+            fetch_from(base.clone()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (sent["op"].as_str(), sent["provider_id"].as_str()),
+            (Some("join"), Some("p.example"))
+        );
+        let file = Member::load(&KeyArgs { key: output }).unwrap().file;
+        assert_eq!(file.issuer, format!("{base}/issuer"));
+        assert_eq!(file.provider_id, "p.example");
+    }
+
+    #[tokio::test]
+    async fn join_uses_an_embedded_realm_profile_only_if_the_domain_keys_verify_it() {
+        let key = SigningKey::from_bytes(&[8; 32]);
+        let forger = SigningKey::from_bytes(&[9; 32]);
+        // The domain serves no Realm Profile at its realms location.
+        let base = serve_domain(&key, |_| None).await;
+        let issuer = format!("{base}/issuer");
+        let dir = tempfile::tempdir().unwrap();
+        let secret = URL_SAFE_NO_PAD.encode([6u8; 32]);
+
+        // Signed by a key the domain does not list: refused, nothing sent.
+        let mut invite = RealmInvite::new(REALM, &secret);
+        invite.profile = Some(profile(&forger, 9, &issuer, "evil.example"));
+        let output = dir.path().join("forged.json");
+        let error = join_with(&join_args(invite, output.clone()), fetch_from(base.clone()))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("No verified Realm Profile"),
+            "{error:#}"
+        );
+        assert!(!output.exists());
+
+        // Signed by the domain's key: used.
+        let mut invite = RealmInvite::new(REALM, &secret);
+        invite.profile = Some(profile(&key, 2, &issuer, "p.example"));
+        let output = dir.path().join("embedded.json");
+        let sent = join_with(&join_args(invite, output), fetch_from(base))
+            .await
+            .unwrap();
+        assert_eq!(sent["provider_id"], "p.example");
+    }
+
+    #[tokio::test]
+    async fn join_prefers_the_newer_of_the_fetched_and_embedded_profiles() {
+        let key = SigningKey::from_bytes(&[8; 32]);
+        let base = serve_domain(&key, |base| {
+            Some(profile(&key, 4, &format!("{base}/issuer"), "p.example"))
+        })
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let secret = URL_SAFE_NO_PAD.encode([7u8; 32]);
+
+        // An older embedded Profile loses to the fetched one.
+        let mut invite = RealmInvite::new(REALM, &secret);
+        invite.profile = Some(profile(&key, 1, "http://127.0.0.1:9/old", "p.example"));
+        let output = dir.path().join("a.json");
+        join_with(&join_args(invite, output.clone()), fetch_from(base.clone()))
+            .await
+            .unwrap();
+        let file = Member::load(&KeyArgs { key: output }).unwrap().file;
+        assert_eq!(file.issuer, format!("{base}/issuer"));
+
+        // A newer one naming another Realm Provider is not a valid successor.
+        let mut invite = RealmInvite::new(REALM, &secret);
+        invite.profile = Some(profile(&key, 5, &format!("{base}/issuer"), "q.example"));
+        let error = join_with(
+            &join_args(invite, dir.path().join("b.json")),
+            fetch_from(base),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("provider"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn join_without_a_realm_profile_needs_the_issuer() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("client.json");
+        let error = join_with(
+            &join_args(
+                RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([1u8; 32])),
+                output.clone(),
+            ),
+            |url| async move { Err(anyhow::anyhow!("{url}: 404 Not Found")) },
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("--issuer"), "{error:#}");
+        assert!(!output.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn key_files_others_can_read_are_refused() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let issuer = serve().await;
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("client.json");
+        let mut args = join_args(
+            RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([1u8; 32])),
+            output.clone(),
+        );
+        args.issuer = Some(issuer);
+        join(&args).await.unwrap();
+
+        std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let key = KeyArgs { key: output };
+        let error = members(&key).await.unwrap_err();
+        assert!(format!("{error:#}").contains("chmod 600"), "{error:#}");
+        // Nor is it reused by a rerun of the join.
+        let error = join(&args).await.unwrap_err();
+        assert!(format!("{error:#}").contains("chmod 600"), "{error:#}");
     }
 
     #[test]
