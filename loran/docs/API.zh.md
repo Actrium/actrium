@@ -313,7 +313,9 @@ admin 接口核对后手动接受（Actr Authority Discovery §4.4 第 6 步）�
   `reason`）。只对已有 pin 的域名、已登记的 publisher 可用，否则 `404`；取不到或文档本身无效时 `503`。
 - `POST` 同一路径，body `{"digest": "<fetched.digest>"}`：重新获取，仅当该文档自身有效、按 pin
   不被接受、且其 `digest` 等于运营者核对过的值时，清空已保存的 key，以它为新基线（publisher 随即按
-  `register_publisher` 的规则接受该 Publisher Profile）；否则 `409`。响应含 `previous` 与新的
+  `register_publisher` 的规则接受该 Publisher Profile）。按 pin 已可接受、`digest` 不符（核对后文档
+  又变了）或 publisher 已停用时 `409`；取不到或文档本身无效时与 GET 相同 `503`；Publisher Profile
+  的包签名 key 不合 `register_publisher` 规则时 `400`。响应含 `previous` 与新的
   `pinned`，并写一条审计记录（`identity.confirm`，before/after 为两组 key）。Realm 写入由 superv
   管理时 Realm 域名的确认返回 `403`。
 
