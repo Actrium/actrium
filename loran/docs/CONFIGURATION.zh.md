@@ -97,7 +97,7 @@ backend = "sqlite"
 ```
 
 首版推荐 SQLite。生产环境必须从 `kek_file`、`kek_env` 或 `kek` 提供 KEK；
-推荐前两者。KEK 与 Realm secret、TURN secret、renewal secret 不得复用。
+推荐前两者。KEK 与 TURN secret、renewal secret 不得复用。
 Signer 只保存具名 key，key 不按时间过期，由 Realm 退役或 issuer key 轮换退役。旧版的
 `[services.signer] tolerance_seconds` 与 `[services.signer.storage] key_ttl_seconds` 已删除；
 配置段拒绝未知字段，仍写这两项的配置会启动失败，删掉即可。
@@ -195,6 +195,14 @@ Provider 域名下的 Realm 由系统管理员经 Admin API 代办创建；收�
 `register_publisher` 受 `[realm] max_publishers` 约束：已登记的 Publisher 总数（不论状态），默认
 1000，达到后新登记返回 `429`，已登记的 Publisher 仍可更新其 Publisher Profile。
 
+Realm membership（API.zh.md「Realm membership」）的限额，超出返回 `429 quota`，邀请不被消耗：
+
+- `max_members_per_realm`：每个 Realm 的 active 成员数，默认 1000；
+- `max_clients_per_member`：每个成员未撤销的 Realm 客户端 key 数，默认 20；
+- `max_open_invites_per_realm`：每个 Realm 未用、未撤销、未过期的邀请数，默认 100（owner 邀请不计）。
+
+邀请有效期不超过 30 天，owner 邀请固定 7 天。
+
 Realm Provider ID 取 `[authority] uri`（`actr://<domain>`，不带端口）的规范化 DNS 域名。
 启用 Issuer、Signaling 或 TURN 时 `uri` 必填，缺失或非法即配置校验失败；它写入 Actor
 credential 与 TURN username 的 `provider`，并由 Signaling、TURN 校验。`[authority] enabled`
@@ -212,7 +220,7 @@ python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db --dry-run
 python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db
 ```
 
-v2 之后没有离线迁移工具：升到当前 schema v8 需要停机后重建数据库（见「Realm provision
+v2 之后没有离线迁移工具：升到当前 schema v9 需要停机后重建数据库（见「Realm provision
 与数据」）。
 
 详见[架构契约](REALM_V1_ARCHITECTURE.zh.md)和

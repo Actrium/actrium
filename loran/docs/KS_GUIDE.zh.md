@@ -64,7 +64,7 @@ kek_env = "ACTRIX_SIGNER_KEK"
 
 ## 运维要求
 
-- `actrix_shared_key`、KEK、Realm secret、TURN secret 和 renewal secret 分离；
+- `actrix_shared_key`、KEK、TURN secret 和 renewal secret 分离；
 - secrets 不使用示例值，不写普通日志，不放命令行或 URL；
 - 生产使用 HTTPS/mTLS 或等价的受保护内部链路；
 - 备份 SQLite 时同时保护 KEK；只有数据库或只有 KEK 都不足以恢复签名能力；

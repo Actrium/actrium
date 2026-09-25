@@ -16,16 +16,14 @@
   `actr.v1`，避免把凭证暴露为页面可读的已选子协议。
 - Publisher 由 Publisher Profile 签名 key 持有方以 `register_publisher` 登记，Publisher
   管理（停用、撤销 key）和配置变更只允许系统管理员调用。其他域名的 Realm 由 Realm 签名
-  key 持有方以 Realm 管理请求（`create_realm`、`publish_profile`、`reissue_admin_token`）创建、
+  key 持有方以 Realm 管理请求（`create_realm`、`publish_profile`、`reissue_owner_invite`）创建、
   更新与退役，`POST` 到 Loran authority descriptor 中的 `realm-management` service link（Actr
   Realm Profile 第 8 节，见下文「Realm 管理请求」）；Realm Provider 域名下的 Realm 由系统管理员
-  创建。作用域为单个 Realm 的 Realm 管理 token 可查看该 Realm 及其 Realm Profile、轮换其
-  secret；管理连接 ACL、Realm membership 与状态尚未实现，见架构契约第 9 节。
-- 计划（架构契约 3.5、4.1 与第 9 节，协议 `actr/protocols/realm-membership`）：共享 Realm secret 与
-  Realm 管理 token 删除；成员凭一次性 Realm 邀请加入，每个客户端登记 Realm 客户端 key，
-  `POST /issuer/membership` 接受由其签名的 membership 请求，注册、重签与续期改带
-  `x-actr-client-proof`；激活与运营者创建改为返回 owner 邀请，`reissue_admin_token` 改为
-  `reissue_owner_invite`。下文描述的是当前实现。
+  创建，其 owner 以 membership 请求 `update_realm` 更新或退役。
+- Realm 成员凭一次性 Realm 邀请加入，每个客户端登记一把 Realm 客户端 key（协议
+  `actr/protocols/realm-membership`）。成员管理是 `POST /issuer/membership`（见下文「Realm
+  membership」）；Actor credential 的注册、重签与续期带 `x-actr-client-proof`。没有共享的
+  Realm secret，也没有 Realm 管理 token。
 - Issuer Signer 是内部信任平面；规范入口是同一 HTTP/2 监听器上的 gRPC，
   不是公开 REST 密钥下载服务。
 
@@ -79,7 +77,8 @@ descriptor，按 key pin 接受 `realm_signing_keys`（Actr Authority Discovery 
 `requester` 与各操作的字段，加上 `signature`（`{"key_id", "algorithm": "Ed25519", "value"}`，
 对去掉 `signature` 的请求按 JCS 规范化后的 detached 签名，与 Realm Profile 相同）：
 
-- `create_realm`：带 `package`（`href` 须为 HTTPS，`sha256` 为 64 位小写十六进制）。建为
+- `create_realm`：带 `package`（`href` 须为 HTTPS，`sha256` 为 64 位小写十六进制，`type` 为包
+  manifest 的 Actor 类型 `publisher/program@version`，publisher 须为域名）。建为
   `pending`，在 Signer 中生成该 Realm 的首把 issuer key `issuer:<realm>`，响应
   `{"realm", "status": "pending", "pending_expires_at", "profile"}`，`profile` 是 `sequence = 1`、
   指明本 Realm Provider 的 Issuer、issuer key 与端点的未签名首份 Realm Profile。以
@@ -89,10 +88,10 @@ descriptor，按 key pin 接受 `realm_signing_keys`（Actr Authority Discovery 
 - `publish_profile`：`profile` 为持有方签名的 Realm Profile。须能以该域名当前的
   `realm_signing_keys` 验证、`provider.id` 为本 Realm Provider；`active` Realm Profile 的
   `issuer` 与 `provider` 须与 Loran 生成的完全一致。首次提交激活 `pending` Realm，响应一次性带
-  `admin_token`；之后只接受通过 `check_successor` 的更高 sequence（重复提交返回 `409`），不再
-  返回 token；`status = retired` 的 Realm Profile 触发退役事务。
-- `reissue_admin_token`：`active` Realm 换发 Realm 管理 token（`{"realm", "admin_token"}`），
-  旧 token 立即失效。
+  `owner_invite`（`ri_…`）与 `owner_invite_expires_at`；之后只接受通过 `check_successor` 的更高
+  sequence（重复提交返回 `409`），不再返回邀请；`status = retired` 的 Realm Profile 触发退役事务。
+- `reissue_owner_invite`：为 `active` Realm 签发新的 owner 邀请（`{"realm", "owner_invite",
+  "expires_at"}`，有效 7 天），此前未用的 owner 邀请立即失效；用于 owner 丢失全部客户端时的恢复。
 - `draft_profile`：`active` 且有已接受 Realm Profile 的 Realm，返回 `{"realm", "profile"}`：
   下一份未签名 Realm Profile（`sequence` 为已接受值加一，`display_name`、`package`、`policy`
   取自已接受的 Realm Profile，`issuer` 与 `provider` 为 Loran 当前值，含轮换中的 issuer key）。
@@ -122,11 +121,28 @@ sign-profile | retire | reissue-request | draft-request`；Publisher 用 `actr r
 
 路由前缀：`/issuer`。
 
-注册、续签与 signing-key 查询使用 protobuf body。Realm secret 是管理员或受信 Actr Host 的
-注册能力，不得下发给 Rill Guest。`/issuer/register` 与 `/issuer/reissue` 先校验 Realm secret：
-Realm 不存在、处于 pending/停用/退役，或 secret 缺失、错误，一律返回 `403`「Realm secret not
-accepted」，不透露 Realm 状态；secret 通过后才报告 Realm 不可用的原因。签发的 Actor
-credential claims 固定包含：
+注册、续签与 signing-key 查询使用 protobuf body。`/issuer/register`、`/issuer/reissue` 与
+`/issuer/renew` 都必须带请求头 `x-actr-client-proof`：base64url（无填充）的 Actr 管理信封，`op`
+为 `register`/`reissue`/`renew`（须与路径一致），`realm` 等于请求体中的 Realm，`body_sha256` 为
+请求体字节的 SHA-256，由一把 Realm 客户端 key 签名（Actr Realm Membership 第 6 节）。
+`provider_id` 为本 Realm Provider ID；Realm 没有 Realm Profile（开发与 e2e）时也接受请求的 `Host`
+（小写 `host[:port]`）。nonce 与 Realm 管理请求共用一张表。Realm 客户端 key 是受信 Actr Host 的
+能力，不得下发给 Rill Guest。
+
+证明先于一切 Realm 信息检查：缺失或格式、`op`、`realm`、`body_sha256`、`provider_id`、有效期、
+nonce 不对返回 `400`（`invalid_request: …`）；key 未在该 Realm 登记（含 Realm 不存在）或签名不对
+返回 `403`（`client_unknown: …`）；key 已撤销为 `403`（`client_revoked: …`），成员已移除为 `403`
+（`member_removed: …`）。之后才报告 Realm 不可用的原因。错误以 protobuf `ErrorResponse` 返回，
+`message` 以上述稳定错误码开头。其余规则：
+
+- 注册记下 Actor 所属的成员与 Realm 客户端 key；Actor 类型的 publisher 与程序名等于 Realm
+  Profile `package.type` 的（不论版本）时只接受 owner 的 key（`403 service_owner_only: …`）；
+- 续期须用该 Actor 当前绑定的 key，重签须用同一成员的某把 key，成功后 Actor 改绑到这把 key，否则
+  `403 client_unknown: …`；
+- 提交事务内重查该 key 未撤销、成员 active；撤销先提交则签发失败；
+- key 的 `last_used_at` 至多每分钟更新一次。
+
+签发的 Actor credential claims 固定包含：
 
 - `protocol_version = 1`
 - `issuer`：Realm 名，例如 `k7m2q9xh@acme.com`
@@ -135,6 +151,8 @@ credential claims 固定包含：
 - `audience = actr.signaling`
 - `realm`（Realm 名，与 `issuer` 相同）、完整 ActorId 与过期时间
 - `actor_type`：注册时声明并经验证的 Actor 类型 `publisher/program@version`
+- `member`、`client_key`、`role`：成员 id、所用 Realm 客户端 key id 与签发时的角色（每次签发按当时
+  记录写入）
 
 Actor credential 由该 Realm 的当前 issuer key（Realm Profile `issuer.keys` 中 `id` 为其十进制的
 key）签名，`key_id` 与注册响应的 `signing_key_id` 为该 key 的 Signer key id；
@@ -144,8 +162,10 @@ Signaling 与 TURN 按 `(realm, key_id)` 查验证 key，轮换后退役 key 的
 
 TURN credential 的 password 为 `base64(HMAC-SHA1(k, username))`，`k` 为该 Realm 的 TURN
 secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider>")`。TURN 拒绝
-不可用（pending、停用、过期或已退役）Realm 的 credential，缓存命中也不例外：Realm 状态变更即时
-生效，过期最迟 10 秒后生效；该 Realm 已建立的 allocation 同时被关闭（按 TURN username 中的 Realm 名）。
+不可用（pending、停用、过期或已退役）Realm 与停用的 Actor（已撤销，或绑定的 Realm 客户端 key 已
+撤销）的 credential，缓存命中也不例外：变更即时生效，过期最迟 10 秒后生效；它们已建立的 allocation
+同时被关闭（按 TURN username 中的 Realm 名与 ActorId）。TURN credential 只随 Actor credential 由
+Issuer 签发；`/actr/ice-config` 只返回 ICE URL，不签发 credential。
 
 `/issuer/renew` 与 `/issuer/reissue` 带客户端生成的 16 字节 `attempt_id`（UUID），网络失败时
 客户端用完全相同的请求体重试。同一 attempt 的第一个请求占用它，身份状态变化（renewal token
@@ -162,18 +182,54 @@ secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider
 这些以 HTTP 状态返回；`/reissue` 的其他结果仍放在 `RegisterResponse` body 中、HTTP 200，只有提交时
 才发现的失败例外：另一个 attempt 先消耗了同一持有证明（`422`）或 publisher nonce（`403`），或存储
 出错（`500`）；这时 attempt 被释放，同一 attempt 可以重试。
-`/reissue` 先校验 Realm secret 再看 `attempt_id`。一个持有证明只能成功 reissue 一次：此后用它
+`/reissue` 与 `/renew` 先校验客户端证明再看 `attempt_id`；重放已存响应前还检查证明的 key 与 Actor
+的绑定（续期为同一把 key，重签为同一成员）。一个持有证明只能成功 reissue 一次：此后用它
 发起的新 attempt 返回 `422`（持有证明不成立），丢失响应只能靠同一 attempt 重试取回。
 
 `/renew` 先只读校验 renewal token（无效或过期返回 `401`），通过后才报告 Realm 不可用的原因，
 未持有有效 token 的调用方探知不到 Realm 是否停用或退役。renewal token 的后继已存在（它已被
 `/renew` 轮换或被 `/reissue` 消耗）时，`/renew` 只在后继生成后 5 分钟内接受它，且只返回这个
-后继及其到期时间；此后返回 `401`。`/renew` 与 `/reissue` 在提交事务内重查 Actor 撤销、Realm
+后继及其到期时间；此后返回 `401`。`/renew` 与 `/reissue` 在提交事务内重查 Actor 撤销、Realm 客户端 key 撤销与成员移除、Realm
 状态、包撤销与 publisher 停用，首次检查之后落地的变更同样阻止签发：此时 attempt 被释放，
 按该错误返回（`/renew` 以 HTTP 状态，`/reissue` 在 body 中）。
 
 注册请求的 ACL 规则只作用于本 Realm：`source_realm` 可以不填、为 `any_realm`（v1 只匹配本
 Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注册返回 `400`。
+
+## Realm membership
+
+`POST /issuer/membership`（protocol `actr-realm-membership/1`，即 Realm Profile 的 `issuer.url` 加
+`/membership`）接受 JSON 的 Actr 管理信封（无 `requester`），由 Realm 客户端 key 签名，
+`signature.key_id` 为其 `key_id`（公钥 SHA-256 前 16 hex）。`provider_id` 规则与 Issuer 客户端证明
+相同。操作见 Actr Realm Membership 第 4 节：
+
+- `join`：`invite`（邀请 secret）、`public_key`、可选 `label`（≤ 64 字符），由新 key 签名；兑换
+  邀请并登记该 key，响应 `{realm, member_id, role, key_id}`。同一把 key 重试已兑换的邀请返回首次
+  的结果（key 未撤销、成员 active 时）。owner 邀请在 Realm 已有 owner 时把新 key 加给 owner 并撤销
+  owner 原有的全部 key；
+- `create_invite`：`role`（`editor`/`viewer`，只有 owner）或 `member_id`（为该成员添加客户端：
+  owner 可为任何 active 成员，成员只为自己），加 `invite_expires_at`（≤ 30 天）；响应 `{invite_id,
+  invite, expires_at}`，`invite` 为 `ri_…` 文本，只返回这一次；
+- `revoke_invite {invite_id}`（owner 或签发者所属成员）、`list_members`（owner 看全部，其他成员只看
+  自己与自己签发的邀请）、`revoke_client {key_id}`（owner 不能撤销自己最后一把 key）、
+  `remove_member {member_id}`、`set_role {member_id, role}`、`transfer_owner {member_id,
+  previous_owner_role?}`（目标须 active 且至少有一把未撤销 key）、`leave`（owner 须先转让）；
+- `update_realm {package? | display_name? | status: "retired"}`：只有 owner，只用于 Realm Provider
+  域名下的 Realm，Loran 签新 Realm Profile（`package.type` 的 publisher/program 不变），响应
+  `{realm, sequence}`；其他 Realm `forbidden`。
+
+检查顺序：信封格式、`provider_id`、有效期与 nonce 长度 → 签名 key（`join` 为邀请：查无
+`invite_unknown`、属于另一 Realm `invite_realm_mismatch`）→ 记录 nonce → 在一个 `BEGIN IMMEDIATE`
+事务中重查 key 与成员、Realm 为 `active`（否则 `realm_unavailable`）→ 角色（`forbidden`）→ 目标
+（`not_found`）→ 其余规则。错误以 `{"error": "<code>", "message"}` 返回，状态码与 code 见协议
+第 4.3 节；限额 `[realm] max_members_per_realm`（1000）、`max_clients_per_member`（20）、
+`max_open_invites_per_realm`（100）超出为 `429 quota`，不消耗邀请。响应带
+`Cache-Control: no-store`。
+
+撤销 Realm 客户端 key（`revoke_client`、`remove_member`、`leave`、owner 恢复）在同一事务中撤销该
+key 与它签发的未用邀请；绑定到它的 Actor 停用：不再续期、签发 TURN credential，Signaling 与 TURN
+立即断开，不能重连。renewal token 保留：同一成员的另一把 key 可凭它 `/reissue` 取回 ActorId 并改绑。
+改角色只改记录，在下一份 credential 生效。
 
 ## Signaling
 
@@ -183,7 +239,9 @@ Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注
 `source` 不是该 Actor、或 relay 的 `target` 不属于该 Realm 时返回 `403`。Actor Registry 与 presence 按
 Realm 分区，发现、路由候选、ServiceSpec 查询与上线通知只涉及同 Realm 的 Actor；
 `GetSigningKey` 只返回本 Realm 的 issuer key。Realm 不可用（不存在、pending、停用、过期或已
-退役）时 upgrade 返回 `403`；Realm 退役时其在线连接以 close code 1008（`realm retired`）关闭。
+退役）或 Actor 已停用（已撤销，或绑定的 Realm 客户端 key 已撤销）时 upgrade 返回 `403`；Realm 退役
+时其在线连接以 close code 1008（`realm retired`）关闭；Realm 客户端 key 撤销时，绑定到它的 Actor 的
+连接以 close code 1008（`client revoked`）关闭，其 Actor Registry 记录与 presence 订阅被删除。
 按 Realm 分别计的速率限制尚未实现，见架构契约第 9 节。
 
 ## Publisher Registry
@@ -260,27 +318,29 @@ nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`k
 ## Admin
 
 - `POST /admin/api/auth/login`
-- 其余 `/admin/api/**` 需要 `Authorization: Bearer <JWT>`；Realm 管理 token（`rat_…`）只能用于
-  自己 Realm 的 `GET /admin/api/realms/{realm}`、`GET …/profile` 与 `POST …/secret/rotate`，
-  其他任何路径（含其他 Realm）一律 `404`；未知 token 为 `401`。
+- 其余 `/admin/api/**` 需要 `Authorization: Bearer <JWT>`（管理员登录所得），其他 token 为 `401`。
 
 实例运营者可创建多个 Realm，数量受 `[realm] max_realms` 限制（不计已退役的）。
 Realm 以 Realm 名寻址，`@` 编码为 `%40`：
 
 - `GET /admin/api/realms`、`POST /admin/api/realms`：列出；创建（body
   `{"realm": "k7m2q9xh@provider.example", "enabled": true, "expires_at": 0, "package": {"href":
-  "https://…", "sha256": "<64 hex>"}}`，可选 `display_name`，响应一次性返回 Realm secret）。Loran
+  "https://…", "sha256": "<64 hex>", "type": "publisher.example/app@1.0.0"}}`，可选 `display_name`；
+  响应一次性返回 `owner_invite` 与 `owner_invite_expires_at`，运营者经带外渠道交给 owner）。Loran
   是 Realm Provider（启用 authority 与带 Signer 的 Issuer）时只创建其 Realm Provider 域名下的
   Realm：先建为 `pending`（`pending_ttl_secs` 后过期），Loran 签发首份 Realm Profile 后转为
-  `active`，签发失败则丢弃该 `pending` 行，响应另一次性返回 `realm_admin_token`；其他域名的
+  `active`，签发失败则丢弃该 `pending` 行；其他域名的
   Realm 由持有方以 Realm 管理请求创建。Loran 不是 Realm Provider 时创建没有 Realm Profile 的
   `active` Realm，不接受 `package` 与 `display_name`；
-- `POST /admin/api/realms/{realm}/admin-token/reissue`：为 `active` Realm 换发 Realm 管理 token
-  （`realm_admin_token`），旧 token 立即失效；
+- `POST /admin/api/realms/{realm}/owner-invite`：为 `active` Realm 签发新的 owner 邀请（owner
+  恢复），响应 `{"success", "realm", "owner_invite", "expires_at"}`，此前未用的 owner 邀请失效。只用于
+  Realm Provider 域名下的 Realm 与没有 Realm Profile 的 Realm，其他 Realm 由持有方
+  `reissue_owner_invite`（`409`）；Realm 不是 `active` 时 `400`；
+- `GET /admin/api/realms/{realm}/members`：只读的成员、客户端（key id、公钥、名称、登记 / 最近使用 /
+  撤销时间）与未用邀请，供支持与滥用排查；运营者处置滥用用停用或退役，不直接改成员；
 - `GET /admin/api/realms/{realm}/profile`：已接受的 Realm Profile（原样 JSON），没有则 `404`；
 - `GET`/`PUT /admin/api/realms/{realm}`：读取；`PUT` 只收 `enabled` 与 `expires_at`，
   `enabled = false` 即停用、`true` 即恢复，Realm 名不可修改；
-- `POST /admin/api/realms/{realm}/secret/rotate`：轮换 Realm secret；
 - `POST /admin/api/realms/{realm}/issuer-key/rotate`：开始轮换该 `active` Realm 的 issuer key
   （Realm Profile §6.1），响应 `{"success", "realm", "key_id"}`。新 key 先在 Signer 中生成并
   列入 Realm Profile（Realm Provider 域名下的 Realm 由 Loran 立即签新 Realm Profile；其他域名
@@ -290,7 +350,8 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
   Signer 中生成的 key 当即退役（此时 Signer 不可用则只记日志，key 留在 Signer 中但不被列出、不签发）。Realm 不是 `active`、已有待切换的 key 或仍列着 3 把 key 时返回 `400`，
   Loran 不是 Realm Provider 时返回 `503`。Realm Provider 域名下的 Realm 每 90 天自动轮换；
 - `POST /admin/api/realms/{realm}/retire`：退役。单一事务中删除该 Realm 的连接 ACL、待连接
-  注册、renewal token 与 `/renew`、`/reissue` 的 attempt 记录，保留已签发身份登记与撤销表；`realm` 行以 `retired` 状态永久保留，
+  注册、邀请、renewal token 与 `/renew`、`/reissue` 的 attempt 记录，保留已签发身份登记、撤销表、
+  成员与 Realm 客户端 key；`realm` 行以 `retired` 状态永久保留，
   作为 Realm Provider tombstone，Realm 名不复用。没有硬删除。Realm Provider 域名下的 Realm 由
   Loran 签发退役 Realm Profile 并在同一事务中退役；其他域名的 Realm 若已有 key 持有方签名的
   Realm Profile，运营者不能退役（只能停用），退役只由持有方发布的退役 Realm Profile 触发。
@@ -299,8 +360,8 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
   重启时对已退役 Realm 重做，Signer 暂不可用时每分钟重试。
 
 gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealms`/
-`RetireRealm`，同样按 Realm 名寻址；Loran 是 Realm Provider 时 `CreateRealm` 不能新建 Realm
-（没有 `package`），只能更新已有 Realm。
+`RetireRealm`，同样按 Realm 名寻址；`CreateRealm` 新建的 Realm 在响应中一次性带 `owner_invite`。
+Loran 是 Realm Provider 时 `CreateRealm` 不能新建 Realm（没有 `package`），只能更新已有 Realm。
 
 Realm Provider 域名下的 Realm 在 v1 只由运营者创建；由用户以 Realm Provider 账号自助创建属于
 后续能力。

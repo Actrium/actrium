@@ -184,7 +184,8 @@ Actr 管理信封（Actr management envelope），只有 `op` 与操作字段不
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
-  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>" },
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>",
+               "type": "notes.example/team-notes@1.4.2" },
   "requester": "<可选，持有方的成员标识>",
   "provider_id": "provider.example",
   "nonce": "<random>",
@@ -308,19 +309,23 @@ Signaling 的发现在本 Realm 内按该类型找到它；Actor Registry 不另
   owner，由部分唯一索引保证。
 - membership 请求：`POST /issuer/membership`（即 Realm Profile 的 `issuer.url` 加 `/membership`），
   Actr 管理信封，签名 key 为成员的 Realm 客户端 key，与 Realm 管理请求共用 nonce 记录；兑换、撤销、
-  移除、转让各在一个 `BEGIN IMMEDIATE` 事务中完成。
+  移除、转让各在一个 `BEGIN IMMEDIATE` 事务中完成。信封的 `provider_id` 为本 Realm Provider ID；
+  没有 Realm Profile 的 Realm（Loran 不是 Realm Provider 时创建，开发与 e2e）也接受 Issuer URL 的
+  authority（Loran 以请求的 `Host` 比较）。
 - 申请 Actor credential：`/issuer/register`、`/issuer/reissue`、`/issuer/renew` 都须带
   `x-actr-client-proof`（`op` 为对应入口、含请求体 SHA-256 的 Actr 管理信封）。Issuer 只对已登记、
   未撤销、属于 active 成员的 key 签发；续期须用该 Actor 当前绑定的 key，重签可用同一成员的任一未撤销
   key 并把 Actor 改绑过去；注册时，Actor 类型的 publisher 与程序名等于 Realm Profile `package.type` 的
   （即 Service 及其升级版本）只接受 owner 的客户端；提交事务内重查 key 与成员状态。
   `issued_actor_identity` 记录每个 Actor 的成员与当前绑定的 key。
-- 撤销 key（客户端撤销、移除成员、离开、owner 恢复）：同一事务内撤销 key 及它签发的未用邀请，删除
-  绑定到它的 Actor 的 renewal token 与 attempt 记录；不写 `revoked_actor`（同一成员可重签取回）。
-  提交后 Signaling 以 close code 1008 关闭这些 Actor 的连接并删除其 Actor Registry 记录，TURN 关闭其
-  allocation；Signaling upgrade、ice-config 签发 TURN credential 与 TURN 认证都拒绝绑定 key 已撤销的
-  Actor。连接与 allocation 都在内存中，重启后必须重建并经过上述检查，因此无需重做。已签发 credential
-  在 Loran 之外到期失效（`token_ttl_secs`，默认 3600）。
+- 撤销 key（客户端撤销、移除成员、离开、owner 恢复）：同一事务内撤销 key 及它签发的未用邀请；
+  绑定到它的 Actor 停用而不作废：不写 `revoked_actor`，renewal token 也保留，因为同一成员的另一把
+  key 正是凭它 `/reissue` 取回 ActorId 并改绑（续期要求绑定 key，已撤销的 key 无法续期）。提交后经
+  进程内通知，Signaling 以 close code 1008（`client revoked`）关闭这些 Actor 的连接并删除其 Actor
+  Registry 记录与 presence 订阅，TURN 关闭其 allocation；Signaling upgrade、Issuer 签发（TURN
+  credential 只随 Actor credential 签发）与 TURN 认证都拒绝「在 `revoked_actor` 中，或绑定 key 已撤销」
+  的 Actor。连接与 allocation 都在内存中，重启后必须重建并经过上述检查，因此无需重做。已签发
+  credential 在 Loran 之外到期失效（`token_ttl_secs`，默认 3600）。
 - 改角色只改记录；角色在下一份 credential 中生效。
 - `update_realm` 只用于 Realm Provider 域名下的 Realm：owner 更新 `package`、`display_name` 或退役，
   Loran 走与运营者 `UpdateRealm`、`…/retire` 相同的自签路径。其他 Realm 一律 `forbidden`。
@@ -475,7 +480,7 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议和�
 
 ## 8. 数据与升级
 
-当前 schema v8 使用 SQLite `PRAGMA user_version = 8`。Loran 遇到旧版或未知 schema
+当前 schema v9 使用 SQLite `PRAGMA user_version = 9`。Loran 遇到旧版或未知 schema
 直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3（新增
 `issuer_control_attempt`）、v3 → v4（以 Realm 名取代数值 Realm id）与 v4 → v5（去掉单
 Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `realm_domain`、
@@ -483,7 +488,9 @@ Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `real
 `publisher.descriptor_json` 改为 `profile_json`）与 v6 → v7（删除
 `issuer_reissue_response_cache` 与 `issuer_renewal_token.delivered_at`）与 v7 → v8（`realm_domain`
 改存 key pins，新增 `realm_issuer_key`，`publisher` 新增第二把 `active` 包签名 key 与
-`profile_pins`，删除未用的 `realm.issuer_key_id`）都没有离线迁移，需停机后重建数据库。
+`profile_pins`，删除未用的 `realm.issuer_key_id`）与 v8 → v9（新增 `realm_member`、
+`realm_client_key`、`realm_invite`，`issued_actor_identity` 新增 `member_id`、`client_key_id`，`realm`
+删除 Realm 注册 secret 与 Realm 管理 token 列）都没有离线迁移，需停机后重建数据库。
 已删除的全局 Issuer key 曾存于数据目录下的 `issuer_keys.db`（更早为 `ais_keys.db`）；Issuer 启动时若发现该文件（及其
 `-wal`、`-shm`）即删除并记日志。Issuer Signer 的 `signer_keys.db` 打开时删除没有名字的 key
 （已删除的 `GenerateSigningKey` 留下的），其余 key 保留。
@@ -497,13 +504,16 @@ v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主
 - `realm_domain`：`domain`、已接受的 `realm_signing_keys` 成员原文、key pins（每把曾接受的
   key 的公钥与最后状态、已接受的 `sequence` 与内容 digest）、固定与最近校验时间；
 - `realm`：以完整 Realm 名（列 `name`）为主键、状态（`pending` | `active` | `retired`，
-  实例运营者的本地挂起用独立的 `enabled` 开关）、pending 到期时间、请求方（`requester`）、Realm 管理 token 哈希与 Realm 注册
-  secret 哈希（二者计划在 v9 删除，见第 9 节）；Realm Provider tombstone 与活跃 Realm
-  共用该主键约束；
+  实例运营者的本地挂起用独立的 `enabled` 开关）、pending 到期时间、请求方（`requester`）；Realm
+  Provider tombstone 与活跃 Realm 共用该主键约束；
+- `realm_member`、`realm_client_key`、`realm_invite`：成员、Realm 客户端 key 与邀请（见 4.1）；
+  退役删除邀请，成员与 key 随 tombstone 保留；
+- `issued_actor_identity`：已签发 ActorId 的永久登记，含 Actor 类型、包 target、成员与当前绑定的
+  Realm 客户端 key；
 - `realm_profile`：每个 Realm 已接受的最新 Realm Profile 原文及其 digest 与 `sequence`；
 - `realm_issuer_key`：每个 Realm 的 issuer key（Signer key id 与名字、公钥、`next` | `current` |
   `retired`、被已接受 Realm Profile 连续列出的起始时间、成为当前的时间、可移除时间）；
-- Realm 管理请求的 `nonce` 记录，保留到对应请求过期；
+- Realm 管理请求、membership 请求与客户端证明的 `nonce` 记录，保留到对应请求过期；
 - 其余按 Realm 分区的表（连接 ACL、已签发身份登记、Actor Registry、renewal state）以
   `realm` 为键。
 
@@ -542,15 +552,16 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   基线、取不到则停用）、退役 Realm Profile 触发的退役事务、身份变化的重新确认（运营者经
   admin 接口核对 pin 与当前 key 的指纹后手动接受，带审计记录；不自动接受）。尚未实现：Loran
   自己的 Realm 签名 key（`realm-signing:<domain>`）的轮换；
-- 已实现其他域名的 Realm 管理请求 `create_realm`、`publish_profile`、`reissue_admin_token`、
+- 已实现其他域名的 Realm 管理请求 `create_realm`、`publish_profile`、`reissue_owner_invite`、
   `draft_profile`（`provider_id` 绑定、5 分钟有效期、nonce 防重放、`(realm, 请求方)` 幂等、待签 Realm Profile）、
   `[realm]` 按域名配额、`pending` TTL 清理；
-- 尚未实现 membership（4.1、3.5，`actr/protocols/realm-membership`）：当前代码仍以共享 Realm 注册 secret
-  （`x-actrix-realm-secret`）准入注册与重签，以 Realm 管理 token（`rat_…`，`reissue_admin_token`）管理
-  Realm，Actor credential 不含成员与角色，Signaling 不查 `revoked_actor`。计划 schema v9：新增
-  `realm_member`、`realm_client_key`、`realm_invite`，`issued_actor_identity` 加成员与 key 列，`realm` 删除
-  secret 与 admin token 列；删除 admin `secret/rotate`、`admin-token/reissue` 与 token 认证，新增
-  `…/owner-invite` 与只读 `…/members`；`reissue_admin_token` 改为 `reissue_owner_invite`；
+- 已实现 membership（4.1、3.5，`actr/protocols/realm-membership`，schema v9）：一次性邀请与 owner
+  邀请、每客户端 Realm 客户端 key、`POST /issuer/membership` 的全部操作、`/issuer/register`、
+  `/reissue`、`/renew` 的 `x-actr-client-proof`（含 `body_sha256`），credential 带成员、key 与角色，
+  Service 程序只由 owner 注册；撤销 key 即时停用其 Actor（Signaling 断开并拒绝重连、TURN 关闭
+  allocation 并拒绝认证）；运营者 `…/owner-invite` 与只读 `…/members`。共享 Realm 注册 secret、Realm
+  管理 token 及其 admin 路由与认证已删除。尚未实现：客户端侧（Actr Host 用 Realm 客户端 key 签证明、
+  `actr realm join` 等命令、e2e 与示例）；Service 侧即时得知成员变化（现以 credential 到期为界）；
 - 已实现运行时分区：Actor credential 由该 Realm 的当前 issuer key 签发（首把为 Signer 中的
   `issuer:<realm>`，随首份 Realm Profile 草稿或运营者创建 `active` Realm 时生成，缺失时签发前
   补建），验证 key 按 `(realm, key_id)` 缓存；signaling 连接绑定其身份的 Realm，source/target 不在该 Realm 的
