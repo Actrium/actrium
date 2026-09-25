@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Package, Key, Copy, ShieldOff, Timer } from 'lucide-react';
 import { publisherApi, type PublisherRecord, type ActrPackage, type PublisherKeyHistory } from '../../lib/api';
+import { IdentityReview } from '../../components/identity/IdentityReview';
 
 function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -496,6 +497,8 @@ export function PublisherRegistryPage() {
           </tbody>
         </table>
       </div>
+
+      <IdentityReview kind="publishers" />
 
       {/* Package Table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

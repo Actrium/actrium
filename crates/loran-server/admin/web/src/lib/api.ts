@@ -399,3 +399,31 @@ export const publisherApi = {
   revokeHistoricalKey: (historyId: number) =>
     request<void>(`/publishers/admin/keys/${historyId}/revoke`, { method: 'POST' }),
 };
+
+// Identity re-confirmation: pinned vs served signing keys of a Realm domain
+// or a publisher (authority-discovery section 4.4 step 6).
+export type IdentityKind = 'realm-domains' | 'publishers';
+
+export interface IdentityKeys {
+  sequence: number;
+  digest: string;
+  keys: { id: string; status: 'active' | 'retired' | 'removed'; fingerprint: string }[];
+}
+
+export interface IdentityView {
+  pinned: IdentityKeys;
+  fetched: IdentityKeys;
+  outcome: 'accepted' | 'identity_change' | 'rejected';
+  reason?: string;
+}
+
+export const identityApi = {
+  get: (kind: IdentityKind, name: string) =>
+    request<IdentityView>(`/identity/${kind}/${encodeURIComponent(name)}`),
+
+  confirm: (kind: IdentityKind, name: string, digest: string) =>
+    request<{ pinned: IdentityKeys }>(`/identity/${kind}/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      body: JSON.stringify({ digest }),
+    }),
+};

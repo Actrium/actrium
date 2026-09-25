@@ -9,6 +9,7 @@ import { ServicePageLayout } from "../components/layout/ServicePageLayout";
 
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { RealmSecretModal } from "../components/realms/RealmSecretModal";
+import { IdentityReview } from "../components/identity/IdentityReview";
 
 const REALM_WRITES_DISABLED_MESSAGE =
   "Realm writes are managed by superv while NodeAdminService gRPC API is enabled.";
@@ -241,6 +242,8 @@ export function Realms() {
           if (ensureRealmWritesEnabled()) setRetireConfirm(realm);
         }}
       />
+
+      <IdentityReview kind="realm-domains" disabled={!realmWritesEnabled} />
 
       {showForm && (
         <RealmForm
