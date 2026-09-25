@@ -376,14 +376,6 @@ export interface ActrPackage {
   revoked_at?: number;
 }
 
-export interface PublisherCertificate {
-  key_id: string;
-  publisher: string;
-  public_key: string;
-  issued_at: number;
-  expires_at: number;
-}
-
 export interface PublisherKeyHistory {
   id: number;
   publisher_id: number;
@@ -394,23 +386,6 @@ export interface PublisherKeyHistory {
   retired_at: number;
 }
 
-export interface PublisherVerificationResponse {
-  certificate: PublisherCertificate;
-}
-
-export interface ApplyRequest {
-  publisher: string;
-  contact?: string;
-}
-
-export interface ApplyResponse {
-  publisher_id: number;
-  challenge_token: string;
-  expires_at: number;
-  descriptor_url: string;
-  instructions: string;
-}
-
 // Publisher Registry API functions, mounted under /admin/api/publishers.
 export const publisherApi = {
   list: (status?: string) => {
@@ -418,27 +393,8 @@ export const publisherApi = {
     return request<PublisherRecord[]>(`/publishers/admin/list${params}`);
   },
 
-  apply: (req: ApplyRequest) =>
-    request<ApplyResponse>('/publishers/applications', {
-      method: 'POST',
-      body: JSON.stringify(req),
-    }),
-
-  verify: (id: number) =>
-    request<PublisherVerificationResponse>(`/publishers/${id}/verify-domain`, {
-      method: 'POST',
-    }),
-
-  getChallenge: (id: number) =>
-    request<ApplyResponse>(`/publishers/${id}/challenge`),
-
   suspend: (id: number) =>
     request<void>(`/publishers/admin/${id}/suspend`, { method: 'POST' }),
-
-  beginKeyRotation: (id: number) =>
-    request<ApplyResponse>(`/publishers/${id}/rotation-challenge`, {
-      method: 'POST',
-    }),
 
   reinstate: (id: number) =>
     request<void>(`/publishers/admin/${id}/reinstate`, { method: 'POST' }),
