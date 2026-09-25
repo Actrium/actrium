@@ -144,7 +144,9 @@ secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider
 - 另一个请求仍在处理：`425`，带 `Retry-After`（秒）；
 - `attempt_id` 不是 16 字节：`400`。
 
-这些以 HTTP 状态返回；`/reissue` 的其他结果仍放在 `RegisterResponse` body 中、HTTP 200。
+这些以 HTTP 状态返回；`/reissue` 的其他结果仍放在 `RegisterResponse` body 中、HTTP 200，只有提交时
+才发现的失败例外：另一个 attempt 先消耗了同一持有证明（`422`）或 publisher nonce（`403`），或存储
+出错（`500`）；这时 attempt 被释放，同一 attempt 可以重试。
 `/reissue` 先校验 Realm secret 再看 `attempt_id`。一个持有证明只能成功 reissue 一次：此后用它
 发起的新 attempt 返回 `422`（持有证明不成立），丢失响应只能靠同一 attempt 重试取回。
 
