@@ -1,15 +1,21 @@
 use crate::{
     PublisherRegistryError, crypto,
     model::{
-        ActrPackage, PkgStatus, PublishNonce, Publisher, PublisherChallenge, PublisherKeyHistory,
-        PublisherStatus, key_history::KeyHistoryStatus,
+        ActrPackage, PkgStatus, PublishNonce, Publisher, PublisherKeyHistory, PublisherStatus,
+        key_history::KeyHistoryStatus,
     },
-    publisher::fetch_publisher_descriptor,
     reserved::canonical_publisher_domain,
 };
+use actr_protocol::realm_profile::jcs;
+use actr_protocol::{KeyStatus, PublisherKeys, PublisherProfile};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::SqlitePool;
 
+/// How long a package signing key without `not_after` may publish.
+const DEFAULT_KEY_LIFETIME_SECS: i64 = 365 * 24 * 3600;
+
+#[cfg(test)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PublisherVerificationResponse {
     pub certificate: PublisherCertificate,
@@ -107,8 +113,9 @@ pub struct PublisherPublicInfo {
     pub name: String,
     pub public_key: String,
     pub certificate: PublisherCertificate,
+    /// The accepted Publisher Profile.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub descriptor: Option<crate::publisher::PublisherDescriptor>,
+    pub profile: Option<Value>,
 }
 
 pub struct PublisherRegistryManager {
@@ -184,240 +191,146 @@ impl PublisherRegistryManager {
         Ok(nonce)
     }
 
-    /// Step 1: apply for a canonical HTTPS publisher identity.
+    /// Register `publisher` from `profile`, its Publisher Profile verified
+    /// by [`PublisherProfile::verify`] with `keys`, or accept a later profile
+    /// of a registered publisher (`register_publisher`,
+    /// `actr/protocols/authority-discovery.md` section 4.5).
     ///
-    /// The challenge must be placed in the publisher descriptor at
-    /// `https://<publisher>/.well-known/actr/publisher.json`.
-    pub async fn apply(
+    /// The first accepted profile pins its `profile_signing_keys`. A later
+    /// profile must be signed by a pinned `active` key, list only pinned keys,
+    /// never make a retired key active again, and never lower `sequence`; the
+    /// same `sequence` must be the same profile. Rotation chains are not
+    /// followed yet. The profile's one `active` package signing key becomes
+    /// the publisher's current key; a replaced key is archived as retired and
+    /// a key used before is never reinstated.
+    pub async fn register_publisher(
         &self,
         publisher: &str,
-        contact: Option<&str>,
-    ) -> Result<(Publisher, PublisherChallenge), PublisherRegistryError> {
-        let publisher = canonical_publisher_domain(publisher)?;
-        let publisher_record = Publisher::create(&self.pool, &publisher, contact).await?;
-        let challenge = PublisherChallenge::create(&self.pool, publisher_record.id).await?;
-        platform::recording::info!("Publisher application received: publisher={}", publisher);
-        Ok((publisher_record, challenge))
-    }
-
-    /// Step 2: verify domain ownership and bind the descriptor's signing key.
-    pub async fn verify_publisher_domain(
-        &self,
-        publisher_id: i64,
-    ) -> Result<PublisherVerificationResponse, PublisherRegistryError> {
-        let mut publisher_record = Publisher::get(&self.pool, publisher_id)
-            .await?
-            .ok_or(PublisherRegistryError::NotFound)?;
-
-        if !matches!(
-            publisher_record.status,
-            PublisherStatus::Pending | PublisherStatus::Active
-        ) {
-            return Err(PublisherRegistryError::InvalidStatus(format!(
-                "cannot verify publisher with status: {}",
-                publisher_record.status
+        profile: &PublisherProfile,
+        keys: &PublisherKeys,
+    ) -> Result<Publisher, PublisherRegistryError> {
+        let invalid = PublisherRegistryError::InvalidRequest;
+        if canonical_publisher_domain(publisher)? != publisher || profile.domain != publisher {
+            return Err(invalid(format!(
+                "'{publisher}' is not the normalized domain of this Publisher Profile"
             )));
         }
-
-        let challenge = PublisherChallenge::get_active(&self.pool, publisher_id)
-            .await?
-            .ok_or(PublisherRegistryError::ChallengeNotFound)?;
-
-        let (descriptor, descriptor_url) =
-            fetch_publisher_descriptor(&publisher_record.name).await?;
-        descriptor.validate_for(&publisher_record.name, &challenge.token)?;
-        let computed_key_id = crypto::compute_key_id_from_b64(&descriptor.public_key)?;
-        if descriptor.key_id != computed_key_id {
-            return Err(PublisherRegistryError::VerificationFailed(format!(
-                "descriptor key_id '{}' does not match public key fingerprint '{}'",
-                descriptor.key_id, computed_key_id
-            )));
-        }
-        if publisher_record.status == PublisherStatus::Active
-            && descriptor.key_id == publisher_record.key_id
-        {
-            return Err(PublisherRegistryError::InvalidRequest(
-                "publisher rotation descriptor must present a new signing key".to_string(),
+        let mut active = keys
+            .keys
+            .iter()
+            .filter(|key| key.status == KeyStatus::Active);
+        let (Some(package_key), None) = (active.next(), active.next()) else {
+            return Err(invalid(
+                "a Publisher Profile must list exactly one active package signing key".into(),
             ));
-        }
-
-        let descriptor_json = serde_json::to_string(&descriptor)
-            .map_err(|error| PublisherRegistryError::InvalidRequest(error.to_string()))?;
-        let response = self
-            .commit_verified_descriptor(
-                &mut publisher_record,
-                &descriptor.public_key,
-                &descriptor_json,
-                &challenge,
-                &descriptor_url,
-            )
-            .await?;
-        publisher_record.descriptor_json = descriptor_json;
-        platform::recording::info!(
-            "Publisher verified via HTTPS descriptor: publisher_id={}, name={}, key_id={}",
-            publisher_id,
-            publisher_record.name,
-            response.certificate.key_id
-        );
-        Ok(response)
-    }
-
-    /// Atomically bind the discovered key and descriptor, archive the previous
-    /// key when rotating, and consume the exact ownership challenge.
-    async fn commit_verified_descriptor(
-        &self,
-        publisher_record: &mut Publisher,
-        public_key: &str,
-        descriptor_json: &str,
-        challenge: &PublisherChallenge,
-        descriptor_url: &str,
-    ) -> Result<PublisherVerificationResponse, PublisherRegistryError> {
-        crypto::validate_public_key(public_key)?;
+        };
+        crypto::validate_public_key(&package_key.public_key)?;
+        let key_id = crypto::compute_key_id_from_b64(&package_key.public_key)?;
         let now = chrono::Utc::now().timestamp();
-        let new_key_id = crypto::compute_key_id_from_b64(public_key)?;
+        let key_expires_at = match &package_key.not_after {
+            Some(not_after) => chrono::DateTime::parse_from_rfc3339(not_after)
+                .map_err(|error| invalid(format!("not_after: {error}")))?
+                .timestamp(),
+            None => now + DEFAULT_KEY_LIFETIME_SECS,
+        };
+        let document = serde_json::to_value(profile)
+            .map_err(|error| invalid(format!("Publisher Profile: {error}")))?;
+        let profile_json = jcs(&document);
+        let contact = document["security_contact"].as_str();
 
-        // Historical-key blacklist: a key_id that was ever archived (retired or
-        // revoked) must never be reinstated as the current key. Without this an
-        // attacker who briefly controlled key A could ride A -> B -> revoke(A) ->
-        // B -> A back into a trusted current-key slot. The check covers retired
-        // keys too, so normal forward rotation to a fresh key is unaffected while
-        // any backward move to a used key is refused.
-        if PublisherKeyHistory::key_id_ever_used(&self.pool, publisher_record.id, &new_key_id)
-            .await?
-        {
-            platform::recording::warn!(
-                "rejected reinstatement of previously used publisher key: \
-                 publisher_id={}, key_id={}",
-                publisher_record.id,
-                new_key_id
-            );
-            return Err(PublisherRegistryError::InvalidRequest(
-                "a previously used publisher key must not be reinstated".to_string(),
-            ));
-        }
-
-        let key_expires_at = now + 365 * 24 * 3600;
         let mut tx = self.pool.begin().await?;
-
-        let updated = match publisher_record.status {
-            PublisherStatus::Pending => sqlx::query(
-                "UPDATE publisher
-                     SET status = 'active', public_key = ?, key_id = ?,
-                         verified_at = ?, updated_at = ?, key_expires_at = ?,
-                         descriptor_json = ?
-                     WHERE id = ? AND status = 'pending'",
+        let existing = sqlx::query_as::<_, Publisher>("SELECT * FROM publisher WHERE name = ?")
+            .bind(publisher)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let Some(record) = existing else {
+            sqlx::query(
+                "INSERT INTO publisher
+                    (name, public_key, key_id, profile_json, contact, status,
+                     created_at, updated_at, verified_at, key_expires_at)
+                 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)",
             )
-            .bind(public_key)
-            .bind(&new_key_id)
+            .bind(publisher)
+            .bind(&package_key.public_key)
+            .bind(&key_id)
+            .bind(&profile_json)
+            .bind(contact)
+            .bind(now)
             .bind(now)
             .bind(now)
             .bind(key_expires_at)
-            .bind(descriptor_json)
-            .bind(publisher_record.id)
             .execute(&mut *tx)
-            .await?
-            .rows_affected(),
-            PublisherStatus::Active => {
-                if !publisher_record.public_key.is_empty() && !publisher_record.key_id.is_empty() {
-                    sqlx::query(
-                        "INSERT INTO publisher_key_history
-                         (publisher_id, key_id, public_key, status, created_at, retired_at)
-                         VALUES (?, ?, ?, 'retired', ?, ?)",
-                    )
-                    .bind(publisher_record.id)
-                    .bind(&publisher_record.key_id)
-                    .bind(&publisher_record.public_key)
-                    .bind(
-                        publisher_record
-                            .verified_at
-                            .unwrap_or(publisher_record.created_at),
-                    )
-                    .bind(now)
-                    .execute(&mut *tx)
-                    .await?;
-                }
-                sqlx::query(
-                    "UPDATE publisher
-                     SET public_key = ?, key_id = ?, key_expires_at = ?,
-                         updated_at = ?, descriptor_json = ?
-                     WHERE id = ? AND status = 'active' AND key_id = ?",
-                )
-                .bind(public_key)
-                .bind(&new_key_id)
-                .bind(key_expires_at)
-                .bind(now)
-                .bind(descriptor_json)
-                .bind(publisher_record.id)
-                .bind(&publisher_record.key_id)
-                .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            platform::recording::info!("Publisher registered: name={publisher}, key_id={key_id}");
+            return Publisher::get_by_name(&self.pool, publisher)
                 .await?
-                .rows_affected()
-            }
-            _ => {
-                return Err(PublisherRegistryError::InvalidStatus(format!(
-                    "cannot verify publisher with status: {}",
-                    publisher_record.status
-                )));
-            }
+                .ok_or(PublisherRegistryError::NotFound);
         };
-        if updated != 1 {
-            return Err(PublisherRegistryError::InvalidStatus(
-                "publisher changed while domain verification was in progress".to_string(),
-            ));
-        }
 
-        let challenge_updated = sqlx::query(
-            "UPDATE publisher_challenge
-             SET verified_at = ?, verify_url = ?
-             WHERE id = ? AND publisher_id = ? AND verified_at IS NULL AND expires_at > ?",
+        if record.status != PublisherStatus::Active {
+            return Err(PublisherRegistryError::InvalidStatus(format!(
+                "Publisher '{publisher}' is {}",
+                record.status
+            )));
+        }
+        if record.profile_json == profile_json {
+            return Ok(record);
+        }
+        check_successor(&record.profile_json, profile, keys)?;
+
+        if record.key_id != key_id {
+            // A key archived or revoked before never becomes current again.
+            if PublisherKeyHistory::key_id_ever_used(&mut *tx, record.id, &key_id).await? {
+                return Err(invalid(
+                    "a previously used publisher key must not be reinstated".into(),
+                ));
+            }
+            if !record.key_id.is_empty() {
+                sqlx::query(
+                    "INSERT INTO publisher_key_history
+                     (publisher_id, key_id, public_key, status, created_at, retired_at)
+                     VALUES (?, ?, ?, 'retired', ?, ?)",
+                )
+                .bind(record.id)
+                .bind(&record.key_id)
+                .bind(&record.public_key)
+                .bind(record.verified_at.unwrap_or(record.created_at))
+                .bind(now)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        let updated = sqlx::query(
+            "UPDATE publisher
+             SET public_key = ?, key_id = ?, key_expires_at = ?, profile_json = ?,
+                 contact = ?, updated_at = ?
+             WHERE id = ? AND status = 'active' AND profile_json = ?",
         )
+        .bind(&package_key.public_key)
+        .bind(&key_id)
+        .bind(key_expires_at)
+        .bind(&profile_json)
+        .bind(contact)
         .bind(now)
-        .bind(descriptor_url)
-        .bind(challenge.id)
-        .bind(publisher_record.id)
-        .bind(now)
+        .bind(record.id)
+        .bind(&record.profile_json)
         .execute(&mut *tx)
         .await?
         .rows_affected();
-        if challenge_updated != 1 {
-            return Err(PublisherRegistryError::ChallengeNotFound);
+        if updated != 1 {
+            return Err(PublisherRegistryError::InvalidStatus(
+                "publisher changed while its profile was registered".to_string(),
+            ));
         }
         tx.commit().await?;
-
-        publisher_record.status = PublisherStatus::Active;
-        publisher_record.public_key = public_key.to_string();
-        publisher_record.key_id = new_key_id.clone();
-        publisher_record.verified_at.get_or_insert(now);
-        publisher_record.updated_at = Some(now);
-        publisher_record.key_expires_at = Some(key_expires_at);
-
-        Ok(PublisherVerificationResponse {
-            certificate: PublisherCertificate {
-                key_id: new_key_id,
-                publisher: publisher_record.name.clone(),
-                public_key: public_key.to_string(),
-                issued_at: now,
-                expires_at: key_expires_at,
-            },
-        })
-    }
-
-    /// Start a publisher-controlled key rotation. The new key is accepted only
-    /// after the active HTTPS descriptor presents this fresh challenge.
-    pub async fn begin_key_rotation(
-        &self,
-        publisher_id: i64,
-    ) -> Result<PublisherChallenge, PublisherRegistryError> {
-        let publisher_record = Publisher::get(&self.pool, publisher_id)
+        platform::recording::info!(
+            "Publisher Profile accepted: name={publisher}, sequence={}, key_id={key_id}",
+            keys.sequence
+        );
+        Publisher::get(&self.pool, record.id)
             .await?
-            .ok_or(PublisherRegistryError::NotFound)?;
-        if publisher_record.status != PublisherStatus::Active {
-            return Err(PublisherRegistryError::InvalidStatus(format!(
-                "cannot rotate publisher key from status: {}",
-                publisher_record.status
-            )));
-        }
-        PublisherChallenge::create(&self.pool, publisher_id).await
+            .ok_or(PublisherRegistryError::NotFound)
     }
 
     /// Test-only shortcut for provisioning publisher records without external
@@ -485,28 +398,6 @@ impl PublisherRegistryManager {
         })
     }
 
-    /// Get an active challenge for initial verification or key rotation.
-    pub async fn get_challenge(
-        &self,
-        publisher_id: i64,
-    ) -> Result<PublisherChallenge, PublisherRegistryError> {
-        let publisher_record = Publisher::get(&self.pool, publisher_id)
-            .await?
-            .ok_or(PublisherRegistryError::NotFound)?;
-        if !matches!(
-            publisher_record.status,
-            PublisherStatus::Pending | PublisherStatus::Active
-        ) {
-            return Err(PublisherRegistryError::InvalidStatus(format!(
-                "publisher cannot hold a verification challenge (status: {})",
-                publisher_record.status
-            )));
-        }
-        PublisherChallenge::get_active(&self.pool, publisher_id)
-            .await?
-            .ok_or(PublisherRegistryError::ChallengeNotFound)
-    }
-
     pub async fn get_status(&self, publisher_id: i64) -> Result<Publisher, PublisherRegistryError> {
         Publisher::get(&self.pool, publisher_id)
             .await?
@@ -538,14 +429,14 @@ impl PublisherRegistryManager {
                 .unwrap_or(publisher_record.created_at),
             expires_at,
         };
-        let descriptor = serde_json::from_str(&publisher_record.descriptor_json).ok();
+        let profile = accepted_profile(&publisher_record.profile_json);
         Ok(PublisherPublicInfo {
             id: publisher_record.id,
             key_id: publisher_record.key_id.clone(),
             name: publisher_record.name,
             public_key: publisher_record.public_key,
             certificate: cert,
-            descriptor,
+            profile,
         })
     }
 
@@ -594,7 +485,7 @@ impl PublisherRegistryManager {
             issued_at: history.created_at,
             expires_at: history.retired_at, // Old keys technically "expired" at retirement time
         };
-        let descriptor = serde_json::from_str(&publisher_record.descriptor_json).ok();
+        let profile = accepted_profile(&publisher_record.profile_json);
 
         Ok(PublisherPublicInfo {
             id: publisher_record.id,
@@ -602,7 +493,7 @@ impl PublisherRegistryManager {
             name: publisher_record.name,
             public_key: history.public_key,
             certificate: cert,
-            descriptor,
+            profile,
         })
     }
 
@@ -700,68 +591,6 @@ impl PublisherRegistryManager {
         }
 
         Err(PublisherRegistryError::InvalidSignature)
-    }
-
-    /// Admin: rotate the signing key to a publisher-supplied public key.
-    ///
-    /// Actrix never generates or handles publisher private keys in production.
-    pub async fn renew_key(
-        &self,
-        publisher_id: i64,
-        user_public_key: &str,
-    ) -> Result<PublisherVerificationResponse, PublisherRegistryError> {
-        let mut publisher_record = Publisher::get(&self.pool, publisher_id)
-            .await?
-            .ok_or(PublisherRegistryError::NotFound)?;
-
-        crypto::validate_public_key(user_public_key)?;
-        let public_key = user_public_key.to_string();
-
-        // Historical-key blacklist on the renew path too. Without this, renew
-        // could be abused to ride A -> B -> revoke(A) -> A back into the current
-        // key slot: rotating away archives the outgoing key, but nothing stopped
-        // a later renew from reinstating a previously retired or revoked key.
-        // Mirror the identical guard on the HTTPS verification path so any key_id
-        // ever archived (retired or revoked) is refused as an incoming key.
-        let incoming_key_id = crypto::compute_key_id_from_b64(&public_key)?;
-        if PublisherKeyHistory::key_id_ever_used(&self.pool, publisher_record.id, &incoming_key_id)
-            .await?
-        {
-            platform::recording::warn!(
-                "rejected reinstatement of previously used publisher key on renew: \
-                 publisher_id={}, key_id={}",
-                publisher_record.id,
-                incoming_key_id
-            );
-            return Err(PublisherRegistryError::InvalidRequest(
-                "a previously used publisher key must not be reinstated".to_string(),
-            ));
-        }
-
-        publisher_record.renew_key(&self.pool, public_key).await?;
-
-        let expires_at = publisher_record
-            .key_expires_at
-            .ok_or(PublisherRegistryError::CertificateExpired)?;
-
-        platform::recording::info!(
-            "Publisher key renewed: publisher_id={}, name={}, new_key_id={}",
-            publisher_id,
-            publisher_record.name,
-            publisher_record.key_id
-        );
-
-        Ok(PublisherVerificationResponse {
-            certificate: PublisherCertificate {
-                key_id: publisher_record.key_id.clone(),
-                publisher: publisher_record.name.clone(),
-                public_key: publisher_record.public_key.clone(),
-                issued_at: publisher_record
-                    .updated_at
-                    .unwrap_or(publisher_record.created_at),
-                expires_at,
-            },
-        })
     }
 
     pub async fn publish_package(
@@ -1089,6 +918,66 @@ impl PublisherRegistryManager {
         platform::recording::warn!("Publisher deleted by admin: publisher_id={}", publisher_id);
         Ok(())
     }
+}
+
+/// The stored Publisher Profile, if one was accepted.
+fn accepted_profile(profile_json: &str) -> Option<Value> {
+    serde_json::from_str::<Value>(profile_json)
+        .ok()
+        .filter(|profile| profile.get("signature").is_some())
+}
+
+/// Check `candidate` against the accepted profile `accepted_json` (see
+/// [`PublisherRegistryManager::register_publisher`]).
+fn check_successor(
+    accepted_json: &str,
+    candidate: &PublisherProfile,
+    keys: &PublisherKeys,
+) -> Result<(), PublisherRegistryError> {
+    let Some(accepted) = accepted_profile(accepted_json) else {
+        return Ok(());
+    };
+    let rejected = |message: String| PublisherRegistryError::VerificationFailed(message);
+    let accepted: PublisherKeys = serde_json::from_value(accepted)
+        .map_err(|error| rejected(format!("accepted Publisher Profile: {error}")))?;
+    let pinned = |id: &str, public_key: &str| {
+        accepted
+            .profile_signing_keys
+            .iter()
+            .find(|key| key.id == id && key.public_key == public_key)
+    };
+    let signer = keys
+        .profile_signing_keys
+        .iter()
+        .find(|key| key.id == candidate.signature.key_id)
+        .and_then(|key| pinned(&key.id, &key.public_key));
+    if signer.is_none_or(|key| key.status != KeyStatus::Active) {
+        return Err(rejected(
+            "the Publisher Profile is not signed by a pinned active key".into(),
+        ));
+    }
+    // The same sequence with other content was ruled out by the caller.
+    if keys.sequence <= accepted.sequence {
+        return Err(rejected(format!(
+            "Publisher Profile sequence {} does not follow {}",
+            keys.sequence, accepted.sequence
+        )));
+    }
+    for key in &keys.profile_signing_keys {
+        let Some(pinned) = pinned(&key.id, &key.public_key) else {
+            return Err(rejected(format!(
+                "the Publisher Profile lists new signing key '{}'; key rotation chains are not supported",
+                key.id
+            )));
+        };
+        if pinned.status == KeyStatus::Retired && key.status == KeyStatus::Active {
+            return Err(rejected(format!(
+                "the Publisher Profile reactivates retired signing key '{}'",
+                key.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Public API for Issuer integration: check if a type_str is a valid, active package.

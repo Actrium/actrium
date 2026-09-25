@@ -24,14 +24,10 @@ pub enum PublisherRegistryError {
     InvalidStatus(String),
     #[error("verification failed: {0}")]
     VerificationFailed(String),
-    #[error("challenge expired or not found")]
-    ChallengeNotFound,
     #[error("invalid signature")]
     InvalidSignature,
     #[error("package already published, revoke first")]
     PackageAlreadyPublished,
-    #[error("publisher discovery error: {0}")]
-    PublisherDiscovery(String),
     #[error("crypto error: {0}")]
     Crypto(String),
     #[error("unauthorized")]
@@ -61,12 +57,8 @@ impl IntoResponse for PublisherRegistryError {
             PublisherRegistryError::InvalidSignature | PublisherRegistryError::Unauthorized => {
                 (StatusCode::UNAUTHORIZED, self.to_string())
             }
-            PublisherRegistryError::VerificationFailed(_)
-            | PublisherRegistryError::ChallengeNotFound => {
+            PublisherRegistryError::VerificationFailed(_) => {
                 (StatusCode::BAD_REQUEST, self.to_string())
-            }
-            PublisherRegistryError::PublisherDiscovery(_) => {
-                (StatusCode::BAD_GATEWAY, self.to_string())
             }
             PublisherRegistryError::KeyRevoked(_) | PublisherRegistryError::CertificateExpired => {
                 (StatusCode::FORBIDDEN, self.to_string())

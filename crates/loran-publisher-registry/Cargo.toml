@@ -9,6 +9,7 @@ description = "Actrix Publisher Registry - domain identity and signed Actor pack
 
 [dependencies]
 # Workspace dependencies
+actr-protocol = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

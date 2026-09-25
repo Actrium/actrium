@@ -64,7 +64,6 @@ pub mod utils {
             "publisher_publish_nonce",
             "publisher_key_history",
             "publisher_package",
-            "publisher_challenge",
             "publisher",
             "realm_profile",
             "realm_domain",

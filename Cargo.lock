@@ -657,6 +657,7 @@ dependencies = [
 name = "actrix-publisher-registry"
 version = "0.10.3"
 dependencies = [
+ "actr-protocol",
  "actrix-platform",
  "axum",
  "base64",

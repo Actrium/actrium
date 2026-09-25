@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const ACTRIX_SCHEMA_VERSION: i64 = 5;
+const ACTRIX_SCHEMA_VERSION: i64 = 6;
 
 /// Database manager
 #[derive(Clone)]
@@ -287,7 +287,7 @@ impl Database {
                 name         TEXT    NOT NULL UNIQUE,
                 public_key   TEXT    NOT NULL DEFAULT '',
                 key_id       TEXT    NOT NULL DEFAULT '',
-                descriptor_json TEXT NOT NULL DEFAULT '{}',
+                profile_json TEXT    NOT NULL DEFAULT '{}',
                 contact      TEXT,
                 status       TEXT    NOT NULL DEFAULT 'pending',
                 created_at   INTEGER NOT NULL,
@@ -296,21 +296,6 @@ impl Database {
                 suspended_at INTEGER,
                 revoked_at   INTEGER,
                 key_expires_at  INTEGER
-            )",
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        // HTTPS publisher descriptor challenge for identity verification.
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS publisher_challenge (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                publisher_id      INTEGER NOT NULL REFERENCES publisher(id),
-                token       TEXT    NOT NULL,
-                verify_url  TEXT    NOT NULL DEFAULT '',
-                expires_at  INTEGER NOT NULL,
-                verified_at INTEGER,
-                created_at  INTEGER NOT NULL
             )",
         )
         .execute(&mut *tx)

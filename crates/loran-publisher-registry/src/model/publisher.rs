@@ -46,8 +46,8 @@ pub struct Publisher {
     pub name: String,
     pub public_key: String,
     pub key_id: String,
-    /// Last verified `actr.publisher/v1` descriptor.
-    pub descriptor_json: String,
+    /// Accepted `actr.publisher/v1` Publisher Profile, `{}` before one.
+    pub profile_json: String,
     pub contact: Option<String>,
     pub status: PublisherStatus,
     pub created_at: i64,
@@ -69,9 +69,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Publisher {
             name: row.try_get("name")?,
             public_key: row.try_get("public_key")?,
             key_id: row.try_get("key_id").unwrap_or_default(),
-            descriptor_json: row
-                .try_get("descriptor_json")
-                .unwrap_or_else(|_| "{}".to_string()),
+            profile_json: row.try_get("profile_json")?,
             contact: row.try_get("contact")?,
             status,
             created_at: row.try_get("created_at")?,
@@ -85,6 +83,9 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Publisher {
 }
 
 impl Publisher {
+    /// A pending record; production records come from
+    /// `PublisherRegistryManager::register_publisher`.
+    #[cfg(test)]
     pub async fn create(
         pool: &SqlitePool,
         name: &str,
@@ -154,6 +155,7 @@ impl Publisher {
         }
     }
 
+    #[cfg(test)]
     pub async fn activate(
         &mut self,
         pool: &SqlitePool,
@@ -188,56 +190,6 @@ impl Publisher {
         Ok(())
     }
 
-    /// Rotate the signing key: archive current key to history, set new key.
-    /// Accepts the new public key and optionally generates a new key_id.
-    pub async fn renew_key(
-        &mut self,
-        pool: &SqlitePool,
-        new_public_key: String,
-    ) -> Result<String, PublisherRegistryError> {
-        if self.status != PublisherStatus::Active {
-            return Err(PublisherRegistryError::InvalidStatus(format!(
-                "cannot renew key from status: {}",
-                self.status
-            )));
-        }
-
-        // Archive current key to history (only if there is one)
-        if !self.public_key.is_empty() && !self.key_id.is_empty() {
-            let created_at = self.verified_at.unwrap_or(self.created_at);
-            super::key_history::PublisherKeyHistory::archive(
-                pool,
-                self.id,
-                &self.key_id,
-                &self.public_key,
-                created_at,
-            )
-            .await?;
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        let new_key_id = crate::crypto::compute_key_id_from_b64(&new_public_key)?;
-        let key_expires_at = now + 365 * 24 * 3600; // 1 year
-
-        sqlx::query(
-            "UPDATE publisher SET public_key = ?, key_id = ?, key_expires_at = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(&new_public_key)
-        .bind(&new_key_id)
-        .bind(key_expires_at)
-        .bind(now)
-        .bind(self.id)
-        .execute(pool)
-        .await?;
-
-        self.public_key = new_public_key;
-        self.key_id = new_key_id.clone();
-        self.key_expires_at = Some(key_expires_at);
-        self.updated_at = Some(now);
-
-        Ok(new_key_id)
-    }
-
     /// Emergency-revoke the CURRENTLY ACTIVE signing key (private key compromised).
     ///
     /// `PublisherKeyHistory::revoke` only touches keys that were already rotated away;
@@ -254,9 +206,10 @@ impl Publisher {
     /// `key_expires_at` set to NULL, every current-key path fails closed -
     /// `resolve_by_name` and `validate_publish_authority` return
     /// `CertificateExpired`, and `resolve_key_by_id` for the old key_id returns
-    /// `KeyRevoked`. Recovery is only possible via `renew_key`, which requires
-    /// `active` status and, thanks to the blacklist, cannot reinstate the revoked
-    /// key - the publisher must rotate to a brand-new key.
+    /// `KeyRevoked`. Recovery is only possible by registering a later
+    /// Publisher Profile, which requires `active` status and, thanks to the
+    /// blacklist, cannot reinstate the revoked key - the publisher must rotate
+    /// to a brand-new key.
     ///
     /// Doing both writes in one transaction is required for safety: a half-applied
     /// state where the key is archived as revoked but still present on the `publisher`
@@ -379,10 +332,6 @@ impl Publisher {
             .execute(pool)
             .await?;
         sqlx::query("DELETE FROM publisher_package WHERE publisher_id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
-        sqlx::query("DELETE FROM publisher_challenge WHERE publisher_id = ?")
             .bind(id)
             .execute(pool)
             .await?;

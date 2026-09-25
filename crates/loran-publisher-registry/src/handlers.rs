@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, Query, State},
     routing::{delete, get, post},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -33,11 +33,8 @@ pub fn create_public_router(state: PublisherRegistryState) -> Router {
 /// These are mounted at `/admin/api/publishers` behind JWT authentication middleware.
 pub fn create_admin_router(state: PublisherRegistryState) -> Router {
     Router::new()
-        // Publisher registration & HTTPS-domain verification flow
-        .route("/applications", post(apply))
-        .route("/{id}/verify-domain", post(verify_publisher_domain))
-        .route("/{id}/rotation-challenge", post(begin_key_rotation))
-        .route("/{id}/challenge", get(get_challenge))
+        // Publishers register themselves with a signed `register_publisher`
+        // request at the Realm Provider's `realm-management` endpoint.
         .route("/{id}/status", get(get_status))
         .route("/resolve/{name}", get(resolve_by_name))
         // Package management
@@ -65,21 +62,6 @@ pub fn create_admin_router(state: PublisherRegistryState) -> Router {
 // --- Request / Response types ---
 
 #[derive(Deserialize)]
-struct ApplyRequest {
-    publisher: String,
-    contact: Option<String>,
-}
-
-#[derive(Serialize)]
-struct ApplyResponse {
-    publisher_id: i64,
-    challenge_token: String,
-    expires_at: i64,
-    descriptor_url: String,
-    instructions: String,
-}
-
-#[derive(Deserialize)]
 struct ListPackagesQuery {
     publisher: Option<String>,
 }
@@ -89,88 +71,7 @@ struct GetVerifyingKeyQuery {
     pub key_id: Option<String>,
 }
 
-// --- Helpers ---
-
 // --- Handlers ---
-
-async fn apply(
-    State(s): State<PublisherRegistryState>,
-    Json(req): Json<ApplyRequest>,
-) -> Result<Json<ApplyResponse>, PublisherRegistryError> {
-    let (record, challenge) = s
-        .manager
-        .apply(&req.publisher, req.contact.as_deref())
-        .await?;
-    let descriptor_url = format!(
-        "https://{}{}",
-        record.name,
-        crate::publisher::PUBLISHER_DESCRIPTOR_PATH
-    );
-    Ok(Json(ApplyResponse {
-        publisher_id: record.id,
-        challenge_token: challenge.token.clone(),
-        expires_at: challenge.expires_at,
-        descriptor_url: descriptor_url.clone(),
-        instructions: format!(
-            "Publish an actr.publisher/v1 descriptor at '{}' containing verification_challenge='{}' and an Ed25519 public key, then call POST /{}/verify-domain",
-            descriptor_url, challenge.token, record.id,
-        ),
-    }))
-}
-
-async fn verify_publisher_domain(
-    State(s): State<PublisherRegistryState>,
-    Path(id): Path<i64>,
-) -> Result<Json<crate::manager::PublisherVerificationResponse>, PublisherRegistryError> {
-    let response = s.manager.verify_publisher_domain(id).await?;
-    Ok(Json(response))
-}
-
-async fn begin_key_rotation(
-    State(s): State<PublisherRegistryState>,
-    Path(id): Path<i64>,
-) -> Result<Json<ApplyResponse>, PublisherRegistryError> {
-    let record = s.manager.get_status(id).await?;
-    let challenge = s.manager.begin_key_rotation(id).await?;
-    let descriptor_url = format!(
-        "https://{}{}",
-        record.name,
-        crate::publisher::PUBLISHER_DESCRIPTOR_PATH
-    );
-    Ok(Json(ApplyResponse {
-        publisher_id: record.id,
-        challenge_token: challenge.token,
-        expires_at: challenge.expires_at,
-        descriptor_url: descriptor_url.clone(),
-        instructions: format!(
-            "Publish the new key and challenge in '{}' and call POST /{}/verify-domain",
-            descriptor_url, record.id,
-        ),
-    }))
-}
-
-async fn get_challenge(
-    State(s): State<PublisherRegistryState>,
-    Path(id): Path<i64>,
-) -> Result<Json<ApplyResponse>, PublisherRegistryError> {
-    let record = s.manager.get_status(id).await?;
-    let challenge = s.manager.get_challenge(id).await?;
-    let descriptor_url = format!(
-        "https://{}{}",
-        record.name,
-        crate::publisher::PUBLISHER_DESCRIPTOR_PATH
-    );
-    Ok(Json(ApplyResponse {
-        publisher_id: record.id,
-        challenge_token: challenge.token.clone(),
-        expires_at: challenge.expires_at,
-        descriptor_url: descriptor_url.clone(),
-        instructions: format!(
-            "Publish an actr.publisher/v1 descriptor at '{}' containing verification_challenge='{}', then call POST /{}/verify-domain",
-            descriptor_url, challenge.token, record.id,
-        ),
-    }))
-}
 
 async fn get_status(
     State(s): State<PublisherRegistryState>,
@@ -291,23 +192,4 @@ async fn admin_delete(
 ) -> Result<Json<serde_json::Value>, PublisherRegistryError> {
     s.manager.admin_delete(id).await?;
     Ok(Json(serde_json::json!({"ok": true})))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ApplyResponse;
-
-    #[test]
-    fn admin_json_contract_uses_publisher_terminology() {
-        let response = serde_json::to_value(ApplyResponse {
-            publisher_id: 7,
-            challenge_token: "challenge".to_string(),
-            expires_at: 9,
-            descriptor_url: "https://apps.example.com/.well-known/actr/publisher.json".to_string(),
-            instructions: "verify".to_string(),
-        })
-        .unwrap();
-        assert_eq!(response["publisher_id"], 7);
-        assert!(response.get("mfr_id").is_none());
-    }
 }
