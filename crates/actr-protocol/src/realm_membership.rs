@@ -542,6 +542,70 @@ impl ClientProof {
     }
 }
 
+/// A Realm client key as a file (JSON, readable only by its owner): what
+/// `actr realm join` writes and an Actr Host signs its client proofs and
+/// membership requests with.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RealmClientKeyFile {
+    pub realm: String,
+    /// Realm Provider ID the requests name (`provider_id`).
+    pub provider_id: String,
+    /// Issuer URL (`issuer.url`); membership requests go to
+    /// `<issuer>/membership`.
+    pub issuer: String,
+    pub key_id: String,
+    /// Base64 Ed25519 private key (32 bytes).
+    pub private_key: String,
+    /// Base64 Ed25519 public key.
+    pub public_key: String,
+}
+
+impl std::fmt::Debug for RealmClientKeyFile {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RealmClientKeyFile")
+            .field("realm", &self.realm)
+            .field("provider_id", &self.provider_id)
+            .field("issuer", &self.issuer)
+            .field("key_id", &self.key_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RealmClientKeyFile {
+    pub fn new(realm: &str, provider_id: &str, issuer: &str, key: &SigningKey) -> Self {
+        let public_key = key.verifying_key().to_bytes();
+        Self {
+            realm: realm.to_string(),
+            provider_id: provider_id.to_string(),
+            issuer: issuer.to_string(),
+            key_id: client_key_id(&public_key),
+            private_key: BASE64.encode(key.to_bytes()),
+            public_key: BASE64.encode(public_key),
+        }
+    }
+
+    /// Parse a key file and return it with its signing key; `key_id` and
+    /// `public_key` must match the private key.
+    pub fn parse(text: &str) -> Result<(Self, SigningKey), MembershipError> {
+        let file: Self = serde_json::from_str(text)
+            .map_err(|error| invalid(format!("not a Realm client key file: {error}")))?;
+        let bytes: [u8; 32] = BASE64
+            .decode(&file.private_key)
+            .ok()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or_else(|| invalid("private_key is not a base64 Ed25519 key"))?;
+        let key = SigningKey::from_bytes(&bytes);
+        let public_key = key.verifying_key().to_bytes();
+        if file.key_id != client_key_id(&public_key) || file.public_key != BASE64.encode(public_key)
+        {
+            return Err(invalid("key_id or public_key does not match private_key"));
+        }
+        check_realm_name(&file.realm)?;
+        Ok((file, key))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,5 +689,23 @@ mod tests {
         );
         let other = SigningKey::from_bytes(&[6; 32]);
         assert!(parsed.verify(&other.verifying_key().to_bytes()).is_err());
+    }
+
+    #[test]
+    fn key_file_round_trips_and_checks_its_key_id() {
+        let key = SigningKey::from_bytes(&[8; 32]);
+        let file = RealmClientKeyFile::new(REALM, "p.example", "https://p.example/issuer", &key);
+        let text = serde_json::to_string(&file).unwrap();
+        let (parsed, parsed_key) = RealmClientKeyFile::parse(&text).unwrap();
+        assert_eq!(
+            parsed.key_id,
+            client_key_id(&key.verifying_key().to_bytes())
+        );
+        assert_eq!(parsed_key.to_bytes(), key.to_bytes());
+        assert!(!format!("{parsed:?}").contains(&parsed.private_key));
+
+        let mut other = file.clone();
+        other.key_id = "0000000000000000".into();
+        assert!(RealmClientKeyFile::parse(&serde_json::to_string(&other).unwrap()).is_err());
     }
 }
