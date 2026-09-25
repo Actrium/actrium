@@ -2714,6 +2714,11 @@ async fn the_operator_confirms_a_publisher_identity_change() {
         confirm(&later, digest(&later)).await,
         Err(PublisherRegistryError::InvalidStatus(_))
     ));
+    // Neither does the stored profile itself, whatever the digest.
+    assert!(matches!(
+        confirm(&first, "not-reviewed".to_string()).await,
+        Err(PublisherRegistryError::InvalidStatus(_))
+    ));
 
     let record = confirm(&changed, digest(&changed)).await.unwrap();
     assert_eq!(record.public_key, b64_key(&new_package));

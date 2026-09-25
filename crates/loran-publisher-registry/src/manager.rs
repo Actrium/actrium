@@ -337,7 +337,8 @@ impl PublisherRegistryManager {
                     record.status
                 )));
             }
-            if record.profile_json == profile_json {
+            // A confirmation goes on to find nothing to confirm.
+            if record.profile_json == profile_json && confirmed.is_none() {
                 return Ok(record.clone());
             }
         }
