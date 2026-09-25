@@ -422,6 +422,18 @@ async fn an_issuer_key_that_loses_a_race_is_retired() {
     );
     assert!(signer.sign(keys[1].key_id, b"m").await.is_err());
 
+    // Two rotations in the same millisecond get the same Signer key; the
+    // loser must not retire the key the winner listed.
+    assert!(
+        issuer::realm_profile::list_issuer_key(&signer, &keys[0])
+            .await
+            .is_err()
+    );
+    signer
+        .sign(keys[0].key_id, b"m")
+        .await
+        .expect("the listed key still signs");
+
     platform::realm::Realm::retire(REALM)
         .await
         .expect("retire realm");
