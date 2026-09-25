@@ -326,6 +326,23 @@ async fn retiring_a_realm_retires_its_issuer_key() {
         .sign(key_id, b"before")
         .await
         .expect("signs while active");
+    // A key being rotated in is retired with the Realm too.
+    let name = format!("issuer:{REALM}/next");
+    let (next_id, next_public) = signer.ensure_named_key(&name).await.expect("next key");
+    platform::realm::RealmIssuerKey {
+        realm: REALM.to_string(),
+        key_id: next_id,
+        signer_name: name,
+        public_key: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, next_public),
+        state: platform::realm::IssuerKeyState::Next,
+        created_at: now,
+        published_at: None,
+        current_since: None,
+        remove_after: None,
+    }
+    .insert()
+    .await
+    .expect("insert next key");
 
     platform::realm::Realm::retire(REALM)
         .await
@@ -339,6 +356,15 @@ async fn retiring_a_realm_retires_its_issuer_key() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(refused, "the retired Realm's issuer key still signs");
+    let mut refused = false;
+    for _ in 0..100 {
+        if signer.sign(next_id, b"after").await.is_err() {
+            refused = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(refused, "the retired Realm's next issuer key still signs");
     // The Realm's key stays retired even if asked for again.
     let (again, _) = issuer.realm_key(REALM).await.expect("realm key");
     assert_eq!(again, key_id);
