@@ -505,8 +505,10 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   envelope 返回 `403`；Actor Registry 与 presence 按 Realm 分区；TURN secret 由主密钥按 Realm
   HKDF 派生；注册拒绝指向其他 Realm 的 ACL `source_realm`；跨 Realm 混淆回归测试
   `realms_with_the_same_actor_type_and_serial_are_isolated`。Issuer 原有的全局轮换 key 及其
-  `/issuer/current-key`、`/issuer/signing-pubkey`、admin 与 gRPC 轮换入口已删除。尚未实现：
-  Realm issuer key 的轮换与退役（Signer 中的 key 不标记退役）；
+  `/issuer/current-key`、`/issuer/signing-pubkey`、admin 与 gRPC 轮换入口已删除。退役事务提交
+  后，Signaling 删除该 Realm 的 Actor Registry 记录与 presence 订阅并关闭其在线连接，Issuer 在
+  Signer 中退役 `issuer:<realm>`（私钥清除，此后不再签名）；两步幂等、重启时重做，并发的连接与
+  注册要么被清理、要么被拒绝后自行关闭。尚未实现：Realm issuer key 的轮换；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
 - 已实现 `register_publisher`：读取 authority descriptor 的 `publisher` 成员（第 7 节），
@@ -518,8 +520,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - 控制面与本契约的剩余差异：Realm Provider 域名下的 Realm 由运营者经 admin API 代办创建（等同
   Realm Provider 账号）；Loran 不是 Realm Provider（未启用 authority 或 Issuer 无 Signer）时，
   运营者仍可创建任意域名下没有 Realm Profile 的 `active` Realm，并可经 `RetireRealm` 与
-  admin `…/retire` 直接退役；当前退役事务尚未清理 Actor Registry、presence、在线连接与 Realm
-  issuer key，靠 `validate_realm` 拒绝已退役 Realm 的新注册与连接。
+  admin `…/retire` 直接退役。
 
 ## 10. 明确不做
 

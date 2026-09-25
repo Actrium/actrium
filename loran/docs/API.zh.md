@@ -137,8 +137,9 @@ Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注
 单帧最大 1 MiB，并执行连接/消息速率限制。连接绑定其身份所属的 Actor 与 Realm：envelope 的
 `source` 不是该 Actor、或 relay 的 `target` 不属于该 Realm 时返回 `403`。Actor Registry 与 presence 按
 Realm 分区，发现、路由候选、ServiceSpec 查询与上线通知只涉及同 Realm 的 Actor；
-`GetSigningKey` 只返回本 Realm 的 issuer key。按 Realm 分别计的速率限制尚未实现，见架构
-契约第 9 节。
+`GetSigningKey` 只返回本 Realm 的 issuer key。Realm 不可用（不存在、pending、停用、过期或已
+退役）时 upgrade 返回 `403`；Realm 退役时其在线连接以 close code 1008（`realm retired`）关闭。
+按 Realm 分别计的速率限制尚未实现，见架构契约第 9 节。
 
 ## Publisher Registry
 
@@ -236,14 +237,16 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
   作为 Realm Provider tombstone，Realm 名不复用。没有硬删除。Realm Provider 域名下的 Realm 由
   Loran 签发退役 Realm Profile 并在同一事务中退役；其他域名的 Realm 若已有 key 持有方签名的
   Realm Profile，运营者不能退役（只能停用），退役只由持有方发布的退役 Realm Profile 触发。
+  事务提交后，Signaling 删除该 Realm 的 Actor Registry 记录（内存与缓存）与 presence 订阅并
+  关闭其在线连接，Issuer 在 Signer 中退役 `issuer:<realm>`（此后不再签名）；这两步幂等，进程
+  重启时对已退役 Realm 重做，Signer 暂不可用时每分钟重试。
 
 gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealms`/
 `RetireRealm`，同样按 Realm 名寻址；Loran 是 Realm Provider 时 `CreateRealm` 不能新建 Realm
 （没有 `package`），只能更新已有 Realm。
 
 尚未实现：Realm Provider 域名下的 Realm 由 Realm Provider 账号（OAuth 2.0 + PKCE）以
-bearer 请求自助创建（目前由运营者代办）；退役事务清理 Actor Registry、presence、在线连接
-与 Realm issuer key（见架构契约第 9 节）。
+bearer 请求自助创建（目前由运营者代办）。
 
 ## Schema migration
 

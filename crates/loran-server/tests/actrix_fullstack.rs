@@ -4046,6 +4046,92 @@ async fn signaling_disconnect_removes_actor_from_route_candidates() {
 
 #[tokio::test]
 #[serial]
+async fn retiring_a_realm_closes_its_connections_and_forgets_its_actors() {
+    const GONE: &str = "gone@acme.com";
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let port = harness.port;
+    let base = harness.base_url();
+    ensure_realm(&harness.data_dir, GONE).await;
+
+    let (_gone_w, mut gone_r, gone_ok) =
+        ws_register_in_realm_with_spec(port, "acme", "svc-gone", GONE, None, None).await;
+    let (mut live_w, mut live_r, live_ok) = ws_register(port, "acme", "svc-live", None).await;
+    ping_and_wait_for_pong(&mut live_w, &mut live_r, &live_ok).await;
+
+    let cache = harness.data_dir.join("signaling_cache.db");
+    let cached_rows = || async {
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite:{}", cache.display()))
+            .await
+            .expect("open signaling cache");
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM actor_registry WHERE actor_realm = ?")
+                .bind(GONE)
+                .fetch_one(&pool)
+                .await
+                .expect("count cached services");
+        pool.close().await;
+        count
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cached_rows().await == 0 {
+        assert!(Instant::now() < deadline, "service was never cached");
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    let client = reqwest::Client::new();
+    let login: Value = client
+        .post(format!("{base}/admin/api/auth/login"))
+        .json(&json!({ "password": "testpassword123" }))
+        .send()
+        .await
+        .expect("admin login request")
+        .json()
+        .await
+        .expect("parse admin login response");
+    let token = login["token"].as_str().expect("admin login token");
+    let retired = client
+        .post(format!("{base}/admin/api/realms/gone%40acme.com/retire"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("retire realm");
+    assert!(retired.status().is_success(), "{}", retired.status());
+
+    // The live connection of the retired Realm is closed.
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match gone_r.next().await {
+                None | Some(Err(_)) | Some(Ok(WsMessage::Close(_))) => break,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await;
+    assert!(closed.is_ok(), "the retired Realm's connection stayed open");
+
+    // Its cached services are gone and it cannot come back.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cached_rows().await != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "cached services survived retirement"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        connect_async(authenticated_ws_request(port, &gone_ok))
+            .await
+            .is_err(),
+        "a retired Realm's credential must not connect"
+    );
+
+    // Other Realms are untouched.
+    ping_and_wait_for_pong(&mut live_w, &mut live_r, &live_ok).await;
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
 async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;

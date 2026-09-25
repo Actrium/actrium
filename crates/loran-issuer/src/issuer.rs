@@ -67,7 +67,8 @@ use prost::Message as ProstMessage;
 use prost::bytes::Bytes;
 use prost_types::Timestamp;
 use sha1::Sha1;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
@@ -232,7 +233,7 @@ pub struct AIdIssuer {
     signer_client: SignerClientWrapper,
     /// Each Realm's issuer key (`issuer:<realm>` in the Signer), which signs
     /// that Realm's credentials: Signer key id and verifying key.
-    realm_keys: RwLock<HashMap<String, (u32, VerifyingKey)>>,
+    realm_keys: Arc<RwLock<HashMap<String, (u32, VerifyingKey)>>>,
     /// Issuer configuration (public for renewal handler access).
     pub config: IssuerConfig,
 }
@@ -242,7 +243,7 @@ impl AIdIssuer {
     pub async fn new(
         signer_client: SignerClientWrapper,
         config: IssuerConfig,
-        _cancel: tokio_util::sync::CancellationToken,
+        cancel: tokio_util::sync::CancellationToken,
     ) -> Result<Self, AidError> {
         if config.turn_secret.len() < 32 {
             return Err(AidError::GenerationFailed(
@@ -259,9 +260,19 @@ impl AIdIssuer {
 
         let issuer = Self {
             signer_client,
-            realm_keys: RwLock::new(HashMap::new()),
+            realm_keys: Arc::new(RwLock::new(HashMap::new())),
             config,
         };
+
+        // Retirements are read from the Realm database, which callers
+        // without one (isolated tests) do not set up.
+        if !cancel.is_cancelled() && platform::storage::db::is_database_initialized() {
+            tokio::spawn(follow_realm_retirements(
+                issuer.signer_client.clone(),
+                issuer.realm_keys.clone(),
+                cancel,
+            ));
+        }
 
         Ok(issuer)
     }
@@ -2054,4 +2065,91 @@ impl AIdIssuer {
     pub async fn realm_key_count(&self) -> usize {
         self.realm_keys.read().await.len()
     }
+}
+
+/// How often a Realm issuer key whose retirement failed is retried
+const KEY_RETIREMENT_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Retire the issuer key of every Realm that retires, so it never signs
+/// again: first for Realms retired before this process started, then as
+/// retirements are announced. A failed Signer call is retried.
+async fn follow_realm_retirements(
+    signer: SignerClientWrapper,
+    realm_keys: Arc<RwLock<HashMap<String, (u32, VerifyingKey)>>>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+
+    let mut changes = platform::realm::changes::subscribe();
+    let mut pending = retired_realms().await;
+    let mut retry = tokio::time::interval(KEY_RETIREMENT_RETRY);
+    loop {
+        pending = retire_realm_keys(&signer, &realm_keys, pending).await;
+        tokio::select! {
+            _ = cancel.cancelled() => break,
+            _ = retry.tick() => {}
+            change = changes.recv() => match change {
+                Ok(realm) => {
+                    if retired_realm(&realm).await {
+                        pending.insert(realm);
+                    }
+                }
+                Err(RecvError::Lagged(_)) => pending.extend(retired_realms().await),
+                Err(RecvError::Closed) => break,
+            },
+        }
+    }
+}
+
+async fn retired_realm(realm: &str) -> bool {
+    matches!(
+        platform::realm::Realm::get(realm).await,
+        Ok(Some(r)) if r.status == platform::realm::RealmStatus::Retired
+    )
+}
+
+async fn retired_realms() -> HashSet<String> {
+    match platform::realm::Realm::get_all().await {
+        Ok(realms) => realms
+            .into_iter()
+            .filter(|r| r.status == platform::realm::RealmStatus::Retired)
+            .map(|r| r.name)
+            .collect(),
+        Err(e) => {
+            platform::recording::warn!("Failed to list retired Realms: {}", e);
+            HashSet::new()
+        }
+    }
+}
+
+/// Retire the issuer keys of `realms` in the Signer; returns the Realms whose
+/// retirement failed.
+async fn retire_realm_keys(
+    signer: &SignerClientWrapper,
+    realm_keys: &RwLock<HashMap<String, (u32, VerifyingKey)>>,
+    realms: HashSet<String>,
+) -> HashSet<String> {
+    let mut failed = HashSet::new();
+    for realm in realms {
+        realm_keys.write().await.remove(&realm);
+        match signer
+            .retire_named_key(&crate::realm_profile::issuer_key_id(&realm))
+            .await
+        {
+            Ok(key_id) => platform::recording::info!(
+                "Retired the issuer key of Realm {} (key_id {})",
+                realm,
+                key_id
+            ),
+            Err(e) => {
+                platform::recording::warn!(
+                    "Failed to retire the issuer key of Realm {}, will retry: {}",
+                    realm,
+                    e
+                );
+                failed.insert(realm);
+            }
+        }
+    }
+    failed
 }

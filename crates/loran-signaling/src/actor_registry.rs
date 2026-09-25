@@ -12,7 +12,7 @@ use actr_protocol::{ActrId, ActrType};
 use platform::RealmError;
 use platform::realm::acl::ActorAcl;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -259,6 +259,8 @@ impl Partition {
 pub struct ActorRegistry {
     /// Realm name -> that Realm's services
     realms: HashMap<String, Partition>,
+    /// Realms retired while this process runs; nothing registers in them again
+    retired: HashSet<String>,
     /// SQLite persistence cache (optional)
     storage: Option<Arc<ActorRegistryStorage>>,
 }
@@ -270,6 +272,25 @@ impl ActorRegistry {
 
     fn realm_mut(&mut self, realm: &str) -> &mut Partition {
         self.realms.entry(realm.to_string()).or_default()
+    }
+
+    /// Drop a retired Realm's services and refuse new ones. Returns the
+    /// storage so the caller can delete the Realm's cached rows without
+    /// holding the registry lock.
+    pub fn retire_realm(&mut self, realm: &str) -> Option<Arc<ActorRegistryStorage>> {
+        self.retired.insert(realm.to_string());
+        self.realms.remove(realm);
+        self.storage.clone()
+    }
+
+    /// Whether `realm` was retired while this process runs
+    pub fn is_retired(&self, realm: &str) -> bool {
+        self.retired.contains(realm)
+    }
+
+    /// The Realms that have services here
+    pub fn realm_names(&self) -> Vec<String> {
+        self.realms.keys().cloned().collect()
     }
 
     /// Set persistence storage (called at startup)
@@ -347,6 +368,9 @@ impl ActorRegistry {
         acl: Option<actr_protocol::Acl>,
         ws_address: Option<String>,
     ) -> Result<(), String> {
+        if self.is_retired(&actor_id.realm) {
+            return Err(format!("Realm {} is retired", actor_id.realm));
+        }
         platform::recording::info!(
             "Register service: {} (Actor {}), has_spec={}, has_acl={}, ws_address={:?}",
             service_name,
@@ -882,6 +906,9 @@ impl ActorRegistry {
             actor_id.to_string_repr()
         );
 
+        if self.is_retired(&actor_id.realm) {
+            return Ok(false);
+        }
         let mut restored_count = 0;
         let partition = self.realm_mut(&actor_id.realm);
 

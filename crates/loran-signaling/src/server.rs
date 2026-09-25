@@ -40,7 +40,7 @@ use actr_protocol::{
 use futures_util::{SinkExt, StreamExt};
 use platform::aid::credential::validator::AIdCredentialValidator;
 use platform::config::signaling::EgressQueueConfig;
-use platform::realm::Realm as RealmEntity;
+use platform::realm::{Realm as RealmEntity, RealmStatus};
 use prost::Message as ProstMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -374,6 +374,118 @@ impl SignalingServer {
             provider_id: String::new(),
         }
     }
+
+    /// A handle sharing this server's state
+    pub fn handle(&self) -> SignalingServerHandle {
+        SignalingServerHandle {
+            clients: self.clients.clone(),
+            actor_id_index: self.actor_id_index.clone(),
+            actor_registry: self.actor_registry.clone(),
+            presence_manager: self.presence_manager.clone(),
+            connection_rate_limiter: self.connection_rate_limiter.clone(),
+            message_rate_limiter: self.message_rate_limiter.clone(),
+            egress_config: self.egress_config.clone(),
+            target_rate_limiter: self.target_rate_limiter.clone(),
+            queue_metrics: self.queue_metrics.clone(),
+            provider_id: self.provider_id.clone(),
+        }
+    }
+}
+
+/// Follow Realm state changes and drop the state of every Realm that
+/// retires: first for Realms retired before this process started, then as
+/// retirements are announced.
+pub async fn follow_realm_retirements(
+    server: SignalingServerHandle,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    let mut changes = platform::realm::changes::subscribe();
+    retire_known_retired_realms(&server).await;
+    loop {
+        let change = tokio::select! {
+            _ = cancel.cancelled() => break,
+            change = changes.recv() => change,
+        };
+        match change {
+            Ok(realm) => {
+                if is_retired(&realm).await {
+                    retire_realm(&server, &realm).await;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                retire_known_retired_realms(&server).await;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
+async fn is_retired(realm: &str) -> bool {
+    matches!(RealmEntity::get(realm).await, Ok(Some(r)) if r.status == RealmStatus::Retired)
+}
+
+/// Retire every Realm with registry rows or connections here that is retired.
+async fn retire_known_retired_realms(server: &SignalingServerHandle) {
+    let mut realms = server.actor_registry.read().await.realm_names();
+    realms.extend(
+        server
+            .clients
+            .read()
+            .await
+            .values()
+            .filter_map(|client| client.actor_id.as_ref().map(|id| id.realm.clone())),
+    );
+    realms.sort();
+    realms.dedup();
+    for realm in realms {
+        if is_retired(&realm).await {
+            retire_realm(&server.clone(), &realm).await;
+        }
+    }
+}
+
+/// Drop everything a retired Realm holds here: its Actor Registry rows (in
+/// memory and in the cache), presence subscriptions and live connections.
+///
+/// The registry and presence refuse the Realm first, so a connection or
+/// registration racing this call either is removed here or is refused and
+/// closes itself. Idempotent.
+pub async fn retire_realm(server: &SignalingServerHandle, realm: &str) {
+    platform::recording::info!("Realm {} retired: dropping its Signaling state", realm);
+    let storage = server.actor_registry.write().await.retire_realm(realm);
+    if let Some(storage) = storage
+        && let Err(e) = storage.delete_realm(realm).await
+    {
+        platform::recording::warn!("Failed to delete cached services of Realm {}: {}", realm, e);
+    }
+    server.presence_manager.write().await.retire_realm(realm);
+
+    let connections: Vec<(String, ClientEgress)> = server
+        .clients
+        .read()
+        .await
+        .iter()
+        .filter(|(_, client)| {
+            client
+                .actor_id
+                .as_ref()
+                .is_some_and(|actor| actor.realm == realm)
+        })
+        .map(|(id, client)| (id.clone(), client.egress.clone()))
+        .collect();
+    for (client_id, egress) in connections {
+        let close_frame = axum::extract::ws::CloseFrame {
+            code: axum::extract::ws::close_code::POLICY,
+            reason: "realm retired".into(),
+        };
+        if egress
+            .try_send_control(WsMessage::Close(Some(close_frame)))
+            .is_err()
+        {
+            platform::recording::warn!("Connection {} control queue full or closed", client_id);
+        }
+        cleanup_client(&client_id, server, CleanupMode::ExplicitUnregister).await;
+    }
 }
 
 /// Handle WebSocket connection
@@ -408,6 +520,7 @@ pub async fn handle_websocket_connection(
         None => (None, None, None),
     };
     let actor_id_for_registry = actor_id.clone().zip(actor_type);
+    let connection_realm = actor_id.as_ref().map(|actor| actor.realm.clone());
     let stale_clients = {
         let mut clients_guard = server.clients.write().await;
 
@@ -521,6 +634,21 @@ pub async fn handle_websocket_connection(
                 }
             }
         }
+    }
+
+    // The Realm retired while this connection was set up: either its state
+    // was dropped before this connection was listed, or the registry refused
+    // the registration above. Either way the connection must not stay.
+    if let Some(realm) = connection_realm
+        && server.actor_registry.read().await.is_retired(&realm)
+    {
+        cleanup_client(&client_id, &server, CleanupMode::ExplicitUnregister).await;
+        let close_frame = axum::extract::ws::CloseFrame {
+            code: axum::extract::ws::close_code::POLICY,
+            reason: "realm retired".into(),
+        };
+        let _ = ws_sender.send(WsMessage::Close(Some(close_frame))).await;
+        return Ok(());
     }
 
     // Task for handling client messages
@@ -2740,19 +2868,9 @@ mod tests {
     fn create_test_server_handle_with_config(
         egress_config: EgressQueueConfig,
     ) -> SignalingServerHandle {
-        let server = SignalingServer::with_egress_config(egress_config);
-        SignalingServerHandle {
-            clients: server.clients.clone(),
-            actor_id_index: server.actor_id_index.clone(),
-            actor_registry: server.actor_registry.clone(),
-            presence_manager: server.presence_manager.clone(),
-            connection_rate_limiter: server.connection_rate_limiter.clone(),
-            message_rate_limiter: server.message_rate_limiter.clone(),
-            egress_config: server.egress_config.clone(),
-            target_rate_limiter: server.target_rate_limiter.clone(),
-            queue_metrics: server.queue_metrics.clone(),
-            provider_id: "provider.example".to_string(),
-        }
+        let mut server = SignalingServer::with_egress_config(egress_config);
+        server.provider_id = "provider.example".to_string();
+        server.handle()
     }
 
     async fn register_test_service(server: &SignalingServerHandle, actor_id: &ActrId) {
@@ -2867,6 +2985,96 @@ mod tests {
                 .len(),
             1,
             "stale connection cleanup must not unregister a live replacement"
+        );
+    }
+
+    #[tokio::test]
+    async fn retiring_a_realm_drops_its_state_and_refuses_it_afterwards() {
+        let server = create_test_server_handle();
+        let retired = create_test_actr_id(1);
+        let other = ActrId {
+            serial_number: 1,
+            realm: "other@example.com".to_string(),
+        };
+        for (client_id, actor) in [("retired", &retired), ("other", &other)] {
+            register_test_service(&server, actor).await;
+            server.clients.write().await.insert(
+                client_id.to_string(),
+                create_test_client_with_id(client_id, actor.clone(), None),
+            );
+            server
+                .actor_id_index
+                .write()
+                .await
+                .insert(actor.clone(), client_id.to_string());
+            server.presence_manager.write().await.subscribe(
+                actor.clone(),
+                create_test_actr_type(),
+                create_test_actr_type(),
+            );
+        }
+
+        retire_realm(&server, &retired.realm).await;
+        // Idempotent.
+        retire_realm(&server, &retired.realm).await;
+
+        assert!(!server.clients.read().await.contains_key("retired"));
+        assert!(server.clients.read().await.contains_key("other"));
+        let registry = server.actor_registry.read().await;
+        assert!(
+            registry
+                .discover_by_service_name(&retired.realm, "test_service")
+                .is_empty()
+        );
+        assert_eq!(
+            registry
+                .discover_by_service_name(&other.realm, "test_service")
+                .len(),
+            1
+        );
+        drop(registry);
+        let presence = server.presence_manager.read().await;
+        assert!(
+            presence
+                .get_subscribers(&retired.realm, &create_test_actr_type())
+                .is_empty()
+        );
+        assert_eq!(
+            presence
+                .get_subscribers(&other.realm, &create_test_actr_type())
+                .len(),
+            1
+        );
+        drop(presence);
+
+        // A registration or subscription racing the retirement is refused.
+        let late = create_test_actr_id(2);
+        assert!(
+            server
+                .actor_registry
+                .write()
+                .await
+                .register_service(
+                    late.clone(),
+                    create_test_actr_type(),
+                    "test_service".to_string(),
+                    vec![],
+                    None,
+                )
+                .is_err()
+        );
+        server.presence_manager.write().await.subscribe(
+            late,
+            create_test_actr_type(),
+            create_test_actr_type(),
+        );
+        assert!(
+            server
+                .presence_manager
+                .read()
+                .await
+                .get_subscribers(&retired.realm, &create_test_actr_type())
+                .is_empty()
         );
     }
 

@@ -432,6 +432,15 @@ impl ActorRegistryStorage {
         Ok(services)
     }
 
+    /// Delete every cached service of a Realm
+    pub async fn delete_realm(&self, realm: &str) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM actor_registry WHERE actor_realm = ?1")
+            .bind(realm)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Clean up expired data
     pub async fn cleanup_expired(&self) -> Result<u64> {
         let now = current_timestamp();

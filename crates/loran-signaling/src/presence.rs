@@ -34,7 +34,7 @@
 use actr_protocol::{ActrId, ActrType};
 use platform::RealmError;
 use platform::realm::acl::ActorAcl;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Presence subscription manager
 ///
@@ -47,14 +47,14 @@ pub struct PresenceManager {
     /// Key: the subscriber's Realm and the subscribed service type (ActrType)
     /// Value: list of Actors subscribed to that type, with their verified types
     subscriptions: HashMap<(String, ActrType), Vec<(ActrId, ActrType)>>,
+    /// Realms retired while this process runs; nobody subscribes in them again
+    retired: HashSet<String>,
 }
 
 impl PresenceManager {
     /// Create a new PresenceManager
     pub fn new() -> Self {
-        Self {
-            subscriptions: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Subscribe to Actor online events for a specific type
@@ -74,6 +74,13 @@ impl PresenceManager {
         subscriber_type: ActrType,
         target_type: ActrType,
     ) {
+        if self.retired.contains(&subscriber.realm) {
+            platform::recording::warn!(
+                "Actor {} not subscribed: its Realm is retired",
+                subscriber.to_string_repr()
+            );
+            return;
+        }
         platform::recording::info!(
             "Actor {} subscribed to {}/{} online events",
             subscriber.to_string_repr(),
@@ -187,6 +194,13 @@ impl PresenceManager {
         }
 
         removed_count
+    }
+
+    /// Drop a retired Realm's subscriptions and refuse new ones
+    pub fn retire_realm(&mut self, realm: &str) {
+        self.retired.insert(realm.to_string());
+        self.subscriptions
+            .retain(|(subscribed_realm, _), _| subscribed_realm != realm);
     }
 
     /// Get all Actors of a Realm subscribed to a specific type

@@ -259,3 +259,54 @@ async fn credentials_are_signed_with_the_realm_issuer_key() {
     drop(issuer);
     env.shutdown_signer().await;
 }
+
+#[tokio::test]
+async fn retiring_a_realm_retires_its_issuer_key() {
+    const REALM: &str = "retiring@example.com";
+    let mut env = setup_test_environment(SignerServiceConfig::default()).await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    sqlx::query(
+        "INSERT INTO realm (name, status, enabled, created_at, secret_current)
+         VALUES (?, 'active', 1, ?, 'hash')",
+    )
+    .bind(REALM)
+    .bind(now)
+    .execute(platform::storage::db::get_database().get_pool())
+    .await
+    .expect("seed realm");
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let issuer = create_issuer(&env, cancel.clone()).await;
+    let (key_id, _) = issuer.realm_key(REALM).await.expect("realm key");
+    let signer = create_signer_client(&env.signer_config, &env.shared_key)
+        .await
+        .expect("create Signer client");
+    signer
+        .sign(key_id, b"before")
+        .await
+        .expect("signs while active");
+
+    platform::realm::Realm::retire(REALM)
+        .await
+        .expect("retire realm");
+    let mut refused = false;
+    for _ in 0..100 {
+        if signer.sign(key_id, b"after").await.is_err() {
+            refused = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(refused, "the retired Realm's issuer key still signs");
+    // The Realm's key stays retired even if asked for again.
+    let (again, _) = issuer.realm_key(REALM).await.expect("realm key");
+    assert_eq!(again, key_id);
+    assert!(signer.sign(again, b"again").await.is_err());
+
+    cancel.cancel();
+    drop(issuer);
+    env.shutdown_signer().await;
+}

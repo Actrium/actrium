@@ -2,7 +2,7 @@
 //!
 //! Provides an Axum Router adapter for SignalingServer
 
-use crate::server::{SignalingServer, SignalingServerHandle};
+use crate::server::SignalingServer;
 use actr_protocol::{AIdCredential, ActrId, ActrType, IdentityClaims};
 use anyhow::{Context as _, Result};
 use axum::{
@@ -18,6 +18,7 @@ use base64::Engine as _;
 use platform::aid::credential::validator::AIdCredentialValidator;
 use platform::config::ActrixConfig;
 use platform::monitoring::ServiceCounters;
+use platform::realm::Realm as RealmEntity;
 use prost::Message as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -241,6 +242,10 @@ pub async fn create_signaling_router_with_config_and_counters(
         counters,
         require_url_auth: true,
     };
+    tokio::spawn(crate::server::follow_realm_retirements(
+        state.server.handle(),
+        cancel.clone(),
+    ));
 
     let router = Router::new()
         .route("/ws", get(websocket_handler))
@@ -315,6 +320,19 @@ async fn websocket_handler(
             }
         };
 
+        // Only a Realm that is served accepts connections.
+        if let Err(e) = RealmEntity::validate_realm(&actor_id.realm).await {
+            let (code, message) = RealmEntity::map_validation_error(e);
+            platform::recording::warn!(
+                "🚫 WebSocket Realm refused: ip={} reason={}",
+                client_ip,
+                message
+            );
+            return axum::http::StatusCode::from_u16(code as u16)
+                .unwrap_or(axum::http::StatusCode::FORBIDDEN)
+                .into_response();
+        }
+
         Some((actor_id, actor_type, credential))
     } else {
         // The bare router is an in-process integration fixture: it skips
@@ -373,19 +391,7 @@ async fn handle_websocket(
         limiter.increment_connection(client_ip).await;
     }
 
-    // Create SignalingServerHandle
-    let server_handle = SignalingServerHandle {
-        clients: state.server.clients.clone(),
-        actor_id_index: state.server.actor_id_index.clone(),
-        actor_registry: state.server.actor_registry.clone(),
-        presence_manager: state.server.presence_manager.clone(),
-        connection_rate_limiter: state.server.connection_rate_limiter.clone(),
-        message_rate_limiter: state.server.message_rate_limiter.clone(),
-        egress_config: state.server.egress_config.clone(),
-        target_rate_limiter: state.server.target_rate_limiter.clone(),
-        queue_metrics: state.server.queue_metrics.clone(),
-        provider_id: state.server.provider_id.clone(),
-    };
+    let server_handle = state.server.handle();
 
     // Call SignalingServer's WebSocket handler function
     if let Err(e) = crate::handle_websocket_connection(
