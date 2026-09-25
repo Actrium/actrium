@@ -4,8 +4,8 @@
 //! `actr/protocols/authority-discovery.md` section 4.4 against the domain's
 //! [`KeyPins`]: the first member is pinned, later ones may retire, remove or,
 //! through a rotation chain, introduce keys. A member whose signing key does
-//! not chain to a pinned key is an identity change and is rejected; there is
-//! no re-confirmation.
+//! not chain to a pinned key is an identity change and is rejected until the
+//! operator confirms the new keys ([`RealmDomain::confirm_identity`]).
 
 use actr_protocol::realm_profile::jcs;
 use actr_protocol::uri::ActrUri;
@@ -154,6 +154,62 @@ impl RealmDomain {
                 }
                 error => error.into(),
             })?;
+        }
+        Self::get(domain).await?.ok_or(RealmError::NotFound)
+    }
+}
+
+impl RealmDomain {
+    /// Take `member` as `domain`'s new baseline after the operator reviewed
+    /// it (section 4.4 step 6): the saved keys are replaced with the
+    /// member's own. Only for a member that is valid on its own but not
+    /// accepted under the pins, and only the one whose digest
+    /// ([`KeyPins::digest`] of its own pins) the operator confirmed.
+    pub async fn confirm_identity(
+        domain: &str,
+        member: &Value,
+        digest: &str,
+    ) -> Result<Self, RealmError> {
+        let pinned = Self::get(domain).await?.ok_or(RealmError::NotFound)?;
+        if matches!(
+            RealmSigningKeys::accept(member, Some(&pinned.pins)),
+            Ok((_, KeyPinOutcome::Accepted(_)))
+        ) {
+            return Err(RealmError::Conflict(format!(
+                "{domain} realm_signing_keys is accepted under the pinned keys; nothing to confirm"
+            )));
+        }
+        let pins = match RealmSigningKeys::accept(member, None)
+            .map_err(|error| invalid(format!("{domain}: {error}")))?
+        {
+            (_, KeyPinOutcome::Accepted(pins)) => pins,
+            (_, KeyPinOutcome::IdentityChange(_)) => unreachable!("no pins, no identity change"),
+        };
+        if pins.digest != digest {
+            return Err(RealmError::Conflict(format!(
+                "{domain} realm_signing_keys changed since it was reviewed"
+            )));
+        }
+        let pins_json =
+            serde_json::to_string(&pins).map_err(|error| invalid(format!("key pins: {error}")))?;
+        let now = Utc::now().timestamp();
+        let updated = sqlx::query(
+            "UPDATE realm_domain
+             SET keys_json = ?, pins_json = ?, pinned_at = ?, checked_at = ?
+             WHERE domain = ? AND pins_json = ?",
+        )
+        .bind(jcs(member))
+        .bind(&pins_json)
+        .bind(now)
+        .bind(now)
+        .bind(domain)
+        .bind(&pinned.pins_json)
+        .execute(get_database().get_pool())
+        .await?;
+        if updated.rows_affected() == 0 {
+            return Err(RealmError::Conflict(format!(
+                "{domain} keys changed concurrently"
+            )));
         }
         Self::get(domain).await?.ok_or(RealmError::NotFound)
     }
@@ -312,6 +368,53 @@ pub(crate) mod tests {
         // A removed key never comes back.
         let back = signed_member(7, &[("rs-2", &two, Active), ("rs-1", &one, Retired)]);
         assert!(RealmDomain::accept("acme.com", &back).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn the_operator_confirms_an_identity_change() -> anyhow::Result<()> {
+        setup_test_db().await?;
+        let old = SigningKey::from_bytes(&[1; 32]);
+        let new = SigningKey::from_bytes(&[2; 32]);
+        use KeyStatus::Active;
+        let first = signed_member(3, &[("rs-1", &old, Active)]);
+        RealmDomain::accept("acme.com", &first).await?;
+
+        // A new key without a chain, even reusing the old id, is refused.
+        let changed = signed_member(1, &[("rs-1", &new, Active)]);
+        assert!(RealmDomain::accept("acme.com", &changed).await.is_err());
+
+        let digest = |member: &Value| match RealmSigningKeys::accept(member, None).unwrap().1 {
+            KeyPinOutcome::Accepted(pins) => pins.digest,
+            KeyPinOutcome::IdentityChange(_) => unreachable!(),
+        };
+        // Only the member the operator reviewed is taken.
+        let other = signed_member(2, &[("rs-1", &new, Active)]);
+        assert!(matches!(
+            RealmDomain::confirm_identity("acme.com", &changed, &digest(&other)).await,
+            Err(RealmError::Conflict(_))
+        ));
+        // A member accepted under the pins needs no confirmation.
+        assert!(matches!(
+            RealmDomain::confirm_identity("acme.com", &first, &digest(&first)).await,
+            Err(RealmError::Conflict(_))
+        ));
+        assert!(matches!(
+            RealmDomain::confirm_identity("other.com", &changed, &digest(&changed)).await,
+            Err(RealmError::NotFound)
+        ));
+
+        let confirmed =
+            RealmDomain::confirm_identity("acme.com", &changed, &digest(&changed)).await?;
+        assert_eq!(confirmed.pins.sequence, 1);
+        assert_eq!(
+            confirmed.keys.keys[0].public_key,
+            BASE64.encode(new.verifying_key().to_bytes())
+        );
+        // The new keys are the baseline from now on.
+        RealmDomain::accept("acme.com", &changed).await?;
+        assert!(RealmDomain::accept("acme.com", &first).await.is_err());
         Ok(())
     }
 

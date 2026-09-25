@@ -338,7 +338,8 @@ Loran 为每个域名保存曾接受的每把 key（公钥与最后状态 `activ
 `sequence`（`realm_domain.pins_json`），同 id 不得换公钥、`retired` 不得复活、已移除不得复现，
 新 key 只经 `sequence` 更高的轮换项引入。没有有效轮换链的 key 变化按身份变化处理：签名 key
 不在已固定的链中时不做 `sequence` 比较，直接要求重新确认信任，确认后以新成员的
-`sequence` 为基线。authority descriptor 不列出 Realm 清单，避免枚举。
+`sequence` 为基线。重新确认只由运营者经 admin 接口手动完成（核对 pin 与当前 key 的指纹，见
+API「身份变化的重新确认」），Loran 从不自动接受。authority descriptor 不列出 Realm 清单，避免枚举。
 
 ### 5.2 Realm Profile
 
@@ -434,7 +435,7 @@ publisher 托管包），与 Realm 管理请求共用同一端点 `POST /actr/re
 3.2 的 Actr 管理信封：以 `publisher` 字段取代 `realm`，由 Publisher Profile 中 `active` 的
 Publisher Profile 签名 key 签名，同样绑定 `provider_id`、5 分钟有效期与 nonce；公开文档中
 不放 challenge。首个 Publisher Profile 固定其 `profile_signing_keys`；之后按与 `realm_signing_keys`
-相同的 §4.4 算法接受（`publisher.profile_pins`），身份变化一律拒绝。包签名 key 的 `id` 须为
+相同的 §4.4 算法接受（`publisher.profile_pins`），身份变化拒绝，直到运营者重新确认。包签名 key 的 `id` 须为
 `actr-pub-<SHA-256 前 16 hex>`；Publisher Profile 列 1 至 2 把 `active` 包签名 key，两把都可
 发布与证明持有（轮换重叠期），原当前 key 只要仍 `active` 就保持当前；不再 `active` 的 key
 归档为 retired，只用于历史包验签；Publisher Profile 不再列出的 key 即吊销（revoked），泄露时
@@ -515,9 +516,9 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   §4.4 六步算法，跟随轮换链，身份变化拒绝；以 `contracts/actr/test-vectors/realm-signing-keys-rotation.json`
   逐条测试）、Realm Provider 域名下 Realm 的 Realm Profile 签发、`realm_profile`
   存储与 `GET /actr/realms/{domain}/{realm_id}`、其他域名 Realm 的周期性刷新（含 key 移除后丢弃
-  基线、取不到则停用）、退役 Realm Profile 触发的退役事务。尚未实现：身份变化的重新确认（目前
-  一律拒绝，运营者只能删除该域名的 pin 重建）、Loran 自己的 Realm 签名 key
-  （`realm-signing:<domain>`）的轮换；
+  基线、取不到则停用）、退役 Realm Profile 触发的退役事务、身份变化的重新确认（运营者经
+  admin 接口核对 pin 与当前 key 的指纹后手动接受，带审计记录；不自动接受）。尚未实现：Loran
+  自己的 Realm 签名 key（`realm-signing:<domain>`）的轮换；
 - 已实现其他域名的 Realm 管理请求 `create_realm`、`publish_profile`、`reissue_admin_token`、
   `draft_profile`（`provider_id` 绑定、5 分钟有效期、nonce 防重放、`(realm, 请求方)` 幂等、待签 Realm Profile）、
   Realm 管理 token（只存哈希、一次性返回、重签即失效、作用域一个 Realm、越权 `404`）与
@@ -543,8 +544,8 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   与账号绑定的 Realm 管理权；
 - 已实现 `register_publisher`：读取 authority descriptor 的 `publisher` 成员（第 7 节），
   `/.well-known/actr/publisher.json` 与 challenge 已移除；Publisher Profile 签名 key 按 key pin
-  跟随轮换链；包签名 key id 由公钥推导，轮换重叠期两把 `active` key 均可发布。尚未实现：
-  Publisher Profile 身份变化的重新确认、Publisher Profile 的周期刷新（过期或 key 移除后不自动
+  跟随轮换链，身份变化由运营者经 admin 接口重新确认；包签名 key id 由公钥推导，轮换重叠期两把
+  `active` key 均可发布。尚未实现：Publisher Profile 的周期刷新（过期或 key 移除后不自动
   停用该 publisher）；已登记 Publisher 总数受 `[realm] max_publishers` 限制（默认 1000）；
 - 已实现 `/renew`、`/reissue` 加固：`/renew` 先只读校验 renewal token 再报告 Realm 状态；后继已
   生成的 token 只在 5 分钟内可 `/renew`，且只换回该后继；两者的提交事务内重查 Actor 撤销、Realm

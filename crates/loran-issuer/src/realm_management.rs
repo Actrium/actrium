@@ -88,6 +88,7 @@ impl From<PublisherRegistryError> for ManagementError {
             PublisherRegistryError::VerificationFailed(_) => Self::Forbidden(error.to_string()),
             PublisherRegistryError::InvalidStatus(_) => Self::Conflict(error.to_string()),
             PublisherRegistryError::QuotaExceeded(_) => Self::Quota(error.to_string()),
+            PublisherRegistryError::NotFound => Self::NotFound(error.to_string()),
             error => Self::Internal(error.to_string()),
         }
     }
@@ -273,7 +274,10 @@ where
 
 /// The `publisher` member of `domain`'s authority descriptor, which must be
 /// valid for `actr://<domain>`.
-fn publisher_from_descriptor(domain: &str, document: &[u8]) -> Result<PublisherProfile, String> {
+pub(crate) fn publisher_from_descriptor(
+    domain: &str,
+    document: &[u8],
+) -> Result<PublisherProfile, String> {
     let descriptor: AuthorityDescriptor = serde_json::from_slice(document)
         .map_err(|error| format!("malformed descriptor: {error}"))?;
     let authority = ActrUri::from_domain(domain).map_err(|error| error.to_string())?;

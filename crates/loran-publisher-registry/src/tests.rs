@@ -2644,3 +2644,118 @@ async fn register_publisher_stops_at_max_publishers() {
     let update = signed_profile("first.example", 2, &roots, &[(&key, "active")]);
     register(&manager, &update).await.unwrap();
 }
+
+#[tokio::test]
+async fn the_operator_confirms_a_publisher_identity_change() {
+    use actr_protocol::{KeyPinOutcome, PublisherProfile};
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let domain = "apps.example.com";
+    let (root, package) = (
+        SigningKey::generate(&mut OsRng),
+        SigningKey::generate(&mut OsRng),
+    );
+    let first = signed_profile(
+        domain,
+        3,
+        &[("root-1", &root, "active")],
+        &[(&package, "active")],
+    );
+    register(&manager, &first).await.unwrap();
+
+    // The domain lost its keys and starts over, reusing the id.
+    let (new_root, new_package) = (
+        SigningKey::generate(&mut OsRng),
+        SigningKey::generate(&mut OsRng),
+    );
+    let changed = signed_profile(
+        domain,
+        1,
+        &[("root-1", &new_root, "active")],
+        &[(&new_package, "active")],
+    );
+    assert!(matches!(
+        register(&manager, &changed).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+
+    let digest = |profile: &PublisherProfile| match profile
+        .accept(domain, chrono::Utc::now(), None)
+        .unwrap()
+        .1
+    {
+        KeyPinOutcome::Accepted(pins) => pins.digest,
+        KeyPinOutcome::IdentityChange(_) => unreachable!(),
+    };
+    let confirm = |profile: &PublisherProfile, digest: String| {
+        let keys = profile.verify(domain, chrono::Utc::now()).unwrap();
+        let (manager, profile) = (&manager, profile.clone());
+        async move {
+            manager
+                .confirm_publisher_identity(domain, &profile, &keys, &digest)
+                .await
+        }
+    };
+    // Only the profile the operator reviewed is taken.
+    assert!(matches!(
+        confirm(&changed, digest(&first)).await,
+        Err(PublisherRegistryError::InvalidStatus(_))
+    ));
+    // A profile accepted under the pins needs no confirmation.
+    let later = signed_profile(
+        domain,
+        4,
+        &[("root-1", &root, "active")],
+        &[(&package, "active")],
+    );
+    assert!(matches!(
+        confirm(&later, digest(&later)).await,
+        Err(PublisherRegistryError::InvalidStatus(_))
+    ));
+
+    let record = confirm(&changed, digest(&changed)).await.unwrap();
+    assert_eq!(record.public_key, b64_key(&new_package));
+    // The new keys are the baseline from now on.
+    let next = signed_profile(
+        domain,
+        2,
+        &[("root-1", &new_root, "active")],
+        &[(&new_package, "active")],
+    );
+    register(&manager, &next).await.unwrap();
+    assert!(matches!(
+        register(&manager, &first).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+
+    // Only a registered publisher is confirmed.
+    let unknown = signed_profile(
+        "other.example.com",
+        1,
+        &[("root-1", &root, "active")],
+        &[(&package, "active")],
+    );
+    let keys = unknown
+        .verify("other.example.com", chrono::Utc::now())
+        .unwrap();
+    assert!(matches!(
+        manager
+            .confirm_publisher_identity(
+                "other.example.com",
+                &unknown,
+                &keys,
+                &digest_of(&unknown, "other.example.com")
+            )
+            .await,
+        Err(PublisherRegistryError::InvalidStatus(_) | PublisherRegistryError::NotFound)
+    ));
+}
+
+fn digest_of(profile: &actr_protocol::PublisherProfile, domain: &str) -> String {
+    match profile.accept(domain, chrono::Utc::now(), None).unwrap().1 {
+        actr_protocol::KeyPinOutcome::Accepted(pins) => pins.digest,
+        actr_protocol::KeyPinOutcome::IdentityChange(_) => unreachable!(),
+    }
+}

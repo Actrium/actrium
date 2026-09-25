@@ -62,7 +62,8 @@ Realm Profile（`application/json`，带 `Access-Control-Allow-Origin: *` 与
 拒绝非公网地址并钉住解析结果、64 KiB、结果缓存 5 分钟、含失败）取该域名的 authority
 descriptor，按 key pin 接受 `realm_signing_keys`（Actr Authority Discovery §4.4：成员自签名，
 首次接受即 pin；此后同 id 不换公钥、`retired` 不复活、已移除不复现、`sequence` 不回退，新 key
-只经 `sequence` 更高的有效轮换项引入；签名 key 链接不到已 pin 的 key 即身份变化，拒绝），再从其 `realms`
+只经 `sequence` 更高的有效轮换项引入；签名 key 链接不到已 pin 的 key 即身份变化，拒绝，直到运营者重新确认，
+见下文「身份变化的重新确认」），再从其 `realms`
 位置取更高 sequence 的 Realm Profile；退役 Realm Profile 触发退役事务。已接受 Realm Profile
 的签名 key 被移除时丢弃该基线，改用由仍列出的 key 签名的 Realm Profile，取不到则停用该 Realm。
 
@@ -213,7 +214,7 @@ Profile，`docs/product/actrium-v1` 12 §2），要求 `domain` 等于该域名�
 `profile_issued_at`–`profile_expires_at` 之内、由 `profile_signing_keys` 中 `active` 的 key 按 JCS
 签名；请求信封须由其中 `active` 的 key 签名；然后记录 `nonce`。首次接受的 Publisher Profile 固定
 （pin）其 `profile_signing_keys`；此后按与 `realm_signing_keys` 相同的 §4.4 规则接受（跟随
-`rotations` 轮换链，身份变化拒绝），相同 Publisher Profile 重复登记不变。
+`rotations` 轮换链，身份变化拒绝，直到运营者重新确认），相同 Publisher Profile 重复登记不变。
 Publisher Profile 的 `keys` 至多 8 项，`id` 须按上文规则由公钥算出；须有 1 至 2 把 `active` 包签名
 key（`not_after` 为其发布期限，缺省一年；登记时须已过 `not_before`、未到 `not_after`）。两把
 `active` key 都可发布与证明持有（轮换重叠期）；原当前 key 只要仍 `active` 就保持为当前 key，否则
@@ -295,6 +296,25 @@ gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealm
 
 尚未实现：Realm Provider 域名下的 Realm 由 Realm Provider 账号（OAuth 2.0 + PKCE）以
 bearer 请求自助创建（目前由运营者代办）。
+
+### 身份变化的重新确认
+
+某 Realm 域名的 `realm_signing_keys`、或已登记 publisher 的 Publisher Profile 签名 key 链接不到
+已 pin 的 key（或同 id 换了公钥等被 pin 拒绝）时，Loran 一律拒绝，不自动接受。运营者经以下
+admin 接口核对后手动接受（Actr Authority Discovery §4.4 第 6 步）：
+
+- `GET /admin/api/identity/realm-domains/{domain}`、`GET /admin/api/identity/publishers/{publisher}`：
+  当场（不经缓存）取该域名的 authority descriptor，返回 `pinned` 与 `fetched` 两组 key（各含
+  `sequence`、`digest` 与每把 key 的 `id`、`status`、`fingerprint`，指纹为公钥字节的 SHA-256 hex），
+  以及 `outcome`：`accepted`（按 pin 可接受，无需确认）、`identity_change` 或 `rejected`（附
+  `reason`）。只对已有 pin 的域名、已登记的 publisher 可用，否则 `404`；取不到或文档本身无效时 `503`。
+- `POST` 同一路径，body `{"digest": "<fetched.digest>"}`：重新获取，仅当该文档自身有效、按 pin
+  不被接受、且其 `digest` 等于运营者核对过的值时，清空已保存的 key，以它为新基线（publisher 随即按
+  `register_publisher` 的规则接受该 Publisher Profile）；否则 `409`。响应含 `previous` 与新的
+  `pinned`，并写一条审计记录（`identity.confirm`，before/after 为两组 key）。Realm 写入由 superv
+  管理时 Realm 域名的确认返回 `403`。
+
+Admin Web 的 Realms 页与 Publisher Registry 页各有对应的核对与「Accept new identity」操作。
 
 ## Schema migration
 

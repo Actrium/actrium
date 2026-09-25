@@ -1115,4 +1115,113 @@ mod management {
         .await;
         assert!(matches!(early, Err(ManagementError::Conflict(_))));
     }
+
+    /// Serve `descriptor` as `acme.com`'s authority descriptor.
+    fn serve(
+        descriptor: &[u8],
+    ) -> impl FnOnce(String) -> std::future::Ready<Result<Arc<[u8]>, FetchError>> {
+        let descriptor: Arc<[u8]> = Arc::from(descriptor);
+        move |url| {
+            assert_eq!(url, "https://acme.com/.well-known/actr");
+            std::future::ready(Ok(descriptor))
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn the_operator_confirms_a_realm_domain_identity_change() {
+        use issuer::identity::{confirm_realm_domain_identity, realm_domain_identity};
+        let (_profiles, _dir) = setup().await;
+        let (_, pinned) = acme();
+        let member = platform::realm::domain::member_from_descriptor("acme.com", &pinned).unwrap();
+        platform::realm::RealmDomain::accept("acme.com", &member)
+            .await
+            .unwrap();
+
+        // The domain starts over with a key that does not chain to rs-1.
+        let changed = Domain {
+            keys: vec![("rs-9", SigningKey::from_bytes(&[9; 32]))],
+        };
+        let descriptor = changed.descriptor(&changed.member(1, &["rs-9"]));
+        let view = realm_domain_identity("acme.com", serve(&descriptor))
+            .await
+            .unwrap();
+        assert_eq!(view["outcome"], "identity_change");
+        assert_eq!(view["pinned"]["keys"][0]["id"], "rs-1");
+        assert_eq!(view["fetched"]["keys"][0]["id"], "rs-9");
+        let fingerprint = |key: &SigningKey| {
+            use sha2::Digest as _;
+            hex::encode(sha2::Sha256::digest(key.verifying_key().to_bytes()))
+        };
+        assert_eq!(
+            view["fetched"]["keys"][0]["fingerprint"],
+            fingerprint(&changed.keys[0].1)
+        );
+
+        // Only the reviewed member is taken.
+        let stale =
+            confirm_realm_domain_identity("acme.com", "0".repeat(64).as_str(), serve(&descriptor))
+                .await;
+        assert!(
+            matches!(stale, Err(ManagementError::Conflict(_))),
+            "{stale:?}"
+        );
+        let digest = view["fetched"]["digest"].as_str().unwrap();
+        let confirmed = confirm_realm_domain_identity("acme.com", digest, serve(&descriptor))
+            .await
+            .unwrap();
+        assert_eq!(confirmed["pinned"]["keys"][0]["id"], "rs-9");
+        let view = realm_domain_identity("acme.com", serve(&descriptor))
+            .await
+            .unwrap();
+        assert_eq!(view["outcome"], "accepted");
+        // Nothing to confirm any more.
+        assert!(matches!(
+            confirm_realm_domain_identity("acme.com", digest, serve(&descriptor)).await,
+            Err(ManagementError::Conflict(_))
+        ));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn the_operator_confirms_a_publisher_identity_change() {
+        use issuer::identity::{confirm_publisher_identity, publisher_identity};
+        let (_profiles, _dir) = setup().await;
+        let package = SigningKey::from_bytes(&[6; 32]);
+        let first = publisher_descriptor(&SigningKey::from_bytes(&[5; 32]), &package);
+        let profile = serde_json::from_slice::<actr_protocol::AuthorityDescriptor>(&first)
+            .unwrap()
+            .publisher
+            .unwrap();
+        let keys = profile.verify("acme.com", chrono::Utc::now()).unwrap();
+        let pool = platform::storage::db::get_database().get_pool().clone();
+        actrix_publisher_registry::PublisherRegistryManager::new(pool)
+            .register_publisher("acme.com", &profile, &keys)
+            .await
+            .unwrap();
+
+        // Same id, a new key: refused under the pin.
+        let descriptor = publisher_descriptor(&SigningKey::from_bytes(&[8; 32]), &package);
+        let view = publisher_identity("acme.com", serve(&descriptor))
+            .await
+            .unwrap();
+        assert_eq!(view["outcome"], "rejected");
+        assert_ne!(
+            view["pinned"]["keys"][0]["fingerprint"],
+            view["fetched"]["keys"][0]["fingerprint"]
+        );
+        let digest = view["fetched"]["digest"].as_str().unwrap();
+        let confirmed = confirm_publisher_identity("acme.com", digest, serve(&descriptor))
+            .await
+            .unwrap();
+        assert_eq!(confirmed["pinned"], view["fetched"]);
+        let view = publisher_identity("acme.com", serve(&descriptor))
+            .await
+            .unwrap();
+        assert_eq!(view["outcome"], "accepted");
+        assert!(matches!(
+            publisher_identity("other.com", serve(&descriptor)).await,
+            Err(ManagementError::NotFound(_))
+        ));
+    }
 }

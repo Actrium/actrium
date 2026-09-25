@@ -348,6 +348,96 @@ async fn create_realm(
     }
 }
 
+// ── Identity re-confirmation ───────────────────────────────────
+//
+// A Realm domain or publisher whose served signing keys do not chain to the
+// pinned keys is refused until the operator compares both and confirms the
+// new ones (`authority-discovery.md` section 4.4 step 6).
+
+#[derive(Deserialize)]
+struct ConfirmIdentityRequest {
+    /// The `fetched.digest` the operator reviewed.
+    digest: String,
+}
+
+/// Fetch an authority descriptor for the operator, uncached so a review sees
+/// what the domain serves now.
+async fn fetch_descriptor(url: String) -> Result<Arc<[u8]>, platform::net::FetchError> {
+    platform::net::fetch_public_json(&url, 5)
+        .await
+        .map(Arc::from)
+}
+
+fn identity_response(result: Result<Value, issuer::realm_management::ManagementError>) -> Response {
+    match result {
+        Ok(view) => (StatusCode::OK, Json(view)).into_response(),
+        Err(error) => (
+            error.status(),
+            Json(json!({ "success": false, "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Record a confirmed identity change on the audit channel.
+fn audit_identity_confirmed(resource: &str, id: &str, confirmed: &Value) {
+    use platform::recording::{AuditPayload, Record, RecordLevel, emit_with_callsite};
+
+    let mut record =
+        Record::<{ platform::recording::CHANNEL_AUDIT }>::new("admin.identity.confirm");
+    record.common.actor = Some("admin".to_string());
+    record.common.level = RecordLevel::Warn;
+    record.audit = Some(AuditPayload {
+        action: "identity.confirm".to_string(),
+        resource: resource.to_string(),
+        resource_id: Some(id.to_string()),
+        reason: Some("operator confirmed new signing keys".to_string()),
+        remote_addr: None,
+        session_id: None,
+        before: confirmed.get("previous").cloned(),
+        after: confirmed.get("pinned").cloned(),
+    });
+    let _ = emit_with_callsite(record, file!(), line!(), module_path!());
+}
+
+async fn get_realm_domain_identity(Path(domain): Path<String>) -> Response {
+    identity_response(issuer::identity::realm_domain_identity(&domain, fetch_descriptor).await)
+}
+
+async fn confirm_realm_domain_identity(
+    State(state): State<Arc<AdminApiState>>,
+    Path(domain): Path<String>,
+    Json(request): Json<ConfirmIdentityRequest>,
+) -> Response {
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+    let result =
+        issuer::identity::confirm_realm_domain_identity(&domain, &request.digest, fetch_descriptor)
+            .await;
+    if let Ok(confirmed) = &result {
+        audit_identity_confirmed("realm_domain", &domain, confirmed);
+    }
+    identity_response(result)
+}
+
+async fn get_publisher_identity(Path(publisher): Path<String>) -> Response {
+    identity_response(issuer::identity::publisher_identity(&publisher, fetch_descriptor).await)
+}
+
+async fn confirm_publisher_identity(
+    Path(publisher): Path<String>,
+    Json(request): Json<ConfirmIdentityRequest>,
+) -> Response {
+    let result =
+        issuer::identity::confirm_publisher_identity(&publisher, &request.digest, fetch_descriptor)
+            .await;
+    if let Ok(confirmed) = &result {
+        audit_identity_confirmed("publisher", &publisher, confirmed);
+    }
+    identity_response(result)
+}
+
 /// Replace the Realm admin token of an active Realm; the old one stops
 /// working.
 async fn reissue_realm_admin_token(
@@ -943,6 +1033,14 @@ pub fn build_admin_api_router(
         .route(
             "/admin/api/realms/{realm}/admin-token/reissue",
             post(reissue_realm_admin_token),
+        )
+        .route(
+            "/admin/api/identity/realm-domains/{domain}",
+            get(get_realm_domain_identity).post(confirm_realm_domain_identity),
+        )
+        .route(
+            "/admin/api/identity/publishers/{publisher}",
+            get(get_publisher_identity).post(confirm_publisher_identity),
         )
         .route(
             "/admin/api/config/{config_type}/{config_key}",

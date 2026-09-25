@@ -247,6 +247,33 @@ impl PublisherRegistryManager {
         profile: &PublisherProfile,
         keys: &PublisherKeys,
     ) -> Result<Publisher, PublisherRegistryError> {
+        self.register(publisher, profile, keys, None).await
+    }
+
+    /// Accept `profile` of a registered publisher as its new baseline after
+    /// the operator reviewed it (`authority-discovery.md` section 4.4 step
+    /// 6): the pins are replaced with the profile's own signing keys, then
+    /// the profile is taken as [`Self::register_publisher`] would. Only for a
+    /// profile that is valid on its own but not accepted under the pins, and
+    /// only the one whose digest ([`KeyPins::digest`] of its own pins) the
+    /// operator confirmed.
+    pub async fn confirm_publisher_identity(
+        &self,
+        publisher: &str,
+        profile: &PublisherProfile,
+        keys: &PublisherKeys,
+        digest: &str,
+    ) -> Result<Publisher, PublisherRegistryError> {
+        self.register(publisher, profile, keys, Some(digest)).await
+    }
+
+    async fn register(
+        &self,
+        publisher: &str,
+        profile: &PublisherProfile,
+        keys: &PublisherKeys,
+        confirmed: Option<&str>,
+    ) -> Result<Publisher, PublisherRegistryError> {
         let invalid = PublisherRegistryError::InvalidRequest;
         if canonical_publisher_domain(publisher)? != publisher || profile.domain != publisher {
             return Err(invalid(format!(
@@ -321,15 +348,40 @@ impl PublisherRegistryManager {
             .transpose()
             .map_err(|error| invalid(format!("stored key pins: {error}")))?;
         let rejected = |message: String| PublisherRegistryError::VerificationFailed(message);
-        let pins = match profile
-            .accept(publisher, chrono::Utc::now(), pinned.as_ref())
-            .map_err(|error| rejected(error.to_string()))?
-        {
-            (_, KeyPinOutcome::Accepted(pins)) => pins,
-            (_, KeyPinOutcome::IdentityChange(_)) => {
+        let outcome = profile.accept(publisher, chrono::Utc::now(), pinned.as_ref());
+        let pins = match (outcome, confirmed) {
+            (Ok((_, KeyPinOutcome::Accepted(pins))), None) => pins,
+            (Ok((_, KeyPinOutcome::IdentityChange(_))), None) => {
                 return Err(rejected(
                     "the Publisher Profile is not signed by a key chained to a pinned key".into(),
                 ));
+            }
+            (Err(error), None) => return Err(rejected(error.to_string())),
+            (Ok((_, KeyPinOutcome::Accepted(_))), Some(_)) => {
+                return Err(PublisherRegistryError::InvalidStatus(format!(
+                    "the Publisher Profile of '{publisher}' is accepted under the pinned keys; \
+                     nothing to confirm"
+                )));
+            }
+            (_, Some(digest)) => {
+                if existing.is_none() {
+                    return Err(PublisherRegistryError::NotFound);
+                }
+                let pins = match profile
+                    .accept(publisher, chrono::Utc::now(), None)
+                    .map_err(|error| rejected(error.to_string()))?
+                {
+                    (_, KeyPinOutcome::Accepted(pins)) => pins,
+                    (_, KeyPinOutcome::IdentityChange(_)) => {
+                        unreachable!("no pins, no identity change")
+                    }
+                };
+                if pins.digest != digest {
+                    return Err(PublisherRegistryError::InvalidStatus(format!(
+                        "the Publisher Profile of '{publisher}' changed since it was reviewed"
+                    )));
+                }
+                pins
             }
         };
         let pins_json =

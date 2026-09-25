@@ -69,6 +69,7 @@
 
 pub mod handlers;
 mod idempotency;
+pub mod identity;
 pub mod issuer;
 pub mod ratelimit;
 pub mod realm_management;

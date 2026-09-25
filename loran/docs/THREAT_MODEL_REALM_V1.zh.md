@@ -62,7 +62,7 @@ TLS/mTLS；Management 即使共享 listener 也必须经过独立认证中间件
 | Realm Provider 分配的域名被滥用批量创建 | 目前由实例运营者经 Admin API（Argon2id/JWT 认证）代办创建；按 `[realm]` 配额限制（`max_realms` 默认不限、`max_realms_per_domain` 默认不限、`max_pending_per_domain` 默认 10、`pending_ttl_secs` 默认 3600 秒）。Realm Provider 账号（OAuth 2.0 + PKCE）自助创建与按账号计配额尚未实现，见架构契约第 9 节 |
 | 批量登记 Publisher（子域名不花成本） | `register_publisher` 须域名的 authority descriptor 与签名；已登记 Publisher 总数受 `[realm] max_publishers` 限制（默认 1000，超出 `429`） |
 | Realm 签名 key 失陷 | 攻击者可签发新 Realm Profile（替换 Realm issuer key 或端点、退役 Realm）或创建新 Realm；已接受 Realm Profile 的客户端会拒绝改换 `provider.id` 的 Realm Profile；控制：持有方从 `keys` 中移除该 key（吊销其全部签名），并用 `active` key 重签受影响的 Realm Profile；客户端与 Loran 刷新 `realm_signing_keys` 后丢弃由该 key 签名的 Realm Profile 及其 `sequence` 基线（包括攻击者发布的超大 `sequence`）。残余风险：首次接触且尚未见到新 `realm_signing_keys` 的客户端无法区分；该风险属于 Realm 签名 key 持有方的信任边界，Loran 不能单独消除 |
-| Realm 签名 key 被无轮换链替换 | 视为身份变化：不做 `sequence` 比较，Loran 挂起相关 Realm，客户端必须重新确认信任，确认后以新成员 `sequence` 为基线；不静默接受 |
+| Realm 签名 key 被无轮换链替换 | 视为身份变化：不做 `sequence` 比较，Loran 挂起相关 Realm，客户端必须重新确认信任，确认后以新成员 `sequence` 为基线；Loran 由运营者经 admin 接口核对指纹后手动接受并留审计记录；不静默接受 |
 | Realm Profile 回滚或重放旧 Realm Profile | 每个 Realm 的 Realm Profile sequence 单调递增，Loran 与客户端拒绝低于已接受值的 Realm Profile，相同 `sequence` 内容必须一致；Realm Profile 不过期，客户端与 Loran 定期刷新 |
 | 回滚 `realm_signing_keys` 以恢复已撤换的 key | `realm_signing_keys` 带 `active` Realm 签名 key 对整个成员（含 `sequence`）的 JCS 签名；已固定 key 后拒绝更低 `sequence`；Loran 保存每把曾接受 key 的最后状态，`retired` key 不得重新 `active`、已移除 key 不得再出现、同 id 不得换公钥（Actr Authority Discovery §4.4） |
 | Realm issuer key 泄露或长期使用 | 每个 Realm 独立 issuer key，验证按 `(realm, key_id)` 查找；按 Realm Profile §6.1 轮换，旧 key 只在其最后 credential 过期 +5 分钟前保留为 `retired`，之后移除并在 Signer 中清除私钥；Realm Provider 域名下的 Realm 每 90 天自动轮换。残余风险：泄露时的立即移除尚无入口，只能退役 Realm |
