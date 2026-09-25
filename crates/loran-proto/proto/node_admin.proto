@@ -28,10 +28,6 @@ service NodeAdminService {
   rpc ListConfigOverrides(ListConfigOverridesRequest) returns (ListConfigOverridesResponse);
   rpc SetConfigOverride(SetConfigOverrideRequest) returns (SetConfigOverrideResponse);
   rpc DeleteConfigOverride(DeleteConfigOverrideRequest) returns (DeleteConfigOverrideResponse);
-
-  // ------------ Issuer key control ------------
-  // Rotates the Issuer signing key. Requires Issuer to be enabled on this node.
-  rpc RotateIssuerSigningKey(RotateIssuerSigningKeyRequest) returns (RotateIssuerSigningKeyResponse);
 }
 
 // ============================================================================
@@ -233,18 +229,4 @@ message DeleteConfigOverrideResponse {
   required bool success = 1;
   optional string error_message = 2;
   required bool deleted = 3;               // Whether a row was actually deleted
-}
-
-// ============================================================================
-// Issuer key control
-// ============================================================================
-
-message RotateIssuerSigningKeyRequest {
-  required NonceCredential credential = 1;  // Authentication credential
-}
-
-message RotateIssuerSigningKeyResponse {
-  required bool success = 1;                // Operation result
-  optional string error_message = 2;        // Error message on failure
-  optional uint32 new_key_id = 3;           // New signing key id after rotation
 }

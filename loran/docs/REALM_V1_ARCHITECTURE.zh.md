@@ -504,9 +504,9 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   `(realm, key_id)` 缓存；signaling 连接绑定其身份的 Realm，source/target 不在该 Realm 的
   envelope 返回 `403`；Actor Registry 与 presence 按 Realm 分区；TURN secret 由主密钥按 Realm
   HKDF 派生；注册拒绝指向其他 Realm 的 ACL `source_realm`；跨 Realm 混淆回归测试
-  `realms_with_the_same_actor_type_and_serial_are_isolated`。尚未实现：Realm issuer key 的轮换与
-  退役（Signer 中的 key 不标记退役）；Issuer 原有的轮换 key 及其 `/issuer/current-key`、admin
-  轮换入口仍在，已不签发 Actor credential；
+  `realms_with_the_same_actor_type_and_serial_are_isolated`。Issuer 原有的全局轮换 key 及其
+  `/issuer/current-key`、`/issuer/signing-pubkey`、admin 与 gRPC 轮换入口已删除。尚未实现：
+  Realm issuer key 的轮换与退役（Signer 中的 key 不标记退役）；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
 - 已实现 `register_publisher`：读取 authority descriptor 的 `publisher` 成员（第 7 节），

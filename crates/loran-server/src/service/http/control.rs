@@ -21,8 +21,7 @@ use tokio::sync::broadcast;
 /// reload to avoid invalidating active admin sessions.
 ///
 /// `aid_issuer` is the issuer backing the public `/issuer` router when Issuer is
-/// enabled, so the control plane can trigger authenticated key rotation on
-/// the live issuer. `realm_profiles` signs Realm Profiles when this Loran is
+/// enabled, so a Realm created here gets its issuer key from the live issuer. `realm_profiles` signs Realm Profiles when this Loran is
 /// the Realm Provider for its own domain.
 ///
 /// Returns `(Router, jwt_secret)` — the caller should persist the secret

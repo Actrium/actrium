@@ -202,10 +202,6 @@ fn default_issuer_config(temp_dir: &TempDir) -> IssuerConfig {
         renewal_rotation_window_secs: 60 * 60,
         renewal_token_secret: vec![0; 32],
         signaling_heartbeat_interval_secs: 30,
-        key_refresh_interval_secs: 3600,
-        key_storage_file: temp_dir.path().join("issuer_keys.db"),
-        enable_periodic_rotation: false,
-        key_rotation_interval_secs: 86400,
         turn_secret: "test-turn-secret-at-least-32-bytes!".to_string(),
         provider_id: "provider.example".to_string(),
         sqlite_path: temp_dir.path().to_path_buf(),
@@ -2136,49 +2132,9 @@ async fn test_issuer_health_checks() {
         .await
         .expect("Database health check should pass");
     issuer
-        .check_key_cache_health()
-        .await
-        .expect("Key cache health check should pass");
-}
-
-#[tokio::test]
-#[serial]
-async fn test_issuer_rotate_key_updates_current_key() {
-    let env = setup_test_environment().await;
-
-    let signer_client = create_signer_client(&env.signer_config, &env.shared_key)
-        .await
-        .expect("Failed to create Signer gRPC client");
-    let issuer = AIdIssuer::new(
-        signer_client,
-        default_issuer_config(&env.issuer_temp_dir),
-        tokio_util::sync::CancellationToken::new(),
-    )
-    .await
-    .expect("Failed to create issuer");
-
-    let key_before = issuer
-        .get_current_key_id()
-        .await
-        .expect("current key before rotate");
-    let rotated = issuer.rotate_key().await.expect("rotate key");
-    let key_after = issuer
-        .get_current_key_id()
-        .await
-        .expect("current key after rotate");
-
-    assert_ne!(key_before, rotated, "rotate_key should change key id");
-    assert_eq!(key_after, rotated, "current key should match rotated key");
-
-    issuer
         .check_signer_health()
         .await
-        .expect("Signer health should still pass after rotation");
-    let cache = issuer
-        .check_key_cache_health()
-        .await
-        .expect("key cache should remain healthy");
-    assert_eq!(cache.key_id, rotated);
+        .expect("Signer health check should pass");
 }
 
 #[tokio::test]
@@ -2270,44 +2226,6 @@ async fn test_issuer_check_signer_health_fails_after_signer_shutdown() {
     }
 
     panic!("issuer Signer health should fail after embedded Signer shutdown");
-}
-
-#[tokio::test]
-#[serial]
-async fn test_issuer_rotate_key_fails_when_signer_is_unavailable() {
-    let mut env = setup_test_environment().await;
-
-    let signer_client = create_signer_client(&env.signer_config, &env.shared_key)
-        .await
-        .expect("Failed to create Signer gRPC client");
-    let issuer = AIdIssuer::new(
-        signer_client,
-        default_issuer_config(&env.issuer_temp_dir),
-        tokio_util::sync::CancellationToken::new(),
-    )
-    .await
-    .expect("Failed to create issuer");
-
-    env.shutdown_signer().await;
-
-    for _ in 0..40 {
-        match issuer.rotate_key().await {
-            Ok(_) => tokio::time::sleep(Duration::from_millis(50)).await,
-            Err(err) => {
-                let msg = err.to_string();
-                assert!(
-                    msg.contains("Signer unavailable")
-                        || msg.contains("Failed")
-                        || msg.contains("transport")
-                        || msg.contains("connection"),
-                    "unexpected rotate_key error after Signer shutdown: {msg}"
-                );
-                return;
-            }
-        }
-    }
-
-    panic!("rotate_key should fail after embedded Signer shutdown");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

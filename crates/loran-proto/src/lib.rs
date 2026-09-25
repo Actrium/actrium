@@ -119,8 +119,6 @@ pub use admin::v1::{
     ListRealmsResponse,
     RetireRealmRequest,
     RetireRealmResponse,
-    RotateIssuerSigningKeyRequest,
-    RotateIssuerSigningKeyResponse,
     SetConfigOverrideRequest,
     SetConfigOverrideResponse,
     ShutdownRequest,

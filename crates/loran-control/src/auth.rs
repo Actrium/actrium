@@ -3,10 +3,9 @@ use actrix_proto::{
     DeleteConfigOverrideResponse, GetConfigRequest, GetConfigResponse, GetNodeInfoRequest,
     GetNodeInfoResponse, GetRealmRequest, GetRealmResponse, ListConfigOverridesRequest,
     ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse, NodeAdminService,
-    NonceCredential, RetireRealmRequest, RetireRealmResponse, RotateIssuerSigningKeyRequest,
-    RotateIssuerSigningKeyResponse, SetConfigOverrideRequest, SetConfigOverrideResponse,
-    ShutdownRequest, ShutdownResponse, UpdateConfigRequest, UpdateConfigResponse,
-    UpdateRealmRequest, UpdateRealmResponse,
+    NonceCredential, RetireRealmRequest, RetireRealmResponse, SetConfigOverrideRequest,
+    SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse, UpdateConfigRequest,
+    UpdateConfigResponse, UpdateRealmRequest, UpdateRealmResponse,
 };
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
@@ -222,14 +221,6 @@ where
         self.verify_body(request.get_ref()).await?;
         self.inner.delete_config_override(request).await
     }
-
-    async fn rotate_issuer_signing_key(
-        &self,
-        request: Request<RotateIssuerSigningKeyRequest>,
-    ) -> Result<Response<RotateIssuerSigningKeyResponse>, Status> {
-        self.verify_body(request.get_ref()).await?;
-        self.inner.rotate_issuer_signing_key(request).await
-    }
 }
 
 // ========= Request type payload construction implementations =========
@@ -396,16 +387,6 @@ impl CredentialPayload for DeleteConfigOverrideRequest {
     }
 }
 
-impl CredentialPayload for RotateIssuerSigningKeyRequest {
-    fn credential(&self) -> &NonceCredential {
-        &self.credential
-    }
-
-    fn auth_payload(&self, node_id: &str) -> String {
-        format!("rotate_issuer_signing_key:{node_id}")
-    }
-}
-
 fn map_nonce_error(err: NonceError, context: &str) -> Status {
     match err {
         NonceError::DuplicateNonce => {
@@ -486,18 +467,5 @@ mod tests {
             credential: dummy_credential(),
         };
         assert_eq!(get_realm.body_digest(), "");
-    }
-
-    #[test]
-    fn rotate_issuer_signing_key_payload_is_canonical() {
-        let req = RotateIssuerSigningKeyRequest {
-            credential: dummy_credential(),
-        };
-        assert_eq!(
-            req.auth_payload("actrix-node"),
-            "rotate_issuer_signing_key:actrix-node"
-        );
-        // No client-controlled mutable body fields, so no digest is appended.
-        assert_eq!(req.body_digest(), "");
     }
 }

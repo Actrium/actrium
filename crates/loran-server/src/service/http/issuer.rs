@@ -16,7 +16,7 @@ use std::sync::Arc;
 ///
 /// The serving router is built from an [`IssuerState`] created once per router
 /// build by the service manager, so the control plane can hold the same
-/// issuer for authenticated key rotation. Instances registered with the
+/// issuer. Instances registered with the
 /// service collector for display purposes carry no state and never build
 /// a router.
 pub struct IssuerService {

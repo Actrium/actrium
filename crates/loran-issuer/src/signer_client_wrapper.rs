@@ -88,17 +88,6 @@ impl SignerClientWrapper {
         }
     }
 
-    /// Request a new Ed25519 signing key from the Signer; returns (key_id, verifying_key_bytes[32], expires_at, tolerance_secs).
-    /// The private key is retained on the Signer server.
-    pub async fn generate_signing_key(
-        &self,
-    ) -> Result<(u32, [u8; 32], u64, u64), signer::SignerError> {
-        self.call_with_rebuild("generate_signing_key", false, |client| {
-            Box::pin(client.generate_signing_key())
-        })
-        .await
-    }
-
     /// Sign a message with the Ed25519 key in the Signer; returns a 64-byte signature.
     /// The private key never leaves the Signer service.
     pub async fn sign(&self, key_id: u32, message: &[u8]) -> Result<Vec<u8>, signer::SignerError> {

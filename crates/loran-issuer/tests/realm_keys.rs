@@ -1,4 +1,4 @@
-//! Isolated regressions for Issuer signing-key rotation.
+//! Isolated regressions for Realm issuer keys.
 //!
 //! This is a separate integration-test binary so its temporary Signer and key
 //! cache do not share the process-global validator/database state used by the
@@ -21,7 +21,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tonic::transport::Server;
 
 const TEST_STEP_TIMEOUT: Duration = Duration::from_secs(30);
-const TEST_REALM: &str = "key-rotation@example.com";
+const TEST_REALM: &str = "realm-keys@example.com";
 
 struct TestEnv {
     issuer_temp_dir: TempDir,
@@ -140,7 +140,7 @@ async fn setup_test_environment(signer_config: SignerServiceConfig) -> TestEnv {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let secret_current = platform::realm::hash_realm_secret("key-rotation-seed-realm-secret");
+        let secret_current = platform::realm::hash_realm_secret("realm-keys-seed-realm-secret");
         sqlx::query(
             "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
              VALUES (?, 'active', 1, ?, ?)",
@@ -191,10 +191,6 @@ fn issuer_config(temp_dir: &TempDir) -> IssuerConfig {
         renewal_rotation_window_secs: 60 * 60,
         renewal_token_secret: vec![0; 32],
         signaling_heartbeat_interval_secs: 30,
-        key_refresh_interval_secs: 3600,
-        key_storage_file: temp_dir.path().join("issuer_keys.db"),
-        enable_periodic_rotation: false,
-        key_rotation_interval_secs: 86400,
         turn_secret: "test-turn-secret-0123456789abcdef".to_string(),
         provider_id: "provider.example".to_string(),
         sqlite_path: temp_dir.path().to_path_buf(),
@@ -262,38 +258,4 @@ async fn credentials_are_signed_with_the_realm_issuer_key() {
 
     drop(issuer);
     env.shutdown_signer().await;
-}
-
-#[tokio::test]
-async fn rotation_recovers_after_signer_restart() {
-    let mut env = setup_test_environment(SignerServiceConfig::default()).await;
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let issuer = create_issuer(&env, cancel.clone()).await;
-    issuer.rotate_key().await.expect("rotate before restart");
-
-    let endpoint = env.signer_config.endpoint.clone();
-    env.shutdown_signer().await;
-    assert!(
-        issuer.rotate_key().await.is_err(),
-        "rotation fails while down"
-    );
-
-    let addr = endpoint
-        .trim_start_matches("http://")
-        .parse()
-        .expect("parse Signer endpoint");
-    let signer_temp_dir = TempDir::new().expect("create restarted Signer temp dir");
-    let (_, restart_handle, restart_shutdown_tx) = start_embedded_signer(
-        &env.shared_key,
-        signer_temp_dir.path(),
-        SignerServiceConfig::default(),
-        Some(addr),
-    )
-    .await;
-
-    assert!(issuer.rotate_key().await.expect("recover rotation") > 0);
-
-    cancel.cancel();
-    let _ = restart_shutdown_tx.send(());
-    let _ = restart_handle.await;
 }

@@ -201,7 +201,7 @@ build_local_actr_cli
 build_local_actrix
 start_actrix
 login_admin
-warmup_issuer_key
+wait_for_signer
 ensure_realm
 provision_publisher_keychain
 

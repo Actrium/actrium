@@ -1068,7 +1068,7 @@ render_runtime_configs
 build_local_actr_cli
 start_actrix
 login_admin
-warmup_issuer_key
+wait_for_signer
 ensure_realm
 provision_publisher_keychain
 

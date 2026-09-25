@@ -633,61 +633,24 @@ echo ""
 echo "🔑 Setting up realms in actrix..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Poll until the Issuer signing key is ready.
-# Strategy: call the admin-only key-rotate endpoint each iteration until
-# /issuer/current-key returns success. The signer gRPC service may take a few
-# seconds to initialize after actrix starts.
-NONCE_DB="$WORKSPACE_ROOT/database/nonce.db"
-MAX_KEY_WAIT=60
-KEY_COUNTER=0
-echo "Warming up actrix Issuer signing key (up to ${MAX_KEY_WAIT}s)..."
-jq_status() {
-    # Extract .status from JSON, returning "missing" on any error.
-    local json="$1"
-    if [ -z "$json" ]; then echo "missing"; return; fi
-    echo "$json" | jq -r '.status // "missing"' 2>/dev/null || echo "missing"
-}
-
-admin_login() {
-    # Log into the Admin UI to obtain a JWT for control-plane calls.
-    local resp
-    resp=$(curl -sf -X POST "${ACTRIX_HTTP_URL}/admin/api/auth/login" \
-        -H 'Content-Type: application/json' \
-        -d "{\"password\":\"${ACTRIX_ADMIN_PASSWORD}\"}" 2>/dev/null || true)
-    ACTRIX_ADMIN_TOKEN=$(echo "$resp" | jq -r '.token // empty' 2>/dev/null)
-    [ -n "$ACTRIX_ADMIN_TOKEN" ]
-}
-
-while [ $KEY_COUNTER -lt $MAX_KEY_WAIT ]; do
-    # Check if /issuer/current-key already has a valid key
-    CURRENT_KEY_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/issuer/current-key" 2>/dev/null || true)
-    if [ "$(jq_status "$CURRENT_KEY_JSON")" = "success" ]; then
-        echo -e "${GREEN}✅ Actrix Issuer signing key ready${NC}"
+# Poll until the Issuer reaches the Signer, which signs every credential with
+# the Realm's issuer key. The signer gRPC service may take a few seconds to
+# initialize after actrix starts.
+MAX_SIGNER_WAIT=60
+SIGNER_COUNTER=0
+echo "Waiting for the actrix Signer (up to ${MAX_SIGNER_WAIT}s)..."
+while [ $SIGNER_COUNTER -lt $MAX_SIGNER_WAIT ]; do
+    HEALTH_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/issuer/health" 2>/dev/null || true)
+    if [ "$(echo "$HEALTH_JSON" | jq -r '.signer_service // "missing"' 2>/dev/null)" = "ok" ]; then
+        echo -e "${GREEN}✅ Actrix Signer ready${NC}"
         break
     fi
-
-    # Nonce storage ready? Trigger rotation to accelerate key initialization.
-    if [ -f "$NONCE_DB" ] && sqlite3 "$NONCE_DB" ".tables" 2>/dev/null | grep -q "nonce_entries" \
-        && admin_login; then
-        ROTATE_RESP=$(curl -sf -X POST \
-            -H "Authorization: Bearer ${ACTRIX_ADMIN_TOKEN}" \
-            "${ACTRIX_HTTP_URL}/admin/api/services/issuer/keys/rotate" 2>/dev/null || true)
-        if [ "$(jq_status "$ROTATE_RESP")" = "success" ]; then
-            # Re-check immediately after successful rotation
-            CURRENT_KEY_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/issuer/current-key" 2>/dev/null || true)
-            if [ "$(jq_status "$CURRENT_KEY_JSON")" = "success" ]; then
-                echo -e "${GREEN}✅ Actrix Issuer signing key ready${NC}"
-                break
-            fi
-        fi
-    fi
-
     sleep 1
-    KEY_COUNTER=$((KEY_COUNTER + 1))
+    SIGNER_COUNTER=$((SIGNER_COUNTER + 1))
 done
-if [ $KEY_COUNTER -eq $MAX_KEY_WAIT ]; then
-    echo -e "${RED}❌ Issuer key warmup timed out after ${MAX_KEY_WAIT}s${NC}"
-    grep -aEn "GenerateSigningKey|Authentication failed" "$LOG_DIR/actrix.log" || true
+if [ $SIGNER_COUNTER -eq $MAX_SIGNER_WAIT ]; then
+    echo -e "${RED}❌ Signer not ready after ${MAX_SIGNER_WAIT}s${NC}"
+    grep -aEn "Signer|Authentication failed" "$LOG_DIR/actrix.log" || true
     exit 1
 fi
 

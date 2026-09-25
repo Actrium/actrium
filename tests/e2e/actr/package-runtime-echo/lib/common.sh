@@ -305,29 +305,22 @@ login_admin() {
     success "Admin API login succeeded"
 }
 
-warmup_issuer_key() {
-    section "🔑 Warming up Issuer signing key"
-    [ -n "${ADMIN_TOKEN:-}" ] || login_admin
-    local current_key_file="$RUN_DIR/issuer-current-key.json"
-    local rotate_file="$RUN_DIR/issuer-rotate-key.json"
+wait_for_signer() {
+    section "🔑 Waiting for Signer"
+    local health_file="$RUN_DIR/issuer-health.json"
     local attempt=0
 
     while [ $attempt -lt 60 ]; do
-        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/issuer/current-key" >"$current_key_file" 2>/dev/null \
-            && [ "$(jq -r '.status // "missing"' "$current_key_file" 2>/dev/null)" = "success" ]; then
-            success "Issuer signing key is ready"
+        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/issuer/health" >"$health_file" 2>/dev/null \
+            && [ "$(jq -r '.signer_service // "missing"' "$health_file" 2>/dev/null)" = "ok" ]; then
+            success "Signer is ready"
             return 0
         fi
-
-        curl -fsS -X POST \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-            "http://127.0.0.1:${HTTP_PORT}/admin/api/services/issuer/keys/rotate" \
-            >"$rotate_file" 2>/dev/null || true
         sleep 1
         attempt=$((attempt + 1))
     done
 
-    fail "Issuer signing key warmup timed out"
+    fail "Signer did not become ready"
 }
 
 ensure_realm() {

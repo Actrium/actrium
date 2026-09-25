@@ -1606,43 +1606,27 @@ async fn realm_management_requests_are_checked_before_any_state_changes() {
 
 #[tokio::test]
 #[serial]
-async fn issuer_does_not_expose_public_key_rotation() {
+async fn issuer_has_no_global_signing_key() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let base = harness.base_url();
 
-    let current_before: Value = client
-        .get(format!("{base}/issuer/current-key"))
-        .send()
-        .await
-        .expect("current-key request before rotate")
-        .json()
-        .await
-        .expect("parse current-key before rotate");
-    assert_eq!(current_before["status"], "success");
-    let key_before = current_before["key_id"]
-        .as_u64()
-        .expect("current key id should be u64");
-
-    // The unauthenticated public rotate endpoint must be gone.
+    // Credentials are signed with each Realm's issuer key; the old global
+    // rotating key and its endpoints are gone.
+    for path in ["/issuer/current-key", "/issuer/signing-pubkey"] {
+        let response = client
+            .get(format!("{base}{path}"))
+            .send()
+            .await
+            .expect("issuer key request");
+        assert_eq!(response.status(), 404, "{path} should no longer exist");
+    }
     let public_rotate = client
         .post(format!("{base}/issuer/rotate-key"))
         .send()
         .await
         .expect("public rotate-key request");
-    assert_eq!(
-        public_rotate.status(),
-        404,
-        "public /issuer/rotate-key should no longer exist"
-    );
-
-    // Unauthenticated calls to the admin rotate route are rejected.
-    let unauth = client
-        .post(format!("{base}/admin/api/services/issuer/keys/rotate"))
-        .send()
-        .await
-        .expect("unauthenticated admin rotate request");
-    assert_eq!(unauth.status(), 401, "admin rotate should require JWT");
+    assert_eq!(public_rotate.status(), 404);
 
     let login: Value = client
         .post(format!("{base}/admin/api/auth/login"))
@@ -1656,39 +1640,28 @@ async fn issuer_does_not_expose_public_key_rotation() {
     let token = login["token"]
         .as_str()
         .expect("admin login should return token");
-
-    let rotated: Value = client
+    let admin_rotate = client
         .post(format!("{base}/admin/api/services/issuer/keys/rotate"))
         .bearer_auth(token)
         .send()
         .await
-        .expect("rotate-key request")
-        .json()
-        .await
-        .expect("parse rotate-key response");
-    assert_eq!(rotated["status"], "success");
-    let key_after_rotate = rotated["new_key_id"]
-        .as_u64()
-        .expect("rotated key id should be u64");
-    assert_ne!(
-        key_after_rotate, key_before,
-        "rotate-key should switch to a new key id"
+        .expect("admin rotate request");
+    assert!(
+        matches!(admin_rotate.status().as_u16(), 404 | 405),
+        "admin rotate should no longer exist: {}",
+        admin_rotate.status()
     );
 
-    let current_after: Value = client
-        .get(format!("{base}/issuer/current-key"))
+    let health: Value = client
+        .get(format!("{base}/issuer/health"))
         .send()
         .await
-        .expect("current-key request after rotate")
+        .expect("issuer health")
         .json()
         .await
-        .expect("parse current-key after rotate");
-    assert_eq!(current_after["status"], "success");
-    assert_eq!(
-        current_after["key_id"].as_u64(),
-        Some(key_after_rotate),
-        "current-key should reflect rotated key"
-    );
+        .expect("issuer health json");
+    assert!(health.get("key_cache").is_none(), "{health}");
+    assert!(health["realm_keys"].is_u64(), "{health}");
 
     harness.shutdown();
 }

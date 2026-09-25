@@ -7,8 +7,7 @@ use actrix_proto::{
     CreateRealmResponse, DeleteConfigOverrideRequest, DeleteConfigOverrideResponse,
     GetConfigRequest, GetConfigResponse, GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest,
     GetRealmResponse, ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest,
-    ListRealmsResponse, RealmInfo, RetireRealmRequest, RetireRealmResponse,
-    RotateIssuerSigningKeyRequest, RotateIssuerSigningKeyResponse, ServiceStatus,
+    ListRealmsResponse, RealmInfo, RetireRealmRequest, RetireRealmResponse, ServiceStatus,
     SetConfigOverrideRequest, SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse,
     SystemMetrics, UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest,
     UpdateRealmResponse,
@@ -714,75 +713,6 @@ impl AdminApiService {
             remaining,
             tolerance_seconds: tolerance,
         })
-    }
-
-    /// Query Issuer keys from the SQLite database.
-    pub async fn get_issuer_keys_direct(&self) -> GrpcResult<Vec<KeyInfo>> {
-        let cfg = self.require_running_config()?;
-        let db_path = cfg.sqlite_path.join(issuer::ISSUER_KEY_STORAGE_FILE);
-        if !db_path.exists() {
-            return Ok(vec![]);
-        }
-
-        let url = format!("sqlite:{}?mode=ro", db_path.display());
-        let options = SqliteConnectOptions::from_str(&url)
-            .map_err(|e| Status::internal(format!("DB connect error: {e}")))?
-            .read_only(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .map_err(|e| Status::internal(format!("DB pool error: {e}")))?;
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let row = sqlx::query_as::<_, (i64, i32, i64, i64, i64)>(
-            "SELECT key_id, length(public_key) as pk_size, fetched_at, expires_at, tolerance_seconds FROM current_key WHERE id = 1",
-        )
-        .fetch_optional(&pool)
-        .await
-        .map_err(|e| Status::internal(format!("Query error: {e}")))?;
-
-        match row {
-            Some((key_id, pk_size, fetched_at, expires_at, tolerance_seconds)) => {
-                let is_expired = expires_at > 0 && expires_at < now;
-                Ok(vec![KeyInfo {
-                    key_id,
-                    pk_size,
-                    created_at: None,
-                    fetched_at: Some(fetched_at),
-                    expires_at,
-                    tolerance_seconds: Some(tolerance_seconds),
-                    is_expired,
-                }])
-            }
-            None => Ok(vec![]),
-        }
-    }
-
-    /// Rotate the Issuer signing key through the shared issuer.
-    ///
-    /// Requires the issuer to be attached via [`AdminApiService::with_aid_issuer`];
-    /// otherwise the node does not run Issuer and rotation is meaningless.
-    pub async fn rotate_issuer_signing_key_direct(&self) -> GrpcResult<u32> {
-        let issuer = self
-            .aid_issuer
-            .as_ref()
-            .ok_or_else(|| Status::failed_precondition("Issuer is not enabled on this node"))?;
-
-        platform::recording::info!("Issuer signing key rotation requested via control plane");
-        let new_key_id = issuer
-            .rotate_key()
-            .await
-            .map_err(|e| Status::internal(format!("Issuer key rotation failed: {e}")))?;
-        platform::recording::info!(
-            "Issuer signing key rotation completed, new key_id: {}",
-            new_key_id
-        );
-        Ok(new_key_id)
     }
 
     /// Get node info including metrics and service statuses.
@@ -1690,43 +1620,5 @@ impl NodeAdminService for AdminApiService {
                 deleted: false,
             })),
         }
-    }
-
-    async fn rotate_issuer_signing_key(
-        &self,
-        _request: Request<RotateIssuerSigningKeyRequest>,
-    ) -> GrpcResult<Response<RotateIssuerSigningKeyResponse>> {
-        self.rotate_issuer_signing_key_direct()
-            .await
-            .map(|new_key_id| {
-                Response::new(RotateIssuerSigningKeyResponse {
-                    success: true,
-                    error_message: None,
-                    new_key_id: Some(new_key_id),
-                })
-            })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn rotate_issuer_signing_key_without_issuer_fails_precondition() {
-        let service = AdminApiService::new(
-            "node-1",
-            "node-1",
-            "local",
-            "0.9.0",
-            ServiceCollector::new(),
-        )
-        .expect("create admin api service");
-
-        let status = service
-            .rotate_issuer_signing_key_direct()
-            .await
-            .expect_err("rotation without an attached issuer must fail");
-        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
     }
 }

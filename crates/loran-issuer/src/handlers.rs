@@ -38,8 +38,7 @@ impl IssuerState {
     }
 
     /// Build state around an issuer that is already shared with another
-    /// consumer (e.g. the control plane holding `Arc<AIdIssuer>` for
-    /// authenticated key rotation).
+    /// consumer (e.g. the control plane holding `Arc<AIdIssuer>`).
     pub fn from_shared_issuer(issuer: Arc<AIdIssuer>) -> Self {
         let idempotency = Arc::new(ControlAttemptStore::new(
             &issuer.config.renewal_token_secret,
@@ -67,8 +66,6 @@ pub fn create_router(state: IssuerState) -> Router {
         .route("/renew", post(renew_credential))
         .route("/reissue", post(reissue_credential))
         .route("/health", axum::routing::get(health_check))
-        .route("/current-key", axum::routing::get(get_current_key))
-        .route("/signing-pubkey", axum::routing::get(get_signing_pubkey))
         .layer(ip_rate_limiter())
         .with_state(state)
 }
@@ -727,10 +724,8 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
 
 /// Health check endpoint
 ///
-/// Performs the following checks:
-/// 1. Whether the database connection is healthy
-/// 2. Whether the Signer service is reachable
-/// 3. Whether the key cache is valid
+/// Checks the database and the Signer, which signs every credential with
+/// the Realm's issuer key, and reports how many Realm issuer keys are loaded.
 async fn health_check(State(state): State<IssuerState>) -> Json<Value> {
     let mut checks = json!({
         "service": "issuer",
@@ -759,72 +754,9 @@ async fn health_check(State(state): State<IssuerState>) -> Json<Value> {
         }
     };
     checks["signer_service"] = json!(signer_status);
-
-    // Check key cache status
-    let cache_status = match state.issuer.check_key_cache_health().await {
-        Ok(info) => json!({"status": "ok", "key_id": info.key_id, "expires_in": info.expires_in}),
-        Err(e) => {
-            platform::recording::error!("Key cache health check failed: {}", e);
-            checks["status"] = json!("degraded");
-            json!({"status": "failed", "error": e.to_string()})
-        }
-    };
-    checks["key_cache"] = cache_status;
+    checks["realm_keys"] = json!(state.issuer.realm_key_count().await);
 
     Json(checks)
-}
-
-/// Get the current key status (id, expiry, minting usability)
-///
-/// For monitoring and debugging. Reports `status: "expired"` once the key
-/// can no longer mint credentials: the endpoint used to
-/// keep answering `success` for an expired key, hiding an ongoing outage
-/// while every signaling handshake failed with 401.
-async fn get_current_key(State(state): State<IssuerState>) -> Json<Value> {
-    match state.issuer.get_current_key_status().await {
-        Ok(status) => {
-            let status_word = if status.usable { "success" } else { "expired" };
-            Json(json!({
-                "status": status_word,
-                "key_id": status.key_id,
-                "expires_at": status.expires_at,
-                "expires_in": status.expires_in,
-                "expired": !status.usable
-            }))
-        }
-        Err(e) => {
-            platform::recording::error!("Failed to get current key: {}", e);
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to get key: {}", e)
-            }))
-        }
-    }
-}
-
-/// Returns the Issuer's own rotating public key (key_id + base64 pubkey)
-///
-/// Actor credentials are signed with each Realm's issuer key, not this one;
-/// verifiers take that key from the Realm Profile or `GetSigningKey`.
-async fn get_signing_pubkey(State(state): State<IssuerState>) -> Json<Value> {
-    match state.issuer.get_current_signing_pubkey().await {
-        Ok((key_id, pubkey_bytes)) => {
-            use base64::Engine as _;
-            let pubkey_b64 = base64::engine::general_purpose::STANDARD.encode(&pubkey_bytes);
-            Json(json!({
-                "status": "success",
-                "key_id": key_id,
-                "pubkey": pubkey_b64
-            }))
-        }
-        Err(e) => {
-            platform::recording::error!("Failed to get signing pubkey: {}", e);
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to get signing pubkey: {}", e)
-            }))
-        }
-    }
 }
 
 /// Encode a RegisterResponse as protobuf bytes

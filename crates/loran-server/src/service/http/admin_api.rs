@@ -713,25 +713,6 @@ async fn cleanup_signer_keys(State(state): State<Arc<AdminApiState>>) -> impl In
     }
 }
 
-async fn get_issuer_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
-    match state.service.get_issuer_keys_direct().await {
-        Ok(keys) => (StatusCode::OK, Json(json!({"keys": keys}))).into_response(),
-        Err(status) => grpc_status_to_response(status),
-    }
-}
-
-/// Rotate the Issuer signing key through the shared issuer (JWT-protected).
-async fn rotate_issuer_key(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
-    match state.service.rotate_issuer_signing_key_direct().await {
-        Ok(new_key_id) => (
-            StatusCode::OK,
-            Json(json!({"status": "success", "new_key_id": new_key_id})),
-        )
-            .into_response(),
-        Err(status) => grpc_status_to_response(status),
-    }
-}
-
 // ── Platform detail endpoint ─────────────────────────────────────
 
 async fn get_platform_detail(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
@@ -974,11 +955,6 @@ pub fn build_admin_api_router(
         .route(
             "/admin/api/services/signer/keys/cleanup",
             post(cleanup_signer_keys),
-        )
-        .route("/admin/api/services/issuer/keys", get(get_issuer_keys))
-        .route(
-            "/admin/api/services/issuer/keys/rotate",
-            post(rotate_issuer_key),
         )
         .route("/admin/api/services/{name}", get(get_service_detail))
         .route("/admin/api/network/probe/{port}", get(probe_port))

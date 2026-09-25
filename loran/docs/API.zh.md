@@ -120,8 +120,9 @@ sign-profile | retire | reissue-request`。
 
 Actor credential 由该 Realm 的 issuer key（Signer 中的 `issuer:<realm>`，即 Realm Profile
 `issuer.keys` 列出的 key）签名，`key_id` 与注册响应的 `signing_key_id` 为该 key 的 Signer key id；
-Signaling 按 `(realm, key_id)` 查验证 key。`/issuer/current-key`、`/issuer/signing-pubkey` 与
-admin 的 Issuer key 轮换仍针对 Issuer 自身的轮换 key，该 key 不再签发 Actor credential。
+Signaling 按 `(realm, key_id)` 查验证 key。Issuer 没有全局签名 key；`GET /issuer/health` 报告
+数据库与 Signer 是否可用（`database`、`signer_service`）以及已加载的 Realm issuer key 数
+（`realm_keys`）。
 
 TURN credential 的 password 为 `base64(HMAC-SHA1(k, username))`，`k` 为该 Realm 的 TURN
 secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider>")`。
@@ -184,8 +185,7 @@ Publisher Profile 的 `keys` 须恰有一把 `active` 包签名 key，它成为�
 
 管理路由前缀：`/admin/api/publishers`，受 Admin JWT 保护：列表、状态、停用/恢复、删除、key
 历史与撤销（含当前 key 的紧急撤销，之后须登记新的 Publisher Profile 才能再发布）、包列表与撤销；
-没有由管理员登记 Publisher 的入口。Issuer key 管理为 `/admin/api/services/issuer/keys`（及
-`/rotate`）。包的长期真实性由 publisher key、signature 与 digest 决定，下载 origin/包 registry
+没有由管理员登记 Publisher 的入口。包的长期真实性由 publisher key、signature 与 digest 决定，下载 origin/包 registry
 不是信任根。
 
 ActorId 的字符串形式为：

@@ -312,14 +312,6 @@ export const api = {
       { method: "POST" },
     ),
 
-  getIssuerKeys: () =>
-    request<{ keys: KeyEntry[] }>("/services/issuer/keys"),
-
-  rotateIssuerKey: () =>
-    request<{ status: string; new_key_id: number }>("/services/issuer/keys/rotate", {
-      method: "POST",
-    }),
-
   getRegistry: () =>
     request<ConfigFieldDef[]>("/registry"),
 

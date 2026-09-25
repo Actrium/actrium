@@ -74,11 +74,11 @@ function IssuanceDiagram() {
       <rect x={panelX} y="10" width={panelW} height={aPanelH} rx="16" className="sgn-panel" stroke="#c7d2fe" />
       <rect x="26" y="24" width="188" height="24" rx="12" fill="#eef2ff" stroke="#a5b4fc" strokeWidth="1" />
       <text x="120" y="40" textAnchor="middle" className="sgn-chip-title" fill="#4338ca">A · Key Lifecycle</text>
-      <text x="228" y="40" className="sgn-chip-caption">background refresh</text>
+      <text x="228" y="40" className="sgn-chip-caption">one key per Realm</text>
 
       <rect x="36" y={nodeY} width="136" height={nodeH} rx="14" fill="#eef2ff" stroke="#6366f1" strokeWidth="1.6" filter="url(#sgn-shadow)" />
       <text x="104" y={nodeY + 24} textAnchor="middle" className="sgn-node-title" fill="#3730a3">Issuer</text>
-      <text x="104" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#6366f1">refresh controller</text>
+      <text x="104" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#6366f1">per-Realm issuer keys</text>
 
       <rect x="240" y={nodeY} width="154" height={nodeH} rx="14" fill="#fffbeb" stroke="#d97706" strokeWidth="1.6" filter="url(#sgn-shadow)" />
       <text x="317" y={nodeY + 24} textAnchor="middle" className="sgn-node-title" fill="#92400e">Signer</text>
@@ -90,8 +90,8 @@ function IssuanceDiagram() {
       <text x="317" y={storageY + 23} textAnchor="middle" fontSize="7.8" fill="#c2410c">private keys never leave process</text>
 
       <rect x="472" y={nodeY} width="146" height={nodeH} rx="14" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1.3" filter="url(#sgn-shadow)" />
-      <text x="545" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#334155">issuer_keys.db</text>
-      <text x="545" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#64748b">Issuer private verifier cache</text>
+      <text x="545" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#334155">Realm Profile</text>
+      <text x="545" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#64748b">lists it under issuer.keys</text>
 
       <rect x="642" y={nodeY} width="166" height={nodeH} rx="14" fill="#f0fdf4" stroke="#22c55e" strokeWidth="1.3" filter="url(#sgn-shadow)" />
       <text x="725" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#166534">signaling_key_cache.db</text>
@@ -99,23 +99,23 @@ function IssuanceDiagram() {
 
       <line x1="172" y1={nodeY + 24} x2="240" y2={nodeY + 24} stroke="#6366f1" strokeWidth="1.6" markerEnd="url(#sgn-ap)" />
       <rect x="146" y={nodeY - 18} width="120" height="16" rx="8" className="sgn-label-chip" />
-      <text x="206" y={nodeY - 6} textAnchor="middle" className="sgn-arrow-label" fill="#4338ca">GenerateSigningKey RPC</text>
+      <text x="206" y={nodeY - 6} textAnchor="middle" className="sgn-arrow-label" fill="#4338ca">EnsureNamedKey RPC</text>
 
       <line x1="240" y1={nodeY + 42} x2="172" y2={nodeY + 42} stroke="#10b981" strokeWidth="1.5" markerEnd="url(#sgn-ag)" />
       <rect x="142" y={nodeY + 52} width="128" height="16" rx="8" className="sgn-label-chip" />
-      <text x="206" y={nodeY + 64} textAnchor="middle" className="sgn-arrow-label" fill="#059669">key_id + verifier + expiry</text>
+      <text x="206" y={nodeY + 64} textAnchor="middle" className="sgn-arrow-label" fill="#059669">key_id + verifier</text>
 
       <line x1="394" y1={nodeY + 24} x2="472" y2={nodeY + 24} stroke="#94a3b8" strokeWidth="1.4" markerEnd="url(#sgn-ar)" />
       <rect x="373" y={nodeY - 18} width="120" height="16" rx="8" className="sgn-label-chip" />
-      <text x="433" y={nodeY - 6} textAnchor="middle" className="sgn-arrow-label" fill="#64748b">store active verifier</text>
+      <text x="433" y={nodeY - 6} textAnchor="middle" className="sgn-arrow-label" fill="#64748b">publish verifier</text>
 
       <path d={`M 394 ${nodeY + 46} Q 520 ${storageY + 26} 642 ${nodeY + 46}`} fill="none" stroke="#22c55e" strokeWidth="1.4" markerEnd="url(#sgn-ak)" />
       <rect x="444" y={storageY + 12} width="148" height="16" rx="8" className="sgn-label-chip" />
       <text x="518" y={storageY + 24} textAnchor="middle" className="sgn-arrow-label" fill="#16a34a">propagate to shared cache</text>
 
       <rect x="36" y={rotationY} width="828" height="40" rx="12" fill="#fff7ed" stroke="#fed7aa" strokeWidth="1" />
-      <text x="450" y={rotationY + 16} textAnchor="middle" fontSize="9.6" fontWeight="700" fill="#92400e">⟳ Background rotation</text>
-      <text x="450" y={rotationY + 29} textAnchor="middle" className="sgn-detail-text" fill="#b45309">Check every 10 min: rotate on near-expiry, or when periodic interval reached</text>
+      <text x="450" y={rotationY + 16} textAnchor="middle" fontSize="9.6" fontWeight="700" fill="#92400e">Retirement</text>
+      <text x="450" y={rotationY + 29} textAnchor="middle" className="sgn-detail-text" fill="#b45309">Named keys do not expire; retiring a Realm retires issuer:&lt;realm&gt;, which never signs again</text>
 
       {/* ── Sub-panel B: Per-Request Issuance ── */}
       <rect x={panelX} y={bPanelY} width={panelW} height={bPanelH} rx="16" className="sgn-panel" stroke="#a7f3d0" />
@@ -449,13 +449,13 @@ export function SignerService() {
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
             <p className="text-sm font-semibold text-gray-700">1. Signing boundary</p>
             <p className="mt-1.5 text-xs text-gray-500">
-              Issuer requests Signer to generate keys and sign payloads. Private Ed25519 keys stay inside Signer's configured storage backend.
+              Issuer asks Signer for each Realm's issuer key and to sign payloads with it. Private Ed25519 keys stay inside Signer's configured storage backend.
             </p>
           </div>
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
             <p className="text-sm font-semibold text-gray-700">2. Verifier distribution</p>
             <p className="mt-1.5 text-xs text-gray-500">
-              Issuer persists the verifier into local <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">issuer_keys.db</code> and shared <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">signaling_key_cache.db</code> so Signaling verifies locally.
+              Issuer persists each Realm's verifier into shared <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">signaling_key_cache.db</code> so Signaling verifies locally.
             </p>
           </div>
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
@@ -471,7 +471,7 @@ export function SignerService() {
         <div className="mt-10">
           <h3 style={sectionTitleStyle}>1. Credential Issuance</h3>
           <p className="mt-1" style={sectionSubtitleStyle}>
-            Issuer refreshes verifier material in the background, then signs each register flow through cluster-private RPC.
+            Issuer gets the Realm's issuer key once, then signs each register flow through cluster-private RPC.
           </p>
           <div className="mt-4 w-full rounded-[24px] border border-blue-100 bg-white p-4 sm:p-6 shadow-[0_8px_30px_rgba(15,23,42,0.04)]">
             <IssuanceDiagram />

@@ -663,7 +663,7 @@ build_workload_dll
 build_winui_app
 start_actrix
 login_admin
-warmup_issuer_key
+wait_for_signer
 ensure_realm
 provision_publisher_keychain
 
