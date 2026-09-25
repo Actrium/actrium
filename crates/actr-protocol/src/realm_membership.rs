@@ -610,14 +610,17 @@ impl RealmClientKeyFile {
     /// Unix. Android and iOS are left out: their app sandboxes, not file
     /// modes, keep other apps away.
     pub fn read(path: &std::path::Path) -> Result<(Self, SigningKey), MembershipError> {
+        use std::io::Read as _;
         let shown = path.display();
+        let cannot_read = |error: std::io::Error| {
+            invalid(format!("cannot read Realm client key {shown}: {error}"))
+        };
+        // The mode is checked on the opened file, so it is the file read.
+        let mut file = std::fs::File::open(path).map_err(cannot_read)?;
         #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
         {
             use std::os::unix::fs::PermissionsExt as _;
-            let mode = std::fs::metadata(path)
-                .map_err(|error| invalid(format!("cannot read Realm client key {shown}: {error}")))?
-                .permissions()
-                .mode();
+            let mode = file.metadata().map_err(cannot_read)?.permissions().mode();
             if mode & 0o077 != 0 {
                 return Err(invalid(format!(
                     "Realm client key {shown} is accessible by group or others (mode {:03o}); \
@@ -626,8 +629,8 @@ impl RealmClientKeyFile {
                 )));
             }
         }
-        let text = std::fs::read_to_string(path)
-            .map_err(|error| invalid(format!("cannot read Realm client key {shown}: {error}")))?;
+        let mut text = String::new();
+        file.read_to_string(&mut text).map_err(cannot_read)?;
         Self::parse(&text).map_err(|error| invalid(format!("Realm client key {shown}: {error}")))
     }
 }
