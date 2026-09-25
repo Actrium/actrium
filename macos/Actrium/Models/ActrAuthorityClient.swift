@@ -260,10 +260,13 @@ final class ActrAuthorityClient {
         }
         try ActrAuthorityTransport.validate(artifactURL)
 
+        // Stream with the declared size as the hard limit: one byte over and
+        // we reject before buffering more than the server claimed. The
+        // equality check below still catches under-delivery.
         let packageData = try await get(
             artifactURL,
             accept: "application/zip",
-            limit: Int(Self.packageLimit)
+            limit: Int(resolution.package.size)
         )
         let actualSize = UInt64(packageData.count)
         guard actualSize == resolution.package.size else {

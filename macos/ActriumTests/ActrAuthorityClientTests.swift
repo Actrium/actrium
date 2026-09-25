@@ -180,6 +180,76 @@ struct ActrAuthorityClientTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func rejectsPackageLargerThanDeclaredSize(advertiseLength: Bool) async throws {
+        let authority = "localhost:8081"
+        let declaredSize = 16
+        let oversizedPayload = Data(repeating: 0x41, count: 64)
+        let digest = SHA256.hash(data: oversizedPayload).map { String(format: "%02x", $0) }.joined()
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ActrMockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer {
+            ActrMockURLProtocol.handler = nil
+            session.invalidateAndCancel()
+        }
+        ActrMockURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            let body: Data
+            var headers = ["Content-Type": "application/json"]
+            switch url.path(percentEncoded: true) {
+            case "/.well-known/actr":
+                body = try JSONSerialization.data(withJSONObject: [
+                    "version": 1,
+                    "authority": "actr://\(authority)",
+                    "services": [[
+                        "rel": "packages",
+                        "href": "http://\(authority)/actr/packages",
+                        "protocol": "actr-packages/1",
+                    ]],
+                ])
+            case "/actr/packages/resolve":
+                body = try JSONSerialization.data(withJSONObject: [
+                    "version": 1,
+                    "target": "echo",
+                    "package": [
+                        "href": "http://\(authority)/actr/packages/artifact",
+                        "media_type": "application/zip",
+                        "sha256": digest,
+                        "size": declaredSize,
+                        "profile": "keel.guest/1",
+                    ],
+                ])
+            case "/actr/packages/artifact":
+                body = oversizedPayload
+                headers["Content-Type"] = "application/zip"
+                if advertiseLength {
+                    headers["Content-Length"] = String(oversizedPayload.count)
+                }
+            default:
+                throw URLError(.fileDoesNotExist)
+            }
+            let response = try #require(HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers
+            ))
+            return (response, body)
+        }
+
+        do {
+            _ = try await ActrAuthorityClient(session: session).resolveAndDownload(
+                try #require(URL(string: "actr://\(authority)/echo"))
+            )
+            Issue.record("Expected declared-size rejection during streaming")
+        } catch let error as ActrAuthorityError {
+            guard case .invalidResponse(let message) = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+            #expect(message == "response exceeded \(declaredSize) bytes")
+        }
+    }
+
     @Test(arguments: ["https://cdn.example/package", "http://[::1]:8081/package", "http://remote.example/package"])
     func validatesRedirectBeforeFollowing(destination: String) throws {
         let session = URLSession(configuration: .ephemeral)
