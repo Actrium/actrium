@@ -14,7 +14,8 @@
   两个 header，因此改用 `actr.v1`、`actr.id.<base64url>` 和
   `actr.credential.<base64url-protobuf>` 子协议项；服务器验证全部身份后只协商返回
   `actr.v1`，避免把凭证暴露为页面可读的已选子协议。
-- 当前实现：Publisher 管理和配置变更只允许系统管理员调用。其他域名的 Realm 由 Realm 签名
+- 当前实现：Publisher 由 Publisher Profile 签名 key 持有方以 `register_publisher` 登记，Publisher
+  管理（停用、撤销 key）和配置变更只允许系统管理员调用。其他域名的 Realm 由 Realm 签名
   key 持有方以 Realm 管理请求（`create_realm`、`publish_profile`、`reissue_admin_token`）创建、
   更新与退役，`POST` 到 Loran authority descriptor 中的 `realm-management` service link（Actr
   Realm Profile 第 8 节，见下文「Realm 管理请求」）；Realm Provider 域名下的 Realm 由系统管理员
@@ -85,9 +86,12 @@ descriptor，按 key pin 接受 `realm_signing_keys`（成员自签名；首次�
   返回 token；`status = retired` 的 Realm Profile 触发退役事务。
 - `reissue_admin_token`：`active` Realm 换发 Realm 管理 token（`{"realm", "admin_token"}`），
   旧 token 立即失效。
+- `register_publisher`（Actr Authority Discovery §4.5）：以 `publisher`（规范化 Publisher 域名）
+  取代 `realm`，由该域名 Publisher Profile 中 `active` 的 Publisher Profile 签名 key 签名。见下文
+  「Publisher Registry」。
 
 校验顺序：请求格式、`provider_id` 等于本 Realm Provider ID、有效期不超过 5 分钟且包含当前时间、
-`nonce` 为 1–128 字符、Realm 名规范且不在 Realm Provider 域名（及其子域名）下（否则 `403`，
+`nonce` 为 1–128 字符（`register_publisher` 之后的步骤见「Publisher Registry」）、Realm 名规范且不在 Realm Provider 域名（及其子域名）下（否则 `403`，
 这些 Realm 由运营者创建）；然后经 Realm discovery 中的抓取器取
 `https://<domain>/.well-known/actr`，按 key pin 接受其 `realm_signing_keys`，要求签名 key 为其中
 `active` key；最后才记录 `nonce`（有效期内重复即 `400`）。请求按来源地址限流，抓取按目标主机
@@ -165,15 +169,24 @@ v1 JSON 统一使用 publisher 术语：
 其他旧 JSON/query 名称不属于 v1 契约；内部 SQLite 列名和 crate 名不构成 API。Publisher
 key id 形如 `actr-pub-<16 hex>`（公钥 SHA-256 的前 16 个十六进制字符）。
 
-管理路由前缀：`/admin/api/publishers`，受 Admin JWT 保护。Issuer key 管理为
-`/admin/api/services/issuer/keys`（及 `/rotate`）。Publisher ID 是规范化 HTTPS
-域名。当前实现通过固定路径 `https://<publisher>/.well-known/actr/publisher.json` 的
-descriptor 证明控制权；目标契约中该路径移除（与 authority-discovery「`/.well-known/actr`
-下不定义子路径」冲突），改为读取 `https://<publisher>/.well-known/actr` authority
-descriptor 中带签名的可选成员 `publisher`（Actr Authority Discovery §4.5），并以 Publisher
-Profile 签名 key 签名的 `register_publisher` 请求（Actr 管理信封）登记，公开文档中不再放 challenge；当前
-descriptor 结构为预发布格式，与目标不兼容。包的长期真实性由 publisher key、signature
-与 digest 决定，下载 origin/包 registry 不是信任根。
+Publisher ID 是规范化 DNS 域名。Publisher 以 `register_publisher` 登记（见「Realm 管理请求」）：
+Loran 经同一抓取器取 `https://<publisher>/.well-known/actr`，读取其 `publisher` 成员（Publisher
+Profile，`docs/product/actrium-v1` 12 §2），要求 `domain` 等于该域名、在
+`profile_issued_at`–`profile_expires_at` 之内、由 `profile_signing_keys` 中 `active` 的 key 按 JCS
+签名；请求信封须由其中 `active` 的 key 签名；然后记录 `nonce`。首次接受的 Publisher Profile 固定
+（pin）其 `profile_signing_keys`；此后须由已 pin 的 `active` key 签名、只列已 pin 的 key、不让
+`retired` key 重新 `active`、`sequence` 只增（相同 Publisher Profile 重复登记不变），轮换链尚未支持。
+Publisher Profile 的 `keys` 须恰有一把 `active` 包签名 key，它成为该 Publisher 的当前 key（key id
+按上文规则由公钥算出，`not_after` 为其发布期限，缺省一年）；被替换的 key 归档为 retired，仍可验证
+旧包，用过的 key 不能再成为当前 key。响应 `{"publisher", "status", "sequence"}`；`400` 请求无效，
+`403` Publisher Profile 或签名不被接受，`409` Publisher 已停用或并发修改，`503` 取不到 descriptor。
+公开文档中不放 challenge，也没有 `/.well-known/actr/publisher.json`。
+
+管理路由前缀：`/admin/api/publishers`，受 Admin JWT 保护：列表、状态、停用/恢复、删除、key
+历史与撤销（含当前 key 的紧急撤销，之后须登记新的 Publisher Profile 才能再发布）、包列表与撤销；
+没有由管理员登记 Publisher 的入口。Issuer key 管理为 `/admin/api/services/issuer/keys`（及
+`/rotate`）。包的长期真实性由 publisher key、signature 与 digest 决定，下载 origin/包 registry
+不是信任根。
 
 ActorId 的字符串形式为：
 
@@ -234,10 +247,11 @@ Realm issuer key。
 
 ## Schema migration
 
-当前 schema 为 v5（`PRAGMA user_version = 5`）：v3 在 v2 上新增 Issuer 幂等日志表
+当前 schema 为 v6（`PRAGMA user_version = 6`）：v3 在 v2 上新增 Issuer 幂等日志表
 `issuer_control_attempt`；v4 以 Realm 名为键（`realm.name` 为主键，其余表以 `realm` 列引用，
 身份登记按 `(realm, serial_number)`）；v5 去掉单 Realm 约束，`realm.status` 改为
-`pending | active | retired`，并新增 `realm_domain`、`realm_profile`、`realm_mgmt_nonce`。
+`pending | active | retired`，并新增 `realm_domain`、`realm_profile`、`realm_mgmt_nonce`；v6 删除
+`publisher_challenge`，`publisher.descriptor_json` 改为 `profile_json`（已接受的 Publisher Profile）。
 运行时只自动初始化空数据库；其他版本拒绝启动。v2 之后的升级都不提供迁移工具，需停机后重建数据库。下面两个历史工具只覆盖到 v2（未版本化库先 v1，再 v2）：
 
 ```bash

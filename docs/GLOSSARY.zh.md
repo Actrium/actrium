@@ -196,7 +196,6 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | 术语 | 定义 |
 | --- | --- |
 | Realm descriptor | 当前实现在 `/.well-known/actr/realm.json` 发布的单 Realm 非秘密元数据。目标契约中由 Realm Profile 取代；该路径与 authority discovery「`/.well-known/actr` 下不定义子路径」冲突，将被移除。 |
-| Publisher descriptor | 当前实现中 Publisher Registry 读取的 `/.well-known/actr/publisher.json`：单 key、未签名的预发布结构，与目标契约不兼容；目标契约中由 Publisher Profile 取代，将被移除。 |
 
 ## 历史名称对照
 

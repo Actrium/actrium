@@ -408,7 +408,7 @@ v1 的连接 ACL 只作用于同一 Realm 内的 Actor 类型。ACL 数据模型
 
 ## 7. Publisher 发现
 
-目标契约：Publisher Profile 是 `https://<publisher>/.well-known/actr` 中带签名的可选成员
+Publisher Profile 是 `https://<publisher>/.well-known/actr` 中带签名的可选成员
 `publisher`，schema 为 `actr.publisher/v1`，字段使用 snake_case，内容以产品规范
 （`docs/product/actrium-v1` 05 §2.2、12 §2）为准：`domain` 必须等于 descriptor
 `authority` 的主机名，Publisher Profile 签名 key 与 package signing key 分离，带轮换链、
@@ -423,10 +423,11 @@ publisher 托管包）。它复用 3.2 的 Actr 管理信封：以 `publisher` �
 已接受的 Publisher Profile 与 `sequence`；key 轮换通过发布新 Publisher Profile 完成，Loran 周期刷新后归档
 旧 key、启用新 key。旧 key 默认只用于历史包验签；泄露时由实例运营者显式 revoke。
 
-当前实现：Publisher Registry 从 `https://<publisher>/.well-known/actr/publisher.json`
-读取一个单 key、含 `registries`/`origins`/`verification_challenge`、不签名的 descriptor，
-禁用重定向。这是预发布结构，与目标契约不兼容，目标移除（见第 9 节）；目标 schema 名
-`actr.publisher/v1` 由新结构占用。
+当前实现：`register_publisher` 与 Realm 管理请求共用 `POST /actr/realm-management`。首个
+Publisher Profile 固定其 `profile_signing_keys`；之后只接受由已固定 `active` key 签名、只列已固定
+key、`sequence` 更高的 Publisher Profile（轮换链尚未支持）。Publisher Profile 须恰有一把
+`active` 包签名 key，作为该 publisher 的当前 key；被替换的 key 归档为 retired。Loran 不周期刷新
+Publisher Profile，key 轮换由 publisher 再次发送 `register_publisher` 完成（见第 9 节）。
 
 程序身份写作 `publisher/program@version`。实例运行哪个包由 Realm Profile 的 `package`
 （下载地址与 SHA-256）给出，包可以放在任何 HTTPS 位置；消费端必须核对 SHA-256，并验证
@@ -438,11 +439,12 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议和�
 
 ## 8. 数据与升级
 
-当前 schema v5 使用 SQLite `PRAGMA user_version = 5`。Loran 遇到旧版或未知 schema
+当前 schema v6 使用 SQLite `PRAGMA user_version = 6`。Loran 遇到旧版或未知 schema
 直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3（新增
 `issuer_control_attempt`）、v3 → v4（以 Realm 名取代数值 Realm id）与 v4 → v5（去掉单
 Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `realm_domain`、
-`realm_profile`、`realm_mgmt_nonce`）都没有离线迁移，需停机后重建数据库。
+`realm_profile`、`realm_mgmt_nonce`）与 v5 → v6（删除 `publisher_challenge`，
+`publisher.descriptor_json` 改为 `profile_json`）都没有离线迁移，需停机后重建数据库。
 
 v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主键，`actoracl`、
 `pending_registration`、`issued_actor_identity`、`revoked_actor` 以 `realm` 列引用它，后三者按
@@ -498,8 +500,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - 已实现其他域名的 Realm 管理请求 `create_realm`、`publish_profile`、`reissue_admin_token`
   （`provider_id` 绑定、5 分钟有效期、nonce 防重放、`(realm, 请求方)` 幂等、待签 Realm Profile）、
   Realm 管理 token（只存哈希、一次性返回、重签即失效、作用域一个 Realm、越权 `404`）与
-  `[realm]` 按域名配额、`pending` TTL 清理。尚未实现：`register_publisher`；Realm 管理 token
-  目前只能查看 Realm 与 Realm Profile、轮换 secret（Realm 列表、连接 ACL、membership 待实现）；
+  `[realm]` 按域名配额、`pending` TTL 清理。尚未实现：Realm 管理 token 目前只能查看 Realm 与 Realm Profile、轮换 secret（Realm 列表、连接 ACL、membership 待实现）；
 - 已实现运行时分区：Actor credential 由该 Realm 的 `issuer:<realm>` key 签发（随首份 Realm
   Profile 草稿或运营者创建 `active` Realm 时生成，缺失时签发前补建），验证 key 按
   `(realm, key_id)` 缓存；signaling 连接绑定其身份的 Realm，source/target 不在该 Realm 的
@@ -510,10 +511,10 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   轮换入口仍在，已不签发 Actor credential；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
-- Publisher 验证改为读取 authority descriptor 的 `publisher` 成员并按第 7 节的签名
-  注册请求登记，移除 `/.well-known/actr/publisher.json`（Publisher Registry 当前
-  实现的 `PUBLISHER_DESCRIPTOR_PATH`）与 `verification_challenge`，重定向处理与 Realm 相同
-  （逐跳 SSRF 检查）；
+- 已实现 `register_publisher`：读取 authority descriptor 的 `publisher` 成员（第 7 节），
+  `/.well-known/actr/publisher.json` 与 challenge 已移除。尚未实现：Publisher Profile 签名 key 的
+  轮换链与身份变化的重新确认、Publisher Profile 的周期刷新（过期或 key 移除后不自动停用该
+  publisher）；
 - 按 Realm 的连接、注册、消息与 TURN 配额；TURN 认证不检查 Realm 是否 `active`（TURN
   credential 随 Actor credential 过期）；
 - 控制面与本契约的剩余差异：Realm Provider 域名下的 Realm 由运营者经 admin API 代办创建（等同

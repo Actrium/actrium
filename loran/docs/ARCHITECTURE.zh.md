@@ -44,10 +44,8 @@ Realm Provider、audience 与 endpoint scope。
   程序类型由注册与 Actor credential 携带。Actor credential 的 issuer 即 Realm 名。
 - Service 通过 renewal possession proof 在重启后保留 ID。
 - 程序身份规范写作 `publisher/program@version`。
-- Publisher 是规范化 DNS 域名。当前实现通过
-  `https://<publisher>/.well-known/actr/publisher.json` 发现；目标契约改为 authority
-  descriptor `https://<publisher>/.well-known/actr` 中带签名的可选成员 `publisher`，
-  旧路径移除。
+- Publisher 是规范化 DNS 域名，其 Publisher Profile 是 authority descriptor
+  `https://<publisher>/.well-known/actr` 中带签名的可选成员 `publisher`。
 - HTTPS 证明域名控制与安全传输；长期包真实性由 publisher key、signature、
   digest 和 revocation 状态决定。
 - Signaling 只做已认证 Actor 的 rendezvous，不签发身份，也不是信任根。
@@ -112,14 +110,12 @@ Workspace 不属于 Loran。一个 Service 至多绑定一个 Workspace，同一
 
 ### Publisher 与包
 
-1. 当前实现：管理员录入 Publisher 域名，Publisher Registry 生成短期 challenge，Publisher 在固定路径
-   `/.well-known/actr/publisher.json` 发布带 challenge 的 descriptor。目标契约：Publisher
-   在 authority descriptor `/.well-known/actr` 的 `publisher` 成员发布签名 Publisher
+1. Publisher 在 authority descriptor `/.well-known/actr` 的 `publisher` 成员发布签名 Publisher
    Profile，并以 Publisher Profile 签名 key 签名的 `register_publisher` 请求（Actr 管理信封）
-   登记，不再使用 challenge。
-2. Publisher Registry 以 SSRF-safe、限大小的请求验证域名和 key。当前实现不跟随重定向；目标契约与
-   Realm 相同，按 authority-discovery 跟随重定向（最多 5 次、每跳 HTTPS、始终用原域名
-   验证 `authority` 绑定），每一跳执行 SSRF 检查与 DNS pinning。
+   在 Realm Provider 登记；公开文档中不放 challenge。首次接受的 Publisher Profile 固定其签名
+   key，之后只接受由已固定 key 签名、`sequence` 更高的 Publisher Profile（包签名 key 轮换即由此完成）。
+2. Loran 取 descriptor 的方式与 Realm 相同：按 authority-discovery 跟随重定向（最多 5 次、每跳
+   HTTPS、始终用原域名验证 `authority` 绑定），每一跳执行 SSRF 检查与 DNS pinning，限长 64 KiB。
 3. 包发布使用一次性 nonce 与 Publisher 签名。
 4. 消费端从允许的 HTTPS origin 下载后验证 digest 和签名；origin 不是信任根。
 

@@ -86,9 +86,9 @@ database 文件。恢复演练应验证：
   Provider 时除外）；Loran 周期性重新获取 `realm_signing_keys`，Realm Profile 的签名 key 被
   移除时丢弃该 Realm Profile，找不到有效 Realm Profile 的 Realm 会被挂起；新 Realm Profile
   不再以 `active` 列出该 Realm 的 issuer key 时，Realm 同样被挂起，不再签发 Actor credential。
-- Publisher key：当前实现先由 Publisher Registry 发 challenge，再通过 Publisher HTTPS
-  descriptor 证明新 key；目标契约中由 Publisher 发布新的签名 Publisher Profile，Publisher
-  Registry 周期刷新后启用；正常退休 key 仍可验历史包，泄露 key 必须显式 revoke。
+- Publisher key：Publisher 发布新的签名 Publisher Profile（`sequence` 更高），再以
+  `register_publisher` 登记后启用（目标契约：Publisher Registry 周期刷新后启用）；正常退休 key
+  仍可验历史包，泄露 key 必须显式 revoke。
 - TURN secret：轮换会影响未过期凭证，需协调 Issuer 与 TURN 并观察 allocation。目标
   契约下它是 Realm Provider 主密钥，轮换会同时影响全部 Realm 的派生 secret。
 - renewal secret：直接替换会破坏稳定 ActorId 恢复，必须按迁移方案处理。

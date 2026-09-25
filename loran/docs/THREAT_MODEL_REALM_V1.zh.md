@@ -48,7 +48,7 @@ TLS/mTLS；Management 即使共享 listener 也必须经过独立认证中间件
 | 无界队列/任务 DoS | signaling bounded channel、正确分钟配额、1 MiB WS 限制；STUN inline backpressure |
 | TURN cache 延长过期或串 secret | cache 属于 authenticator 实例，key 使用完整 username+realm，命中前检查 expiry |
 | TURN relay 端口错误/泄露 | 配置验证 1024..65535 且 start<=end；宣告地址与实际 relay 范围分离 |
-| Publisher 验证 SSRF/DNS rebinding | 当前实现：固定 HTTPS path `/.well-known/actr/publisher.json`、禁 redirect、响应限长、拒绝非公网 IP、DNS pinning；目标契约：读取 authority descriptor `/.well-known/actr` 的 `publisher` 成员，重定向处理与 Realm 相同（最多 5 次、每跳 HTTPS、逐跳 SSRF 检查与 DNS pinning、始终校验原 `authority` 绑定），有效性以 `publisher` 成员签名为准；注册使用 Publisher Profile 签名 key 签名的 `register_publisher` 请求（Actr 管理信封），公开文档中不放 challenge |
+| Publisher 验证 SSRF/DNS rebinding | 读取 authority descriptor `/.well-known/actr` 的 `publisher` 成员，重定向处理与 Realm 相同（最多 5 次、每跳 HTTPS、逐跳 SSRF 检查与 DNS pinning、64 KiB、始终校验原 `authority` 绑定），有效性以 `publisher` 成员签名为准；注册使用 Publisher Profile 签名 key 签名的 `register_publisher` 请求（Actr 管理信封，`provider_id`、5 分钟有效期、nonce），公开文档中不放 challenge；首个 Publisher Profile 固定签名 key，之后 `sequence` 只增 |
 | 连接 ACL 更新中途失败产生半策略 | 目标 Actor type 的连接 ACL 在单一事务中整体替换；无规则默认拒绝 |
 | 连接 ACL wildcard 覆盖不确定 | 精确 source Realm 优先于 wildcard；策略坐标唯一 |
 | Guest workload 自行扩权 | Realm registration secret 只交给 Realm 管理员/可信 Actr Host；Guest 不得接触该能力 |
