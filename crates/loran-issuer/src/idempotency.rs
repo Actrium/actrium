@@ -795,6 +795,69 @@ pub(crate) mod tests {
         ));
     }
 
+    /// Retirement deletes the Realm's renewal tokens; a renewal or reissue
+    /// prepared before it must not commit (or hand out a credential) after it.
+    #[tokio::test]
+    async fn work_prepared_before_a_realm_retired_does_not_commit() {
+        setup_db().await;
+        let realm = "attempt-raced@example.com";
+        platform::realm::Realm::create(realm.to_string(), "secret-hash".to_string())
+            .await
+            .unwrap();
+        let actor = ActrId {
+            realm: realm.to_string(),
+            serial_number: 9,
+        };
+        let secret = [7u8; 32];
+        let token = [5u8; 32];
+        let now = crate::renewal::now_secs();
+        crate::renewal::insert_renewal_token(&actor, &crate::renewal::hash_token(&token), now + 60)
+            .await
+            .unwrap();
+        let store = ControlAttemptStore::new(&secret);
+
+        let renew = acquired(
+            store
+                .claim(Operation::Renew, &[1u8; 16], &actor, b"renew")
+                .await
+                .unwrap(),
+        );
+        let rotation =
+            crate::renewal::prepare_renewal_token_rotation(&actor, &token, &secret, 3600, 86_400)
+                .await
+                .unwrap();
+        let reissue = acquired(
+            store
+                .claim(Operation::Reissue, &[2u8; 16], &actor, b"reissue")
+                .await
+                .unwrap(),
+        );
+        let successor = crate::renewal::derive_successor_token(&secret, &token, &actor, now + 60);
+        let prepared = PreparedReissue {
+            register_ok: register_response::RegisterOk::default(),
+            successor_hash: crate::renewal::hash_token(&successor),
+            successor_token: successor,
+            successor_expires_at: now + 86_400,
+            proof_hash: crate::renewal::hash_token(&token),
+            binding_expires_at: now + 60,
+            publisher_nonce: None,
+            target: None,
+        };
+
+        platform::realm::Realm::retire(realm).await.unwrap();
+
+        assert!(matches!(
+            store
+                .complete_renewal(&renew, &actor, &rotation, b"response", now + 60)
+                .await,
+            Err(AttemptError::TokenRejected)
+        ));
+        assert!(matches!(
+            store.complete_reissue(&reissue, &actor, prepared).await,
+            Err(AttemptError::PossessionNotProven)
+        ));
+    }
+
     #[tokio::test]
     async fn released_attempt_can_be_retried_and_expired_response_is_gone() {
         setup_db().await;
