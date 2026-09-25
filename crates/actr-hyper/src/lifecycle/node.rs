@@ -82,14 +82,32 @@ fn error_response_for_wire(error: &ActrError) -> actr_protocol::ErrorResponse {
 ///
 /// Each peer also carries a count of its open connections (inbound WebSocket
 /// connections and the WebRTC connection together); the entry is dropped
-/// when the last one closes.
+/// when the last one closes, unless its type was recorded within
+/// [`PEER_TYPE_SETUP_SECS`]: Signaling relays a connection's type before the
+/// connection is counted, possibly while the peer's previous connection is
+/// still closing. Such an entry, and one whose connection never opens, is
+/// dropped by a later [`PeerTypes::record`] once that time has passed.
 #[derive(Clone, Default)]
 pub(crate) struct PeerTypes(Arc<std::sync::Mutex<HashMap<ActrId, PeerTypeEntry>>>);
+
+/// How long a recorded type waits for its connection.
+pub(crate) const PEER_TYPE_SETUP_SECS: u64 = 60;
 
 #[derive(Default)]
 struct PeerTypeEntry {
     actor_type: Option<ActrType>,
     connections: usize,
+    recorded_at: Option<tokio::time::Instant>,
+}
+
+impl PeerTypeEntry {
+    /// No open connection and no connection being set up.
+    fn unused(&self) -> bool {
+        self.connections == 0
+            && self.recorded_at.is_none_or(|recorded_at| {
+                recorded_at.elapsed() >= Duration::from_secs(PEER_TYPE_SETUP_SECS)
+            })
+    }
 }
 
 impl PeerTypes {
@@ -101,7 +119,11 @@ impl PeerTypes {
 
     /// Record the verified type of `peer`.
     pub(crate) fn record(&self, peer: ActrId, actor_type: ActrType) {
-        self.entries().entry(peer).or_default().actor_type = Some(actor_type);
+        let mut entries = self.entries();
+        entries.retain(|_, entry| !entry.unused());
+        let entry = entries.entry(peer).or_default();
+        entry.actor_type = Some(actor_type);
+        entry.recorded_at = Some(tokio::time::Instant::now());
     }
 
     /// The verified type of `peer`, if known.
@@ -113,15 +135,19 @@ impl PeerTypes {
 
     /// A connection to `peer` opened.
     pub(crate) fn connection_opened(&self, peer: &ActrId) {
-        self.entries().entry(peer.clone()).or_default().connections += 1;
+        let mut entries = self.entries();
+        let entry = entries.entry(peer.clone()).or_default();
+        entry.connections += 1;
+        entry.recorded_at = None;
     }
 
-    /// A connection to `peer` closed; the last one drops the entry.
+    /// A connection to `peer` closed; the last one drops the entry unless a
+    /// connection is being set up.
     pub(crate) fn connection_closed(&self, peer: &ActrId) {
         let mut entries = self.entries();
         if let Some(entry) = entries.get_mut(peer) {
             entry.connections = entry.connections.saturating_sub(1);
-            if entry.connections == 0 {
+            if entry.unused() {
                 entries.remove(peer);
             }
         }

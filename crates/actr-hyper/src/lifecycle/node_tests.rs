@@ -2903,6 +2903,36 @@ async fn a_recovered_message_is_judged_by_its_recorded_sender_type() {
     );
 }
 
+/// A reconnecting peer's new offer is relayed (recording its type) while its
+/// old WebRTC connection is still closing; the new connection is counted only
+/// after the old one is dropped. The type recorded for the new connection
+/// survives the old one's close, and a type whose connection never opens is
+/// dropped later.
+#[tokio::test(start_paused = true)]
+async fn a_type_recorded_while_the_old_connection_closes_is_kept() {
+    let peer_types = PeerTypes::default();
+    let peer = acl_peer(3);
+
+    peer_types.connection_opened(&peer); // the old connection
+    peer_types.record(peer.clone(), acl_client_type()); // the new offer
+    peer_types.connection_closed(&peer); // the old connection is dropped
+    assert_eq!(peer_types.get(&peer), Some(acl_client_type()));
+
+    peer_types.connection_opened(&peer); // the new connection
+    assert_eq!(peer_types.get(&peer), Some(acl_client_type()));
+    peer_types.connection_closed(&peer);
+    assert_eq!(peer_types.get(&peer), None);
+
+    // A relayed type whose connection never opens.
+    peer_types.record(peer.clone(), acl_client_type());
+    tokio::time::advance(Duration::from_secs(PEER_TYPE_SETUP_SECS - 1)).await;
+    peer_types.record(acl_peer(4), acl_client_type());
+    assert_eq!(peer_types.get(&peer), Some(acl_client_type()));
+    tokio::time::advance(Duration::from_secs(1)).await;
+    peer_types.record(acl_peer(4), acl_client_type());
+    assert_eq!(peer_types.get(&peer), None);
+}
+
 #[cfg(feature = "webrtc-v020")]
 #[tokio::test]
 async fn a_peer_type_lasts_until_its_last_connection_closes() {
