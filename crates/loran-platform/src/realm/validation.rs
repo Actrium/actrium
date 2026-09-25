@@ -39,16 +39,33 @@ impl Realm {
     /// Returns Ok(Realm) if the realm is usable.
     /// Returns Err(RealmValidationError) if the realm is unavailable or a database error occurred.
     pub async fn validate_realm(name: &str) -> Result<Realm, RealmValidationError> {
-        let unavailable = |reason: String| RealmValidationError::RealmUnavailable {
-            realm: name.to_string(),
-            reason,
-        };
-        let realm = Self::get(name)
+        let mut conn = crate::storage::db::get_database()
+            .get_pool()
+            .acquire()
             .await
             .map_err(|e| RealmValidationError::StoreError {
                 realm: name.to_string(),
                 message: format!("Failed to query realm: {e}"),
             })?;
+        Self::validate_realm_on(&mut conn, name).await
+    }
+
+    /// [`Realm::validate_realm`] on `conn`, e.g. inside a transaction.
+    pub async fn validate_realm_on(
+        conn: &mut sqlx::SqliteConnection,
+        name: &str,
+    ) -> Result<Realm, RealmValidationError> {
+        let unavailable = |reason: String| RealmValidationError::RealmUnavailable {
+            realm: name.to_string(),
+            reason,
+        };
+        let realm =
+            Self::get_on(conn, name)
+                .await
+                .map_err(|e| RealmValidationError::StoreError {
+                    realm: name.to_string(),
+                    message: format!("Failed to query realm: {e}"),
+                })?;
 
         let Some(realm) = realm else {
             return Err(unavailable(format!("Realm {name} not found")));

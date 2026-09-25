@@ -474,6 +474,11 @@ async fn reissue_credential(
             .await
         {
             Ok(cached) => (protobuf_response(cached.status, cached.body), true),
+            Err(AttemptError::Refused(err)) => {
+                release_attempt(&state, &lease).await;
+                let (code, message) = aid_error_to_response(err);
+                (register_error(code, message), false)
+            }
             Err(error) => {
                 release_attempt(&state, &lease).await;
                 (attempt_error_response(error, register_error_body), false)
@@ -509,10 +514,11 @@ async fn reissue_credential(
 ///
 /// Processing flow:
 /// 1. Decode `RenewCredentialRequest` and claim its attempt.
-/// 2. Validate the token length and the realm state.
-/// 3. Validate the renewal token and prepare its rotation.
-/// 4. Re-issue access and TURN credentials for the original ActrId.
-/// 5. Commit the rotation together with the response.
+/// 2. Validate the token length.
+/// 3. Validate the renewal token (read-only) and prepare its rotation.
+/// 4. Check the Realm state; an unauthenticated caller never learns it.
+/// 5. Re-issue access and TURN credentials for the original ActrId.
+/// 6. Commit the rotation together with the response, rechecking the actor.
 async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Response {
     let start = std::time::Instant::now();
 
@@ -552,7 +558,7 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
         }
     };
 
-    // 2. Validate token length (32 bytes expected) and realm state.
+    // 2. Validate token length (32 bytes expected).
     if request.renewal_token.len() != 32 {
         platform::recording::warn!(
             "Renewal token has invalid length: {} bytes",
@@ -573,19 +579,6 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
         "Received renewal request for actor {}",
         actor_id.to_string_repr()
     );
-
-    if let Err(validation_err) = RealmEntity::validate_realm(&actor_id.realm).await {
-        let (code, message) = RealmEntity::map_validation_error(validation_err);
-        let body = renew_error_body(code, format!("Realm validation failed: {message}"));
-        return complete_attempt(
-            &state,
-            &lease,
-            status_for_error_code(code),
-            body,
-            renew_error_body,
-        )
-        .await;
-    }
 
     // 3. Validate the token and prepare its rotation; nothing is written yet.
     let issuer = &state.issuer;
@@ -625,7 +618,21 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
         }
     };
 
-    // 4. Re-issue access and TURN credentials for the original ActrId. /renew
+    // 4. Only an authenticated caller learns the Realm state.
+    if let Err(validation_err) = RealmEntity::validate_realm(&actor_id.realm).await {
+        let (code, message) = RealmEntity::map_validation_error(validation_err);
+        let body = renew_error_body(code, format!("Realm validation failed: {message}"));
+        return complete_attempt(
+            &state,
+            &lease,
+            status_for_error_code(code),
+            body,
+            renew_error_body,
+        )
+        .await;
+    }
+
+    // 5. Re-issue access and TURN credentials for the original ActrId. /renew
     // carries no package target, so recheck the one recorded for the actor.
     let target = AIdIssuer::issued_target(actor_id).await;
     let mut register_ok = match issuer
@@ -645,7 +652,7 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
         }
     };
 
-    // 5. Attach the renewal token and commit it with the response.
+    // 6. Attach the renewal token and commit it with the response.
     let (token, expires_at) = match &prepared.outcome {
         crate::renewal::RotationOutcome::Unchanged { token, expires_at }
         | crate::renewal::RotationOutcome::Rotated { token, expires_at } => {
@@ -665,15 +672,26 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
     .encode_to_vec();
     if let Err(error) = state
         .idempotency
-        .complete_renewal(&lease, actor_id, &prepared, &body, response_expires_at)
+        .complete_renewal(
+            &lease,
+            actor_id,
+            target.as_deref(),
+            &prepared,
+            &body,
+            response_expires_at,
+        )
         .await
     {
-        platform::recording::error!(
+        platform::recording::warn!(
             "Failed to commit credential renewal for actor {}: {}",
             actor_id.to_string_repr(),
             error
         );
         release_attempt(&state, &lease).await;
+        if let AttemptError::Refused(err) = error {
+            let (code, message) = aid_error_to_response(err);
+            return renew_error(code, message);
+        }
         return attempt_error_response(error, renew_error_body);
     }
 
@@ -863,6 +881,7 @@ fn attempt_error_response(error: AttemptError, error_body: fn(u32, String) -> Ve
             "publisher authorization nonce already consumed",
             None,
         ),
+        AttemptError::Refused(_) => (StatusCode::FORBIDDEN, "credential refused", None),
         AttemptError::Store(_) | AttemptError::Crypto(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal control-attempt store error",

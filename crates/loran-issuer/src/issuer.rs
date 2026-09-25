@@ -393,7 +393,11 @@ impl AIdIssuer {
             .verify_actor_possession(actor_id, renewal_proof)
             .await?;
         // The requested type must be the one this identity was issued for.
-        if Self::issued_actor(actor_id).await?.0 != request.actr_type {
+        if Self::issued_actor(&mut *Self::db_connection().await?, actor_id)
+            .await?
+            .0
+            != request.actr_type
+        {
             platform::recording::warn!(
                 "Credential reissue type mismatch: actor={}, requested_type={}",
                 actor_id.to_string_repr(),
@@ -1438,15 +1442,26 @@ impl AIdIssuer {
             .map(|_| ())
     }
 
+    async fn db_connection() -> Result<sqlx::pool::PoolConnection<sqlx::Sqlite>, AidError> {
+        platform::storage::db::get_database()
+            .get_pool()
+            .acquire()
+            .await
+            .map_err(|e| AidError::GenerationFailed(format!("database connection failed: {e}")))
+    }
+
     /// Load the Actor type and auth mode recorded when `actor_id` was issued.
-    async fn issued_actor(actor_id: &ActrId) -> Result<(ActrType, Option<i32>), AidError> {
+    async fn issued_actor(
+        conn: &mut sqlx::SqliteConnection,
+        actor_id: &ActrId,
+    ) -> Result<(ActrType, Option<i32>), AidError> {
         let row: Option<(String, Option<i32>)> = sqlx::query_as(
             "SELECT actor_type, auth_mode FROM issued_actor_identity
              WHERE realm = ? AND serial_number = ?",
         )
         .bind(&actor_id.realm)
         .bind(actor_id.serial_number as i64)
-        .fetch_optional(platform::storage::db::get_database().get_pool())
+        .fetch_optional(conn)
         .await
         .map_err(|e| AidError::GenerationFailed(format!("actor identity lookup failed: {e}")))?;
         let Some((actor_type, auth_mode)) = row else {
@@ -1481,9 +1496,21 @@ impl AIdIssuer {
         actor_id: &ActrId,
         target: Option<&str>,
     ) -> Result<ActrType, AidError> {
+        Self::recheck_actor_on(&mut *Self::db_connection().await?, actor_id, target).await
+    }
+
+    /// [`AIdIssuer::recheck_existing_actor`] on `conn`. The renew and reissue
+    /// commits run it inside their transaction, so a revocation, Realm,
+    /// package or publisher change that lands after the first check still
+    /// stops the credential.
+    pub(crate) async fn recheck_actor_on(
+        conn: &mut sqlx::SqliteConnection,
+        actor_id: &ActrId,
+        target: Option<&str>,
+    ) -> Result<ActrType, AidError> {
         // AIS-04: an explicitly revoked identity is terminal, regardless of any
         // still-valid renewal token it may hold.
-        if crate::renewal::is_actor_revoked(actor_id)
+        if crate::renewal::is_actor_revoked(&mut *conn, actor_id)
             .await
             .map_err(|e| {
                 AidError::GenerationFailed(format!("actor revocation lookup failed: {e}"))
@@ -1502,7 +1529,7 @@ impl AIdIssuer {
 
         // AIS-03(a): the realm must still be usable (exists, enabled, not
         // expired, Active status).
-        platform::realm::Realm::validate_realm(&actor_id.realm)
+        platform::realm::Realm::validate_realm_on(&mut *conn, &actor_id.realm)
             .await
             .map_err(|e| match e {
                 platform::realm::RealmValidationError::RealmUnavailable { reason, .. } => {
@@ -1517,8 +1544,7 @@ impl AIdIssuer {
 
         // AIS-03(b): recheck package/publisher status for package identities.
         // The Actor type is the one recorded when the identity was issued.
-        let (actor_type, auth_mode) = Self::issued_actor(actor_id).await?;
-        let pool = platform::storage::db::get_database().get_pool().clone();
+        let (actor_type, auth_mode) = Self::issued_actor(&mut *conn, actor_id).await?;
         let type_str = actor_type.to_program_identity();
         // Any package row (regardless of lifecycle status) for this type marks a
         // published-package identity. `publisher_package.status` stores 'active' or
@@ -1532,7 +1558,7 @@ impl AIdIssuer {
             )
             .bind(&type_str)
             .bind(target)
-            .fetch_all(&pool)
+            .fetch_all(&mut *conn)
             .await
             .map_err(|e| AidError::GenerationFailed(format!("package status lookup failed: {e}")))?
         } else {
@@ -1542,7 +1568,7 @@ impl AIdIssuer {
             );
             sqlx::query_scalar("SELECT status FROM publisher_package WHERE type_str = ?1")
                 .bind(&type_str)
-                .fetch_all(&pool)
+                .fetch_all(&mut *conn)
                 .await
                 .map_err(|e| {
                     AidError::GenerationFailed(format!("package status lookup failed: {e}"))
@@ -1565,8 +1591,10 @@ impl AIdIssuer {
         }
 
         // Published and unpublished package identities both require an active publisher.
-        let publisher =
-            actrix_publisher_registry::model::Publisher::get_by_name(&pool, &actor_type.publisher)
+        let publisher: Option<String> =
+            sqlx::query_scalar("SELECT status FROM publisher WHERE name = ?")
+                .bind(&actor_type.publisher)
+                .fetch_optional(&mut *conn)
                 .await
                 .map_err(|e| {
                     AidError::GenerationFailed(format!("publisher status lookup failed: {e}"))
@@ -1582,18 +1610,18 @@ impl AIdIssuer {
             return Ok(actor_type);
         }
         match publisher {
-            Some(publisher_record)
-                if publisher_record.status
-                    == actrix_publisher_registry::model::PublisherStatus::Active =>
+            Some(status)
+                if status
+                    == actrix_publisher_registry::model::PublisherStatus::Active.to_string() =>
             {
                 Ok(actor_type)
             }
-            Some(publisher_record) => {
+            Some(status) => {
                 platform::recording::warn!(
                     "Credential issuance rejected: publisher {} for type {} is not active (status={})",
                     actor_type.publisher,
                     type_str,
-                    publisher_record.status
+                    status
                 );
                 Err(AidError::PublisherNotVerified)
             }

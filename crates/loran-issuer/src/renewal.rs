@@ -41,6 +41,12 @@ type HmacSha256 = Hmac<Sha256>;
 /// are analysed in `loran/docs/reissue-grace-threat-model.zh.md`.
 pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400;
 
+/// How long `/issuer/renew` still accepts a token whose successor already
+/// exists (it was rotated, or consumed by `/issuer/reissue`). Within it the
+/// caller gets that successor back, so a node that lost the response can
+/// recover; afterwards the token is refused, so a leaked copy of it is useless.
+pub const CONSUMED_TOKEN_RENEW_SECS: i64 = 5 * 60;
+
 // -------- public API ---------------------------------------------------------
 
 /// Compute SHA-256(token) for storage lookup.
@@ -164,9 +170,10 @@ pub async fn find_binding_token_expiry(
 /// A hit is terminal: the caller must refuse to renew or reissue credentials for
 /// this `(realm, serial_number)` regardless of any renewal token it still
 /// holds.
-pub async fn is_actor_revoked(actor_id: &ActrId) -> Result<bool, sqlx::Error> {
-    let pool = platform::storage::db::get_database().get_pool();
-
+pub async fn is_actor_revoked(
+    conn: &mut sqlx::SqliteConnection,
+    actor_id: &ActrId,
+) -> Result<bool, sqlx::Error> {
     let found: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM revoked_actor
          WHERE realm = ?1 AND serial_number = ?2
@@ -174,7 +181,7 @@ pub async fn is_actor_revoked(actor_id: &ActrId) -> Result<bool, sqlx::Error> {
     )
     .bind(&actor_id.realm)
     .bind(actor_id.serial_number as i64)
-    .fetch_optional(pool)
+    .fetch_optional(conn)
     .await?;
 
     Ok(found.is_some())
@@ -291,16 +298,19 @@ pub enum RotationOutcome {
 /// together with the response (`ControlAttemptStore::complete_renewal`).
 pub(crate) struct PreparedRotation {
     pub(crate) presented_hash: Vec<u8>,
-    /// Set when the token entered the rotation window.
-    pub(crate) successor_hash: Option<Vec<u8>>,
+    /// The token's successor, stored when `outcome` is `Rotated`; its row
+    /// marks the presented token as consumed.
+    pub(crate) successor_hash: Vec<u8>,
     pub(crate) outcome: RotationOutcome,
 }
 
 /// Validate the presented token and work out the rotation without writing.
 ///
 /// 1. Verify the token exists and is unexpired (401 otherwise).
-/// 2. If remaining lifetime > rotation_window_secs, the token stays.
-/// 3. Otherwise derive the successor and its expiry.
+/// 2. If its successor already exists, return that successor, but only within
+///    [`CONSUMED_TOKEN_RENEW_SECS`] of its creation (401 afterwards).
+/// 3. If remaining lifetime > rotation_window_secs, the token stays.
+/// 4. Otherwise derive the successor and its expiry.
 pub(crate) async fn prepare_renewal_token_rotation(
     actor_id: &ActrId,
     old_token: &[u8],
@@ -328,10 +338,35 @@ pub(crate) async fn prepare_renewal_token_rotation(
         return Err(RenewalError::TokenRejected);
     };
 
+    let successor = derive_successor_token(secret, old_token, actor_id, current_expires_at);
+    let successor_hash = hash_token(&successor);
+    let consumed: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT expires_at, created_at FROM issuer_renewal_token
+         WHERE actor_id = ?1 AND token_hash = ?2",
+    )
+    .bind(actor_id.to_string_repr())
+    .bind(&successor_hash)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| RenewalError::StoreError(format!("successor lookup failed: {e}")))?;
+    if let Some((successor_expires, consumed_at)) = consumed {
+        if now - consumed_at > CONSUMED_TOKEN_RENEW_SECS {
+            return Err(RenewalError::TokenRejected);
+        }
+        return Ok(PreparedRotation {
+            presented_hash,
+            successor_hash,
+            outcome: RotationOutcome::Rotated {
+                token: Bytes::from(successor),
+                expires_at: successor_expires,
+            },
+        });
+    }
+
     if current_expires_at - now > rotation_window_secs as i64 {
         return Ok(PreparedRotation {
             presented_hash,
-            successor_hash: None,
+            successor_hash,
             outcome: RotationOutcome::Unchanged {
                 token: Bytes::copy_from_slice(old_token),
                 expires_at: current_expires_at,
@@ -339,10 +374,9 @@ pub(crate) async fn prepare_renewal_token_rotation(
         });
     }
 
-    let successor = derive_successor_token(secret, old_token, actor_id, current_expires_at);
     Ok(PreparedRotation {
         presented_hash,
-        successor_hash: Some(hash_token(&successor)),
+        successor_hash,
         outcome: RotationOutcome::Rotated {
             token: Bytes::from(successor),
             expires_at: successor_expires_at(current_expires_at, ttl_secs),

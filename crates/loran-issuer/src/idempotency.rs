@@ -85,6 +85,10 @@ pub(crate) enum AttemptError {
     PossessionNotProven,
     #[error("publisher authorization nonce was already consumed")]
     PublisherNonceRejected,
+    /// The actor may no longer receive credentials (revoked, Realm, package
+    /// or publisher state changed before the commit).
+    #[error("credential refused: {0}")]
+    Refused(platform::aid::AidError),
     #[error("idempotency store error: {0}")]
     Store(String),
     #[error("idempotency response encryption error: {0}")]
@@ -354,10 +358,13 @@ impl ControlAttemptStore {
     }
 
     /// Commit a prepared renewal and its response in one transaction.
+    /// `target` is the package target the credential was rechecked under.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn complete_renewal(
         &self,
         lease: &AttemptLease,
         actor_id: &ActrId,
+        target: Option<&str>,
         prepared: &PreparedRotation,
         body: &[u8],
         response_expires_at: i64,
@@ -387,19 +394,38 @@ impl ControlAttemptStore {
         if presented_exists == 0 {
             return Err(AttemptError::TokenRejected);
         }
+        crate::issuer::AIdIssuer::recheck_actor_on(&mut tx, actor_id, target)
+            .await
+            .map_err(AttemptError::Refused)?;
 
-        let renewal_expires_at = match &prepared.outcome {
-            RotationOutcome::Unchanged { expires_at, .. }
-            | RotationOutcome::Rotated { expires_at, .. } => *expires_at,
+        let (renewal_expires_at, rotated) = match &prepared.outcome {
+            RotationOutcome::Unchanged { expires_at, .. } => (*expires_at, false),
+            RotationOutcome::Rotated { expires_at, .. } => (*expires_at, true),
         };
-        if let Some(successor_hash) = prepared.successor_hash.as_ref() {
+        if !rotated {
+            // A `/reissue` that consumed the token meanwhile turns it into
+            // a consumed token; the retry gets the successor instead.
+            let consumed: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM issuer_renewal_token WHERE actor_id = ?1 AND token_hash = ?2
+                 )",
+            )
+            .bind(&actor_id_repr)
+            .bind(&prepared.successor_hash)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|error| AttemptError::Store(format!("successor recheck failed: {error}")))?;
+            if consumed != 0 {
+                return Err(AttemptError::TokenRejected);
+            }
+        } else {
             sqlx::query(
                 "INSERT OR IGNORE INTO issuer_renewal_token
                     (actor_id, token_hash, expires_at, created_at)
                  VALUES (?1, ?2, ?3, ?4)",
             )
             .bind(&actor_id_repr)
-            .bind(successor_hash)
+            .bind(&prepared.successor_hash)
             .bind(renewal_expires_at)
             .bind(now)
             .execute(&mut *tx)
@@ -488,6 +514,9 @@ impl ControlAttemptStore {
         if binding_expires_at != Some(prepared.binding_expires_at) {
             return Err(AttemptError::PossessionNotProven);
         }
+        crate::issuer::AIdIssuer::recheck_actor_on(&mut tx, actor_id, prepared.target.as_deref())
+            .await
+            .map_err(AttemptError::Refused)?;
 
         if let Some(binding) = prepared.publisher_nonce.as_ref() {
             crate::issuer::AIdIssuer::consume_publisher_auth_nonce(
@@ -848,7 +877,7 @@ pub(crate) mod tests {
 
         assert!(matches!(
             store
-                .complete_renewal(&renew, &actor, &rotation, b"response", now + 60)
+                .complete_renewal(&renew, &actor, None, &rotation, b"response", now + 60)
                 .await,
             Err(AttemptError::TokenRejected)
         ));
@@ -856,6 +885,83 @@ pub(crate) mod tests {
             store.complete_reissue(&reissue, &actor, prepared).await,
             Err(AttemptError::PossessionNotProven)
         ));
+    }
+
+    /// A revocation or a Realm suspension that lands after the first check
+    /// still stops a renewal or reissue at commit.
+    #[tokio::test]
+    async fn work_prepared_before_a_revocation_does_not_commit() {
+        setup_db().await;
+        let secret = [7u8; 32];
+        let store = ControlAttemptStore::new(&secret);
+        for (n, revoke) in [true, false].into_iter().enumerate() {
+            let token = [60 + n as u8; 32];
+            let realm = format!("attempt-refused-{n}@example.com");
+            platform::realm::Realm::create(realm.clone(), "secret-hash".to_string())
+                .await
+                .unwrap();
+            let actor = ActrId {
+                realm: realm.clone(),
+                serial_number: 11,
+            };
+            let now = crate::renewal::now_secs();
+            crate::renewal::insert_renewal_token(
+                &actor,
+                &crate::renewal::hash_token(&token),
+                now + 60,
+            )
+            .await
+            .unwrap();
+
+            let renew = acquired(
+                store
+                    .claim(Operation::Renew, &[20 + n as u8; 16], &actor, b"renew")
+                    .await
+                    .unwrap(),
+            );
+            let rotation = crate::renewal::prepare_renewal_token_rotation(
+                &actor, &token, &secret, 3600, 86_400,
+            )
+            .await
+            .unwrap();
+            let reissue = acquired(
+                store
+                    .claim(Operation::Reissue, &[30 + n as u8; 16], &actor, b"reissue")
+                    .await
+                    .unwrap(),
+            );
+            let successor =
+                crate::renewal::derive_successor_token(&secret, &token, &actor, now + 60);
+            let prepared = PreparedReissue {
+                register_ok: register_response::RegisterOk::default(),
+                successor_hash: crate::renewal::hash_token(&successor),
+                successor_token: successor,
+                successor_expires_at: now + 86_400,
+                proof_hash: crate::renewal::hash_token(&token),
+                binding_expires_at: now + 60,
+                publisher_nonce: None,
+                target: None,
+            };
+
+            if revoke {
+                crate::renewal::revoke_actor(&actor, "test").await.unwrap();
+            } else {
+                platform::realm::Realm::set_enabled(&realm, false)
+                    .await
+                    .unwrap();
+            }
+
+            assert!(matches!(
+                store
+                    .complete_renewal(&renew, &actor, None, &rotation, b"response", now + 60)
+                    .await,
+                Err(AttemptError::Refused(_))
+            ));
+            assert!(matches!(
+                store.complete_reissue(&reissue, &actor, prepared).await,
+                Err(AttemptError::Refused(_))
+            ));
+        }
     }
 
     #[tokio::test]

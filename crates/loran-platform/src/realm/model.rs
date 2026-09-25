@@ -313,6 +313,15 @@ impl Realm {
 
     /// Get a realm by its Realm name.
     pub async fn get(name: &str) -> Result<Option<Self>, RealmError> {
+        let mut conn = get_database().get_pool().acquire().await?;
+        Self::get_on(&mut conn, name).await
+    }
+
+    /// [`Realm::get`] on `conn`, e.g. inside a transaction.
+    pub async fn get_on(
+        conn: &mut sqlx::SqliteConnection,
+        name: &str,
+    ) -> Result<Option<Self>, RealmError> {
         let result = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
                     secret_current, secret_previous_hash, secret_previous_valid_until,
@@ -320,7 +329,7 @@ impl Realm {
              FROM realm WHERE name = ?",
         )
         .bind(name)
-        .fetch_optional(get_database().get_pool())
+        .fetch_optional(conn)
         .await?;
 
         Ok(result)

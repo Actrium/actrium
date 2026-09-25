@@ -156,6 +156,13 @@ secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider
 `/reissue` 先校验 Realm secret 再看 `attempt_id`。一个持有证明只能成功 reissue 一次：此后用它
 发起的新 attempt 返回 `422`（持有证明不成立），丢失响应只能靠同一 attempt 重试取回。
 
+`/renew` 先只读校验 renewal token（无效或过期返回 `401`），通过后才报告 Realm 不可用的原因，
+未持有有效 token 的调用方探知不到 Realm 是否停用或退役。renewal token 的后继已存在（它已被
+`/renew` 轮换或被 `/reissue` 消耗）时，`/renew` 只在后继生成后 5 分钟内接受它，且只返回这个
+后继及其到期时间；此后返回 `401`。`/renew` 与 `/reissue` 在提交事务内重查 Actor 撤销、Realm
+状态、包撤销与 publisher 停用，首次检查之后落地的变更同样阻止签发：此时 attempt 被释放，
+按该错误返回（`/renew` 以 HTTP 状态，`/reissue` 在 body 中）。
+
 注册请求的 ACL 规则只作用于本 Realm：`source_realm` 可以不填、为 `any_realm`（v1 只匹配本
 Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注册返回 `400`。
 

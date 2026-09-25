@@ -4231,3 +4231,122 @@ async fn test_unpublished_renewal_enforces_publisher_status() {
     .await;
     assert_eq!(status, StatusCode::OK);
 }
+
+fn renewed(response: RenewCredentialResponse) -> register_response::RegisterOk {
+    match response.result.expect("renew result") {
+        renew_credential_response::Result::Success(ok) => ok,
+        renew_credential_response::Result::Error(err) => panic!("renew failed: {err:?}"),
+    }
+}
+
+/// A token consumed by `/reissue` renews only to the successor the reissue
+/// already handed out, and only for five minutes after the consumption; a
+/// leaked copy of it is useless afterwards.
+#[tokio::test]
+#[serial]
+async fn test_renew_with_a_token_consumed_by_reissue() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let realm_secret = "renew-consumed-secret";
+    let (registration, initial_ok) =
+        register_linked_actor(&app, "renew-consumed@example.com", realm_secret).await;
+    let old_token = initial_ok.renewal_token.clone().expect("renewal token");
+
+    let reissued = post_reissue(
+        app.clone(),
+        ReissueCredentialRequest {
+            actr_id: initial_ok.actr_id.clone(),
+            registration,
+            renewal_proof: Some(old_token.clone()),
+            attempt_id: control_attempt_id(),
+        },
+        Some(realm_secret),
+    )
+    .await;
+    let reissued = match reissued.result.expect("reissue result") {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(err) => panic!("reissue failed: {err:?}"),
+    };
+    assert_ne!(reissued.renewal_token.as_ref(), Some(&old_token));
+
+    let renew = |attempt_id| RenewCredentialRequest {
+        actr_id: initial_ok.actr_id.clone(),
+        renewal_token: old_token.clone(),
+        attempt_id,
+    };
+    let ok = renewed(post_renew(app.clone(), renew(control_attempt_id())).await);
+    assert_eq!(ok.renewal_token, reissued.renewal_token);
+    assert_eq!(
+        ok.renewal_token_expires_at,
+        reissued.renewal_token_expires_at
+    );
+
+    let pool = platform::storage::db::get_database().get_pool();
+    sqlx::query(
+        "UPDATE issuer_renewal_token SET created_at = created_at - 301
+         WHERE actor_id = ?1 AND token_hash = ?2",
+    )
+    .bind(initial_ok.actr_id.to_string_repr())
+    .bind(issuer::renewal::hash_token(
+        reissued.renewal_token.as_ref().expect("successor"),
+    ))
+    .execute(pool)
+    .await
+    .expect("age the consumption");
+    let (status, _) = post_renew_raw(app.clone(), renew(control_attempt_id())).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The successor itself keeps renewing.
+    let ok = renewed(
+        post_renew(
+            app,
+            RenewCredentialRequest {
+                actr_id: initial_ok.actr_id.clone(),
+                renewal_token: reissued.renewal_token.clone().expect("successor"),
+                attempt_id: control_attempt_id(),
+            },
+        )
+        .await,
+    );
+    assert_eq!(ok.renewal_token, reissued.renewal_token);
+
+    env.shutdown_signer().await;
+}
+
+/// `/renew` checks the renewal token before the Realm: a caller without a
+/// valid token cannot learn that a Realm is suspended.
+#[tokio::test]
+#[serial]
+async fn test_renew_does_not_reveal_realm_state_before_authentication() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let realm = "renew-hidden-state@example.com";
+    let (_, ok) = register_linked_actor(&app, realm, "renew-hidden-secret").await;
+    platform::realm::Realm::set_enabled(realm, false)
+        .await
+        .expect("suspend realm");
+
+    let (status, _) = post_renew_raw(
+        app.clone(),
+        RenewCredentialRequest {
+            actr_id: ok.actr_id.clone(),
+            renewal_token: prost::bytes::Bytes::from(vec![9; 32]),
+            attempt_id: control_attempt_id(),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, _) = post_renew_raw(
+        app,
+        RenewCredentialRequest {
+            actr_id: ok.actr_id.clone(),
+            renewal_token: ok.renewal_token.clone().expect("renewal token"),
+            attempt_id: control_attempt_id(),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    env.shutdown_signer().await;
+}
