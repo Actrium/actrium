@@ -395,6 +395,10 @@ impl SignalingServer {
 /// Follow Realm state changes and drop the state of every Realm that
 /// retires: first for Realms retired before this process started, then as
 /// retirements are announced.
+///
+/// `cancel` retires this server (a configuration reload builds a new one),
+/// but its connections stay open, so the task keeps following until the
+/// last of them is gone.
 pub async fn follow_realm_retirements(
     server: SignalingServerHandle,
     cancel: tokio_util::sync::CancellationToken,
@@ -403,7 +407,7 @@ pub async fn follow_realm_retirements(
     retire_known_retired_realms(&server).await;
     loop {
         let change = tokio::select! {
-            _ = cancel.cancelled() => break,
+            _ = no_connections_after(&server, &cancel) => break,
             change = changes.recv() => change,
         };
         match change {
@@ -417,6 +421,17 @@ pub async fn follow_realm_retirements(
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         }
+    }
+}
+
+/// Resolves once `cancel` fired and the server has no connections left.
+async fn no_connections_after(
+    server: &SignalingServerHandle,
+    cancel: &tokio_util::sync::CancellationToken,
+) {
+    cancel.cancelled().await;
+    while !server.clients.read().await.is_empty() {
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 
@@ -3809,6 +3824,45 @@ mod tests {
                 assert_eq!(error_code(next_flow(&mut source)), 403);
             }
             assert!(next_flow(&mut target).is_none());
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn a_replaced_server_still_closes_connections_of_retired_realms() {
+            setup().await;
+            let realm = "replaced@example.com";
+            RealmEntity::create(realm.to_string(), "secret-hash".to_string())
+                .await
+                .unwrap();
+            let server = create_test_server_handle();
+            let actor = ActrId {
+                serial_number: 1,
+                realm: realm.to_string(),
+            };
+            server.clients.write().await.insert(
+                "old".to_string(),
+                create_test_client_with_id("old", actor, None),
+            );
+
+            // A configuration reload cancels this server; its connection stays.
+            let cancel = tokio_util::sync::CancellationToken::new();
+            let follower = tokio::spawn(follow_realm_retirements(server.clone(), cancel.clone()));
+            cancel.cancel();
+            tokio::task::yield_now().await;
+
+            RealmEntity::retire(realm).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while server.clients.read().await.contains_key("old") {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("the retired Realm's connection is dropped");
+            // With no connections left, the follower ends.
+            tokio::time::timeout(Duration::from_secs(5), follower)
+                .await
+                .expect("the follower ends")
+                .unwrap();
         }
     }
 }
