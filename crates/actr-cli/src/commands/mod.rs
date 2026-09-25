@@ -23,6 +23,7 @@ pub mod pkg;
 pub(crate) mod process;
 pub mod ps;
 pub mod realm;
+pub mod realm_members;
 pub mod registry;
 pub mod restart;
 pub mod rm;

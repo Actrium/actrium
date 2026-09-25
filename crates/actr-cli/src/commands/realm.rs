@@ -1,5 +1,6 @@
 //! `actr realm` — the Realm signing key holder's tool
-//! (`actr/protocols/realm-profile.md` sections 7 and 8).
+//! (`actr/protocols/realm-profile.md` sections 7 and 8), and a member's
+//! (`actr/protocols/realm-membership.md`, see [`super::realm_members`]).
 //!
 //! Subcommands:
 //!   - `keygen`          — create a Realm signing key and its `realm_signing_keys` member
@@ -9,6 +10,9 @@
 //!   - `reissue-request` — sign a `reissue_owner_invite` request
 //!   - `draft-request`   — sign a `draft_profile` request
 //!   - `register-publisher` — sign a `register_publisher` request and send it
+//!   - `join`, `invite`, `members`, `revoke-invite`, `revoke-client`,
+//!     `remove-member`, `set-role`, `transfer-owner`, `leave` — membership
+//!     requests signed with a Realm client key
 //!
 //! Requests are printed as JSON, to be sent with `POST` to the Realm
 //! Provider's `realm-management` endpoint; `register-publisher` sends its
@@ -27,6 +31,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use super::realm_members::{
+    self, InviteArgs, InviteIdArgs, JoinArgs, KeyArgs, MemberArgs, RevokeClientArgs, SetRoleArgs,
+    TransferOwnerArgs,
+};
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
 
 #[derive(Args, Debug)]
@@ -57,6 +65,26 @@ pub enum RealmCommand {
     /// Sign a `register_publisher` request with a Publisher Profile signing
     /// key and send it to the Realm Provider's `realm-management` endpoint.
     RegisterPublisher(RegisterPublisherArgs),
+    /// Redeem a Realm invite with a new Realm client key and write its key
+    /// file.
+    Join(JoinArgs),
+    /// Create an invite: a new member (owner, `--role`) or a new client of a
+    /// member (`--member`).
+    Invite(InviteArgs),
+    /// List members, clients and open invites (a non-owner sees its own).
+    Members(KeyArgs),
+    /// Revoke an unused invite.
+    RevokeInvite(InviteIdArgs),
+    /// Revoke a client; this key file's own key if no key id is given.
+    RevokeClient(RevokeClientArgs),
+    /// Remove a member and revoke all its clients (owner).
+    RemoveMember(MemberArgs),
+    /// Change a member's role (owner).
+    SetRole(SetRoleArgs),
+    /// Make another member the owner (owner).
+    TransferOwner(TransferOwnerArgs),
+    /// Leave the Realm; revokes all your clients.
+    Leave(KeyArgs),
 }
 
 #[derive(Args, Debug)]
@@ -235,6 +263,15 @@ impl Command for RealmArgs {
                     .sign(&key_id, &key)
             }
             RealmCommand::RegisterPublisher(args) => register_publisher(args).await?,
+            RealmCommand::Join(args) => realm_members::join(args).await?,
+            RealmCommand::Invite(args) => realm_members::invite(args).await?,
+            RealmCommand::Members(args) => realm_members::members(args).await?,
+            RealmCommand::RevokeInvite(args) => realm_members::revoke_invite(args).await?,
+            RealmCommand::RevokeClient(args) => realm_members::revoke_client(args).await?,
+            RealmCommand::RemoveMember(args) => realm_members::remove_member(args).await?,
+            RealmCommand::SetRole(args) => realm_members::set_role(args).await?,
+            RealmCommand::TransferOwner(args) => realm_members::transfer_owner(args).await?,
+            RealmCommand::Leave(args) => realm_members::leave(args).await?,
         };
         Ok(CommandResult::Success(serde_json::to_string_pretty(
             &output,
@@ -250,7 +287,7 @@ impl Command for RealmArgs {
     }
 
     fn description(&self) -> &str {
-        "Realm signing key holder's tool"
+        "Realm signing key holder's and member's tool"
     }
 }
 
@@ -304,7 +341,7 @@ fn keygen(args: &KeygenArgs) -> Result<Value> {
 }
 
 /// Write `contents` to a file only its owner can read, from its creation on.
-fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
