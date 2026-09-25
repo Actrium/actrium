@@ -425,6 +425,42 @@ async fn rotates_the_issuer_keys_of_provider_domain_realms() {
 
 #[tokio::test]
 #[serial]
+async fn switches_only_to_an_issuer_key_the_accepted_profile_lists() {
+    use platform::realm::RealmIssuerKey;
+    let (profiles, _dir) = setup().await;
+    let acme = Domain {
+        keys: vec![("rs-1", SigningKey::from_bytes(&[1; 32]))],
+    };
+    let member = acme.member(1, &["rs-1"]);
+    let name = "keys@acme.com";
+    insert(name, RealmStatus::Active).await;
+    let before = issuer_of(&profiles, name).await;
+    accept(name, &acme.profile(name, 1, "active", "rs-1", &before), &member).await;
+    let old = RealmIssuerKey::current(name).await.unwrap().unwrap();
+
+    // The key holder publishes the next key, then a Profile without it
+    // (as a refresh from its realms location may bring).
+    profiles.rotate_issuer_key(name).await.unwrap();
+    let rotating = issuer_of(&profiles, name).await;
+    accept(name, &acme.profile(name, 2, "active", "rs-1", &rotating), &member).await;
+    accept(name, &acme.profile(name, 3, "active", "rs-1", &before), &member).await;
+
+    let later = chrono::Utc::now().timestamp() + issuer::realm_profile::PREPUBLISH_SECS + 60;
+    profiles.maintain_issuer_keys(later).await.unwrap();
+    let current = RealmIssuerKey::current(name).await.unwrap().unwrap();
+    assert_eq!(current.key_id, old.key_id, "the accepted Profile does not list the next key");
+
+    // Listed again, it switches once the pre-publish period has passed.
+    accept(name, &acme.profile(name, 4, "active", "rs-1", &rotating), &member).await;
+    let listed = RealmIssuerKey::list(name).await.unwrap();
+    assert!(listed.iter().all(|key| key.published_at.is_some()));
+    profiles.maintain_issuer_keys(later).await.unwrap();
+    let current = RealmIssuerKey::current(name).await.unwrap().unwrap();
+    assert_ne!(current.key_id, old.key_id);
+}
+
+#[tokio::test]
+#[serial]
 async fn refreshes_other_domains_profiles_under_the_key_pin() {
     let (profiles, _dir) = setup().await;
     let acme = Domain {

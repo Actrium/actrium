@@ -40,7 +40,7 @@ pub struct RealmIssuerKey {
     pub public_key: String,
     pub state: IssuerKeyState,
     pub created_at: i64,
-    /// When a Realm Profile listing this key was first accepted.
+    /// Since when the accepted Realm Profiles have listed this key.
     pub published_at: Option<i64>,
     pub current_since: Option<i64>,
     /// Retired: when the Realm Profile may stop listing it.
@@ -126,12 +126,34 @@ impl RealmIssuerKey {
     }
 
     /// Record that an accepted Realm Profile lists `profile`'s active issuer
-    /// keys, in the transaction that stores it.
+    /// keys, in the transaction that stores it. A `next` key it does not list
+    /// starts its pre-publish period over once listed again.
     pub(crate) async fn mark_published(
         tx: &mut sqlx::SqliteConnection,
         profile: &RealmProfile,
         now: i64,
     ) -> Result<(), RealmError> {
+        let next: Option<String> = sqlx::query_scalar(
+            "SELECT public_key FROM realm_issuer_key WHERE realm = ? AND state = 'next'",
+        )
+        .bind(&profile.realm.name)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(next) = next
+            && !profile
+                .issuer
+                .keys
+                .iter()
+                .any(|key| key.status == KeyStatus::Active && key.public_key == next)
+        {
+            sqlx::query(
+                "UPDATE realm_issuer_key SET published_at = NULL
+                 WHERE realm = ? AND state = 'next'",
+            )
+            .bind(&profile.realm.name)
+            .execute(&mut *tx)
+            .await?;
+        }
         for key in &profile.issuer.keys {
             let Some(key_id) = actr_protocol::realm_profile::parse_issuer_key_id(&key.id) else {
                 continue;

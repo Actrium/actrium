@@ -384,9 +384,9 @@ Realm Provider ID 是 Realm Provider 的规范化 DNS authority（例如 `provid
 - 携带 Actor 类型 `publisher/program@version`（见第 4 节）
 
 每个 Realm 的 issuer key 按 Realm Profile §6.1 轮换（「先发布、再使用、后移除」）：新 key 先以
-`active` 列入 Realm Profile，列出它的 Realm Profile 被接受满 24 小时后才开始签发，旧 key 以
-`retired` 继续列出，直到它签发的最后一个 credential 过期再过 5 分钟才移除（此时在 Signer 中
-退役）。Realm Provider 域名下的 Realm 每 90 天自动轮换，Loran 自行签新 Realm Profile；其他
+`active` 列入 Realm Profile，列出它的 Realm Profile 被接受满 24 小时后才开始签发（其间新接受的
+Realm Profile 不再列出它则重新计时），旧 key 以 `retired` 继续列出，直到它签发的最后一个
+credential 过期再过 5 分钟才移除（此时在 Signer 中退役）。Realm Provider 域名下的 Realm 每 90 天自动轮换，Loran 自行签新 Realm Profile；其他
 域名的 Realm 由运营者经 admin API 发起，持有方用 `draft_profile` 取得含新 key 的草案、签名后
 `publish_profile`，发布之前 Loran 继续用旧 key。签名只用当前 key；验证者（signaling、TURN）
 按 `(realm, key_id)` 查 key，退役 key 的缓存项到移除时刻失效。
@@ -475,7 +475,7 @@ v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主
   共用该主键约束；
 - `realm_profile`：每个 Realm 已接受的最新 Realm Profile 原文及其 digest 与 `sequence`；
 - `realm_issuer_key`：每个 Realm 的 issuer key（Signer key id 与名字、公钥、`next` | `current` |
-  `retired`、首次被已接受 Realm Profile 列出的时间、成为当前的时间、可移除时间）；
+  `retired`、被已接受 Realm Profile 连续列出的起始时间、成为当前的时间、可移除时间）；
 - Realm 管理请求的 `nonce` 记录，保留到对应请求过期；
 - 其余按 Realm 分区的表（连接 ACL、已签发身份登记、Actor Registry、renewal state）以
   `realm` 为键。
