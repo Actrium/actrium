@@ -568,7 +568,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   `/register`、`/reissue`、`/renew` 请求新签证明；`actr realm` 提供 `join`、`invite`、`members`、
   `revoke-invite`、`revoke-client`、`remove-member`、`set-role`、`transfer-owner`、`leave`；
   e2e `package-runtime-echo` 走 owner 邀请 → 邀请 editor → 移除后拒签的全流程。尚未实现：`actr realm join`
-  从 `realms` 位置取 Realm Profile（现为邀请内嵌的 Realm Profile 或 `--issuer`）；Web（sw-host）
+  从 `realms` 位置取 Realm Profile 并验证邀请内嵌的 Realm Profile（现只用 `--issuer`，内嵌的不使用）；Web（sw-host）
   客户端的 Realm 客户端 key；Actr Host 下载 Realm 包后核对 `package.type`；Service 侧即时得知成员变化
   （现以 credential 到期为界）；
 - 已实现运行时分区：Actor credential 由该 Realm 的当前 issuer key 签发（首把为 Signer 中的

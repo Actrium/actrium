@@ -33,12 +33,12 @@ pub struct JoinArgs {
     /// Key file to write the new Realm client key to
     #[arg(long, short = 'o', value_name = "FILE")]
     pub output: PathBuf,
-    /// Issuer URL of the Realm (`issuer.url` of its Realm Profile); needed
-    /// unless the invite embeds the Realm Profile
+    /// Issuer URL of the Realm (`issuer.url` of its Realm Profile). An
+    /// invite's embedded Realm Profile is not verified here, so it is not
+    /// used.
     #[arg(long, value_name = "URL")]
-    pub issuer: Option<String>,
-    /// Realm Provider ID; defaults to the embedded Realm Profile's, else the
-    /// Issuer URL's `host[:port]`
+    pub issuer: String,
+    /// Realm Provider ID; defaults to the Issuer URL's `host[:port]`
     #[arg(long, value_name = "ID")]
     pub provider: Option<String>,
     /// Name of this client, shown to the Realm owner
@@ -190,22 +190,12 @@ pub async fn join(args: &JoinArgs) -> Result<Value> {
         args.invite.clone()
     };
     let invite = RealmInvite::decode(&text)?;
-    let profile = invite.profile.as_ref();
-    let issuer = match (
-        &args.issuer,
-        profile.and_then(|p| p["issuer"]["url"].as_str()),
-    ) {
-        (Some(issuer), _) => issuer.clone(),
-        (None, Some(issuer)) => issuer.to_string(),
-        (None, None) => bail!("the invite carries no Realm Profile; pass --issuer <URL>"),
-    };
-    let provider = match (
-        &args.provider,
-        profile.and_then(|p| p["provider"]["id"].as_str()),
-    ) {
-        (Some(provider), _) => provider.clone(),
-        (None, Some(provider)) => provider.to_string(),
-        (None, None) => url_authority(&issuer)?,
+    // The invite's embedded Realm Profile is unverified: it must not choose
+    // where the invite secret goes.
+    let issuer = args.issuer.clone();
+    let provider = match &args.provider {
+        Some(provider) => provider.clone(),
+        None => url_authority(&issuer)?,
     };
 
     let key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
@@ -332,7 +322,7 @@ mod tests {
         let join_args = JoinArgs {
             invite: RealmInvite::new(REALM, &secret).encode(),
             output: output.clone(),
-            issuer: Some(issuer.clone()),
+            issuer: issuer.clone(),
             provider: None,
             label: Some("laptop".into()),
             force: false,
@@ -393,6 +383,30 @@ mod tests {
         .unwrap();
         assert_eq!(sent["previous_owner_role"], "viewer");
         assert_eq!(leave(&key).await.unwrap()["op"], "leave");
+    }
+
+    #[tokio::test]
+    async fn join_does_not_trust_an_embedded_realm_profile() {
+        let issuer = serve().await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut invite = RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([2u8; 32]));
+        // Unverified: its issuer and provider must not be used.
+        invite.profile = Some(serde_json::json!({
+            "realm": { "name": REALM },
+            "provider": { "id": "evil.example" },
+            "issuer": { "url": "http://127.0.0.1:9/issuer" },
+        }));
+        let sent = join(&JoinArgs {
+            invite: invite.encode(),
+            output: dir.path().join("client.json"),
+            issuer: issuer.clone(),
+            provider: None,
+            label: None,
+            force: false,
+        })
+        .await
+        .unwrap();
+        assert_eq!(sent["provider_id"], url_authority(&issuer).unwrap());
     }
 
     #[test]
