@@ -450,6 +450,53 @@ async fn rotates_the_issuer_keys_of_provider_domain_realms() {
 
 #[tokio::test]
 #[serial]
+async fn lists_a_next_issuer_key_whose_profile_was_not_signed() {
+    use platform::realm::{IssuerKeyState, RealmIssuerKey};
+    let (profiles, _dir) = setup().await;
+    let name = format!("unl1st3d@{PROVIDER}");
+    insert(&name, RealmStatus::Pending).await;
+    profiles
+        .issue(
+            &name,
+            ProfileChange {
+                package: Some(package()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    // A rotation whose Realm Profile could not be signed (the Signer was
+    // down): the next key exists but no Profile lists it.
+    let now = chrono::Utc::now().timestamp();
+    RealmIssuerKey {
+        realm: name.clone(),
+        key_id: u32::MAX,
+        signer_name: format!("issuer:{name}/unlisted"),
+        public_key: BASE64.encode([5u8; 32]),
+        state: IssuerKeyState::Next,
+        created_at: now,
+        published_at: None,
+        current_since: None,
+        remove_after: None,
+    }
+    .insert()
+    .await
+    .unwrap();
+
+    profiles.maintain_issuer_keys(now).await.unwrap();
+    let record = RealmProfileRecord::get(&name).await.unwrap().unwrap();
+    assert_eq!(record.sequence, 2);
+    let next = RealmIssuerKey::list(&name)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|key| key.state == IssuerKeyState::Next)
+        .unwrap();
+    assert!(next.published_at.is_some());
+}
+
+#[tokio::test]
+#[serial]
 async fn switches_only_to_an_issuer_key_the_accepted_profile_lists() {
     use platform::realm::RealmIssuerKey;
     let (profiles, _dir) = setup().await;

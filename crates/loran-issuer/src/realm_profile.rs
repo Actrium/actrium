@@ -537,7 +537,11 @@ impl RealmProfiles {
 
     async fn maintain_realm_keys(&self, realm: &str, now: i64) -> Result<(), ProfileError> {
         let keys = RealmIssuerKey::list(realm).await?;
-        let mut changed = false;
+        // A next key whose Realm Profile could not be signed yet.
+        let mut changed = self.holds_key_for(realm)
+            && keys
+                .iter()
+                .any(|key| key.state == IssuerKeyState::Next && key.published_at.is_none());
         for key in &keys {
             match key.state {
                 IssuerKeyState::Next
