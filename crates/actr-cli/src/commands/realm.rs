@@ -205,8 +205,9 @@ pub struct RealmKeyFile {
 
 impl RealmKeyFile {
     fn load(path: &Path) -> Result<(String, SigningKey)> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read key file: {}", path.display()))?;
+        let text =
+            actr_protocol::realm_membership::read_private_key_file(path, "Realm signing key")
+                .map_err(anyhow::Error::msg)?;
         let file: RealmKeyFile = serde_json::from_str(&text)
             .with_context(|| format!("Not a Realm signing key file: {}", path.display()))?;
         let bytes: [u8; 32] = BASE64

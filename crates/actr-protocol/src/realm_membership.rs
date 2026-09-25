@@ -605,34 +605,40 @@ impl RealmClientKeyFile {
         Ok((file, key))
     }
 
-    /// Read and [`parse`](Self::parse) the key file at `path`. Like ssh with
-    /// a private key, a file that group or others may access is refused on
-    /// Unix. Android and iOS are left out: their app sandboxes, not file
-    /// modes, keep other apps away.
+    /// Read and [`parse`](Self::parse) the key file at `path`, refusing a
+    /// file others may access (see [`read_private_key_file`]).
     pub fn read(path: &std::path::Path) -> Result<(Self, SigningKey), MembershipError> {
-        use std::io::Read as _;
         let shown = path.display();
-        let cannot_read = |error: std::io::Error| {
-            invalid(format!("cannot read Realm client key {shown}: {error}"))
-        };
-        // The mode is checked on the opened file, so it is the file read.
-        let mut file = std::fs::File::open(path).map_err(cannot_read)?;
-        #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            let mode = file.metadata().map_err(cannot_read)?.permissions().mode();
-            if mode & 0o077 != 0 {
-                return Err(invalid(format!(
-                    "Realm client key {shown} is accessible by group or others (mode {:03o}); \
-                     run `chmod 600 {shown}`",
-                    mode & 0o777
-                )));
-            }
-        }
-        let mut text = String::new();
-        file.read_to_string(&mut text).map_err(cannot_read)?;
+        let text = read_private_key_file(path, "Realm client key").map_err(invalid)?;
         Self::parse(&text).map_err(|error| invalid(format!("Realm client key {shown}: {error}")))
     }
+}
+
+/// Read a private key file. Like ssh with a private key, a file that group or
+/// others may access is refused on Unix. Android and iOS are left out: their
+/// app sandboxes, not file modes, keep other apps away. `what` names the file
+/// in errors.
+pub fn read_private_key_file(path: &std::path::Path, what: &str) -> Result<String, String> {
+    use std::io::Read as _;
+    let shown = path.display();
+    let cannot_read = |error: std::io::Error| format!("cannot read {what} {shown}: {error}");
+    // The mode is checked on the opened file, so it is the file read.
+    let mut file = std::fs::File::open(path).map_err(cannot_read)?;
+    #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = file.metadata().map_err(cannot_read)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(format!(
+                "{what} {shown} is accessible by group or others (mode {:03o}); \
+                 run `chmod 600 {shown}`",
+                mode & 0o777
+            ));
+        }
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text).map_err(cannot_read)?;
+    Ok(text)
 }
 
 #[cfg(test)]
