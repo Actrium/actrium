@@ -23,6 +23,11 @@ pub fn ensure_named_key_payload(name: &str) -> String {
     format!("{SIGN_REQUEST_AUTH_VERSION}:ensure_named_key:{name}")
 }
 
+/// Build the nonce-auth payload for a RetireNamedKey request.
+pub fn retire_named_key_payload(name: &str) -> String {
+    format!("{SIGN_REQUEST_AUTH_VERSION}:retire_named_key:{name}")
+}
+
 /// Key pair structure (internal use, stores public key reference)
 #[derive(Debug, Clone)]
 pub struct KeyPair {

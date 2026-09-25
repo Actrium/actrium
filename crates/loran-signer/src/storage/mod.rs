@@ -117,6 +117,16 @@ impl KeyStorage {
         }
     }
 
+    /// Retire the named key; it never signs again
+    pub async fn retire_named_key(&self, name: &str) -> SignerResult<u32> {
+        match self {
+            Self::Sqlite(b) => b.retire_named_key(name).await,
+
+            #[cfg(feature = "backend-postgres")]
+            Self::Postgres(b) => b.retire_named_key(name).await,
+        }
+    }
+
     /// Look up the verifying public key by key_id
     pub async fn get_public_key(&self, key_id: u32) -> SignerResult<Option<String>> {
         match self {

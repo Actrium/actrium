@@ -13,7 +13,7 @@ Issuer Signer 是 Issuer 的最小私钥边界：
 2. 在服务端保存私钥，只返回 verifying key；
 3. 对 Issuer 提交的精确消息签名；
 4. 按 `expires_at` 停止签名（命名 key `expires_at = 0` 永不过期，供 Realm issuer key/Realm
-   签名 key 使用），并支持 key rotation/revocation 审计。
+   签名 key 使用）；命名 key 可退役，退役即销毁私钥，此后不再签名。
 
 Issuer Signer 不负责 Actor 路由、Realm 管理、Publisher 下载，也不提供「获取私钥」接口。
 
@@ -26,6 +26,7 @@ Loran all-in-one profile 将 Issuer Signer gRPC 挂载在主 HTTP/2 监听器：
 /signer.v1.Signer/Sign
 /signer.v1.Signer/GetVerifyingKey
 /signer.v1.Signer/EnsureNamedKey
+/signer.v1.Signer/RetireNamedKey
 /signer.v1.Signer/HealthCheck
 ```
 
@@ -60,7 +61,9 @@ kek_env = "ACTRIX_SIGNER_KEK"
 - 新 key 在 `expires_at` 前可用于签名；
 - 到期后立即拒绝新签名；
 - tolerance 只允许历史验签/平滑读取 verifying metadata，不延长签名能力；
-- Issuer rotation 先生成并发布 successor，再切换 active key；
+- 命名 key 不过期；`RetireNamedKey` 清除其私钥、保留名字与 verifying key，之后 `Sign`
+  返回 `FAILED_PRECONDITION`。退役幂等；名字尚无 key 时直接建为已退役，名字不会再得到可用
+  key。Realm 退役时 Issuer 以此退役 `issuer:<realm>`；
 - revocation 与轮换必须进入审计记录。
 
 ## 运维要求

@@ -271,6 +271,20 @@ impl KeyStorageBackend for SqliteBackend {
         })
     }
 
+    async fn retire_named_key(&self, name: &str) -> SignerResult<u32> {
+        let key_id = self.ensure_named_key(name).await?.key_id;
+        // An empty secret is the retired marker: the private key is gone.
+        sqlx::query("UPDATE keys SET secret_key = '' WHERE key_id = ?")
+            .bind(key_id as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                SignerError::Internal(format!("Failed to retire named key {name}: {e}"))
+            })?;
+        crate::recording::info!("Retired named key {} (key_id: {})", name, key_id);
+        Ok(key_id)
+    }
+
     async fn get_public_key(&self, key_id: u32) -> SignerResult<Option<String>> {
         let result = sqlx::query_as::<_, (String,)>("SELECT public_key FROM keys WHERE key_id = ?")
             .bind(key_id as i64)
@@ -310,6 +324,9 @@ impl KeyStorageBackend for SqliteBackend {
                 return Err(SignerError::NotFound(format!("Key not found: {key_id}")));
             }
         };
+        if encrypted_signing_key.is_empty() {
+            return Err(SignerError::KeyRetired(key_id));
+        }
 
         // Decrypt the signing key
         let signing_key_b64 = self.encryptor.decrypt(&encrypted_signing_key)?;
@@ -467,6 +484,51 @@ mod tests {
             verifying_key.verify(message, &sig).is_ok(),
             "Signature must be valid"
         );
+    }
+
+    #[tokio::test]
+    async fn a_retired_named_key_never_signs_again() {
+        let temp_dir = tempdir().unwrap();
+        let backend = create_test_backend(temp_dir.path()).await;
+
+        let key = backend
+            .ensure_named_key("issuer:a@a.example")
+            .await
+            .unwrap();
+        assert_eq!(
+            backend
+                .retire_named_key("issuer:a@a.example")
+                .await
+                .unwrap(),
+            key.key_id
+        );
+        assert!(matches!(
+            backend.sign(key.key_id, b"m").await,
+            Err(SignerError::KeyRetired(id)) if id == key.key_id
+        ));
+        // Idempotent, and the name keeps its retired key.
+        backend
+            .retire_named_key("issuer:a@a.example")
+            .await
+            .unwrap();
+        let again = backend
+            .ensure_named_key("issuer:a@a.example")
+            .await
+            .unwrap();
+        assert_eq!(again.key_id, key.key_id);
+        assert!(backend.sign(again.key_id, b"m").await.is_err());
+
+        // A name retired before it had a key never gets a live one.
+        let unused = backend
+            .retire_named_key("issuer:b@b.example")
+            .await
+            .unwrap();
+        let later = backend
+            .ensure_named_key("issuer:b@b.example")
+            .await
+            .unwrap();
+        assert_eq!(later.key_id, unused);
+        assert!(backend.sign(later.key_id, b"m").await.is_err());
     }
 
     #[tokio::test]

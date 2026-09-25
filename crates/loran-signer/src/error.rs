@@ -45,6 +45,10 @@ pub enum SignerError {
     #[error("Signing key expired: key_id={0}")]
     KeyExpired(u32),
 
+    /// The named key was retired: its private key is gone and it never signs
+    #[error("Signing key retired: key_id={0}")]
+    KeyRetired(u32),
+
     /// Resource not found
     #[error("Not found: {0}")]
     NotFound(String),
@@ -95,6 +99,7 @@ impl IntoResponse for SignerError {
                 (StatusCode::NOT_FOUND, "Resource not found".to_string())
             }
             SignerError::KeyExpired(_) => (StatusCode::GONE, "Signing key expired".to_string()),
+            SignerError::KeyRetired(_) => (StatusCode::GONE, "Signing key retired".to_string()),
             SignerError::Database(_) | SignerError::Internal(_) | SignerError::Crypto(_) => {
                 // Never expose internal error details to the client
                 crate::recording::error!("Internal error: {:?}", self);
@@ -145,6 +150,10 @@ impl From<SignerError> for tonic::Status {
             SignerError::KeyNotFound(_) | SignerError::NotFound(_) => {
                 crate::recording::debug!("gRPC resource not found: {err:?}");
                 tonic::Status::not_found("not found")
+            }
+            SignerError::KeyRetired(_) => {
+                crate::recording::warn!("gRPC sign refused: {err:?}");
+                tonic::Status::failed_precondition("key retired")
             }
             _ => {
                 crate::recording::error!("gRPC internal error: {err:?}");

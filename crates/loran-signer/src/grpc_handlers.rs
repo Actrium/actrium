@@ -3,7 +3,7 @@
 use crate::{
     error::SignerError,
     storage::KeyStorage,
-    types::{ensure_named_key_payload, sign_request_payload},
+    types::{ensure_named_key_payload, retire_named_key_payload, sign_request_payload},
 };
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
@@ -253,6 +253,27 @@ impl Signer for SignerGrpcService {
             key_id: key_pair.key_id,
             verifying_key: key_pair.verifying_key,
         }))
+    }
+
+    /// Retire the named key; it never signs again
+    async fn retire_named_key(
+        &self,
+        request: Request<RetireNamedKeyRequest>,
+    ) -> Result<Response<RetireNamedKeyResponse>, Status> {
+        let req = request.into_inner();
+        self.verify_credential(&req.credential, &retire_named_key_payload(&req.name))
+            .await
+            .map_err(Status::from)?;
+        if req.name.is_empty() {
+            return Err(Status::invalid_argument("key name is empty"));
+        }
+
+        let key_id = self
+            .storage
+            .retire_named_key(&req.name)
+            .await
+            .map_err(Status::from)?;
+        Ok(Response::new(RetireNamedKeyResponse { key_id }))
     }
 
     /// Health check

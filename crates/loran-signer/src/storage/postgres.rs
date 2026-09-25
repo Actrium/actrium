@@ -409,6 +409,20 @@ impl KeyStorageBackend for PostgresBackend {
         Ok(result)
     }
 
+    async fn retire_named_key(&self, name: &str) -> SignerResult<u32> {
+        let key_id = self.ensure_named_key(name).await?.key_id;
+        // An empty secret is the retired marker: the private key is gone.
+        sqlx::query("UPDATE keys SET secret_key = '' WHERE key_id = $1")
+            .bind(key_id as i32)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                SignerError::Internal(format!("Failed to retire named key {name}: {e}"))
+            })?;
+        crate::recording::info!("Retired named key {} (key_id: {})", name, key_id);
+        Ok(key_id)
+    }
+
     async fn sign(&self, key_id: u32, message: &[u8]) -> SignerResult<Vec<u8>> {
         // Read stored signing key (AES-256-GCM v1 ciphertext, or legacy v0 plaintext)
         let result =
@@ -432,6 +446,9 @@ impl KeyStorageBackend for PostgresBackend {
                 return Err(SignerError::NotFound(format!("Key not found: {key_id}")));
             }
         };
+        if stored.is_empty() {
+            return Err(SignerError::KeyRetired(key_id));
+        }
 
         // Decrypt / decode; fails closed on format/KEK mismatch (see load_secret)
         let signing_key_b64 = self.load_secret(&stored)?;

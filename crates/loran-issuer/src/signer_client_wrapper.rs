@@ -126,6 +126,16 @@ impl SignerClientWrapper {
         .await
     }
 
+    /// Retire the key named `name` so it never signs again; returns its
+    /// key id. Idempotent, so it retries.
+    pub async fn retire_named_key(&self, name: &str) -> Result<u32, signer::SignerError> {
+        self.call_with_rebuild("retire_named_key", true, move |client| {
+            let name = name.to_string();
+            Box::pin(async move { client.retire_named_key(&name).await })
+        })
+        .await
+    }
+
     /// Health check
     pub async fn health_check(&self) -> Result<String, signer::SignerError> {
         self.call_with_rebuild("health_check", true, |client| {

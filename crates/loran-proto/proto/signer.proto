@@ -20,6 +20,10 @@ service Signer {
   // Return the non-expiring key with the given name, generating it if missing
   rpc EnsureNamedKey(EnsureNamedKeyRequest) returns (EnsureNamedKeyResponse);
 
+  // Retire the named key: its private key is destroyed and it never signs
+  // again. Idempotent; a missing name is created retired.
+  rpc RetireNamedKey(RetireNamedKeyRequest) returns (RetireNamedKeyResponse);
+
   // Health check
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 }
@@ -111,6 +115,19 @@ message EnsureNamedKeyResponse {
 
   // Verifying key (Base64-encoded Ed25519 verifying key, 32 bytes)
   required string verifying_key = 2;
+}
+
+message RetireNamedKeyRequest {
+  // Key name, e.g. "issuer:k7m2q9xh@example.com"
+  required string name = 1;
+
+  // nonce-auth credential
+  required admin.v1.NonceCredential credential = 2;
+}
+
+message RetireNamedKeyResponse {
+  // Key ID of the retired key
+  required uint32 key_id = 1;
 }
 
 // ============================================================================

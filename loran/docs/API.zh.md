@@ -202,7 +202,7 @@ Actr Host 管理的非 DNS publisher 值，但不能借此进入 Publisher Regis
 
 规范入口：`/signer.v1.Signer/<Method>`（gRPC）。
 
-方法包括 `GenerateSigningKey`、`Sign`、`GetVerifyingKey` 与 `HealthCheck`。认证使用
+方法包括 `GenerateSigningKey`、`Sign`、`GetVerifyingKey`、`EnsureNamedKey`、`RetireNamedKey`（退役命名 key，此后不再签名）与 `HealthCheck`。认证使用
 nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`key_id` 和待签
 消息 SHA-256。不存在下载私钥的 API。生产环境必须配置 KEK，私钥明文落盘会导致配置
 校验失败。

@@ -1,11 +1,11 @@
 //! Signer gRPC client
 
 use crate::error::SignerError;
-use crate::types::{ensure_named_key_payload, sign_request_payload};
+use crate::types::{ensure_named_key_payload, retire_named_key_payload, sign_request_payload};
 use actrix_proto::admin::v1::NonceCredential;
 use actrix_proto::signer::v1::{
     EnsureNamedKeyRequest, GenerateSigningKeyRequest, GetVerifyingKeyRequest, HealthCheckRequest,
-    SignRequest, signer_client::SignerClient,
+    RetireNamedKeyRequest, SignRequest, signer_client::SignerClient,
 };
 use base64::prelude::*;
 use ed25519_dalek::VerifyingKey;
@@ -329,6 +329,29 @@ impl GrpcClient {
             .map_err(|e| SignerError::Internal(format!("Invalid verifying key: {e}")))?;
 
         Ok((resp.key_id, key_array))
+    }
+
+    /// Retire the named key so it never signs again. Returns its key id.
+    pub async fn retire_named_key(&mut self, name: &str) -> Result<u32, SignerError> {
+        let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
+            .sign(retire_named_key_payload(name).as_bytes())?;
+        let credential = NonceCredential {
+            timestamp: nonce_credential.timestamp,
+            nonce: nonce_credential.nonce,
+            signature: nonce_credential.signature,
+        };
+
+        let request = tonic::Request::new(RetireNamedKeyRequest {
+            name: name.to_string(),
+            credential,
+        });
+        let resp = self
+            .client
+            .retire_named_key(request)
+            .await
+            .map_err(|e| SignerError::Internal(format!("gRPC RetireNamedKey failed: {e}")))?
+            .into_inner();
+        Ok(resp.key_id)
     }
 
     /// Health check

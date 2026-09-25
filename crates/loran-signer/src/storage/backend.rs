@@ -33,6 +33,12 @@ pub trait KeyStorageBackend: Send + Sync {
     /// same key.
     async fn ensure_named_key(&self, name: &str) -> SignerResult<KeyPair>;
 
+    /// Retire the key named `name`: destroy its private key so it never signs
+    /// again, keeping the name and verifying key. A missing name is created
+    /// retired, so the name can never get a live key. Idempotent; returns the
+    /// key id.
+    async fn retire_named_key(&self, name: &str) -> SignerResult<u32>;
+
     /// Query the verifying public key by key_id
     ///
     /// # Arguments
