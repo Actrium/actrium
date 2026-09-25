@@ -125,7 +125,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
-      { "id": "issuer-2026-2", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
+      { "id": "7", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
     ]
   },
   "provider": {
@@ -161,7 +161,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `package.href` | HTTPS download address of the package the instance runs; it may be anywhere. |
 | `package.sha256` | SHA-256 of all bytes of that package, in lowercase hexadecimal. |
 | `issuer.url` | Registration and verification endpoint of the Issuer. |
-| `issuer.keys` | Realm issuer public keys used to verify Actor credentials. |
+| `issuer.keys` | Realm issuer public keys used to verify Actor credentials, 1 to 3 entries (Section 6.1). |
 | `provider.id` | Realm Provider ID: the Realm Provider's canonical DNS authority. It never changes during the Realm's life. |
 | `provider.signaling` | Signaling endpoints. Entries sharing a `control_plane_id` are replicas or failover entries of one Realm Provider control plane, not a federation. |
 | `provider.ice` | STUN and TURN endpoints. TURN entries name the `credential_audience` for short-lived TURN credentials. |
@@ -214,7 +214,7 @@ error.
 
 An Actr Host reaches a Realm only through the Issuer and Realm Provider named
 by its accepted Realm Profile. Actor credentials for the Realm name the Realm
-as their issuer and are verified with the Realm issuer keys in `issuer.keys`.
+as their issuer and are verified with the Realm issuer keys in `issuer.keys` (Section 6.1).
 Realm membership means that a client has registered its Realm client key in
 the Realm and has not been revoked; it admits the client to the instance's
 network, and the Issuer issues Actor credentials only to registered,
@@ -247,6 +247,46 @@ Actr Host **MUST** report an error. In every case the Actr Host **MUST NOT**
 use any Realm Provider other than the one named by the accepted Realm Profile,
 including services listed in the authority descriptor.
 
+### 6.1 Realm issuer keys
+
+`issuer.keys` lists 1 to 3 Realm issuer keys, each with an `id`, `algorithm`
+(`Ed25519`), a base64 `public_key`, and `status`. An Actor credential header
+carries an unsigned 32-bit integer `key_id`; `id` **MUST** be that integer in
+decimal without leading zeros, for example `"7"`. An `id` names one public key
+for the whole history of the Realm and **MUST NOT** be reused.
+
+To verify an Actor credential, a verifier takes the accepted Realm Profile of
+the credential's Realm, finds the key in its `issuer.keys` whose `id` matches
+`key_id` (`active` or `retired`), verifies the signature with it, and checks
+the validity period; it **MUST NOT** use keys of another Realm. When no key
+matches, the verifier **SHOULD** refresh that Realm Profile and try again, at
+most once every 60 seconds per Realm; if there is still no match, it rejects
+the credential.
+
+The Issuer signs only with an `active` key, and with one key at a time. A
+`retired` key no longer signs; unexpired credentials it signed stay valid.
+Removing a key from `issuer.keys` revokes it: the credentials it signed stop
+being valid at once, and Actors must obtain new ones.
+
+Rotation follows "publish, then use, then remove", each step being a Realm
+Profile with a higher sequence:
+
+1. **Pre-publish.** Add the new key (`active`); the Issuer keeps signing with
+   the old key.
+2. **Switch.** At least 24 hours after the Realm Profile that lists the new key
+   is accepted (the refresh interval of Section 6), the Issuer signs with the
+   new key; later Realm Profiles mark the old key `retired`.
+3. **Remove.** Five minutes (allowing for clock skew) after the last credential
+   signed by the old key expires, Realm Profiles may stop listing the old key.
+
+A Realm Provider **SHOULD** rotate every 90 days. A compromised key is removed
+at once, without waiting, by publishing a Realm Profile without it. For a Realm
+under the Realm Provider's domain, the Realm Provider signs these Realm
+Profiles itself; for any other Realm, the Realm Provider returns a draft with
+the new key in its `draft_profile` response (Section 8), which the Realm
+signing key holder signs and submits with `publish_profile`. Until the holder
+publishes it, the Realm Provider keeps using the old key.
+
 ## 7. Lifecycle
 
 ### 7.1 Creation
@@ -278,7 +318,8 @@ the Realm issuer keys, the Realm Provider's endpoints, `display_name`, and
 `provider.id`.
 
 A new Realm Profile is likewise submitted to the Realm Provider with
-`publish_profile`; if the `realms` location is not at the Realm Provider, the
+`publish_profile` (the holder may first obtain a draft with the Realm
+Provider's current issuer and endpoints through `draft_profile`); if the `realms` location is not at the Realm Provider, the
 holder also publishes it there. For a Realm under the Realm Provider's domain,
 the request carries only the `package`, `display_name`, or `policy` to change,
 and the Realm Provider builds and signs the new Realm Profile.
@@ -347,6 +388,7 @@ Discovery, Section 4.3):
 | `create_realm` | Create a pending Realm and return its unsigned first Realm Profile (its `package` taken from the request). |
 | `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries the Realm admin token once; later submissions with a higher sequence are updates (including retirement). |
 | `reissue_admin_token` | Issue a new Realm admin token and invalidate the old one. |
+| `draft_profile` | Only for Realms outside the Realm Provider's domain: return the next unsigned Realm Profile draft. Its sequence is the accepted one plus one; `package`, `display_name`, and `policy` come from the accepted Realm Profile, and `issuer` and `provider` are the Realm Provider's current values (including a Realm issuer key being rotated in, Section 6.1). It does not change the Realm. |
 
 For a Realm under the Realm Provider's domain (Section 2.1), requests carry
 the payload below, including `provider_id`, `nonce`, and validity, without a

@@ -101,7 +101,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
-      { "id": "issuer-2026-2", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
+      { "id": "7", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
     ]
   },
   "provider": {
@@ -137,7 +137,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `package.href` | 该实例所运行包的 HTTPS 下载地址，可以在任何位置。 |
 | `package.sha256` | 该包全部字节的 SHA-256（小写十六进制）。 |
 | `issuer.url` | Issuer 的注册与验证端点。 |
-| `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥。 |
+| `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥，1 至 3 项（第 6.1 节）。 |
 | `provider.id` | Realm Provider ID：Realm Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
 | `provider.signaling` | signaling 端点。共享同一 `control_plane_id` 的条目是同一 Realm Provider control plane 的副本或故障切换入口，不是 federation。 |
 | `provider.ice` | STUN 与 TURN 端点。TURN 条目标明短期 TURN credential 的 `credential_audience`。 |
@@ -180,7 +180,7 @@ Actr Host 以不带 credential 的 HTTPS GET 下载 `package.href`，**MUST** �
 相同的那个 Actor，恰好一个；零个或多于一个都是错误。
 
 Actr Host 只通过已接受 Realm Profile 指定的 Issuer 和 Realm Provider 访问 Realm。该 Realm
-的 Actor credential 以该 Realm 名为 issuer，用 `issuer.keys` 中的 Realm issuer key 验证。
+的 Actor credential 以该 Realm 名为 issuer，用 `issuer.keys` 中的 Realm issuer key 验证（第 6.1 节）。
 Realm membership 指客户端已在该 Realm 注册其 Realm 客户端 key 且未被撤销；它决定客户端能否
 进入该实例的网络，Issuer 只向已注册且未撤销的 Realm 客户端 key 签发 Actor credential。实例内
 的应用权限由应用决定，不属于本文范围。
@@ -200,6 +200,35 @@ sequence 与 `provider.id` 基线，改用最后一份由仍列出的 key 签名
 Profile 验证失败时，Actr Host 忽略它、保留已接受的并报告失败。从未接受过 Realm Profile 且
 无法取得时，Actr Host **MUST** 报错。任何情况下 Actr Host 都 **MUST NOT** 使用已接受
 Realm Profile 指定之外的任何 Realm Provider，包括 authority descriptor 中列出的 service。
+
+### 6.1 Realm issuer key
+
+`issuer.keys` 列出 1 至 3 把 Realm issuer key，每把有 `id`、`algorithm`（`Ed25519`）、base64
+`public_key` 与 `status`。Actor credential 头部带 32 位无符号整数 `key_id`，`id` **MUST** 是该
+整数的十进制形式，不带前导零，例如 `"7"`。`id` 在该 Realm 的全部历史中只对应一个公钥，
+**MUST NOT** 复用。
+
+验证 Actor credential 时，验证者取 credential 所属 Realm 的已接受 Realm Profile，在其
+`issuer.keys` 中找 `id` 与 `key_id` 相符的 key（`active` 或 `retired` 均可），用它验签并检查
+有效期；**MUST NOT** 使用其他 Realm 的 key。找不到时，验证者 **SHOULD** 刷新该 Realm Profile
+后再判，同一 Realm 每 60 秒至多刷新一次；仍找不到即拒绝。
+
+Issuer 只用 `active` key 签发，同一时刻只用一把。`retired` key 不再签发，它签发且未过期的
+credential 仍然有效。从 `issuer.keys` 移除某把 key 即吊销它：它签发的 credential 立即失效，
+Actor 需重新取得 credential。
+
+轮换按「先发布、再使用、后移除」进行，每一步都是一份 sequence 更高的 Realm Profile：
+
+1. **预发布。** 加入新 key（`active`），Issuer 继续用旧 key 签发。
+2. **切换。** 列出新 key 的 Realm Profile 被接受至少 24 小时后（第 6 节的刷新间隔），Issuer 改用
+   新 key；此后的 Realm Profile 把旧 key 标为 `retired`。
+3. **移除。** 旧 key 签发的最后一个 credential 过期再过 5 分钟（容许时钟偏差）后，Realm Profile
+   可以不再列出旧 key。
+
+Realm Provider **SHOULD** 每 90 天轮换一次。key 泄露时跳过等待，立即发布移除它的 Realm
+Profile。对 Realm Provider 域名下的 Realm，Realm Provider 自行签署这些 Realm Profile；对其他
+Realm，Realm Provider 在 `draft_profile` 响应（第 8 节）中给出含新 key 的草案，由 Realm 签名
+key 持有方签署后以 `publish_profile` 提交。持有方发布之前，Realm Provider 继续使用旧 key。
 
 ## 7. 生命周期
 
@@ -222,7 +251,8 @@ Realm Provider 由 Actr Host、用户或 key 持有方的策略选定。每一�
 sequence 更高的 Realm Profile 可以更改 `package`（升级程序）、Realm issuer key、Realm
 Provider 端点、`display_name` 与 `policy`，**MUST NOT** 更改 `provider.id`。
 
-新 Realm Profile 同样以 `publish_profile` 提交给 Realm Provider；`realms` 位置不在 Realm
+新 Realm Profile 同样以 `publish_profile` 提交给 Realm Provider（持有方可先用 `draft_profile`
+取得含 Realm Provider 当前 issuer 与端点的草案）；`realms` 位置不在 Realm
 Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域名下的 Realm，请求只携带要改的
 `package`、`display_name` 或 `policy`，由 Realm Provider 生成并签署新 Realm Profile。
 
@@ -272,6 +302,7 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 | `create_realm` | 创建 pending Realm，返回其未签名的首个 Realm Profile（其中 `package` 取自请求）。 |
 | `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 Realm 管理 token；之后提交 sequence 更高的版本即更新（含退役）。 |
 | `reissue_admin_token` | 签发新的 Realm 管理 token，并使旧 token 失效。 |
+| `draft_profile` | 只用于 Realm Provider 域名以外的 Realm：返回下一份未签名的 Realm Profile 草案。其 sequence 为已接受值加一，`package`、`display_name`、`policy` 取自已接受的 Realm Profile，`issuer` 与 `provider` 为 Realm Provider 的当前值（含轮换中的 Realm issuer key，第 6.1 节）。不改变 Realm。 |
 
 对 Realm Provider 域名下的 Realm（第 2.1 节），请求携带下述 payload（含 `provider_id`、
 `nonce` 与有效期）但不带签名，由 Realm Provider 账号的 bearer access token 授权（第 7.3
