@@ -101,17 +101,11 @@ impl RealmClientKey {
         }
     }
 
-    /// Load a key file written by `actr realm join`.
+    /// Load a key file written by `actr realm join`; it must be readable
+    /// only by its owner ([`RealmClientKeyFile::read`]).
     pub fn load(path: &Path) -> HyperResult<Self> {
-        let text = std::fs::read_to_string(path).map_err(|error| {
-            HyperError::Config(format!(
-                "failed to read Realm client key {}: {error}",
-                path.display()
-            ))
-        })?;
-        let (file, key) = RealmClientKeyFile::parse(&text).map_err(|error| {
-            HyperError::Config(format!("Realm client key {}: {error}", path.display()))
-        })?;
+        let (file, key) = RealmClientKeyFile::read(path)
+            .map_err(|error| HyperError::Config(error.to_string()))?;
         Ok(Self::new(file.realm, file.provider_id, key))
     }
 

@@ -901,6 +901,11 @@ async fn linked_node_registers_with_a_realm_client_key() {
         &ed25519_dalek::SigningKey::from_bytes(&[5; 32]),
     );
     std::fs::write(&key_path, serde_json::to_string(&key_file).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     cfg.realm_client_key = Some(key_path);
 
     let issuer = format!("http://127.0.0.1:{}/issuer", server.port());

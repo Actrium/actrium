@@ -604,6 +604,32 @@ impl RealmClientKeyFile {
         check_realm_name(&file.realm)?;
         Ok((file, key))
     }
+
+    /// Read and [`parse`](Self::parse) the key file at `path`. Like ssh with
+    /// a private key, a file that group or others may access is refused on
+    /// Unix. Android and iOS are left out: their app sandboxes, not file
+    /// modes, keep other apps away.
+    pub fn read(path: &std::path::Path) -> Result<(Self, SigningKey), MembershipError> {
+        let shown = path.display();
+        #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(path)
+                .map_err(|error| invalid(format!("cannot read Realm client key {shown}: {error}")))?
+                .permissions()
+                .mode();
+            if mode & 0o077 != 0 {
+                return Err(invalid(format!(
+                    "Realm client key {shown} is accessible by group or others (mode {:03o}); \
+                     run `chmod 600 {shown}`",
+                    mode & 0o777
+                )));
+            }
+        }
+        let text = std::fs::read_to_string(path)
+            .map_err(|error| invalid(format!("cannot read Realm client key {shown}: {error}")))?;
+        Self::parse(&text).map_err(|error| invalid(format!("Realm client key {shown}: {error}")))
+    }
 }
 
 #[cfg(test)]
@@ -624,6 +650,30 @@ mod tests {
         let hash = invite_secret_hash(&secret).unwrap();
         assert_eq!(invite_id(&secret).unwrap(), hash[..16]);
         assert!(invite_secret_hash("short").is_err());
+    }
+
+    #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
+    #[test]
+    fn a_key_file_others_can_read_is_refused() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let key = SigningKey::from_bytes(&[5; 32]);
+        let file = RealmClientKeyFile::new(REALM, "p.example", "https://p.example/issuer", &key);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("realm-client.json");
+        std::fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+
+        for mode in [0o644, 0o640, 0o604, 0o660] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            let error = RealmClientKeyFile::read(&path).unwrap_err().to_string();
+            assert!(error.contains("chmod 600"), "{mode:o}: {error}");
+        }
+        for mode in [0o600, 0o400] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(
+                RealmClientKeyFile::read(&path).unwrap().1.to_bytes(),
+                key.to_bytes()
+            );
+        }
     }
 
     #[test]

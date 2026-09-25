@@ -52,6 +52,15 @@ fn client_key_file_must_be_of_the_configured_realm() {
     let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
     let file = RealmClientKeyFile::new("k7m2q9xh@acme.com", "issuer:8081", "http://issuer", &key);
     std::fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let set = |mode| std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode));
+        set(0o644).unwrap();
+        let error = RealmClientKey::load_for(Some(&path), "k7m2q9xh@acme.com").unwrap_err();
+        assert!(error.to_string().contains("chmod 600"), "{error}");
+        set(0o600).unwrap();
+    }
 
     let loaded = RealmClientKey::load_for(Some(&path), "k7m2q9xh@acme.com")
         .unwrap()
