@@ -2390,3 +2390,41 @@ async fn register_publisher_refuses_a_package_key_outside_its_validity() {
     let record = register(&manager, &valid).await.unwrap();
     assert!(record.key_expires_at.unwrap() > now.timestamp());
 }
+
+#[tokio::test]
+async fn register_publisher_refuses_a_package_key_that_is_not_a_curve_point() {
+    use base64::Engine as _;
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    // 32 bytes that do not decode to an Ed25519 point.
+    let not_a_point = (0u8..=255)
+        .map(|byte| {
+            let mut bytes = [0u8; 32];
+            bytes[0] = byte;
+            bytes[31] = 0x7f;
+            bytes
+        })
+        .find(|bytes| ed25519_dalek::VerifyingKey::from_bytes(bytes).is_err())
+        .expect("some bytes are not a point");
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let profile = signed_profile(
+        "point.example",
+        1,
+        &[("root-1", &root, "active")],
+        &[(&SigningKey::generate(&mut OsRng), "active")],
+    );
+    let mut document = serde_json::to_value(&profile).unwrap();
+    document["keys"][0]["public_key"] = base64::engine::general_purpose::STANDARD
+        .encode(not_a_point)
+        .into();
+    actr_protocol::realm_profile::sign_document(&mut document, "root-1", &root);
+    let profile: actr_protocol::PublisherProfile = serde_json::from_value(document).unwrap();
+    let result = register(&manager, &profile).await;
+    assert!(
+        matches!(result, Err(PublisherRegistryError::InvalidRequest(_))),
+        "{result:?}"
+    );
+}

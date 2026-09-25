@@ -225,7 +225,8 @@ impl PublisherRegistryManager {
                 "a Publisher Profile must list exactly one active package signing key".into(),
             ));
         };
-        crypto::validate_public_key(&package_key.public_key)?;
+        crypto::validate_public_key(&package_key.public_key)
+            .map_err(|error| invalid(format!("package signing key: {error}")))?;
         let key_id = crypto::compute_key_id_from_b64(&package_key.public_key)?;
         let now = chrono::Utc::now().timestamp();
         let time = |value: &Option<String>, member: &str| {
