@@ -116,6 +116,7 @@ fn realm_group_exposes_the_signing_tool() {
         subs,
         [
             "create-request",
+            "draft-request",
             "keygen",
             "reissue-request",
             "retire",

@@ -7,6 +7,7 @@
 //!   - `sign-profile`    — sign a Realm Profile into a `publish_profile` request
 //!   - `retire`          — sign the retired successor of a Realm Profile
 //!   - `reissue-request` — sign a `reissue_admin_token` request
+//!   - `draft-request`   — sign a `draft_profile` request
 //!
 //! Requests are printed as JSON, to be sent with `POST` to the Realm
 //! Provider's `realm-management` endpoint.
@@ -47,6 +48,10 @@ pub enum RealmCommand {
     Retire(RetireArgs),
     /// Sign a `reissue_admin_token` request.
     ReissueRequest(ReissueRequestArgs),
+    /// Sign a `draft_profile` request for the next Realm Profile, with the
+    /// Realm Provider's current issuer keys; sign its reply with
+    /// `sign-profile`.
+    DraftRequest(ReissueRequestArgs),
 }
 
 #[derive(Args, Debug)]
@@ -183,6 +188,11 @@ impl Command for RealmArgs {
             RealmCommand::ReissueRequest(args) => {
                 let (key_id, key) = RealmKeyFile::load(&args.key)?;
                 new_request(ManagementOp::ReissueAdminToken, &args.realm, &args.provider)
+                    .sign(&key_id, &key)
+            }
+            RealmCommand::DraftRequest(args) => {
+                let (key_id, key) = RealmKeyFile::load(&args.key)?;
+                new_request(ManagementOp::DraftProfile, &args.realm, &args.provider)
                     .sign(&key_id, &key)
             }
         };
@@ -361,7 +371,10 @@ mod tests {
             "sequence": 1,
             "realm": { "name": "k7m2q9xh@acme.com", "display_name": "k7m2q9xh", "status": "active" },
             "package": { "href": "https://cdn.example/a.actr", "sha256": "ab".repeat(32) },
-            "issuer": { "url": "https://p.example/issuer", "keys": [] },
+            "issuer": { "url": "https://p.example/issuer", "keys": [{
+                "id": "7", "algorithm": "Ed25519", "status": "active",
+                "public_key": BASE64.encode([2u8; 32]),
+            }] },
             "provider": { "id": "p.example", "signaling": [], "ice": [] },
             "policy": { "membership": "invite-only" },
             "issued_at": "2026-09-25T00:00:00Z",
