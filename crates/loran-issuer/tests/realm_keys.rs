@@ -73,12 +73,7 @@ async fn start_embedded_signer(
             addr
         }
     };
-    let service = create_grpc_service(
-        storage,
-        MemoryStorage::new(),
-        shared_key.to_string(),
-        service_config.tolerance_seconds,
-    );
+    let service = create_grpc_service(storage, MemoryStorage::new(), shared_key.to_string());
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
         Server::builder()

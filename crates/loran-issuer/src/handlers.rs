@@ -916,12 +916,7 @@ fn aid_error_to_response(err: AidError) -> (u32, String) {
         // Server errors (5xx)
         AidError::GenerationFailed(msg) => {
             // If the Signer is unavailable, return 503 (Service Unavailable)
-            // A lost race with an expired Signer key is also retryable: rotation
-            // may have produced a usable key by the next request.
-            if msg.contains("Signer unavailable")
-                || msg.contains("Signer service")
-                || msg.contains("has expired")
-            {
+            if msg.contains("Signer unavailable") || msg.contains("Signer service") {
                 503
             } else {
                 500

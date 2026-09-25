@@ -724,13 +724,6 @@ async fn get_signer_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoRe
     }
 }
 
-async fn cleanup_signer_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
-    match state.service.cleanup_signer_keys_direct().await {
-        Ok(result) => (StatusCode::OK, Json(serde_json::to_value(result).unwrap())).into_response(),
-        Err(status) => grpc_status_to_response(status),
-    }
-}
-
 // ── Platform detail endpoint ─────────────────────────────────────
 
 async fn get_platform_detail(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
@@ -974,10 +967,6 @@ pub fn build_admin_api_router(
         )
         // Service detail routes — specific routes before parameterized
         .route("/admin/api/services/signer/keys", get(get_signer_keys))
-        .route(
-            "/admin/api/services/signer/keys/cleanup",
-            post(cleanup_signer_keys),
-        )
         .route("/admin/api/services/{name}", get(get_service_detail))
         .route("/admin/api/network/probe/{port}", get(probe_port))
         .route("/admin/api/metrics/timeseries", get(get_metrics_timeseries));

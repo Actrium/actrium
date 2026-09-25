@@ -73,12 +73,7 @@ async fn setup() -> (Arc<RealmProfiles>, TempDir) {
     )
     .await
     .unwrap();
-    let service = create_grpc_service(
-        storage,
-        MemoryStorage::new(),
-        shared_key.to_string(),
-        service_config.tolerance_seconds,
-    );
+    let service = create_grpc_service(storage, MemoryStorage::new(), shared_key.to_string());
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);

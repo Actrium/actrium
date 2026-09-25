@@ -592,29 +592,6 @@ static REGISTRY: &[ConfigFieldDef] = &[
         service: "issuer",
         choices: &[],
     },
-    // ── Signer ────────────────────────────────────────────────────────
-    ConfigFieldDef {
-        key: "services.signer.storage.key_ttl_seconds",
-        toml_path: "services.signer.storage.key_ttl_seconds",
-        value_type: ConfigValueType::U64,
-        default_value: "3600",
-        dynamic: true,
-        reloadable: true,
-        description: "Key time-to-live in seconds",
-        service: "signer",
-        choices: &[],
-    },
-    ConfigFieldDef {
-        key: "services.signer.tolerance_seconds",
-        toml_path: "services.signer.tolerance_seconds",
-        value_type: ConfigValueType::U64,
-        default_value: "300",
-        dynamic: true,
-        reloadable: true,
-        description: "Clock skew tolerance for key validation",
-        service: "signer",
-        choices: &[],
-    },
     // ── Monitoring ─────────────────────────────────────────────────
     ConfigFieldDef {
         key: "monitoring.htpasswd_file",

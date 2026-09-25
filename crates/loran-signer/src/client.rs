@@ -1,11 +1,6 @@
 //! Signer client - simple HTTP client (for testing only)
 
-use crate::types::{
-    GenerateSigningKeyRequest, GenerateSigningKeyResponse, SignRequest, SignResponse,
-    sign_request_payload,
-};
-use base64::prelude::*;
-use ed25519_dalek::VerifyingKey;
+use crate::types::{SignRequest, SignResponse, sign_request_payload};
 use nonce_auth::CredentialBuilder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -53,57 +48,6 @@ impl Client {
             client,
             actrix_shared_key: config.psk.clone(),
         }
-    }
-
-    /// Generate a new Ed25519 signing key pair from the Signer service
-    ///
-    /// Returns (key_id, verifying_key_bytes[32], expires_at)
-    /// The private key is retained on the Signer server side
-    pub async fn generate_signing_key(
-        &self,
-    ) -> Result<(u32, VerifyingKey, u64), crate::error::SignerError> {
-        let url = format!("{}/generate-signing-key", self.endpoint);
-        let request_data = "generate_signing_key";
-
-        let credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
-            .sign(request_data.as_bytes())?;
-
-        let request = GenerateSigningKeyRequest { credential };
-
-        crate::recording::debug!(
-            "Requesting Ed25519 signing key generation from Signer at {}",
-            url
-        );
-
-        let response = self.client.post(&url).json(&request).send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(crate::error::SignerError::Internal(format!(
-                "Signer generate signing key request failed with status {status}: {error_text}"
-            )));
-        }
-
-        let response: GenerateSigningKeyResponse = response.json().await?;
-
-        let vk_bytes = BASE64_STANDARD.decode(&response.verifying_key)?;
-        let vk_array: [u8; 32] = vk_bytes.try_into().map_err(|_| {
-            crate::error::SignerError::Crypto(
-                "Invalid verifying key length, expected 32 bytes".to_string(),
-            )
-        })?;
-
-        let verifying_key = VerifyingKey::from_bytes(&vk_array).map_err(|e| {
-            crate::error::SignerError::Crypto(format!("Invalid Ed25519 verifying key: {e}"))
-        })?;
-
-        crate::recording::info!(
-            "Successfully generated Ed25519 signing key with key_id={}, expires_at={}",
-            response.key_id,
-            response.expires_at
-        );
-        Ok((response.key_id, verifying_key, response.expires_at))
     }
 
     /// Sign a message using a key in the Signer service

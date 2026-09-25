@@ -80,8 +80,7 @@ Workspace，同一 Workspace 可按写入并发策略被多个 Service 使用；
 2. Realm Profile 由 Realm 签名 key 签名，把 Realm issuer key 与 Realm Provider 端点委派给
    某个 Realm Provider。Realm Profile 的有效性只取决于签名，不取决于从哪里取到。
 3. Realm issuer key（Ed25519）签发 Actor credential，每个 Realm 同一时刻只用一把签发（轮换时
-   Realm Profile 最多列 3 把，见 5.3），私钥留在 Realm Provider 的 Issuer Signer；容忍窗口仅用于验签，绝不延长签名或 Actor credential
-   生命周期。
+   Realm Profile 最多列 3 把，见 5.3），私钥留在 Realm Provider 的 Issuer Signer；key 退役即销毁私钥，此后不再签名。
 4. Publisher ID 是规范化 DNS 域名。Publisher Profile 是 authority descriptor
    `https://<publisher>/.well-known/actr` 中带签名的可选成员 `publisher`（Actr Authority
    Discovery §4.5）。其中的 Ed25519 key 才是包的长期真实性根；包 registry/origin 只是

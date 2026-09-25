@@ -97,14 +97,12 @@ fn unwrap_secret(encryptor: &KeyEncryptor, stored: &str) -> SignerResult<String>
 #[derive(Clone)]
 pub struct PostgresBackend {
     pool: PgPool,
-    key_ttl: u64,
     encryptor: KeyEncryptor,
 }
 
 impl std::fmt::Debug for PostgresBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PostgresBackend")
-            .field("key_ttl", &self.key_ttl)
             .field("encryption_enabled", &self.encryptor.is_enabled())
             .finish()
     }
@@ -115,13 +113,8 @@ impl PostgresBackend {
     ///
     /// # Arguments
     /// * `config` - PostgreSQL configuration
-    /// * `key_ttl` - Key TTL (seconds); 0 means never expires
     /// * `encryptor` - Key encryptor used to protect stored Ed25519 signing keys
-    pub async fn new(
-        config: &PostgresConfig,
-        key_ttl: u64,
-        encryptor: KeyEncryptor,
-    ) -> SignerResult<Self> {
+    pub async fn new(config: &PostgresConfig, encryptor: KeyEncryptor) -> SignerResult<Self> {
         // Build connection URL
         let url = format!(
             "postgres://{}:{}@{}:{}/{}",
@@ -136,11 +129,7 @@ impl PostgresBackend {
             .await
             .map_err(|e| SignerError::Internal(format!("Failed to connect to PostgreSQL: {e}")))?;
 
-        let backend = Self {
-            pool,
-            key_ttl,
-            encryptor,
-        };
+        let backend = Self { pool, encryptor };
 
         // Initialize database tables. When a KEK is configured this also runs the
         // v0→v1 migration; any failure aborts startup so the service never serves
@@ -148,11 +137,10 @@ impl PostgresBackend {
         backend.init().await?;
 
         crate::recording::info!(
-            "PostgreSQL storage initialized: host={}:{}, db={}, key_ttl={}s, encryption={}",
+            "PostgreSQL storage initialized: host={}:{}, db={}, encryption={}",
             config.host,
             config.port,
             config.database,
-            key_ttl,
             backend.encryptor.is_enabled()
         );
 
@@ -254,16 +242,8 @@ impl KeyStorageBackend for PostgresBackend {
         .await
         .map_err(|e| SignerError::Internal(format!("Failed to create keys table: {e}")))?;
 
-        // Create index to improve expired key query performance
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_keys_expires_at ON keys(expires_at) WHERE expires_at > 0",
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| SignerError::Internal(format!("Failed to create index: {e}")))?;
-
-        // Named keys: stable names such as `realm-signing:<domain>` for keys
-        // that never expire.
+        // Named keys: stable names such as `realm-signing:<domain>`. Every key
+        // is named, so `keys.expires_at` is always 0.
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS key_names (
@@ -275,6 +255,18 @@ impl KeyStorageBackend for PostgresBackend {
         .execute(&self.pool)
         .await
         .map_err(|e| SignerError::Internal(format!("Failed to create key_names table: {e}")))?;
+
+        // Keys without a name came from the removed GenerateSigningKey RPC;
+        // nothing refers to them any more.
+        let unnamed =
+            sqlx::query("DELETE FROM keys WHERE key_id NOT IN (SELECT key_id FROM key_names)")
+                .execute(&self.pool)
+                .await
+                .map_err(|e| SignerError::Internal(format!("Failed to delete unnamed keys: {e}")))?
+                .rows_affected();
+        if unnamed > 0 {
+            crate::recording::info!("Deleted {} unnamed signing keys", unnamed);
+        }
 
         crate::recording::debug!("PostgreSQL tables and indexes initialized");
 
@@ -288,62 +280,6 @@ impl KeyStorageBackend for PostgresBackend {
             );
         }
         Ok(())
-    }
-
-    async fn generate_and_store_key(&self) -> SignerResult<KeyPair> {
-        // Generate Ed25519 key pair
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
-
-        // Encode as Base64
-        let verifying_key_b64 = BASE64_STANDARD.encode(verifying_key.as_bytes());
-        let signing_key_b64 = BASE64_STANDARD.encode(signing_key.as_bytes());
-
-        // Encrypt (if a KEK is configured) and tag with the v1 format prefix so the
-        // stored value is never the recoverable Base64 private key.
-        let stored_secret = self.store_secret(&signing_key_b64)?;
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        // Calculate expiration time
-        let expires_at = if self.key_ttl == 0 {
-            0 // Never expires
-        } else {
-            now + self.key_ttl as i64
-        };
-
-        // Insert key and get the auto-generated key_id (public_key stores the verifying
-        // key, secret_key stores the AES-256-GCM ciphertext or legacy plaintext)
-        let row = sqlx::query_as::<_, (i32,)>(
-            r#"
-            INSERT INTO keys (public_key, secret_key, created_at, expires_at)
-            VALUES ($1, $2, $3, $4)
-            RETURNING key_id
-            "#,
-        )
-        .bind(&verifying_key_b64)
-        .bind(&stored_secret)
-        .bind(now)
-        .bind(expires_at)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| SignerError::Internal(format!("Failed to insert key: {e}")))?;
-
-        let key_id = row.0 as u32;
-
-        crate::recording::info!(
-            "Generated and stored new Ed25519 key pair in PostgreSQL: key_id={}, expires_at={}",
-            key_id,
-            expires_at
-        );
-
-        Ok(KeyPair {
-            key_id,
-            verifying_key: verifying_key_b64,
-        })
     }
 
     async fn ensure_named_key(&self, name: &str) -> SignerResult<KeyPair> {
@@ -484,8 +420,8 @@ impl KeyStorageBackend for PostgresBackend {
     }
 
     async fn get_key_record(&self, key_id: u32) -> SignerResult<Option<KeyRecord>> {
-        let result = sqlx::query_as::<_, (i32, String, i64, i64)>(
-            "SELECT key_id, public_key, created_at, expires_at FROM keys WHERE key_id = $1",
+        let result = sqlx::query_as::<_, (i32, String, i64)>(
+            "SELECT key_id, public_key, created_at FROM keys WHERE key_id = $1",
         )
         .bind(key_id as i32)
         .fetch_optional(&self.pool)
@@ -497,13 +433,12 @@ impl KeyStorageBackend for PostgresBackend {
         })?;
 
         match result {
-            Some((id, public_key, created_at, expires_at)) => {
+            Some((id, public_key, created_at)) => {
                 crate::recording::debug!("Found key record for key_id: {} in PostgreSQL", key_id);
                 Ok(Some(KeyRecord {
                     key_id: id as u32,
                     public_key,
                     created_at: created_at as u64,
-                    expires_at: expires_at as u64,
                 }))
             }
             None => {
@@ -523,32 +458,6 @@ impl KeyStorageBackend for PostgresBackend {
             .map_err(|e| SignerError::Internal(format!("Failed to get key count: {e}")))?;
 
         Ok(count as u32)
-    }
-
-    async fn cleanup_expired_keys(&self, tolerance_seconds: u64) -> SignerResult<u32> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let cutoff = now - tolerance_seconds as i64;
-
-        let result = sqlx::query("DELETE FROM keys WHERE expires_at > 0 AND expires_at < $1")
-            .bind(cutoff)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| SignerError::Internal(format!("Failed to cleanup expired keys: {e}")))?;
-
-        let deleted_count = result.rows_affected() as u32;
-
-        if deleted_count > 0 {
-            crate::recording::info!(
-                "Cleaned up {} expired keys from PostgreSQL (tolerance {}s)",
-                deleted_count,
-                tolerance_seconds
-            );
-        }
-
-        Ok(deleted_count)
     }
 }
 
@@ -578,22 +487,18 @@ mod tests {
 
     async fn create_test_backend() -> PostgresBackend {
         let enc = KeyEncryptor::no_encryption();
-        PostgresBackend::new(&test_config(), 3600, enc)
-            .await
-            .unwrap()
+        PostgresBackend::new(&test_config(), enc).await.unwrap()
     }
 
     /// Backend with a configured KEK (encryption enabled). Used by the encryption
     /// and migration integration tests below.
     async fn create_test_backend_with_encryption() -> PostgresBackend {
         let enc = KeyEncryptor::from_kek(&test_kek()).unwrap();
-        PostgresBackend::new(&test_config(), 3600, enc)
-            .await
-            .unwrap()
+        PostgresBackend::new(&test_config(), enc).await.unwrap()
     }
 
     async fn cleanup_test_data(backend: &PostgresBackend) {
-        sqlx::query("TRUNCATE TABLE keys RESTART IDENTITY")
+        sqlx::query("TRUNCATE TABLE key_names, keys RESTART IDENTITY")
             .execute(&backend.pool)
             .await
             .unwrap();
@@ -616,7 +521,7 @@ mod tests {
         cleanup_test_data(&backend).await;
 
         // Generate key
-        let key_pair = backend.generate_and_store_key().await.unwrap();
+        let key_pair = backend.ensure_named_key("k1").await.unwrap();
         assert!(key_pair.key_id > 0);
         assert!(!key_pair.verifying_key.is_empty());
 
@@ -637,7 +542,7 @@ mod tests {
         let backend = create_test_backend().await;
         cleanup_test_data(&backend).await;
 
-        let key_pair = backend.generate_and_store_key().await.unwrap();
+        let key_pair = backend.ensure_named_key("k2").await.unwrap();
         let message = b"test message";
         let signature = backend.sign(key_pair.key_id, message).await.unwrap();
         assert_eq!(signature.len(), 64);
@@ -665,81 +570,11 @@ mod tests {
 
         assert_eq!(backend.get_key_count().await.unwrap(), 0);
 
-        backend.generate_and_store_key().await.unwrap();
+        backend.ensure_named_key("k3").await.unwrap();
         assert_eq!(backend.get_key_count().await.unwrap(), 1);
 
-        backend.generate_and_store_key().await.unwrap();
+        backend.ensure_named_key("k4").await.unwrap();
         assert_eq!(backend.get_key_count().await.unwrap(), 2);
-
-        cleanup_test_data(&backend).await;
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires a PostgreSQL server
-    async fn test_cleanup_expired_keys() {
-        let config = PostgresConfig {
-            host: std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string()),
-            port: std::env::var("POSTGRES_PORT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(5432),
-            database: std::env::var("POSTGRES_DB").unwrap_or_else(|_| "signer_test".to_string()),
-            username: std::env::var("POSTGRES_USER").unwrap_or_else(|_| "postgres".to_string()),
-            password: std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "postgres".to_string()),
-            pool_size: 5,
-            max_lifetime_secs: 3600,
-        };
-
-        // Create backend with 1-second TTL
-        let backend = PostgresBackend::new(&config, 1, KeyEncryptor::no_encryption())
-            .await
-            .unwrap();
-        cleanup_test_data(&backend).await;
-
-        // Generate key
-        backend.generate_and_store_key().await.unwrap();
-        assert_eq!(backend.get_key_count().await.unwrap(), 1);
-
-        // Wait for expiration
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-        // Clean up expired keys
-        let cleaned = backend.cleanup_expired_keys(0).await.unwrap();
-        assert_eq!(cleaned, 1);
-        assert_eq!(backend.get_key_count().await.unwrap(), 0);
-
-        cleanup_test_data(&backend).await;
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires a PostgreSQL server
-    async fn test_zero_ttl_never_expires() {
-        let config = PostgresConfig {
-            host: std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string()),
-            port: std::env::var("POSTGRES_PORT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(5432),
-            database: std::env::var("POSTGRES_DB").unwrap_or_else(|_| "signer_test".to_string()),
-            username: std::env::var("POSTGRES_USER").unwrap_or_else(|_| "postgres".to_string()),
-            password: std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "postgres".to_string()),
-            pool_size: 5,
-            max_lifetime_secs: 3600,
-        };
-
-        // TTL is 0 (never expires)
-        let backend = PostgresBackend::new(&config, 0, KeyEncryptor::no_encryption())
-            .await
-            .unwrap();
-        cleanup_test_data(&backend).await;
-
-        backend.generate_and_store_key().await.unwrap();
-        assert_eq!(backend.get_key_count().await.unwrap(), 1);
-
-        // Cleanup should not delete keys that never expire
-        let cleaned = backend.cleanup_expired_keys(0).await.unwrap();
-        assert_eq!(cleaned, 0);
-        assert_eq!(backend.get_key_count().await.unwrap(), 1);
 
         cleanup_test_data(&backend).await;
     }
@@ -839,7 +674,7 @@ mod tests {
         let backend = create_test_backend_with_encryption().await;
         cleanup_test_data(&backend).await;
 
-        let kp = backend.generate_and_store_key().await.unwrap();
+        let kp = backend.ensure_named_key("k5").await.unwrap();
 
         // The raw column value must be v1 ciphertext, never the recoverable base64 key.
         let stored: String =
@@ -866,7 +701,7 @@ mod tests {
         // Phase 1: insert a v0 plaintext row via a no-KEK backend.
         let plain_backend = create_test_backend().await;
         cleanup_test_data(&plain_backend).await;
-        let kp = plain_backend.generate_and_store_key().await.unwrap();
+        let kp = plain_backend.ensure_named_key("k6").await.unwrap();
         let stored_before: String =
             sqlx::query_scalar::<_, String>("SELECT secret_key FROM keys WHERE key_id = $1")
                 .bind(kp.key_id as i32)
@@ -934,11 +769,16 @@ mod tests {
         .fetch_one(&plain_backend.pool)
         .await
         .unwrap();
+        sqlx::query("INSERT INTO key_names (name, key_id) VALUES ('malformed', $1)")
+            .bind(key_id)
+            .execute(&plain_backend.pool)
+            .await
+            .unwrap();
         drop(plain_backend);
 
         // Phase 2: open with KEK → migration must abort and new() must return Err.
         let enc = KeyEncryptor::from_kek(&test_kek()).unwrap();
-        let result = PostgresBackend::new(&test_config(), 3600, enc).await;
+        let result = PostgresBackend::new(&test_config(), enc).await;
         assert!(
             result.is_err(),
             "migration of a malformed v0 row must abort startup (fail closed)"
@@ -972,7 +812,6 @@ mod tests {
 
         let storage_config = StorageConfig {
             backend: StorageBackend::Postgres,
-            key_ttl_seconds: 3600,
             sqlite: None,
             postgres: Some(test_config()),
         };
@@ -984,7 +823,7 @@ mod tests {
             .await
             .expect("from_config must succeed on Postgres+KEK");
 
-        let kp = storage.generate_and_store_key().await.unwrap();
+        let kp = storage.ensure_named_key("k7").await.unwrap();
 
         // Read the raw column via the underlying pool to confirm it is v1
         // ciphertext, not the recoverable base64 key.

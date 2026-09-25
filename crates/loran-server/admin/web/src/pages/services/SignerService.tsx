@@ -295,77 +295,16 @@ function VerificationDiagram() {
   );
 }
 
-function KeyLifecycleBar({ config }: { config: Record<string, unknown> }) {
-  const ttl = Number(config.key_ttl_seconds ?? 3600);
-  const tolerance = Number(config.tolerance_seconds ?? 300);
-  const totalSpan = ttl + tolerance;
-  const activePercent = Math.max(8, (ttl / totalSpan) * 100);
-  const tolerancePercent = Math.max(8, 100 - activePercent);
-
-  return (
-    <div className="w-full">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-[11.5px] text-slate-500">
-          Total validity = {ttl}s active + {tolerance}s tolerance
-        </p>
-        <span className="max-w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10.5px] font-bold leading-4 text-slate-500 uppercase tracking-tight">
-          cleanup deletes keys only after tolerance
-        </span>
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50">
-        <div className="flex h-12 text-[12.5px] font-bold">
-          <div
-            className="flex items-center justify-center bg-emerald-100 text-emerald-800"
-            style={{ width: `${activePercent}%` }}
-          >
-            Active ({ttl}s)
-          </div>
-          <div
-            className="flex items-center justify-center bg-amber-100 text-amber-800"
-            style={{ width: `${tolerancePercent}%` }}
-          >
-            Tolerance ({tolerance}s)
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 text-[11.5px] text-slate-600 md:grid-cols-3">
-        <div className="rounded-[14px] border border-emerald-100 bg-emerald-50 p-4">
-          <p className="font-bold text-emerald-700">Created → Expires</p>
-          <p className="mt-1.5 leading-relaxed">Active signing window. Signer can sign new payloads, and verifiers accept the key as fresh.</p>
-        </div>
-        <div className="rounded-[14px] border border-amber-100 bg-amber-50 p-4">
-          <p className="font-bold text-amber-700">Expires → Cleanup</p>
-          <p className="mt-1.5 leading-relaxed">Grace period. New signing has moved to a fresher key, but verifiers still accept this key to support late-arriving credentials.</p>
-        </div>
-        <div className="rounded-[14px] border border-slate-200 bg-slate-50 p-4">
-          <p className="font-bold text-slate-700">After cleanup</p>
-          <p className="mt-1.5 leading-relaxed">The key is purged from verifier caches. Any remaining credentials using this key will now fail verification.</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
 export function SignerService() {
   const [data, setData] = useState<ServiceDetail | null>(null);
   const [keys, setKeys] = useState<KeyEntry[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [error, setError] = useState("");
-  const [cleaning, setCleaning] = useState(false);
-  const [cleanupMsg, setCleanupMsg] = useState("");
-  const fallbackConfig: Record<string, unknown> = {
-    key_ttl_seconds: 3600,
-    tolerance_seconds: 86400,
-  };
-
   function buildFallbackDetail(status: ServiceStatus | null): ServiceDetail {
     return {
       enabled: status != null,
       status,
-      config: fallbackConfig,
+      config: null,
     };
   }
 
@@ -410,8 +349,6 @@ export function SignerService() {
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, [fetchData]);
-
-  const diagramConfig = data?.config ?? fallbackConfig;
 
   if (!data && !error) {
     return <div className="text-sm text-gray-500">Loading...</div>;
@@ -516,23 +453,12 @@ export function SignerService() {
           </div>
         </div>
 
-        {/* ── Section 4: Lifecycle ── */}
-        <div className="mt-10">
-          <h3 style={sectionTitleStyle}>4. Signing Key Lifecycle</h3>
-          <p className="mt-1" style={sectionSubtitleStyle}>
-            Key validity keeps a clear active window followed by a grace period so older credentials can still verify before cleanup.
-          </p>
-          <div className="mt-4 w-full rounded-[24px] border border-indigo-100 bg-white p-4 sm:p-6 shadow-[0_8px_30px_rgba(15,23,42,0.04)]">
-            <KeyLifecycleBar config={diagramConfig} />
-          </div>
-        </div>
-
         {/* ── Key concepts ── */}
         <div className="mt-8 rounded-2xl border border-gray-100 bg-gray-50/50 px-5 py-5">
           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Key concepts</p>
           <ul className="mt-3 space-y-2 text-[12px] text-gray-500 list-disc pl-5">
             <li className="leading-relaxed">
-              <strong className="text-gray-700 font-semibold">Signer boundary</strong> — private Ed25519 keys stay inside Signer's storage backend; Issuer only receives the verifying key, expiry metadata, and signatures.
+              <strong className="text-gray-700 font-semibold">Signer boundary</strong> — private Ed25519 keys stay inside Signer's storage backend; Issuer only receives the verifying key and signatures.
             </li>
             <li className="leading-relaxed">
               <strong className="text-gray-700 font-semibold">Local verification</strong> — Issuer persists verifying keys into shared KeyCache; Signaling verifies AIdCredentials locally by <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">key_id</code> without a Signer round-trip.
@@ -541,7 +467,7 @@ export function SignerService() {
               <strong className="text-gray-700 font-semibold">TURN is separate</strong> — TURN does not use KeyCache or Ed25519; it independently validates the HMAC-SHA1 credential derived from <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">turn_secret</code>.
             </li>
             <li className="leading-relaxed">
-              <strong className="text-gray-700 font-semibold">Lifecycle window</strong> — <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">key_ttl_seconds</code> defines the active window; <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">tolerance_seconds</code> keeps old credentials verifiable until cleanup.
+              <strong className="text-gray-700 font-semibold">Key lifetime</strong> — keys are named and do not expire; rotating a Realm's issuer key or retiring the Realm retires its keys, destroying the private key.
             </li>
           </ul>
         </div>
@@ -553,34 +479,10 @@ export function SignerService() {
 
       {data?.enabled && (
         <CollapsibleCard storageKey="signer_keys" title="Keys">
-        <div className="flex items-center justify-between mb-3">
+        <div className="mb-3">
           <span className="text-xs text-gray-500">
             {keys.length} of {totalCount} total
           </span>
-          <div className="flex items-center gap-2">
-            {cleanupMsg && (
-              <span className="text-xs text-green-600">{cleanupMsg}</span>
-            )}
-            <button
-              onClick={async () => {
-                setCleaning(true);
-                setCleanupMsg("");
-                try {
-                  const r = await api.cleanupSignerKeys();
-                  setCleanupMsg(`Deleted ${r.deleted}, ${r.remaining} remaining`);
-                  fetchData();
-                } catch {
-                  setCleanupMsg("Cleanup failed");
-                } finally {
-                  setCleaning(false);
-                }
-              }}
-              disabled={cleaning}
-              className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-            >
-              {cleaning ? "Cleaning..." : "Cleanup expired"}
-            </button>
-          </div>
         </div>
         {keys.length === 0 ? (
           <p className="text-sm text-gray-500">No keys found</p>
@@ -592,7 +494,6 @@ export function SignerService() {
                   <th className="pb-2 pr-4 font-medium text-gray-500">Key ID</th>
                   <th className="pb-2 pr-4 font-medium text-gray-500">PK Size</th>
                   <th className="pb-2 pr-4 font-medium text-gray-500">Created At</th>
-                  <th className="pb-2 pr-4 font-medium text-gray-500">Expires At</th>
                   <th className="pb-2 font-medium text-gray-500">Status</th>
                 </tr>
               </thead>
@@ -602,25 +503,16 @@ export function SignerService() {
                     <td className="py-2 pr-4 font-mono">{k.key_id}</td>
                     <td className="py-2 pr-4">{k.pk_size} bytes</td>
                     <td className="py-2 pr-4 font-mono text-xs">
-                      {k.created_at ? new Date(k.created_at * 1000).toLocaleString() : "—"}
-                    </td>
-                    <td className="py-2 pr-4 font-mono text-xs">
-                      {k.expires_at === 0
-                        ? "Never"
-                        : new Date(k.expires_at * 1000).toLocaleString()}
+                      {new Date(k.created_at * 1000).toLocaleString()}
                     </td>
                     <td className="py-2">
-                      {k.expires_at === 0 ? (
-                        <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                          Permanent
-                        </span>
-                      ) : k.is_expired ? (
-                        <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                          Expired
+                      {k.retired ? (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                          Retired
                         </span>
                       ) : (
                         <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                          Valid
+                          Active
                         </span>
                       )}
                     </td>

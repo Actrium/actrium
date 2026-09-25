@@ -53,7 +53,6 @@ kek_env = "ACTRIX_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 
@@ -136,7 +135,6 @@ turn_secret = "0123456789abcdef0123456789abcdef"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 

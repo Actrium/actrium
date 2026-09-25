@@ -88,18 +88,19 @@ coturn 无法直接使用主密钥验证。直接替换会使尚未过期的 TUR
 
 ```toml
 [services.signer]
-tolerance_seconds = 3600
 kek_env = "ACTRIX_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 ```
 
 首版推荐 SQLite。生产环境必须从 `kek_file`、`kek_env` 或 `kek` 提供 KEK；
 推荐前两者。KEK 与 Realm secret、TURN secret、renewal secret 不得复用。
+Signer 只保存具名 key，key 不按时间过期，由 Realm 退役或 issuer key 轮换退役。旧版的
+`[services.signer] tolerance_seconds` 与 `[services.signer.storage] key_ttl_seconds` 已删除；
+配置段拒绝未知字段，仍写这两项的配置会启动失败，删掉即可。
 Issuer Signer 可以留在 all-in-one 进程；需要更强隔离时可使用现有 TLS/mTLS gRPC
 客户端配置部署为独立安全边界。
 

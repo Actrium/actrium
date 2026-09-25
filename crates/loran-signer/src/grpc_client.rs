@@ -4,8 +4,8 @@ use crate::error::SignerError;
 use crate::types::{ensure_named_key_payload, retire_named_key_payload, sign_request_payload};
 use actrix_proto::admin::v1::NonceCredential;
 use actrix_proto::signer::v1::{
-    EnsureNamedKeyRequest, GenerateSigningKeyRequest, GetVerifyingKeyRequest, HealthCheckRequest,
-    RetireNamedKeyRequest, SignRequest, signer_client::SignerClient,
+    EnsureNamedKeyRequest, GetVerifyingKeyRequest, HealthCheckRequest, RetireNamedKeyRequest,
+    SignRequest, signer_client::SignerClient,
 };
 use base64::prelude::*;
 use ed25519_dalek::VerifyingKey;
@@ -138,71 +138,6 @@ impl GrpcClient {
         Ok(tls_config)
     }
 
-    /// Generate a new Ed25519 signing key pair from the Signer service
-    ///
-    /// Returns (key_id, verifying_key_bytes[32], expires_at, tolerance_seconds)
-    /// Private key remains on the Signer service side, not returned to the caller
-    pub async fn generate_signing_key(&mut self) -> Result<(u32, [u8; 32], u64, u64), SignerError> {
-        let request_data = "generate_signing_key";
-
-        // Create nonce credential
-        let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
-            .sign(request_data.as_bytes())?;
-
-        // Convert to protobuf NonceCredential
-        let credential = NonceCredential {
-            timestamp: nonce_credential.timestamp,
-            nonce: nonce_credential.nonce,
-            signature: nonce_credential.signature,
-        };
-
-        let request = tonic::Request::new(GenerateSigningKeyRequest { credential });
-
-        crate::recording::debug!("Requesting Ed25519 signing key generation from Signer via gRPC");
-
-        let response = self
-            .client
-            .generate_signing_key(request)
-            .await
-            .map_err(|e| SignerError::Internal(format!("gRPC GenerateSigningKey failed: {e}")))?;
-
-        let resp = response.into_inner();
-
-        // Decode verifying key (32-byte Ed25519 public key)
-        let verifying_key_bytes = BASE64_STANDARD
-            .decode(&resp.verifying_key)
-            .map_err(|e| SignerError::Crypto(format!("Failed to decode verifying key: {e}")))?;
-
-        if verifying_key_bytes.len() != 32 {
-            return Err(SignerError::Crypto(format!(
-                "Invalid verifying key length: expected 32 bytes, got {}",
-                verifying_key_bytes.len()
-            )));
-        }
-
-        // Validate verifying key legitimacy
-        let vk_array: [u8; 32] = verifying_key_bytes.try_into().map_err(|_| {
-            SignerError::Crypto("Failed to convert verifying key to array".to_string())
-        })?;
-
-        VerifyingKey::from_bytes(&vk_array)
-            .map_err(|e| SignerError::Crypto(format!("Invalid Ed25519 verifying key: {e}")))?;
-
-        crate::recording::info!(
-            "Successfully generated Ed25519 signing key via gRPC: key_id={}, expires_at={}, tolerance_seconds={}",
-            resp.key_id,
-            resp.expires_at,
-            resp.tolerance_seconds
-        );
-
-        Ok((
-            resp.key_id,
-            vk_array,
-            resp.expires_at,
-            resp.tolerance_seconds,
-        ))
-    }
-
     /// Sign a message with a key stored in the Signer service (Ed25519)
     ///
     /// Returns 64-byte Ed25519 signature
@@ -257,11 +192,8 @@ impl GrpcClient {
 
     /// Get the verifying public key for the specified key_id
     ///
-    /// Returns (verifying_key_bytes [u8;32], expires_at, tolerance_seconds)
-    pub async fn get_verifying_key(
-        &mut self,
-        key_id: u32,
-    ) -> Result<([u8; 32], u64, u64), SignerError> {
+    /// Returns the 32-byte Ed25519 verifying key
+    pub async fn get_verifying_key(&mut self, key_id: u32) -> Result<[u8; 32], SignerError> {
         let request_data = format!("get_verifying_key:{key_id}");
         let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
             .sign(request_data.as_bytes())?;
@@ -294,10 +226,10 @@ impl GrpcClient {
         VerifyingKey::from_bytes(&key_array)
             .map_err(|e| SignerError::Internal(format!("Invalid verifying key: {e}")))?;
 
-        Ok((key_array, resp.expires_at, resp.tolerance_seconds))
+        Ok(key_array)
     }
 
-    /// Return the non-expiring key named `name`, generating it if missing.
+    /// Return the key named `name`, generating it if missing.
     ///
     /// Returns (key_id, verifying_key_bytes [u8;32])
     pub async fn ensure_named_key(&mut self, name: &str) -> Result<(u32, [u8; 32]), SignerError> {

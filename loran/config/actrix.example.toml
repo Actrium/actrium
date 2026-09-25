@@ -176,14 +176,12 @@ turn_secret = "<generate-distinct-turn-secret-openssl-rand-base64-48>"
 # Service enablement is controlled by the bitmask (enable field)
 # Set ENABLE_SIGNER bit (16) in the enable field to enable this service
 [services.signer]
-tolerance_seconds = 3600
 # Required in production. The environment value must be 32 random bytes
 # encoded as 64 hex characters or 44-character Base64.
 kek_env = "ACTRIX_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 

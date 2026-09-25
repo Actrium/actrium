@@ -162,11 +162,8 @@ export interface PlatformDetail {
 export interface KeyEntry {
   key_id: number;
   pk_size: number;
-  created_at?: number;
-  fetched_at?: number;
-  expires_at: number;
-  tolerance_seconds?: number;
-  is_expired: boolean;
+  created_at: number;
+  retired: boolean;
 }
 
 export interface MetricSample {
@@ -305,12 +302,6 @@ export const api = {
 
   getSignerKeys: () =>
     request<{ keys: KeyEntry[]; total_count: number }>("/services/signer/keys"),
-
-  cleanupSignerKeys: () =>
-    request<{ deleted: number; remaining: number; tolerance_seconds: number }>(
-      "/services/signer/keys/cleanup",
-      { method: "POST" },
-    ),
 
   getRegistry: () =>
     request<ConfigFieldDef[]>("/registry"),

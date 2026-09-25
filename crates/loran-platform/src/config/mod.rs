@@ -1800,14 +1800,12 @@ mod tests {
         config.services.signer = Some(SignerServiceConfig {
             storage: ::signer::storage::StorageConfig {
                 backend: ::signer::storage::StorageBackend::Sqlite,
-                key_ttl_seconds: 3600,
                 sqlite: Some(::signer::storage::SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
-            tolerance_seconds: 3600,
             ..Default::default()
         });
 

@@ -59,7 +59,7 @@ loran-server
 - 私钥没有下载 API；
 - `Sign` 认证 payload 绑定 key ID 和待签消息 digest；
 - 生产 SQLite 私钥由独立 KEK 加密；
-- tolerance 只影响历史验签/取 key 语义，不延长 Actor credential 本身期限。
+- key 都是具名 key，不按时间过期；退役即销毁私钥，此后不再签名。
 
 ### `loran-signaling`
 

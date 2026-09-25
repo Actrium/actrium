@@ -459,8 +459,6 @@ impl AdminApiService {
             "signer" => cfg.services.signer.as_ref().map(|k| {
                 serde_json::json!({
                     "storage_backend": format!("{:?}", k.storage.backend),
-                    "key_ttl_seconds": k.storage.key_ttl_seconds,
-                    "tolerance_seconds": k.tolerance_seconds,
                 })
             }),
             _ => None,
@@ -625,13 +623,9 @@ impl AdminApiService {
             .await
             .map_err(|e| Status::internal(format!("DB pool error: {e}")))?;
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let rows = sqlx::query_as::<_, (i64, i32, i64, i64)>(
-            "SELECT key_id, length(public_key) as pk_size, created_at, expires_at FROM keys ORDER BY created_at DESC LIMIT 5",
+        let rows = sqlx::query_as::<_, (i64, i32, i64, bool)>(
+            "SELECT key_id, length(public_key) as pk_size, created_at, secret_key = '' AS retired \
+             FROM keys ORDER BY created_at DESC LIMIT 5",
         )
         .fetch_all(&pool)
         .await
@@ -645,74 +639,15 @@ impl AdminApiService {
 
         let keys = rows
             .iter()
-            .map(|(key_id, pk_size, created_at, expires_at)| {
-                let is_expired = *expires_at > 0 && *expires_at < now;
-                KeyInfo {
-                    key_id: *key_id,
-                    pk_size: *pk_size,
-                    created_at: Some(*created_at),
-                    fetched_at: None,
-                    expires_at: *expires_at,
-                    tolerance_seconds: None,
-                    is_expired,
-                }
+            .map(|(key_id, pk_size, created_at, retired)| KeyInfo {
+                key_id: *key_id,
+                pk_size: *pk_size,
+                created_at: *created_at,
+                retired: *retired,
             })
             .collect();
 
         Ok(SignerKeysResult { keys, total_count })
-    }
-
-    /// Cleanup expired Signer keys.
-    pub async fn cleanup_signer_keys_direct(&self) -> GrpcResult<SignerCleanupResult> {
-        let cfg = self.require_running_config()?;
-        let db_path = cfg.sqlite_path.join("signer_keys.db");
-        if !db_path.exists() {
-            return Ok(SignerCleanupResult {
-                deleted: 0,
-                remaining: 0,
-                tolerance_seconds: 0,
-            });
-        }
-
-        let url = format!("sqlite:{}", db_path.display());
-        let options = SqliteConnectOptions::from_str(&url)
-            .map_err(|e| Status::internal(format!("DB connect error: {e}")))?;
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .map_err(|e| Status::internal(format!("DB pool error: {e}")))?;
-
-        let tolerance = cfg
-            .services
-            .signer
-            .as_ref()
-            .map(|k| k.tolerance_seconds)
-            .unwrap_or(3600);
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let cutoff = now - tolerance as i64;
-
-        let result = sqlx::query("DELETE FROM keys WHERE expires_at > 0 AND expires_at < ?")
-            .bind(cutoff)
-            .execute(&pool)
-            .await
-            .map_err(|e| Status::internal(format!("Cleanup error: {e}")))?;
-
-        let remaining = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM keys")
-            .fetch_one(&pool)
-            .await
-            .map(|r| r.0)
-            .unwrap_or(0);
-
-        Ok(SignerCleanupResult {
-            deleted: result.rows_affected(),
-            remaining,
-            tolerance_seconds: tolerance,
-        })
     }
 
     /// Get node info including metrics and service statuses.
@@ -1272,19 +1207,14 @@ pub struct ConfigFileContent {
     pub path: String,
 }
 
-/// Key info (shared by Signer and Issuer).
+/// A Signer key.
 #[derive(Debug, Clone, Serialize)]
 pub struct KeyInfo {
     pub key_id: i64,
     pub pk_size: i32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fetched_at: Option<i64>,
-    pub expires_at: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tolerance_seconds: Option<i64>,
-    pub is_expired: bool,
+    pub created_at: i64,
+    /// The private key is destroyed; the key never signs again.
+    pub retired: bool,
 }
 
 /// Realm secret rotation result (the plaintext secret is returned only once).
@@ -1302,14 +1232,6 @@ pub struct RealmSecretRotationResult {
 pub struct SignerKeysResult {
     pub keys: Vec<KeyInfo>,
     pub total_count: i64,
-}
-
-/// Signer cleanup result.
-#[derive(Debug, Clone, Serialize)]
-pub struct SignerCleanupResult {
-    pub deleted: u64,
-    pub remaining: i64,
-    pub tolerance_seconds: u64,
 }
 
 /// Map service name string to the ResourceType integer used in ServiceStatus.type

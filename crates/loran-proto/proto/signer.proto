@@ -8,16 +8,13 @@ import "common.proto";
 // Signer service definition
 // Generates and manages Ed25519 signing keys; private keys never leave the Signer
 service Signer {
-  // Generate a new Ed25519 signing key pair, returning the key_id and verifying key
-  rpc GenerateSigningKey(GenerateSigningKeyRequest) returns (GenerateSigningKeyResponse);
-
   // Sign a message with the specified key using Ed25519
   rpc Sign(SignRequest) returns (SignResponse);
 
   // Retrieve the verifying key for the given key_id
   rpc GetVerifyingKey(GetVerifyingKeyRequest) returns (GetVerifyingKeyResponse);
 
-  // Return the non-expiring key with the given name, generating it if missing
+  // Return the key with the given name, generating it if missing
   rpc EnsureNamedKey(EnsureNamedKeyRequest) returns (EnsureNamedKeyResponse);
 
   // Retire the named key: its private key is destroyed and it never signs
@@ -26,29 +23,6 @@ service Signer {
 
   // Health check
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
-}
-
-// ============================================================================
-// Signing key generation messages
-// ============================================================================
-
-message GenerateSigningKeyRequest {
-  // nonce-auth credential
-  required admin.v1.NonceCredential credential = 1;
-}
-
-message GenerateSigningKeyResponse {
-  // The generated key ID
-  required uint32 key_id = 1;
-
-  // Verifying key (Base64-encoded Ed25519 verifying key, 32 bytes)
-  required string verifying_key = 2;
-
-  // Key expiry time (Unix timestamp, seconds)
-  required uint64 expires_at = 3;
-
-  // Tolerance period (seconds)
-  required uint64 tolerance_seconds = 4;
 }
 
 // ============================================================================
@@ -90,11 +64,7 @@ message GetVerifyingKeyResponse {
   // Verifying key (Base64-encoded Ed25519 verifying key, 32 bytes)
   required string verifying_key = 2;
 
-  // Key expiry time (Unix timestamp, seconds)
-  required uint64 expires_at = 3;
-
-  // Tolerance period (seconds)
-  required uint64 tolerance_seconds = 4;
+  reserved 3, 4;
 }
 
 // ============================================================================

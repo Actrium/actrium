@@ -100,20 +100,7 @@ impl SignerClientWrapper {
         .await
     }
 
-    /// Get the verifying public key for the specified key_id
-    ///
-    /// Returns (verifying_key_bytes [u8;32], expires_at, tolerance_seconds)
-    pub async fn get_verifying_key(
-        &self,
-        key_id: u32,
-    ) -> Result<([u8; 32], u64, u64), signer::SignerError> {
-        self.call_with_rebuild("get_verifying_key", true, |client| {
-            Box::pin(client.get_verifying_key(key_id))
-        })
-        .await
-    }
-
-    /// Return the non-expiring key named `name`, generating it if missing;
+    /// Return the key named `name`, generating it if missing;
     /// returns (key_id, verifying_key_bytes[32]). Idempotent, so it retries.
     pub async fn ensure_named_key(
         &self,

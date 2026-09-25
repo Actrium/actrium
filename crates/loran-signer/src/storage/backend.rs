@@ -18,19 +18,9 @@ pub trait KeyStorageBackend: Send + Sync {
     /// Performs necessary initialization operations such as creating tables, indexes, etc.
     async fn init(&self) -> SignerResult<()>;
 
-    /// Generate and store a new Ed25519 signing key pair
-    ///
-    /// Automatically generates an Ed25519 key pair, stores it in the backend, and returns a structure containing key_id and verifying key
-    /// The private key (signing key) is only stored in the backend and not returned to the caller
-    ///
-    /// # Returns
-    /// Key pair structure containing key_id and verifying_key (Base64-encoded 32-byte verifying public key)
-    async fn generate_and_store_key(&self) -> SignerResult<KeyPair>;
-
     /// Return the key named `name`, generating and storing it if missing
     ///
-    /// Named keys never expire. Concurrent calls for the same name return the
-    /// same key.
+    /// Concurrent calls for the same name return the same key.
     async fn ensure_named_key(&self, name: &str) -> SignerResult<KeyPair>;
 
     /// Retire the key named `name`: destroy its private key so it never signs
@@ -78,18 +68,6 @@ pub trait KeyStorageBackend: Send + Sync {
     /// Get the total number of keys in storage
     ///
     /// # Returns
-    /// Total key count (including expired and non-expired keys)
+    /// Total key count (including retired keys)
     async fn get_key_count(&self) -> SignerResult<u32>;
-
-    /// Clean up expired keys
-    ///
-    /// Deletes all key records that have expired and exceeded the tolerance period
-    /// (expires_at > 0 and expires_at + tolerance_seconds < current time)
-    ///
-    /// # Arguments
-    /// * `tolerance_seconds` - Tolerance period after expiration (seconds)
-    ///
-    /// # Returns
-    /// Number of keys cleaned up
-    async fn cleanup_expired_keys(&self, tolerance_seconds: u64) -> SignerResult<u32>;
 }

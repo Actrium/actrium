@@ -160,7 +160,6 @@ turn_secret = "fullstack-turn-secret-0123456789abcdef"
 [services.signer]
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
 path = "signer.db"
 
@@ -245,7 +244,6 @@ turn_secret = "fullstack-turn-secret-0123456789abcdef"
 [services.signer]
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
 path = "signer.db"
 
@@ -342,7 +340,6 @@ turn_secret = "fullstack-turn-secret-0123456789abcdef"
 [services.signer]
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
 path = "signer.db"
 
@@ -417,7 +414,6 @@ realm = "actrix.local"
 [services.signer]
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
 path = "signer.db"
 

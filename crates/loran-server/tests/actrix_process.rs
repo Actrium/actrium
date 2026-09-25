@@ -1538,13 +1538,11 @@ async fn actrix_signer_grpc_health_and_key_lifecycle() {
     let grpc_health = grpc_client.health_check().await.expect("grpc health check");
     assert_eq!(grpc_health, "healthy");
 
-    let (key_id, _public_key, expires_at, tolerance_seconds) = grpc_client
-        .generate_signing_key()
+    let (key_id, public_key) = grpc_client
+        .ensure_named_key("test")
         .await
-        .expect("grpc generate key");
-    assert!(key_id > 0, "generated key_id should be positive");
-    assert!(expires_at > 0, "generated key should have expiration");
-    assert!(tolerance_seconds > 0, "tolerance should be positive");
+        .expect("grpc ensure named key");
+    assert!(key_id > 0, "key_id should be positive");
 
     let signature = grpc_client
         .sign(key_id, b"test-message")
@@ -1552,12 +1550,11 @@ async fn actrix_signer_grpc_health_and_key_lifecycle() {
         .expect("grpc sign with generated key");
     assert_eq!(signature.len(), 64, "Ed25519 signature should be 64 bytes");
 
-    let (_, sign_expires_at, sign_tolerance_seconds) = grpc_client
+    let fetched = grpc_client
         .get_verifying_key(key_id)
         .await
         .expect("grpc get verifying key");
-    assert_eq!(sign_expires_at, expires_at);
-    assert_eq!(sign_tolerance_seconds, tolerance_seconds);
+    assert_eq!(fetched, public_key);
 
     let missing_key_err = grpc_client
         .sign(key_id.saturating_add(1_000_000), b"test")
@@ -1608,13 +1605,13 @@ async fn actrix_signer_grpc_rejects_invalid_shared_secret() {
         .await
         .expect("grpc client should connect before auth checks");
     let err = bad_client
-        .generate_signing_key()
+        .ensure_named_key("test")
         .await
         .expect_err("invalid shared secret should be rejected");
     let err_text = err.to_string();
     assert!(
         err_text.contains("Unauthenticated") || err_text.to_lowercase().contains("authentication"),
-        "expected authentication failure from grpc generate_signing_key, got: {err_text}"
+        "expected authentication failure from grpc ensure_named_key, got: {err_text}"
     );
 
     let admin_health_url = format!("http://127.0.0.1:{port}/admin/health");
@@ -1650,13 +1647,11 @@ async fn actrix_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
         &log_path,
     )
     .await;
-    let (key_id, _public_key, expires_at, tolerance_seconds) = grpc_client
-        .generate_signing_key()
+    let (key_id, public_key) = grpc_client
+        .ensure_named_key("test")
         .await
-        .expect("grpc generate key with kek");
+        .expect("grpc ensure named key with kek");
     assert!(key_id > 0);
-    assert!(expires_at > 0);
-    assert!(tolerance_seconds > 0);
 
     let signature = grpc_client
         .sign(key_id, b"test-message")
@@ -1664,12 +1659,11 @@ async fn actrix_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
         .expect("grpc sign with kek");
     assert_eq!(signature.len(), 64);
 
-    let (_, fetched_expires_at, fetched_tolerance) = grpc_client
+    let fetched = grpc_client
         .get_verifying_key(key_id)
         .await
         .expect("grpc get verifying key with kek");
-    assert_eq!(fetched_expires_at, expires_at);
-    assert_eq!(fetched_tolerance, tolerance_seconds);
+    assert_eq!(fetched, public_key);
 
     graceful_shutdown(child);
 }

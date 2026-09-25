@@ -37,26 +37,6 @@ pub struct KeyPair {
     pub verifying_key: String,
 }
 
-/// Generate signing key request
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GenerateSigningKeyRequest {
-    /// nonce-auth credential
-    pub credential: NonceCredential,
-}
-
-/// Generate signing key response
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GenerateSigningKeyResponse {
-    /// Generated key ID
-    pub key_id: u32,
-    /// Verifying public key (Base64-encoded Ed25519 verifying key, 32 bytes)
-    pub verifying_key: String,
-    /// Expiry time (Unix timestamp)
-    pub expires_at: u64,
-    /// Tolerance window (seconds)
-    pub tolerance_seconds: u64,
-}
-
 /// Sign request
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SignRequest {
@@ -84,15 +64,6 @@ pub struct KeyRecord {
     pub public_key: String,
     /// Creation timestamp
     pub created_at: u64,
-    /// Expiry time (Unix timestamp)
-    pub expires_at: u64,
-}
-
-impl GenerateSigningKeyRequest {
-    /// Get the request data used for verification
-    pub fn request_payload(&self) -> String {
-        "generate_signing_key".to_string()
-    }
 }
 
 impl SignRequest {

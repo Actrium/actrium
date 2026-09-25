@@ -41,7 +41,7 @@ TLS/mTLS；Management 即使共享 listener 也必须经过独立认证中间件
 | 默认/硬编码 secret | 配置拒绝占位符和短 secret；缺失时 fail closed；默认值不再是固定生产 secret |
 | 明文 Admin 密码泄露 | 配置仅存 Argon2id PHC hash；登录使用 Argon2id verifier |
 | Sign 请求 key/message 被替换 | HMAC 覆盖 version、key_id 和 message digest；HTTP path/body key_id 必须一致 |
-| 过期 key 继续签名 | Issuer Signer 与 Issuer 均以 `expires_at` 截止签名；tolerance 仅用于验签 |
+| 已退役 key 继续签名 | 退役即在 Issuer Signer 销毁私钥，`Sign` 返回 `FAILED_PRECONDITION`；轮换移除的旧 key 与退役 Realm 的 key 都会退役 |
 | Actor credential 跨用途/跨 Realm Provider 重放 | claims 绑定 protocol/issuer/Realm/Realm Provider/audience；signaling 强校验 |
 | signaling 冒充 source Actor | claims.actor_id 必须等于消息 source 和连接绑定 Actor |
 | Actor credential 泄露到 URL/日志 | 原生 WebSocket 使用 Authorization header；浏览器使用只回选 `actr.v1` 的 subprotocol transport；trace 只记录 path，不记录 query |
