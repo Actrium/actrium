@@ -54,7 +54,7 @@ https://notes.example/.well-known/actr
     ],
     "keys": [
       {
-        "id": "ed25519:2026-q2",
+        "id": "actr-pub-3f9a1c0d2b7e4a61",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "not_before": "2026-04-01T00:00:00Z",
@@ -62,7 +62,7 @@ https://notes.example/.well-known/actr
         "status": "active"
       },
       {
-        "id": "ed25519:2025",
+        "id": "actr-pub-8c2e5b7d1a4f9e03",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "not_before": "2025-01-01T00:00:00Z",
@@ -82,7 +82,7 @@ https://notes.example/.well-known/actr
 }
 ```
 
-`publisher.signature` 对象本身不进入 payload；`publisher` 成员的其余 JSON 按 RFC 8785 JCS 规范化后做 detached Ed25519 验证。`sequence` 必须单调递增。descriptor 中 `publisher` 以外的部分不签名，不参与 Publisher 信任判断。
+`publisher.signature` 对象本身不进入 payload；`publisher` 成员的其余 JSON 按 RFC 8785 JCS 规范化后做 detached Ed25519 验证。`sequence` 必须单调递增。descriptor 中 `publisher` 以外的部分不签名，不参与 Publisher 信任判断。`profile_signing_keys` 与可选的 `rotations` 的格式、接受与轮换规则同 `realm_signing_keys`（Actr Authority Discovery §4.4）。包签名 key 的 `id` 由公钥算出，与 manifest `signing_key_id` 相同；`keys` 至多 8 项、其中 `active` 至多 2 项，轮换时先发布新 key、至少 24 小时后再用它签包（[Actor Package](../../../actr/protocols/actor-package.zh.md) §6.8）。
 
 ## 3. 包下载
 
@@ -106,7 +106,7 @@ publisher = "notes.example"
 name = "team-notes"
 version = "1.4.2"
 signature_algorithm = "ed25519"
-signing_key_id = "ed25519:2026-q2"
+signing_key_id = "actr-pub-3f9a1c0d2b7e4a61"
 
 [binary]
 path = "bin/service.wasm"
@@ -376,7 +376,7 @@ https://realms.provider.example/acme.com/k7m2q9xh
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
       {
-        "id": "issuer-2026-2",
+        "id": "7",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "status": "active"

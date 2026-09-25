@@ -67,7 +67,7 @@ Sample (the `publisher` member uses snake_case; `domain` must match the `authori
     ],
     "keys": [
       {
-        "id": "ed25519:2026-q2",
+        "id": "actr-pub-3f9a1c0d2b7e4a61",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "not_before": "2026-04-01T00:00:00Z",
@@ -75,7 +75,7 @@ Sample (the `publisher` member uses snake_case; `domain` must match the `authori
         "status": "active"
       },
       {
-        "id": "ed25519:2025",
+        "id": "actr-pub-8c2e5b7d1a4f9e03",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "not_before": "2025-01-01T00:00:00Z",
@@ -98,7 +98,13 @@ Sample (the `publisher` member uses snake_case; `domain` must match the `authori
 The `publisher.signature` object itself does not enter the payload; the rest of the `publisher`
 member's JSON is normalized per RFC 8785 JCS and verified as a detached Ed25519 signature.
 `sequence` must increase monotonically. The parts of the descriptor outside `publisher` are
-unsigned and play no part in Publisher trust decisions.
+unsigned and play no part in Publisher trust decisions. `profile_signing_keys` and the
+optional `rotations` follow the format, acceptance, and rotation rules of
+`realm_signing_keys` (Actr Authority Discovery §4.4). A package signing key's `id` is computed
+from its public key and equals the manifest `signing_key_id`; `keys` has at most 8 entries, at
+most 2 of them `active`, and a rotation publishes the new key first and signs packages with it
+only 24 hours or more later ([Actor Package](../../../actr/protocols/actor-package.zh.md) §6.8,
+Chinese only).
 
 ## 3. Package download
 
@@ -126,7 +132,7 @@ publisher = "notes.example"
 name = "team-notes"
 version = "1.4.2"
 signature_algorithm = "ed25519"
-signing_key_id = "ed25519:2026-q2"
+signing_key_id = "actr-pub-3f9a1c0d2b7e4a61"
 
 [binary]
 path = "bin/service.wasm"
@@ -414,7 +420,7 @@ Sample:
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
       {
-        "id": "issuer-2026-2",
+        "id": "7",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "status": "active"
