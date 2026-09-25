@@ -38,6 +38,32 @@ fn wrap_secret(encryptor: &KeyEncryptor, signing_key_b64: &str) -> SignerResult<
     }
 }
 
+/// The `v1` form of a stored `secret_key`, or `None` when the row needs no
+/// migration: it is already `v1`, or empty because the key was retired.
+fn migrated_secret(
+    encryptor: &KeyEncryptor,
+    key_id: i32,
+    stored: &str,
+) -> SignerResult<Option<String>> {
+    if stored.is_empty() || stored.starts_with(V1_PREFIX) {
+        return Ok(None);
+    }
+    // v0 is plaintext base64(32B). Validate before re-encrypting so we never
+    // stamp a malformed row as a valid v1 key.
+    let raw = BASE64_STANDARD.decode(stored).map_err(|e| {
+        SignerError::Crypto(format!(
+            "migrate_v0_to_v1: key_id={key_id} invalid v0 base64: {e}"
+        ))
+    })?;
+    if raw.len() != 32 {
+        return Err(SignerError::Crypto(format!(
+            "migrate_v0_to_v1: key_id={key_id} expected 32-byte signing key, got {} bytes",
+            raw.len()
+        )));
+    }
+    Ok(Some(format!("{V1_PREFIX}{}", encryptor.encrypt(stored)?)))
+}
+
 /// Unwrap a stored `secret_key` value back to the plaintext Base64 signing key.
 ///
 /// Fail-closed matrix:
@@ -180,23 +206,9 @@ impl PostgresBackend {
 
         let mut migrated = 0u64;
         for (key_id, stored) in &rows {
-            if stored.starts_with(V1_PREFIX) {
-                continue; // already v1 — idempotent
-            }
-            // v0 is plaintext base64(32B). Validate before re-encrypting so we never
-            // stamp a malformed row as a valid v1 key.
-            let raw = BASE64_STANDARD.decode(stored).map_err(|e| {
-                SignerError::Crypto(format!(
-                    "migrate_v0_to_v1: key_id={key_id} invalid v0 base64: {e}"
-                ))
-            })?;
-            if raw.len() != 32 {
-                return Err(SignerError::Crypto(format!(
-                    "migrate_v0_to_v1: key_id={key_id} expected 32-byte signing key, got {} bytes",
-                    raw.len()
-                )));
-            }
-            let v1 = format!("{V1_PREFIX}{}", self.encryptor.encrypt(stored)?);
+            let Some(v1) = migrated_secret(&self.encryptor, *key_id, stored)? else {
+                continue;
+            };
             sqlx::query("UPDATE keys SET secret_key = $1 WHERE key_id = $2")
                 .bind(&v1)
                 .bind(*key_id)
@@ -751,6 +763,20 @@ mod tests {
 
         let recovered = unwrap_secret(&enc, &stored).unwrap();
         assert_eq!(recovered, plain);
+    }
+
+    #[test]
+    fn test_migration_keeps_retired_and_v1_rows() {
+        let enc = KeyEncryptor::from_kek(&test_kek()).unwrap();
+        let plain = BASE64_STANDARD.encode([0x5Au8; 32]);
+
+        // A retired key's empty secret must not abort the startup migration.
+        assert!(migrated_secret(&enc, 1, "").unwrap().is_none());
+        let v1 = wrap_secret(&enc, &plain).unwrap();
+        assert!(migrated_secret(&enc, 2, &v1).unwrap().is_none());
+        let migrated = migrated_secret(&enc, 3, &plain).unwrap().unwrap();
+        assert_eq!(unwrap_secret(&enc, &migrated).unwrap(), plain);
+        assert!(migrated_secret(&enc, 4, "not base64!").is_err());
     }
 
     #[test]
