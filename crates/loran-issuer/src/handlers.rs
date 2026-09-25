@@ -434,7 +434,13 @@ async fn reissue_credential(
     {
         Ok(ClaimOutcome::Acquired(lease)) => lease,
         Ok(ClaimOutcome::Replay(cached)) => {
-            if let Err(err) = state.issuer.recheck_before_replay(&request.actr_id).await {
+            let issued = matches!(
+                RegisterResponse::decode(cached.body.as_slice()),
+                Ok(RegisterResponse {
+                    result: Some(register_response::Result::Success(_))
+                })
+            );
+            if issued && let Err(err) = state.issuer.recheck_before_replay(&request.actr_id).await {
                 let (code, message) = aid_error_to_response(err);
                 return register_error(code, message);
             }
@@ -527,7 +533,15 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
     {
         Ok(ClaimOutcome::Acquired(lease)) => lease,
         Ok(ClaimOutcome::Replay(cached)) => {
-            if let Err(err) = state.issuer.recheck_before_replay(actor_id).await {
+            // Only a stored credential is rechecked; a stored rejection is
+            // replayed as is, so it tells nothing new about the actor.
+            let issued = matches!(
+                RenewCredentialResponse::decode(cached.body.as_slice()),
+                Ok(RenewCredentialResponse {
+                    result: Some(renew_credential_response::Result::Success(_))
+                })
+            );
+            if issued && let Err(err) = state.issuer.recheck_before_replay(actor_id).await {
                 let (code, message) = aid_error_to_response(err);
                 return renew_error(code, message);
             }

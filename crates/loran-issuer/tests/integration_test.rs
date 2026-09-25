@@ -3695,6 +3695,50 @@ async fn test_renew_rejected_after_actor_revoked() {
     env.shutdown_signer().await;
 }
 
+/// A replayed rejection is the stored response as is: it says nothing about
+/// the actor to a caller that never proved it holds its renewal token. A
+/// replayed credential is rechecked, so it does not bypass a revocation.
+#[tokio::test]
+#[serial]
+async fn test_renew_replay_rechecks_only_issued_credentials() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let (_, ok) = register_linked_actor(
+        &app,
+        "renew-replay-oracle@example.com",
+        "renew-oracle-secret",
+    )
+    .await;
+
+    let guess = RenewCredentialRequest {
+        actr_id: ok.actr_id.clone(),
+        renewal_token: prost::bytes::Bytes::from(vec![9; 32]),
+        attempt_id: control_attempt_id(),
+    };
+    let (status, rejected) = post_renew_raw(app.clone(), guess.clone()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let renewed = RenewCredentialRequest {
+        actr_id: ok.actr_id.clone(),
+        renewal_token: ok.renewal_token.clone().expect("renewal token"),
+        attempt_id: control_attempt_id(),
+    };
+    let issued = post_renew(app.clone(), renewed.clone()).await;
+
+    issuer::renewal::revoke_actor(&ok.actr_id, "replay oracle")
+        .await
+        .expect("revoke actor");
+
+    let (status, replayed) = post_renew_raw(app.clone(), guess).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(replayed.encode_to_vec(), rejected.encode_to_vec());
+
+    let (status, replayed) = post_renew_raw(app, renewed).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_ne!(replayed.encode_to_vec(), issued.encode_to_vec());
+
+    env.shutdown_signer().await;
+}
+
 /// AIS-04: an actor placed on the revocation list can no longer reissue.
 #[tokio::test]
 #[serial]

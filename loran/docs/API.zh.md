@@ -138,7 +138,7 @@ secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider
 `issuer_control_attempt`。之后用同一 `attempt_id`：
 
 - 请求体相同：返回首次的响应原文（成功响应保留到 credential 或 renewal token 到期，拒绝保留
-  5 分钟）；返回前仍重查 Actor 撤销与 Realm、包、publisher 状态，已不允许则返回该错误；
+  5 分钟）；重放成功响应前仍重查 Actor 撤销与 Realm、包、publisher 状态，已不允许则返回该错误；
 - 请求体不同：`409`；
 - 超过响应保留期：`410`，客户端应以新 `attempt_id` 重来；
 - 另一个请求仍在处理：`425`，带 `Retry-After`（秒）；

@@ -1415,7 +1415,7 @@ impl AIdIssuer {
         })
     }
 
-    /// Recheck, before a stored response is replayed, that `actor_id` may
+    /// Recheck, before a stored credential is replayed, that `actor_id` may
     /// still receive credentials: a replay never hands out what the Issuer
     /// would refuse now.
     pub(crate) async fn recheck_before_replay(&self, actor_id: &ActrId) -> Result<(), AidError> {
