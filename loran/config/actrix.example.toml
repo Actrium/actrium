@@ -165,7 +165,7 @@ relay_port_range = "49152-65535"
 
 # TURN realm
 realm = "actrix.example.com"
-# REQUIRED: stable per-Realm secret. Rotating it invalidates outstanding TURN
+# REQUIRED: stable TURN secret. Rotating it invalidates outstanding TURN
 # credentials, so rotate through an explicit maintenance procedure.
 # Must be independent from every other secret in this file (no reuse).
 # Generate: openssl rand -base64 48

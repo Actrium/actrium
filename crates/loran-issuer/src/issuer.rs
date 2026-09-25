@@ -792,7 +792,7 @@ impl AIdIssuer {
                 .await
                 .map_err(Self::map_publisher_verification_error)?;
 
-            // AIS-02: an existing published package, the realm secret, and the
+            // AIS-02: an existing published package, Realm membership, and the
             // public manifest are no longer sufficient to register — all of them
             // are readable/holdable without controlling the publisher. The caller
             // must additionally prove current possession of the publisher's
@@ -1103,7 +1103,7 @@ impl AIdIssuer {
     ///
     /// Shared by both package registration paths. Whether or not a registry row
     /// already exists, an authorized publisher launch is distinguished from a
-    /// caller who merely holds the realm secret and the public manifest by a
+    /// caller who merely is a Realm member and holds the public manifest by a
     /// fresh single-use nonce plus a domain-separated signature binding this
     /// realm, actr_type, target, and manifest hash to the publisher's signing
     /// key. `signing_key_id` scopes the nonce and is recorded for audit.

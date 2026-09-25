@@ -17,7 +17,7 @@
 //! # Security
 //!
 //! - The database never stores raw tokens.
-//! - Logging must never emit tokens, token hashes, or realm secrets.
+//! - Logging must never emit tokens or token hashes.
 
 use actr_protocol::ActrId;
 use hmac::{Hmac, Mac};

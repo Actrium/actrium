@@ -18,8 +18,8 @@ pub trait CredentialPayload {
     fn auth_payload(&self, node_id: &str) -> String;
     /// Digest of the request body (excluding the `credential` field) for mutable
     /// operations. Appended to `auth_payload` as `{op}:{node_id}:{subject}:{digest}`
-    /// so the signature binds the security-critical body fields (e.g. realm secret
-    /// hashes) against in-transit tampering. Returns empty for read-only ops, which
+    /// so the signature binds the security-critical body fields (e.g. `enabled`,
+    /// `expires_at`) against in-transit tampering. Returns empty for read-only ops, which
     /// have no mutable body beyond what `auth_payload` already binds.
     fn body_digest(&self) -> String {
         String::new()

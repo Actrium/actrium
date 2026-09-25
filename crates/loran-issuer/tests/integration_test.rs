@@ -664,7 +664,7 @@ fn error_code(response: &RegisterResponse) -> Option<u32> {
 
 #[tokio::test]
 #[serial]
-async fn test_register_route_linked_with_realm_secret_succeeds() {
+async fn test_register_route_linked_with_client_proof_succeeds() {
     let env = setup_test_environment().await;
     let key_label = "linked-http-route-secret";
     let realm = "linked-http-route@example.com";
@@ -681,7 +681,7 @@ async fn test_register_route_linked_with_realm_secret_succeeds() {
             assert_eq!(registered_type(&ok).name, "source-workload");
         }
         register_response::Result::Error(err) => {
-            panic!("linked /register with realm secret should succeed: {err:?}")
+            panic!("linked /register with a client proof should succeed: {err:?}")
         }
     }
 }
@@ -3628,7 +3628,7 @@ async fn test_path1_published_package_with_publisher_triple_succeeds() {
 
 /// AIS-02: a published-package (Path 1) registration that presents a valid
 /// manifest and target but NO publisher possession proof must now be
-/// rejected. The published package, the realm secret, and the public manifest
+/// rejected. The published package, Realm membership, and the public manifest
 /// are all obtainable without controlling the publisher, so they are no longer
 /// sufficient on their own.
 #[tokio::test]
