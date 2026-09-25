@@ -4,8 +4,12 @@
 //! `signature` member, a detached Ed25519 signature by an `active` Realm
 //! signing key of the Realm's domain over the RFC 8785 JCS form of the
 //! payload (the request without `signature`).
+//!
+//! `register_publisher` (`actr/protocols/authority-discovery.md` section 4.5)
+//! reuses the envelope with `publisher` in place of `realm`, signed by an
+//! `active` Publisher Profile signing key.
 
-use crate::authority::{DetachedSignature, KeyStatus, RealmSigningKeys};
+use crate::authority::{DetachedSignature, KeyStatus, RealmSigningKey};
 use crate::realm_profile::{RealmPackage, jcs, sign_document, verify_signature};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::SigningKey;
@@ -23,14 +27,19 @@ pub enum ManagementOp {
     CreateRealm,
     PublishProfile,
     ReissueAdminToken,
+    RegisterPublisher,
 }
 
 /// A Realm management request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagementRequest {
     pub op: ManagementOp,
-    /// Full Realm name `<realm_id>@<domain>`.
+    /// Full Realm name `<realm_id>@<domain>`; empty for `register_publisher`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub realm: String,
+    /// `register_publisher`: the Publisher ID (domain).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub publisher: String,
     /// `create_realm`: the package of the first Realm Profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package: Option<RealmPackage>,
@@ -73,6 +82,7 @@ impl ManagementRequest {
         Self {
             op,
             realm: realm.to_string(),
+            publisher: String::new(),
             package: None,
             profile: None,
             provider_id: provider_id.to_string(),
@@ -137,9 +147,10 @@ impl ManagementRequest {
     }
 
     /// Verify the signature of a request from [`Self::parse`] with an
-    /// `active` key of `keys`, the accepted `realm_signing_keys` member of the
-    /// Realm's domain.
-    pub fn verify(&self, keys: &RealmSigningKeys) -> Result<(), ManagementRequestError> {
+    /// `active` key of `keys`: the keys of the accepted `realm_signing_keys`
+    /// member of the Realm's domain, or for `register_publisher` the
+    /// `profile_signing_keys` of the Publisher Profile.
+    pub fn verify(&self, keys: &[RealmSigningKey]) -> Result<(), ManagementRequestError> {
         let signature = self
             .signature
             .as_ref()
@@ -147,10 +158,7 @@ impl ManagementRequest {
         let key = verify_signature(keys, signature, self.signed_payload.as_bytes())
             .map_err(|error| invalid(error.to_string()))?;
         if key.status != KeyStatus::Active {
-            return Err(invalid(format!(
-                "Realm signing key '{}' is not active",
-                key.id
-            )));
+            return Err(invalid(format!("signing key '{}' is not active", key.id)));
         }
         Ok(())
     }
@@ -159,29 +167,19 @@ impl ManagementRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authority::RealmSigningKey;
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as BASE64;
 
-    fn keys(listed: &[(&str, &SigningKey, KeyStatus)]) -> RealmSigningKeys {
-        RealmSigningKeys {
-            sequence: 1,
-            keys: listed
-                .iter()
-                .map(|(id, key, status)| RealmSigningKey {
-                    id: id.to_string(),
-                    algorithm: "Ed25519".into(),
-                    public_key: BASE64.encode(key.verifying_key().to_bytes()),
-                    status: *status,
-                })
-                .collect(),
-            rotations: None,
-            signature: DetachedSignature {
-                key_id: listed[0].0.to_string(),
+    fn keys(listed: &[(&str, &SigningKey, KeyStatus)]) -> Vec<RealmSigningKey> {
+        listed
+            .iter()
+            .map(|(id, key, status)| RealmSigningKey {
+                id: id.to_string(),
                 algorithm: "Ed25519".into(),
-                value: String::new(),
-            },
-        }
+                public_key: BASE64.encode(key.verifying_key().to_bytes()),
+                status: *status,
+            })
+            .collect()
     }
 
     fn request() -> ManagementRequest {
@@ -262,5 +260,22 @@ mod tests {
                 .check_window(Utc::now() - chrono::Duration::seconds(60))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn register_publisher_names_the_publisher_instead_of_a_realm() {
+        let key = SigningKey::from_bytes(&[1; 32]);
+        let mut request =
+            ManagementRequest::new(ManagementOp::RegisterPublisher, "", "p.example", "n-2");
+        request.publisher = "acme.com".into();
+        let document = request.sign("root-1", &key);
+        assert_eq!(document["op"], "register_publisher");
+        assert_eq!(document["publisher"], "acme.com");
+        assert!(document.get("realm").is_none());
+        let parsed = ManagementRequest::parse(document.to_string().as_bytes()).unwrap();
+        assert_eq!(parsed.realm, "");
+        parsed
+            .verify(&keys(&[("root-1", &key, KeyStatus::Active)]))
+            .unwrap();
     }
 }

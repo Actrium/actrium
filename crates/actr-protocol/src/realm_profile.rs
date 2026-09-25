@@ -202,7 +202,7 @@ impl RealmProfile {
             members.remove("signature");
         }
         let signed_payload = jcs(&value);
-        verify_signature(keys, &profile.signature, signed_payload.as_bytes())?;
+        verify_signature(&keys.keys, &profile.signature, signed_payload.as_bytes())?;
         Ok(Self {
             signed_payload,
             ..profile
@@ -289,7 +289,7 @@ impl RealmProfile {
 /// names, and return that key. Whether the key must be `active` is the
 /// caller's rule.
 pub(crate) fn verify_signature<'k>(
-    keys: &'k RealmSigningKeys,
+    keys: &'k [RealmSigningKey],
     signature: &DetachedSignature,
     payload: &[u8],
 ) -> Result<&'k RealmSigningKey, RealmProfileError> {
@@ -301,12 +301,11 @@ pub(crate) fn verify_signature<'k>(
         )));
     }
     let key = keys
-        .keys
         .iter()
         .find(|key| key.id == signature.key_id)
         .ok_or_else(|| {
             invalid(format!(
-                "signature key '{}' is not a listed Realm signing key",
+                "signature key '{}' is not a listed signing key",
                 signature.key_id
             ))
         })?;

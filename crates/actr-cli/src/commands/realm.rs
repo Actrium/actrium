@@ -388,7 +388,7 @@ mod tests {
         let request = sign_profile(&key_path, profile, Some("Notes"), None).unwrap();
 
         let parsed = ManagementRequest::parse(request.to_string().as_bytes()).unwrap();
-        parsed.verify(&keys).unwrap();
+        parsed.verify(&keys.keys).unwrap();
         assert_eq!(parsed.op, ManagementOp::PublishProfile);
         assert_eq!(parsed.provider_id, "p.example");
         let signed = parsed.profile.unwrap();

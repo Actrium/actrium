@@ -128,7 +128,7 @@ where
         .map_err(|error| ManagementError::Forbidden(error.to_string()))?
         .keys;
     request
-        .verify(&keys)
+        .verify(&keys.keys)
         .map_err(|error| ManagementError::Forbidden(error.to_string()))?;
 
     // Only signed requests reach the nonce table.
@@ -154,6 +154,9 @@ where
                 })?;
             Ok(json!({ "realm": request.realm, "admin_token": token }))
         }
+        ManagementOp::RegisterPublisher => Err(ManagementError::Invalid(
+            "register_publisher is not supported yet".to_string(),
+        )),
     }
 }
 

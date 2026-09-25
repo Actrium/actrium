@@ -1,9 +1,12 @@
 //! Public authority discovery data types.
 
+use crate::realm_profile::{jcs, verify_signature};
 use crate::uri::{ActrUri, is_link_prefix};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 pub const AUTHORITY_DESCRIPTOR_VERSION: u32 = 1;
@@ -248,6 +251,108 @@ impl PublisherProfile {
             )));
         }
         check_signature(&self.signature).map_err(invalid)
+    }
+
+    /// Verifies the profile for `domain` at `now`: [`Self::validate_for`],
+    /// its key members, its validity period, and its signature by an
+    /// `active` `profile_signing_keys` entry over the RFC 8785 JCS form of the
+    /// member without `signature`. Pinning and `sequence` checks against an
+    /// accepted profile are the caller's.
+    pub fn verify(
+        &self,
+        domain: &str,
+        now: DateTime<Utc>,
+    ) -> Result<PublisherKeys, AuthorityDescriptorError> {
+        self.validate_for(domain)?;
+        let invalid = AuthorityDescriptorError::InvalidPublisher;
+        let mut payload = serde_json::to_value(self).map_err(|error| invalid(error.to_string()))?;
+        if let Value::Object(members) = &mut payload {
+            members.remove("signature");
+        }
+        let keys: PublisherKeys = serde_json::from_value(payload.clone())
+            .map_err(|error| invalid(format!("malformed Publisher Profile: {error}")))?;
+        keys.check(now).map_err(invalid)?;
+        let key = verify_signature(
+            &keys.profile_signing_keys,
+            &self.signature,
+            jcs(&payload).as_bytes(),
+        )
+        .map_err(|error| invalid(error.to_string()))?;
+        if key.status != KeyStatus::Active {
+            return Err(invalid(format!(
+                "Publisher Profile signing key '{}' is not active",
+                key.id
+            )));
+        }
+        Ok(keys)
+    }
+}
+
+/// A package signing key listed in a Publisher Profile's `keys`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageSigningKey {
+    pub id: String,
+    pub algorithm: String,
+    /// Base64 Ed25519 public key.
+    pub public_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_before: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_after: Option<String>,
+    pub status: KeyStatus,
+}
+
+/// The key members of a Publisher Profile (`docs/product/actrium-v1` 05
+/// section 2.2 and 12 section 2), returned by [`PublisherProfile::verify`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PublisherKeys {
+    pub sequence: u64,
+    /// Keys that sign the Publisher Profile; same members as Realm signing
+    /// keys.
+    pub profile_signing_keys: Vec<RealmSigningKey>,
+    /// Package signing keys.
+    pub keys: Vec<PackageSigningKey>,
+    /// RFC 3339.
+    pub profile_issued_at: String,
+    /// RFC 3339.
+    pub profile_expires_at: String,
+}
+
+impl PublisherKeys {
+    fn check(&self, now: DateTime<Utc>) -> Result<(), String> {
+        if self.profile_signing_keys.is_empty() {
+            return Err("profile_signing_keys is empty".into());
+        }
+        let listed = self
+            .profile_signing_keys
+            .iter()
+            .map(|key| (&key.id, &key.algorithm, &key.public_key))
+            .chain(
+                self.keys
+                    .iter()
+                    .map(|key| (&key.id, &key.algorithm, &key.public_key)),
+            );
+        let mut ids = Vec::new();
+        for (id, algorithm, public_key) in listed {
+            if id.is_empty() || ids.contains(&id) {
+                return Err(format!("key id '{id}' is empty or listed twice"));
+            }
+            ids.push(id);
+            if algorithm != SIGNATURE_ALGORITHM || !decodes_to(public_key, 32) {
+                return Err(format!("key '{id}' is not a base64 Ed25519 key"));
+            }
+        }
+        let time = |value: &str, member: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .map(|time| time.with_timezone(&Utc))
+                .map_err(|error| format!("{member}: {error}"))
+        };
+        let issued_at = time(&self.profile_issued_at, "profile_issued_at")?;
+        let expires_at = time(&self.profile_expires_at, "profile_expires_at")?;
+        if now < issued_at || now > expires_at {
+            return Err("Publisher Profile is outside its validity period".into());
+        }
+        Ok(())
     }
 }
 
@@ -656,5 +761,70 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(parsed.links.as_deref(), Some(&["/i/".to_string()][..]));
+    }
+
+    /// A Publisher Profile for `domain` signed by the first of
+    /// `signing_keys`.
+    fn signed_publisher(
+        domain: &str,
+        signing_keys: &[(&str, &ed25519_dalek::SigningKey, KeyStatus)],
+    ) -> PublisherProfile {
+        let key_json = |id: &str, key: &ed25519_dalek::SigningKey, status: KeyStatus| {
+            serde_json::json!({
+                "id": id,
+                "algorithm": "Ed25519",
+                "public_key": BASE64.encode(key.verifying_key().to_bytes()),
+                "status": status,
+            })
+        };
+        let package_key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+        let mut document = serde_json::json!({
+            "schema": "actr.publisher/v1",
+            "sequence": 1,
+            "domain": domain,
+            "profile_signing_keys": signing_keys
+                .iter()
+                .map(|(id, key, status)| key_json(id, key, *status))
+                .collect::<Vec<_>>(),
+            "keys": [key_json("package-1", &package_key, KeyStatus::Active)],
+            "security_contact": "mailto:security@example.com",
+            "profile_issued_at": "2026-01-01T00:00:00Z",
+            "profile_expires_at": "2027-01-01T00:00:00Z",
+        });
+        crate::realm_profile::sign_document(&mut document, signing_keys[0].0, signing_keys[0].1);
+        serde_json::from_value(document).unwrap()
+    }
+
+    #[test]
+    fn verifies_signed_publisher_profiles() {
+        let root = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+        let now: DateTime<Utc> = "2026-06-01T00:00:00Z".parse().unwrap();
+        let profile = signed_publisher("example.com", &[("root-1", &root, KeyStatus::Active)]);
+        let keys = profile.verify("example.com", now).unwrap();
+        assert_eq!(keys.sequence, 1);
+        assert_eq!(keys.keys[0].id, "package-1");
+
+        let rejected = |profile: &PublisherProfile, now: DateTime<Utc>| {
+            assert!(matches!(
+                profile.verify("example.com", now),
+                Err(AuthorityDescriptorError::InvalidPublisher(_))
+            ));
+        };
+        // Another domain, an expired profile, a changed member.
+        assert!(profile.verify("other.example", now).is_err());
+        rejected(&profile, "2027-06-01T00:00:00Z".parse().unwrap());
+        let mut tampered = profile.clone();
+        tampered.other.insert("sequence".into(), 2.into());
+        rejected(&tampered, now);
+        // Signed by a retired key.
+        rejected(
+            &signed_publisher("example.com", &[("root-1", &root, KeyStatus::Retired)]),
+            now,
+        );
+        // A key id listed twice.
+        let mut twice = serde_json::to_value(&profile).unwrap();
+        twice["keys"][0]["id"] = "root-1".into();
+        crate::realm_profile::sign_document(&mut twice, "root-1", &root);
+        rejected(&serde_json::from_value(twice).unwrap(), now);
     }
 }
