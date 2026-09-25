@@ -148,6 +148,9 @@ pub struct ClientEgress {
     control_tx: tokio::sync::mpsc::Sender<WsMessage>,
     /// Data queue byte budget
     byte_budget: Arc<Semaphore>,
+    /// Cancelled when the server closes the connection but could not queue
+    /// a Close frame; the write task then ends the connection at once.
+    closed: tokio_util::sync::CancellationToken,
     /// The bound configuration applied to this client
     config: EgressQueueConfig,
     /// Shared observability counters
@@ -171,6 +174,7 @@ impl ClientEgress {
             data_tx,
             control_tx,
             byte_budget: Arc::new(Semaphore::new(config.max_bytes as usize)),
+            closed: tokio_util::sync::CancellationToken::new(),
             config,
             metrics,
         };
@@ -229,6 +233,19 @@ impl ClientEgress {
         self.control_tx.try_send(msg).inspect_err(|_| {
             self.metrics.control_dropped.fetch_add(1, Ordering::Relaxed);
         })
+    }
+
+    /// Close the connection: queue a Close frame, or, when the control queue
+    /// is full or closed, have the write task end the connection without one.
+    /// Returns whether the Close frame was queued.
+    fn close(&self, close_frame: axum::extract::ws::CloseFrame) -> bool {
+        let queued = self
+            .try_send_control(WsMessage::Close(Some(close_frame)))
+            .is_ok();
+        if !queued {
+            self.closed.cancel();
+        }
+        queued
     }
 
     /// Current number of queued data messages (observability gauge)
@@ -493,11 +510,11 @@ pub async fn retire_realm(server: &SignalingServerHandle, realm: &str) {
             code: axum::extract::ws::close_code::POLICY,
             reason: "realm retired".into(),
         };
-        if egress
-            .try_send_control(WsMessage::Close(Some(close_frame)))
-            .is_err()
-        {
-            platform::recording::warn!("Connection {} control queue full or closed", client_id);
+        if !egress.close(close_frame) {
+            platform::recording::warn!(
+                "Connection {} control queue full or closed; closing without a Close frame",
+                client_id
+            );
         }
         cleanup_client(&client_id, server, CleanupMode::ExplicitUnregister).await;
     }
@@ -522,10 +539,11 @@ pub async fn handle_websocket_connection(
     let (mut ws_sender, mut ws_receiver) = websocket.split();
 
     // Create a bounded egress queue for this connection (data + control dual channels + byte budget, issue #351)
-    let (egress, mut data_rx, mut control_rx) =
+    let (egress, data_rx, control_rx) =
         ClientEgress::new(server.egress_config.clone(), server.queue_metrics.clone());
     let write_timeout = Duration::from_millis(server.egress_config.write_timeout_ms as u64);
     let control_tx = egress.clone();
+    let closed = egress.closed.clone();
 
     // Register the client (including the bounded egress handle)
     let (actor_id, actor_type, credential) = match url_identity {
@@ -723,76 +741,13 @@ pub async fn handle_websocket_connection(
     });
 
     // Task for sending messages
-    //
-    // Drain the control queue first (biased select) so Close/Ping/Pong are not starved by data messages;
-    // every write has a write deadline, so slow/non-reading clients are torn down on timeout (issue #351).
-    let mut send_task = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                // Control messages first
-                ctrl = control_rx.recv() => {
-                    match ctrl {
-                        Some(message) => {
-                            let should_close = matches!(message, WsMessage::Close(_));
-                            match timeout(write_timeout, ws_sender.send(message)).await {
-                                Ok(Ok(())) => {}
-                                Ok(Err(e)) => {
-                                    platform::recording::warn!(
-                                        "WebSocket control frame write failed: {}",
-                                        e
-                                    );
-                                    break;
-                                }
-                                Err(_) => {
-                                    platform::recording::warn!(
-                                        "WebSocket control frame write timed out ({}ms); closing slow-consumer connection",
-                                        write_timeout.as_millis()
-                                    );
-                                    break;
-                                }
-                            }
-                            if should_close {
-                                break;
-                            }
-                        }
-                        None => break,
-                    }
-                }
-                // Data messages
-                data = data_rx.recv() => {
-                    match data {
-                        Some(queued) => {
-                            let QueuedFrame { msg, byte_len, _permit } = queued;
-                            // Hold the byte permit during the write and release it after (applies accurate backpressure to slow consumers)
-                            let send_result = timeout(write_timeout, ws_sender.send(msg)).await;
-                            drop(_permit);
-                            match send_result {
-                                Ok(Ok(())) => {}
-                                Ok(Err(e)) => {
-                                    platform::recording::warn!(
-                                        "WebSocket data frame write failed ({} bytes): {}",
-                                        byte_len,
-                                        e
-                                    );
-                                    break;
-                                }
-                                Err(_) => {
-                                    platform::recording::warn!(
-                                        "WebSocket data frame write timed out ({}ms, {} bytes); closing slow-consumer connection",
-                                        write_timeout.as_millis(),
-                                        byte_len
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                        None => break,
-                    }
-                }
-            }
-        }
-    });
+    let mut send_task = tokio::spawn(write_egress(
+        ws_sender,
+        data_rx,
+        control_rx,
+        closed,
+        write_timeout,
+    ));
     let mut receive_task = receive_task;
 
     // Wait for either task to complete
@@ -828,6 +783,92 @@ pub async fn handle_websocket_connection(
     Ok(())
 }
 
+/// Write a connection's queued frames until the connection ends.
+///
+/// Drains the control queue first (biased select) so Close/Ping/Pong are not
+/// starved by data messages; every write has a write deadline, so slow or
+/// non-reading clients are torn down on timeout (issue #351). Returns, ending
+/// the connection, after writing a Close frame, on a write failure, when the
+/// queues close, or when `closed` is cancelled.
+async fn write_egress<S>(
+    mut ws_sender: S,
+    mut data_rx: tokio::sync::mpsc::Receiver<QueuedFrame>,
+    mut control_rx: tokio::sync::mpsc::Receiver<WsMessage>,
+    closed: tokio_util::sync::CancellationToken,
+    write_timeout: Duration,
+) where
+    S: futures_util::Sink<WsMessage> + Unpin,
+    S::Error: std::fmt::Display,
+{
+    loop {
+        tokio::select! {
+            biased;
+            // The server closed the connection but could not queue a Close frame
+            _ = closed.cancelled() => break,
+            // Control messages first
+            ctrl = control_rx.recv() => {
+                match ctrl {
+                    Some(message) => {
+                        let should_close = matches!(message, WsMessage::Close(_));
+                        match timeout(write_timeout, ws_sender.send(message)).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                platform::recording::warn!(
+                                    "WebSocket control frame write failed: {}",
+                                    e
+                                );
+                                break;
+                            }
+                            Err(_) => {
+                                platform::recording::warn!(
+                                    "WebSocket control frame write timed out ({}ms); closing slow-consumer connection",
+                                    write_timeout.as_millis()
+                                );
+                                break;
+                            }
+                        }
+                        if should_close {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            // Data messages
+            data = data_rx.recv() => {
+                match data {
+                    Some(queued) => {
+                        let QueuedFrame { msg, byte_len, _permit } = queued;
+                        // Hold the byte permit during the write and release it after (applies accurate backpressure to slow consumers)
+                        let send_result = timeout(write_timeout, ws_sender.send(msg)).await;
+                        drop(_permit);
+                        match send_result {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                platform::recording::warn!(
+                                    "WebSocket data frame write failed ({} bytes): {}",
+                                    byte_len,
+                                    e
+                                );
+                                break;
+                            }
+                            Err(_) => {
+                                platform::recording::warn!(
+                                    "WebSocket data frame write timed out ({}ms, {} bytes); closing slow-consumer connection",
+                                    write_timeout.as_millis(),
+                                    byte_len
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+}
+
 fn remove_stale_actor_clients(
     clients: &mut HashMap<String, ClientConnection>,
     actor_id: &ActrId,
@@ -855,13 +896,9 @@ async fn close_stale_clients(stale_clients: Vec<StaleClient>, server: &Signaling
             reason: "displaced by new connection".into(),
         };
 
-        if stale_client
-            .egress
-            .try_send_control(WsMessage::Close(Some(close_frame)))
-            .is_err()
-        {
+        if !stale_client.egress.close(close_frame) {
             platform::recording::debug!(
-                "Stale WebSocket client {} control queue full or closed",
+                "Stale WebSocket client {} control queue full or closed; closing without a Close frame",
                 stale_client.id
             );
         }
@@ -2182,7 +2219,7 @@ async fn close_slow_client(client_id: &str, server: &SignalingServerHandle, egre
         code: axum::extract::ws::close_code::ERROR,
         reason: "slow consumer: egress queue saturated".into(),
     };
-    let _ = egress.try_send_control(WsMessage::Close(Some(close_frame)));
+    egress.close(close_frame);
 
     cleanup_client(client_id, server, CleanupMode::ConnectionClosed).await;
 }
@@ -3412,6 +3449,77 @@ mod tests {
             Ok(WsMessage::Pong(payload)) => assert_eq!(payload.as_ref(), b"probe"),
             other => panic!("expected queued Pong despite full data queue, got {other:?}"),
         }
+    }
+
+    /// A replaced or retired connection whose control queue is full still
+    /// ends: no Close frame fits, so the write task stops at once instead of
+    /// leaving the socket open until the client speaks.
+    #[tokio::test]
+    async fn a_close_that_cannot_be_queued_still_ends_the_connection() {
+        let server = create_test_server_handle();
+        let config = EgressQueueConfig {
+            max_control_messages: 1,
+            ..EgressQueueConfig::default()
+        };
+        let full_control_queue = || {
+            let (egress, data_rx, control_rx) =
+                ClientEgress::new(config.clone(), Arc::new(SignalingQueueMetrics::default()));
+            egress
+                .try_send_control(WsMessage::Pong(Vec::from("queued").into()))
+                .unwrap();
+            (egress, data_rx, control_rx)
+        };
+
+        // Replaced by a new connection of the same actor.
+        let (replaced, data_rx, control_rx) = full_control_queue();
+        close_stale_clients(
+            vec![StaleClient {
+                id: "replaced".to_string(),
+                egress: replaced.clone(),
+            }],
+            &server,
+        )
+        .await;
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            write_egress(
+                futures_util::sink::drain(),
+                data_rx,
+                control_rx,
+                replaced.closed.clone(),
+                Duration::from_secs(1),
+            ),
+        )
+        .await
+        .expect("the write task ends although the replaced client never reads or speaks");
+
+        // Its Realm retired.
+        let actor = create_test_actr_id(1);
+        let (retired, _data_rx, _control_rx) = full_control_queue();
+        server.clients.write().await.insert(
+            "retired".to_string(),
+            ClientConnection {
+                id: "retired".to_string(),
+                actor_id: Some(actor.clone()),
+                credential: None,
+                egress: retired.clone(),
+                client_ip: None,
+                webrtc_role: None,
+            },
+        );
+        retire_realm(&server, &actor.realm).await;
+        assert!(retired.closed.is_cancelled());
+
+        // A Close frame that fits is sent instead, and ends the connection.
+        let (egress, data_rx, mut control_rx) =
+            ClientEgress::new(config.clone(), Arc::new(SignalingQueueMetrics::default()));
+        assert!(egress.close(axum::extract::ws::CloseFrame {
+            code: axum::extract::ws::close_code::POLICY,
+            reason: "test".into(),
+        }));
+        assert!(!egress.closed.is_cancelled());
+        assert!(matches!(control_rx.try_recv(), Ok(WsMessage::Close(_))));
+        drop(data_rx);
     }
 
     /// Blocked socket: a slow-consumer client is closed after the enqueue timeout and removed from the routing table (acceptance criteria 3+4).
