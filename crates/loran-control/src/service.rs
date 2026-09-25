@@ -1121,10 +1121,8 @@ impl AdminApiService {
                 ProfileError::Realm(RealmError::NotFound) => {
                     Status::not_found(format!("Realm not found: {realm}"))
                 }
-                ProfileError::Realm(RealmError::Conflict(message)) => {
-                    Status::failed_precondition(message)
-                }
-                ProfileError::Invalid(message) => Status::invalid_argument(message),
+                ProfileError::Realm(RealmError::Conflict(message))
+                | ProfileError::Invalid(message) => Status::invalid_argument(message),
                 err => Status::internal(format!("Failed to rotate the issuer key: {err}")),
             })
     }
