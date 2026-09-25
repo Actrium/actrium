@@ -3708,7 +3708,7 @@ mod tests {
                 .await
                 .unwrap();
                 if RealmEntity::get(REALM).await.unwrap().is_none() {
-                    RealmEntity::create(REALM.to_string(), "secret-hash".to_string())
+                    RealmEntity::create(REALM.to_string())
                         .await
                         .unwrap();
                 }
@@ -3942,7 +3942,7 @@ mod tests {
         async fn a_replaced_server_still_closes_connections_of_retired_realms() {
             setup().await;
             let realm = "replaced@example.com";
-            RealmEntity::create(realm.to_string(), "secret-hash".to_string())
+            RealmEntity::create(realm.to_string())
                 .await
                 .unwrap();
             let server = create_test_server_handle();

@@ -1,14 +1,14 @@
 //! Realm management requests (`actr/protocols/realm-profile.md` section 8)
 //! for Realms of other domains: `create_realm`, `publish_profile`,
-//! `reissue_admin_token` and `draft_profile`, each an Actr management
+//! `reissue_owner_invite` and `draft_profile`, each an Actr management
 //! envelope signed by an `active` Realm signing key of the Realm's domain.
 //!
 //! The same envelope carries `register_publisher`
 //! (`actr/protocols/authority-discovery.md` section 4.5), signed by an
 //! `active` Publisher Profile signing key of the publisher's domain.
 //!
-//! Realms under the Provider domain are managed with a Realm Provider
-//! account, which this Loran does not offer; the operator creates them.
+//! Realms under the Provider domain are created by the operator and managed
+//! by their owner with membership requests (`update_realm`).
 
 use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
 use actr_protocol::realm_profile::{RealmPackage, RealmProfile, RealmStatus as ProfileStatus};
@@ -20,8 +20,8 @@ use chrono::Utc;
 use platform::config::RealmConfig;
 use platform::net::FetchError;
 use platform::realm::domain::member_from_descriptor;
-use platform::realm::management::{generate_admin_token, use_nonce};
-use platform::realm::secret::{generate_realm_secret, hash_realm_secret};
+use platform::realm::management::use_nonce;
+use platform::realm::membership::{self, BY_HOLDER};
 use platform::realm::{Realm, RealmDomain, RealmError, RealmProfileRecord, RealmStatus};
 use serde_json::{Value, json};
 use std::future::Future;
@@ -163,13 +163,18 @@ where
         ManagementOp::CreateRealm => create_realm(profiles, config, &request).await,
         ManagementOp::PublishProfile => publish_profile(profiles, &request, &keys).await,
         ManagementOp::ReissueOwnerInvite => {
-            let token = Realm::reissue_admin_token(&request.realm)
+            let invite = membership::issue_owner_invite(&request.realm, BY_HOLDER)
                 .await
-                .map_err(|error| match error {
-                    RealmError::ValidationError(message) => ManagementError::Conflict(message),
-                    error => error.into(),
+                .map_err(|error| match error.code {
+                    membership::Code::NotFound => ManagementError::NotFound(error.message),
+                    membership::Code::Conflict => ManagementError::Conflict(error.message),
+                    _ => ManagementError::Internal(error.message),
                 })?;
-            Ok(json!({ "realm": request.realm, "admin_token": token }))
+            Ok(json!({
+                "realm": request.realm,
+                "owner_invite": invite.invite,
+                "expires_at": membership::rfc3339(invite.expires_at),
+            }))
         }
         ManagementOp::DraftProfile => draft_profile(profiles, &request, &keys).await,
         ManagementOp::RegisterPublisher => unreachable!("handled above"),
@@ -321,7 +326,6 @@ async fn create_realm(
     let created = Realm {
         name: name.to_string(),
         status: RealmStatus::Pending,
-        secret_current: hash_realm_secret(&generate_realm_secret()),
         requester: requester.clone(),
         pending_expires_at: Some(Utc::now().timestamp() as u64 + config.pending_ttl_secs()),
         ..Default::default()
@@ -425,12 +429,11 @@ async fn publish_profile(
         }
     }
 
-    let token = (realm.status == RealmStatus::Pending).then(generate_admin_token);
-    let (stored, activated) = RealmProfileRecord::store(
+    let (stored, _, owner_invite) = RealmProfileRecord::store(
         &profile,
         &document,
         record.as_ref().map(|record| record.digest.as_str()),
-        token.as_ref().map(|(_, hash)| hash.as_str()),
+        Some(BY_HOLDER),
     )
     .await?;
     let mut reply = json!({
@@ -438,22 +441,14 @@ async fn publish_profile(
         "status": stored.status.to_string(),
         "sequence": profile.sequence,
     });
-    if activated && let Some((token, _)) = token {
-        reply["admin_token"] = json!(token);
+    // The first activation hands the owner invite over, once.
+    if let Some(invite) = owner_invite {
+        reply["owner_invite"] = json!(invite.invite);
+        reply["owner_invite_expires_at"] = json!(membership::rfc3339(invite.expires_at));
     }
     Ok(reply)
 }
 
 fn check_package(package: &RealmPackage) -> Result<(), ManagementError> {
-    let hex = package.sha256.len() == 64
-        && package
-            .sha256
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-    if !package.href.starts_with("https://") || !hex {
-        return Err(ManagementError::Invalid(
-            "package needs an https href and a lowercase hex sha256".to_string(),
-        ));
-    }
-    Ok(())
+    package.check().map_err(ManagementError::Invalid)
 }

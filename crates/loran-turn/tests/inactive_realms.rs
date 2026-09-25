@@ -20,7 +20,7 @@ async fn follows_suspension_resumption_and_retirement() {
     platform::storage::db::set_db_path(dir.path())
         .await
         .expect("init db");
-    Realm::create("early@example.com".to_string(), "hash".to_string())
+    Realm::create("early@example.com".to_string())
         .await
         .expect("create realm");
     Realm::set_enabled("early@example.com", false)
@@ -32,7 +32,7 @@ async fn follows_suspension_resumption_and_retirement() {
     // Loaded at start.
     assert!(inactive.contains("early@example.com"));
 
-    Realm::create("late@example.com".to_string(), "hash".to_string())
+    Realm::create("late@example.com".to_string())
         .await
         .expect("create realm");
     assert!(!inactive.contains("late@example.com"));

@@ -252,12 +252,31 @@ impl RealmProfiles {
             .map(|record| record.verify(keys))
             .transpose()?;
 
+        if let Some(package) = &change.package {
+            package.check().map_err(ProfileError::Invalid)?;
+            // Another program is another instance, not an upgrade.
+            let previous_type = previous
+                .as_ref()
+                .and_then(|p| p.package.as_ref())
+                .and_then(|package| package.actr_type().ok());
+            let new_type = package.actr_type().map_err(ProfileError::Invalid)?;
+            if let Some(previous_type) = previous_type
+                && (previous_type.publisher != new_type.publisher
+                    || previous_type.name != new_type.name)
+            {
+                return Err(ProfileError::Invalid(format!(
+                    "package.type {} is another program than {}",
+                    package.r#type,
+                    previous_type.to_program_identity()
+                )));
+            }
+        }
         let package = change
             .package
             .or_else(|| previous.as_ref().and_then(|p| p.package.clone()));
         if package.is_none() && !change.retire {
             return Err(ProfileError::Invalid(
-                "an active Realm Profile needs package {href, sha256}".to_string(),
+                "an active Realm Profile needs package {href, sha256, type}".to_string(),
             ));
         }
         let display_name = change
@@ -286,7 +305,7 @@ impl RealmProfiles {
             previous.check_successor(&profile)?;
         }
         let digest = record.as_ref().map(|record| record.digest.as_str());
-        let (realm, _) = RealmProfileRecord::store(&profile, &document, digest, None).await?;
+        let (realm, _, _) = RealmProfileRecord::store(&profile, &document, digest, None).await?;
         Ok(realm)
     }
 

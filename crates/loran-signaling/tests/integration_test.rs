@@ -81,7 +81,7 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
 
     // Ensure the test-required realm exists — avoids 403 errors due to missing realm
     if RealmEntity::get(TEST_REALM).await.unwrap_or(None).is_none() {
-        let _ = RealmEntity::create(TEST_REALM.to_string(), String::new()).await;
+        let _ = RealmEntity::create(TEST_REALM.to_string()).await;
     }
 
     // Create router using create_signaling_router

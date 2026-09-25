@@ -2660,6 +2660,22 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
         .expect("identity confirmation");
     assert_eq!(confirm.status(), reqwest::StatusCode::FORBIDDEN);
 
+    // Owner invites are a Realm write; the member list is admin-only.
+    let realm_url = format!("http://127.0.0.1:{port}/admin/api/realms/test%40example.com");
+    let invite = http_client
+        .post(format!("{realm_url}/owner-invite"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("owner invite request");
+    assert_eq!(invite.status(), reqwest::StatusCode::FORBIDDEN);
+    let members = http_client
+        .get(format!("{realm_url}/members"))
+        .send()
+        .await
+        .expect("unauthenticated members request");
+    assert_eq!(members.status(), reqwest::StatusCode::UNAUTHORIZED);
+
     graceful_shutdown(child);
 }
 
@@ -2687,9 +2703,6 @@ async fn actrix_control_grpc_managed_realm_crud_by_name_and_retire() {
             enabled: true,
             credential: dummy_credential(),
             expires_at: 1_900_000_000,
-            secret_current_hash: Some("hash-v1".to_string()),
-            secret_previous_hash: None,
-            secret_previous_valid_until: None,
         };
         req.credential = build_signed_credential(&shared_secret, &req);
         req
@@ -2703,13 +2716,21 @@ async fn actrix_control_grpc_managed_realm_crud_by_name_and_retire() {
     let created_realm = created.realm.expect("created realm info");
     assert_eq!(created_realm.realm, realm);
     assert_eq!(created_realm.status, "active");
+    // A new Realm's owner invite comes back once.
+    let invite = created.owner_invite.expect("owner invite");
     assert_eq!(
-        created_realm
-            .secret_rotation_state
-            .unwrap()
-            .current_hash_preview,
-        "hash-v1"
+        actr_protocol::realm_membership::RealmInvite::decode(&invite)
+            .expect("owner invite text")
+            .realm,
+        realm
     );
+    let again = client
+        .create_realm(create(realm))
+        .await
+        .expect("repeated managed CreateRealm")
+        .into_inner();
+    assert!(again.success, "{:?}", again.error_message);
+    assert_eq!(again.owner_invite, None);
 
     // One instance hosts many Realms.
     let other = client
@@ -2724,9 +2745,6 @@ async fn actrix_control_grpc_managed_realm_crud_by_name_and_retire() {
         enabled: Some(false),
         credential: dummy_credential(),
         expires_at: Some(1_900_000_001),
-        secret_current_hash: Some("hash-v2".to_string()),
-        secret_previous_hash: Some("hash-v1".to_string()),
-        secret_previous_valid_until: Some(1_800_000_000),
     };
     update_req.credential = build_signed_credential(&shared_secret, &update_req);
     let updated = client

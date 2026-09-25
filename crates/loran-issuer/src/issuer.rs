@@ -63,7 +63,7 @@ use base64::prelude::*;
 use ed25519_dalek::VerifyingKey;
 use hmac::{Hmac, Mac};
 use platform::aid::AidError;
-use platform::realm::RealmSecretCheck;
+use platform::realm::membership::Signer;
 use prost::Message as ProstMessage;
 use prost::bytes::Bytes;
 use prost_types::Timestamp;
@@ -96,7 +96,10 @@ fn aid_error_to_code(err: &AidError) -> u32 {
         | AidError::Base64DecodeError(_)
         | AidError::HexDecodeError(_) => 400,
         AidError::Expired => 401,
-        AidError::RealmError(_) | AidError::PublisherNotVerified | AidError::PackageRevoked => 403,
+        AidError::RealmError(_)
+        | AidError::PublisherNotVerified
+        | AidError::PackageRevoked
+        | AidError::Membership(_) => 403,
         AidError::GenerationFailed(msg) => {
             if msg.contains("Signer unavailable") || msg.contains("Signer service") {
                 503
@@ -164,11 +167,13 @@ pub(crate) struct PreparedReissue {
     /// Package-auth reissue only: the nonce to consume and the target to record.
     pub(crate) publisher_nonce: Option<PublisherAuthBinding>,
     pub(crate) target: Option<String>,
+    /// The key the Actor is bound to once the reissue commits.
+    pub(crate) signer: Signer,
 }
 
 /// Result of preparing a reissue.
 pub(crate) enum ReissuePreparation {
-    Ready(PreparedReissue),
+    Ready(Box<PreparedReissue>),
     /// A stable rejection, kept as the attempt's response.
     Rejected(RegisterResponse),
     /// An infrastructure failure; the attempt is released so the same body can
@@ -290,26 +295,14 @@ impl AIdIssuer {
         Ok(issuer)
     }
 
-    /// Process a register request and issue a credential.
+    /// Process a register request from `signer`, whose Realm client key
+    /// proof the handler checked, and issue a credential.
     pub async fn issue_credential(
         &self,
         request: &RegisterRequest,
+        signer: &Signer,
     ) -> Result<RegisterResponse, AidError> {
-        self.issue_credential_with_realm_secret_check(request, None)
-            .await
-    }
-
-    /// Process a register request and issue a credential, carrying the realm secret
-    /// verification result completed by the handler.
-    pub async fn issue_credential_with_realm_secret_check(
-        &self,
-        request: &RegisterRequest,
-        realm_secret_check: Option<RealmSecretCheck>,
-    ) -> Result<RegisterResponse, AidError> {
-        match self
-            .issue_credential_inner(request, realm_secret_check.as_ref())
-            .await
-        {
+        match self.issue_credential_inner(request, signer).await {
             Ok(register_ok) => Ok(RegisterResponse {
                 result: Some(register_response::Result::Success(register_ok)),
             }),
@@ -339,18 +332,13 @@ impl AIdIssuer {
         actor_id: &ActrId,
         request: &RegisterRequest,
         renewal_proof: Option<&[u8]>,
-        realm_secret_check: Option<RealmSecretCheck>,
+        signer: &Signer,
     ) -> ReissuePreparation {
         match self
-            .prepare_reissue_inner(
-                actor_id,
-                request,
-                renewal_proof,
-                realm_secret_check.as_ref(),
-            )
+            .prepare_reissue_inner(actor_id, request, renewal_proof, signer)
             .await
         {
-            Ok(prepared) => ReissuePreparation::Ready(prepared),
+            Ok(prepared) => ReissuePreparation::Ready(Box::new(prepared)),
             Err(err) => {
                 let (code, message) = err.to_response();
                 let response = RegisterResponse {
@@ -373,7 +361,7 @@ impl AIdIssuer {
         actor_id: &ActrId,
         request: &RegisterRequest,
         renewal_proof: Option<&[u8]>,
-        realm_secret_check: Option<&RealmSecretCheck>,
+        signer: &Signer,
     ) -> Result<PreparedReissue, ReissueFailure> {
         if actor_id.realm != request.realm {
             platform::recording::warn!(
@@ -386,12 +374,23 @@ impl AIdIssuer {
 
         // The publisher-auth nonce is only checked here; it is consumed when
         // the attempt commits.
-        let publisher_nonce = self
-            .verify_registration_identity(request, realm_secret_check)
-            .await?;
+        let publisher_nonce = self.verify_registration_identity(request).await?;
         let proof = self
             .verify_actor_possession(actor_id, renewal_proof)
             .await?;
+        // A member moves only its own Actors to another of its keys.
+        let binding = platform::realm::membership::actor_binding_on(
+            &mut *Self::db_connection().await?,
+            actor_id,
+        )
+        .await
+        .map_err(|e| AidError::GenerationFailed(format!("actor binding lookup failed: {e}")))?;
+        if binding.is_none_or(|binding| binding.member_id != signer.member_id) {
+            return Err(AidError::Membership(
+                "client_unknown: the Actor belongs to another member".to_string(),
+            )
+            .into());
+        }
         // The requested type must be the one this identity was issued for.
         if Self::issued_actor(&mut *Self::db_connection().await?, actor_id)
             .await?
@@ -407,7 +406,7 @@ impl AIdIssuer {
         }
 
         let register_ok = self
-            .issue_credential_for_actor(actor_id, request.target.as_deref())
+            .issue_credential_for_actor(actor_id, request.target.as_deref(), signer)
             .await?;
 
         // Reissue accepts proofs that already expired (anything inside the
@@ -426,6 +425,7 @@ impl AIdIssuer {
             binding_expires_at: proof.binding_expires_at,
             publisher_nonce,
             target: request.target.clone(),
+            signer: signer.clone(),
         })
     }
 
@@ -520,11 +520,9 @@ impl AIdIssuer {
     async fn issue_credential_inner(
         &self,
         request: &RegisterRequest,
-        realm_secret_check: Option<&RealmSecretCheck>,
+        signer: &Signer,
     ) -> Result<register_response::RegisterOk, AidError> {
-        let nonce_binding = self
-            .verify_registration_identity(request, realm_secret_check)
-            .await?;
+        let nonce_binding = self.verify_registration_identity(request).await?;
         // Fresh registration burns the publisher-auth nonce immediately after
         // verification, so a replayed /register is rejected within the nonce TTL.
         if let Some(binding) = nonce_binding {
@@ -557,6 +555,7 @@ impl AIdIssuer {
                 } else {
                     actr_protocol::RegisterAuthMode::Package
                 },
+                signer,
             )
             .await?;
 
@@ -572,9 +571,9 @@ impl AIdIssuer {
             provider: self.config.provider_id.clone(),
             audience: "actr.signaling".to_string(),
             actor_type: request.actr_type.clone(),
-            member: "member-1".to_string(),
-            client_key: "0000000000000000".to_string(),
-            role: actr_protocol::MemberRole::Owner as i32,
+            member: signer.member_id.clone(),
+            client_key: signer.key_id.clone(),
+            role: actr_protocol::MemberRole::from(signer.role) as i32,
         };
 
         // Proto-encode the claims bytes.
@@ -628,7 +627,6 @@ impl AIdIssuer {
     async fn verify_registration_identity(
         &self,
         request: &RegisterRequest,
-        realm_secret_check: Option<&RealmSecretCheck>,
     ) -> Result<Option<PublisherAuthBinding>, AidError> {
         let auth_mode = match request.auth_mode {
             Some(value) if value == actr_protocol::RegisterAuthMode::Linked as i32 => {
@@ -648,17 +646,15 @@ impl AIdIssuer {
                 self.verify_publisher_identity(request).await
             }
             actr_protocol::RegisterAuthMode::Linked => {
-                self.verify_linked_identity(request, realm_secret_check)?;
+                self.verify_linked_identity(request)?;
                 Ok(None)
             }
         }
     }
 
-    fn verify_linked_identity(
-        &self,
-        request: &RegisterRequest,
-        realm_secret_check: Option<&RealmSecretCheck>,
-    ) -> Result<(), AidError> {
+    /// A Linked registration is authorized by the Realm client key proof
+    /// the handler checked; it only may not claim a publisher domain.
+    fn verify_linked_identity(&self, request: &RegisterRequest) -> Result<(), AidError> {
         if request.actr_type.version.is_empty()
             || request.manifest_raw.is_some()
             || request.publisher_signature.is_some()
@@ -671,7 +667,7 @@ impl AIdIssuer {
 
         // Linked workloads must not claim a DNS-style publisher namespace: dotted
         // names (e.g. "apps.example.com") are reserved for Package identities whose
-        // domain ownership is cryptographically verified. A realm secret is not
+        // domain ownership is cryptographically verified. Realm membership is not
         // proof of owning a publisher domain, so allowing a dotted publisher
         // here would let any realm workload impersonate a published publisher's
         // service type and overwrite its ACL (AIS-01 / SIG-05).
@@ -683,19 +679,7 @@ impl AIdIssuer {
             );
             return Err(AidError::PublisherNotVerified);
         }
-
-        match realm_secret_check {
-            Some(RealmSecretCheck::ValidCurrent) | Some(RealmSecretCheck::ValidPrevious) => Ok(()),
-            other => {
-                platform::recording::warn!(
-                    "Linked registration rejected: realm secret was not verified, realm={}, type={}, secret_check={:?}",
-                    request.realm,
-                    request.actr_type.to_string_repr(),
-                    other
-                );
-                Err(AidError::PublisherNotVerified)
-            }
-        }
+        Ok(())
     }
 
     /// verify Publisher Registry identity
@@ -1281,6 +1265,7 @@ impl AIdIssuer {
         realm: &str,
         target: Option<&str>,
         auth_mode: actr_protocol::RegisterAuthMode,
+        signer: &Signer,
     ) -> Result<ActrId, AidError> {
         let pool = platform::storage::db::get_database().get_pool();
         let issued_at = SystemTime::now()
@@ -1296,8 +1281,9 @@ impl AIdIssuer {
             let serial_number = SerialNumber::sn().value();
             let reserved = sqlx::query(
                 "INSERT OR IGNORE INTO issued_actor_identity
-                 (realm, serial_number, actor_type, target, issued_at, auth_mode)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                 (realm, serial_number, actor_type, target, issued_at, auth_mode,
+                  member_id, client_key_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(realm)
             .bind(serial_number as i64)
@@ -1305,6 +1291,8 @@ impl AIdIssuer {
             .bind(target)
             .bind(issued_at)
             .bind(auth_mode as i32)
+            .bind(&signer.member_id)
+            .bind(&signer.key_id)
             .execute(pool)
             .await
             .map_err(|error| {
@@ -1438,9 +1426,13 @@ impl AIdIssuer {
     /// Recheck, before a stored credential is replayed, that `actor_id` may
     /// still receive credentials: a replay never hands out what the Issuer
     /// would refuse now.
-    pub(crate) async fn recheck_before_replay(&self, actor_id: &ActrId) -> Result<(), AidError> {
+    pub(crate) async fn recheck_before_replay(
+        &self,
+        actor_id: &ActrId,
+        signer: &Signer,
+    ) -> Result<(), AidError> {
         let target = Self::issued_target(actor_id).await;
-        self.recheck_existing_actor(actor_id, target.as_deref())
+        self.recheck_existing_actor(actor_id, target.as_deref(), signer)
             .await
             .map(|_| ())
     }
@@ -1498,8 +1490,9 @@ impl AIdIssuer {
         &self,
         actor_id: &ActrId,
         target: Option<&str>,
+        signer: &Signer,
     ) -> Result<ActrType, AidError> {
-        Self::recheck_actor_on(&mut *Self::db_connection().await?, actor_id, target).await
+        Self::recheck_actor_on(&mut *Self::db_connection().await?, actor_id, target, signer).await
     }
 
     /// [`AIdIssuer::recheck_existing_actor`] on `conn`. The renew and reissue
@@ -1510,6 +1503,7 @@ impl AIdIssuer {
         conn: &mut sqlx::SqliteConnection,
         actor_id: &ActrId,
         target: Option<&str>,
+        signer: &Signer,
     ) -> Result<ActrType, AidError> {
         // AIS-04: an explicitly revoked identity is terminal, regardless of any
         // still-valid renewal token it may hold.
@@ -1529,6 +1523,18 @@ impl AIdIssuer {
                 ),
             ));
         }
+
+        // The requesting Realm client key must be unrevoked and its member
+        // active (`realm-membership.md` section 6). For a renewal it is the
+        // Actor's key; a reissue moves the Actor to it.
+        platform::realm::membership::check_key_on(&mut *conn, &actor_id.realm, &signer.key_id)
+            .await
+            .map_err(|error| match error.code {
+                platform::realm::membership::Code::Unavailable => {
+                    AidError::GenerationFailed(error.to_string())
+                }
+                _ => AidError::Membership(error.to_string()),
+            })?;
 
         // AIS-03(a): the realm must still be usable (exists, enabled, not
         // expired, Active status).
@@ -1647,11 +1653,14 @@ impl AIdIssuer {
         &self,
         actor_id: &ActrId,
         target: Option<&str>,
+        signer: &Signer,
     ) -> Result<register_response::RegisterOk, AidError> {
         // Re-validate realm/package/publisher state and the revocation list
         // before signing (AIS-03 / AIS-04). Covers both /renew and /reissue,
         // which are the only callers of this method.
-        let actor_type = self.recheck_existing_actor(actor_id, target).await?;
+        let actor_type = self
+            .recheck_existing_actor(actor_id, target, signer)
+            .await?;
 
         // Build IdentityClaims.
         let (key_id, verifying_key) = self.realm_key(&actor_id.realm).await?;
@@ -1665,9 +1674,9 @@ impl AIdIssuer {
             provider: self.config.provider_id.clone(),
             audience: "actr.signaling".to_string(),
             actor_type,
-            member: "member-1".to_string(),
-            client_key: "0000000000000000".to_string(),
-            role: actr_protocol::MemberRole::Owner as i32,
+            member: signer.member_id.clone(),
+            client_key: signer.key_id.clone(),
+            role: actr_protocol::MemberRole::from(signer.role) as i32,
         };
 
         let claims_bytes = claims_proto.encode_to_vec();

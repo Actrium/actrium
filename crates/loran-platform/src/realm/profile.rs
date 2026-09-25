@@ -10,6 +10,7 @@ use chrono::Utc;
 
 use super::domain::digest;
 use super::error::RealmError;
+use super::membership::{IssuedInvite, issue_owner_invite_in};
 use super::model::{Realm, retire_in};
 use crate::storage::db::get_database;
 
@@ -44,16 +45,17 @@ impl RealmProfileRecord {
     /// record's digest, or `None` when the Realm had none, and the store
     /// fails with [`RealmError::Conflict`] if another write came first.
     ///
-    /// In the same transaction an active Profile activates a pending Realm,
-    /// setting `admin_token_hash` as its Realm admin token, and a retired
-    /// Profile retires the Realm. Returns the Realm and whether this store
-    /// activated it.
+    /// In the same transaction an active Profile activates a pending Realm
+    /// and a retired Profile retires the Realm. When this store activates the
+    /// Realm and `owner_invite_by` is set, an owner invite created by it
+    /// comes back too. Returns the Realm and whether this store activated
+    /// it.
     pub async fn store(
         profile: &RealmProfile,
         document: &str,
         previous_digest: Option<&str>,
-        admin_token_hash: Option<&str>,
-    ) -> Result<(Realm, bool), RealmError> {
+        owner_invite_by: Option<&str>,
+    ) -> Result<(Realm, bool, Option<IssuedInvite>), RealmError> {
         let name = profile.realm.name.as_str();
         let now = Utc::now().timestamp();
         let mut tx = get_database().get_pool().begin().await?;
@@ -103,28 +105,35 @@ impl RealmProfileRecord {
         }
 
         let mut activated = false;
+        let mut owner_invite = None;
         match profile.realm.status {
             RealmStatus::Retired => retire_in(&mut tx, name, now).await?,
             RealmStatus::Active => {
                 super::issuer_key::RealmIssuerKey::mark_published(&mut tx, profile, now).await?;
                 activated = sqlx::query(
                     "UPDATE realm SET status = 'active', pending_expires_at = NULL,
-                        admin_token_hash = ?, updated_at = ?
+                        updated_at = ?
                      WHERE name = ? AND status = 'pending'",
                 )
-                .bind(admin_token_hash)
                 .bind(now)
                 .bind(name)
                 .execute(&mut *tx)
                 .await?
                 .rows_affected()
                     == 1;
+                if activated && let Some(created_by) = owner_invite_by {
+                    owner_invite = Some(
+                        issue_owner_invite_in(&mut tx, name, created_by, now)
+                            .await
+                            .map_err(|error| RealmError::DatabaseError(error.to_string()))?,
+                    );
+                }
             }
         }
         tx.commit().await?;
         super::changes::announce(name);
         let realm = Realm::get(name).await?.ok_or(RealmError::NotFound)?;
-        Ok((realm, activated))
+        Ok((realm, activated, owner_invite))
     }
 }
 
@@ -160,7 +169,8 @@ mod tests {
         });
         if status == "active" {
             profile["package"] = json!({
-                "href": "https://cdn.example/notes.actr", "sha256": "ab".repeat(32)
+                "href": "https://cdn.example/notes.actr", "sha256": "ab".repeat(32),
+                "type": "acme.com/notes@1.0.0",
             });
         }
         let signature = key.sign(jcs(&profile).as_bytes());
@@ -182,7 +192,6 @@ mod tests {
         Realm {
             name: NAME.to_string(),
             status: Lifecycle::Pending,
-            secret_current: "hash".to_string(),
             ..Default::default()
         }
         .insert(None)
@@ -197,10 +206,11 @@ mod tests {
 
         let first = document(1, "active", &key);
         let profile = RealmProfile::verify(first.as_bytes(), NAME, &keys)?;
-        let (realm, activated) =
-            RealmProfileRecord::store(&profile, &first, None, Some("token-hash")).await?;
+        let (realm, activated, invite) =
+            RealmProfileRecord::store(&profile, &first, None, Some("holder")).await?;
         assert_eq!(realm.status, Lifecycle::Active);
         assert!(activated);
+        assert!(invite.unwrap().invite.starts_with("ri_"));
         // A second write that missed the first one conflicts.
         assert!(matches!(
             RealmProfileRecord::store(&profile, &first, None, None).await,
@@ -218,7 +228,7 @@ mod tests {
             RealmProfileRecord::store(&profile, &retired, Some("stale"), None).await,
             Err(RealmError::Conflict(_))
         ));
-        let (realm, _) =
+        let (realm, _, _) =
             RealmProfileRecord::store(&profile, &retired, Some(&stored.digest), None).await?;
         assert_eq!(realm.status, Lifecycle::Retired);
         assert_eq!(RealmProfileRecord::get(NAME).await?.unwrap().sequence, 2);

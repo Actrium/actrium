@@ -1920,7 +1920,7 @@ mod tests {
         let other_realm = "other@acme.com";
         for name in [source_realm, target_realm, other_realm] {
             if RealmEntity::get(name).await?.is_none() {
-                RealmEntity::create(name.to_string(), "hash".to_string()).await?;
+                RealmEntity::create(name.to_string()).await?;
             }
         }
 

@@ -368,6 +368,7 @@ impl ControlAttemptStore {
         prepared: &PreparedRotation,
         body: &[u8],
         response_expires_at: i64,
+        signer: &platform::realm::membership::Signer,
     ) -> Result<(), AttemptError> {
         let encrypted = self.encrypt_response(&lease.request_hash, body)?;
         let now = crate::renewal::now_secs();
@@ -394,7 +395,7 @@ impl ControlAttemptStore {
         if presented_exists == 0 {
             return Err(AttemptError::TokenRejected);
         }
-        crate::issuer::AIdIssuer::recheck_actor_on(&mut tx, actor_id, target)
+        crate::issuer::AIdIssuer::recheck_actor_on(&mut tx, actor_id, target, signer)
             .await
             .map_err(AttemptError::Refused)?;
 
@@ -515,9 +516,31 @@ impl ControlAttemptStore {
         if binding_expires_at != Some(prepared.binding_expires_at) {
             return Err(AttemptError::PossessionNotProven);
         }
-        crate::issuer::AIdIssuer::recheck_actor_on(&mut tx, actor_id, prepared.target.as_deref())
-            .await
-            .map_err(AttemptError::Refused)?;
+        // Move the Actor to the requesting key of its own member.
+        let rebound = sqlx::query(
+            "UPDATE issued_actor_identity SET client_key_id = ?1
+             WHERE realm = ?2 AND serial_number = ?3 AND member_id = ?4",
+        )
+        .bind(&prepared.signer.key_id)
+        .bind(&actor_id.realm)
+        .bind(actor_id.serial_number as i64)
+        .bind(&prepared.signer.member_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AttemptError::Store(format!("key rebind failed: {error}")))?;
+        if rebound.rows_affected() != 1 {
+            return Err(AttemptError::Refused(platform::aid::AidError::Membership(
+                "client_unknown: the Actor belongs to another member".to_string(),
+            )));
+        }
+        crate::issuer::AIdIssuer::recheck_actor_on(
+            &mut tx,
+            actor_id,
+            prepared.target.as_deref(),
+            &prepared.signer,
+        )
+        .await
+        .map_err(AttemptError::Refused)?;
 
         if let Some(binding) = prepared.publisher_nonce.as_ref() {
             crate::issuer::AIdIssuer::consume_publisher_auth_nonce(
@@ -832,9 +855,10 @@ pub(crate) mod tests {
     async fn work_prepared_before_a_realm_retired_does_not_commit() {
         setup_db().await;
         let realm = "attempt-raced@example.com";
-        platform::realm::Realm::create(realm.to_string(), "secret-hash".to_string())
+        platform::realm::Realm::create(realm.to_string())
             .await
             .unwrap();
+        let signer = crate::test_support::owner_of(realm, 1).await;
         let actor = ActrId {
             realm: realm.to_string(),
             serial_number: 9,
@@ -873,13 +897,22 @@ pub(crate) mod tests {
             binding_expires_at: now + 60,
             publisher_nonce: None,
             target: None,
+            signer: signer.clone(),
         };
 
         platform::realm::Realm::retire(realm).await.unwrap();
 
         assert!(matches!(
             store
-                .complete_renewal(&renew, &actor, None, &rotation, b"response", now + 60)
+                .complete_renewal(
+                    &renew,
+                    &actor,
+                    None,
+                    &rotation,
+                    b"response",
+                    now + 60,
+                    &signer
+                )
                 .await,
             Err(AttemptError::LeaseLost)
         ));
@@ -896,18 +929,22 @@ pub(crate) mod tests {
     async fn a_kept_token_consumed_meanwhile_is_retried() {
         setup_db().await;
         let realm = "attempt-consumed@example.com";
-        platform::realm::Realm::create(realm.to_string(), "secret-hash".to_string())
+        platform::realm::Realm::create(realm.to_string())
             .await
             .unwrap();
+        let signer = crate::test_support::owner_of(realm, 1).await;
         let actor = ActrId {
             realm: realm.to_string(),
             serial_number: 12,
         };
         sqlx::query(
-            "INSERT INTO issued_actor_identity (realm, serial_number, actor_type, issued_at)
-             VALUES (?, 12, 'acme/worker@1.0.0', 1)",
+            "INSERT INTO issued_actor_identity
+                (realm, serial_number, actor_type, member_id, client_key_id, issued_at)
+             VALUES (?, 12, 'acme/worker@1.0.0', ?, ?, 1)",
         )
         .bind(realm)
+        .bind(&signer.member_id)
+        .bind(&signer.key_id)
         .execute(platform::storage::db::get_database().get_pool())
         .await
         .unwrap();
@@ -948,7 +985,7 @@ pub(crate) mod tests {
         .unwrap();
 
         let error = store
-            .complete_renewal(&renew, &actor, None, &kept, b"response", now + 60)
+            .complete_renewal(&renew, &actor, None, &kept, b"response", now + 60, &signer)
             .await
             .unwrap_err();
         assert!(matches!(error, AttemptError::LeaseLost), "{error:?}");
@@ -970,20 +1007,19 @@ pub(crate) mod tests {
         }
     }
 
-    /// A revocation, Realm suspension, package revocation or publisher
-    /// suspension that lands after the first check still stops a renewal or
-    /// reissue at commit.
+    /// A revocation, Realm suspension, package revocation, publisher
+    /// suspension or Realm client key revocation that lands after the first
+    /// check still stops a renewal or reissue at commit.
     #[tokio::test]
     async fn work_prepared_before_a_revocation_does_not_commit() {
         setup_db().await;
         let secret = [7u8; 32];
         let store = ControlAttemptStore::new(&secret);
-        for n in 0..4u8 {
+        for n in 0..5u8 {
             let token = [60 + n; 32];
             let realm = format!("attempt-refused-{n}@example.com");
-            platform::realm::Realm::create(realm.clone(), "secret-hash".to_string())
-                .await
-                .unwrap();
+            platform::realm::Realm::create(realm.clone()).await.unwrap();
+            let signer = crate::test_support::owner_of(&realm, 1).await;
             let actor = ActrId {
                 realm: realm.clone(),
                 serial_number: 11,
@@ -1012,12 +1048,15 @@ pub(crate) mod tests {
             .unwrap();
             sqlx::query(
                 "INSERT INTO issued_actor_identity
-                    (realm, serial_number, actor_type, target, auth_mode, issued_at)
-                 VALUES (?, 11, ?, 'wasm32-wasip1', ?, 1)",
+                    (realm, serial_number, actor_type, target, auth_mode, issued_at,
+                     member_id, client_key_id)
+                 VALUES (?, 11, ?, 'wasm32-wasip1', ?, 1, ?, ?)",
             )
             .bind(&realm)
             .bind(&actor_type)
             .bind(actr_protocol::RegisterAuthMode::Package as i32)
+            .bind(&signer.member_id)
+            .bind(&signer.key_id)
             .execute(pool)
             .await
             .unwrap();
@@ -1058,6 +1097,7 @@ pub(crate) mod tests {
                 binding_expires_at: now + 60,
                 publisher_nonce: None,
                 target: None,
+                signer: signer.clone(),
             };
 
             // Nothing refuses the actor before the change.
@@ -1065,6 +1105,7 @@ pub(crate) mod tests {
                 &mut pool.acquire().await.unwrap(),
                 &actor,
                 None,
+                &signer,
             )
             .await
             .unwrap();
@@ -1086,9 +1127,17 @@ pub(crate) mod tests {
                     .await
                     .unwrap();
                 }
-                _ => {
+                3 => {
                     sqlx::query("UPDATE publisher SET status = 'suspended' WHERE name = ?")
                         .bind(&publisher)
+                        .execute(pool)
+                        .await
+                        .unwrap();
+                }
+                _ => {
+                    // The Realm client key is revoked.
+                    sqlx::query("UPDATE realm_client_key SET revoked_at = 1 WHERE realm = ?")
+                        .bind(&realm)
                         .execute(pool)
                         .await
                         .unwrap();
@@ -1097,7 +1146,15 @@ pub(crate) mod tests {
 
             assert!(matches!(
                 store
-                    .complete_renewal(&renew, &actor, None, &rotation, b"response", now + 60)
+                    .complete_renewal(
+                        &renew,
+                        &actor,
+                        None,
+                        &rotation,
+                        b"response",
+                        now + 60,
+                        &signer
+                    )
                     .await,
                 Err(AttemptError::Refused(_))
             ));

@@ -102,11 +102,5 @@ message RealmInfo {
   // Field 7 removed (was version, replaced by updated_at)
   required uint64 expires_at = 8;           // Expiration timestamp (Unix timestamp)
   required string status = 9;               // pending | active | retired
-  optional SecretRotationState secret_rotation_state = 10; // Secret rotation state
-}
-
-message SecretRotationState {
-  required string current_hash_preview = 1;
-  optional string previous_hash_preview = 2;
-  optional int64 previous_valid_until = 3;
+  reserved 10; reserved "secret_rotation_state"; // Realm secrets were replaced by invites
 }

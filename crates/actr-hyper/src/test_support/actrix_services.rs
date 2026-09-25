@@ -62,15 +62,7 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
             // router validates every websocket identity against the Actrix
             // realm store before registering it; an empty schema is therefore
             // not a usable signaling fixture.
-            platform::Realm::upsert_managed(
-                TEST_REALM.to_string(),
-                true,
-                None,
-                platform::realm::hash_realm_secret("actr-rtc-integration-secret"),
-                None,
-                None,
-            )
-            .await?;
+            platform::Realm::upsert_managed(TEST_REALM.to_string(), true, None, None).await?;
 
             let actor_type = make_actor_type().to_string_repr();
             if platform::ActorAcl::get_by_types(TEST_REALM, TEST_REALM, &actor_type, &actor_type)

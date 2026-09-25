@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const ACTRIX_SCHEMA_VERSION: i64 = 8;
+const ACTRIX_SCHEMA_VERSION: i64 = 9;
 
 /// Database manager
 #[derive(Clone)]
@@ -90,8 +90,6 @@ impl Database {
 
         // Create the Realm table, keyed by Realm name `<realm_id>@<domain>`.
         // Callers validate the name before writing; the CHECK is a backstop.
-        // secret_current carries a CHECK so the non-empty invariant is enforced
-        // at the storage layer, not only by the application entry points.
         //
         // A retired row is the Realm Provider tombstone: it is never deleted,
         // so the primary key keeps the name from being reused. `enabled` is the
@@ -106,13 +104,8 @@ impl Database {
                 expires_at INTEGER,
                 pending_expires_at INTEGER,
                 requester TEXT NOT NULL DEFAULT '',
-                admin_token_hash TEXT,
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER,
-                secret_current TEXT NOT NULL DEFAULT ''
-                    CHECK(length(trim(secret_current)) > 0),
-                secret_previous_hash TEXT,
-                secret_previous_valid_until INTEGER
+                updated_at INTEGER
             )",
         )
         .execute(&mut *tx)
@@ -191,6 +184,72 @@ impl Database {
                 document TEXT NOT NULL,
                 accepted_at INTEGER NOT NULL,
                 FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Realm members (`actr/protocols/realm-membership.md`). At most one
+        // active owner per Realm.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_member (
+                realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE,
+                member_id TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('owner', 'editor', 'viewer')),
+                status TEXT NOT NULL CHECK(status IN ('active', 'removed')),
+                created_at INTEGER NOT NULL,
+                removed_at INTEGER,
+                PRIMARY KEY(realm, member_id)
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS realm_member_one_owner
+             ON realm_member(realm) WHERE role = 'owner' AND status = 'active'",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Realm client keys: one Ed25519 key per client of a member.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_client_key (
+                realm TEXT NOT NULL,
+                key_id TEXT NOT NULL,
+                public_key BLOB NOT NULL,
+                member_id TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                registered_at INTEGER NOT NULL,
+                last_used_at INTEGER,
+                revoked_at INTEGER,
+                PRIMARY KEY(realm, key_id),
+                UNIQUE(realm, public_key),
+                FOREIGN KEY(realm, member_id) REFERENCES realm_member(realm, member_id)
+                    ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Realm invites; only the SHA-256 of the secret is kept. `role` for
+        // a new member, or `member_id` for a new client of a member.
+        // `created_by` is the signing key id, or `holder` / `operator`.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_invite (
+                realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE,
+                invite_id TEXT NOT NULL,
+                secret_hash TEXT NOT NULL UNIQUE,
+                role TEXT CHECK(role IN ('owner', 'editor', 'viewer')),
+                member_id TEXT,
+                created_by TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                used_at INTEGER,
+                used_by_key TEXT,
+                revoked_at INTEGER,
+                PRIMARY KEY(realm, invite_id),
+                CHECK((role IS NULL) != (member_id IS NULL))
             )",
         )
         .execute(&mut *tx)
@@ -294,6 +353,8 @@ impl Database {
                 actor_type TEXT NOT NULL,
                 target TEXT,
                 auth_mode INTEGER,
+                member_id TEXT NOT NULL,
+                client_key_id TEXT NOT NULL,
                 issued_at INTEGER NOT NULL,
                 PRIMARY KEY(realm, serial_number),
                 FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
@@ -302,12 +363,12 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        // Legacy databases (created before the target column existed) lack it;
-        // add it idempotently so existing rows get NULL (per-target recheck
-        // degrades to type-only for those rows, logged in recheck_existing_actor).
-        add_column_if_missing(&mut tx, "issued_actor_identity", "target", "TEXT").await?;
-        // NULL preserves the distinction between legacy rows and verified Linked registrations.
-        add_column_if_missing(&mut tx, "issued_actor_identity", "auth_mode", "INTEGER").await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_issued_actor_identity_client_key
+             ON issued_actor_identity(realm, client_key_id)",
+        )
+        .execute(&mut *tx)
+        .await?;
 
         // Publisher Registry tables
         // name is the canonical HTTPS publisher domain.
@@ -540,29 +601,6 @@ impl Database {
     }
 }
 
-/// Add a column to a table if it does not already exist. Used to evolve legacy
-/// databases that pre-date a column introduced in a schema bump, without
-/// forcing a full offline migration for an additive, nullable column.
-async fn add_column_if_missing(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    table: &str,
-    column: &str,
-    decl: &str,
-) -> Result<()> {
-    let exists: bool =
-        sqlx::query_scalar("SELECT COUNT(*) > 0 FROM pragma_table_info(?) WHERE name = ?")
-            .bind(table)
-            .bind(column)
-            .fetch_one(&mut **tx)
-            .await?;
-    if !exists {
-        sqlx::query(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))
-            .execute(&mut **tx)
-            .await?;
-    }
-    Ok(())
-}
-
 use tokio::sync::OnceCell;
 
 /// Global database instance
@@ -604,14 +642,11 @@ mod tests {
         assert_eq!(version, ACTRIX_SCHEMA_VERSION);
 
         for name in ["primary@example.com", "second@example.com"] {
-            sqlx::query(
-                "INSERT INTO realm (name, created_at, secret_current)
-                 VALUES (?, 1, 'hash')",
-            )
-            .bind(name)
-            .execute(db.get_pool())
-            .await
-            .unwrap();
+            sqlx::query("INSERT INTO realm (name, created_at) VALUES (?, 1)")
+                .bind(name)
+                .execute(db.get_pool())
+                .await
+                .unwrap();
         }
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM realm")
             .fetch_one(db.get_pool())
@@ -620,8 +655,8 @@ mod tests {
         assert_eq!(count, 2);
 
         let unknown_status = sqlx::query(
-            "INSERT INTO realm (name, status, created_at, secret_current)
-             VALUES ('third@example.com', 'suspended', 1, 'hash')",
+            "INSERT INTO realm (name, status, created_at)
+             VALUES ('third@example.com', 'suspended', 1)",
         )
         .execute(db.get_pool())
         .await;
@@ -632,13 +667,10 @@ mod tests {
     async fn realm_name_is_immutable_and_retirement_is_final() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::new(dir.path()).await.unwrap();
-        sqlx::query(
-            "INSERT INTO realm (name, created_at, secret_current)
-             VALUES ('primary@example.com', 1, 'hash')",
-        )
-        .execute(db.get_pool())
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO realm (name, created_at) VALUES ('primary@example.com', 1)")
+            .execute(db.get_pool())
+            .await
+            .unwrap();
 
         let rename = sqlx::query("UPDATE realm SET name = 'renamed@example.com'")
             .execute(db.get_pool())
@@ -653,12 +685,10 @@ mod tests {
             .execute(db.get_pool())
             .await;
         assert!(revive.is_err(), "retired realm must stay retired");
-        let reuse = sqlx::query(
-            "INSERT INTO realm (name, created_at, secret_current)
-             VALUES ('primary@example.com', 2, 'hash')",
-        )
-        .execute(db.get_pool())
-        .await;
+        let reuse =
+            sqlx::query("INSERT INTO realm (name, created_at) VALUES ('primary@example.com', 2)")
+                .execute(db.get_pool())
+                .await;
         assert!(reuse.is_err(), "retired realm name must not be reused");
     }
 
@@ -668,16 +698,16 @@ mod tests {
         let db = Database::new(dir.path()).await.unwrap();
 
         let unnamed = sqlx::query(
-            "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES ('primary', 'active', 1, 1, 'hash')",
+            "INSERT INTO realm (name, status, enabled, created_at)
+             VALUES ('primary', 'active', 1, 1)",
         )
         .execute(db.get_pool())
         .await;
         assert!(unnamed.is_err(), "realm name must be <realm_id>@<domain>");
 
         sqlx::query(
-            "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES ('primary@example.com', 'active', 1, 1, 'hash')",
+            "INSERT INTO realm (name, status, enabled, created_at)
+             VALUES ('primary@example.com', 'active', 1, 1)",
         )
         .execute(db.get_pool())
         .await
@@ -703,36 +733,6 @@ mod tests {
         .execute(db.get_pool())
         .await;
         assert!(orphan.is_err(), "rows must reference an existing Realm");
-    }
-
-    #[tokio::test]
-    async fn existing_v1_actor_ledger_gains_nullable_auth_mode() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = Database::new(dir.path()).await.unwrap();
-        sqlx::query("ALTER TABLE issued_actor_identity DROP COLUMN auth_mode")
-            .execute(db.get_pool())
-            .await
-            .unwrap();
-        sqlx::query(
-            "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES ('primary@example.com', 'active', 1, 1, 'hash')",
-        )
-        .execute(db.get_pool())
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO issued_actor_identity (realm, serial_number, actor_type, target, issued_at)
-             VALUES ('primary@example.com', 42, 'apps.example.com/worker@1.0.0', 'wasm32-wasip1', 1)",
-        ).execute(db.get_pool()).await.unwrap();
-        db.get_pool().close().await;
-
-        let upgraded = Database::new(dir.path()).await.unwrap();
-        let row: (String, Option<i32>) = sqlx::query_as(
-            "SELECT actor_type, auth_mode FROM issued_actor_identity WHERE realm = 'primary@example.com' AND serial_number = 42",
-        ).fetch_one(upgraded.get_pool()).await.unwrap();
-        assert_eq!(row, ("apps.example.com/worker@1.0.0".to_string(), None));
-        // Repeated initialization preserves the upgraded schema and records.
-        upgraded.initialize_schema().await.unwrap();
     }
 
     #[tokio::test]

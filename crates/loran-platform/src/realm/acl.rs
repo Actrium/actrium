@@ -436,11 +436,7 @@ mod tests {
         setup_test_db().await?;
 
         // Create a realm first
-        let realm = Realm::create(
-            "acl-test@example.com".to_string(),
-            "test-secret-hash".to_string(),
-        )
-        .await?;
+        let realm = Realm::create("acl-test@example.com".to_string()).await?;
         let realm = realm.name;
 
         // Test create
@@ -504,11 +500,7 @@ mod tests {
     async fn test_source_scoped_and_wildcard_acl_precedence() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        let target = Realm::create(
-            "acl-target@example.com".to_string(),
-            "test-secret-hash".to_string(),
-        )
-        .await?;
+        let target = Realm::create("acl-target@example.com".to_string()).await?;
         let target_realm = target.name.as_str();
 
         let wildcard = ActorAcl::new_with_source_realm(
@@ -547,7 +539,7 @@ mod tests {
         let target_realm = "acl-target@example.com";
         let source_realm = "acl-source@acme.com";
         for name in [target_realm, source_realm] {
-            Realm::create(name.to_string(), "test-secret-hash".to_string()).await?;
+            Realm::create(name.to_string()).await?;
         }
         for source in [Some(source_realm.to_string()), None] {
             let rule = ActorAcl::new_with_source_realm(
@@ -572,11 +564,7 @@ mod tests {
     async fn test_replace_for_target_replaces_only_the_selected_type() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        let realm = Realm::create(
-            "acl-replace@example.com".to_string(),
-            "test-secret-hash".to_string(),
-        )
-        .await?;
+        let realm = Realm::create("acl-replace@example.com".to_string()).await?;
         let realm = realm.name;
         let target = "acme:worker";
         let untouched_target = "acme:other";
@@ -637,11 +625,7 @@ mod tests {
     async fn test_replace_for_target_in_transaction_rolls_back_with_caller() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        let realm = Realm::create(
-            "acl-rollback@example.com".to_string(),
-            "test-secret-hash".to_string(),
-        )
-        .await?;
+        let realm = Realm::create("acl-rollback@example.com".to_string()).await?;
         let realm = realm.name;
         let target = "acme:worker";
         let mut old = ActorAcl::new(

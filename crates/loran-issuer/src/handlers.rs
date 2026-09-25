@@ -8,6 +8,7 @@ use crate::{
     issuer::{AIdIssuer, ReissuePreparation},
     ratelimit::ip_rate_limiter,
 };
+use actr_protocol::realm_membership::{CLIENT_PROOF_HEADER, ClientProof, ProofOp, Role};
 use actr_protocol::{
     ErrorResponse, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
     RenewCredentialRequest, RenewCredentialResponse, register_response, renew_credential_response,
@@ -25,10 +26,8 @@ use axum::{
 };
 use platform::aid::AidError;
 use platform::monitoring::ServiceCounters;
-use platform::realm::{
-    REALM_SECRET_HEADER, Realm as RealmEntity, RealmError, RealmSecretCheck, acl::ActorAcl,
-    verify_realm_secret,
-};
+use platform::realm::membership::{self, Limits, Signer};
+use platform::realm::{Realm as RealmEntity, RealmProfileRecord, acl::ActorAcl};
 use prost::Message;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -40,6 +39,11 @@ pub struct IssuerState {
     idempotency: Arc<ControlAttemptStore>,
     /// Service-level counters for metrics collection.
     pub counters: Option<Arc<ServiceCounters>>,
+    /// Membership limits (`[realm]`).
+    pub(crate) limits: Limits,
+    /// Signs Realm Profiles for `update_realm` when this Loran is a Realm
+    /// Provider.
+    pub(crate) profiles: Option<Arc<crate::realm_profile::RealmProfiles>>,
 }
 
 impl IssuerState {
@@ -57,7 +61,21 @@ impl IssuerState {
             issuer,
             idempotency,
             counters: None,
+            limits: Limits::from(&platform::config::RealmConfig::default()),
+            profiles: None,
         }
+    }
+
+    /// Membership limits and, when this Loran is a Realm Provider, the Realm
+    /// Profiles `update_realm` signs.
+    pub fn with_membership(
+        mut self,
+        config: &platform::config::RealmConfig,
+        profiles: Option<Arc<crate::realm_profile::RealmProfiles>>,
+    ) -> Self {
+        self.limits = Limits::from(config);
+        self.profiles = profiles;
+        self
     }
 
     pub fn with_counters(mut self, counters: Arc<ServiceCounters>) -> Self {
@@ -75,6 +93,7 @@ pub fn create_router(state: IssuerState) -> Router {
         .route("/register", post(register_actr))
         .route("/renew", post(renew_credential))
         .route("/reissue", post(reissue_credential))
+        .route("/membership", post(crate::membership::post_membership))
         .route("/health", axum::routing::get(health_check))
         .layer(ip_rate_limiter())
         .with_state(state)
@@ -86,7 +105,7 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     let start = std::time::Instant::now();
 
     // Decode the protobuf request
-    let request = match RegisterRequest::decode(body) {
+    let request = match RegisterRequest::decode(body.clone()) {
         Ok(req) => req,
         Err(err) => {
             platform::recording::error!("Failed to decode protobuf request: {}", err);
@@ -131,14 +150,16 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     }
 
     // Authenticate before saying anything about the Realm.
-    let realm_secret_check = match authenticate_realm(&request.realm, &headers).await {
-        Ok(check) => check,
-        Err(error) => {
-            return encode_result(RegisterResponse {
-                result: Some(register_response::Result::Error(error)),
-            });
-        }
-    };
+    let signer =
+        match authenticate_client(&state, &headers, ProofOp::Register, &request.realm, &body).await
+        {
+            Ok(signer) => signer,
+            Err(error) => {
+                return encode_result(RegisterResponse {
+                    result: Some(register_response::Result::Error(error)),
+                });
+            }
+        };
 
     // Validate that the Realm exists, is in a healthy state, and has not expired
     if let Err(validation_err) = RealmEntity::validate_realm(&request.realm).await {
@@ -152,12 +173,14 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         return encode_result(error_result);
     }
 
+    if let Err(error) = check_service_owner(&request, &signer).await {
+        return encode_result(RegisterResponse {
+            result: Some(register_response::Result::Error(error)),
+        });
+    }
+
     // Invoke the issuer to issue a credential
-    let result = match state
-        .issuer
-        .issue_credential_with_realm_secret_check(&request, Some(realm_secret_check))
-        .await
-    {
+    let result = match state.issuer.issue_credential(&request, &signer).await {
         Ok(response) => {
             if let Some(register_response::Result::Success(ref register_ok)) = response.result {
                 platform::recording::debug!(
@@ -168,7 +191,7 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
 
                 // ACL policy and pending signaling metadata commit together.
                 if let Err((code, message)) =
-                    persist_registration_state(&request, register_ok).await
+                    persist_registration_state(&request, register_ok, &signer).await
                 {
                     if let Some(ref ctr) = state.counters {
                         ctr.record_request(false, start.elapsed().as_secs_f64() * 1000.0)
@@ -177,7 +200,7 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
                     return encode_result(RegisterResponse {
                         result: Some(register_response::Result::Error(ErrorResponse {
                             code,
-                            message: message.to_string(),
+                            message,
                         })),
                     });
                 }
@@ -205,37 +228,143 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     encode_result(result)
 }
 
-/// The one answer to a caller that has not proven it holds the Realm secret,
-/// whatever the reason: unknown, pending, suspended or retired Realm, missing
-/// or wrong secret.
-const REALM_AUTHENTICATION_FAILED: &str = "Realm secret not accepted";
-
-/// Check the Realm secret in `headers` before anything about the Realm is
-/// revealed. Every failure short of an internal error gets the same `403`.
-async fn authenticate_realm(
-    realm: &str,
-    headers: &HeaderMap,
-) -> Result<RealmSecretCheck, ErrorResponse> {
-    let provided_secret = headers
-        .get(REALM_SECRET_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-
-    match verify_realm_secret(realm, provided_secret).await {
-        Ok(check @ (RealmSecretCheck::ValidCurrent | RealmSecretCheck::ValidPrevious)) => Ok(check),
-        Ok(_) | Err(RealmError::NotFound) => Err(ErrorResponse {
-            code: 403,
-            message: REALM_AUTHENTICATION_FAILED.to_string(),
-        }),
-        Err(e) => {
-            platform::recording::error!("Failed to verify realm secret for realm {}: {}", realm, e);
-            Err(ErrorResponse {
-                code: 500,
-                message: "Internal error while verifying realm secret".to_string(),
-            })
-        }
+fn membership_error(code: &str, message: impl std::fmt::Display) -> ErrorResponse {
+    let status = match code {
+        "invalid_request" => 400,
+        "unavailable" => 503,
+        _ => 403,
+    };
+    ErrorResponse {
+        code: status,
+        message: format!("{code}: {message}"),
     }
+}
+
+fn from_membership(error: membership::MembershipError) -> ErrorResponse {
+    membership_error(error.code.as_str(), error.message)
+}
+
+/// The Realm Provider ID a request for `realm` may name: this Realm
+/// Provider's, or for a Realm without a Realm Profile (served by a Loran
+/// that is no Realm Provider) the authority of the Issuer URL, the request's
+/// `Host`.
+pub(crate) async fn expected_provider_id(
+    state: &IssuerState,
+    realm: &str,
+    claimed: &str,
+    headers: &HeaderMap,
+) -> String {
+    let own = &state.issuer.config.provider_id;
+    if claimed == own {
+        return own.clone();
+    }
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_ascii_lowercase);
+    if host.as_deref() == Some(claimed) && matches!(RealmProfileRecord::get(realm).await, Ok(None))
+    {
+        return claimed.to_string();
+    }
+    own.clone()
+}
+
+/// Check the `x-actr-client-proof` of a request for `op` on `realm` with
+/// `body` (`realm-membership.md` section 6): the proof itself, then that its
+/// Realm client key is registered, unrevoked and of an active member. Runs
+/// before anything about the Realm is revealed.
+async fn authenticate_client(
+    state: &IssuerState,
+    headers: &HeaderMap,
+    op: ProofOp,
+    realm: &str,
+    body: &[u8],
+) -> Result<Signer, ErrorResponse> {
+    let invalid = |message: &dyn std::fmt::Display| membership_error("invalid_request", message);
+    let header = headers
+        .get(CLIENT_PROOF_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| invalid(&format!("missing {CLIENT_PROOF_HEADER}")))?;
+    let proof = ClientProof::parse_header(header).map_err(|e| invalid(&e))?;
+    let provider = expected_provider_id(state, realm, &proof.provider_id, headers).await;
+    proof
+        .check(op, realm, &provider, body, chrono::Utc::now())
+        .map_err(|e| invalid(&e))?;
+    let unknown = || membership_error("client_unknown", "the Realm client key is not registered");
+    let key = membership::client_key(realm, proof.signer_key_id())
+        .await
+        .map_err(from_membership)?
+        .ok_or_else(unknown)?;
+    proof.verify(&key.public_key).map_err(|_| unknown())?;
+    let signer = membership::authenticate(key)
+        .await
+        .map_err(from_membership)?;
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&proof.expires_at)
+        .map_err(|e| invalid(&e))?
+        .timestamp();
+    match platform::realm::management::use_nonce(&proof.nonce, expires_at).await {
+        Ok(true) => Ok(signer),
+        Ok(false) => Err(invalid(&"nonce was already used")),
+        Err(error) => Err(membership_error("unavailable", error)),
+    }
+}
+
+/// Only the owner registers the Realm's Service: an Actor whose publisher
+/// and program are those of the Realm Profile `package.type`, any version.
+async fn check_service_owner(
+    request: &RegisterRequest,
+    signer: &Signer,
+) -> Result<(), ErrorResponse> {
+    if signer.role == Role::Owner {
+        return Ok(());
+    }
+    let record = RealmProfileRecord::get(&request.realm)
+        .await
+        .map_err(|error| membership_error("unavailable", error))?;
+    let service = record
+        .and_then(|record| serde_json::from_str::<Value>(&record.document).ok())
+        .and_then(|profile| profile["package"]["type"].as_str().map(str::to_string))
+        .and_then(|text| actr_protocol::ActrType::from_program_identity(&text).ok());
+    match service {
+        Some(service)
+            if service.publisher == request.actr_type.publisher
+                && service.name == request.actr_type.name =>
+        {
+            Err(membership_error(
+                "service_owner_only",
+                "only the Realm owner registers the Realm's Service",
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The actor must be bound to `signer`'s member (reissue) or to exactly its
+/// key (renew).
+async fn check_binding(
+    actor_id: &actr_protocol::ActrId,
+    signer: &Signer,
+    same_key: bool,
+) -> Result<(), ErrorResponse> {
+    let mut conn = platform::storage::db::get_database()
+        .get_pool()
+        .acquire()
+        .await
+        .map_err(|error| membership_error("unavailable", error))?;
+    let binding = membership::actor_binding_on(&mut conn, actor_id)
+        .await
+        .map_err(|error| membership_error("unavailable", error))?;
+    let bound = binding.is_some_and(|binding| {
+        binding.member_id == signer.member_id
+            && (!same_key || binding.client_key_id == signer.key_id)
+    });
+    if !bound {
+        return Err(membership_error(
+            "client_unknown",
+            "the Actor is not bound to this Realm client key",
+        ));
+    }
+    Ok(())
 }
 
 /// Connection ACLs of version 1 act only within the Actor's own Realm: a
@@ -271,14 +400,21 @@ fn check_acl_source_realms(request: &RegisterRequest) -> Result<(), String> {
 async fn persist_registration_state(
     request: &RegisterRequest,
     register_ok: &register_response::RegisterOk,
-) -> Result<(), (u32, &'static str)> {
-    const STATE_ERROR: (u32, &str) = (500, "Failed to persist registration state");
+    signer: &Signer,
+) -> Result<(), (u32, String)> {
+    let state_error = || (500, "Failed to persist registration state".to_string());
 
     let pool = platform::storage::db::get_database().get_pool();
-    let mut tx = pool.begin().await.map_err(|error| {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(|error| {
         platform::recording::error!("Failed to begin registration transaction: {}", error);
-        STATE_ERROR
+        state_error()
     })?;
+
+    // A revocation that committed after the proof was checked stops the
+    // registration; one that commits later disables the Actor recorded here.
+    if let Err(error) = membership::check_key_on(&mut tx, &signer.realm, &signer.key_id).await {
+        return Err((error.code.status().into(), error.to_string()));
+    }
 
     if let Some(ref acl) = request.acl {
         use actr_protocol::acl_rule::SourceRealm;
@@ -314,7 +450,7 @@ async fn persist_registration_state(
                     my_type,
                     error
                 );
-                (500, "Failed to persist registration policy")
+                (500, "Failed to persist registration policy".to_string())
             })?;
     }
 
@@ -350,7 +486,7 @@ async fn persist_registration_state(
                 "Failed to persist pending registration metadata: {}",
                 error
             );
-            (500, "Failed to persist registration metadata")
+            (500, "Failed to persist registration metadata".to_string())
         })?;
     }
 
@@ -365,7 +501,7 @@ async fn persist_registration_state(
             "Failed to clean expired pending registration metadata: {}",
             error
         );
-        (500, "Failed to persist registration metadata")
+        (500, "Failed to persist registration metadata".to_string())
     })?;
 
     // Checked after the writes above, which hold the write lock: a
@@ -379,15 +515,15 @@ async fn persist_registration_state(
     .await
     .map_err(|error| {
         platform::recording::error!("Failed to read Realm state: {}", error);
-        STATE_ERROR
+        state_error()
     })?;
     if retired {
-        return Err((403, "Realm is retired"));
+        return Err((403, "Realm is retired".to_string()));
     }
 
     tx.commit().await.map_err(|error| {
         platform::recording::error!("Failed to commit registration state: {}", error);
-        STATE_ERROR
+        state_error()
     })
 }
 
@@ -417,8 +553,16 @@ async fn reissue_credential(
 
     let registration = &request.registration;
     // Authenticate before saying anything about the Realm or the attempt.
-    let realm_secret_check = match authenticate_realm(&registration.realm, &headers).await {
-        Ok(check) => check,
+    let signer = match authenticate_client(
+        &state,
+        &headers,
+        ProofOp::Reissue,
+        &registration.realm,
+        &body,
+    )
+    .await
+    {
+        Ok(signer) => signer,
         Err(error) => return register_error(error.code, error.message),
     };
 
@@ -440,9 +584,18 @@ async fn reissue_credential(
                     result: Some(register_response::Result::Success(_))
                 })
             );
-            if issued && let Err(err) = state.issuer.recheck_before_replay(&request.actr_id).await {
-                let (code, message) = aid_error_to_response(err);
-                return register_error(code, message);
+            if issued {
+                if let Err(error) = check_binding(&request.actr_id, &signer, false).await {
+                    return register_error(error.code, error.message);
+                }
+                if let Err(err) = state
+                    .issuer
+                    .recheck_before_replay(&request.actr_id, &signer)
+                    .await
+                {
+                    let (code, message) = aid_error_to_response(err);
+                    return register_error(code, message);
+                }
             }
             return protobuf_response(cached.status, cached.body);
         }
@@ -463,14 +616,14 @@ async fn reissue_credential(
             &request.actr_id,
             registration,
             request.renewal_proof.as_deref(),
-            Some(realm_secret_check),
+            &signer,
         )
         .await;
 
     let (response, succeeded) = match preparation {
         ReissuePreparation::Ready(prepared) => match state
             .idempotency
-            .complete_reissue(&lease, &request.actr_id, prepared)
+            .complete_reissue(&lease, &request.actr_id, *prepared)
             .await
         {
             Ok(cached) => (protobuf_response(cached.status, cached.body), true),
@@ -506,6 +659,8 @@ async fn reissue_credential(
             "Credential reissued for actor {}",
             request.actr_id.to_string_repr()
         );
+        // The Actor may have moved to this key from a revoked one.
+        platform::realm::changes::announce_actor(&request.actr_id);
     }
     response
 }
@@ -519,7 +674,11 @@ async fn reissue_credential(
 /// 4. Check the Realm state; an unauthenticated caller never learns it.
 /// 5. Re-issue access and TURN credentials for the original ActrId.
 /// 6. Commit the rotation together with the response, rechecking the actor.
-async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Response {
+async fn renew_credential(
+    State(state): State<IssuerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     let start = std::time::Instant::now();
 
     // 1. Decode protobuf request and claim the attempt.
@@ -531,6 +690,13 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
         }
     };
     let actor_id = &request.actr_id;
+
+    // The client proof is checked before the renewal token.
+    let signer =
+        match authenticate_client(&state, &headers, ProofOp::Renew, &actor_id.realm, &body).await {
+            Ok(signer) => signer,
+            Err(error) => return renew_error(error.code, error.message),
+        };
 
     let lease = match state
         .idempotency
@@ -547,9 +713,14 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
                     result: Some(renew_credential_response::Result::Success(_))
                 })
             );
-            if issued && let Err(err) = state.issuer.recheck_before_replay(actor_id).await {
-                let (code, message) = aid_error_to_response(err);
-                return renew_error(code, message);
+            if issued {
+                if let Err(error) = check_binding(actor_id, &signer, true).await {
+                    return renew_error(error.code, error.message);
+                }
+                if let Err(err) = state.issuer.recheck_before_replay(actor_id, &signer).await {
+                    let (code, message) = aid_error_to_response(err);
+                    return renew_error(code, message);
+                }
             }
             return protobuf_response(cached.status, cached.body);
         }
@@ -618,6 +789,12 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
         }
     };
 
+    // Only the key the Actor is bound to renews it.
+    if let Err(error) = check_binding(actor_id, &signer, true).await {
+        release_attempt(&state, &lease).await;
+        return renew_error(error.code, error.message);
+    }
+
     // 4. Only an authenticated caller learns the Realm state.
     if let Err(validation_err) = RealmEntity::validate_realm(&actor_id.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
@@ -636,7 +813,7 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
     // carries no package target, so recheck the one recorded for the actor.
     let target = AIdIssuer::issued_target(actor_id).await;
     let mut register_ok = match issuer
-        .issue_credential_for_actor(actor_id, target.as_deref())
+        .issue_credential_for_actor(actor_id, target.as_deref(), &signer)
         .await
     {
         Ok(ok) => ok,
@@ -679,6 +856,7 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
             &prepared,
             &body,
             response_expires_at,
+            &signer,
         )
         .await
     {
@@ -931,6 +1109,7 @@ fn aid_error_to_response(err: AidError) -> (u32, String) {
         AidError::RealmError(_) => 403, // Forbidden
         AidError::PublisherNotVerified => 403,
         AidError::PackageRevoked => 403,
+        AidError::Membership(_) => 403,
 
         // Server errors (5xx)
         AidError::GenerationFailed(msg) => {
@@ -1009,9 +1188,8 @@ mod tests {
 
         crate::idempotency::tests::setup_db().await;
         let realm = "raced@example.com";
-        RealmEntity::create(realm.to_string(), "secret-hash".to_string())
-            .await
-            .unwrap();
+        RealmEntity::create(realm.to_string()).await.unwrap();
+        let signer = crate::test_support::owner_of(realm, 1).await;
         // The request was authenticated; then the Realm retires.
         RealmEntity::retire(realm).await.unwrap();
 
@@ -1042,8 +1220,8 @@ mod tests {
         };
 
         assert_eq!(
-            persist_registration_state(&request, &register_ok).await,
-            Err((403, "Realm is retired"))
+            persist_registration_state(&request, &register_ok, &signer).await,
+            Err((403, "Realm is retired".to_string()))
         );
         let pool = platform::storage::db::get_database().get_pool();
         for table in ["actoracl", "pending_registration"] {

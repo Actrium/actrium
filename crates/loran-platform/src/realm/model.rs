@@ -39,10 +39,6 @@ pub struct Realm {
     pub expires_at: Option<u64>,
     pub created_at: u64,
     pub updated_at: Option<u64>,
-    /// SHA256 hash of current secret (required)
-    pub secret_current: String,
-    /// (hash, valid_until) for previous secret during rotation grace window
-    pub secret_previous: Option<(String, u64)>,
     /// Who asked for the Realm in a `create_realm` request (the idempotency
     /// key is `(name, requester)`); empty for operator-created Realms.
     pub requester: String,
@@ -60,8 +56,6 @@ impl Default for Realm {
             expires_at: None,
             created_at: now,
             updated_at: None,
-            secret_current: String::new(),
-            secret_previous: None,
             requester: String::new(),
             pending_expires_at: None,
         }
@@ -77,17 +71,8 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Realm {
         let expires_at: Option<i64> = row.try_get("expires_at")?;
         let created_at: i64 = row.try_get("created_at")?;
         let updated_at: Option<i64> = row.try_get("updated_at")?;
-        let secret_current: String = row.try_get("secret_current")?;
-        let secret_previous_hash: Option<String> = row.try_get("secret_previous_hash")?;
-        let secret_previous_valid_until: Option<i64> =
-            row.try_get("secret_previous_valid_until")?;
         let requester: String = row.try_get("requester")?;
         let pending_expires_at: Option<i64> = row.try_get("pending_expires_at")?;
-
-        let secret_previous = match (secret_previous_hash, secret_previous_valid_until) {
-            (Some(hash), Some(valid_until)) if !hash.is_empty() => Some((hash, valid_until as u64)),
-            _ => None,
-        };
 
         let status = RealmStatus::from_str(&status_str).map_err(|_| {
             sqlx::Error::Decode(Box::new(std::io::Error::new(
@@ -103,8 +88,6 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Realm {
             expires_at: expires_at.map(|v| v as u64),
             created_at: created_at as u64,
             updated_at: updated_at.map(|v| v as u64),
-            secret_current,
-            secret_previous,
             requester,
             pending_expires_at: pending_expires_at.map(|v| v as u64),
         })
@@ -112,14 +95,11 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Realm {
 }
 
 impl Realm {
-    /// Create a new active realm.
-    ///
-    /// `secret_hash` is the SHA256 hash of the realm secret (must be non-empty).
-    /// `name` must be a normalized Realm name `<realm_id>@<domain>`.
-    pub async fn create(name: String, secret_hash: String) -> Result<Self, RealmError> {
+    /// Create a new active realm. `name` must be a normalized Realm name
+    /// `<realm_id>@<domain>`.
+    pub async fn create(name: String) -> Result<Self, RealmError> {
         Self {
             name,
-            secret_current: secret_hash,
             ..Default::default()
         }
         .insert(None)
@@ -159,13 +139,7 @@ impl Realm {
                 "a new realm cannot be retired".to_string(),
             ));
         }
-        if self.secret_current.trim().is_empty() {
-            return Err(RealmError::ValidationError(
-                "realm secret hash must not be empty".to_string(),
-            ));
-        }
         let now = Utc::now().timestamp();
-        let (prev_hash, prev_valid_until) = previous_columns(&self.secret_previous);
         let domain = self.name.rsplit_once('@').map_or("", |(_, domain)| domain);
         let (max_per_domain, max_pending) = match per_domain {
             Some((max_per_domain, max_pending)) => (max_per_domain, Some(max_pending)),
@@ -174,31 +148,26 @@ impl Realm {
 
         let result = sqlx::query(
             "INSERT INTO realm (
-                name, status, enabled, expires_at, created_at,
-                secret_current, secret_previous_hash, secret_previous_valid_until,
-                requester, pending_expires_at
+                name, status, enabled, expires_at, created_at, requester, pending_expires_at
              )
-             SELECT ?1, ?9, ?2, ?3, ?4, ?5, ?6, ?7, ?10, ?11
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
              WHERE (?8 IS NULL
                     OR (SELECT COUNT(*) FROM realm WHERE status != 'retired') < ?8)
-               AND (?12 IS NULL
+               AND (?9 IS NULL
                     OR (SELECT COUNT(*) FROM realm WHERE status != 'retired'
-                        AND substr(name, instr(name, '@') + 1) = ?14) < ?12)
-               AND (?13 IS NULL
+                        AND substr(name, instr(name, '@') + 1) = ?11) < ?9)
+               AND (?10 IS NULL
                     OR (SELECT COUNT(*) FROM realm WHERE status = 'pending'
-                        AND substr(name, instr(name, '@') + 1) = ?14) < ?13)",
+                        AND substr(name, instr(name, '@') + 1) = ?11) < ?10)",
         )
         .bind(&self.name)
+        .bind(self.status.to_string())
         .bind(self.enabled as i32)
         .bind(self.expires_at.map(|v| v as i64))
         .bind(now)
-        .bind(&self.secret_current)
-        .bind(prev_hash)
-        .bind(prev_valid_until)
-        .bind(max_realms.map(i64::from))
-        .bind(self.status.to_string())
         .bind(&self.requester)
         .bind(self.pending_expires_at.map(|v| v as i64))
+        .bind(max_realms.map(i64::from))
         .bind(max_per_domain.map(i64::from))
         .bind(max_pending.map(i64::from))
         .bind(domain)
@@ -228,43 +197,30 @@ impl Realm {
         }
     }
 
-    /// Create or update a superv-managed realm by name.
-    ///
-    /// Only the enabled switch, expiry and secret hashes are synced; a retired
-    /// realm is never touched.
+    /// Create or update a superv-managed realm by name. Only the enabled
+    /// switch and expiry are synced; a retired realm is never touched.
+    /// Returns the Realm and whether it was created.
     pub async fn upsert_managed(
         name: String,
         enabled: bool,
         expires_at: Option<u64>,
-        secret_current: String,
-        secret_previous: Option<(String, u64)>,
         max_realms: Option<u32>,
-    ) -> Result<Self, RealmError> {
-        if secret_current.trim().is_empty() {
-            return Err(RealmError::ValidationError(
-                "managed realm secret_current must not be empty".to_string(),
-            ));
-        }
-        let secret_previous = secret_previous.filter(|(hash, _)| !hash.trim().is_empty());
-
+    ) -> Result<(Self, bool), RealmError> {
         let Some(mut realm) = Self::get(&name).await? else {
-            return Self {
+            let realm = Self {
                 name,
                 enabled,
                 expires_at,
-                secret_current,
-                secret_previous,
                 ..Default::default()
             }
             .insert(max_realms)
-            .await;
+            .await?;
+            return Ok((realm, true));
         };
         realm.enabled = enabled;
         realm.expires_at = expires_at;
-        realm.secret_current = secret_current;
-        realm.secret_previous = secret_previous;
         realm.save().await?;
-        Ok(realm)
+        Ok((realm, false))
     }
 
     /// Save the mutable fields of an existing, non-retired realm.
@@ -272,30 +228,14 @@ impl Realm {
     /// Name and status never change here: the name is immutable and status
     /// moves only through [`Realm::retire`].
     pub async fn save(&mut self) -> Result<(), RealmError> {
-        // Enforce the non-empty secret invariant here as well, so no code path
-        // can silently persist an empty secret. This mirrors the storage-layer
-        // CHECK constraint and the validation in `insert` / `upsert_managed`.
-        if self.secret_current.trim().is_empty() {
-            return Err(RealmError::ValidationError(
-                "realm secret_current must not be empty".to_string(),
-            ));
-        }
-
         let now = Utc::now().timestamp();
-        let (prev_hash, prev_valid_until) = previous_columns(&self.secret_previous);
-
         let result = sqlx::query(
-            "UPDATE realm SET enabled = ?, expires_at = ?,
-             updated_at = ?, secret_current = ?,
-             secret_previous_hash = ?, secret_previous_valid_until = ?
+            "UPDATE realm SET enabled = ?, expires_at = ?, updated_at = ?
              WHERE name = ? AND status != 'retired'",
         )
         .bind(self.enabled as i32)
         .bind(self.expires_at.map(|v| v as i64))
         .bind(now)
-        .bind(&self.secret_current)
-        .bind(prev_hash)
-        .bind(prev_valid_until)
         .bind(&self.name)
         .execute(get_database().get_pool())
         .await?;
@@ -324,7 +264,6 @@ impl Realm {
     ) -> Result<Option<Self>, RealmError> {
         let result = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
-                    secret_current, secret_previous_hash, secret_previous_valid_until,
                     requester, pending_expires_at
              FROM realm WHERE name = ?",
         )
@@ -339,7 +278,6 @@ impl Realm {
     pub async fn get_all() -> Result<Vec<Self>, RealmError> {
         let realms = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
-                    secret_current, secret_previous_hash, secret_previous_valid_until,
                     requester, pending_expires_at
              FROM realm ORDER BY created_at, name",
         )
@@ -360,8 +298,9 @@ impl Realm {
     /// Retire a realm in one transaction.
     ///
     /// The row stays as the tombstone that keeps the name from being reused.
-    /// Connection ACL rules, pending registrations and renewal tokens of the
-    /// realm are removed; the issued identity ledger and revocation list stay.
+    /// Connection ACL rules, pending registrations, renewal tokens and
+    /// invites of the realm are removed; the issued identity ledger,
+    /// revocation list, members and client keys stay.
     pub async fn retire(name: &str) -> Result<Self, RealmError> {
         let mut tx = get_database().get_pool().begin().await?;
         retire_in(&mut tx, name, Utc::now().timestamp()).await?;
@@ -403,7 +342,7 @@ pub(crate) async fn retire_in(
 ) -> Result<(), RealmError> {
     let retired = sqlx::query(
         "UPDATE realm SET status = 'retired', enabled = 0, updated_at = ?,
-                pending_expires_at = NULL, admin_token_hash = NULL
+                pending_expires_at = NULL
              WHERE name = ? AND status != 'retired'",
     )
     .bind(now)
@@ -426,6 +365,10 @@ pub(crate) async fn retire_in(
         .execute(&mut **tx)
         .await?;
     sqlx::query("DELETE FROM pending_registration WHERE realm = ?")
+        .bind(name)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM realm_invite WHERE realm = ?")
         .bind(name)
         .execute(&mut **tx)
         .await?;
@@ -453,13 +396,6 @@ fn validate_name(name: &str) -> Result<(), RealmError> {
     Ok(())
 }
 
-fn previous_columns(previous: &Option<(String, u64)>) -> (Option<&str>, Option<i64>) {
-    match previous {
-        Some((hash, valid_until)) => (Some(hash.as_str()), Some(*valid_until as i64)),
-        None => (None, None),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,8 +421,6 @@ mod tests {
         assert!(realm.name.is_empty());
         assert_eq!(realm.status, RealmStatus::Active);
         assert!(realm.enabled);
-        assert!(realm.secret_current.is_empty());
-        assert!(realm.secret_previous.is_none());
     }
 
     #[test]
@@ -532,20 +466,18 @@ mod tests {
     async fn test_many_realms_and_max_realms() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        Realm::create("one@example.com".to_string(), "hash".to_string()).await?;
-        Realm::create("two@acme.com".to_string(), "hash".to_string()).await?;
+        Realm::create("one@example.com".to_string()).await?;
+        Realm::create("two@acme.com".to_string()).await?;
         assert_eq!(Realm::get_all().await?.len(), 2);
 
         let third = Realm {
             name: "three@example.com".to_string(),
-            secret_current: "hash".to_string(),
             ..Default::default()
         };
         let limited = third.clone().insert(Some(2)).await;
         assert!(matches!(limited, Err(RealmError::QuotaExceeded(_))));
         let existing = Realm {
             name: "one@example.com".to_string(),
-            secret_current: "hash".to_string(),
             ..Default::default()
         };
         assert!(matches!(
@@ -566,7 +498,7 @@ mod tests {
         setup_test_db().await?;
         let mut changes = changes::subscribe();
 
-        Realm::create("told@example.com".to_string(), "hash".to_string()).await?;
+        Realm::create("told@example.com".to_string()).await?;
         Realm::set_enabled("told@example.com", false).await?;
         Realm::retire("told@example.com").await?;
         for _ in 0..3 {
@@ -583,15 +515,15 @@ mod tests {
     async fn test_retired_name_is_never_reused() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        Realm::create("gone@example.com".to_string(), "hash".to_string()).await?;
-        let duplicate = Realm::create("gone@example.com".to_string(), "hash".to_string()).await;
+        Realm::create("gone@example.com".to_string()).await?;
+        let duplicate = Realm::create("gone@example.com".to_string()).await;
         assert!(matches!(duplicate, Err(RealmError::AlreadyExists)));
 
         let retired = Realm::retire("gone@example.com").await?;
         assert_eq!(retired.status, RealmStatus::Retired);
         assert!(!retired.enabled);
 
-        let reuse = Realm::create("gone@example.com".to_string(), "hash".to_string()).await;
+        let reuse = Realm::create("gone@example.com".to_string()).await;
         assert!(matches!(reuse, Err(RealmError::AlreadyExists)));
         assert!(matches!(
             Realm::retire("gone@example.com").await,
@@ -616,7 +548,7 @@ mod tests {
         let pool = get_database().get_pool();
 
         for name in ["old@example.com", "keep@example.com"] {
-            Realm::create(name.to_string(), "hash".to_string()).await?;
+            Realm::create(name.to_string()).await?;
             sqlx::query(
                 "INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
                  VALUES (?1, ?1, 'acme/a@1', 'acme/b@1', 1)",
@@ -632,8 +564,9 @@ mod tests {
             .execute(pool)
             .await?;
             sqlx::query(
-                "INSERT INTO issued_actor_identity (realm, serial_number, actor_type, issued_at)
-                 VALUES (?, 1, 'acme/a@1', 1)",
+                "INSERT INTO issued_actor_identity
+                    (realm, serial_number, actor_type, member_id, client_key_id, issued_at)
+                 VALUES (?, 1, 'acme/a@1', 'm', 'k', 1)",
             )
             .bind(name)
             .execute(pool)
@@ -693,7 +626,7 @@ mod tests {
     async fn test_suspend_and_resume() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        Realm::create("pause@example.com".to_string(), "hash".to_string()).await?;
+        Realm::create("pause@example.com".to_string()).await?;
         let suspended = Realm::set_enabled("pause@example.com", false).await?;
         assert!(!suspended.enabled);
         assert_eq!(suspended.status, RealmStatus::Active);
@@ -713,55 +646,33 @@ mod tests {
     async fn test_upsert_managed_updates_by_name() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        let realm = Realm::upsert_managed(
+        let (realm, created) = Realm::upsert_managed(
             "managed-one@example.com".to_string(),
             true,
             Some(1_900_000_000),
-            "hash-current".to_string(),
-            None,
             None,
         )
         .await?;
+        assert!(created);
         assert_eq!(realm.name, "managed-one@example.com");
-        assert_eq!(realm.secret_current, "hash-current");
 
-        let updated = Realm::upsert_managed(
+        let (updated, created) = Realm::upsert_managed(
             "managed-one@example.com".to_string(),
             false,
             Some(1_900_000_001),
-            "hash-current-2".to_string(),
-            Some(("hash-prev".to_string(), 1_800_000_000)),
             None,
         )
         .await?;
+        assert!(!created);
         assert_eq!(updated.status, RealmStatus::Active);
         assert!(!updated.enabled);
-        assert_eq!(updated.secret_current, "hash-current-2");
-        assert_eq!(
-            updated.secret_previous,
-            Some(("hash-prev".to_string(), 1_800_000_000))
-        );
+        assert_eq!(updated.expires_at, Some(1_900_000_001));
 
         // A second realm is allowed; a retired one is never touched again.
-        Realm::upsert_managed(
-            "managed-two@example.com".to_string(),
-            true,
-            None,
-            "hash-other".to_string(),
-            None,
-            None,
-        )
-        .await?;
+        Realm::upsert_managed("managed-two@example.com".to_string(), true, None, None).await?;
         Realm::retire("managed-two@example.com").await?;
-        let revived = Realm::upsert_managed(
-            "managed-two@example.com".to_string(),
-            true,
-            None,
-            "hash-other".to_string(),
-            None,
-            None,
-        )
-        .await;
+        let revived =
+            Realm::upsert_managed("managed-two@example.com".to_string(), true, None, None).await;
         assert!(matches!(revived, Err(RealmError::Retired)));
 
         Ok(())
@@ -779,7 +690,7 @@ mod tests {
             "a@example.com:443",
             "a@abcdefghijklmnopqrstuvwxyz.actr.alt",
         ] {
-            let result = Realm::create(name.to_string(), "hash".to_string()).await;
+            let result = Realm::create(name.to_string()).await;
             assert!(
                 matches!(result, Err(RealmError::ValidationError(_))),
                 "{name} should be rejected"

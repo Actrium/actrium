@@ -262,13 +262,8 @@ impl CredentialPayload for CreateRealmRequest {
 
     fn body_digest(&self) -> String {
         let canon = format!(
-            "realm={}&enabled={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
-            self.realm,
-            self.enabled,
-            self.expires_at,
-            opt_str(self.secret_current_hash.as_deref()),
-            opt_str(self.secret_previous_hash.as_deref()),
-            opt_u64(self.secret_previous_valid_until),
+            "realm={}&enabled={}&expires_at={}",
+            self.realm, self.enabled, self.expires_at,
         );
         sha256_hex(&canon)
     }
@@ -295,13 +290,10 @@ impl CredentialPayload for UpdateRealmRequest {
 
     fn body_digest(&self) -> String {
         let canon = format!(
-            "realm={}&enabled={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
+            "realm={}&enabled={}&expires_at={}",
             self.realm,
             opt_bool(self.enabled),
             opt_u64(self.expires_at),
-            opt_str(self.secret_current_hash.as_deref()),
-            opt_str(self.secret_previous_hash.as_deref()),
-            opt_u64(self.secret_previous_valid_until),
         );
         sha256_hex(&canon)
     }
@@ -410,7 +402,7 @@ mod tests {
     /// the superv client must build the identical string for the same logical
     /// fields. Any change to field order/rendering here must be mirrored on the
     /// superv side (see its `realm_body_digest` test, same expected digest).
-    const REALM_CANON: &str = "realm=managed@example.com&enabled=true&expires_at=1900000000&secret_current_hash=hash-42&secret_previous_hash=&secret_previous_valid_until=";
+    const REALM_CANON: &str = "realm=managed@example.com&enabled=true&expires_at=1900000000";
 
     fn dummy_credential() -> NonceCredential {
         NonceCredential {
@@ -427,9 +419,6 @@ mod tests {
             enabled: true,
             credential: dummy_credential(),
             expires_at: 1_900_000_000,
-            secret_current_hash: Some("hash-42".to_string()),
-            secret_previous_hash: None,
-            secret_previous_valid_until: None,
         };
         assert_eq!(sha256_hex(REALM_CANON), req.body_digest());
     }
@@ -441,9 +430,6 @@ mod tests {
             enabled: Some(true),
             credential: dummy_credential(),
             expires_at: Some(1_900_000_000),
-            secret_current_hash: Some("hash-42".to_string()),
-            secret_previous_hash: None,
-            secret_previous_valid_until: None,
         };
         assert_eq!(sha256_hex(REALM_CANON), req.body_digest());
     }

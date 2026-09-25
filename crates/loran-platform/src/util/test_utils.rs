@@ -69,6 +69,9 @@ pub mod utils {
             "realm_profile",
             "realm_domain",
             "realm_mgmt_nonce",
+            "realm_invite",
+            "realm_client_key",
+            "realm_member",
             "realm",
         ] {
             sqlx::query(&format!("DELETE FROM {table}"))

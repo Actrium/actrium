@@ -76,15 +76,17 @@ message CreateRealmRequest {
   // Field 6 removed (was version)
   required uint64 expires_at = 7;           // Expiration timestamp (Unix timestamp)
   reserved 8; reserved "status";            // Status is owned by the node
-  optional string secret_current_hash = 9;  // Current realm secret hash from superv
-  optional string secret_previous_hash = 10; // Previous realm secret hash during rotation
-  optional uint64 secret_previous_valid_until = 11; // Previous secret grace-window deadline
+  // Realm secrets were replaced by invites and Realm client keys.
+  reserved 9, 10, 11;
+  reserved "secret_current_hash", "secret_previous_hash", "secret_previous_valid_until";
 }
 
 message CreateRealmResponse {
   required bool success = 1;                // Operation result
   optional string error_message = 2;        // Error message on failure
   optional RealmInfo realm = 3;             // Created realm info
+  // Owner invite (`ri_...`) of a newly created Realm, returned once.
+  optional string owner_invite = 4;
 }
 
 // ------------ GetRealm ------------
@@ -112,9 +114,9 @@ message UpdateRealmRequest {
   required NonceCredential credential = 4;  // Authentication credential
   reserved 5; reserved "status";            // Status is owned by the node
   optional uint64 expires_at = 6;           // Expiration timestamp (Unix timestamp)
-  optional string secret_current_hash = 7;  // Current realm secret hash from superv
-  optional string secret_previous_hash = 8; // Previous realm secret hash during rotation
-  optional uint64 secret_previous_valid_until = 9; // Previous secret grace-window deadline
+  // Realm secrets were replaced by invites and Realm client keys.
+  reserved 7, 8, 9;
+  reserved "secret_current_hash", "secret_previous_hash", "secret_previous_valid_until";
 }
 
 message UpdateRealmResponse {

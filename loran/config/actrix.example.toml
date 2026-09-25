@@ -56,6 +56,9 @@ uri = "actr://realm.example.com"
 [realm]
 # max_realms = 1              # pending + active Realms; unset = no limit
 # max_publishers = 1000       # publishers register_publisher may register
+# max_members_per_realm = 1000      # active members of a Realm
+# max_clients_per_member = 20       # unrevoked Realm client keys of a member
+# max_open_invites_per_realm = 100  # unused, unexpired invites of a Realm
 
 # Recording pipeline (logging + tracing)
 [recording]

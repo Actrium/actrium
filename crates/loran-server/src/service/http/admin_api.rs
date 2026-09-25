@@ -82,28 +82,6 @@ pub async fn auth_middleware(
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
 
-    // A Realm admin token manages one Realm; outside it nothing exists.
-    if !token.contains('.') {
-        return match platform::realm::Realm::for_admin_token(token).await {
-            Ok(Some(realm))
-                if realm_admin_scope(request.method(), request.uri().path())
-                    .is_some_and(|scope| scope == realm) =>
-            {
-                next.run(request).await
-            }
-            Ok(Some(_)) => StatusCode::NOT_FOUND.into_response(),
-            Ok(None) => (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid or expired token"})),
-            )
-                .into_response(),
-            Err(err) => {
-                platform::recording::warn!("Realm admin token lookup failed: {err}");
-                StatusCode::INTERNAL_SERVER_ERROR.into_response()
-            }
-        };
-    }
-
     match jsonwebtoken::decode::<Claims>(token, &key, &validation) {
         Ok(data) => {
             // ADM-07: Reject tokens issued under a superseded password hash.
@@ -126,20 +104,6 @@ pub async fn auth_middleware(
         )
             .into_response(),
     }
-}
-
-/// The Realm whose admin may call `method path`: viewing the Realm and its
-/// Realm Profile, and rotating its Realm secret.
-fn realm_admin_scope(method: &axum::http::Method, path: &str) -> Option<String> {
-    use axum::http::Method;
-    let rest = path.strip_prefix("/admin/api/realms/")?;
-    let (realm, action) = rest.split_once('/').unwrap_or((rest, ""));
-    let allowed = matches!(
-        (method, action),
-        (&Method::GET, "") | (&Method::GET, "profile") | (&Method::POST, "secret/rotate")
-    );
-    // Realm names are lowercase ASCII; only `@` arrives percent-encoded.
-    allowed.then(|| realm.replace("%40", "@"))
 }
 
 // ── Handlers ───────────────────────────────────────────────────
@@ -309,9 +273,6 @@ async fn create_realm(
         enabled: body.enabled,
         credential: dummy_credential(),
         expires_at: body.expires_at,
-        secret_current_hash: None,
-        secret_previous_hash: None,
-        secret_previous_valid_until: None,
     };
 
     let profile = ProfileChange {
@@ -321,10 +282,10 @@ async fn create_realm(
     };
     match state
         .service
-        .create_realm_with_secret_direct(req, profile)
+        .create_realm_with_invite_direct(req, profile)
         .await
     {
-        Ok((resp, realm_secret, admin_token)) => {
+        Ok((resp, owner_invite)) => {
             let status = if resp.success {
                 StatusCode::CREATED
             } else {
@@ -332,14 +293,16 @@ async fn create_realm(
             };
             (
                 status,
-                // ADM-09: response carries the realm secret; forbid caching.
+                // ADM-09: response carries the owner invite; forbid caching.
                 [(header::CACHE_CONTROL, "no-store")],
                 Json(json!({
                     "success": resp.success,
                     "error_message": resp.error_message,
                     "realm": resp.realm.as_ref().map(realm_info_to_json),
-                    "realm_secret": realm_secret,
-                    "realm_admin_token": admin_token,
+                    "owner_invite": owner_invite.as_ref().map(|invite| &invite.invite),
+                    "owner_invite_expires_at": owner_invite
+                        .as_ref()
+                        .map(|invite| platform::realm::membership::rfc3339(invite.expires_at)),
                 })),
             )
                 .into_response()
@@ -438,9 +401,10 @@ async fn confirm_publisher_identity(
     identity_response(result)
 }
 
-/// Replace the Realm admin token of an active Realm; the old one stops
-/// working.
-async fn reissue_realm_admin_token(
+/// A new owner invite for an active Realm under the Provider domain or
+/// without a Realm Profile (owner recovery); earlier unused owner invites
+/// stop working.
+async fn issue_owner_invite(
     State(state): State<Arc<AdminApiState>>,
     Path(realm): Path<String>,
 ) -> impl IntoResponse {
@@ -448,15 +412,36 @@ async fn reissue_realm_admin_token(
         return realm_writes_disabled_response();
     }
 
-    match state.service.reissue_realm_admin_token_direct(&realm).await {
-        Ok(token) => (
+    match state.service.issue_owner_invite_direct(&realm).await {
+        Ok(invite) => (
             StatusCode::OK,
             [(header::CACHE_CONTROL, "no-store")],
             Json(json!({
                 "success": true,
                 "realm": realm,
-                "realm_admin_token": token,
+                "owner_invite": invite.invite,
+                "expires_at": platform::realm::membership::rfc3339(invite.expires_at),
             })),
+        )
+            .into_response(),
+        Err(status) if status.code() == tonic::Code::FailedPrecondition => (
+            StatusCode::CONFLICT,
+            Json(json!({ "success": false, "error": status.message() })),
+        )
+            .into_response(),
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
+/// Members, clients and open invites of a Realm, read-only.
+async fn list_realm_members(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+) -> impl IntoResponse {
+    match state.service.list_realm_members_direct(&realm).await {
+        Ok(members) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "members": members["members"], "invites": members["invites"] })),
         )
             .into_response(),
         Err(status) => grpc_status_to_response(status),
@@ -475,32 +460,6 @@ async fn rotate_realm_issuer_key(
         Ok(key_id) => (
             StatusCode::OK,
             Json(json!({ "success": true, "realm": realm, "key_id": key_id })),
-        )
-            .into_response(),
-        Err(status) => grpc_status_to_response(status),
-    }
-}
-
-async fn rotate_realm_secret(
-    State(state): State<Arc<AdminApiState>>,
-    Path(realm): Path<String>,
-) -> impl IntoResponse {
-    if !state.realm_writes_enabled {
-        return realm_writes_disabled_response();
-    }
-
-    match state.service.rotate_realm_secret_direct(&realm).await {
-        Ok(result) => (
-            StatusCode::OK,
-            // ADM-09: response carries the rotated realm secret; forbid caching.
-            [(header::CACHE_CONTROL, "no-store")],
-            Json(json!({
-                "success": true,
-                "realm": result.realm,
-                "realm_secret": result.realm_secret,
-                "previous_valid_until": result.previous_valid_until,
-                "grace_seconds": result.grace_seconds,
-            })),
         )
             .into_response(),
         Err(status) => grpc_status_to_response(status),
@@ -555,9 +514,6 @@ async fn update_realm(
         enabled: body.enabled,
         credential: dummy_credential(),
         expires_at: body.expires_at,
-        secret_current_hash: None,
-        secret_previous_hash: None,
-        secret_previous_valid_until: None,
     };
 
     match state.service.update_realm_direct(req).await {
@@ -1021,19 +977,16 @@ pub fn build_admin_api_router(
         .route("/admin/api/realms/{realm}", get(get_realm))
         .route("/admin/api/realms/{realm}", put(update_realm))
         .route(
-            "/admin/api/realms/{realm}/secret/rotate",
-            post(rotate_realm_secret),
-        )
-        .route(
             "/admin/api/realms/{realm}/issuer-key/rotate",
             post(rotate_realm_issuer_key),
         )
         .route("/admin/api/realms/{realm}/retire", post(retire_realm))
         .route("/admin/api/realms/{realm}/profile", get(get_realm_profile))
         .route(
-            "/admin/api/realms/{realm}/admin-token/reissue",
-            post(reissue_realm_admin_token),
+            "/admin/api/realms/{realm}/owner-invite",
+            post(issue_owner_invite),
         )
+        .route("/admin/api/realms/{realm}/members", get(list_realm_members))
         .route(
             "/admin/api/identity/realm-domains/{domain}",
             get(get_realm_domain_identity).post(confirm_realm_domain_identity),
@@ -1190,14 +1143,6 @@ fn realm_writes_disabled_response() -> Response {
 }
 
 fn realm_info_to_json(info: &RealmInfo) -> Value {
-    let secret_rotation_state = info.secret_rotation_state.as_ref().map(|s| {
-        json!({
-            "current_hash_preview": s.current_hash_preview,
-            "previous_hash_preview": s.previous_hash_preview,
-            "previous_valid_until": s.previous_valid_until,
-        })
-    });
-
     json!({
         "realm": info.realm,
         "enabled": info.enabled,
@@ -1205,7 +1150,6 @@ fn realm_info_to_json(info: &RealmInfo) -> Value {
         "updated_at": info.updated_at,
         "expires_at": info.expires_at,
         "status": info.status,
-        "secret_rotation_state": secret_rotation_state,
     })
 }
 

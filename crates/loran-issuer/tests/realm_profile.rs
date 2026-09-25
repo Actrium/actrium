@@ -127,7 +127,6 @@ async fn insert(name: &str, status: RealmStatus) {
     Realm {
         name: name.to_string(),
         status,
-        secret_current: "hash".to_string(),
         ..Default::default()
     }
     .insert(None)
@@ -927,19 +926,16 @@ mod management {
         let other = send(signed(&create(name, "n-3", Some("m-2")), &acme, "rs-1")).await;
         assert!(matches!(other, Err(ManagementError::Conflict(_))));
 
-        // The first Profile activates the Realm and returns the admin token once.
+        // The first Profile activates the Realm and returns the owner invite once.
         let mut profile = draft.clone();
         profile["realm"]["display_name"] = "Team notes".into();
         let activated = send(publish(name, "n-4", profile.clone(), &acme))
             .await
             .unwrap();
         assert_eq!(activated["status"], "active");
-        let token = activated["admin_token"].as_str().unwrap().to_string();
-        assert_eq!(
-            Realm::for_admin_token(&token).await.unwrap().as_deref(),
-            Some(name)
-        );
-        // Publishing it again conflicts and returns no token.
+        let token = activated["owner_invite"].as_str().unwrap().to_string();
+        assert_eq!(invite_state(&token).await, Some((name.to_string(), false)));
+        // Publishing it again conflicts and returns no invite.
         let again = send(publish(name, "n-5", profile.clone(), &acme)).await;
         assert!(matches!(again, Err(ManagementError::Conflict(_))));
         let active = send(signed(&create(name, "n-6", Some("m-1")), &acme, "rs-1"))
@@ -947,12 +943,12 @@ mod management {
             .unwrap();
         assert_eq!(active, json!({ "realm": name, "status": "active" }));
 
-        // Updates need a higher sequence and never return a token.
+        // Updates need a higher sequence and never return an invite.
         let mut second = profile.clone();
         second["sequence"] = 2.into();
         let updated = send(publish(name, "n-7", second, &acme)).await.unwrap();
         assert_eq!(updated["sequence"], 2);
-        assert!(updated.get("admin_token").is_none());
+        assert!(updated.get("owner_invite").is_none());
         let rollback = send(publish(name, "n-8", profile.clone(), &acme)).await;
         assert!(matches!(rollback, Err(ManagementError::Conflict(_))));
 
@@ -1012,7 +1008,7 @@ mod management {
         let rollback = send(publish(name, "r-4", second, &acme)).await;
         assert!(matches!(rollback, Err(ManagementError::Conflict(_))));
 
-        // Reissuing replaces the token.
+        // Reissuing replaces the owner invite.
         let reissued = send(signed(
             &request(ManagementOp::ReissueOwnerInvite, name, "n-9"),
             &acme,
@@ -1020,9 +1016,12 @@ mod management {
         ))
         .await
         .unwrap();
-        let new_token = reissued["admin_token"].as_str().unwrap();
-        assert_eq!(Realm::for_admin_token(&token).await.unwrap(), None);
-        assert!(Realm::for_admin_token(new_token).await.unwrap().is_some());
+        let new_token = reissued["owner_invite"].as_str().unwrap();
+        assert_eq!(invite_state(&token).await, Some((name.to_string(), true)));
+        assert_eq!(
+            invite_state(new_token).await,
+            Some((name.to_string(), false))
+        );
 
         // A retired Profile retires the Realm; the name is never reused.
         let mut retired = profile.clone();
@@ -1031,7 +1030,8 @@ mod management {
         retired["issuer"] = drafted["profile"]["issuer"].clone();
         let done = send(publish(name, "n-10", retired, &acme)).await.unwrap();
         assert_eq!(done["status"], "retired");
-        assert_eq!(Realm::for_admin_token(new_token).await.unwrap(), None);
+        // Retirement drops the invites.
+        assert_eq!(invite_state(new_token).await, None);
         let recreate = send(signed(&create(name, "n-11", Some("m-1")), &acme, "rs-1")).await;
         assert!(matches!(recreate, Err(ManagementError::Conflict(_))));
         let record = RealmProfileRecord::get(name).await.unwrap().unwrap();
@@ -1225,4 +1225,20 @@ mod management {
             Err(ManagementError::NotFound(_))
         ));
     }
+}
+
+/// The Realm of an invite and whether it is revoked.
+async fn invite_state(text: &str) -> Option<(String, bool)> {
+    let secret = actr_protocol::realm_membership::RealmInvite::decode(text)
+        .unwrap()
+        .secret;
+    let hash = actr_protocol::realm_membership::invite_secret_hash(&secret).unwrap();
+    sqlx::query_as::<_, (String, Option<i64>)>(
+        "SELECT realm, revoked_at FROM realm_invite WHERE secret_hash = ?",
+    )
+    .bind(hash)
+    .fetch_optional(platform::storage::db::get_database().get_pool())
+    .await
+    .unwrap()
+    .map(|(realm, revoked)| (realm, revoked.is_some()))
 }

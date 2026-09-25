@@ -36,7 +36,12 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTRIX_SHARED_KEY: &str = "0123456789abcdef0123456789abcdef";
 const TEST_REALM: &str = "test@example.com";
 const SECOND_REALM: &str = "second@acme.com";
-const TEST_REALM_SECRET: &str = "actrix-fullstack-realm-secret";
+/// Label of the owner key every seeded Realm has.
+const TEST_CLIENT_KEY: &str = "actrix-fullstack-client-key";
+/// Member id of that owner.
+const TEST_OWNER_MEMBER: &str = "00000000000000f1";
+/// Realm Provider ID of every fullstack config (`actr://localhost`).
+const PROVIDER_ID: &str = "localhost";
 const DEFAULT_TOKEN_TTL: u64 = 3600;
 const RENEWAL_TOKEN_SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
@@ -450,17 +455,103 @@ fn spawn_actrix(config: &Path, log_path: &Path) -> Child {
         .expect("spawn actrix")
 }
 
+/// The Realm client key a test names by `label`.
+fn client_key(label: &str) -> ed25519_dalek::SigningKey {
+    let seed: [u8; 32] = hex::decode(actr_protocol::realm_membership::body_sha256(
+        label.as_bytes(),
+    ))
+    .expect("hex")
+    .try_into()
+    .expect("32 bytes");
+    ed25519_dalek::SigningKey::from_bytes(&seed)
+}
+
+/// An `x-actr-client-proof` for `body`, signed by the key `label`.
+fn client_proof(
+    op: actr_protocol::realm_membership::ProofOp,
+    realm: &str,
+    body: &[u8],
+    label: &str,
+) -> String {
+    actr_protocol::realm_membership::ClientProof::new(
+        op,
+        realm,
+        PROVIDER_ID,
+        body,
+        &Uuid::new_v4().to_string(),
+    )
+    .header_value(&client_key(label))
+}
+
+/// An active Realm whose owner holds the key [`TEST_CLIENT_KEY`].
 async fn ensure_realm(sqlite_dir: &Path, realm: &str) {
     let db = platform::storage::db::Database::new(sqlite_dir)
         .await
         .expect("init db");
-    let secret_hash = platform::realm::hash_realm_secret(TEST_REALM_SECRET);
-    db.execute(&format!(
-        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
-         VALUES ('{realm}', 'active', 1, strftime('%s','now'), '{secret_hash}')"
-    ))
-    .await
-    .expect("insert realm");
+    let public_key = client_key(TEST_CLIENT_KEY).verifying_key().to_bytes();
+    let key_id = actr_protocol::realm_membership::client_key_id(&public_key);
+    let public_key = hex::encode(public_key);
+    for statement in [
+        format!(
+            "INSERT OR IGNORE INTO realm (name, status, enabled, created_at)
+             VALUES ('{realm}', 'active', 1, strftime('%s','now'))"
+        ),
+        format!(
+            "INSERT OR IGNORE INTO realm_member (realm, member_id, role, status, created_at)
+             VALUES ('{realm}', '{TEST_OWNER_MEMBER}', 'owner', 'active', 1)"
+        ),
+        format!(
+            "INSERT OR IGNORE INTO realm_client_key
+                (realm, key_id, public_key, member_id, registered_at)
+             VALUES ('{realm}', '{key_id}', X'{public_key}', '{TEST_OWNER_MEMBER}', 1)"
+        ),
+    ] {
+        db.execute(&statement).await.expect("seed realm");
+    }
+}
+
+/// `POST /issuer/membership` with `request` signed by the key `label`.
+async fn membership(
+    base: &str,
+    request: actr_protocol::realm_membership::MembershipRequest,
+    label: &str,
+) -> (reqwest::StatusCode, Value) {
+    let response = reqwest::Client::new()
+        .post(format!("{base}/issuer/membership"))
+        .json(&request.sign(&client_key(label)))
+        .send()
+        .await
+        .expect("membership request");
+    let status = response.status();
+    (status, response.json().await.expect("membership json"))
+}
+
+fn membership_request(
+    op: actr_protocol::realm_membership::MembershipOp,
+    realm: &str,
+) -> actr_protocol::realm_membership::MembershipRequest {
+    actr_protocol::realm_membership::MembershipRequest::new(
+        op,
+        realm,
+        PROVIDER_ID,
+        &Uuid::new_v4().to_string(),
+    )
+}
+
+/// Redeem `invite` with a new key `label`.
+async fn join(base: &str, realm: &str, invite: &str, label: &str) -> (reqwest::StatusCode, Value) {
+    let mut request =
+        membership_request(actr_protocol::realm_membership::MembershipOp::Join, realm);
+    request.invite = Some(
+        actr_protocol::realm_membership::RealmInvite::decode(invite)
+            .expect("invite text")
+            .secret,
+    );
+    request.public_key = Some(
+        base64::engine::general_purpose::STANDARD
+            .encode(client_key(label).verifying_key().to_bytes()),
+    );
+    membership(base, request, label).await
 }
 
 /// Register via Issuer HTTP, returns RegisterOk
@@ -472,26 +563,26 @@ async fn issuer_register_http(
     service_spec: Option<actr_protocol::ServiceSpec>,
     acl: Option<Acl>,
 ) -> register_response::RegisterOk {
-    issuer_register_http_with_secret(
+    issuer_register_http_with_key(
         base_url,
         realm,
         publisher,
         name,
         service_spec,
         acl,
-        Some(TEST_REALM_SECRET),
+        Some(TEST_CLIENT_KEY),
     )
     .await
 }
 
-async fn issuer_register_http_with_secret(
+async fn issuer_register_http_with_key(
     base_url: &str,
     realm: &str,
     publisher: &str,
     name: &str,
     service_spec: Option<actr_protocol::ServiceSpec>,
     acl: Option<Acl>,
-    realm_secret: Option<&str>,
+    key_label: Option<&str>,
 ) -> register_response::RegisterOk {
     let result = issuer_register_result(
         base_url,
@@ -500,7 +591,7 @@ async fn issuer_register_http_with_secret(
         name,
         service_spec,
         acl,
-        realm_secret,
+        key_label,
     )
     .await;
     match result {
@@ -521,7 +612,7 @@ async fn issuer_register_result(
     name: &str,
     service_spec: Option<actr_protocol::ServiceSpec>,
     acl: Option<Acl>,
-    realm_secret: Option<&str>,
+    key_label: Option<&str>,
 ) -> register_response::Result {
     let register_req = RegisterRequest {
         actr_type: ActrType {
@@ -544,13 +635,22 @@ async fn issuer_register_result(
     };
     let client = reqwest::Client::new();
     let register_url = format!("{base_url}/issuer/register");
+    let body = register_req.encode_to_vec();
     let mut req = client
         .post(&register_url)
-        .header("content-type", "application/octet-stream")
-        .body(register_req.encode_to_vec());
-    if let Some(secret) = realm_secret {
-        req = req.header("x-actrix-realm-secret", secret);
+        .header("content-type", "application/octet-stream");
+    if let Some(label) = key_label {
+        req = req.header(
+            "x-actr-client-proof",
+            client_proof(
+                actr_protocol::realm_membership::ProofOp::Register,
+                realm,
+                &body,
+                label,
+            ),
+        );
     }
+    let req = req.body(body);
     let rsp_bytes = req
         .send()
         .await
@@ -1020,7 +1120,15 @@ async fn actrix_end_to_end_register_and_health() {
     let register_url = format!("{base}/issuer/register");
     let rsp_bytes = client
         .post(&register_url)
-        .header("x-actrix-realm-secret", TEST_REALM_SECRET)
+        .header(
+            "x-actr-client-proof",
+            client_proof(
+                actr_protocol::realm_membership::ProofOp::Register,
+                TEST_REALM,
+                &body,
+                TEST_CLIENT_KEY,
+            ),
+        )
         .body(body)
         .send()
         .await
@@ -1278,9 +1386,19 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
         publisher_auth_nonce: None,
     };
 
+    let body = register_req.encode_to_vec();
     let rsp_bytes = client
         .post(&register_url)
-        .body(register_req.encode_to_vec())
+        .header(
+            "x-actr-client-proof",
+            client_proof(
+                actr_protocol::realm_membership::ProofOp::Register,
+                "other@example.com",
+                &body,
+                TEST_CLIENT_KEY,
+            ),
+        )
+        .body(body)
         .send()
         .await
         .expect("send register with non-preprovisioned realm")
@@ -1293,7 +1411,11 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
         register_response::Result::Error(err) => {
             assert_eq!(err.code, 403, "non-preprovisioned realm should be denied");
             // Unauthenticated callers learn nothing about the Realm.
-            assert_eq!(err.message, "Realm secret not accepted");
+            assert!(
+                err.message.starts_with("client_unknown:"),
+                "{}",
+                err.message
+            );
         }
         other => panic!("expected register error for non-preprovisioned realm, got {other:?}"),
     }
@@ -1431,6 +1553,7 @@ async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
     let package = json!({
         "href": "https://cdn.example/notes-1.0.actr",
         "sha256": "ab".repeat(32),
+        "type": "acme.com/notes@1.0.0",
     });
 
     // Under the Provider domain the first Profile needs a package; other
@@ -1662,136 +1785,49 @@ async fn issuer_has_no_global_signing_key() {
 
 #[tokio::test]
 #[serial]
-async fn issuer_register_enforces_realm_secret_when_configured() {
+async fn issuer_register_requires_a_registered_client_key() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    let client = reqwest::Client::new();
     let base = harness.base_url();
-
-    let login: Value = client
-        .post(format!("{base}/admin/api/auth/login"))
-        .json(&json!({ "password": "testpassword123" }))
-        .send()
-        .await
-        .expect("admin login request")
-        .json()
-        .await
-        .expect("parse admin login response");
-    let token = login["token"]
-        .as_str()
-        .expect("admin login should return token");
-
-    let rotate: Value = client
-        .post(format!(
-            "{base}/admin/api/realms/test%40example.com/secret/rotate"
-        ))
-        .bearer_auth(token)
-        .send()
-        .await
-        .expect("rotate realm secret request")
-        .json()
-        .await
-        .expect("parse rotate realm secret response");
-    let realm_secret = rotate["realm_secret"]
-        .as_str()
-        .expect("rotate response should include realm_secret");
-
-    let register_req = RegisterRequest {
-        actr_type: ActrType {
-            publisher: "acme".to_string(),
-            name: "secret-check".to_string(),
-            version: "1.0.0".to_string(),
-        },
-        realm: TEST_REALM.to_string(),
-        service_spec: None,
-        acl: None,
-        service: None,
-        ws_address: None,
-        manifest_raw: None,
-        publisher_signature: None,
-        target: None,
-        auth_mode: Some(RegisterAuthMode::Linked as i32),
-        publisher_auth_signature: None,
-        publisher_auth_signed_at: None,
-        publisher_auth_nonce: None,
+    let register = |label: Option<&'static str>| {
+        let base = base.clone();
+        async move {
+            issuer_register_result(&base, TEST_REALM, "acme", "key-check", None, None, label).await
+        }
     };
 
-    // 1) Without realm_secret, Issuer HTTP registration should be rejected
-    {
-        let rsp_bytes = client
-            .post(format!("{base}/issuer/register"))
-            .header("content-type", "application/octet-stream")
-            .body(register_req.encode_to_vec())
-            .send()
-            .await
-            .expect("register without secret")
-            .bytes()
-            .await
-            .expect("read body")
-            .to_vec();
-        let rsp = RegisterResponse::decode(&*rsp_bytes).expect("decode");
-        match rsp.result.expect("result") {
-            register_response::Result::Error(err) => {
-                assert_eq!(err.code, 403, "missing realm_secret should be denied");
-                assert!(
-                    err.message.to_lowercase().contains("realm secret"),
-                    "unexpected error message: {}",
-                    err.message
-                );
-            }
-            other => panic!("expected register error, got {other:?}"),
+    // Without a proof, or with a key the Realm does not know, nothing is
+    // said about the Realm.
+    match register(None).await {
+        register_response::Result::Error(err) => {
+            assert_eq!(err.code, 400);
+            assert!(
+                err.message.starts_with("invalid_request:"),
+                "{}",
+                err.message
+            );
         }
+        other => panic!("registered without a client proof: {other:?}"),
     }
-
-    // 2) With wrong realm_secret, Issuer HTTP registration should be rejected
-    {
-        let rsp_bytes = client
-            .post(format!("{base}/issuer/register"))
-            .header("content-type", "application/octet-stream")
-            .header("x-actrix-realm-secret", "wrong-secret")
-            .body(register_req.encode_to_vec())
-            .send()
-            .await
-            .expect("register with wrong secret")
-            .bytes()
-            .await
-            .expect("read body")
-            .to_vec();
-        let rsp = RegisterResponse::decode(&*rsp_bytes).expect("decode");
-        match rsp.result.expect("result") {
-            register_response::Result::Error(err) => {
-                assert_eq!(err.code, 403, "invalid realm_secret should be denied");
-                assert!(
-                    err.message.to_lowercase().contains("realm secret"),
-                    "unexpected error message: {}",
-                    err.message
-                );
-            }
-            other => panic!("expected register error, got {other:?}"),
+    match register(Some("unregistered-key")).await {
+        register_response::Result::Error(err) => {
+            assert_eq!(err.code, 403);
+            assert!(
+                err.message.starts_with("client_unknown:"),
+                "{}",
+                err.message
+            );
         }
+        other => panic!("registered with an unknown key: {other:?}"),
     }
-
-    // 3) With correct realm_secret, Issuer HTTP registration should succeed
-    {
-        let rsp_bytes = client
-            .post(format!("{base}/issuer/register"))
-            .header("content-type", "application/octet-stream")
-            .header("x-actrix-realm-secret", realm_secret)
-            .body(register_req.encode_to_vec())
-            .send()
-            .await
-            .expect("register with correct secret")
-            .bytes()
-            .await
-            .expect("read body")
-            .to_vec();
-        let rsp = RegisterResponse::decode(&*rsp_bytes).expect("decode");
-        match rsp.result.expect("result") {
-            register_response::Result::Success(ok) => {
-                assert_eq!(ok.actr_id.realm, TEST_REALM);
-                assert!(ok.actr_id.serial_number > 0);
-            }
-            other => panic!("expected register success, got {other:?}"),
+    match register(Some(TEST_CLIENT_KEY)).await {
+        register_response::Result::Success(ok) => {
+            assert_eq!(ok.actr_id.realm, TEST_REALM);
+            let claims =
+                actr_protocol::IdentityClaims::decode(ok.credential.claims.as_ref()).unwrap();
+            assert_eq!(claims.member, TEST_OWNER_MEMBER);
+            assert_eq!(claims.role(), actr_protocol::MemberRole::Owner);
         }
+        other => panic!("expected register success, got {other:?}"),
     }
 
     harness.shutdown();
@@ -1855,10 +1891,19 @@ async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachab
         publisher_auth_signed_at: None,
         publisher_auth_nonce: None,
     };
+    let body = register_req.encode_to_vec();
     let register_resp = client
         .post(format!("{base}/issuer/register"))
-        .header("x-actrix-realm-secret", TEST_REALM_SECRET)
-        .body(register_req.encode_to_vec())
+        .header(
+            "x-actr-client-proof",
+            client_proof(
+                actr_protocol::realm_membership::ProofOp::Register,
+                TEST_REALM,
+                &body,
+                TEST_CLIENT_KEY,
+            ),
+        )
+        .body(body)
         .send()
         .await
         .expect("issuer register request");
@@ -4436,15 +4481,16 @@ async fn admin_api_manages_many_realms_by_name() {
     let package = json!({
         "href": "https://cdn.example/notes-1.0.actr",
         "sha256": "ab".repeat(32),
+        "type": "acme.com/notes@1.0.0",
     });
 
     let created = create_provider_realm(&client, &base, token, MANAGED).await;
     assert_eq!(created["realm"]["status"], "active");
-    let admin_token = created["realm_admin_token"]
+    let first_invite = created["owner_invite"]
         .as_str()
-        .expect("create returns the Realm admin token")
+        .expect("create returns the owner invite")
         .to_string();
-    assert!(created["realm_secret"].is_string());
+    assert!(created.get("realm_secret").is_none());
 
     let listed: Value = client
         .get(format!("{base}/admin/api/realms"))
@@ -4463,35 +4509,7 @@ async fn admin_api_manages_many_realms_by_name() {
         .collect();
     assert_eq!(names, HashSet::from([TEST_REALM, MANAGED]));
 
-    // The Realm admin token manages this Realm only; everything else is
-    // not found.
-    let as_realm_admin = |method: reqwest::Method, path: &str| {
-        client
-            .request(method, format!("{base}{path}"))
-            .bearer_auth(&admin_token)
-            .send()
-    };
-    use reqwest::Method;
-    for (method, path, status) in [
-        (Method::GET, "/admin/api/realms/second%40localhost", 200),
-        (
-            Method::GET,
-            "/admin/api/realms/second%40localhost/profile",
-            200,
-        ),
-        (Method::GET, "/admin/api/realms/test%40example.com", 404),
-        (Method::GET, "/admin/api/realms", 404),
-        (Method::PUT, "/admin/api/realms/second%40localhost", 404),
-        (
-            Method::POST,
-            "/admin/api/realms/second%40localhost/retire",
-            404,
-        ),
-        (Method::GET, "/admin/api/node", 404),
-    ] {
-        let response = as_realm_admin(method, path).await.expect("realm admin");
-        assert_eq!(response.status().as_u16(), status, "{path}");
-    }
+    // Only an admin session authenticates; there is no Realm admin token.
     let unknown = client
         .get(&realm_url)
         .bearer_auth("rat_unknown")
@@ -4500,41 +4518,84 @@ async fn admin_api_manages_many_realms_by_name() {
         .expect("unknown token");
     assert_eq!(unknown.status(), reqwest::StatusCode::UNAUTHORIZED);
 
-    // Reissuing replaces the token.
+    // A new owner invite replaces the unused one.
     let reissued: Value = client
-        .post(format!("{realm_url}/admin-token/reissue"))
+        .post(format!("{realm_url}/owner-invite"))
         .bearer_auth(token)
         .send()
         .await
-        .expect("reissue")
+        .expect("owner invite")
         .json()
         .await
-        .expect("reissue json");
-    let new_admin_token = reissued["realm_admin_token"]
-        .as_str()
-        .expect("reissued token");
-    let old = as_realm_admin(Method::GET, "/admin/api/realms/second%40localhost")
-        .await
-        .expect("old token");
-    assert_eq!(old.status(), reqwest::StatusCode::UNAUTHORIZED);
-    let rotated = client
-        .post(format!("{realm_url}/secret/rotate"))
-        .bearer_auth(new_admin_token)
+        .expect("owner invite json");
+    let owner_invite = reissued["owner_invite"].as_str().expect("owner invite");
+    let (status, error) = join(&base, MANAGED, &first_invite, "second-owner").await;
+    assert_eq!(status, reqwest::StatusCode::GONE);
+    assert_eq!(error["error"], "invite_revoked");
+    let (status, joined) = join(&base, MANAGED, owner_invite, "second-owner").await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{joined}");
+    assert_eq!(joined["role"], "owner");
+
+    // The owner updates the Realm Loran signs the Realm Profile of; the
+    // package stays the same program.
+    {
+        use actr_protocol::realm_membership::MembershipOp;
+        let mut update = membership_request(MembershipOp::UpdateRealm, MANAGED);
+        update.display_name = Some("Renamed".to_string());
+        let (status, updated) = membership(&base, update, "second-owner").await;
+        assert_eq!(status, reqwest::StatusCode::OK, "{updated}");
+        assert_eq!(updated["sequence"], 2);
+        let mut other_program = membership_request(MembershipOp::UpdateRealm, MANAGED);
+        other_program.package = Some(actr_protocol::realm_profile::RealmPackage {
+            href: "https://cdn.example/other.actr".to_string(),
+            sha256: "cd".repeat(32),
+            r#type: "acme.com/other@1.0.0".to_string(),
+        });
+        let (status, error) = membership(&base, other_program, "second-owner").await;
+        assert_eq!(status, reqwest::StatusCode::BAD_REQUEST, "{error}");
+    }
+
+    // The operator sees the members, read-only.
+    let members: Value = client
+        .get(format!("{realm_url}/members"))
+        .bearer_auth(token)
         .send()
         .await
-        .expect("rotate as realm admin");
-    assert_eq!(rotated.status(), reqwest::StatusCode::OK);
-    let rotated: Value = rotated.json().await.expect("rotate json");
-    let secret = rotated["realm_secret"]
-        .as_str()
-        .expect("rotated secret")
-        .to_string();
+        .expect("members")
+        .json()
+        .await
+        .expect("members json");
+    assert_eq!(members["members"][0]["role"], "owner");
+    assert_eq!(
+        members["members"][0]["clients"][0]["key_id"],
+        joined["key_id"]
+    );
+    // A Realm with a Realm Profile its domain's key holder signs is not the
+    // operator's to recover.
+    // (TEST_REALM has none, so the operator issues its owner invites.)
+    let test_realm_invite = client
+        .post(format!(
+            "{base}/admin/api/realms/test%40example.com/owner-invite"
+        ))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("owner invite without a Realm Profile");
+    assert_eq!(test_realm_invite.status(), reqwest::StatusCode::OK);
 
     let register = |name: &'static str| {
         let base = base.clone();
-        let secret = secret.clone();
         async move {
-            issuer_register_result(&base, MANAGED, "acme", name, None, None, Some(&secret)).await
+            issuer_register_result(
+                &base,
+                MANAGED,
+                "acme",
+                name,
+                None,
+                None,
+                Some("second-owner"),
+            )
+            .await
         }
     };
     assert!(matches!(
@@ -4606,11 +4667,11 @@ async fn admin_api_manages_many_realms_by_name() {
             .await
             .expect("resume retired realm"),
         client
-            .post(format!("{realm_url}/secret/rotate"))
+            .post(format!("{realm_url}/owner-invite"))
             .bearer_auth(token)
             .send()
             .await
-            .expect("rotate retired realm secret"),
+            .expect("owner invite of a retired realm"),
         client
             .post(format!("{base}/admin/api/realms"))
             .bearer_auth(token)
@@ -4631,7 +4692,7 @@ async fn admin_api_manages_many_realms_by_name() {
             "first-still-ok",
             None,
             None,
-            Some(TEST_REALM_SECRET)
+            Some(TEST_CLIENT_KEY)
         )
         .await,
         register_response::Result::Success(_)
@@ -4847,6 +4908,7 @@ async fn create_provider_realm(
     let package = json!({
         "href": "https://cdn.example/notes-1.0.actr",
         "sha256": "ab".repeat(32),
+        "type": "acme.com/notes@1.0.0",
     });
     for _ in 0..50 {
         let response = client
@@ -4898,13 +4960,17 @@ async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
     let token = login["token"].as_str().expect("admin login token");
     let alpha = create_provider_realm(&client, &base, token, ALPHA).await;
     let beta = create_provider_realm(&client, &base, token, BETA).await;
-    let secret = |created: &Value| {
-        created["realm_secret"]
-            .as_str()
-            .expect("secret")
-            .to_string()
-    };
-    let (alpha_secret, beta_secret) = (secret(&alpha), secret(&beta));
+    for (created, realm, label) in [(&alpha, ALPHA, "alpha-owner"), (&beta, BETA, "beta-owner")] {
+        let (status, joined) = join(
+            &base,
+            realm,
+            created["owner_invite"].as_str().unwrap(),
+            label,
+        )
+        .await;
+        assert_eq!(status, reqwest::StatusCode::OK, "{joined}");
+    }
+    let (alpha_secret, beta_secret) = ("alpha-owner".to_string(), "beta-owner".to_string());
 
     // The same service type in both Realms, open to acme/client of its own Realm.
     let acl = Acl {
@@ -4921,7 +4987,7 @@ async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
     let register = |realm: &'static str, secret: String, name: &'static str, acl: Option<Acl>| {
         let base = base.clone();
         async move {
-            issuer_register_http_with_secret(&base, realm, "acme", name, None, acl, Some(&secret))
+            issuer_register_http_with_key(&base, realm, "acme", name, None, acl, Some(&secret))
                 .await
         }
     };
@@ -5071,30 +5137,27 @@ async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
         other => panic!("a cross-Realm ACL rule must be rejected: {other:?}"),
     }
 
-    // Each Realm admin token manages only its own Realm.
-    let alpha_token = alpha["realm_admin_token"].as_str().expect("admin token");
-    for (path, status) in [
-        ("/admin/api/realms/alpha%40localhost", 200),
-        ("/admin/api/realms/beta%40localhost", 404),
-        ("/admin/api/realms/beta%40localhost/profile", 404),
-    ] {
-        let response = client
-            .get(format!("{base}{path}"))
-            .bearer_auth(alpha_token)
-            .send()
-            .await
-            .expect("realm admin request");
-        assert_eq!(response.status().as_u16(), status, "{path}");
+    // A Realm client key belongs to one Realm only.
+    match issuer_register_result(
+        &base,
+        BETA,
+        "acme",
+        "client-2",
+        None,
+        None,
+        Some(&alpha_secret),
+    )
+    .await
+    {
+        register_response::Result::Error(err) => {
+            assert!(
+                err.message.starts_with("client_unknown:"),
+                "{}",
+                err.message
+            )
+        }
+        other => panic!("a key of one Realm registered in another: {other:?}"),
     }
-    let rotate = client
-        .post(format!(
-            "{base}/admin/api/realms/beta%40localhost/secret/rotate"
-        ))
-        .bearer_auth(alpha_token)
-        .send()
-        .await
-        .expect("rotate other Realm's secret");
-    assert_eq!(rotate.status(), reqwest::StatusCode::NOT_FOUND);
 
     let _ = alpha_w.send(WsMessage::Close(None)).await;
     let _ = beta_w.send(WsMessage::Close(None)).await;

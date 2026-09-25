@@ -29,6 +29,16 @@ pub struct RealmConfig {
     /// register, whatever their status. Unset means 1000.
     #[serde(default)]
     pub max_publishers: Option<u32>,
+    /// Maximum active members per Realm. Unset means 1000.
+    #[serde(default)]
+    pub max_members_per_realm: Option<u32>,
+    /// Maximum unrevoked Realm client keys per member. Unset means 20.
+    #[serde(default)]
+    pub max_clients_per_member: Option<u32>,
+    /// Maximum unused, unexpired, unrevoked invites per Realm. Unset means
+    /// 100.
+    #[serde(default)]
+    pub max_open_invites_per_realm: Option<u32>,
 }
 
 impl RealmConfig {
@@ -47,6 +57,18 @@ impl RealmConfig {
     pub fn max_publishers(&self) -> u32 {
         self.max_publishers.unwrap_or(1000)
     }
+
+    pub fn max_members_per_realm(&self) -> u32 {
+        self.max_members_per_realm.unwrap_or(1000)
+    }
+
+    pub fn max_clients_per_member(&self) -> u32 {
+        self.max_clients_per_member.unwrap_or(20)
+    }
+
+    pub fn max_open_invites_per_realm(&self) -> u32 {
+        self.max_open_invites_per_realm.unwrap_or(100)
+    }
 }
 
 #[cfg(test)]
@@ -62,6 +84,9 @@ mod tests {
         assert_eq!(config.max_pending_per_domain(), 10);
         assert_eq!(config.pending_ttl_secs(), 3600);
         assert_eq!(config.max_publishers(), 1000);
+        assert_eq!(config.max_members_per_realm(), 1000);
+        assert_eq!(config.max_clients_per_member(), 20);
+        assert_eq!(config.max_open_invites_per_realm(), 100);
 
         let config: RealmConfig = toml::from_str("max_realms = 1").unwrap();
         assert_eq!(config.max_realms, Some(1));

@@ -2,6 +2,9 @@
 //!
 //! Starts a temporary Signer gRPC service within the test process to verify the Issuer issuance and validation chain.
 
+use actr_protocol::realm_membership::{
+    CLIENT_PROOF_HEADER, ClientProof, ProofOp, RealmInvite, Role, client_key_id, invite_secret_hash,
+};
 use actr_protocol::{
     Acl, AclRule, ActrType, ErrorResponse, RegisterAuthMode, RegisterRequest, RegisterResponse,
     ReissueCredentialRequest, RenewCredentialRequest, RenewCredentialResponse, acl_rule,
@@ -21,12 +24,14 @@ use issuer::{
 use nonce_auth::storage::MemoryStorage;
 use platform::aid::credential::validator::AIdCredentialValidator;
 use platform::config::signer::SignerClientConfig;
-use platform::realm::{REALM_SECRET_HEADER, RealmSecretCheck, hash_realm_secret};
+use platform::realm::membership::{self, BY_OPERATOR, Limits, Signer};
 use prost::Message;
 use serial_test::serial;
 use signer::{GrpcClient, GrpcClientConfig, KeyStorage, SignerServiceConfig, create_grpc_service};
+use std::collections::HashMap;
 use std::net::TcpListener;
 use std::path::Path;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio::sync::oneshot;
@@ -35,7 +40,117 @@ use tonic::transport::Server;
 use tower::ServiceExt;
 
 const TEST_REALM: &str = "test@example.com";
-const ROUTE_REALM_SECRET: &str = "test-route-realm-registration-root-secret";
+const ROUTE_KEY_LABEL: &str = "test-route-realm-client-key";
+const PROVIDER_ID: &str = "provider.example";
+/// Label of the owner key a Realm is seeded with when a test names none.
+const DEFAULT_KEY_LABEL: &str = "seed-client-key";
+
+/// Realm client keys by `key_id`, to sign as the key an Actor is bound to.
+static KEYS: LazyLock<Mutex<HashMap<String, ed25519_dalek::SigningKey>>> =
+    LazyLock::new(Default::default);
+
+/// The Realm client key a test names by `label`.
+fn key_for(label: &str) -> ed25519_dalek::SigningKey {
+    use sha2::Digest;
+    let key = ed25519_dalek::SigningKey::from_bytes(&sha2::Sha256::digest(label).into());
+    KEYS.lock()
+        .unwrap()
+        .insert(client_key_id(&key.verifying_key().to_bytes()), key.clone());
+    key
+}
+
+fn limits() -> Limits {
+    Limits::from(&platform::config::RealmConfig::default())
+}
+
+/// Register the key `label` in `realm` for a member: a new member of `role`,
+/// or the owner (recovering it, if it exists). Returns its signer.
+async fn add_client(realm: &str, label: &str, role: Role) -> Signer {
+    let key = key_for(label).verifying_key().to_bytes();
+    let key_id = client_key_id(&key);
+    if let Some(existing) = membership::client_key(realm, &key_id).await.unwrap() {
+        return membership::authenticate(existing).await.unwrap();
+    }
+    let invite = match role {
+        Role::Owner => membership::issue_owner_invite(realm, BY_OPERATOR)
+            .await
+            .unwrap(),
+        role => {
+            let owner = owner(realm).await;
+            let expires = chrono::Utc::now().timestamp() + 3600;
+            membership::create_invite(&owner, Some(role), None, expires, limits())
+                .await
+                .unwrap()
+        }
+    };
+    let secret = RealmInvite::decode(&invite.invite).unwrap().secret;
+    membership::join(
+        realm,
+        &invite_secret_hash(&secret).unwrap(),
+        &key,
+        label,
+        limits(),
+    )
+    .await
+    .unwrap();
+    let registered = membership::client_key(realm, &key_id)
+        .await
+        .unwrap()
+        .unwrap();
+    membership::authenticate(registered).await.unwrap()
+}
+
+/// The owner of `realm`, seeded with the default key if it has none.
+async fn owner(realm: &str) -> Signer {
+    let key_id: Option<String> = sqlx::query_scalar(
+        "SELECT k.key_id FROM realm_client_key k
+         JOIN realm_member m ON m.realm = k.realm AND m.member_id = k.member_id
+         WHERE k.realm = ? AND m.role = 'owner' AND k.revoked_at IS NULL
+         ORDER BY k.registered_at LIMIT 1",
+    )
+    .bind(realm)
+    .fetch_optional(platform::storage::db::get_database().get_pool())
+    .await
+    .unwrap();
+    match key_id {
+        Some(key_id) => membership::authenticate(
+            membership::client_key(realm, &key_id)
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .await
+        .unwrap(),
+        None => Box::pin(add_client(realm, DEFAULT_KEY_LABEL, Role::Owner)).await,
+    }
+}
+
+/// An `x-actr-client-proof` for `body`, signed by `key`.
+fn proof(op: ProofOp, realm: &str, body: &[u8], key: &ed25519_dalek::SigningKey) -> String {
+    ClientProof::new(
+        op,
+        realm,
+        PROVIDER_ID,
+        body,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+    .header_value(key)
+}
+
+/// The key `actor` is bound to, or the default one.
+async fn bound_key(actor: &actr_protocol::ActrId) -> ed25519_dalek::SigningKey {
+    let key_id: Option<String> = sqlx::query_scalar(
+        "SELECT client_key_id FROM issued_actor_identity WHERE realm = ? AND serial_number = ?",
+    )
+    .bind(&actor.realm)
+    .bind(actor.serial_number as i64)
+    .fetch_optional(platform::storage::db::get_database().get_pool())
+    .await
+    .unwrap();
+    key_id
+        .and_then(|key_id| KEYS.lock().unwrap().get(&key_id).cloned())
+        .unwrap_or_else(|| key_for(DEFAULT_KEY_LABEL))
+}
 
 struct TestEnv {
     issuer_temp_dir: TempDir,
@@ -283,30 +398,28 @@ async fn create_test_issuer(env: &TestEnv) -> AIdIssuer {
     .expect("issuer")
 }
 
-async fn seed_realm(realm: &str, secret: Option<&str>) {
+/// An active Realm whose owner holds the key `key_label` (the default key
+/// if `None`).
+async fn seed_realm(realm: &str, key_label: Option<&str>) {
     let pool = platform::storage::db::get_database().get_pool();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    // A realm always has a non-empty secret at the storage layer (enforced by a
-    // CHECK constraint). When a test does not care about the secret value, seed a
-    // fixed placeholder so the row is valid; tests that exercise secret
-    // verification pass an explicit secret.
-    let secret_current = secret
-        .map(hash_realm_secret)
-        .unwrap_or_else(|| hash_realm_secret("seed-realm-secret"));
-
-    sqlx::query(
-        "INSERT OR REPLACE INTO realm (name, status, enabled, created_at, secret_current)
-         VALUES (?, 'active', 1, ?, ?)",
-    )
-    .bind(realm)
-    .bind(now)
-    .bind(secret_current)
-    .execute(pool)
-    .await
-    .expect("seed realm");
+    // A fresh Realm: what an earlier test left (issuer keys of another
+    // Signer, members) goes with the old row.
+    sqlx::query("DELETE FROM realm WHERE name = ?")
+        .bind(realm)
+        .execute(pool)
+        .await
+        .expect("clear realm");
+    sqlx::query("INSERT INTO realm (name, status, enabled, created_at) VALUES (?, 'active', 1, ?)")
+        .bind(realm)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("seed realm");
+    add_client(realm, key_label.unwrap_or(DEFAULT_KEY_LABEL), Role::Owner).await;
 }
 
 fn test_registry_manifest(publisher: &str, name: &str, version: &str, target: &str) -> Vec<u8> {
@@ -428,15 +541,19 @@ fn path1_request_with_auth(
 async fn post_register(
     app: Router,
     request: RegisterRequest,
-    realm_secret: Option<&str>,
+    key_label: Option<&str>,
 ) -> RegisterResponse {
     let mut builder = Request::builder()
         .method("POST")
         .uri("/register")
         .header("content-type", "application/protobuf")
         .header("x-real-ip", "127.0.0.1");
-    if let Some(secret) = realm_secret {
-        builder = builder.header(REALM_SECRET_HEADER, secret);
+    if let Some(label) = key_label {
+        let body = request.encode_to_vec();
+        builder = builder.header(
+            CLIENT_PROOF_HEADER,
+            proof(ProofOp::Register, &request.realm, &body, &key_for(label)),
+        );
     }
 
     // The rate limiter keys on the peer IP via ConnectInfo, which the production
@@ -469,9 +586,9 @@ async fn post_register(
 async fn post_reissue(
     app: Router,
     request: ReissueCredentialRequest,
-    realm_secret: Option<&str>,
+    key_label: Option<&str>,
 ) -> RegisterResponse {
-    let (status, response) = post_reissue_raw(app, request, realm_secret).await;
+    let (status, response) = post_reissue_raw(app, request, key_label).await;
     assert_eq!(status, StatusCode::OK);
     response
 }
@@ -480,15 +597,24 @@ async fn post_reissue(
 async fn post_reissue_raw(
     app: Router,
     request: ReissueCredentialRequest,
-    realm_secret: Option<&str>,
+    key_label: Option<&str>,
 ) -> (StatusCode, RegisterResponse) {
     let mut builder = Request::builder()
         .method("POST")
         .uri("/reissue")
         .header("content-type", "application/protobuf")
         .header("x-real-ip", "127.0.0.1");
-    if let Some(secret) = realm_secret {
-        builder = builder.header(REALM_SECRET_HEADER, secret);
+    if let Some(label) = key_label {
+        let body = request.encode_to_vec();
+        builder = builder.header(
+            CLIENT_PROOF_HEADER,
+            proof(
+                ProofOp::Reissue,
+                &request.registration.realm,
+                &body,
+                &key_for(label),
+            ),
+        );
     }
 
     let mut http_request = builder.body(Body::from(request.encode_to_vec())).unwrap();
@@ -517,12 +643,12 @@ async fn post_reissue_raw(
 async fn register_linked_actor(
     app: &Router,
     realm: &str,
-    realm_secret: &str,
+    key_label: &str,
 ) -> (RegisterRequest, register_response::RegisterOk) {
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    let initial = post_register(app.clone(), registration.clone(), Some(key_label)).await;
     match initial.result.expect("register result") {
         register_response::Result::Success(ok) => (registration, ok),
         register_response::Result::Error(err) => panic!("register failed: {err:?}"),
@@ -540,14 +666,14 @@ fn error_code(response: &RegisterResponse) -> Option<u32> {
 #[serial]
 async fn test_register_route_linked_with_realm_secret_succeeds() {
     let env = setup_test_environment().await;
-    let realm_secret = "linked-http-route-secret";
+    let key_label = "linked-http-route-secret";
     let realm = "linked-http-route@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut request = linked_register_request();
     request.realm = realm.to_string();
-    let response = post_register(app, request, Some(realm_secret)).await;
+    let response = post_register(app, request, Some(key_label)).await;
 
     match response.result.expect("result") {
         register_response::Result::Success(ok) => {
@@ -590,18 +716,24 @@ async fn test_register_does_not_reveal_realm_state_before_authentication() {
         .await
         .expect("retire");
 
-    // Without the secret, every Realm looks the same.
+    // Without a registered Realm client key, every Realm looks the same.
     for realm in ["state-unknown@example.com", suspended, retired] {
-        for provided in [None, Some("wrong-secret")] {
-            let err = register_error(&env, realm, provided).await;
-            assert_eq!(
-                (err.code, err.message.as_str()),
-                (403, "Realm secret not accepted"),
-                "{realm} {provided:?}"
-            );
-        }
+        let err = register_error(&env, realm, None).await;
+        assert_eq!(err.code, 400, "{realm}");
+        assert!(
+            err.message.starts_with("invalid_request:"),
+            "{}",
+            err.message
+        );
+        let err = register_error(&env, realm, Some("unregistered-key")).await;
+        assert_eq!(err.code, 403, "{realm}");
+        assert!(
+            err.message.starts_with("client_unknown:"),
+            "{}",
+            err.message
+        );
     }
-    // With it, the caller learns why.
+    // With one, the caller learns why.
     let err = register_error(&env, suspended, Some(secret)).await;
     assert_eq!(err.code, 403);
     assert!(err.message.contains("suspended"), "{}", err.message);
@@ -611,9 +743,9 @@ async fn test_register_does_not_reveal_realm_state_before_authentication() {
 #[serial]
 async fn test_register_pending_failure_rolls_back_acl() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-register-atomic-secret";
+    let key_label = "linked-register-atomic-secret";
     let realm = "linked-register-atomic@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
     let pool = platform::storage::db::get_database().get_pool();
 
@@ -672,7 +804,7 @@ async fn test_register_pending_failure_rolls_back_acl() {
     .await
     .expect("create pending failure trigger");
 
-    let response = post_register(app, request, Some(realm_secret)).await;
+    let response = post_register(app, request, Some(key_label)).await;
     sqlx::query("DROP TRIGGER IF EXISTS test_fail_pending_registration")
         .execute(pool)
         .await
@@ -713,9 +845,9 @@ async fn test_register_pending_failure_rolls_back_acl() {
 #[serial]
 async fn test_register_sets_pending_retention_and_drops_expired_rows() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-register-retention-secret";
+    let key_label = "linked-register-retention-secret";
     let realm = "linked-register-retention@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
     let pool = platform::storage::db::get_database().get_pool();
 
@@ -732,7 +864,7 @@ async fn test_register_sets_pending_retention_and_drops_expired_rows() {
     let mut request = linked_register_request();
     request.realm = realm.to_string();
     request.ws_address = Some("wss://example.invalid/actor".to_string());
-    let ok = match post_register(app, request, Some(realm_secret))
+    let ok = match post_register(app, request, Some(key_label))
         .await
         .result
         .expect("register result")
@@ -768,16 +900,16 @@ async fn test_register_sets_pending_retention_and_drops_expired_rows() {
 #[serial]
 async fn test_renew_and_reissue_extend_pending_retention() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-pending-extend-secret";
+    let key_label = "linked-pending-extend-secret";
     let realm = "linked-pending-extend@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
     let pool = platform::storage::db::get_database().get_pool();
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
     registration.ws_address = Some("wss://example.invalid/actor".to_string());
-    let registered = match post_register(app.clone(), registration.clone(), Some(realm_secret))
+    let registered = match post_register(app.clone(), registration.clone(), Some(key_label))
         .await
         .result
         .expect("register result")
@@ -847,7 +979,7 @@ async fn test_renew_and_reissue_extend_pending_retention() {
             renewal_proof: renewed.renewal_token.clone(),
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await
     .result
@@ -874,14 +1006,14 @@ async fn test_renew_and_reissue_extend_pending_retention() {
 #[serial]
 async fn test_reissue_route_preserves_linked_actor_id() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-reissue-secret";
+    let key_label = "linked-reissue-secret";
     let realm = "linked-reissue@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    let initial = post_register(app.clone(), registration.clone(), Some(key_label)).await;
     let initial_ok = match initial.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => panic!("initial registration failed: {err:?}"),
@@ -895,7 +1027,7 @@ async fn test_reissue_route_preserves_linked_actor_id() {
             renewal_proof: initial_ok.renewal_token.clone(),
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await;
     match response.result.expect("reissue result") {
@@ -920,16 +1052,16 @@ async fn test_reissue_route_preserves_linked_actor_id() {
 #[serial]
 async fn test_reissue_route_rejects_foreign_serial() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-foreign-serial-secret";
+    let key_label = "linked-foreign-serial-secret";
     let realm = "linked-foreign-serial@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
 
     // Two same-realm/type actors, each with its own renewal token.
-    let victim = match post_register(app.clone(), registration.clone(), Some(realm_secret))
+    let victim = match post_register(app.clone(), registration.clone(), Some(key_label))
         .await
         .result
         .expect("victim register result")
@@ -937,7 +1069,7 @@ async fn test_reissue_route_rejects_foreign_serial() {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => panic!("victim registration failed: {err:?}"),
     };
-    let attacker = match post_register(app.clone(), registration.clone(), Some(realm_secret))
+    let attacker = match post_register(app.clone(), registration.clone(), Some(key_label))
         .await
         .result
         .expect("attacker register result")
@@ -958,7 +1090,7 @@ async fn test_reissue_route_rejects_foreign_serial() {
             renewal_proof: attacker.renewal_token.clone(),
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await;
     match response.result.expect("foreign-serial reissue result") {
@@ -992,7 +1124,7 @@ async fn test_reissue_route_rejects_foreign_serial() {
             renewal_proof: attacker.renewal_token.clone(),
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await;
     match response.result.expect("unknown-serial reissue result") {
@@ -1016,14 +1148,14 @@ async fn test_reissue_route_rejects_foreign_serial() {
 #[serial]
 async fn test_reissue_route_rejects_changed_actor_type() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-reissue-type-secret";
+    let key_label = "linked-reissue-type-secret";
     let realm = "linked-reissue-type@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let ok = match post_register(app.clone(), registration.clone(), Some(realm_secret))
+    let ok = match post_register(app.clone(), registration.clone(), Some(key_label))
         .await
         .result
         .expect("register result")
@@ -1041,7 +1173,7 @@ async fn test_reissue_route_rejects_changed_actor_type() {
             renewal_proof: ok.renewal_token.clone(),
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await;
     assert!(
@@ -1058,14 +1190,14 @@ async fn test_reissue_route_rejects_changed_actor_type() {
 #[serial]
 async fn test_reissue_route_rejects_missing_possession_proof() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-missing-proof-secret";
+    let key_label = "linked-missing-proof-secret";
     let realm = "linked-missing-proof@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    let initial = post_register(app.clone(), registration.clone(), Some(key_label)).await;
     let initial_ok = match initial.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => panic!("initial registration failed: {err:?}"),
@@ -1079,7 +1211,7 @@ async fn test_reissue_route_rejects_missing_possession_proof() {
             renewal_proof: None,
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await;
     match response.result.expect("missing-proof reissue result") {
@@ -1105,14 +1237,14 @@ async fn test_reissue_route_rejects_missing_possession_proof() {
 #[serial]
 async fn test_reissue_route_accepts_expired_recorded_proof() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-expired-proof-secret";
+    let key_label = "linked-expired-proof-secret";
     let realm = "linked-expired-proof@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    let initial = post_register(app.clone(), registration.clone(), Some(key_label)).await;
     let initial_ok = match initial.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => panic!("initial registration failed: {err:?}"),
@@ -1140,7 +1272,7 @@ async fn test_reissue_route_accepts_expired_recorded_proof() {
             renewal_proof: initial_ok.renewal_token.clone(),
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await;
     match response.result.expect("expired-proof reissue result") {
@@ -1166,14 +1298,14 @@ async fn test_reissue_route_accepts_expired_recorded_proof() {
 #[serial]
 async fn test_reissue_route_is_idempotent_across_lost_responses() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-replay-secret";
+    let key_label = "linked-replay-secret";
     let realm = "linked-replay@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    let initial = post_register(app.clone(), registration.clone(), Some(key_label)).await;
     let initial_ok = match initial.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => panic!("initial registration failed: {err:?}"),
@@ -1190,7 +1322,7 @@ async fn test_reissue_route_is_idempotent_across_lost_responses() {
     // never reached the client.
     let mut outcomes = Vec::new();
     for attempt in 1..=3 {
-        let response = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
+        let response = post_reissue(app.clone(), request.clone(), Some(key_label)).await;
         match response.result.expect("reissue result") {
             register_response::Result::Success(ok) => outcomes.push(ok),
             register_response::Result::Error(err) => {
@@ -1268,7 +1400,7 @@ async fn test_reissue_route_is_idempotent_across_lost_responses() {
 async fn test_register_route_package_with_publisher_identity_succeeds() {
     let env = setup_test_environment().await;
     let realm = "package-http-route@example.com";
-    seed_realm(realm, Some(ROUTE_REALM_SECRET)).await;
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
     let (manifest_raw, key) =
         seed_active_package_returning_key("httppkg", "PackagedService", "1.0.0", "wasm32-wasip1")
             .await;
@@ -1286,7 +1418,7 @@ async fn test_register_route_package_with_publisher_identity_succeeds() {
         &key,
         vec![0x71; 32],
     );
-    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
+    let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
     match response.result.expect("result") {
         register_response::Result::Success(ok) => {
@@ -1304,7 +1436,7 @@ async fn test_register_route_package_with_publisher_identity_succeeds() {
 async fn test_register_route_unspecified_auth_mode_uses_package_identity() {
     let env = setup_test_environment().await;
     let realm = "unspecified-http-route@example.com";
-    seed_realm(realm, Some(ROUTE_REALM_SECRET)).await;
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
     let (manifest_raw, key) =
         seed_active_package_returning_key("legacyhttp", "LegacyService", "1.0.0", "wasm32-wasip1")
             .await;
@@ -1338,7 +1470,7 @@ async fn test_register_route_unspecified_auth_mode_uses_package_identity() {
         test_unix_now_secs(),
         vec![0x72; 32],
     );
-    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
+    let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
     match response.result.expect("result") {
         register_response::Result::Success(ok) => {
@@ -1356,7 +1488,7 @@ async fn test_register_route_unspecified_auth_mode_uses_package_identity() {
 async fn test_register_route_published_package_without_manifest_raw_is_rejected() {
     let env = setup_test_environment().await;
     let realm = "published-package-missing-manifest@example.com";
-    seed_realm(realm, Some(ROUTE_REALM_SECRET)).await;
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
     seed_active_package(
         "missingmanifest",
         "PublishedService",
@@ -1385,7 +1517,7 @@ async fn test_register_route_published_package_without_manifest_raw_is_rejected(
         publisher_auth_signed_at: None,
         publisher_auth_nonce: None,
     };
-    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
+    let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
@@ -1402,7 +1534,7 @@ async fn test_register_route_published_package_without_manifest_raw_is_rejected(
 async fn test_register_route_published_package_without_target_is_rejected() {
     let env = setup_test_environment().await;
     let realm = "published-package-missing-target@example.com";
-    seed_realm(realm, Some(ROUTE_REALM_SECRET)).await;
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
     let manifest_raw = seed_active_package(
         "missingtarget",
         "PublishedService",
@@ -1431,7 +1563,7 @@ async fn test_register_route_published_package_without_target_is_rejected() {
         publisher_auth_signed_at: None,
         publisher_auth_nonce: None,
     };
-    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
+    let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
@@ -1511,7 +1643,10 @@ async fn test_published_package_manifest_hash_mismatch_does_not_fall_back_to_pat
         vec![0x55; 32],
     );
 
-    let response = issuer.issue_credential(&request).await.expect("issue");
+    let response = issuer
+        .issue_credential(&request, &owner(&request.realm).await)
+        .await
+        .expect("issue");
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
             assert_eq!(err.code, 403);
@@ -1564,7 +1699,7 @@ async fn test_expired_publisher_key_allows_existing_package_and_path2_registrati
         vec![0x56; 32],
     );
     let path1_response = issuer
-        .issue_credential(&path1_request)
+        .issue_credential(&path1_request, &owner(&path1_request.realm).await)
         .await
         .expect("issue Path 1 credential");
     assert!(
@@ -1599,7 +1734,7 @@ async fn test_expired_publisher_key_allows_existing_package_and_path2_registrati
         vec![0x58; 32],
     );
     let path2_response = issuer
-        .issue_credential(&path2_request)
+        .issue_credential(&path2_request, &owner(&path2_request.realm).await)
         .await
         .expect("issue Path 2 credential");
     assert!(
@@ -1661,7 +1796,10 @@ async fn test_revoked_published_package_does_not_fall_back_to_path2() {
         vec![0x59; 32],
     );
 
-    let response = issuer.issue_credential(&request).await.expect("issue");
+    let response = issuer
+        .issue_credential(&request, &owner(&request.realm).await)
+        .await
+        .expect("issue");
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
             assert_eq!(err.code, 403);
@@ -1710,7 +1848,7 @@ async fn test_suspended_publisher_rejects_path1_and_path2() {
         None,
     );
     let path1_response = issuer
-        .issue_credential(&path1_request)
+        .issue_credential(&path1_request, &owner(&path1_request.realm).await)
         .await
         .expect("issue Path 1 credential");
     assert!(
@@ -1745,7 +1883,7 @@ async fn test_suspended_publisher_rejects_path1_and_path2() {
         vec![0x5A; 32],
     );
     let path2_response = issuer
-        .issue_credential(&path2_request)
+        .issue_credential(&path2_request, &owner(&path2_request.realm).await)
         .await
         .expect("issue Path 2 credential");
     assert!(
@@ -1816,7 +1954,7 @@ async fn test_published_package_retired_key_survives_until_explicit_revocation()
         vec![0x5C; 32],
     );
     let retired_response = issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("issue with retired key");
     assert!(
@@ -1837,7 +1975,7 @@ async fn test_published_package_retired_key_survives_until_explicit_revocation()
     .expect("revoke historical key");
 
     let response = issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("issue with revoked key");
     assert!(
@@ -1854,7 +1992,7 @@ async fn test_published_package_retired_key_survives_until_explicit_revocation()
 async fn test_register_route_package_without_publisher_identity_is_still_rejected() {
     let env = setup_test_environment().await;
     let realm = "package-http-route-missing-publisher@example.com";
-    seed_realm(realm, Some(ROUTE_REALM_SECRET)).await;
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
     let app = create_test_router(&env).await;
 
     let request = RegisterRequest {
@@ -1881,7 +2019,7 @@ async fn test_register_route_package_without_publisher_identity_is_still_rejecte
         publisher_auth_signed_at: None,
         publisher_auth_nonce: None,
     };
-    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
+    let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
@@ -1896,7 +2034,7 @@ async fn test_register_route_package_without_publisher_identity_is_still_rejecte
 
 #[tokio::test]
 #[serial]
-async fn test_linked_registration_with_verified_realm_secret_succeeds() {
+async fn test_linked_registration_of_a_member_succeeds() {
     let env = setup_test_environment().await;
 
     let signer_client = create_signer_client(&env.signer_config, &env.shared_key)
@@ -1910,11 +2048,10 @@ async fn test_linked_registration_with_verified_realm_secret_succeeds() {
     .await
     .expect("issuer");
 
+    seed_realm(TEST_REALM, None).await;
+    let viewer = add_client(TEST_REALM, "linked-viewer", Role::Viewer).await;
     let response = issuer
-        .issue_credential_with_realm_secret_check(
-            &linked_register_request(),
-            Some(RealmSecretCheck::ValidCurrent),
-        )
+        .issue_credential(&linked_register_request(), &viewer)
         .await
         .expect("issue linked credential");
 
@@ -1922,44 +2059,15 @@ async fn test_linked_registration_with_verified_realm_secret_succeeds() {
         register_response::Result::Success(ok) => {
             assert_eq!(registered_type(&ok).name, "source-workload");
             assert_eq!(ok.actr_id.realm, TEST_REALM);
+            // The credential names the member, its client key and role.
+            let claims =
+                actr_protocol::IdentityClaims::decode(ok.credential.claims.as_ref()).unwrap();
+            assert_eq!(claims.member, viewer.member_id);
+            assert_eq!(claims.client_key, viewer.key_id);
+            assert_eq!(claims.role(), actr_protocol::MemberRole::Viewer);
         }
         register_response::Result::Error(err) => {
-            panic!("linked registration with verified realm secret should succeed: {err:?}")
-        }
-    }
-}
-
-#[tokio::test]
-#[serial]
-async fn test_linked_registration_without_verified_realm_secret_is_rejected() {
-    let env = setup_test_environment().await;
-
-    let signer_client = create_signer_client(&env.signer_config, &env.shared_key)
-        .await
-        .expect("signer client");
-    let issuer = AIdIssuer::new(
-        signer_client,
-        default_issuer_config(&env.issuer_temp_dir),
-        tokio_util::sync::CancellationToken::new(),
-    )
-    .await
-    .expect("issuer");
-
-    let response = issuer
-        .issue_credential_with_realm_secret_check(
-            &linked_register_request(),
-            Some(RealmSecretCheck::NotConfigured),
-        )
-        .await
-        .expect("issue linked credential");
-
-    match response.result.expect("result") {
-        register_response::Result::Error(err) => {
-            assert_eq!(err.code, 403);
-            assert!(err.message.contains("publisher not verified"));
-        }
-        register_response::Result::Success(_) => {
-            panic!("linked registration without verified realm secret should be rejected")
+            panic!("linked registration of a member should succeed: {err:?}")
         }
     }
 }
@@ -2006,7 +2114,7 @@ async fn test_package_registration_without_publisher_identity_is_still_rejected(
     };
 
     let response = issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("issue package credential");
 
@@ -2076,7 +2184,7 @@ async fn test_end_to_end_credential_flow() {
     );
 
     let response = issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("Failed to issue credential");
 
@@ -2168,7 +2276,7 @@ async fn test_end_to_end_credential_flow() {
         );
 
         let rsp = issuer
-            .issue_credential(&req)
+            .issue_credential(&req, &owner(&req.realm).await)
             .await
             .unwrap_or_else(|e| panic!("Failed to issue credential {idx}: {e}"));
         let ok = match rsp.result.expect("Response should contain result") {
@@ -2255,7 +2363,7 @@ async fn test_issuer_creation_fails_with_wrong_shared_key() {
         publisher_auth_nonce: None,
     };
     let resp = issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("issue_credential returns Ok wrapping the error");
     assert!(
@@ -2512,7 +2620,10 @@ async fn test_path2_missing_publisher_auth_signature_rejected() {
         publisher_auth_nonce: None,
     };
 
-    let response = issuer.issue_credential(&request).await.expect("issue");
+    let response = issuer
+        .issue_credential(&request, &owner(&request.realm).await)
+        .await
+        .expect("issue");
     match response.result.expect("result") {
         register_response::Result::Error(_) => {}
         register_response::Result::Success(_) => {
@@ -2556,7 +2667,10 @@ async fn test_path2_missing_publisher_record_returns_forbidden() {
         vec![0x5B; 32],
     );
 
-    let response = issuer.issue_credential(&request).await.expect("issue");
+    let response = issuer
+        .issue_credential(&request, &owner(&request.realm).await)
+        .await
+        .expect("issue");
     assert!(
         matches!(
             &response.result,
@@ -2633,7 +2747,10 @@ hash = "0000000000000000000000000000000000000000000000000000000000000000"
     // signature checks and reaches the binary.target guard.
     sign_publisher_request(&mut request, &key, &manifest_bytes);
 
-    let response = issuer.issue_credential(&request).await.expect("issue");
+    let response = issuer
+        .issue_credential(&request, &owner(&request.realm).await)
+        .await
+        .expect("issue");
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
             assert_eq!(
@@ -2707,7 +2824,7 @@ async fn test_path2_publisher_auth_nonce_replay_rejected() {
     );
 
     let first = issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("first issue");
     match first.result.expect("first result") {
@@ -2718,7 +2835,7 @@ async fn test_path2_publisher_auth_nonce_replay_rejected() {
     }
 
     let second = issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("second issue");
     match second.result.expect("second result") {
@@ -2769,7 +2886,7 @@ async fn test_path2_historical_retired_key_passes() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'active', 1, ?, 'seed-placeholder-secret')")
+    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('test@example.com', 'active', 1, ?)")
         .bind(now)
         .execute(pool)
         .await
@@ -2805,7 +2922,10 @@ async fn test_path2_historical_retired_key_passes() {
     };
     sign_publisher_request(&mut request, &key_a, &manifest_bytes);
 
-    let response = issuer.issue_credential(&request).await.expect("issue");
+    let response = issuer
+        .issue_credential(&request, &owner(&request.realm).await)
+        .await
+        .expect("issue");
     match response.result.expect("result") {
         register_response::Result::Success(_) => {} // expected
         register_response::Result::Error(err) => {
@@ -2840,7 +2960,7 @@ async fn test_path2_revoked_key_rejected() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'active', 1, ?, 'seed-placeholder-secret')")
+    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('test@example.com', 'active', 1, ?)")
         .bind(now)
         .execute(pool)
         .await
@@ -2897,7 +3017,10 @@ async fn test_path2_revoked_key_rejected() {
     };
     sign_publisher_request(&mut request, &key_revoked, &manifest_bytes);
 
-    let response = issuer.issue_credential(&request).await.expect("issue");
+    let response = issuer
+        .issue_credential(&request, &owner(&request.realm).await)
+        .await
+        .expect("issue");
     match response.result.expect("result") {
         register_response::Result::Error(_) => {} // expected: revoked key rejected
         register_response::Result::Success(_) => {
@@ -2932,7 +3055,7 @@ async fn test_path2_identity_mismatch_rejected() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'active', 1, ?, 'seed-placeholder-secret')")
+    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('test@example.com', 'active', 1, ?)")
         .bind(now)
         .execute(pool)
         .await
@@ -2967,7 +3090,10 @@ async fn test_path2_identity_mismatch_rejected() {
     };
     sign_publisher_request(&mut request, &key, &manifest_bytes);
 
-    let response = issuer.issue_credential(&request).await.expect("issue");
+    let response = issuer
+        .issue_credential(&request, &owner(&request.realm).await)
+        .await
+        .expect("issue");
     match response.result.expect("result") {
         register_response::Result::Error(_) => {} // expected: identity mismatch rejected
         register_response::Result::Success(_) => {
@@ -3065,12 +3191,18 @@ fn base_path2_request(fx: &Path2Fixture, realm: &str) -> RegisterRequest {
 }
 
 async fn post_renew(app: Router, request: RenewCredentialRequest) -> RenewCredentialResponse {
+    let body = request.encode_to_vec();
+    let key = bound_key(&request.actr_id).await;
     let builder = Request::builder()
         .method("POST")
         .uri("/renew")
         .header("content-type", "application/protobuf")
-        .header("x-real-ip", "127.0.0.1");
-    let mut http_request = builder.body(Body::from(request.encode_to_vec())).unwrap();
+        .header("x-real-ip", "127.0.0.1")
+        .header(
+            CLIENT_PROOF_HEADER,
+            proof(ProofOp::Renew, &request.actr_id.realm, &body, &key),
+        );
+    let mut http_request = builder.body(Body::from(body)).unwrap();
     http_request
         .extensions_mut()
         .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
@@ -3098,14 +3230,14 @@ async fn post_renew(app: Router, request: RenewCredentialRequest) -> RenewCreden
 #[serial]
 async fn test_renew_rotation_deletes_expired_token_rows() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "renew-expired-cleanup-secret";
+    let key_label = "renew-expired-cleanup-secret";
     let realm = "renew-expired-cleanup@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration, Some(realm_secret)).await;
+    let initial = post_register(app.clone(), registration, Some(key_label)).await;
     let initial_ok = match initial.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(error) => panic!("register failed: {error:?}"),
@@ -3284,7 +3416,11 @@ async fn test_path2_missing_publisher_field_matrix() {
         );
         blank(&mut request);
 
-        let response = fx.issuer.issue_credential(&request).await.expect("issue");
+        let response = fx
+            .issuer
+            .issue_credential(&request, &owner(&request.realm).await)
+            .await
+            .expect("issue");
         match response.result.expect("result") {
             register_response::Result::Error(err) => assert_eq!(
                 err.code, 403,
@@ -3343,7 +3479,11 @@ async fn test_path2_tamper_and_signature_matrix() {
         sign_publisher_request_at(&mut request, &fx.key, &fx.manifest_bytes, now, nonce);
         mutation(&mut request, &fx, now);
 
-        let response = fx.issuer.issue_credential(&request).await.expect("issue");
+        let response = fx
+            .issuer
+            .issue_credential(&request, &owner(TEST_REALM).await)
+            .await
+            .expect("issue");
         match (response.result.expect("result"), expect_success) {
             (register_response::Result::Success(_), true) => {}
             (register_response::Result::Error(err), false) => assert_eq!(
@@ -3390,7 +3530,11 @@ async fn test_path2_publisher_auth_signed_at_window_matrix() {
             *signed_at,
             vec![i as u8 + 0x10; 32],
         );
-        let response = fx.issuer.issue_credential(&request).await.expect("issue");
+        let response = fx
+            .issuer
+            .issue_credential(&request, &owner(&request.realm).await)
+            .await
+            .expect("issue");
         match (response.result.expect("result"), expect) {
             (register_response::Result::Success(_), None) => {}
             (register_response::Result::Error(err), Some(code)) => assert_eq!(
@@ -3424,9 +3568,11 @@ async fn test_path2_concurrent_nonce_only_one_succeeds() {
     let req_a = build();
     let req_b = build();
 
+    let signer_a = owner(&req_a.realm).await;
+    let signer_b = owner(&req_b.realm).await;
     let (resp_a, resp_b) = tokio::join!(
-        fx.issuer.issue_credential(&req_a),
-        fx.issuer.issue_credential(&req_b)
+        fx.issuer.issue_credential(&req_a, &signer_a),
+        fx.issuer.issue_credential(&req_b, &signer_b)
     );
 
     let success_a = matches!(
@@ -3451,7 +3597,7 @@ async fn test_path2_concurrent_nonce_only_one_succeeds() {
 async fn test_path1_published_package_with_publisher_triple_succeeds() {
     let env = setup_test_environment().await;
     let realm = "package-triple-route@example.com";
-    seed_realm(realm, Some(ROUTE_REALM_SECRET)).await;
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
     let (manifest_raw, key) =
         seed_active_package_returning_key("triplepkg", "TripleService", "1.0.0", "wasm32-wasip1")
             .await;
@@ -3467,7 +3613,7 @@ async fn test_path1_published_package_with_publisher_triple_succeeds() {
         &key,
         vec![0x77; 32],
     );
-    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
+    let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
     match response.result.expect("result") {
         register_response::Result::Success(ok) => {
@@ -3490,7 +3636,7 @@ async fn test_path1_published_package_with_publisher_triple_succeeds() {
 async fn test_path1_published_package_without_publisher_auth_is_rejected() {
     let env = setup_test_environment().await;
     let realm = "package-no-auth-route@example.com";
-    seed_realm(realm, Some(ROUTE_REALM_SECRET)).await;
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
     let manifest_raw =
         seed_active_package("noauthpkg", "NoAuthService", "1.0.0", "wasm32-wasip1").await;
     let app = create_test_router(&env).await;
@@ -3505,7 +3651,7 @@ async fn test_path1_published_package_without_publisher_auth_is_rejected() {
         manifest_raw,
         None,
     );
-    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
+    let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
@@ -3527,9 +3673,9 @@ async fn test_path1_published_package_without_publisher_auth_is_rejected() {
 #[serial]
 async fn test_linked_auth_with_publisher_triple_rejected() {
     let env = setup_test_environment().await;
-    let realm_secret = "linked-triple-secret";
+    let key_label = "linked-triple-secret";
     let realm = "linked-triple@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut request = linked_register_request();
@@ -3539,7 +3685,7 @@ async fn test_linked_auth_with_publisher_triple_rejected() {
     request.publisher_auth_signed_at = Some(test_unix_now_secs());
     request.publisher_auth_nonce = Some(prost::bytes::Bytes::from(vec![0x88; 32]));
 
-    let response = post_register(app, request, Some(realm_secret)).await;
+    let response = post_register(app, request, Some(key_label)).await;
     match response.result.expect("result") {
         register_response::Result::Error(err) => assert_eq!(
             err.code, 400,
@@ -3559,7 +3705,7 @@ async fn test_linked_auth_with_publisher_triple_rejected() {
 async fn test_renewal_token_renew_without_publisher_triple() {
     let env = setup_test_environment().await;
     let realm = "renew-route@example.com";
-    seed_realm(realm, Some(ROUTE_REALM_SECRET)).await;
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
     let (manifest_raw, key) =
         seed_active_package_returning_key("renewpkg", "RenewService", "1.0.0", "wasm32-wasip1")
             .await;
@@ -3579,7 +3725,7 @@ async fn test_renewal_token_renew_without_publisher_triple() {
     );
     // `post_register` consumes the Router; clone it so the renew call hits the
     // same issuer (shared via Arc<AIdIssuer> inside IssuerState).
-    let reg_response = post_register(app.clone(), register, Some(ROUTE_REALM_SECRET)).await;
+    let reg_response = post_register(app.clone(), register, Some(ROUTE_KEY_LABEL)).await;
     let ok = match reg_response.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => {
@@ -3618,12 +3764,18 @@ async fn post_renew_raw(
     app: Router,
     request: RenewCredentialRequest,
 ) -> (StatusCode, RenewCredentialResponse) {
+    let body = request.encode_to_vec();
+    let key = bound_key(&request.actr_id).await;
     let builder = Request::builder()
         .method("POST")
         .uri("/renew")
         .header("content-type", "application/protobuf")
-        .header("x-real-ip", "127.0.0.1");
-    let mut http_request = builder.body(Body::from(request.encode_to_vec())).unwrap();
+        .header("x-real-ip", "127.0.0.1")
+        .header(
+            CLIENT_PROOF_HEADER,
+            proof(ProofOp::Renew, &request.actr_id.realm, &body, &key),
+        );
+    let mut http_request = builder.body(Body::from(body)).unwrap();
     http_request
         .extensions_mut()
         .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
@@ -3650,14 +3802,14 @@ async fn post_renew_raw(
 #[serial]
 async fn test_renew_rejected_after_actor_revoked() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-revoked-renew-secret";
+    let key_label = "linked-revoked-renew-secret";
     let realm = "linked-revoked-renew@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration, Some(realm_secret)).await;
+    let initial = post_register(app.clone(), registration, Some(key_label)).await;
     let ok = match initial.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => panic!("register failed: {err:?}"),
@@ -3739,14 +3891,14 @@ async fn test_renew_replay_rechecks_only_issued_credentials() {
 #[serial]
 async fn test_reissue_rejected_after_actor_revoked() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-revoked-reissue-secret";
+    let key_label = "linked-revoked-reissue-secret";
     let realm = "linked-revoked-reissue@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
+    seed_realm(realm, Some(key_label)).await;
     let app = create_test_router(&env).await;
 
     let mut registration = linked_register_request();
     registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    let initial = post_register(app.clone(), registration.clone(), Some(key_label)).await;
     let ok = match initial.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => panic!("register failed: {err:?}"),
@@ -3764,7 +3916,7 @@ async fn test_reissue_rejected_after_actor_revoked() {
             renewal_proof: ok.renewal_token.clone(),
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await;
     match response.result.expect("reissue result") {
@@ -3809,7 +3961,7 @@ async fn test_issue_for_actor_rejected_after_package_revoked() {
         vec![0x74; 32],
     );
     let ok = match issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("issue")
         .result
@@ -3821,7 +3973,7 @@ async fn test_issue_for_actor_rejected_after_package_revoked() {
 
     // Re-issuing for the actor succeeds while the package is still active.
     issuer
-        .issue_credential_for_actor(&ok.actr_id, None)
+        .issue_credential_for_actor(&ok.actr_id, None, &owner(&ok.actr_id.realm).await)
         .await
         .expect("reissue before revoke should succeed");
 
@@ -3836,7 +3988,7 @@ async fn test_issue_for_actor_rejected_after_package_revoked() {
     .expect("revoke package");
 
     let err = issuer
-        .issue_credential_for_actor(&ok.actr_id, None)
+        .issue_credential_for_actor(&ok.actr_id, None, &owner(&ok.actr_id.realm).await)
         .await
         .expect_err("a revoked package must block re-issuance");
     assert!(
@@ -3874,7 +4026,7 @@ async fn test_issue_for_actor_rejected_after_publisher_suspended() {
         vec![0x75; 32],
     );
     let ok = match issuer
-        .issue_credential(&request)
+        .issue_credential(&request, &owner(&request.realm).await)
         .await
         .expect("issue")
         .result
@@ -3892,7 +4044,7 @@ async fn test_issue_for_actor_rejected_after_publisher_suspended() {
         .expect("suspend publisher");
 
     let err = issuer
-        .issue_credential_for_actor(&ok.actr_id, None)
+        .issue_credential_for_actor(&ok.actr_id, None, &owner(&ok.actr_id.realm).await)
         .await
         .expect_err("a suspended publisher must block re-issuance");
     assert!(
@@ -3909,9 +4061,9 @@ async fn test_issue_for_actor_rejected_after_publisher_suspended() {
 async fn test_reissue_proof_is_consumed_by_one_attempt() {
     let mut env = setup_test_environment().await;
     let app = create_test_router(&env).await;
-    let realm_secret = "linked-proof-consumed-secret";
+    let key_label = "linked-proof-consumed-secret";
     let (registration, initial_ok) =
-        register_linked_actor(&app, "linked-proof-consumed@example.com", realm_secret).await;
+        register_linked_actor(&app, "linked-proof-consumed@example.com", key_label).await;
 
     let request = ReissueCredentialRequest {
         actr_id: initial_ok.actr_id.clone(),
@@ -3919,12 +4071,12 @@ async fn test_reissue_proof_is_consumed_by_one_attempt() {
         renewal_proof: initial_ok.renewal_token.clone(),
         attempt_id: control_attempt_id(),
     };
-    let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
+    let first = post_reissue(app.clone(), request.clone(), Some(key_label)).await;
     assert_eq!(error_code(&first), None, "first reissue must succeed");
 
     let mut new_attempt = request;
     new_attempt.attempt_id = control_attempt_id();
-    let replay = post_reissue(app, new_attempt, Some(realm_secret)).await;
+    let replay = post_reissue(app, new_attempt, Some(key_label)).await;
     assert_eq!(
         error_code(&replay),
         Some(REISSUE_POSSESSION_NOT_PROVEN_CODE),
@@ -3945,7 +4097,7 @@ async fn test_reissue_replay_requires_the_original_request() {
     let app = create_test_router(&fx._env).await;
     let mut registration = base_path2_request(&fx, TEST_REALM);
     sign_publisher_request(&mut registration, &fx.key, &fx.manifest_bytes);
-    let initial = post_register(app.clone(), registration.clone(), Some("seed-realm-secret")).await;
+    let initial = post_register(app.clone(), registration.clone(), Some(DEFAULT_KEY_LABEL)).await;
     let initial = match initial.result.unwrap() {
         register_response::Result::Success(ok) => ok,
         other => panic!("initial registration failed: {other:?}"),
@@ -3963,14 +4115,14 @@ async fn test_reissue_replay_requires_the_original_request() {
         renewal_proof: initial.renewal_token,
         attempt_id: control_attempt_id(),
     };
-    let first = post_reissue(app.clone(), request.clone(), Some("seed-realm-secret")).await;
+    let first = post_reissue(app.clone(), request.clone(), Some(DEFAULT_KEY_LABEL)).await;
     assert!(matches!(
         &first.result,
         Some(register_response::Result::Success(_))
     ));
     // A new issuer instance must still recognize the durable attempt.
     let restarted = create_test_router(&fx._env).await;
-    let replay = post_reissue(restarted, request.clone(), Some("seed-realm-secret")).await;
+    let replay = post_reissue(restarted, request.clone(), Some(DEFAULT_KEY_LABEL)).await;
     assert_eq!(first.encode_to_vec(), replay.encode_to_vec());
 
     let mut mutations = Vec::new();
@@ -3994,7 +4146,7 @@ async fn test_reissue_replay_requires_the_original_request() {
     mutations.push(linked);
     for changed in mutations {
         let (status, response) =
-            post_reissue_raw(app.clone(), changed, Some("seed-realm-secret")).await;
+            post_reissue_raw(app.clone(), changed, Some(DEFAULT_KEY_LABEL)).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(error_code(&response), Some(409));
     }
@@ -4003,7 +4155,7 @@ async fn test_reissue_replay_requires_the_original_request() {
     issuer::renewal::revoke_actor(&request.actr_id, "replay regression")
         .await
         .unwrap();
-    let revoked = post_reissue(app, request, Some("seed-realm-secret")).await;
+    let revoked = post_reissue(app, request, Some(DEFAULT_KEY_LABEL)).await;
     assert_eq!(error_code(&revoked), Some(403));
 }
 
@@ -4012,21 +4164,21 @@ async fn test_reissue_replay_requires_the_original_request() {
 async fn test_reissue_attempt_id_body_mismatch_returns_conflict() {
     let mut env = setup_test_environment().await;
     let app = create_test_router(&env).await;
-    let realm_secret = "reissue-conflict-secret";
+    let key_label = "reissue-conflict-secret";
     let (registration, initial_ok) =
-        register_linked_actor(&app, "reissue-conflict@example.com", realm_secret).await;
+        register_linked_actor(&app, "reissue-conflict@example.com", key_label).await;
     let request = ReissueCredentialRequest {
         actr_id: initial_ok.actr_id,
         registration,
         renewal_proof: initial_ok.renewal_token,
         attempt_id: control_attempt_id(),
     };
-    let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
+    let first = post_reissue(app.clone(), request.clone(), Some(key_label)).await;
     assert_eq!(error_code(&first), None);
 
     let mut conflicting = request;
     conflicting.registration.ws_address = Some("wss://conflict.example.invalid".to_string());
-    let (status, response) = post_reissue_raw(app, conflicting, Some(realm_secret)).await;
+    let (status, response) = post_reissue_raw(app, conflicting, Some(key_label)).await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(error_code(&response), Some(409));
 
@@ -4040,16 +4192,16 @@ async fn test_reissue_attempt_id_body_mismatch_returns_conflict() {
 async fn test_reissue_replay_after_response_expiry_returns_gone() {
     let mut env = setup_test_environment().await;
     let app = create_test_router(&env).await;
-    let realm_secret = "reissue-gone-secret";
+    let key_label = "reissue-gone-secret";
     let (registration, initial_ok) =
-        register_linked_actor(&app, "reissue-gone@example.com", realm_secret).await;
+        register_linked_actor(&app, "reissue-gone@example.com", key_label).await;
     let request = ReissueCredentialRequest {
         actr_id: initial_ok.actr_id.clone(),
         registration,
         renewal_proof: initial_ok.renewal_token.clone(),
         attempt_id: control_attempt_id(),
     };
-    let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
+    let first = post_reissue(app.clone(), request.clone(), Some(key_label)).await;
     assert_eq!(error_code(&first), None);
 
     let pool = platform::storage::db::get_database().get_pool();
@@ -4068,7 +4220,7 @@ async fn test_reissue_replay_after_response_expiry_returns_gone() {
     .expect("expire stored reissue response");
     assert_eq!(expired.rows_affected(), 1);
 
-    let (status, response) = post_reissue_raw(app, request, Some(realm_secret)).await;
+    let (status, response) = post_reissue_raw(app, request, Some(key_label)).await;
     assert_eq!(status, StatusCode::GONE);
     assert_eq!(error_code(&response), Some(410));
 
@@ -4081,9 +4233,9 @@ async fn test_reissue_replay_after_response_expiry_returns_gone() {
 async fn test_reissue_attempt_in_progress_returns_too_early() {
     let mut env = setup_test_environment().await;
     let app = create_test_router(&env).await;
-    let realm_secret = "reissue-in-progress-secret";
+    let key_label = "reissue-in-progress-secret";
     let (registration, initial_ok) =
-        register_linked_actor(&app, "reissue-in-progress@example.com", realm_secret).await;
+        register_linked_actor(&app, "reissue-in-progress@example.com", key_label).await;
     let request = ReissueCredentialRequest {
         actr_id: initial_ok.actr_id.clone(),
         registration,
@@ -4114,13 +4266,22 @@ async fn test_reissue_attempt_in_progress_returns_too_early() {
     .await
     .expect("seed in-progress attempt");
 
+    let body = request.encode_to_vec();
     let mut http_request = Request::builder()
         .method("POST")
         .uri("/reissue")
         .header("content-type", "application/protobuf")
         .header("x-real-ip", "127.0.0.1")
-        .header(REALM_SECRET_HEADER, realm_secret)
-        .body(Body::from(request.encode_to_vec()))
+        .header(
+            CLIENT_PROOF_HEADER,
+            proof(
+                ProofOp::Reissue,
+                &request.registration.realm,
+                &body,
+                &key_for(key_label),
+            ),
+        )
+        .body(Body::from(body))
         .unwrap();
     http_request
         .extensions_mut()
@@ -4153,7 +4314,7 @@ async fn test_unpublished_renewal_enforces_publisher_status() {
     let app = create_test_router(&fx._env).await;
     let mut registration = base_path2_request(&fx, TEST_REALM);
     sign_publisher_request(&mut registration, &fx.key, &fx.manifest_bytes);
-    let initial = post_register(app.clone(), registration, Some("seed-realm-secret")).await;
+    let initial = post_register(app.clone(), registration, Some(DEFAULT_KEY_LABEL)).await;
     let initial = match initial.result.unwrap() {
         register_response::Result::Success(ok) => ok,
         other => panic!("initial registration failed: {other:?}"),
@@ -4213,7 +4374,7 @@ async fn test_unpublished_renewal_enforces_publisher_status() {
     let linked = post_register(
         app.clone(),
         linked_register_request(),
-        Some("seed-realm-secret"),
+        Some(DEFAULT_KEY_LABEL),
     )
     .await;
     let linked = match linked.result.unwrap() {
@@ -4247,9 +4408,9 @@ fn renewed(response: RenewCredentialResponse) -> register_response::RegisterOk {
 async fn test_renew_with_a_token_consumed_by_reissue() {
     let mut env = setup_test_environment().await;
     let app = create_test_router(&env).await;
-    let realm_secret = "renew-consumed-secret";
+    let key_label = "renew-consumed-secret";
     let (registration, initial_ok) =
-        register_linked_actor(&app, "renew-consumed@example.com", realm_secret).await;
+        register_linked_actor(&app, "renew-consumed@example.com", key_label).await;
     let old_token = initial_ok.renewal_token.clone().expect("renewal token");
 
     let reissued = post_reissue(
@@ -4260,7 +4421,7 @@ async fn test_renew_with_a_token_consumed_by_reissue() {
             renewal_proof: Some(old_token.clone()),
             attempt_id: control_attempt_id(),
         },
-        Some(realm_secret),
+        Some(key_label),
     )
     .await;
     let reissued = match reissued.result.expect("reissue result") {
@@ -4349,4 +4510,315 @@ async fn test_renew_does_not_reveal_realm_state_before_authentication() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     env.shutdown_signer().await;
+}
+
+// ── Realm membership (`actr/protocols/realm-membership.md`) ──────────
+
+async fn post_membership(
+    app: Router,
+    document: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let mut http_request = Request::builder()
+        .method("POST")
+        .uri("/membership")
+        .header("content-type", "application/json")
+        .body(Body::from(document.to_string()))
+        .unwrap();
+    http_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            12345,
+        ))));
+    let response = app.oneshot(http_request).await.unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&body).unwrap())
+}
+
+fn membership_request(
+    op: actr_protocol::realm_membership::MembershipOp,
+    realm: &str,
+) -> actr_protocol::realm_membership::MembershipRequest {
+    actr_protocol::realm_membership::MembershipRequest::new(
+        op,
+        realm,
+        PROVIDER_ID,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+}
+
+/// Join with the key `label` through `POST /membership`.
+async fn join_over_http(
+    app: &Router,
+    realm: &str,
+    invite: &str,
+    label: &str,
+) -> (StatusCode, serde_json::Value) {
+    use actr_protocol::realm_membership::MembershipOp;
+    let key = key_for(label);
+    let mut request = membership_request(MembershipOp::Join, realm);
+    request.invite = Some(RealmInvite::decode(invite).unwrap().secret);
+    request.public_key =
+        Some(base64::prelude::BASE64_STANDARD.encode(key.verifying_key().to_bytes()));
+    post_membership(app.clone(), request.sign(&key)).await
+}
+
+#[tokio::test]
+#[serial]
+async fn test_membership_requests_over_http() {
+    use actr_protocol::realm_membership::MembershipOp;
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let realm = "members-http@example.com";
+    seed_realm(realm, Some("members-owner")).await;
+    let owner_key = key_for("members-owner");
+
+    // The owner invites an editor.
+    let mut invite = membership_request(MembershipOp::CreateInvite, realm);
+    invite.role = Some(Role::Editor);
+    invite.invite_expires_at = Some((chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339());
+    let (status, created) = post_membership(app.clone(), invite.sign(&owner_key)).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let text = created["invite"].as_str().unwrap().to_string();
+
+    // The invite names its Realm; another Realm's name is a mismatch.
+    seed_realm("members-other@example.com", None).await;
+    let (status, error) =
+        join_over_http(&app, "members-other@example.com", &text, "members-editor").await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::CONFLICT, Some("invite_realm_mismatch"))
+    );
+    let (status, joined) = join_over_http(&app, realm, &text, "members-editor").await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    assert_eq!(joined["role"], "editor");
+    let (status, error) = join_over_http(&app, realm, &text, "members-third").await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::GONE, Some("invite_used"))
+    );
+
+    // Roles come before targets: an editor learns nothing about members.
+    let editor_key = key_for("members-editor");
+    let remove = || {
+        let mut remove = membership_request(MembershipOp::RemoveMember, realm);
+        remove.member_id = Some("0000000000000000".to_string());
+        remove
+    };
+    let (status, error) = post_membership(app.clone(), remove().sign(&editor_key)).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("forbidden"))
+    );
+    let (status, error) = post_membership(app.clone(), remove().sign(&owner_key)).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::NOT_FOUND, Some("not_found"))
+    );
+
+    // A replayed nonce, a foreign provider and an unknown key are refused.
+    let list = membership_request(MembershipOp::ListMembers, realm);
+    let signed = list.sign(&editor_key);
+    let (status, own) = post_membership(app.clone(), signed.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(own["members"].as_array().unwrap().len(), 1);
+    let (status, error) = post_membership(app.clone(), signed).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("invalid_request"))
+    );
+    let mut foreign = membership_request(MembershipOp::ListMembers, realm);
+    foreign.provider_id = "other.example".to_string();
+    let (status, _) = post_membership(app.clone(), foreign.sign(&owner_key)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, error) = post_membership(
+        app.clone(),
+        membership_request(MembershipOp::ListMembers, realm).sign(&key_for("stranger")),
+    )
+    .await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("client_unknown"))
+    );
+
+    // update_realm is for Realms whose Realm Profile this Loran signs.
+    let mut update = membership_request(MembershipOp::UpdateRealm, realm);
+    update.display_name = Some("Renamed".to_string());
+    let (status, error) = post_membership(app.clone(), update.sign(&owner_key)).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("forbidden"))
+    );
+
+    env.shutdown_signer().await;
+}
+
+/// Only the owner registers the Realm's Service, any version of it.
+// Reloading the signing key from storage uses `block_in_place`.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn test_only_the_owner_registers_the_service() {
+    let fx = path2_fixture("svc.example.com", "notes", "wasm32-wasip1").await;
+    let app = create_test_router(&fx._env).await;
+    add_client(TEST_REALM, "service-editor", Role::Editor).await;
+    // The Realm Profile names another version of the program.
+    sqlx::query(
+        "INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at)
+         VALUES (?, 1, 'd', ?, 1)",
+    )
+    .bind(TEST_REALM)
+    .bind(serde_json::json!({ "package": { "type": "svc.example.com/notes@0.9.0" } }).to_string())
+    .execute(platform::storage::db::get_database().get_pool())
+    .await
+    .unwrap();
+
+    let mut request = base_path2_request(&fx, TEST_REALM);
+    sign_publisher_request_at(
+        &mut request,
+        &fx.key,
+        &fx.manifest_bytes,
+        test_unix_now_secs(),
+        vec![0x51; 32],
+    );
+    match post_register(app.clone(), request.clone(), Some("service-editor"))
+        .await
+        .result
+        .unwrap()
+    {
+        register_response::Result::Error(err) => {
+            assert_eq!(err.code, 403);
+            assert!(
+                err.message.starts_with("service_owner_only:"),
+                "{}",
+                err.message
+            );
+        }
+        other => panic!("an editor registered the Service: {other:?}"),
+    }
+    let registered = post_register(app, request, Some(DEFAULT_KEY_LABEL)).await;
+    assert!(
+        matches!(
+            registered.result,
+            Some(register_response::Result::Success(_))
+        ),
+        "{registered:?}"
+    );
+}
+
+/// Revoking a key stops its Actors; another key of the same member reissues
+/// them and moves them to itself.
+#[tokio::test]
+#[serial]
+async fn test_a_revoked_key_disables_its_actors_until_the_member_reissues() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let realm = "key-revoked@example.com";
+    let (registration, ok) = register_linked_actor(&app, realm, "revoked-first").await;
+    let owner = owner(realm).await;
+    let second = add_second_client(realm, &owner, "revoked-second").await;
+    let token = ok.renewal_token.clone().unwrap();
+
+    // Another key of the member does not renew the Actor.
+    let renew = RenewCredentialRequest {
+        actr_id: ok.actr_id.clone(),
+        renewal_token: token.clone(),
+        attempt_id: control_attempt_id(),
+    };
+    let body = renew.encode_to_vec();
+    let (status, response) = post_renew_with(
+        app.clone(),
+        &body,
+        proof(ProofOp::Renew, realm, &body, &key_for("revoked-second")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(renew_message(&response).starts_with("client_unknown:"));
+
+    membership::revoke_client(&second, &owner.key_id)
+        .await
+        .unwrap();
+    assert!(membership::actor_disabled(&ok.actr_id).await.unwrap());
+    // The revoked key signs nothing.
+    let (status, response) = post_renew_raw(app.clone(), renew).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(renew_message(&response).starts_with("client_revoked:"));
+
+    // The member's other key reissues the Actor and becomes its key.
+    let reissue = ReissueCredentialRequest {
+        actr_id: ok.actr_id.clone(),
+        registration,
+        renewal_proof: Some(token),
+        attempt_id: control_attempt_id(),
+    };
+    let response = post_reissue(app.clone(), reissue, Some("revoked-second")).await;
+    let reissued = match response.result.unwrap() {
+        register_response::Result::Success(ok) => ok,
+        other => panic!("reissue failed: {other:?}"),
+    };
+    assert_eq!(reissued.actr_id, ok.actr_id);
+    let claims =
+        actr_protocol::IdentityClaims::decode(reissued.credential.claims.as_ref()).unwrap();
+    assert_eq!(claims.client_key, second.key_id);
+    assert!(!membership::actor_disabled(&ok.actr_id).await.unwrap());
+
+    env.shutdown_signer().await;
+}
+
+/// A second client of `owner`'s member, with the key `label`.
+async fn add_second_client(realm: &str, owner: &Signer, label: &str) -> Signer {
+    let key = key_for(label).verifying_key().to_bytes();
+    let expires = chrono::Utc::now().timestamp() + 3600;
+    let invite = membership::create_invite(owner, None, Some(&owner.member_id), expires, limits())
+        .await
+        .unwrap();
+    let secret = RealmInvite::decode(&invite.invite).unwrap().secret;
+    membership::join(
+        realm,
+        &invite_secret_hash(&secret).unwrap(),
+        &key,
+        label,
+        limits(),
+    )
+    .await
+    .unwrap();
+    membership::authenticate(
+        membership::client_key(realm, &client_key_id(&key))
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+async fn post_renew_with(
+    app: Router,
+    body: &[u8],
+    client_proof: String,
+) -> (StatusCode, RenewCredentialResponse) {
+    let mut http_request = Request::builder()
+        .method("POST")
+        .uri("/renew")
+        .header("content-type", "application/protobuf")
+        .header(CLIENT_PROOF_HEADER, client_proof)
+        .body(Body::from(body.to_vec()))
+        .unwrap();
+    http_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            12345,
+        ))));
+    let response = app.oneshot(http_request).await.unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, RenewCredentialResponse::decode(body).unwrap())
+}
+
+fn renew_message(response: &RenewCredentialResponse) -> &str {
+    match &response.result {
+        Some(renew_credential_response::Result::Error(err)) => &err.message,
+        other => panic!("expected an error, got {other:?}"),
+    }
 }

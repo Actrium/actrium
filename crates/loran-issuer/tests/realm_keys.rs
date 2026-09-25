@@ -135,26 +135,50 @@ async fn setup_test_environment(signer_config: SignerServiceConfig) -> TestEnv {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let secret_current = platform::realm::hash_realm_secret("realm-keys-seed-realm-secret");
         sqlx::query(
-            "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES (?, 'active', 1, ?, ?)",
+            "INSERT OR IGNORE INTO realm (name, status, enabled, created_at)
+             VALUES (?, 'active', 1, ?)",
         )
         .bind(TEST_REALM)
         .bind(now)
-        .bind(secret_current)
         .execute(pool)
         .await
         .expect("seed realm");
+        // The owner and its Realm client key, which the Actor is bound to.
+        sqlx::query(
+            "INSERT OR IGNORE INTO realm_member (realm, member_id, role, status, created_at)
+             VALUES (?, ?, 'owner', 'active', ?)",
+        )
+        .bind(TEST_REALM)
+        .bind(&owner().member_id)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("seed member");
+        sqlx::query(
+            "INSERT OR IGNORE INTO realm_client_key
+                (realm, key_id, public_key, member_id, registered_at)
+             VALUES (?, ?, zeroblob(32), ?, ?)",
+        )
+        .bind(TEST_REALM)
+        .bind(&owner().key_id)
+        .bind(&owner().member_id)
+        .bind(now)
+        .execute(pool)
+        .await
+        .expect("seed client key");
         // The identity ledger records the Actor type that renewals sign into claims.
         sqlx::query(
             "INSERT OR IGNORE INTO issued_actor_identity
-             (realm, serial_number, actor_type, target, issued_at, auth_mode)
-             VALUES (?, 42, 'linked-src/source-workload@1.0.0', NULL, ?, ?)",
+             (realm, serial_number, actor_type, target, issued_at, auth_mode,
+              member_id, client_key_id)
+             VALUES (?, 42, 'linked-src/source-workload@1.0.0', NULL, ?, ?, ?, ?)",
         )
         .bind(TEST_REALM)
         .bind(now)
         .bind(RegisterAuthMode::Linked as i32)
+        .bind(&owner().member_id)
+        .bind(&owner().key_id)
         .execute(pool)
         .await
         .expect("seed actor identity");
@@ -216,7 +240,7 @@ async fn credentials_are_signed_with_the_realm_issuer_key() {
     };
     let issued = tokio::time::timeout(
         TEST_STEP_TIMEOUT,
-        issuer.issue_credential_for_actor(&actor_id, None),
+        issuer.issue_credential_for_actor(&actor_id, None, &owner()),
     )
     .await
     .expect("credential issuance timed out")
@@ -277,7 +301,7 @@ async fn credentials_are_signed_with_the_realm_issuer_key() {
         .await
         .expect("switch keys");
     let rotated = issuer
-        .issue_credential_for_actor(&actor_id, None)
+        .issue_credential_for_actor(&actor_id, None, &owner())
         .await
         .expect("issue credential after rotation");
     assert_eq!(rotated.credential.key_id, next_id);
@@ -302,8 +326,8 @@ async fn retiring_a_realm_retires_its_issuer_key() {
         .unwrap()
         .as_secs() as i64;
     sqlx::query(
-        "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-         VALUES (?, 'active', 1, ?, 'hash')",
+        "INSERT INTO realm (name, status, enabled, created_at)
+         VALUES (?, 'active', 1, ?)",
     )
     .bind(REALM)
     .bind(now)
@@ -378,8 +402,8 @@ async fn an_issuer_key_that_loses_a_race_is_retired() {
     let mut env = setup_test_environment(SignerServiceConfig::default()).await;
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
-        "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-         VALUES (?, 'active', 1, ?, 'hash')",
+        "INSERT INTO realm (name, status, enabled, created_at)
+         VALUES (?, 'active', 1, ?)",
     )
     .bind(REALM)
     .bind(now)
@@ -450,4 +474,14 @@ async fn an_issuer_key_that_loses_a_race_is_retired() {
     assert!(signer.sign(keys[2].key_id, b"m").await.is_err());
 
     env.shutdown_signer().await;
+}
+
+/// The owner of `TEST_REALM` the seeded Actor is bound to.
+fn owner() -> platform::realm::membership::Signer {
+    platform::realm::membership::Signer {
+        realm: TEST_REALM.to_string(),
+        key_id: "0123456789abcdef".to_string(),
+        member_id: "fedcba9876543210".to_string(),
+        role: actr_protocol::realm_membership::Role::Owner,
+    }
 }

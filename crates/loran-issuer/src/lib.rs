@@ -71,12 +71,15 @@ pub mod handlers;
 mod idempotency;
 pub mod identity;
 pub mod issuer;
+mod membership;
 pub mod ratelimit;
 pub mod realm_management;
 pub mod realm_profile;
 pub mod renewal;
 pub mod signer_client_wrapper;
 mod sn;
+#[cfg(test)]
+mod test_support;
 
 pub use issuer::{AIdIssuer, IssuerConfig};
 

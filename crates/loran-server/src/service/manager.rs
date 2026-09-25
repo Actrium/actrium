@@ -388,6 +388,8 @@ impl ServiceManager {
         // Public authority bootstrap is an instance-level concern. It stays
         // separate from the individual signaling, identity, and package roles
         // even when Loran serves them from the same process.
+        // `update_realm` membership requests sign Realm Profiles too.
+        let membership_profiles = realm_profiles.clone();
         app = app.merge(
             crate::service::http::build_authority_router(&self.config, realm_profiles).await?,
         );
@@ -420,6 +422,7 @@ impl ServiceManager {
 
         if self.config.is_issuer_enabled() {
             if let Some(state) = issuer_state.clone() {
+                let state = state.with_membership(&self.config.realm, membership_profiles.clone());
                 let mut svc = IssuerService::with_state(&self.config, state);
                 if let Some(ctr) = self.service_counters.get(&(resource_type::ISSUER)) {
                     svc.set_counters(ctr.clone());

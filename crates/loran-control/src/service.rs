@@ -19,9 +19,7 @@ use platform::config::ActrixConfig;
 use platform::config::config_store::{ConfigOverride, ConfigOverrideStore};
 use platform::config::registry;
 use platform::config::resolver::{self, ResolvedField};
-use platform::realm::{
-    DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS, hash_realm_secret, rotate_realm_secret,
-};
+use platform::realm::membership::{self, BY_OPERATOR, IssuedInvite};
 use platform::realm::{Realm, RealmError, RealmProfileRecord, RealmStatus};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -36,9 +34,8 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
-/// A created Realm: the response, its plaintext Realm secret, and the Realm
-/// admin token of a Realm under the Provider domain, each returned once.
-pub type CreatedRealm = (CreateRealmResponse, Option<String>, Option<String>);
+/// A created Realm: the response and its owner invite, returned once.
+pub type CreatedRealm = (CreateRealmResponse, Option<IssuedInvite>);
 type MetricsFuture = Pin<Box<dyn Future<Output = AdminResult<SystemMetrics>> + Send>>;
 type MetricsProvider = Arc<dyn Fn() -> MetricsFuture + Send + Sync>;
 type ShutdownFuture = Pin<Box<dyn Future<Output = AdminResult<()>> + Send>>;
@@ -714,8 +711,8 @@ impl AdminApiService {
                     success: false,
                     error_message: Some(message),
                     realm: None,
+                    owner_invite: None,
                 },
-                None,
                 None,
             ))
         };
@@ -756,8 +753,6 @@ impl AdminApiService {
             None => {}
         }
 
-        // Generate secret at creation time
-        let plain_secret = platform::realm::secret::generate_realm_secret();
         let realm = Realm {
             name: req.realm,
             status: if signer.is_some() {
@@ -767,7 +762,6 @@ impl AdminApiService {
             },
             enabled: req.enabled,
             expires_at: (req.expires_at > 0).then_some(req.expires_at),
-            secret_current: hash_realm_secret(&plain_secret),
             // Removed if the process stops before the first Profile is signed.
             pending_expires_at: signer.is_some().then(|| {
                 chrono::Utc::now().timestamp() as u64 + self.realm_config().pending_ttl_secs()
@@ -803,17 +797,14 @@ impl AdminApiService {
             platform::recording::warn!("Realm {} has no issuer key yet: {err}", realm.name);
         }
 
-        // The operator stands in for the Realm Provider account: the Realm
-        // admin token comes back with the creation, once.
-        let admin_token = match signer {
-            Some(_) => match Realm::reissue_admin_token(&realm.name).await {
-                Ok(token) => Some(token),
-                Err(err) => {
-                    platform::recording::warn!("Realm {} has no admin token: {err}", realm.name);
-                    None
-                }
-            },
-            None => None,
+        // The owner invite comes back with the creation, once; the operator
+        // hands it to the owner.
+        let owner_invite = match membership::issue_owner_invite(&realm.name, BY_OPERATOR).await {
+            Ok(invite) => Some(invite),
+            Err(err) => {
+                platform::recording::warn!("Realm {} has no owner invite: {err}", realm.name);
+                None
+            }
         };
 
         platform::recording::info!("Realm created: {}", realm.name);
@@ -823,9 +814,9 @@ impl AdminApiService {
                 success: true,
                 error_message: None,
                 realm: Some(realm_to_proto(&realm)),
+                owner_invite: owner_invite.as_ref().map(|invite| invite.invite.clone()),
             },
-            Some(plain_secret),
-            admin_token,
+            owner_invite,
         ))
     }
 
@@ -833,18 +824,6 @@ impl AdminApiService {
         &self,
         req: CreateRealmRequest,
     ) -> GrpcResult<CreateRealmResponse> {
-        let Some(secret_current) = req.secret_current_hash else {
-            return Ok(CreateRealmResponse {
-                success: false,
-                error_message: Some(
-                    "secret_current_hash is required for managed CreateRealm".to_string(),
-                ),
-                realm: None,
-            });
-        };
-        let secret_previous =
-            build_secret_previous(req.secret_previous_hash, req.secret_previous_valid_until);
-
         platform::recording::info!("Create managed realm request received: realm={}", req.realm);
 
         // As Realm Provider, Loran creates Realms only under its Provider
@@ -858,6 +837,7 @@ impl AdminApiService {
                         .to_string(),
                 ),
                 realm: None,
+                owner_invite: None,
             });
         }
 
@@ -865,32 +845,48 @@ impl AdminApiService {
             req.realm,
             req.enabled,
             (req.expires_at > 0).then_some(req.expires_at),
-            secret_current,
-            secret_previous,
             self.max_realms(),
         )
         .await
         {
-            Ok(realm) => Ok(CreateRealmResponse {
-                success: true,
-                error_message: None,
-                realm: Some(realm_to_proto(&realm)),
-            }),
+            Ok((realm, created)) => {
+                // A new Realm's owner invite comes back once.
+                let owner_invite = if created {
+                    match membership::issue_owner_invite(&realm.name, BY_OPERATOR).await {
+                        Ok(invite) => Some(invite.invite),
+                        Err(err) => {
+                            platform::recording::warn!(
+                                "Realm {} has no owner invite: {err}",
+                                realm.name
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                Ok(CreateRealmResponse {
+                    success: true,
+                    error_message: None,
+                    realm: Some(realm_to_proto(&realm)),
+                    owner_invite,
+                })
+            }
             Err(err) => Ok(CreateRealmResponse {
                 success: false,
                 error_message: Some(format!("Failed to upsert managed realm: {err}")),
                 realm: None,
+                owner_invite: None,
             }),
         }
     }
 
-    /// Create a realm and return the plaintext realm secret once, with the
-    /// Realm admin token of a Realm under the Provider domain.
+    /// Create a realm and return its owner invite once.
     ///
     /// `profile` carries the package and display name of the first Realm
     /// Profile, required and allowed only for Realms under the Provider
     /// domain. As Realm Provider, Loran creates no Realm elsewhere.
-    pub async fn create_realm_with_secret_direct(
+    pub async fn create_realm_with_invite_direct(
         &self,
         req: CreateRealmRequest,
         profile: ProfileChange,
@@ -898,7 +894,7 @@ impl AdminApiService {
         self.create_local_realm_internal(req, profile).await
     }
 
-    /// Create a realm (gRPC path, does not expose plaintext secret in response).
+    /// Create or update a superv-managed realm (gRPC path).
     pub async fn create_realm_direct(
         &self,
         req: CreateRealmRequest,
@@ -948,21 +944,6 @@ impl AdminApiService {
         if let Some(expires_at) = req.expires_at {
             realm.expires_at = (expires_at > 0).then_some(expires_at);
         }
-        if let Some(secret_current_hash) = req.secret_current_hash {
-            if secret_current_hash.trim().is_empty() {
-                return Ok(UpdateRealmResponse {
-                    success: false,
-                    error_message: Some("secret_current_hash must not be empty".to_string()),
-                    realm: None,
-                });
-            }
-            realm.secret_current = secret_current_hash;
-        }
-        if req.secret_previous_hash.is_some() || req.secret_previous_valid_until.is_some() {
-            realm.secret_previous =
-                build_secret_previous(req.secret_previous_hash, req.secret_previous_valid_until);
-        }
-
         if let Err(err) = realm.save().await {
             return Ok(UpdateRealmResponse {
                 success: false,
@@ -1027,18 +1008,35 @@ impl AdminApiService {
         }
     }
 
-    /// Issue a new Realm admin token for an active Realm, invalidating the
-    /// previous one.
-    pub async fn reissue_realm_admin_token_direct(&self, realm: &str) -> GrpcResult<String> {
-        Realm::reissue_admin_token(realm)
+    /// Issue a new owner invite for an active Realm (owner recovery),
+    /// revoking its unused owner invites. Only for Realms under the Provider
+    /// domain and Realms without a Realm Profile; the Realm signing key
+    /// holder recovers the others (`FailedPrecondition`).
+    pub async fn issue_owner_invite_direct(&self, realm: &str) -> GrpcResult<IssuedInvite> {
+        let has_profile = RealmProfileRecord::get(realm)
             .await
-            .map_err(|err| match err {
-                RealmError::NotFound => Status::not_found(format!("Realm not found: {realm}")),
-                RealmError::Retired | RealmError::ValidationError(_) => {
-                    Status::invalid_argument(err.to_string())
-                }
-                err => Status::internal(format!("Failed to reissue admin token: {err}")),
+            .map_err(|e| Status::internal(format!("Failed to load Realm Profile: {e}")))?
+            .is_some();
+        if has_profile && self.signs_profiles_for(realm).is_none() {
+            return Err(Status::failed_precondition(
+                "the Realm signing key holder issues this Realm's owner invites",
+            ));
+        }
+        membership::issue_owner_invite(realm, BY_OPERATOR)
+            .await
+            .map_err(|err| match err.code {
+                membership::Code::NotFound => Status::not_found(err.message),
+                membership::Code::Conflict => Status::invalid_argument(err.message),
+                _ => Status::internal(format!("Failed to issue an owner invite: {err}")),
             })
+    }
+
+    /// Members, clients and open invites of `realm`, read-only.
+    pub async fn list_realm_members_direct(&self, realm: &str) -> GrpcResult<JsonValue> {
+        self.load_realm(realm).await?;
+        membership::list_members(realm, None)
+            .await
+            .map_err(|err| Status::internal(format!("Failed to list members: {err}")))
     }
 
     /// Start rotating `realm`'s issuer key (`realm-profile.md` section 6.1);
@@ -1068,29 +1066,6 @@ impl AdminApiService {
             .await
             .map(|record| record.map(|record| record.document))
             .map_err(|e| Status::internal(format!("Failed to load Realm Profile: {e}")))
-    }
-
-    /// Rotate realm secret and return plaintext once.
-    pub async fn rotate_realm_secret_direct(
-        &self,
-        realm: &str,
-    ) -> GrpcResult<RealmSecretRotationResult> {
-        let rotated = rotate_realm_secret(realm, Some(DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS))
-            .await
-            .map_err(|e| match e {
-                RealmError::NotFound => Status::not_found(format!("Realm not found: {realm}")),
-                RealmError::Retired => {
-                    Status::invalid_argument(format!("Realm is retired: {realm}"))
-                }
-                e => Status::internal(format!("Failed to rotate realm secret: {e}")),
-            })?;
-
-        Ok(RealmSecretRotationResult {
-            realm: realm.to_string(),
-            realm_secret: rotated.new_secret,
-            previous_valid_until: rotated.previous_valid_until,
-            grace_seconds: DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS,
-        })
     }
 
     /// Get a config value.
@@ -1217,16 +1192,6 @@ pub struct KeyInfo {
     pub retired: bool,
 }
 
-/// Realm secret rotation result (the plaintext secret is returned only once).
-#[derive(Debug, Clone, Serialize)]
-pub struct RealmSecretRotationResult {
-    pub realm: String,
-    pub realm_secret: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub previous_valid_until: Option<u64>,
-    pub grace_seconds: u64,
-}
-
 /// Signer keys query result.
 #[derive(Debug, Clone, Serialize)]
 pub struct SignerKeysResult {
@@ -1242,15 +1207,6 @@ fn service_name_to_type_id(name: &str) -> Option<i32> {
         "signaling" => Some(3),
         "issuer" => Some(4),
         "signer" => Some(5),
-        _ => None,
-    }
-}
-
-fn build_secret_previous(hash: Option<String>, valid_until: Option<u64>) -> Option<(String, u64)> {
-    match (hash, valid_until) {
-        (Some(hash), Some(valid_until)) if !hash.trim().is_empty() && valid_until > 0 => {
-            Some((hash, valid_until))
-        }
         _ => None,
     }
 }
