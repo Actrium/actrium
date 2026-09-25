@@ -25,7 +25,7 @@ fn parse_role(text: &str) -> std::result::Result<Role, String> {
     }
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct JoinArgs {
     /// Realm invite text `ri_…` (`-` reads stdin)
     #[arg(value_name = "INVITE")]
@@ -137,7 +137,7 @@ impl Member {
     }
 
     async fn send(&self, request: MembershipRequest) -> Result<Value> {
-        send(&self.file.issuer, &request.sign(&self.key)).await
+        Ok(send(&self.file.issuer, &request.sign(&self.key)).await?)
     }
 }
 
@@ -159,8 +159,24 @@ fn url_authority(url: &str) -> Result<String> {
     .to_ascii_lowercase())
 }
 
+/// Why a membership request got no reply.
+enum SendError {
+    /// The Realm Provider answered with an error: nothing changed.
+    Refused(anyhow::Error),
+    /// No usable answer: the request may or may not have taken effect.
+    Unknown(anyhow::Error),
+}
+
+impl From<SendError> for anyhow::Error {
+    fn from(error: SendError) -> Self {
+        match error {
+            SendError::Refused(error) | SendError::Unknown(error) => error,
+        }
+    }
+}
+
 /// POST `document` to `<issuer>/membership`; the reply, or its error.
-async fn send(issuer: &str, document: &Value) -> Result<Value> {
+async fn send(issuer: &str, document: &Value) -> std::result::Result<Value, SendError> {
     let url = format!("{}/membership", issuer.trim_end_matches('/'));
     let response = reqwest::Client::new()
         .post(&url)
@@ -168,22 +184,38 @@ async fn send(issuer: &str, document: &Value) -> Result<Value> {
         .body(document.to_string())
         .send()
         .await
-        .with_context(|| format!("Failed to send the membership request to {url}"))?;
+        .with_context(|| format!("Failed to send the membership request to {url}"))
+        .map_err(SendError::Unknown)?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = response
+        .text()
+        .await
+        .with_context(|| format!("Failed to read the membership reply from {url}"))
+        .map_err(SendError::Unknown)?;
     if !status.is_success() {
-        bail!("membership request refused (HTTP {status}): {body}");
+        return Err(SendError::Refused(anyhow::anyhow!(
+            "membership request refused (HTTP {status}): {body}"
+        )));
     }
-    serde_json::from_str(&body).context("membership reply is not JSON")
+    serde_json::from_str(&body)
+        .context("membership reply is not JSON")
+        .map_err(SendError::Unknown)
 }
 
+/// The key of a key file for `realm` at `issuer` that an interrupted `join`
+/// left at `path`, if any.
+fn interrupted_join_key(path: &std::path::Path, realm: &str, issuer: &str) -> Option<SigningKey> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let (file, key) = RealmClientKeyFile::parse(&text).ok()?;
+    (file.realm == realm && file.issuer == issuer).then_some(key)
+}
+
+/// Redeem the invite. The key file is written before the request is sent,
+/// so a lost reply does not lose the key of a redeemed invite: rerunning the
+/// same command reuses the key file, and the Realm Provider answers the
+/// retry of that redemption with its result (or `conflict` if the key is
+/// already registered otherwise).
 pub async fn join(args: &JoinArgs) -> Result<Value> {
-    if args.output.exists() && !args.force {
-        bail!(
-            "Key file already exists: {}\nUse --force to overwrite.",
-            args.output.display()
-        );
-    }
     let text = if args.invite == "-" {
         std::io::read_to_string(std::io::stdin())?
     } else {
@@ -198,26 +230,59 @@ pub async fn join(args: &JoinArgs) -> Result<Value> {
         None => url_authority(&issuer)?,
     };
 
-    let key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+    let reused = if args.output.exists() && !args.force {
+        let key = interrupted_join_key(&args.output, &invite.realm, &issuer);
+        if key.is_none() {
+            bail!(
+                "Key file already exists: {}\nUse --force to overwrite.",
+                args.output.display()
+            );
+        }
+        key
+    } else {
+        None
+    };
+    let created = reused.is_none();
+    let key = match reused {
+        Some(key) => key,
+        None => {
+            let key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+            if let Some(parent) = args.output.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create {}", parent.display()))?;
+            }
+            let file = RealmClientKeyFile::new(&invite.realm, &provider, &issuer, &key);
+            write_private(
+                &args.output,
+                serde_json::to_string_pretty(&file)?.as_bytes(),
+            )
+            .with_context(|| format!("Failed to write key file: {}", args.output.display()))?;
+            key
+        }
+    };
+
     let mut request =
         MembershipRequest::new(MembershipOp::Join, &invite.realm, &provider, &new_nonce());
     request.invite = Some(invite.secret.clone());
     request.public_key = Some(BASE64.encode(key.verifying_key().to_bytes()));
     request.label = args.label.clone();
-    let reply = send(&issuer, &request.sign(&key)).await?;
-
-    if let Some(parent) = args.output.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    match send(&issuer, &request.sign(&key)).await {
+        Ok(reply) => {
+            eprintln!("Realm client key written to {}", args.output.display());
+            Ok(reply)
+        }
+        Err(SendError::Refused(error)) => {
+            if created {
+                let _ = std::fs::remove_file(&args.output);
+            }
+            Err(error)
+        }
+        Err(SendError::Unknown(error)) => Err(error.context(format!(
+            "The invite may have been redeemed; the key is kept in {}. \
+             Rerun the same command to finish joining.",
+            args.output.display()
+        ))),
     }
-    let file = RealmClientKeyFile::new(&invite.realm, &provider, &issuer, &key);
-    write_private(
-        &args.output,
-        serde_json::to_string_pretty(&file)?.as_bytes(),
-    )
-    .with_context(|| format!("Failed to write key file: {}", args.output.display()))?;
-    eprintln!("Realm client key written to {}", args.output.display());
-    Ok(reply)
 }
 
 pub async fn invite(args: &InviteArgs) -> Result<Value> {
@@ -343,8 +408,22 @@ mod tests {
             let mode = std::fs::metadata(&output).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
-        // The key file is not overwritten by accident.
-        assert!(join(&join_args).await.is_err());
+        // A rerun reuses the key file (retry of an interrupted join); a key
+        // file of another Realm is not overwritten by accident.
+        let file = Member::load(&key).unwrap().file;
+        assert_eq!(
+            join(&join_args).await.unwrap()["public_key"],
+            file.public_key
+        );
+        assert!(
+            join(&JoinArgs {
+                invite: RealmInvite::new("other@acme.com", &secret).encode(),
+                ..join_args.clone()
+            })
+            .await
+            .is_err()
+        );
+        assert_eq!(Member::load(&key).unwrap().file.public_key, file.public_key);
 
         let sent = invite(&InviteArgs {
             key: KeyArgs {
@@ -383,6 +462,99 @@ mod tests {
         .unwrap();
         assert_eq!(sent["previous_owner_role"], "viewer");
         assert_eq!(leave(&key).await.unwrap()["op"], "leave");
+    }
+
+    /// A membership endpoint that reads each request, sends it on the
+    /// returned channel and closes the connection without a reply.
+    async fn serve_without_reply() -> (String, tokio::sync::mpsc::UnboundedReceiver<Value>) {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buffer = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let read = stream.read(&mut chunk).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    buffer.extend_from_slice(&chunk[..read]);
+                    let text = String::from_utf8_lossy(&buffer);
+                    if let Some(start) = text.find("\r\n\r\n")
+                        && let Ok(body) = serde_json::from_str::<Value>(&text[start + 4..])
+                    {
+                        let _ = tx.send(body);
+                        break;
+                    }
+                }
+                let _ = stream.shutdown().await;
+            }
+        });
+        (format!("http://{address}/issuer"), rx)
+    }
+
+    #[tokio::test]
+    async fn a_join_whose_reply_is_lost_keeps_its_key_for_the_retry() {
+        let (lost, mut sent) = serve_without_reply().await;
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("client.json");
+        let args = JoinArgs {
+            invite: RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([3u8; 32])).encode(),
+            output: output.clone(),
+            issuer: lost,
+            provider: Some("p.example".into()),
+            label: None,
+            force: false,
+        };
+        let error = join(&args).await.unwrap_err();
+        assert!(format!("{error:#}").contains("Rerun the same command"));
+        let first = sent.recv().await.unwrap();
+        // The key the Realm Provider may have registered is on disk.
+        let file = Member::load(&KeyArgs {
+            key: output.clone(),
+        })
+        .unwrap()
+        .file;
+        assert_eq!(first["public_key"], file.public_key);
+
+        // Rerunning the command retries the same redemption with that key.
+        assert!(join(&args).await.is_err());
+        let retry = sent.recv().await.unwrap();
+        assert_eq!(retry["public_key"], file.public_key);
+        assert_eq!(retry["invite"], first["invite"]);
+    }
+
+    #[tokio::test]
+    async fn a_refused_join_leaves_no_key_file() {
+        let app = Router::new().route(
+            "/issuer/membership",
+            post(|| async {
+                (
+                    axum::http::StatusCode::GONE,
+                    Json(serde_json::json!({"error": "invite_used", "message": "used"})),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("client.json");
+        let error = join(&JoinArgs {
+            invite: RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([4u8; 32])).encode(),
+            output: output.clone(),
+            issuer: format!("http://{address}/issuer"),
+            provider: None,
+            label: None,
+            force: false,
+        })
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("invite_used"));
+        assert!(!output.exists());
     }
 
     #[tokio::test]
