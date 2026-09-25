@@ -206,20 +206,31 @@ pub(super) fn discovery_client() -> Result<reqwest::Client> {
         .context("Failed to create the HTTP client")
 }
 
-/// GET the public document at `url`: the body of a 2xx reply.
+/// Size limit of a public document (`authority-discovery.md`).
+const PUBLIC_DOCUMENT_LIMIT: usize = 64 * 1024;
+
+/// GET the public document at `url`: the body of a 2xx reply, at most
+/// 64 KiB.
 async fn fetch_public(client: &reqwest::Client, url: String) -> Result<Vec<u8>> {
-    let response = client
+    let mut response = client
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
         .with_context(|| format!("Failed to fetch {url}"))?;
-    let body = response
-        .bytes()
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .with_context(|| format!("Failed to read {url}"))?;
-    Ok(body.to_vec())
+        .with_context(|| format!("Failed to read {url}"))?
+    {
+        if body.len() + chunk.len() > PUBLIC_DOCUMENT_LIMIT {
+            bail!("{url} is larger than 64 KiB");
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 /// The Realm Profile of `realm` (`realm-profile.md` sections 3 and 5): the
@@ -987,6 +998,41 @@ mod tests {
         // Nor is it reused by a rerun of the join.
         let error = join(&args).await.unwrap_err();
         assert!(format!("{error:#}").contains("chmod 600"), "{error:#}");
+    }
+
+    #[tokio::test]
+    async fn public_documents_are_limited_to_64_kib() {
+        use axum::body::Body;
+        use axum::routing::get;
+        let big = || vec![b' '; 64 * 1024 + 1];
+        let app = Router::new()
+            .route("/fits", get(|| async { vec![b' '; 64 * 1024] }))
+            .route("/sized", get(move || async move { big() }))
+            .route(
+                "/chunked",
+                get(|| async {
+                    let chunks = (0..65).map(|_| Ok::<_, std::io::Error>(vec![b' '; 1024]));
+                    Body::from_stream(futures_util::stream::iter(chunks))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client = reqwest::Client::new();
+        assert_eq!(
+            fetch_public(&client, format!("{base}/fits"))
+                .await
+                .unwrap()
+                .len(),
+            64 * 1024
+        );
+        for path in ["sized", "chunked"] {
+            let error = fetch_public(&client, format!("{base}/{path}"))
+                .await
+                .unwrap_err();
+            assert!(format!("{error:#}").contains("64 KiB"), "{path}: {error:#}");
+        }
     }
 
     #[test]
