@@ -1163,6 +1163,20 @@ pub async fn actor_disabled(actor: &ActrId) -> Result<bool, sqlx::Error> {
     actor_disabled_on(&mut conn, actor).await
 }
 
+/// Whether Signaling refuses a credential of `actor` issued to the Realm
+/// client key `client_key`: the Actor is disabled, or a reissue has since
+/// moved it to another key, so a credential of the old key (perhaps revoked
+/// by now) does not connect.
+pub async fn credential_refused(actor: &ActrId, client_key: &str) -> Result<bool, sqlx::Error> {
+    let mut conn = get_database().get_pool().acquire().await?;
+    if actor_disabled_on(&mut conn, actor).await? {
+        return Ok(true);
+    }
+    Ok(actor_binding_on(&mut conn, actor)
+        .await?
+        .is_some_and(|binding| binding.client_key_id != client_key))
+}
+
 /// Every disabled Actor.
 pub async fn disabled_actors() -> Result<Vec<ActrId>, sqlx::Error> {
     let rows: Vec<(String, i64)> = sqlx::query_as(

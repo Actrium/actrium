@@ -276,6 +276,43 @@ async fn revoking_a_key_disables_its_actors_and_its_invites() {
 
 #[tokio::test]
 #[serial]
+async fn a_credential_of_a_key_the_actor_moved_from_is_refused() {
+    let owner = realm_with_owner().await;
+    let editor = invite_member(&owner, Role::Editor, 2).await;
+    let second = create_invite(
+        &editor,
+        None,
+        Some(&editor.member_id),
+        now_secs() + 60,
+        LIMITS,
+    )
+    .await
+    .unwrap();
+    redeem(&second, 5).await.unwrap();
+    let moved_to = signer(5).await;
+    let actor = bind_actor(&editor, 43).await;
+    assert!(!credential_refused(&actor, &editor.key_id).await.unwrap());
+
+    // A reissue moves the Actor to the member's other key.
+    sqlx::query("UPDATE issued_actor_identity SET client_key_id = ? WHERE serial_number = 43")
+        .bind(&moved_to.key_id)
+        .execute(get_database().get_pool())
+        .await
+        .unwrap();
+    assert!(!credential_refused(&actor, &moved_to.key_id).await.unwrap());
+    assert!(credential_refused(&actor, &editor.key_id).await.unwrap());
+    // Revoking the old key does not disable the Actor; its old credential
+    // stays refused.
+    revoke_client(&editor, &editor.key_id).await.unwrap();
+    assert!(!actor_disabled(&actor).await.unwrap());
+    assert!(credential_refused(&actor, &editor.key_id).await.unwrap());
+    // A disabled Actor is refused whatever the key.
+    revoke_client(&owner, &moved_to.key_id).await.unwrap();
+    assert!(credential_refused(&actor, &moved_to.key_id).await.unwrap());
+}
+
+#[tokio::test]
+#[serial]
 async fn the_owner_keeps_a_client_and_transfers_before_leaving() {
     let owner = realm_with_owner().await;
     let editor = invite_member(&owner, Role::Editor, 2).await;

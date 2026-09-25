@@ -325,8 +325,10 @@ Signaling 的发现在本 Realm 内按该类型找到它；Actor Registry 不另
   进程内通知，Signaling 以 close code 1008（`client revoked`）关闭这些 Actor 的连接并删除其 Actor
   Registry 记录与 presence 订阅，TURN 关闭其 allocation；Signaling upgrade、Issuer 签发（TURN
   credential 只随 Actor credential 签发）与 TURN 认证都拒绝「在 `revoked_actor` 中，或绑定 key 已撤销」
-  的 Actor。连接与 allocation 都在内存中，重启后必须重建并经过上述检查，因此无需重做。已签发
-  credential 在 Loran 之外到期失效（`token_ttl_secs`，默认 3600）。
+  的 Actor；Signaling upgrade 另拒绝 claims 的 `client_key` 不是该 Actor 当前绑定 key 的 credential
+  （重签已把 Actor 改绑，旧 key 此后被撤销也不会连带停用它）。连接与 allocation 都在内存中，重启后
+  必须重建并经过上述检查，因此无需重做。已签发 credential 在 Loran 之外到期失效（`token_ttl_secs`，
+  默认 3600）；改绑前旧 key 取得的 TURN credential 与已建立的连接同样以此为界。
 - 改角色只改记录；角色在下一份 credential 中生效。
 - `update_realm` 只用于 Realm Provider 域名下的 Realm：owner 更新 `package`、`display_name` 或退役，
   Loran 走与运营者 `UpdateRealm`、`…/retire` 相同的自签路径。其他 Realm 一律 `forbidden`。

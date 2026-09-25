@@ -289,7 +289,7 @@ async fn websocket_handler(
             }
         };
 
-        let actor_type = match AIdCredentialValidator::check(
+        let (actor_type, client_key) = match AIdCredentialValidator::check(
             &credential,
             &actor_id.realm,
             &state.server.provider_id,
@@ -308,7 +308,7 @@ async fn websocket_handler(
                     );
                     return axum::http::StatusCode::UNAUTHORIZED.into_response();
                 }
-                claims.actor_type
+                (claims.actor_type, claims.client_key)
             }
             Err(e) => {
                 platform::recording::warn!(
@@ -334,12 +334,13 @@ async fn websocket_handler(
         }
 
         // A disabled Actor (revoked, or its Realm client key revoked) does
-        // not connect again.
-        match platform::realm::membership::actor_disabled(&actor_id).await {
+        // not connect again, nor does a credential of a key a reissue moved
+        // the Actor from.
+        match platform::realm::membership::credential_refused(&actor_id, &client_key).await {
             Ok(false) => {}
             Ok(true) => {
                 platform::recording::warn!(
-                    "🚫 WebSocket Actor refused: ip={} actor={} is disabled",
+                    "🚫 WebSocket Actor refused: ip={} actor={} is disabled or its credential key was replaced",
                     client_ip,
                     actor_id.to_string_repr()
                 );
