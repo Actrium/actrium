@@ -507,23 +507,46 @@ async fn switches_only_to_an_issuer_key_the_accepted_profile_lists() {
     let name = "keys@acme.com";
     insert(name, RealmStatus::Active).await;
     let before = issuer_of(&profiles, name).await;
-    accept(name, &acme.profile(name, 1, "active", "rs-1", &before), &member).await;
+    accept(
+        name,
+        &acme.profile(name, 1, "active", "rs-1", &before),
+        &member,
+    )
+    .await;
     let old = RealmIssuerKey::current(name).await.unwrap().unwrap();
 
     // The key holder publishes the next key, then a Profile without it
     // (as a refresh from its realms location may bring).
     profiles.rotate_issuer_key(name).await.unwrap();
     let rotating = issuer_of(&profiles, name).await;
-    accept(name, &acme.profile(name, 2, "active", "rs-1", &rotating), &member).await;
-    accept(name, &acme.profile(name, 3, "active", "rs-1", &before), &member).await;
+    accept(
+        name,
+        &acme.profile(name, 2, "active", "rs-1", &rotating),
+        &member,
+    )
+    .await;
+    accept(
+        name,
+        &acme.profile(name, 3, "active", "rs-1", &before),
+        &member,
+    )
+    .await;
 
     let later = chrono::Utc::now().timestamp() + issuer::realm_profile::PREPUBLISH_SECS + 60;
     profiles.maintain_issuer_keys(later).await.unwrap();
     let current = RealmIssuerKey::current(name).await.unwrap().unwrap();
-    assert_eq!(current.key_id, old.key_id, "the accepted Profile does not list the next key");
+    assert_eq!(
+        current.key_id, old.key_id,
+        "the accepted Profile does not list the next key"
+    );
 
     // Listed again, it switches once the pre-publish period has passed.
-    accept(name, &acme.profile(name, 4, "active", "rs-1", &rotating), &member).await;
+    accept(
+        name,
+        &acme.profile(name, 4, "active", "rs-1", &rotating),
+        &member,
+    )
+    .await;
     let listed = RealmIssuerKey::list(name).await.unwrap();
     assert!(listed.iter().all(|key| key.published_at.is_some()));
     profiles.maintain_issuer_keys(later).await.unwrap();

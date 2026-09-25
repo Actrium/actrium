@@ -1424,6 +1424,9 @@ mod tests {
         assert!(matches!(outcome(pinned(2)), KeyPinOutcome::Accepted(_)));
         // A client that already accepted sequence 3 without rs-2 does not
         // take the rotation from it.
-        assert!(matches!(outcome(pinned(3)), KeyPinOutcome::IdentityChange(_)));
+        assert!(matches!(
+            outcome(pinned(3)),
+            KeyPinOutcome::IdentityChange(_)
+        ));
     }
 }
