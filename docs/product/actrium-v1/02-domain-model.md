@@ -125,7 +125,7 @@ Realm name = <realm_id>@<domain>                      # networked, e.g. k7m2q9xh
 ```
 
 - The Realm domain belongs to its owner and serves only as a naturally unique, ownership-verifiable name; it carries no infrastructure. A local Realm uses the pseudo-domain `<installation-id>.actr.alt` (generated at random at install time, never resolved via DNS), belonging to that Actrium installation;
-- the domain's Realm signing key is the long-term trust root for every Realm under that domain, and signs each Realm Profile individually; the Realm Profile's `package` records the package this instance runs (download location and SHA-256);
+- the domain's Realm signing key is the long-term trust root for every Realm under that domain, and signs each Realm Profile individually; the Realm Profile's `package` records the package this instance runs (download location, SHA-256 and Actor type);
 - the RealmId is unique within the domain, immutable after creation, and never reused after retirement;
 - one Realm Provider (Signaling, TURN, Issuer) hosts a large number of Realms; a Realm is bound to one Realm Provider at creation and can never switch afterward;
 - the Realm Provider records the members of a networked Realm: exactly one owner (the creator, transferable), the rest editors or viewers; members join with a one-time Realm invitation, and each client registers one Realm client key. A local Realm has no members.

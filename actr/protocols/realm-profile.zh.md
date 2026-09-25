@@ -97,7 +97,8 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
   },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>"
+    "sha256": "<64 hex>",
+    "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
@@ -137,6 +138,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `realm.status` | `active` 或 `retired`。 |
 | `package.href` | 该实例所运行包的 HTTPS 下载地址，可以在任何位置。 |
 | `package.sha256` | 该包全部字节的 SHA-256（小写十六进制）。 |
+| `package.type` | 该包 manifest 声明的 Actor 类型 `publisher/program@version`，即该实例 Service 的类型。 |
 | `issuer.url` | Issuer 的注册与验证端点。 |
 | `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥，1 至 3 项（第 6.1 节）。 |
 | `provider.id` | Realm Provider ID：Realm Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
@@ -176,8 +178,8 @@ Provider 不是信任根。
 ## 6. 使用 Realm
 
 Actr Host 以不带 credential 的 HTTPS GET 下载 `package.href`，**MUST** 核对
-`package.sha256`，并按 [Actor Package](actor-package.zh.md) 验证包签名；任一失败即不运行。
-包 manifest 声明的 Actor 类型即该实例的程序：实例的 Service 是本 Realm 内 Actor 类型与之
+`package.sha256`，并按 [Actor Package](actor-package.zh.md) 验证包签名，包 manifest 声明的 Actor 类型
+**MUST** 等于 `package.type`；任一失败即不运行。该类型即该实例的程序：实例的 Service 是本 Realm 内 Actor 类型与之
 相同的那个 Actor，恰好一个；零个或多于一个都是错误。
 
 Actr Host 只通过已接受 Realm Profile 指定的 Issuer 和 Realm Provider 访问 Realm。该 Realm
@@ -255,8 +257,8 @@ Provider 端点、`display_name` 与 `policy`，**MUST NOT** 更改 `provider.id
 
 新 Realm Profile 同样以 `publish_profile` 提交给 Realm Provider（持有方可先用 `draft_profile`
 取得含 Realm Provider 当前 issuer 与端点的草案）；`realms` 位置不在 Realm
-Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域名下的 Realm，由 Realm Provider 更改
-`package`、`display_name` 或 `policy` 并签署新 Realm Profile。
+Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域名下的 Realm，由 Realm Provider 按 owner 的
+`update_realm` 请求（Actr Realm Membership 第 4 节）更改 `package` 或 `display_name` 并签署新 Realm Profile。
 
 ### 7.3 由 key 持有方授权
 
@@ -264,7 +266,7 @@ Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域�
 不定义创建委派 key。Actr Host 按第 2.1 节的规则区分：
 
 - **Realm Provider 域名下的 Realm。** Realm Provider 就是持有方。版本 1 中这类 Realm 只由 Realm
-  Provider 的运营者创建与管理，不经 Realm 管理请求；运营者在创建时得到 owner 邀请，经带外渠道交给
+  Provider 的运营者创建，不经 Realm 管理请求，此后由 owner 以 membership 请求更新或退役；运营者在创建时得到 owner 邀请，经带外渠道交给
   用户（Actr Realm Membership 第 5 节）。由用户以 Realm Provider 账号自助创建属于后续工作（第 10 节）。
 - **其他 Realm。** 每个 Realm 管理请求都是由 `active` Realm 签名 key 签名的 Actr 管理信封
   （第 8 节），由 Realm 签名 key 持有方的签名服务签发；持有方可以是域名所有者，也可以是其
@@ -276,7 +278,8 @@ Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域�
 Realm Provider tombstone 并停止服务该 Realm。该 Realm 名永不复用。退役 Realm Profile 保持
 相同的 `provider.id`，且 sequence 更高。若该 Realm 的 Realm Provider 已停服，域名所有者把
 `realms` link 改指自己控制的位置，并在那里发布退役 Realm Profile。属于 Realm Provider 的
-域名随其一起消失：其中的 Realm 无法退役，只能在别处重新创建。
+域名随其一起消失：其中的 Realm 无法退役，只能在别处重新创建。Realm Provider 域名下的 Realm 由 Realm Provider
+按 owner 的 `update_realm` 请求发布退役 Realm Profile。
 
 ### 7.5 Realm 签名 key 丢失
 
@@ -307,7 +310,7 @@ Realm 管理请求只用于 Realm Provider 域名以外的 Realm（第 7.3 节�
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
-  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>" },
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>", "type": "notes.example/team-notes@1.4.2" },
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",

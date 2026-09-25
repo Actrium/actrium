@@ -127,7 +127,7 @@ Realm 名 = <realm_id>@<domain>                      # 联网，如 k7m2q9xh@acm
 
 - Realm 域名归域名所有者，只用作天然唯一、归属可验证的名字，不承载基础设施；本机 Realm 使用
   伪域名 `<installation-id>.actr.alt`（安装时随机生成，永不经 DNS 解析），归该 Actrium 安装；
-- 域名的 Realm 签名 key 是该域名下所有 Realm 的长期信任根，逐个签发 Realm Profile；Realm Profile 的 `package` 写明该实例运行的包（下载地址与 SHA-256）；
+- 域名的 Realm 签名 key 是该域名下所有 Realm 的长期信任根，逐个签发 Realm Profile；Realm Profile 的 `package` 写明该实例运行的包（下载地址、SHA-256 与 Actor 类型）；
 - RealmId 在域名内唯一、创建后不可修改、退役后永不复用；
 - 一个 Realm Provider（信令、TURN、Issuer）承载大量 Realm；Realm 在创建时绑定一个 Realm Provider，此后不可更换；
 - 联网 Realm 的成员由 Realm Provider 记录：恰好一个 owner（创建者，可转让），其余为 editor 或 viewer；成员凭一次性 Realm 邀请加入，每个客户端登记一把 Realm 客户端 key。本机 Realm 没有成员。

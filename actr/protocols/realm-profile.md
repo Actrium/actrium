@@ -122,7 +122,8 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
   },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>"
+    "sha256": "<64 hex>",
+    "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
@@ -162,6 +163,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `realm.status` | `active` or `retired`. |
 | `package.href` | HTTPS download address of the package the instance runs; it may be anywhere. |
 | `package.sha256` | SHA-256 of all bytes of that package, in lowercase hexadecimal. |
+| `package.type` | The Actor type `publisher/program@version` declared by that package's manifest, that is, the type of the instance's Service. |
 | `issuer.url` | Registration and verification endpoint of the Issuer. |
 | `issuer.keys` | Realm issuer public keys used to verify Actor credentials, 1 to 3 entries (Section 6.1). |
 | `provider.id` | Realm Provider ID: the Realm Provider's canonical DNS authority. It never changes during the Realm's life. |
@@ -208,9 +210,10 @@ it, an Actr Host **MUST** stop using the Realm.
 
 An Actr Host downloads `package.href` with an HTTPS GET that carries no
 credentials, **MUST** check `package.sha256`, and verifies the package
-signature as in [Actor Package](actor-package.zh.md) (Chinese only); if any
-check fails, it does not run the package. The Actor type declared in the
-package manifest is the instance's program: the instance's Service is the one
+signature as in [Actor Package](actor-package.zh.md) (Chinese only); the
+Actor type declared in the package manifest **MUST** equal `package.type`. If
+any check fails, it does not run the package. That type is the instance's
+program: the instance's Service is the one
 Actor in this Realm with that Actor type; finding none or more than one is an
 error.
 
@@ -322,8 +325,9 @@ A new Realm Profile is likewise submitted to the Realm Provider with
 `publish_profile` (the holder may first obtain a draft with the Realm
 Provider's current issuer and endpoints through `draft_profile`); if the `realms` location is not at the Realm Provider, the
 holder also publishes it there. For a Realm under the Realm Provider's domain,
-the Realm Provider changes `package`, `display_name`, or `policy` and signs
-the new Realm Profile.
+the Realm Provider changes `package` or `display_name` at the owner's
+`update_realm` request (Actr Realm Membership, Section 4) and signs the new
+Realm Profile.
 
 ### 7.3 Authorization by the key holder
 
@@ -333,8 +337,9 @@ no delegated creation keys. The Actr Host tells the cases apart with the rule
 of Section 2.1:
 
 - **A Realm under the Realm Provider's domain.** The Realm Provider is the
-  holder. In version 1 only the Realm Provider's operator creates and manages
-  these Realms, without Realm management requests; the operator receives the
+  holder. In version 1 only the Realm Provider's operator creates these Realms,
+  without Realm management requests, and the owner then updates or retires
+  them with membership requests; the operator receives the
   owner invite at creation and hands it to the user out of band (Actr Realm
   Membership, Section 5). Self-service creation by users with Realm Provider
   accounts is future work (Section 10).
@@ -353,7 +358,9 @@ Profile keeps the same `provider.id` and has a higher sequence. If the Realm's
 Realm Provider has shut down, the domain owner points the `realms` link at a
 location it controls and publishes the retired Realm Profile there. A domain
 owned by a Realm Provider disappears with it: its Realms cannot be retired
-and can only be recreated elsewhere.
+and can only be recreated elsewhere. For a Realm under the Realm Provider's
+domain, the Realm Provider publishes the retired Realm Profile at the owner's
+`update_realm` request.
 
 ### 7.5 Realm signing key loss
 
@@ -389,7 +396,7 @@ The payload of a `create_realm` request is:
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
-  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>" },
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>", "type": "notes.example/team-notes@1.4.2" },
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",

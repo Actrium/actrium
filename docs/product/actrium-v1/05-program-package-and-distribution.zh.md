@@ -77,7 +77,7 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 
 平台不负责「按程序名找包」。包只有两个来源：
 
-- **打开实例**：Realm Profile 的 `package` 给出下载地址与 SHA-256（[Actr Realm Profile](../../../actr/protocols/realm-profile.zh.md)）；
+- **打开实例**：Realm Profile 的 `package` 给出下载地址、SHA-256 与 Actor 类型（[Actr Realm Profile](../../../actr/protocols/realm-profile.zh.md)）；
 - **新建实例**：用户在 Program Catalog、Marketplace、本地文件或一个包地址中选定。发现程序、查询新版本属于 Marketplace 与 Publisher 自己的渠道。
 
 无论来源，验证都一样：核对 SHA-256，再用 Publisher Profile 的包签名 key 验证包签名（第 8 节）。下载地址放在哪里都不影响安全。

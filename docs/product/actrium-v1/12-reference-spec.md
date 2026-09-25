@@ -113,7 +113,8 @@ Which package an instance runs is written into its Realm Profile's `package` (sa
 ```json
 "package": {
   "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-  "sha256": "<64 hex>"
+  "sha256": "<64 hex>",
+  "type": "notes.example/team-notes@1.4.2"
 }
 ```
 
@@ -414,7 +415,8 @@ Sample:
   },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>"
+    "sha256": "<64 hex>",
+    "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",

@@ -140,7 +140,7 @@ A Realm Profile contains at least:
 - schema (`actr.realm/v1`);
 - `realm.name` (the full Realm name) and a display name;
 - `status`: `active` or `retired`;
-- `package`: the package this instance runs (download address and SHA-256), required when `active`;
+- `package`: the package this instance runs (download address, SHA-256 and Actor type), required when `active`;
 - a monotonic `sequence` and issue time `issued_at` (a Realm Profile does not expire);
 - the issuer URL and Realm issuer keys/key ids (the Actor credential's issuer is the Realm name);
 - the Realm Provider ID, signaling endpoints, STUN/TURN endpoints;
@@ -386,7 +386,7 @@ Membership and instance authorization are two separate layers: Realm membership 
 
 1. The Actr Host generates or reads the Actor's long-term key;
 2. It requests a new ActorId or reclaims an existing ActorId;
-3. The Issuer verifies that the request is signed by a registered, unrevoked Realm client key (Realm membership), the Actor type and allowed claims; the Service type is accepted only from the owner's clients; it additionally verifies platform attestation when a managed runtime is required;
+3. The Issuer verifies that the request is signed by a registered, unrevoked Realm client key (Realm membership), the Actor type and allowed claims; Actors of the instance's program (the publisher and program name of `package.type`, in any version) are registered only from the owner's clients; it additionally verifies platform attestation when a managed runtime is required;
 4. The Issuer issues a short-lived Actor credential carrying the ActorId, the Actor type, the member id, the Realm client key id and the role;
 5. The Actor uses the short-lived ticket to connect to signaling;
 6. Signaling verifies the issuer, audience, ActorId and proof.
@@ -410,9 +410,10 @@ Each networked Realm has exactly one owner: the instance's creator, who holds bo
 - Changing a role: owner only; it changes only application permissions and revokes no key; it takes effect in the member's next Actor credential.
 - Transferring ownership: atomic; the previous owner becomes an editor by default. The owner must transfer before leaving and cannot revoke its own last client.
 - Leaving a Realm: a member removes itself, with the same effect as removal.
+- Updates and retirement: for an instance under the Realm Provider's domain the owner sends `update_realm` and the Realm Provider signs the new or retired Realm Profile; other Realms go through the Realm signing key holder.
 - Owner recovery: when the owner has lost all its clients, the Realm signing key holder (`reissue_owner_invite`) or the Realm Provider's operator issues a new owner invite; redeeming it adds a new client to the owner and revokes all of the owner's previous Realm client keys.
 
-Once a Realm client key is revoked, the Realm Provider immediately refuses its new requests and new Actor credentials, revokes every Actor it registered, and closes those Actors' signaling connections and TURN allocations; Actor credentials already issued stop working outside the Realm Provider (for example where a Service checks a Front) when they expire (at most 1 hour by default on Loran). A Service treats the Front credential's expiry as the limit of an Attach session and reads the role again when the Front presents a renewed credential.
+Once a Realm client key is revoked, the Realm Provider immediately refuses its new requests and new Actor credentials, revokes the unused invites it issued, disables every Actor bound to it and closes those Actors' signaling connections and TURN allocations; the same member can reissue with another of its unrevoked keys and the Actor private key to move an Actor over (FR-NET-006), while a removed member cannot; Actor credentials already issued stop working outside the Realm Provider (for example where a Service checks a Front) when they expire (at most 1 hour by default on Loran). A Service treats the Front credential's expiry as the limit of an Attach session and reads the role again when the Front presents a renewed credential.
 
 ## 8. Signaling authentication credentials
 

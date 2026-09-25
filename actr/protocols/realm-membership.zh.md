@@ -51,8 +51,8 @@ v1 不定义 Realm Provider 账号、多个 owner 或域名级 SSO。
 
 - 邀请只经带外渠道交付。它 **MUST NOT** 出现在 `actr://` URI、Realm 链接的 https 形式、query 或
   fragment 中。
-- 内嵌的 `profile` 按 Realm Profile 第 5 节验证，与经 HTTPS 取得的相同；Actr Host 仍 **SHOULD** 从 `realms`
-  位置刷新。
+- 内嵌的 `profile` 按 Realm Profile 第 5 节验证，与经 HTTPS 取得的相同，其 `realm.name` **MUST** 等于
+  `realm`；Actr Host 仍 **SHOULD** 从 `realms` 位置刷新。
 - 持有邀请即可兑换，接收方 **SHOULD** 尽快兑换；签发方可在兑换前撤销。
 
 ## 4. Membership 请求
@@ -69,14 +69,18 @@ Actr Host 以 HTTPS `POST <issuer.url>/membership` 发送 membership 请求（pr
 | `create_invite` | `role`（`editor`/`viewer`）或 `member_id`，加 `invite_expires_at` | 新成员邀请：owner；客户端邀请：owner，或成员为自己 | 响应 `{invite_id, invite, expires_at}`，`invite` 为文本形式，只返回这一次 |
 | `revoke_invite` | `invite_id` | owner，或该邀请的签发者 | 未用的邀请失效 |
 | `list_members` | 无 | 任何成员 | owner 得到全部成员、客户端与未用邀请；其他成员只得到自己的记录、客户端与自己签发的邀请 |
-| `revoke_client` | `key_id` | 成员撤销自己的客户端；owner 撤销任何客户端 | 该 key 撤销（第 6 节） |
+| `revoke_client` | `key_id` | 成员撤销自己的客户端；owner 撤销任何客户端 | 该 key 撤销（第 6 节），它签发的未用邀请一并撤销 |
 | `remove_member` | `member_id` | owner（不能是自己） | 成员移除，其全部客户端 key 撤销 |
 | `set_role` | `member_id`、`role`（`editor`/`viewer`） | owner（不能是自己） | 只改角色 |
-| `transfer_owner` | `member_id`、可选 `previous_owner_role`（缺省 `editor`） | owner | 原子地把 owner 交给另一 active 成员，原 owner 改为指定角色 |
+| `transfer_owner` | `member_id`、可选 `previous_owner_role`（缺省 `editor`） | owner | 原子地把 owner 交给另一 active 且至少有一把未撤销客户端 key 的成员，原 owner 改为指定角色 |
 | `leave` | 无 | 非 owner 成员 | 移除自己，效果同 `remove_member` |
+| `update_realm` | 可选 `package`、`display_name`，或 `status: "retired"` | owner；只用于 Realm Provider 域名下的 Realm | Realm Provider 签署并发布 sequence 更高的 Realm Profile（Realm Profile 第 7.2、7.4 节）；响应 `{realm, sequence}` |
 
 `join` 请求中 `signature.key_id` **MUST** 等于由 `public_key` 算出的 `key_id`，签名即持有证明。其他请求的签名
 key **MUST** 是该 Realm 已登记、未撤销、属于 `active` 成员的 Realm 客户端 key。
+
+Realm Provider 先检查角色，再查找目标：无权执行的请求一律 `forbidden`，不以 `not_found` 透露目标是否存在。
+其他 Realm 的更新与退役仍由 Realm 签名 key 持有方经 Realm 管理请求完成，对它们发 `update_realm` 得到 `forbidden`。
 
 `label` 是客户端名称，至多 64 个字符，供成员辨认自己的客户端。`invite_expires_at` 为 RFC 3339 时间，不超过
 签发时刻后 30 天。
@@ -84,7 +88,8 @@ key **MUST** 是该 Realm 已登记、未撤销、属于 `active` 成员的 Real
 ### 4.1 兑换规则
 
 Realm Provider 在单个事务中兑换邀请：记录邀请已用，按邀请建立新成员或定位目标成员，登记 key。两个并发兑换
-最多一个成功。同一把 key 重复兑换同一邀请（响应丢失后的重试）返回首次的结果。
+最多一个成功；超过限额（`quota`）时邀请不被消耗。同一把 key 重复兑换同一邀请（响应丢失后的重试），只要
+该 key 仍未撤销、成员仍为 `active`，就返回首次的结果，否则返回 `invite_used`。
 
 - 带 `role` 的邀请建立新成员。`owner` 角色的邀请（owner 邀请）只由 Realm 签名 key 持有方或 Realm Provider
   运营者签发（第 5 节）：Realm 尚无 owner 时建立 owner；已有 owner 时，新 key 成为该 owner 成员的客户端，
@@ -126,7 +131,7 @@ owner 邀请是 `role = owner` 的邀请，有效期 7 天。签发新的 owner 
   `owner_invite`（文本形式）；此后以 `reissue_owner_invite`（Realm Profile 第 8 节）签发新的，用于 owner 丢失
   全部客户端时的恢复。
 - **Realm Provider 域名下的 Realm。** v1 只由 Realm Provider 运营者创建，创建时得到 owner 邀请，经带外渠道交给
-  用户；恢复同样由运营者签发。签发接口不属于本协议。
+  用户；恢复同样由运营者签发。签发接口不属于本协议。此后 owner 以 `update_realm` 更新或退役该 Realm。
 
 ## 6. Actor credential 与 membership
 
@@ -144,10 +149,13 @@ JSON 是 Actr 管理信封，`op` 为 `register`、`reissue` 或 `renew`（对�
 Issuer 只在以下条件都满足时签发：
 
 1. 签名 key 已在该 Realm 登记、未撤销，所属成员为 `active`；
-2. 重签与续期时，签名 key 就是该 Actor 注册时所用的 key；
-3. Actor 类型等于 Realm Profile `package` 所指包的类型（即该实例的 Service）时，签名 key 属于 owner。
+2. 续期时，签名 key 是该 Actor 当前绑定的 key；重签时，签名 key 属于该 Actor 所属的成员，重签成功后 Actor
+   改绑到这把 key（成员可凭 Actor 私钥把自己的 Actor 移到自己的另一个客户端）；
+3. 注册时，若 Actor 类型的 publisher 与程序名等于 Realm Profile `package.type` 的（不论版本，即该实例的
+   Service 及其升级版本），签名 key 属于 owner。续期与重签不再检查角色，owner 转让不影响运行中的 Service。
 
-Issuer 只把 owner 客户端注册时携带的连接 ACL 写入；其他成员注册时携带的 ACL 被忽略。
+注册携带的连接 ACL 只作用于所注册 Actor 自己的类型；Service 的程序只有 owner 能注册，其他成员因此不能改写
+Service 的 ACL。
 
 Actor credential 的 claims 包含成员 id、Realm 客户端 key id 与签发时的角色。Service **MAY** 据此判断 Front 的
 应用权限；它 **MUST** 以 Front credential 的到期时间为该判断的有效期，Front 续期后出示新 credential 时再读取
@@ -155,11 +163,13 @@ Actor credential 的 claims 包含成员 id、Realm 客户端 key id 与签发�
 
 撤销 Realm 客户端 key（包括移除成员、`leave` 与 owner 恢复）时，Realm Provider **MUST** 立即：
 
-- 拒绝该 key 的新请求，包括签发 Actor credential；
-- 撤销该 key 注册的全部 Actor，拒绝它们续期与重签；
-- 关闭这些 Actor 的 signaling 连接与 TURN allocation，拒绝它们重连。
+- 拒绝该 key 的新请求，包括签发 Actor credential；撤销它签发的未用邀请；
+- 停用当前绑定到该 key 的全部 Actor：拒绝它们续期，关闭它们的 signaling 连接与 TURN allocation，拒绝它们
+  重连、取得 TURN credential。
 
-已签发的 Actor credential 在 Realm Provider 之外（例如对端 Actor 的验证）到期失效。改角色不撤销任何 key，
+ActorId 不因此作废：同一 `active` 成员可用自己另一把未撤销的 key 重签（上文第 2 条），Actor 随之恢复。被移除
+或离开的成员没有可用的 key，其 Actor 永久停用。已签发的 Actor credential 在 Realm Provider 之外（例如对端
+Actor 的验证）到期失效。改角色不撤销任何 key，
 在该成员下一份 Actor credential 生效。
 
 Realm 客户端 key 是 Actr Host 的能力，**MUST NOT** 交给 Guest workload。
@@ -170,8 +180,10 @@ Realm 客户端 key 是 Actr Host 的能力，**MUST NOT** 交给 Guest workload
   Actr Host **SHOULD** 默认使用不含个人信息的名称。
 - 邀请是 bearer secret：泄露的未用邀请可被他人兑换。签发方 **SHOULD** 选短有效期，发现泄露时撤销；
   owner 在 `list_members` 中能看到每个成员及其客户端，可移除误入者。
-- owner 邀请的持有方与运营者能恢复 owner，因此它们处于 Realm 的信任边界内，这与它们本就能签发 Realm Profile 或
-  停用 Realm 一致。
+- owner 邀请的持有方与运营者能恢复 owner，因此它们处于 Realm 的信任边界内，这与它们本就能签发 Realm Profile、
+  停用 Realm（Realm Provider 还持有 Realm issuer key）一致。
+- owner 恢复撤销 owner 原有的全部客户端 key 与它们签发的未用邀请，被盗的 owner key 因此无法与恢复者反复争夺。
+  被盗期间对方可能已邀请成员或转让 owner；恢复后 owner **SHOULD** 在 `list_members` 中核对并移除。
 - Actor credential 有效期是撤销在 Realm Provider 之外生效的上限；Realm Provider **SHOULD** 保持较短的
   credential 有效期。
 

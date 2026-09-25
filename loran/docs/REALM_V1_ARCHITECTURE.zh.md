@@ -111,8 +111,9 @@ Realm Provider 只持有 Realm issuer key 私钥；只有受托成为 Realm 签�
 
 Realm 客户端 key 是 Actr Host 能力，不是 Guest workload credential。Issuer 的注册入口同时要求
 Realm 客户端 key 的持有证明与 package/linked 身份证明；Actrium/Rill 等 Actr Host 持有该 key，
-但不得把它暴露给用户编写的 Rill Guest。注册请求携带的连接 ACL 因此是 Actr Host 管理行为，且只在
-owner 的客户端注册时写入；无 ACL 时默认拒绝发现/中继。
+但不得把它暴露给用户编写的 Rill Guest。注册请求携带的连接 ACL 因此是 Actr Host 管理行为，只作用于
+所注册 Actor 自己的类型；该实例程序的 Actor 只有 owner 的客户端能注册（见 4.1），其他成员因此改不了
+Service 的 ACL；无 ACL 时默认拒绝发现/中继。
 
 ## 3. Realm 创建与激活
 
@@ -121,7 +122,7 @@ owner 的客户端注册时写入；无 ACL 时默认拒绝发现/中继。
 创建 Realm 不需要按 Realm 或按域名做 challenge 验证；授权来自 Realm 签名 key 持有方：
 
 1. 调用方（Realm 签名 key 持有方的签名工具、实例运营者或 supervisor）以 3.2 的 Realm 管理
-   请求提交 `create_realm`，其中携带该实例要运行的包 `package`（下载地址与 SHA-256）；
+   请求提交 `create_realm`，其中携带该实例要运行的包 `package`（下载地址、SHA-256 与 Actor 类型）；
 2. Loran 获取该域名的 authority descriptor（见 5.1）并验证 `realm_signing_keys`，再用
    其中的 key 验证请求签名；通过后创建 `pending` Realm，在 Issuer Signer 中生成该 Realm
    的 Realm issuer key，在响应中返回待签 Realm Profile payload（`package`、Realm issuer
@@ -310,15 +311,19 @@ Signaling 的发现在本 Realm 内按该类型找到它；Actor Registry 不另
   移除、转让各在一个 `BEGIN IMMEDIATE` 事务中完成。
 - 申请 Actor credential：`/issuer/register`、`/issuer/reissue`、`/issuer/renew` 都须带
   `x-actr-client-proof`（`op` 为对应入口、含请求体 SHA-256 的 Actr 管理信封）。Issuer 只对已登记、
-  未撤销、属于 active 成员的 key 签发；重签与续期须用该 Actor 注册时的 key；与 Realm Profile 所指包
-  同类型的 Actor（即 Service）只接受 owner 的客户端；提交事务内重查 key 与成员状态。
-  `issued_actor_identity` 记录每个 Actor 的成员与 key。
-- 撤销 key（客户端撤销、移除成员、离开、owner 恢复）：同一事务内撤销 key、把该 key 注册的 Actor 写入
-  `revoked_actor` 并删除其 renewal token 与 attempt 记录；提交后 Signaling 以 close code 1008 关闭
-  这些 Actor 的连接并删除其 Actor Registry 记录，upgrade 时拒绝已撤销的 Actor，TURN 关闭其
-  allocation。两步幂等，重启时重做。已签发 credential 在 Loran 之外到期失效（`token_ttl_secs`，
-  默认 3600）。
+  未撤销、属于 active 成员的 key 签发；续期须用该 Actor 当前绑定的 key，重签可用同一成员的任一未撤销
+  key 并把 Actor 改绑过去；注册时，Actor 类型的 publisher 与程序名等于 Realm Profile `package.type` 的
+  （即 Service 及其升级版本）只接受 owner 的客户端；提交事务内重查 key 与成员状态。
+  `issued_actor_identity` 记录每个 Actor 的成员与当前绑定的 key。
+- 撤销 key（客户端撤销、移除成员、离开、owner 恢复）：同一事务内撤销 key 及它签发的未用邀请，删除
+  绑定到它的 Actor 的 renewal token 与 attempt 记录；不写 `revoked_actor`（同一成员可重签取回）。
+  提交后 Signaling 以 close code 1008 关闭这些 Actor 的连接并删除其 Actor Registry 记录，TURN 关闭其
+  allocation；Signaling upgrade、ice-config 签发 TURN credential 与 TURN 认证都拒绝绑定 key 已撤销的
+  Actor。连接与 allocation 都在内存中，重启后必须重建并经过上述检查，因此无需重做。已签发 credential
+  在 Loran 之外到期失效（`token_ttl_secs`，默认 3600）。
 - 改角色只改记录；角色在下一份 credential 中生效。
+- `update_realm` 只用于 Realm Provider 域名下的 Realm：owner 更新 `package`、`display_name` 或退役，
+  Loran 走与运营者 `UpdateRealm`、`…/retire` 相同的自签路径。其他 Realm 一律 `forbidden`。
 
 ## 5. Realm 签名 key 与 Realm Profile
 
@@ -424,7 +429,7 @@ Provider 主密钥经 HKDF 以 Realm 名和 Realm Provider ID 派生。第三方
 | 缓存串 Realm | signaling presence、Actor Registry、TURN authenticator cache、renewal token、连接 ACL 的 key 均包含 Realm；禁止仅以 Actor serial 或类型做 key |
 | Discovery 越界 | Discovery 与 RouteCandidates 只返回同 Realm 的 Actor；v1 不做跨 Realm 发现 |
 | 管理越权 | Realm 管理请求只作用于签名 key 所属 Realm 域名；membership 请求的签名 key 只在其所属 Realm 内查找，角色逐请求检查；列表接口只返回作用域内的 Realm |
-| 成员越权 | Service 类型只接受 owner 客户端注册；连接 ACL 只由 owner 客户端的注册写入；owner 身份只经 owner 邀请或转让产生 |
+| 成员越权 | 该实例程序（`package.type` 的 publisher 与程序名）的 Actor 只接受 owner 客户端注册；注册携带的 ACL 只作用于所注册 Actor 自己的类型；角色检查先于目标查找；owner 身份只经 owner 邀请或转让产生 |
 | 未激活或已挂起的 Realm 被使用 | 只有 `active` Realm 签发 Actor credential、接受连接与分配 TURN |
 | 删除后残留 | 退役在单一事务中撤销 Actor credential、renewal token 与续期/重签 attempt 记录、未用的 Realm 邀请、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key，并写入以 Realm 名为键的 Realm Provider tombstone |
 | 资源挤占 | 按 Realm 域名与按 Realm 配额 |
@@ -461,7 +466,7 @@ Publisher Profile 签名 key 签名，同样绑定 `provider_id`、5 分钟有�
 发送 `register_publisher` 完成（见第 9 节）。
 
 程序身份写作 `publisher/program@version`。实例运行哪个包由 Realm Profile 的 `package`
-（下载地址与 SHA-256）给出，包可以放在任何 HTTPS 位置；消费端必须核对 SHA-256，并验证
+（下载地址、SHA-256 与 Actor 类型）给出，包可以放在任何 HTTPS 位置；消费端必须核对 SHA-256，并验证
 manifest、publisher key 签名和 key revocation 状态。
 
 包托管：`loran-packages` 只是按内容寻址托管 `.actr` 文件的静态下载服务，

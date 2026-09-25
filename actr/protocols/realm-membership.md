@@ -69,8 +69,8 @@ JSON's UTF-8 bytes, suitable for a message, an email, a QR code or a file.
   `actr://` URI, in the https form of a Realm link, or in a query or
   fragment.
 - An embedded `profile` is verified per Realm Profile section 5, exactly like
-  one fetched over HTTPS; the Actr Host still **SHOULD** refresh it from the
-  `realms` location.
+  one fetched over HTTPS, and its `realm.name` **MUST** equal `realm`; the Actr
+  Host still **SHOULD** refresh it from the `realms` location.
 - Whoever holds an invite can redeem it, so the recipient **SHOULD** redeem it
   promptly; the issuer can revoke it before then.
 
@@ -92,16 +92,23 @@ no `requester`.
 | `create_invite` | `role` (`editor`/`viewer`) or `member_id`, plus `invite_expires_at` | New-member invite: the owner; client invite: the owner, or a member for itself | Responds `{invite_id, invite, expires_at}`, where `invite` is the text form, returned only this once |
 | `revoke_invite` | `invite_id` | The owner, or whoever issued the invite | The unused invite stops working |
 | `list_members` | none | Any member | The owner gets all members, clients and unused invites; other members get only their own record, clients and the invites they issued |
-| `revoke_client` | `key_id` | A member for its own clients; the owner for any client | The key is revoked (section 6) |
+| `revoke_client` | `key_id` | A member for its own clients; the owner for any client | The key is revoked (section 6), together with the unused invites it issued |
 | `remove_member` | `member_id` | The owner (not for itself) | The member is removed and all its Realm client keys revoked |
 | `set_role` | `member_id`, `role` (`editor`/`viewer`) | The owner (not for itself) | Changes only the role |
-| `transfer_owner` | `member_id`, optional `previous_owner_role` (default `editor`) | The owner | Atomically hands ownership to another active member; the previous owner takes the given role |
+| `transfer_owner` | `member_id`, optional `previous_owner_role` (default `editor`) | The owner | Atomically hands ownership to another active member that has at least one unrevoked client key; the previous owner takes the given role |
 | `leave` | none | A member other than the owner | Removes itself, with the effect of `remove_member` |
+| `update_realm` | optional `package`, `display_name`, or `status: "retired"` | The owner; only for Realms under the Realm Provider's domain | The Realm Provider signs and publishes a Realm Profile with a higher sequence (Realm Profile sections 7.2 and 7.4); responds `{realm, sequence}` |
 
 In a `join` request, `signature.key_id` **MUST** equal the `key_id` computed
 from `public_key`; the signature is the proof of possession. For every other
 request the signing key **MUST** be a registered, unrevoked Realm client key of
 an `active` member of the Realm.
+
+The Realm Provider checks the role before looking up the target: a request
+the sender may not make always gets `forbidden`, so `not_found` never reveals
+whether a target exists. Other Realms are still updated and retired by the
+Realm signing key holder through Realm management requests; `update_realm` for
+them gets `forbidden`.
 
 `label` is a client name of at most 64 characters that lets members tell their
 clients apart. `invite_expires_at` is an RFC 3339 time no more than 30 days
@@ -111,9 +118,11 @@ after issuance.
 
 The Realm Provider redeems an invite in a single transaction: it marks the
 invite used, creates the new member or finds the target member, and registers
-the key. Of two concurrent redemptions at most one succeeds. Redeeming the same
-invite again with the same key (a retry after a lost response) returns the
-first result.
+the key. Of two concurrent redemptions at most one succeeds; when a quota would be
+exceeded (`quota`) the invite is not consumed. Redeeming the same invite again
+with the same key (a retry after a lost response) returns the first result as
+long as the key is still unrevoked and the member still `active`; otherwise
+the answer is `invite_used`.
 
 - An invite with a `role` creates a new member. Invites with the `owner` role
   (owner invites) are issued only by the Realm signing key holder or the Realm
@@ -169,7 +178,8 @@ new owner invite invalidates the Realm's earlier unused owner invites.
 - **Realms under the Realm Provider's domain.** In version 1 only the Realm
   Provider's operator creates them and receives the owner invite at creation,
   handing it to the user out of band; the operator also issues recovery
-  invites. How it does so is outside this protocol.
+  invites. How it does so is outside this protocol. The owner then updates or
+  retires the Realm with `update_realm`.
 
 ## 6. Actor credentials and membership
 
@@ -193,15 +203,19 @@ The Issuer issues only when all of the following hold:
 
 1. the signing key is registered in the Realm, not revoked, and its member is
    `active`;
-2. for reissue and renewal, the signing key is the one the Actor was
-   registered with;
-3. if the Actor type equals the type of the package named by the Realm
-   Profile's `package` (that is, the instance's Service), the signing key
-   belongs to the owner.
+2. for renewal, the signing key is the one the Actor is currently bound to;
+   for reissue, the signing key belongs to the Actor's member, and a
+   successful reissue rebinds the Actor to that key (so a member holding the
+   Actor private key can move its Actor to another of its clients);
+3. at registration, if the Actor type's publisher and program name equal those
+   of the Realm Profile's `package.type` (in any version, that is, the
+   instance's Service and its upgrades), the signing key belongs to the owner.
+   Renewal and reissue do not check the role again, so an ownership transfer
+   does not affect a running Service.
 
-The Issuer stores the connection ACL carried by a registration only when the
-owner's client registers; an ACL carried by another member's registration is
-ignored.
+A connection ACL carried by a registration applies only to the registering
+Actor's own type; since only the owner can register the Service's program,
+other members cannot rewrite the Service's ACL.
 
 Actor credential claims include the member id, the Realm client key id and
 the role at issuance. A Service **MAY** use them to decide a Front's
@@ -213,14 +227,16 @@ When a Realm client key is revoked (including by removing a member, `leave`
 and owner recovery), the Realm Provider **MUST** immediately:
 
 - refuse new requests signed with the key, including Actor credential
-  issuance;
-- revoke every Actor registered with the key and refuse their renewal and
-  reissue;
-- close those Actors' signaling connections and TURN allocations and refuse
-  their reconnection.
+  issuance, and revoke the unused invites it issued;
+- disable every Actor currently bound to the key: refuse their renewal, close
+  their signaling connections and TURN allocations, and refuse their
+  reconnection and TURN credentials.
 
-Actor credentials already issued stop working outside the Realm Provider (for
-example, where a peer Actor verifies them) when they expire. Changing a role
+The ActorIds are not voided: the same `active` member can reissue with another
+of its unrevoked keys (item 2 above), which brings the Actor back. A removed
+member, or one that has left, has no usable key, so its Actors stay disabled
+for good. Actor credentials already issued stop working outside the Realm
+Provider (for example, where a peer Actor verifies them) when they expire. Changing a role
 revokes no key; it takes effect in the member's next Actor credential.
 
 A Realm client key is a capability of the Actr Host and **MUST NOT** be given
@@ -238,7 +254,12 @@ to Guest workloads.
 - The holder of the Realm signing key and the operator can recover ownership
   through owner invites, so they sit inside the Realm's trust boundary, which
   is consistent with their existing power to sign Realm Profiles or suspend the
-  Realm.
+  Realm (the Realm Provider also holds the Realm issuer key).
+- Owner recovery revokes all of the owner's previous client keys and the unused
+  invites they issued, so a stolen owner key cannot keep fighting the
+  recovering party. While it was stolen, the other party may have invited
+  members or transferred ownership; after recovery the owner **SHOULD** review
+  `list_members` and remove them.
 - An Actor credential's lifetime bounds how long a revocation takes to reach
   places outside the Realm Provider; Realm Providers **SHOULD** keep it short.
 

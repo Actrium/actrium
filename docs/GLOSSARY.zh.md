@@ -91,7 +91,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Realm 签名 key 轮换链（`rotations`） | 旧 key 签名 `{from, to, public_key, sequence}` 认可新 key 的记录；没有轮换链的 key 变化视为身份变化，需重新确认信任。 |
 | `realms` relation | authority descriptor 中指向 Realm Profile 存放位置的链接：`GET <href>/<realm_id>`。 |
 | `realm-management` relation | Realm Provider 自身 authority descriptor 中的 Realm 管理请求端点（`POST`，protocol `actr-realm-management/1`）。 |
-| Realm Profile（`actr.realm/v1`） | 每个 Realm 一份的公开文档，由 Realm 签名 key 签名：`realm.name`、状态、该实例运行的包（`package`：下载地址与 SHA-256）、Realm issuer key、Realm Provider 与端点。放在哪都行（`realms` 位置、Realm Provider、Realm 邀请内嵌），存放方不成为信任根，有效性只看签名；不过期，回滚保护只靠 Realm Profile sequence；`provider.id` 在 Realm 生命周期内不可变。签名 key 被移除后，回退到仍在 `keys` 中的 key 签署的最近一份。 |
+| Realm Profile（`actr.realm/v1`） | 每个 Realm 一份的公开文档，由 Realm 签名 key 签名：`realm.name`、状态、该实例运行的包（`package`：下载地址、SHA-256 与 Actor 类型）、Realm issuer key、Realm Provider 与端点。放在哪都行（`realms` 位置、Realm Provider、Realm 邀请内嵌），存放方不成为信任根，有效性只看签名；不过期，回滚保护只靠 Realm Profile sequence；`provider.id` 在 Realm 生命周期内不可变。签名 key 被移除后，回退到仍在 `keys` 中的 key 签署的最近一份。 |
 | 退役 Realm Profile | `status: retired` 的 Realm Profile，由 Realm 签名 key 签署，永久有效，Realm 名不再复用。退役只有这一条路径。 |
 | Realm issuer key | Issuer 为每个 Realm 持有的签名 key：私钥在 Realm Provider 的 Issuer Signer 中，公钥列在 Realm Profile。 |
 | Actor credential | Issuer 签发给 Actor 的短期凭证：issuer 字段即 Realm 名，绑定 ActorId、Actor key、Actor 类型、Realm、有效期、principal/client binding（成员 id、Realm 客户端 key id）与签发时的角色。它证明 Actor key、身份与 claims，不单独证明对端实际运行的代码。 |
@@ -119,7 +119,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Realm 客户端 key | 某成员的某个客户端安装在某个 Realm 中使用的 key，按 Realm 独立生成，可单独吊销；不跨 Realm 复用，防止跨实例关联同一客户端。对应 Realm 客户端注册。 |
 | 成员（`member_id`） | Realm Provider 为某个联网 Realm 记录的一方：`member_id`（16 位十六进制）、角色与状态（active/removed）。凭 Realm 邀请加入，可有多个客户端；移除成员或离开 Realm 即撤销其全部 Realm 客户端 key。本机 Realm 没有成员。 |
 | 角色（owner / editor / viewer） | 成员在实例内的应用权限角色，由 Realm Provider 随成员记录保存、写入 Actor credential，由 Service 执行；改角色不撤销 key，在下一份 credential 生效。每个 Realm 恰好一个 owner：它同时持有成员管理权（邀请、撤销客户端、移除成员、改角色）与应用 owner 角色，可原子转让，v1 不支持多 owner。 |
-| membership 请求 | 成员用 Realm 客户端 key 签名、发往 `<issuer.url>/membership` 的 Actr 管理信封：`join`、`create_invite`、`revoke_invite`、`list_members`、`revoke_client`、`remove_member`、`set_role`、`transfer_owner`、`leave`。 |
+| membership 请求 | 成员用 Realm 客户端 key 签名、发往 `<issuer.url>/membership` 的 Actr 管理信封：`join`、`create_invite`、`revoke_invite`、`list_members`、`revoke_client`、`remove_member`、`set_role`、`transfer_owner`、`leave`，以及只用于 Realm Provider 域名下 Realm 的 `update_realm`（owner 更新程序、名称或退役）。 |
 | renewal token | Actor credential 续期用的凭证，绑定 Realm 客户端 key。 |
 | Principal / PrincipalId | 使用某 Actor 实例的一方及其外部不透明标识；不是 Publisher、Realm Provider 或运营方。一个 Actor 实例完整生命周期只绑定一个 PrincipalId。Actor credential 中的 principal/client binding 即成员 id 与 Realm 客户端 key id。 |
 | 应用权限 | 实例内的权限（读写、管理、分享），由应用与会话授权决定；与 Realm membership 分开，取得 membership 不等于获得任何应用权限。成员角色是其最小部分，由 Service 从 Front 的 Actor credential 读取。 |

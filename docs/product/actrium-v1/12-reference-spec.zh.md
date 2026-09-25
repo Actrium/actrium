@@ -91,7 +91,8 @@ https://notes.example/.well-known/actr
 ```json
 "package": {
   "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-  "sha256": "<64 hex>"
+  "sha256": "<64 hex>",
+  "type": "notes.example/team-notes@1.4.2"
 }
 ```
 
@@ -370,7 +371,8 @@ https://realms.provider.example/acme.com/k7m2q9xh
   },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>"
+    "sha256": "<64 hex>",
+    "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",

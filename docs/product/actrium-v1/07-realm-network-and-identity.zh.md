@@ -140,7 +140,7 @@ Realm Profile 至少包含：
 - schema（`actr.realm/v1`）；
 - `realm.name`（完整 Realm 名）与显示名；
 - `status`：`active` 或 `retired`；
-- `package`：实例运行的包（下载地址与 SHA-256），active 时必填；
+- `package`：实例运行的包（下载地址、SHA-256 与 Actor 类型），active 时必填；
 - 单调 `sequence` 与签发时间 `issued_at`（Realm Profile 不设过期时间）；
 - issuer URL、Realm issuer keys/key ids（Actor credential 的 issuer 即 Realm 名）；
 - Realm Provider ID、signaling endpoints、STUN/TURN endpoints；
@@ -386,7 +386,7 @@ membership 与实例授权是两层：Realm membership 只决定能否进入该�
 
 1. Actr Host 生成或读取 Actor长期 key；
 2. 请求新 ActorId 或 reclaim 已有 ActorId；
-3. Issuer 验证请求由已登记、未撤销的 Realm 客户端 key 签名（Realm membership）、Actor 类型和允许的 claim；Service 类型只接受 owner 的客户端；需要受管 runtime 时另验 platform attestation；
+3. Issuer 验证请求由已登记、未撤销的 Realm 客户端 key 签名（Realm membership）、Actor 类型和允许的 claim；该实例程序（`package.type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 的客户端注册；需要受管 runtime 时另验 platform attestation；
 4. Issuer 签发短期 Actor credential，携带 ActorId、Actor 类型、成员 id、Realm 客户端 key id 与角色；
 5. Actor 使用短期 ticket 连接 signaling；
 6. signaling 验证 issuer、audience、ActorId 和 proof。
@@ -410,9 +410,10 @@ membership 与实例授权是两层：Realm membership 只决定能否进入该�
 - 改角色：只有 owner，只改应用权限，不撤销 key；在该成员下一份 Actor credential 生效。
 - 转让 owner：原子完成，原 owner 默认改为 editor。owner 离开前必须先转让，也不能撤销自己最后一个客户端。
 - 离开 Realm：成员移除自己，效果同移除成员。
+- 更新与退役：Realm Provider 域名下的实例由 owner 发 `update_realm`，Realm Provider 签署新的或退役的 Realm Profile；其他 Realm 经 Realm 签名 key 持有方。
 - owner 恢复：owner 丢失全部客户端时，由 Realm 签名 key 持有方（`reissue_owner_invite`）或 Realm Provider 运营者签发新的 owner 邀请；兑换后成为 owner 的新客户端，owner 原有客户端 key 全部撤销。
 
-撤销 Realm 客户端 key 后，Realm Provider 立即拒绝它的新请求与新 Actor credential，撤销它注册的全部 Actor，并关闭这些 Actor 的 signaling 连接与 TURN allocation；已签发的 Actor credential 在 Realm Provider 之外（例如 Service 对 Front 的校验）到期失效（Loran 默认最多 1 小时）。Service 以 Front credential 的到期时间为 Attach 会话的上限，Front 续期后出示新 credential 时重新读取角色。
+撤销 Realm 客户端 key 后，Realm Provider 立即拒绝它的新请求与新 Actor credential，撤销它签发的未用邀请，停用绑定到它的全部 Actor 并关闭这些 Actor 的 signaling 连接与 TURN allocation；同一成员可用自己另一把未撤销的 key 凭 Actor 私钥重签，把 Actor 移过来（FR-NET-006），被移除的成员则不能；已签发的 Actor credential 在 Realm Provider 之外（例如 Service 对 Front 的校验）到期失效（Loran 默认最多 1 小时）。Service 以 Front credential 的到期时间为 Attach 会话的上限，Front 续期后出示新 credential 时重新读取角色。
 
 ## 8. 信令认证凭据
 
