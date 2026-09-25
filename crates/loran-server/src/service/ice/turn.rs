@@ -144,26 +144,26 @@ impl IceService for TurnService {
             }
         };
 
-        // A Realm that stops being served loses its allocations too, not
-        // only their refreshes.
+        // A Realm that stops being served, or a disabled Actor, loses its
+        // allocations too, not only their refreshes.
         let turn_server = Arc::new(turn_server);
         let closer = {
             let server = turn_server.clone();
             tokio::spawn(async move {
                 loop {
                     inactive_realms.deactivated().await;
-                    match turn::close_realm_allocations(&server, |realm| {
-                        inactive_realms.contains(realm)
+                    match turn::close_allocations(&server, |realm, actor| {
+                        inactive_realms.contains(realm) || inactive_realms.contains_actor(actor)
                     })
                     .await
                     {
                         Ok(0) => {}
                         Ok(closed) => platform::recording::info!(
-                            "Closed the TURN allocations of {} credentials of inactive Realms",
+                            "Closed the TURN allocations of {} credentials of inactive Realms or Actors",
                             closed
                         ),
                         Err(e) => platform::recording::warn!(
-                            "Failed to close TURN allocations of inactive Realms: {}",
+                            "Failed to close TURN allocations of inactive Realms or Actors: {}",
                             e
                         ),
                     }

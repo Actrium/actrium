@@ -287,11 +287,18 @@ impl Authenticator {
                 "TURN credential scope does not match this Realm/provider".to_string(),
             ));
         }
-        // Checked before the cache, so a cached key never outlives the Realm.
+        // Checked before the cache, so a cached key never outlives the Realm
+        // or the Actor's Realm client key.
         if self.inactive_realms.contains(realm) {
             platform::recording::warn!("TURN credential refused: Realm {} is not active", realm);
             return Err(Error::Other(
                 "TURN credential Realm is not active".to_string(),
+            ));
+        }
+        if self.inactive_realms.contains_actor(actor_id) {
+            platform::recording::warn!("TURN credential refused: Actor {} is disabled", actor_id);
+            return Err(Error::Other(
+                "TURN credential Actor is disabled".to_string(),
             ));
         }
 
@@ -563,6 +570,23 @@ mod tests {
             .auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
             .expect_err("inactive Realm is refused");
         assert!(error.to_string().contains("not active"), "{error}");
+    }
+
+    #[test]
+    fn test_auth_handle_refuses_disabled_actor_even_when_cached() {
+        let inactive = InactiveRealms::default();
+        let auth = make_auth().with_inactive_realms(inactive.clone());
+        let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
+        let username = username(2_000_000_060);
+        let actor = username.split_once(":actor=").unwrap().1.to_string();
+
+        auth.auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .expect("enabled Actor authenticates");
+        inactive.insert_actor(&actor);
+        let error = auth
+            .auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .expect_err("disabled Actor is refused");
+        assert!(error.to_string().contains("disabled"), "{error}");
     }
 
     #[test]

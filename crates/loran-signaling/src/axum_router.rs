@@ -333,6 +333,24 @@ async fn websocket_handler(
                 .into_response();
         }
 
+        // A disabled Actor (revoked, or its Realm client key revoked) does
+        // not connect again.
+        match platform::realm::membership::actor_disabled(&actor_id).await {
+            Ok(false) => {}
+            Ok(true) => {
+                platform::recording::warn!(
+                    "🚫 WebSocket Actor refused: ip={} actor={} is disabled",
+                    client_ip,
+                    actor_id.to_string_repr()
+                );
+                return axum::http::StatusCode::FORBIDDEN.into_response();
+            }
+            Err(e) => {
+                platform::recording::warn!("WebSocket Actor state lookup failed: {}", e);
+                return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+        }
+
         Some((actor_id, actor_type, credential))
     } else {
         // The bare router is an in-process integration fixture: it skips

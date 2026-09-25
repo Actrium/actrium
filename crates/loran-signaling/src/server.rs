@@ -411,7 +411,8 @@ impl SignalingServer {
 
 /// Follow Realm state changes and drop the state of every Realm that
 /// retires: first for Realms retired before this process started, then as
-/// retirements are announced.
+/// retirements are announced. Likewise drop every Actor disabled by a
+/// revoked Realm client key.
 ///
 /// `cancel` retires this server (a configuration reload builds a new one),
 /// but its connections stay open, so the task keeps following until the
@@ -421,11 +422,29 @@ pub async fn follow_realm_retirements(
     cancel: tokio_util::sync::CancellationToken,
 ) {
     let mut changes = platform::realm::changes::subscribe();
+    let mut actor_changes = platform::realm::changes::subscribe_actors();
     retire_known_retired_realms(&server).await;
     loop {
         let change = tokio::select! {
             _ = no_connections_after(&server, &cancel) => break,
             change = changes.recv() => change,
+            actor = actor_changes.recv() => {
+                match actor {
+                    Ok(actor) => {
+                        if platform::realm::membership::actor_disabled(&actor)
+                            .await
+                            .unwrap_or(false)
+                        {
+                            disable_actor(&server, &actor).await;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        disable_known_disabled_actors(&server).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+                continue;
+            }
         };
         match change {
             Ok(realm) => {
@@ -518,6 +537,73 @@ pub async fn retire_realm(server: &SignalingServerHandle, realm: &str) {
         }
         cleanup_client(&client_id, server, CleanupMode::ExplicitUnregister).await;
     }
+}
+
+/// Drop every connected Actor that is disabled.
+async fn disable_known_disabled_actors(server: &SignalingServerHandle) {
+    let mut actors: Vec<ActrId> = server
+        .clients
+        .read()
+        .await
+        .values()
+        .filter_map(|client| client.actor_id.clone())
+        .collect();
+    actors.sort();
+    actors.dedup();
+    for actor in actors {
+        if platform::realm::membership::actor_disabled(&actor)
+            .await
+            .unwrap_or(false)
+        {
+            disable_actor(server, &actor).await;
+        }
+    }
+}
+
+/// Drop an Actor whose Realm client key was revoked
+/// (`realm-membership.md` section 6): close its connections with close code
+/// 1008 and remove its Actor Registry rows (in memory and in the cache) and
+/// presence subscriptions. It cannot connect again while it stays disabled.
+pub async fn disable_actor(server: &SignalingServerHandle, actor: &ActrId) {
+    platform::recording::info!(
+        "Actor {} disabled: its Realm client key was revoked",
+        actor.to_string_repr()
+    );
+    let connections: Vec<(String, ClientEgress)> = server
+        .clients
+        .read()
+        .await
+        .iter()
+        .filter(|(_, client)| client.actor_id.as_ref() == Some(actor))
+        .map(|(id, client)| (id.clone(), client.egress.clone()))
+        .collect();
+    for (client_id, egress) in connections {
+        let close_frame = axum::extract::ws::CloseFrame {
+            code: axum::extract::ws::close_code::POLICY,
+            reason: "client revoked".into(),
+        };
+        if !egress.close(close_frame) {
+            platform::recording::warn!(
+                "Connection {} control queue full or closed; closing without a Close frame",
+                client_id
+            );
+        }
+        cleanup_client(&client_id, server, CleanupMode::ExplicitUnregister).await;
+    }
+    if let Err(e) = server
+        .actor_registry
+        .write()
+        .await
+        .unregister_actor_durable(actor)
+        .await
+    {
+        platform::recording::warn!(
+            "Failed to delete cached services of Actor {}: {}",
+            actor.to_string_repr(),
+            e
+        );
+    }
+    server.presence_manager.write().await.unsubscribe_all(actor);
 }
 
 /// Handle WebSocket connection
@@ -3041,6 +3127,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disabling_an_actor_drops_only_its_state() {
+        let server = create_test_server_handle();
+        let disabled = create_test_actr_id(1);
+        let other = create_test_actr_id(2);
+        for (client_id, actor) in [("disabled", &disabled), ("other", &other)] {
+            register_test_service(&server, actor).await;
+            server.clients.write().await.insert(
+                client_id.to_string(),
+                create_test_client_with_id(client_id, actor.clone(), None),
+            );
+            server
+                .actor_id_index
+                .write()
+                .await
+                .insert(actor.clone(), client_id.to_string());
+            server.presence_manager.write().await.subscribe(
+                actor.clone(),
+                create_test_actr_type(),
+                create_test_actr_type(),
+            );
+        }
+
+        disable_actor(&server, &disabled).await;
+
+        assert!(!server.clients.read().await.contains_key("disabled"));
+        assert!(server.clients.read().await.contains_key("other"));
+        let registry = server.actor_registry.read().await;
+        let services = registry.discover_by_service_name(&disabled.realm, "test_service");
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].actor_id, other);
+        drop(registry);
+        let presence = server.presence_manager.read().await;
+        let subscribers = presence.get_subscribers(&disabled.realm, &create_test_actr_type());
+        assert_eq!(subscribers, vec![&other]);
+    }
+
+    #[tokio::test]
     async fn retiring_a_realm_drops_its_state_and_refuses_it_afterwards() {
         let server = create_test_server_handle();
         let retired = create_test_actr_id(1);
@@ -3708,9 +3831,7 @@ mod tests {
                 .await
                 .unwrap();
                 if RealmEntity::get(REALM).await.unwrap().is_none() {
-                    RealmEntity::create(REALM.to_string())
-                        .await
-                        .unwrap();
+                    RealmEntity::create(REALM.to_string()).await.unwrap();
                 }
                 let rule = ActorAcl::new(
                     REALM.to_string(),
@@ -3942,9 +4063,7 @@ mod tests {
         async fn a_replaced_server_still_closes_connections_of_retired_realms() {
             setup().await;
             let realm = "replaced@example.com";
-            RealmEntity::create(realm.to_string())
-                .await
-                .unwrap();
+            RealmEntity::create(realm.to_string()).await.unwrap();
             let server = create_test_server_handle();
             let actor = ActrId {
                 serial_number: 1,

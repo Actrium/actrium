@@ -122,19 +122,22 @@ pub async fn create_turn_server(
     Ok(server)
 }
 
-/// The Realm a scoped TURN username
-/// (`<expires>:realm=<realm>:provider=…`) belongs to
-fn username_realm(username: &str) -> Option<&str> {
+/// The Realm and Actor (text form) of a scoped TURN username
+/// (`<expires>:realm=<realm>:provider=…:actor=<actor_id>`)
+fn username_scope(username: &str) -> Option<(&str, &str)> {
     let (_, scoped) = username.split_once(":realm=")?;
-    Some(scoped.split_once(":provider=")?.0)
+    let (realm, rest) = scoped.split_once(":provider=")?;
+    let (_, actor) = rest.split_once(":actor=")?;
+    Some((realm, actor))
 }
 
-/// Close the allocations whose credential belongs to a Realm `closed`
-/// selects; returns how many usernames were closed. Credentials are refused
-/// once a Realm is not served; this also ends the allocations it already has.
-pub async fn close_realm_allocations(
+/// Close the allocations whose credential belongs to a Realm and Actor
+/// that `closed(realm, actor)` selects; returns how many usernames were
+/// closed. Credentials are refused once a Realm is not served or an Actor
+/// is disabled; this also ends the allocations they already have.
+pub async fn close_allocations(
     server: &Server,
-    closed: impl Fn(&str) -> bool,
+    closed: impl Fn(&str, &str) -> bool,
 ) -> error::Result<usize> {
     let infos =
         server
@@ -146,7 +149,9 @@ pub async fn close_realm_allocations(
     let mut usernames: Vec<String> = infos
         .into_values()
         .map(|info| info.username)
-        .filter(|username| username_realm(username).is_some_and(&closed))
+        .filter(|username| {
+            username_scope(username).is_some_and(|(realm, actor)| closed(realm, actor))
+        })
         .collect();
     usernames.sort();
     usernames.dedup();

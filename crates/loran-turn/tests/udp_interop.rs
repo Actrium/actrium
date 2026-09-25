@@ -132,19 +132,21 @@ async fn malformed_udp_burst_does_not_starve_a_valid_allocation() -> anyhow::Res
 }
 
 #[tokio::test]
-async fn allocations_of_a_closed_realm_are_closed() -> anyhow::Result<()> {
+async fn allocations_of_a_closed_realm_or_actor_are_closed() -> anyhow::Result<()> {
     let (server, server_address) = start_turn_server().await?;
     let client = turn_client(&server_address).await?;
     let relay = timeout(Duration::from_secs(3), client.allocate()).await??;
     assert_eq!(server.get_allocations_info(None).await?.len(), 1);
 
-    let closed =
-        turn::close_realm_allocations(&server, |realm| realm == "other@example.com").await?;
+    let closed = turn::close_allocations(&server, |realm, actor| {
+        realm == "other@example.com" || actor == "2.k7m2q9xh@example.com"
+    })
+    .await?;
     assert_eq!(closed, 0);
     assert_eq!(server.get_allocations_info(None).await?.len(), 1);
 
     let closed =
-        turn::close_realm_allocations(&server, |realm| realm == "k7m2q9xh@example.com").await?;
+        turn::close_allocations(&server, |_, actor| actor == "1.k7m2q9xh@example.com").await?;
     assert_eq!(closed, 1);
     assert!(server.get_allocations_info(None).await?.is_empty());
 

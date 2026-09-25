@@ -1833,6 +1833,93 @@ async fn issuer_register_requires_a_registered_client_key() {
     harness.shutdown();
 }
 
+/// Removing a member stops its Actors at once: the connection closes with
+/// 1008, it does not reconnect and gets no new credential.
+#[tokio::test]
+#[serial]
+async fn removing_a_member_closes_its_connections_and_refuses_it() {
+    use actr_protocol::realm_membership::{MembershipOp, Role};
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let base = harness.base_url();
+
+    let mut invite = membership_request(MembershipOp::CreateInvite, TEST_REALM);
+    invite.role = Some(Role::Editor);
+    invite.invite_expires_at = Some((chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339());
+    let (status, created) = membership(&base, invite, TEST_CLIENT_KEY).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{created}");
+    let (status, joined) = join(
+        &base,
+        TEST_REALM,
+        created["invite"].as_str().unwrap(),
+        "fullstack-editor",
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{joined}");
+    let member = joined["member_id"].as_str().unwrap().to_string();
+
+    let editor = issuer_register_http_with_key(
+        &base,
+        TEST_REALM,
+        "acme",
+        "editor-device",
+        None,
+        None,
+        Some("fullstack-editor"),
+    )
+    .await;
+    let (_write, mut read) = connect_ws_authenticated(harness.port, &editor).await;
+
+    let mut remove = membership_request(MembershipOp::RemoveMember, TEST_REALM);
+    remove.member_id = Some(member);
+    let (status, removed) = membership(&base, remove, TEST_CLIENT_KEY).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{removed}");
+
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match read.next().await {
+                Some(Ok(WsMessage::Close(frame))) => return frame,
+                Some(Ok(_)) => continue,
+                other => panic!("connection ended without a Close frame: {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("the connection closes");
+    let frame = closed.expect("close frame");
+    assert_eq!(u16::from(frame.code), 1008);
+    assert_eq!(frame.reason.as_str(), "client revoked");
+
+    assert!(
+        connect_async(authenticated_ws_request(harness.port, &editor))
+            .await
+            .is_err(),
+        "a removed member's Actor does not reconnect"
+    );
+    match issuer_register_result(
+        &base,
+        TEST_REALM,
+        "acme",
+        "editor-again",
+        None,
+        None,
+        Some("fullstack-editor"),
+    )
+    .await
+    {
+        register_response::Result::Error(err) => {
+            assert_eq!(err.code, 403);
+            assert!(
+                err.message.starts_with("client_revoked:"),
+                "{}",
+                err.message
+            );
+        }
+        other => panic!("a removed member registered: {other:?}"),
+    }
+
+    harness.shutdown();
+}
+
 #[tokio::test]
 #[serial]
 async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachable() {
