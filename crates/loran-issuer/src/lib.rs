@@ -119,6 +119,7 @@ pub async fn create_issuer_state(
     counters: Option<Arc<ServiceCounters>>,
 ) -> Result<IssuerState> {
     platform::recording::info!("Creating Issuer state with config");
+    remove_retired_key_store(&global_config.sqlite_path);
 
     // Get Signer client config
     let signer_client_config = config
@@ -179,6 +180,24 @@ pub async fn create_issuer_state(
     Ok(state)
 }
 
+/// Delete `issuer_keys.db`, the store of the removed global Issuer key, if a
+/// data directory still has it.
+fn remove_retired_key_store(data_dir: &std::path::Path) {
+    for suffix in ["", "-wal", "-shm"] {
+        let path = data_dir.join(format!("issuer_keys.db{suffix}"));
+        match std::fs::remove_file(&path) {
+            Ok(()) => platform::recording::info!(
+                "Removed {}, left by the retired global Issuer key",
+                path.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                platform::recording::warn!("Failed to remove {}: {}", path.display(), error)
+            }
+        }
+    }
+}
+
 /// Build the public `/issuer` router from an existing [`IssuerState`].
 pub fn create_router_from_state(state: IssuerState) -> Router {
     create_router(state)
@@ -186,8 +205,17 @@ pub fn create_router_from_state(state: IssuerState) -> Router {
 
 #[cfg(test)]
 mod tests {
-
-    // Note: full integration tests require the Signer service to be running
-    // Only basic unit tests here
-    // Actual testing is done via HTTP endpoints after the main program starts
+    #[test]
+    fn removes_the_retired_key_store() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["issuer_keys.db", "issuer_keys.db-wal", "actrix.db"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        super::remove_retired_key_store(dir.path());
+        assert!(!dir.path().join("issuer_keys.db").exists());
+        assert!(!dir.path().join("issuer_keys.db-wal").exists());
+        assert!(dir.path().join("actrix.db").exists());
+        // Nothing left to remove is fine.
+        super::remove_retired_key_store(dir.path());
+    }
 }

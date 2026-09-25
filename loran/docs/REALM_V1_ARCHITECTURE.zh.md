@@ -459,6 +459,9 @@ Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `real
 `issuer_reissue_response_cache` 与 `issuer_renewal_token.delivered_at`）与 v7 → v8（`realm_domain`
 改存 key pins，新增 `realm_issuer_key`，`publisher` 新增第二把 `active` 包签名 key 与
 `profile_pins`，删除未用的 `realm.issuer_key_id`）都没有离线迁移，需停机后重建数据库。
+已删除的全局 Issuer key 曾存于数据目录下的 `issuer_keys.db`；Issuer 启动时若发现该文件（及其
+`-wal`、`-shm`）即删除并记日志。Issuer Signer 的 `signer_keys.db` 打开时删除没有名字的 key
+（已删除的 `GenerateSigningKey` 留下的），其余 key 保留。
 
 v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主键，`actoracl`、
 `pending_registration`、`issued_actor_identity`、`revoked_actor` 以 `realm` 列引用它，后三者按
