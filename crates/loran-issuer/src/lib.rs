@@ -183,9 +183,10 @@ pub async fn create_issuer_state(
 /// Delete `issuer_keys.db` (earlier `ais_keys.db`), the store of the removed
 /// global Issuer key, if a data directory still has it.
 fn remove_retired_key_store(data_dir: &std::path::Path) {
-    for file in ["issuer_keys.db", "ais_keys.db"].into_iter().flat_map(|name| {
-        ["", "-wal", "-shm"].map(|suffix| format!("{name}{suffix}"))
-    }) {
+    for file in ["issuer_keys.db", "ais_keys.db"]
+        .into_iter()
+        .flat_map(|name| ["", "-wal", "-shm"].map(|suffix| format!("{name}{suffix}")))
+    {
         let path = data_dir.join(file);
         match std::fs::remove_file(&path) {
             Ok(()) => platform::recording::info!(
@@ -210,7 +211,12 @@ mod tests {
     #[test]
     fn removes_the_retired_key_store() {
         let dir = tempfile::tempdir().unwrap();
-        for name in ["issuer_keys.db", "issuer_keys.db-wal", "ais_keys.db", "actrix.db"] {
+        for name in [
+            "issuer_keys.db",
+            "issuer_keys.db-wal",
+            "ais_keys.db",
+            "actrix.db",
+        ] {
             std::fs::write(dir.path().join(name), b"x").unwrap();
         }
         super::remove_retired_key_store(dir.path());

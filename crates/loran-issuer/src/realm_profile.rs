@@ -104,12 +104,11 @@ pub async fn list_issuer_key(
     };
     // Rotations started in the same millisecond share one Signer key name,
     // and so one key; the one listed by the winner stays.
-    let listed: Result<bool, sqlx::Error> = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM realm_issuer_key WHERE signer_name = ?)",
-    )
-    .bind(&key.signer_name)
-    .fetch_one(platform::storage::db::get_database().get_pool())
-    .await;
+    let listed: Result<bool, sqlx::Error> =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM realm_issuer_key WHERE signer_name = ?)")
+            .bind(&key.signer_name)
+            .fetch_one(platform::storage::db::get_database().get_pool())
+            .await;
     if !matches!(listed, Ok(false)) {
         return Err(error.into());
     }
