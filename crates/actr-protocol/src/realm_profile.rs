@@ -35,7 +35,7 @@ pub fn parse_issuer_key_id(id: &str) -> Option<u32> {
 }
 
 /// Largest integer JCS (RFC 8785, via I-JSON) represents exactly.
-const MAX_EXACT_INTEGER: u64 = (1 << 53) - 1;
+pub(crate) const MAX_EXACT_INTEGER: u64 = (1 << 53) - 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RealmProfile {

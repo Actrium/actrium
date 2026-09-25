@@ -312,6 +312,13 @@ impl KeyPins {
     ) -> Result<KeyPinOutcome, String> {
         let listed = |id: &str| list.keys.iter().find(|key| key.id == id);
 
+        // A JCS number above 2^53 names more than one integer, so the
+        // signatures would not bind the sequences.
+        let exact = crate::realm_profile::MAX_EXACT_INTEGER;
+        if list.sequence > exact || list.rotations.iter().any(|r| r.sequence > exact) {
+            return Err(format!("sequences are limited to {exact}"));
+        }
+
         // 1. Signed by an active listed key.
         let signer = listed(&list.signature.key_id)
             .filter(|key| key.status == KeyStatus::Active)
@@ -1340,5 +1347,36 @@ mod tests {
             rotations,
         );
         assert!(crowded.accept("example.com", now, Some(&pins)).is_err());
+    }
+
+    #[test]
+    fn signatures_bind_sequences_exactly() {
+        // Above 2^53 a JCS number no longer names one integer: a signature
+        // over 2^53 would also cover 2^53 + 1.
+        let key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+        let mut member = serde_json::json!({
+            "sequence": 1u64 << 53,
+            "keys": [{
+                "id": "rs-1", "algorithm": "Ed25519", "status": "active",
+                "public_key": BASE64.encode(key.verifying_key().to_bytes()),
+            }],
+        });
+        crate::realm_profile::sign_document(&mut member, "rs-1", &key);
+        let mut bumped = member.clone();
+        bumped["sequence"] = ((1u64 << 53) + 1).into();
+        for member in [member, bumped] {
+            assert!(RealmSigningKeys::accept(&member, None).is_err());
+        }
+
+        let now: DateTime<Utc> = "2026-06-01T00:00:00Z".parse().unwrap();
+        let package = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+        let big = publisher_with(
+            1 << 53,
+            &[("root-1", &key, KeyStatus::Active)],
+            ("root-1", &key),
+            &[(&package, KeyStatus::Active)],
+            Value::Null,
+        );
+        assert!(big.accept("example.com", now, None).is_err());
     }
 }

@@ -164,7 +164,8 @@ link 在内的任何其他 Realm Provider。
 }
 ```
 
-- `sequence` 是非负整数，该 member 每次变更都递增。
+- `sequence` 是不超过 2<sup>53</sup> − 1 的非负整数（JCS 能精确表示的最大整数，轮换项的 `sequence`
+  同样），该 member 每次变更都递增。
 - `keys` 列出 Realm 签名 key，最多 8 项。每个 key 有 `id`、`algorithm`（版本 1 只定义 `Ed25519`）、
   base64 `public_key` 与 `status`。`id` 在该域名的全部历史中只对应一个公钥，**MUST NOT** 复用。
   `active` key 用于签名；`retired` key 不再签名，但它此前所做的签名（如已有 Realm Profile 上的）

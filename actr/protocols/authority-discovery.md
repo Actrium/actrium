@@ -180,8 +180,9 @@ root of every Realm named under the domain:
 }
 ```
 
-- `sequence` is a non-negative integer that increases with every change to the
-  member.
+- `sequence` is a non-negative integer no greater than 2<sup>53</sup> − 1 (the
+  largest integer JCS represents exactly; the same holds for rotation entry
+  `sequence`s) that increases with every change to the member.
 - `keys` lists the Realm signing keys, at most 8. Each key has an `id`,
   `algorithm` (version 1 defines only `Ed25519`), a base64 `public_key`, and
   `status`. An `id` names one public key for the whole history of the domain

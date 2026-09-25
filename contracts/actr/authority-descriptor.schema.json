@@ -48,7 +48,8 @@
         },
         "sequence": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "profile_signing_keys": {
           "type": "array",
@@ -199,7 +200,8 @@
       "properties": {
         "sequence": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "keys": {
           "type": "array",
@@ -271,7 +273,8 @@
         },
         "sequence": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "signature": {
           "type": "string",
