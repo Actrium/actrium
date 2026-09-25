@@ -60,15 +60,19 @@ impl Realm {
     /// Remove pending Realms whose time to become active has passed. They
     /// were never served, so their names are free again.
     pub async fn discard_expired_pending() -> Result<u64, RealmError> {
-        Ok(sqlx::query(
+        let discarded: Vec<String> = sqlx::query_scalar(
             "DELETE FROM realm
              WHERE status = 'pending' AND pending_expires_at IS NOT NULL
-               AND pending_expires_at <= ?",
+               AND pending_expires_at <= ?
+             RETURNING name",
         )
         .bind(Utc::now().timestamp())
-        .execute(get_database().get_pool())
-        .await?
-        .rows_affected())
+        .fetch_all(get_database().get_pool())
+        .await?;
+        for name in &discarded {
+            super::changes::announce(name);
+        }
+        Ok(discarded.len() as u64)
     }
 }
 

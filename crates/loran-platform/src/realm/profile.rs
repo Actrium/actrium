@@ -121,6 +121,7 @@ impl RealmProfileRecord {
             }
         }
         tx.commit().await?;
+        super::changes::announce(name);
         let realm = Realm::get(name).await?.ok_or(RealmError::NotFound)?;
         Ok((realm, activated))
     }

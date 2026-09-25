@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use strum::{Display, EnumString};
 
+use super::changes;
 use super::error::RealmError;
 use crate::config::RealmConfig;
 use crate::storage::db::get_database;
@@ -217,6 +218,7 @@ impl Realm {
             Ok(_) => {
                 self.created_at = now as u64;
                 self.updated_at = None;
+                changes::announce(&self.name);
                 Ok(self)
             }
             Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
@@ -305,6 +307,7 @@ impl Realm {
         }
 
         self.updated_at = Some(now as u64);
+        changes::announce(&self.name);
         Ok(())
     }
 
@@ -354,6 +357,7 @@ impl Realm {
         let mut tx = get_database().get_pool().begin().await?;
         retire_in(&mut tx, name, Utc::now().timestamp()).await?;
         tx.commit().await?;
+        changes::announce(name);
         Self::get(name).await?.ok_or(RealmError::NotFound)
     }
 
@@ -364,6 +368,7 @@ impl Realm {
             .bind(name)
             .execute(get_database().get_pool())
             .await?;
+        changes::announce(name);
         Ok(())
     }
 
@@ -542,6 +547,24 @@ mod tests {
         Realm::retire("one@example.com").await?;
         third.insert(Some(2)).await?;
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_state_changes_are_announced() -> anyhow::Result<()> {
+        setup_test_db().await?;
+        let mut changes = changes::subscribe();
+
+        Realm::create("told@example.com".to_string(), "hash".to_string()).await?;
+        Realm::set_enabled("told@example.com", false).await?;
+        Realm::retire("told@example.com").await?;
+        for _ in 0..3 {
+            assert_eq!(changes.recv().await?, "told@example.com");
+        }
+        // A refused change announces nothing.
+        assert!(Realm::retire("told@example.com").await.is_err());
+        assert!(changes.try_recv().is_err());
         Ok(())
     }
 

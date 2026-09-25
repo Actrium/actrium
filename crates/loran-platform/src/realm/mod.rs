@@ -4,6 +4,7 @@
 
 // Submodules
 pub mod acl;
+pub mod changes;
 pub mod domain;
 pub mod error;
 pub mod management;
