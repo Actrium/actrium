@@ -8,7 +8,7 @@ url = "http://127.0.0.1:8081/issuer"
 
 [deployment]
 realm = "__REALM__"
-realm_secret = "__REALM_SECRET__"
+realm_client_key = "__REALM_CLIENT_KEY__"
 
 [discovery]
 visible = true

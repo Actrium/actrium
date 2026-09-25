@@ -323,6 +323,11 @@ wait_for_signer() {
     fail "Signer did not become ready"
 }
 
+# Create a Realm via the Admin API and join it: the server host as the owner
+# (with the owner invite) and the client host as an editor invited by the
+# owner. Sets REALM, REALM_OWNER_KEY, REALM_CLIENT_KEY (Realm client key
+# files, `deployment.realm_client_key`) and REALM_CLIENT_MEMBER_ID. Needs
+# run_actr.
 ensure_realm() {
     section "🪪 Creating realm via Admin API"
     local create_file="$RUN_DIR/realm-create.json"
@@ -336,9 +341,29 @@ ensure_realm() {
         >"$create_file"
 
     REALM="$(json_field "$create_file" '.realm.realm')"
-    REALM_SECRET="$(json_field "$create_file" '.realm_secret')"
+    local owner_invite
+    owner_invite="$(json_field "$create_file" '.owner_invite')"
 
     [ -n "$REALM" ] || fail "Realm creation returned an empty realm"
-    [ -n "$REALM_SECRET" ] || fail "Realm creation returned an empty realm secret"
+    [ -n "$owner_invite" ] || fail "Realm creation returned no owner invite"
     success "Realm ${REALM} created"
+
+    section "🔑 Joining the Realm"
+    local issuer="http://127.0.0.1:${HTTP_PORT}/issuer"
+    REALM_OWNER_KEY="$RUN_DIR/keys/owner.json"
+    REALM_CLIENT_KEY="$RUN_DIR/keys/client.json"
+    run_actr realm join "$owner_invite" --issuer "$issuer" \
+        --output "$REALM_OWNER_KEY" --label server >"$RUN_DIR/join-owner.json"
+    [ "$(json_field "$RUN_DIR/join-owner.json" '.role')" = "owner" ] ||
+        fail "The owner invite did not make an owner"
+
+    run_actr realm invite --key "$REALM_OWNER_KEY" --role editor >"$RUN_DIR/client-invite.json"
+    local client_invite
+    client_invite="$(json_field "$RUN_DIR/client-invite.json" '.invite')"
+    run_actr realm join "$client_invite" --issuer "$issuer" \
+        --output "$REALM_CLIENT_KEY" --label client >"$RUN_DIR/join-client.json"
+    REALM_CLIENT_MEMBER_ID="$(json_field "$RUN_DIR/join-client.json" '.member_id')"
+    [ "$(json_field "$RUN_DIR/join-client.json" '.role')" = "editor" ] ||
+        fail "The client did not join as an editor"
+    success "Owner and client joined the Realm"
 }

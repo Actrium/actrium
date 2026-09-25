@@ -66,7 +66,8 @@ ACTR_CLI_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
-REALM_SECRET=""
+REALM_OWNER_KEY=""
+REALM_CLIENT_KEY=""
 DEVICE_UDID=""
 DEVICE_CREATED="0"
 
@@ -309,7 +310,6 @@ sanitize_logs_for_upload() {
     mkdir -p "$dst_dir"
 
     local secrets=(
-        "$REALM_SECRET"
         "$ADMIN_PASSWORD"
         "$ADMIN_TOKEN"
     )
@@ -458,7 +458,7 @@ keychain = "$keychain_path"
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 realm = "$REALM"
-realm_secret = "$REALM_SECRET"
+realm_client_key = "$REALM_CLIENT_KEY"
 EOF
 }
 
@@ -640,7 +640,7 @@ render_swift_ts_workload_app_config() {
         "__ICE_PORT__=$ICE_PORT" \
         "__PUBLISHER__=$PUBLISHER" \
         "__REALM__=$REALM" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM_CLIENT_KEY__=$REALM_CLIENT_KEY"
     success "SwiftTsWorkloadApp actr.toml rendered"
 }
 
@@ -872,7 +872,7 @@ url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
 realm = "${REALM}"
-realm_secret = "${REALM_SECRET}"
+realm_client_key = "${REALM_OWNER_KEY}"
 
 [[trust]]
 kind = "registry"

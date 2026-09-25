@@ -7,7 +7,7 @@ RUN_ID="${ACTR_E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 RUN_ROOT="${ACTR_E2E_RUN_ROOT:-$REPO_ROOT/target/e2e-cache/typescript-stream/$RUN_ID}"
 LOG_DIR="$RUN_ROOT/logs"
 REALM="${ACTR_E2E_REALM:-typescript-stream-${RUN_ID}@e2e.test}"
-REALM_SECRET="${ACTR_E2E_REALM_SECRET:-typescript-stream-e2e-secret}"
+REALM_CLIENT_KEY=""
 PUBLISHER="demo1"
 
 ACTR_BIN="${ACTR_BIN:-$REPO_ROOT/target/release/actr}"
@@ -26,16 +26,7 @@ dump_log_tail() {
   fi
 
   printf '\n--- %s (last %s lines) ---\n' "$file" "$lines" >&2
-  tail -n "$lines" "$file" | REALM_SECRET="$REALM_SECRET" python3 -c '
-import os
-import sys
-
-secret = os.environ.get("REALM_SECRET", "")
-data = sys.stdin.read()
-if secret:
-    data = data.replace(secret, "[redacted]")
-sys.stderr.write(data)
-' || true
+  tail -n "$lines" "$file" >&2 || true
 }
 
 dump_failure_logs() {
@@ -108,6 +99,22 @@ wait_actor_registered() {
   wait_log "$LOG_DIR/mock-actrix.log" "name=\"$name\""
 }
 
+# A Realm client key file for $REALM. mock-actrix has no membership endpoint
+# and accepts any client proof, so the key is made locally instead of with
+# `actr realm join`.
+write_realm_client_key() {
+  local signing_key="$RUN_ROOT/realm-signing-key.json"
+  REALM_CLIENT_KEY="$RUN_ROOT/realm-client.json"
+  "$ACTR_BIN" realm keygen --key-id local --output "$signing_key" --force >/dev/null
+  local key_id
+  key_id="$(jq -r '.public_key' "$signing_key" | base64 -d | sha256sum | cut -c1-16)"
+  jq --arg realm "$REALM" --arg issuer "$ISSUER_ENDPOINT" --arg key_id "$key_id" \
+    '{realm: $realm, provider_id: ($issuer | sub("^[a-z]+://"; "") | sub("/.*$"; "")),
+      issuer: $issuer, key_id: $key_id, private_key, public_key}' \
+    "$signing_key" >"$REALM_CLIENT_KEY"
+  chmod 600 "$REALM_CLIENT_KEY"
+}
+
 write_cli_config() {
   local project="$1"
   mkdir -p "$project/.actr"
@@ -120,7 +127,7 @@ keychain = "$RUN_ROOT/dev-key.json"
 signaling_url = "$SIGNALING_WS"
 issuer_endpoint = "$ISSUER_ENDPOINT"
 realm = "$REALM"
-realm_secret = "$REALM_SECRET"
+realm_client_key = "$REALM_CLIENT_KEY"
 
 [storage]
 hyper_data_dir = "$RUN_ROOT/hyper"
@@ -143,7 +150,7 @@ url = "$ISSUER_ENDPOINT"
 
 [deployment]
 realm = "$REALM"
-realm_secret = "$REALM_SECRET"
+realm_client_key = "$REALM_CLIENT_KEY"
 
 [[trust]]
 kind = "static"
@@ -1122,6 +1129,7 @@ mkdir -p "$RUN_ROOT"
 mkdir -p "$RUN_ROOT/home"
 run_logged "keygen" env HOME="$RUN_ROOT/home" "$ACTR_BIN" pkg keygen --output "$RUN_ROOT/dev-key.json" --force
 PUBLIC_KEY="$(jq -r '.public_key' "$RUN_ROOT/dev-key.json")"
+write_realm_client_key
 
 curl -fsS -X POST "$MOCK_HTTP/admin/realms" \
   -H 'content-type: application/json' \

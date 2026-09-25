@@ -1,6 +1,6 @@
 [package]
 name = "pkg-runtime-echo-client-guest"
-# Non-dotted on purpose: a realm consumer registers linked (realm secret), and
+# Non-dotted on purpose: a realm consumer registers linked (Realm client key), and
 # Issuer-01 reserves DNS-style publisher names for verified publishers.
 publisher = "e2e-actrium-local"
 version = "0.1.0"

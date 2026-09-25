@@ -223,7 +223,7 @@ url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
 realm = "${REALM}"
-realm_secret = "${REALM_SECRET}"
+realm_client_key = "${REALM_OWNER_KEY}"
 
 [[trust]]
 kind = "registry"
@@ -428,9 +428,11 @@ render_linked_client_config() {
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__REALM__=$REALM" \
-        "__REALM_SECRET__=$REALM_SECRET" \
         "__HYPER_DATA_DIR__=/data/data/${application_id}/files/hyper" \
         "__ACL_TYPE__=$acl_type"
+
+    # The client's Realm client key, next to actr.toml (`realm_client_key`).
+    cp "$REALM_CLIENT_KEY" "$assets_dir/realm-client.json"
 
     # manifest.toml is read by resolveActorType(); copy the (corrected) project manifest.
     cp "$app_dir/manifest.toml" "$assets_dir/manifest.toml"
@@ -538,7 +540,7 @@ sanitize_and_stage_logs() {
     local sanitized="$RUN_DIR/sanitized-logs"
     local staged="$SCRIPT_DIR/.tmp/sanitized-logs"
     mkdir -p "$sanitized"
-    local secrets=("$REALM_SECRET" "$ADMIN_PASSWORD" "${ADMIN_TOKEN:-}")
+    local secrets=("$ADMIN_PASSWORD" "${ADMIN_TOKEN:-}")
     local src="$RUN_DIR/diagnostics"
     [ -d "$src" ] || src="$LOG_DIR"
     while IFS= read -r -d '' f; do

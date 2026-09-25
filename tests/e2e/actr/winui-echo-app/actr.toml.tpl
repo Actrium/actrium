@@ -15,7 +15,7 @@ url = "http://__HOST__:__HTTP_PORT__/issuer"
 
 [deployment]
 realm = "__REALM__"
-realm_secret = "__REALM_SECRET__"
+realm_client_key = "__REALM_CLIENT_KEY__"
 
 [discovery]
 visible = true

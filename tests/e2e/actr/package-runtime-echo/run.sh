@@ -13,8 +13,8 @@ REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="e2e.actrium.test"
 # The client guest is a realm consumer, not a verified publisher: it keeps a
-# non-dotted publisher so its linked (realm-secret) registrations satisfy
-# Issuer-01, which reserves DNS-style names for package identities.
+# non-dotted publisher so its linked registrations satisfy Issuer-01, which
+# reserves DNS-style names for package identities.
 CLIENT_PUBLISHER="e2e-actrium-local"
 CLIENT_GUEST_VERSION="0.1.0"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
@@ -67,7 +67,7 @@ case "$MODE" in
     *) fail "Unknown MODE: $MODE" ;;
 esac
 
-for cmd in cargo curl jq sqlite3 python3 perl rustc lsof; do
+for cmd in cargo curl jq sqlite3 python3 perl rustc lsof timeout; do
     require_cmd "$cmd"
 done
 
@@ -105,7 +105,10 @@ ACTR_CLI_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
-REALM_SECRET=""
+REALM_NAME_PREFIX="package-runtime-echo"
+REALM_OWNER_KEY=""
+REALM_CLIENT_KEY=""
+REALM_CLIENT_MEMBER_ID=""
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 
 cleanup() {
@@ -217,32 +220,6 @@ wait_for_signer() {
     done
 
     fail "Signer did not become ready"
-}
-
-ensure_realm() {
-    section "🪪 Creating realm via Admin API"
-    local create_file="$RUN_DIR/realm-create.json"
-    local realm="package-runtime-echo-${RUN_ID}@e2e.test"
-    curl -fsS \
-        -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/realms" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d "{\"realm\":\"${realm}\",\"enabled\":true,\"expires_at\":0}" \
-        >"$create_file"
-
-    REALM="$(json_field "$create_file" '.realm.realm')"
-    REALM_SECRET="$(json_field "$create_file" '.realm_secret')"
-
-    [ -n "$REALM" ] || fail "Realm creation returned an empty realm"
-    [ -n "$REALM_SECRET" ] || fail "Realm creation returned an empty realm secret"
-    # The secret is interpolated into TOML string literals below; URL-safe
-    # base64 stays inside that grammar, so reject anything else before it can
-    # make .actr/config.toml unparseable.
-    case "$REALM_SECRET" in
-        *[!A-Za-z0-9_-]*) fail "realm_secret has characters outside URL-safe base64" ;;
-    esac
-    success "Realm ${REALM} created"
 }
 
 append_workspace_patch() {
@@ -394,7 +371,7 @@ version = 1
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 realm = "$REALM"
-realm_secret = "$REALM_SECRET"
+realm_client_key = "$REALM_CLIENT_KEY"
 EOF
     (
         cd "$client_guest_dir"
@@ -513,7 +490,7 @@ render_client_runtime_config() {
         "$CLIENT_RUNTIME_PATH" \
         "__REALM__=$REALM" \
         "__ECHO_SERVICE_VERSION__=$SERVICE_VERSION" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM_CLIENT_KEY__=$REALM_CLIENT_KEY"
 }
 
 run_client_and_assert() {
@@ -573,6 +550,39 @@ run_client_and_assert() {
     echo "Actrix log:"
     cat "$LOG_DIR/actrix.log" || true
     fail "Expected echo reply not found"
+}
+
+# Removing the client's member revokes its Realm client key: the same client
+# host can no longer obtain an Actor credential.
+assert_removed_member_refused() {
+    section "🚫 Removing the client's member"
+    run_actr realm remove-member --key "$REALM_OWNER_KEY" "$REALM_CLIENT_MEMBER_ID" >/dev/null
+    run_actr realm members --key "$REALM_OWNER_KEY" >"$RUN_DIR/members.json"
+    [ "$(jq -r --arg id "$REALM_CLIENT_MEMBER_ID" \
+        '.members[] | select(.member_id == $id) | .status' "$RUN_DIR/members.json")" = "removed" ] ||
+        fail "The client's member is not listed as removed"
+
+    local client_home="$RUN_DIR/home-client-removed"
+    mkdir -p "$client_home"
+    local status=0
+    echo "quit" | \
+        HOME="$client_home" \
+        ECHO_ACTR_VERSION="$SERVICE_VERSION" \
+        CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
+        CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
+        CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
+        CLIENT_GUEST_KEYCHAIN_PATH="$PROVISIONED_KEYCHAIN" \
+        RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
+        timeout "${CLIENT_TIMEOUT_SECONDS:-40}" \
+        "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
+        >"$LOG_DIR/client-removed.log" 2>&1 || status=$?
+
+    if [ "$status" -ne 0 ] && grep -q "client_revoked" "$LOG_DIR/client-removed.log"; then
+        success "The removed member's client was refused a credential"
+        return 0
+    fi
+    cat "$LOG_DIR/client-removed.log" || true
+    fail "The removed member's client was not refused (exit status $status)"
 }
 
 # ============================================================================
@@ -635,7 +645,7 @@ render_server_runtime() {
         "$SERVER_RUNTIME_PATH" \
         "__PACKAGE_PATH__=$SERVICE_PACKAGE" \
         "__REALM__=$REALM" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM_CLIENT_KEY__=$REALM_OWNER_KEY"
 }
 
 # Launch actr run fully isolated — independent HOME and --hyper-dir.
@@ -771,6 +781,7 @@ mode_path1_full_echo() {
     build_client_guest_package
     seed_client_registry_state
     run_client_and_assert
+    assert_removed_member_refused
     stop_server
 }
 

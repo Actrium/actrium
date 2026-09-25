@@ -44,7 +44,7 @@ sequenceDiagram
     CI->>AX: start actrix
     CI->>AX: health check
     CI->>AX: admin login
-    CI->>AX: create realm → realm + realm_secret
+    CI->>AX: create realm → realm + owner invite (actr realm join)
     CI->>AX: register publisher + approve
 
     CI->>CLI: actr init --template echo --role service
@@ -133,7 +133,7 @@ On failure (or when `CAPTURE_DIAGNOSTICS_ON_SUCCESS=1`), `run.sh` captures:
 - `signaling_cache.db` service registrations and status
 - Filtered logs: heartbeat, disconnect, cleanup, ghost, ACL, errors
 
-Sensitive values (realm secret, admin token) are redacted before upload.
+Sensitive values (admin password, admin token) are redacted before upload.
 Diagnostics are written to `.tmp/run-*/diagnostics/` and sanitized copies to `.tmp/run-*/sanitized-logs/`.
 
 ## CI

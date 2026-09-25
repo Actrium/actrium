@@ -93,7 +93,8 @@ ACTR_CLI_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
-REALM_SECRET=""
+REALM_OWNER_KEY=""
+REALM_CLIENT_KEY=""
 
 # ──── Windows port cleanup (override common.sh's lsof-based kill_listener) ────
 kill_listener() {
@@ -361,7 +362,7 @@ keychain = "$keychain_path"
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 realm = "$REALM"
-realm_secret = "$REALM_SECRET"
+realm_client_key = "$REALM_CLIENT_KEY"
 EOF
 }
 
@@ -492,7 +493,7 @@ render_echoapp_config() {
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__REALM__=$REALM" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM_CLIENT_KEY__=$REALM_CLIENT_KEY"
     success "EchoApp actr.toml rendered"
 }
 
@@ -514,7 +515,7 @@ url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
 realm = "${REALM}"
-realm_secret = "${REALM_SECRET}"
+realm_client_key = "${REALM_OWNER_KEY}"
 
 [[trust]]
 kind = "registry"
