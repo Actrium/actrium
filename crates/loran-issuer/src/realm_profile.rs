@@ -5,6 +5,11 @@
 //! Signer (`realm-signing:<domain>`) and signs the Profiles itself. For other
 //! domains it only keeps the Profiles their key holders signed, and refreshes
 //! them together with the domain's pinned `realm_signing_keys`.
+//!
+//! Each Realm's issuer keys rotate as section 6.1 describes: a new key is
+//! listed first, signs once a Profile listing it has been accepted for
+//! [`PREPUBLISH_SECS`], and the old key stays listed as `retired` until the
+//! last credential it signed has expired.
 
 use actr_protocol::realm_profile::{
     IceEndpoint, IssuerKey, RealmIssuer, RealmPackage, RealmPolicy, RealmProfile,
@@ -19,7 +24,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use platform::net::FetchError;
 use platform::realm::domain::member_from_descriptor;
-use platform::realm::{Realm, RealmDomain, RealmError, RealmProfileRecord, RealmStatus};
+use platform::realm::{
+    IssuerKeyState, Realm, RealmDomain, RealmError, RealmIssuerKey, RealmProfileRecord, RealmStatus,
+};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -37,9 +44,52 @@ pub fn realm_signing_key_id(domain: &str) -> String {
     format!("realm-signing:{domain}")
 }
 
-/// Signer key name, and Profile key id, of a Realm's issuer key.
-pub fn issuer_key_id(realm: &str) -> String {
+/// Signer key name of a Realm's first issuer key.
+pub fn issuer_key_name(realm: &str) -> String {
     format!("issuer:{realm}")
+}
+
+/// How long a Realm Profile must list a new issuer key before it signs.
+pub const PREPUBLISH_SECS: i64 = 24 * 3600;
+/// How often the Realm issuer keys of Provider-domain Realms rotate.
+pub const ROTATION_INTERVAL_SECS: i64 = 90 * 24 * 3600;
+/// Clock skew allowed before a retired issuer key is removed.
+const CLOCK_SKEW_SECS: i64 = 300;
+
+/// The Realm's current issuer key: `(key_id, public key)`. The first one is
+/// created in the Signer, as `issuer:<realm>`, on first use.
+pub async fn current_issuer_key(
+    signer: &SignerClientWrapper,
+    realm: &str,
+) -> Result<RealmIssuerKey, ProfileError> {
+    if let Some(key) = RealmIssuerKey::current(realm).await? {
+        return Ok(key);
+    }
+    let name = issuer_key_name(realm);
+    let (key_id, public_key) = signer
+        .ensure_named_key(&name)
+        .await
+        .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
+    let now = chrono::Utc::now().timestamp();
+    let key = RealmIssuerKey {
+        realm: realm.to_string(),
+        key_id,
+        signer_name: name,
+        public_key: BASE64.encode(public_key),
+        state: IssuerKeyState::Current,
+        created_at: now,
+        published_at: None,
+        current_since: Some(now),
+        remove_after: None,
+    };
+    match key.insert().await {
+        Ok(()) => Ok(key),
+        // Created concurrently.
+        Err(RealmError::Conflict(_)) => RealmIssuerKey::current(realm)
+            .await?
+            .ok_or_else(|| ProfileError::Unavailable(format!("{realm} has no issuer key"))),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The Realm Provider endpoints a Loran-signed Realm Profile names.
@@ -83,6 +133,11 @@ impl From<RealmProfileError> for ProfileError {
 pub struct RealmProfiles {
     endpoints: ProviderEndpoints,
     signer: SignerClientWrapper,
+    /// Longest Actor credential lifetime, which a retired issuer key
+    /// outlives.
+    credential_ttl_secs: u64,
+    /// Where the credential validator's key cache lives.
+    sqlite_path: std::path::PathBuf,
     /// Signer key id and the self-signed `realm_signing_keys` member.
     member: OnceCell<(u32, RealmSigningKeys)>,
     /// One Profile signed at a time, so sequences never collide.
@@ -90,10 +145,17 @@ pub struct RealmProfiles {
 }
 
 impl RealmProfiles {
-    pub fn new(endpoints: ProviderEndpoints, signer: SignerClientWrapper) -> Self {
+    pub fn new(
+        endpoints: ProviderEndpoints,
+        signer: SignerClientWrapper,
+        credential_ttl_secs: u64,
+        sqlite_path: std::path::PathBuf,
+    ) -> Self {
         Self {
             endpoints,
             signer,
+            credential_ttl_secs,
+            sqlite_path,
             member: OnceCell::new(),
             signing: Mutex::new(()),
         }
@@ -209,12 +271,17 @@ impl RealmProfiles {
         package: Option<RealmPackage>,
         retire: bool,
     ) -> Result<Value, ProfileError> {
-        let issuer_key = issuer_key_id(realm);
-        let (_, issuer_public_key) = self
-            .signer
-            .ensure_named_key(&issuer_key)
-            .await
-            .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
+        current_issuer_key(&self.signer, realm).await?;
+        let issuer_keys = RealmIssuerKey::list(realm)
+            .await?
+            .into_iter()
+            .map(|key| IssuerKey {
+                id: key.key_id.to_string(),
+                algorithm: SIGNATURE_ALGORITHM.to_string(),
+                status: key.profile_status(),
+                public_key: key.public_key,
+            })
+            .collect();
 
         let mut document = json!({
             "schema": actr_protocol::realm_profile::REALM_PROFILE_SCHEMA,
@@ -226,12 +293,7 @@ impl RealmProfiles {
             },
             "issuer": RealmIssuer {
                 url: self.endpoints.issuer_url.clone(),
-                keys: vec![IssuerKey {
-                    id: issuer_key,
-                    algorithm: SIGNATURE_ALGORITHM.to_string(),
-                    public_key: BASE64.encode(issuer_public_key),
-                    status: KeyStatus::Active,
-                }],
+                keys: issuer_keys,
             },
             "provider": RealmProvider {
                 id: self.endpoints.provider_id.clone(),
@@ -391,12 +453,7 @@ impl RealmProfiles {
         if profile.realm.status != ProfileStatus::Active {
             return Ok(());
         }
-        let (_, public_key) = self
-            .signer
-            .ensure_named_key(&issuer_key_id(realm))
-            .await
-            .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
-        let public_key = BASE64.encode(public_key);
+        let public_key = current_issuer_key(&self.signer, realm).await?.public_key;
         let listed = profile
             .issuer
             .keys
@@ -407,6 +464,161 @@ impl RealmProfiles {
                 "Suspending Realm {realm}: its Realm Profile no longer lists this issuer key"
             );
             Realm::set_enabled(realm, false).await?;
+        }
+        Ok(())
+    }
+
+    /// Start rotating `realm`'s issuer key: create the next key in the Signer
+    /// and list it. For a Realm under the Provider domain a new Realm Profile
+    /// lists it right away; for another domain the key holder picks it up
+    /// with `draft_profile`. Returns the new key id.
+    pub async fn rotate_issuer_key(&self, realm: &str) -> Result<u32, ProfileError> {
+        let current = Realm::get(realm).await?.ok_or(RealmError::NotFound)?;
+        if current.status != RealmStatus::Active {
+            return Err(ProfileError::Invalid(format!(
+                "Realm {realm} is not active"
+            )));
+        }
+        current_issuer_key(&self.signer, realm).await?;
+        let keys = RealmIssuerKey::list(realm).await?;
+        if keys.iter().any(|key| key.state == IssuerKeyState::Next) {
+            return Err(RealmError::Conflict(format!(
+                "Realm {realm} is already rotating its issuer key"
+            ))
+            .into());
+        }
+        if keys.len() >= actr_protocol::realm_profile::MAX_ISSUER_KEYS {
+            return Err(RealmError::Conflict(format!(
+                "Realm {realm} still lists a retired issuer key; rotate after it is removed"
+            ))
+            .into());
+        }
+
+        let now = chrono::Utc::now();
+        let name = format!("{}/{}", issuer_key_name(realm), now.timestamp_millis());
+        let (key_id, public_key) = self
+            .signer
+            .ensure_named_key(&name)
+            .await
+            .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
+        RealmIssuerKey {
+            realm: realm.to_string(),
+            key_id,
+            signer_name: name,
+            public_key: BASE64.encode(public_key),
+            state: IssuerKeyState::Next,
+            created_at: now.timestamp(),
+            published_at: None,
+            current_since: None,
+            remove_after: None,
+        }
+        .insert()
+        .await?;
+        platform::recording::info!("Realm {realm}: new issuer key {key_id} listed");
+        self.republish(realm).await?;
+        Ok(key_id)
+    }
+
+    /// Advance issuer key rotations at `now` (Unix seconds): switch to a
+    /// next key listed long enough, remove retired keys whose credentials
+    /// have all expired, and start the periodic rotation of Provider-domain
+    /// Realms.
+    pub async fn maintain_issuer_keys(&self, now: i64) -> Result<(), ProfileError> {
+        for realm in Realm::get_all().await? {
+            if realm.status != RealmStatus::Active {
+                continue;
+            }
+            if let Err(error) = self.maintain_realm_keys(&realm.name, now).await {
+                platform::recording::warn!("Realm {} issuer keys: {error}", realm.name);
+            }
+        }
+        Ok(())
+    }
+
+    async fn maintain_realm_keys(&self, realm: &str, now: i64) -> Result<(), ProfileError> {
+        let keys = RealmIssuerKey::list(realm).await?;
+        let mut changed = false;
+        for key in &keys {
+            match key.state {
+                IssuerKeyState::Next
+                    if key
+                        .published_at
+                        .is_some_and(|at| at + PREPUBLISH_SECS <= now) =>
+                {
+                    let remove_after = now + self.credential_ttl_secs as i64 + CLOCK_SKEW_SECS;
+                    RealmIssuerKey::switch(realm, now, remove_after).await?;
+                    // The retired key verifies only until it is removed.
+                    for old in keys.iter().filter(|k| k.state == IssuerKeyState::Current) {
+                        self.cache_key(realm, old, remove_after as u64).await?;
+                    }
+                    platform::recording::info!(
+                        "Realm {realm}: issuer key {} now signs",
+                        key.key_id
+                    );
+                    changed = true;
+                }
+                IssuerKeyState::Retired if key.remove_after.is_some_and(|at| at <= now) => {
+                    self.signer
+                        .retire_named_key(&key.signer_name)
+                        .await
+                        .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
+                    RealmIssuerKey::remove(realm, key.key_id).await?;
+                    platform::recording::info!(
+                        "Realm {realm}: retired issuer key {} removed",
+                        key.key_id
+                    );
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        if changed {
+            self.republish(realm).await?;
+        }
+        let rotating = keys.iter().any(|key| key.state == IssuerKeyState::Next);
+        let due = keys.iter().any(|key| {
+            key.state == IssuerKeyState::Current
+                && key
+                    .current_since
+                    .is_some_and(|since| since + ROTATION_INTERVAL_SECS <= now)
+        });
+        if self.holds_key_for(realm) && due && !rotating && !changed {
+            self.rotate_issuer_key(realm).await?;
+        }
+        Ok(())
+    }
+
+    /// Write `key` to the credential validator's cache, valid until
+    /// `expires_at` (0: no expiry).
+    async fn cache_key(
+        &self,
+        realm: &str,
+        key: &RealmIssuerKey,
+        expires_at: u64,
+    ) -> Result<(), ProfileError> {
+        let bytes: [u8; 32] = BASE64
+            .decode(&key.public_key)
+            .ok()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or_else(|| ProfileError::Invalid(format!("issuer key {}", key.key_id)))?;
+        let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+            .map_err(|error| ProfileError::Invalid(error.to_string()))?;
+        platform::aid::credential::validator::AIdCredentialValidator::persist_key(
+            &self.sqlite_path,
+            realm,
+            key.key_id,
+            &verifying_key,
+            expires_at,
+        )
+        .await
+        .map_err(|error| ProfileError::Unavailable(format!("key cache: {error}")))
+    }
+
+    /// Sign a new Realm Profile with the current issuer keys, for a Realm
+    /// under the Provider domain that has one.
+    async fn republish(&self, realm: &str) -> Result<(), ProfileError> {
+        if self.holds_key_for(realm) && RealmProfileRecord::get(realm).await?.is_some() {
+            self.issue(realm, ProfileChange::default()).await?;
         }
         Ok(())
     }
@@ -450,6 +662,10 @@ impl RealmProfiles {
                 let fetch = |url: String| async move { fetcher.get(&url).await };
                 if let Err(error) = profiles.refresh(fetch).await {
                     platform::recording::warn!("Realm Profile refresh failed: {error}");
+                }
+                let now = chrono::Utc::now().timestamp();
+                if let Err(error) = profiles.maintain_issuer_keys(now).await {
+                    platform::recording::warn!("Realm issuer key rotation failed: {error}");
                 }
                 tokio::select! {
                     _ = cancel.cancelled() => return,

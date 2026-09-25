@@ -1106,6 +1106,29 @@ impl AdminApiService {
             })
     }
 
+    /// Start rotating `realm`'s issuer key (`realm-profile.md` section 6.1);
+    /// returns the new key id. Only when this Loran is a Realm Provider.
+    pub async fn rotate_realm_issuer_key_direct(&self, realm: &str) -> GrpcResult<u32> {
+        let Some(profiles) = &self.realm_profiles else {
+            return Err(Status::failed_precondition(
+                "this Loran is not a Realm Provider",
+            ));
+        };
+        profiles
+            .rotate_issuer_key(realm)
+            .await
+            .map_err(|err| match err {
+                ProfileError::Realm(RealmError::NotFound) => {
+                    Status::not_found(format!("Realm not found: {realm}"))
+                }
+                ProfileError::Realm(RealmError::Conflict(message)) => {
+                    Status::failed_precondition(message)
+                }
+                ProfileError::Invalid(message) => Status::invalid_argument(message),
+                err => Status::internal(format!("Failed to rotate the issuer key: {err}")),
+            })
+    }
+
     /// The accepted Realm Profile document of `realm`, as signed.
     pub async fn get_realm_profile_direct(&self, realm: &str) -> GrpcResult<Option<String>> {
         RealmProfileRecord::get(realm)

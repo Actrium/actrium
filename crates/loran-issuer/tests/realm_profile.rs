@@ -2,10 +2,10 @@
 //! checked with the Actr Host rules (`RealmProfile::verify` and
 //! `check_successor`).
 
-use actr_protocol::RealmSigningKeys;
 use actr_protocol::realm_profile::{
     IceEndpoint, RealmPackage, RealmProfile, RealmStatus as ProfileStatus, SignalingEndpoint, jcs,
 };
+use actr_protocol::{KeyStatus, RealmSigningKeys};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ed25519_dalek::{Signer as _, SigningKey};
@@ -48,6 +48,7 @@ async fn setup() -> (Arc<RealmProfiles>, TempDir) {
     let pool = platform::storage::db::get_database().get_pool();
     for table in [
         "actoracl",
+        "realm_issuer_key",
         "realm_profile",
         "realm_domain",
         "realm_mgmt_nonce",
@@ -114,6 +115,8 @@ async fn setup() -> (Arc<RealmProfiles>, TempDir) {
             realms_base: format!("https://{PROVIDER}/actr/realms/"),
         },
         signer,
+        3600,
+        dir.path().to_path_buf(),
     ));
     for _ in 0..50 {
         if profiles.ensure_signing_keys().await.is_ok() {
@@ -172,7 +175,15 @@ async fn signs_verifiable_profiles_for_the_provider_domain() {
         "provider.example/v1"
     );
     assert_eq!(first.policy.membership, "invite-only");
-    assert_eq!(first.issuer.keys[0].id, format!("issuer:{name}"));
+    let current = platform::realm::RealmIssuerKey::current(&name)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.issuer.keys[0].id, current.key_id.to_string());
+    assert_eq!(
+        first.issuer_key(current.key_id).unwrap().public_key,
+        current.public_key
+    );
     assert_eq!(first.signature.key_id, "realm-signing:provider.example");
 
     profiles
@@ -342,6 +353,78 @@ async fn refresh(profiles: &RealmProfiles, documents: &Documents) {
 
 #[tokio::test]
 #[serial]
+async fn rotates_the_issuer_keys_of_provider_domain_realms() {
+    use platform::realm::RealmIssuerKey;
+    let (profiles, _dir) = setup().await;
+    let keys = profiles.signing_keys().unwrap().clone();
+    let name = format!("r0t4t10n@{PROVIDER}");
+    insert(&name, RealmStatus::Pending).await;
+    profiles
+        .issue(
+            &name,
+            ProfileChange {
+                package: Some(package()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let latest = || async {
+        let record = RealmProfileRecord::get(&name).await.unwrap().unwrap();
+        RealmProfile::verify(record.document.as_bytes(), &name, &keys).unwrap()
+    };
+    let old = RealmIssuerKey::current(&name).await.unwrap().unwrap();
+
+    // Pre-publish: listed as active, the old key still signs.
+    let next = profiles.rotate_issuer_key(&name).await.unwrap();
+    let profile = latest().await;
+    assert_eq!(profile.sequence, 2);
+    assert_eq!(profile.issuer_key(next).unwrap().status, KeyStatus::Active);
+    assert!(matches!(
+        profiles.rotate_issuer_key(&name).await,
+        Err(ProfileError::Realm(RealmError::Conflict(_)))
+    ));
+    let now = chrono::Utc::now().timestamp();
+    profiles.maintain_issuer_keys(now + 60).await.unwrap();
+    let current = RealmIssuerKey::current(&name).await.unwrap().unwrap();
+    assert_eq!(current.key_id, old.key_id);
+
+    // Switch after 24 hours; the old key is retired but still listed.
+    let switch = now + issuer::realm_profile::PREPUBLISH_SECS + 1;
+    profiles.maintain_issuer_keys(switch).await.unwrap();
+    let current = RealmIssuerKey::current(&name).await.unwrap().unwrap();
+    assert_eq!(current.key_id, next);
+    let profile = latest().await;
+    assert_eq!(profile.sequence, 3);
+    assert_eq!(
+        profile.issuer_key(old.key_id).unwrap().status,
+        KeyStatus::Retired
+    );
+
+    // Removed once its last credential (1 hour) and the skew have passed.
+    profiles.maintain_issuer_keys(switch + 3600).await.unwrap();
+    assert_eq!(latest().await.issuer.keys.len(), 2);
+    profiles
+        .maintain_issuer_keys(switch + 3600 + 300)
+        .await
+        .unwrap();
+    let profile = latest().await;
+    assert_eq!(profile.sequence, 4);
+    assert!(profile.issuer_key(old.key_id).is_none());
+    assert_eq!(RealmIssuerKey::list(&name).await.unwrap().len(), 1);
+
+    // The next rotation starts on its own after 90 days.
+    let due = switch + issuer::realm_profile::ROTATION_INTERVAL_SECS;
+    profiles.maintain_issuer_keys(due - 1).await.unwrap();
+    assert_eq!(latest().await.sequence, 4);
+    profiles.maintain_issuer_keys(due).await.unwrap();
+    let profile = latest().await;
+    assert_eq!(profile.issuer.keys.len(), 2);
+    assert_eq!(profile.sequence, 5);
+}
+
+#[tokio::test]
+#[serial]
 async fn refreshes_other_domains_profiles_under_the_key_pin() {
     let (profiles, _dir) = setup().await;
     let acme = Domain {
@@ -352,12 +435,13 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     };
     let member = acme.member(1, &["rs-1", "rs-2"]);
     let (one, two, three) = ("one@acme.com", "two@acme.com", "three@acme.com");
+    insert(one, RealmStatus::Active).await;
+    insert(two, RealmStatus::Active).await;
+    insert(three, RealmStatus::Active).await;
     let mut issuer = HashMap::new();
     for name in [one, two, three] {
         issuer.insert(name, issuer_of(&profiles, name).await);
     }
-    insert(one, RealmStatus::Active).await;
-    insert(two, RealmStatus::Active).await;
     accept(
         one,
         &acme.profile(one, 1, "active", "rs-1", &issuer[one]),
@@ -444,7 +528,6 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     );
     // Make the accepted Profile unverifiable: sign it with a key the domain
     // no longer lists.
-    insert(three, RealmStatus::Active).await;
     let old: RealmSigningKeys = serde_json::from_value(member.clone()).unwrap();
     let profile = RealmProfile::verify(
         &acme.profile(three, 1, "active", "rs-1", &issuer[three]),
@@ -564,7 +647,10 @@ mod management {
             "sequence": 1,
             "domain": "acme.com",
             "profile_signing_keys": [key("root-1", root)],
-            "keys": [key("package-1", package)],
+            "keys": [key(
+                &actr_protocol::package_key_id(package.verifying_key().as_bytes()),
+                package,
+            )],
             "profile_issued_at": (now - chrono::Duration::hours(1)).to_rfc3339(),
             "profile_expires_at": (now + chrono::Duration::days(30)).to_rfc3339(),
         });
@@ -690,7 +776,11 @@ mod management {
             .unwrap();
         assert_eq!(created["status"], "pending");
         let draft = created["profile"].clone();
-        assert_eq!(draft["issuer"]["keys"][0]["id"], format!("issuer:{name}"));
+        let current = platform::realm::RealmIssuerKey::current(name)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(draft["issuer"]["keys"][0]["id"], current.key_id.to_string());
         assert_eq!(draft["provider"]["id"], PROVIDER);
         assert_eq!(draft["package"], json!(package()));
         assert_eq!(
@@ -739,6 +829,62 @@ mod management {
         let rollback = send(publish(name, "n-8", profile.clone(), &acme)).await;
         assert!(matches!(rollback, Err(ManagementError::Conflict(_))));
 
+        // Rotating the issuer key: draft_profile lists the next key, and the
+        // Realm Provider switches to it only after the key holder published
+        // a Profile listing it for the pre-publish period.
+        let old_key = platform::realm::RealmIssuerKey::current(name)
+            .await
+            .unwrap()
+            .unwrap();
+        let next_key = profiles.rotate_issuer_key(name).await.unwrap();
+        let drafted = send(signed(
+            &request(ManagementOp::DraftProfile, name, "r-1"),
+            &acme,
+            "rs-1",
+        ))
+        .await
+        .unwrap();
+        let rotated = drafted["profile"].clone();
+        assert_eq!(rotated["sequence"], 3);
+        assert_eq!(rotated["realm"]["display_name"], "Team notes");
+        assert_eq!(rotated["issuer"]["keys"].as_array().unwrap().len(), 2);
+        let now = chrono::Utc::now().timestamp();
+        let later = now + issuer::realm_profile::PREPUBLISH_SECS + 1;
+        profiles.maintain_issuer_keys(later).await.unwrap();
+        let current = platform::realm::RealmIssuerKey::current(name)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.key_id, old_key.key_id, "not published yet");
+        send(publish(name, "r-2", rotated, &acme)).await.unwrap();
+        profiles.maintain_issuer_keys(now + 60).await.unwrap();
+        profiles.maintain_issuer_keys(later + 60).await.unwrap();
+        let current = platform::realm::RealmIssuerKey::current(name)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.key_id, next_key);
+        let drafted = send(signed(
+            &request(ManagementOp::DraftProfile, name, "r-3"),
+            &acme,
+            "rs-1",
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            drafted["profile"]["issuer"]["keys"],
+            json!([
+                { "id": old_key.key_id.to_string(), "algorithm": "Ed25519",
+                  "public_key": old_key.public_key, "status": "retired" },
+                { "id": next_key.to_string(), "algorithm": "Ed25519",
+                  "public_key": current.public_key, "status": "active" },
+            ])
+        );
+        let mut second = drafted["profile"].clone();
+        second["sequence"] = 2.into();
+        let rollback = send(publish(name, "r-4", second, &acme)).await;
+        assert!(matches!(rollback, Err(ManagementError::Conflict(_))));
+
         // Reissuing replaces the token.
         let reissued = send(signed(
             &request(ManagementOp::ReissueAdminToken, name, "n-9"),
@@ -753,15 +899,16 @@ mod management {
 
         // A retired Profile retires the Realm; the name is never reused.
         let mut retired = profile.clone();
-        retired["sequence"] = 3.into();
+        retired["sequence"] = 4.into();
         retired["realm"]["status"] = "retired".into();
+        retired["issuer"] = drafted["profile"]["issuer"].clone();
         let done = send(publish(name, "n-10", retired, &acme)).await.unwrap();
         assert_eq!(done["status"], "retired");
         assert_eq!(Realm::for_admin_token(new_token).await.unwrap(), None);
         let recreate = send(signed(&create(name, "n-11", Some("m-1")), &acme, "rs-1")).await;
         assert!(matches!(recreate, Err(ManagementError::Conflict(_))));
         let record = RealmProfileRecord::get(name).await.unwrap().unwrap();
-        assert_eq!(record.sequence, 3);
+        assert_eq!(record.sequence, 4);
     }
 
     #[tokio::test]

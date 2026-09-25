@@ -1,7 +1,7 @@
 //! Realm management requests (`actr/protocols/realm-profile.md` section 8)
-//! for Realms of other domains: `create_realm`, `publish_profile` and
-//! `reissue_admin_token`, each an Actr management envelope signed by an
-//! `active` Realm signing key of the Realm's domain.
+//! for Realms of other domains: `create_realm`, `publish_profile`,
+//! `reissue_admin_token` and `draft_profile`, each an Actr management
+//! envelope signed by an `active` Realm signing key of the Realm's domain.
 //!
 //! The same envelope carries `register_publisher`
 //! (`actr/protocols/authority-discovery.md` section 4.5), signed by an
@@ -169,8 +169,45 @@ where
                 })?;
             Ok(json!({ "realm": request.realm, "admin_token": token }))
         }
+        ManagementOp::DraftProfile => draft_profile(profiles, &request, &keys).await,
         ManagementOp::RegisterPublisher => unreachable!("handled above"),
     }
+}
+
+/// `draft_profile`: the next unsigned Realm Profile, with this Realm
+/// Provider's current Issuer keys and endpoints and the rest taken from the
+/// accepted Realm Profile.
+async fn draft_profile(
+    profiles: &RealmProfiles,
+    request: &ManagementRequest,
+    keys: &actr_protocol::RealmSigningKeys,
+) -> Result<Value, ManagementError> {
+    let name = request.realm.as_str();
+    let realm = Realm::get(name)
+        .await?
+        .ok_or_else(|| ManagementError::NotFound(format!("Realm {name} not found")))?;
+    if realm.status != RealmStatus::Active {
+        return Err(ManagementError::Conflict(format!(
+            "Realm {name} is not active"
+        )));
+    }
+    let accepted = RealmProfileRecord::get(name)
+        .await?
+        .and_then(|record| record.verify(keys).ok())
+        .ok_or_else(|| {
+            ManagementError::Conflict(format!("Realm {name} has no accepted Realm Profile"))
+        })?;
+    let mut draft = profiles
+        .draft(
+            name,
+            accepted.sequence + 1,
+            &accepted.realm.display_name,
+            accepted.package.clone(),
+            false,
+        )
+        .await?;
+    draft["policy"] = json!(accepted.policy);
+    Ok(json!({ "realm": name, "profile": draft }))
 }
 
 /// Record the nonce of a signed request; only signed requests reach the

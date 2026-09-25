@@ -373,6 +373,24 @@ async fn reissue_realm_admin_token(
     }
 }
 
+async fn rotate_realm_issuer_key(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+) -> impl IntoResponse {
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+
+    match state.service.rotate_realm_issuer_key_direct(&realm).await {
+        Ok(key_id) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "realm": realm, "key_id": key_id })),
+        )
+            .into_response(),
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
 async fn rotate_realm_secret(
     State(state): State<Arc<AdminApiState>>,
     Path(realm): Path<String>,
@@ -922,6 +940,10 @@ pub fn build_admin_api_router(
         .route(
             "/admin/api/realms/{realm}/secret/rotate",
             post(rotate_realm_secret),
+        )
+        .route(
+            "/admin/api/realms/{realm}/issuer-key/rotate",
+            post(rotate_realm_issuer_key),
         )
         .route("/admin/api/realms/{realm}/retire", post(retire_realm))
         .route("/admin/api/realms/{realm}/profile", get(get_realm_profile))

@@ -106,7 +106,6 @@ impl Database {
                 expires_at INTEGER,
                 pending_expires_at INTEGER,
                 requester TEXT NOT NULL DEFAULT '',
-                issuer_key_id TEXT,
                 admin_token_hash TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER,
@@ -149,6 +148,36 @@ impl Database {
                 pinned_at INTEGER NOT NULL,
                 checked_at INTEGER NOT NULL
             )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Realm issuer keys this Realm Provider holds in the Signer. `key_id`
+        // is the Signer key id, the credential `key_id` and, in decimal, the
+        // Realm Profile issuer key id. `next` is listed in the Realm Profile
+        // but does not sign yet, `current` signs, `retired` only verifies
+        // until `remove_after`. At most one `next` and one `current`.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_issuer_key (
+                realm TEXT NOT NULL,
+                key_id INTEGER NOT NULL,
+                signer_name TEXT NOT NULL UNIQUE,
+                public_key TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('next', 'current', 'retired')),
+                created_at INTEGER NOT NULL,
+                published_at INTEGER,
+                current_since INTEGER,
+                remove_after INTEGER,
+                PRIMARY KEY(realm, key_id),
+                FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_realm_issuer_key_state
+             ON realm_issuer_key(realm, state) WHERE state != 'retired'",
         )
         .execute(&mut *tx)
         .await?;

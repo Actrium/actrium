@@ -129,6 +129,12 @@ pub async fn build_realm_profiles(
             realms_base: format!("{origin}/actr/realms/"),
         },
         signer,
+        config
+            .services
+            .issuer
+            .as_ref()
+            .map_or(3600, |issuer| issuer.server.token_ttl_secs),
+        config.sqlite_path.clone(),
     ))))
 }
 

@@ -1310,27 +1310,31 @@ impl AIdIssuer {
         ))
     }
 
-    /// The Realm's issuer key, `issuer:<realm>` in the Signer, created there
-    /// the first time. Named keys never expire; rotating one goes through a
-    /// new Realm Profile. The verifying key is written to the credential
-    /// validator's cache under the Realm, so it verifies only that Realm's
-    /// credentials.
+    /// The Realm's current issuer key (`realm-profile.md` section 6.1),
+    /// created in the Signer on first use. Its verifying key is written to
+    /// the credential validator's cache under the Realm, so it verifies only
+    /// that Realm's credentials.
     pub async fn realm_key(&self, realm: &str) -> Result<(u32, VerifyingKey), AidError> {
-        if let Some(key) = self.realm_keys.read().await.get(realm) {
+        let current = crate::realm_profile::current_issuer_key(&self.signer_client, realm)
+            .await
+            .map_err(|e| AidError::GenerationFailed(format!("Realm issuer key: {e}")))?;
+        if let Some(key) = self.realm_keys.read().await.get(realm)
+            && key.0 == current.key_id
+        {
             return Ok(*key);
         }
-        let (key_id, public_key) = self
-            .signer_client
-            .ensure_named_key(&crate::realm_profile::issuer_key_id(realm))
-            .await
-            .map_err(|e| AidError::GenerationFailed(format!("Signer unavailable: {e}")))?;
+        let public_key: [u8; 32] = base64::prelude::BASE64_STANDARD
+            .decode(&current.public_key)
+            .ok()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or_else(|| AidError::GenerationFailed("invalid Realm issuer key".to_string()))?;
         let verifying_key = VerifyingKey::from_bytes(&public_key).map_err(|e| {
             AidError::GenerationFailed(format!("Invalid verifying key from Signer: {e}"))
         })?;
         platform::aid::credential::validator::AIdCredentialValidator::persist_key(
             &self.config.sqlite_path,
             realm,
-            key_id,
+            current.key_id,
             &verifying_key,
             0,
         )
@@ -1338,8 +1342,8 @@ impl AIdIssuer {
         self.realm_keys
             .write()
             .await
-            .insert(realm.to_string(), (key_id, verifying_key));
-        Ok((key_id, verifying_key))
+            .insert(realm.to_string(), (current.key_id, verifying_key));
+        Ok((current.key_id, verifying_key))
     }
 
     /// Compute the renewal token expiry time (Unix timestamp, seconds, i64 for SQLite).
@@ -1791,22 +1795,37 @@ async fn retire_realm_keys(
     let mut failed = HashSet::new();
     for realm in realms {
         realm_keys.write().await.remove(&realm);
-        match signer
-            .retire_named_key(&crate::realm_profile::issuer_key_id(&realm))
-            .await
-        {
-            Ok(key_id) => platform::recording::info!(
-                "Retired the issuer key of Realm {} (key_id {})",
-                realm,
-                key_id
-            ),
+        let mut names = vec![crate::realm_profile::issuer_key_name(&realm)];
+        match platform::realm::RealmIssuerKey::list(&realm).await {
+            Ok(keys) => names.extend(keys.into_iter().map(|key| key.signer_name)),
             Err(e) => {
                 platform::recording::warn!(
-                    "Failed to retire the issuer key of Realm {}, will retry: {}",
+                    "Failed to list the issuer keys of Realm {}, will retry: {}",
                     realm,
                     e
                 );
                 failed.insert(realm);
+                continue;
+            }
+        }
+        names.dedup();
+        for name in names {
+            match signer.retire_named_key(&name).await {
+                Ok(key_id) => platform::recording::info!(
+                    "Retired issuer key {} of Realm {} (key_id {})",
+                    name,
+                    realm,
+                    key_id
+                ),
+                Err(e) => {
+                    platform::recording::warn!(
+                        "Failed to retire issuer key {} of Realm {}, will retry: {}",
+                        name,
+                        realm,
+                        e
+                    );
+                    failed.insert(realm.clone());
+                }
             }
         }
     }

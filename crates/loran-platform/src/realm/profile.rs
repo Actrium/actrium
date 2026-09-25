@@ -106,6 +106,7 @@ impl RealmProfileRecord {
         match profile.realm.status {
             RealmStatus::Retired => retire_in(&mut tx, name, now).await?,
             RealmStatus::Active => {
+                super::issuer_key::RealmIssuerKey::mark_published(&mut tx, profile, now).await?;
                 activated = sqlx::query(
                     "UPDATE realm SET status = 'active', pending_expires_at = NULL,
                         admin_token_hash = ?, updated_at = ?
@@ -149,7 +150,10 @@ mod tests {
             "schema": "actr.realm/v1",
             "sequence": sequence,
             "realm": { "name": NAME, "display_name": "Notes", "status": status },
-            "issuer": { "url": "https://provider.example/issuer", "keys": [] },
+            "issuer": { "url": "https://provider.example/issuer", "keys": [{
+                "id": "7", "algorithm": "Ed25519", "status": "active",
+                "public_key": BASE64.encode([2u8; 32]),
+            }] },
             "provider": { "id": "provider.example", "signaling": [], "ice": [] },
             "policy": { "membership": "invite-only" },
             "issued_at": "2026-09-25T00:00:00Z",

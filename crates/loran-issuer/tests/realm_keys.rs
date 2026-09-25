@@ -256,6 +256,44 @@ async fn credentials_are_signed_with_the_realm_issuer_key() {
         "linked-src/source-workload@1.0.0"
     );
 
+    // After a rotation switches keys, credentials carry the new key id and
+    // both keys verify under the Realm.
+    let signer = create_signer_client(&env.signer_config, &env.shared_key)
+        .await
+        .expect("create Signer client");
+    let name = format!("issuer:{TEST_REALM}/next");
+    let (next_id, next_public) = signer.ensure_named_key(&name).await.expect("next key");
+    let now = chrono::Utc::now().timestamp();
+    platform::realm::RealmIssuerKey {
+        realm: TEST_REALM.to_string(),
+        key_id: next_id,
+        signer_name: name,
+        public_key: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, next_public),
+        state: platform::realm::IssuerKeyState::Next,
+        created_at: now,
+        published_at: Some(now),
+        current_since: None,
+        remove_after: None,
+    }
+    .insert()
+    .await
+    .expect("insert next key");
+    platform::realm::RealmIssuerKey::switch(TEST_REALM, now, now + 3900)
+        .await
+        .expect("switch keys");
+    let rotated = issuer
+        .issue_credential_for_actor(&actor_id, None)
+        .await
+        .expect("issue credential after rotation");
+    assert_eq!(rotated.credential.key_id, next_id);
+    assert_ne!(next_id, realm_key_id);
+    let (next_key, _) = cache
+        .get_cached_key(TEST_REALM, next_id)
+        .await
+        .expect("read signaling cache")
+        .expect("new key cached");
+    AIdCredentialVerifier::verify(&rotated.credential, &next_key).expect("new credential verifies");
+
     drop(issuer);
     env.shutdown_signer().await;
 }

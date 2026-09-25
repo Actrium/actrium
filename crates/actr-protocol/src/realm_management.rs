@@ -28,6 +28,7 @@ pub enum ManagementOp {
     PublishProfile,
     ReissueAdminToken,
     RegisterPublisher,
+    DraftProfile,
 }
 
 /// A Realm management request.
