@@ -1379,4 +1379,51 @@ mod tests {
         );
         assert!(big.accept("example.com", now, None).is_err());
     }
+
+    #[test]
+    fn only_rotations_newer_than_the_pin_introduce_keys() {
+        use ed25519_dalek::Signer as _;
+        let old = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+        let new = ed25519_dalek::SigningKey::from_bytes(&[2; 32]);
+        let key = |id: &str, key: &ed25519_dalek::SigningKey, status: &str| {
+            serde_json::json!({
+                "id": id, "algorithm": "Ed25519", "status": status,
+                "public_key": BASE64.encode(key.verifying_key().to_bytes()),
+            })
+        };
+        let pinned = |sequence: u64| {
+            let mut member = serde_json::json!({
+                "sequence": sequence, "keys": [key("rs-1", &old, "active")],
+            });
+            crate::realm_profile::sign_document(&mut member, "rs-1", &old);
+            match RealmSigningKeys::accept(&member, None).unwrap().1 {
+                KeyPinOutcome::Accepted(pins) => pins,
+                other => panic!("{other:?}"),
+            }
+        };
+        // rs-1 -> rs-2 introduced at sequence 3, then signed by rs-2 at 4.
+        let rotation = KeyRotation {
+            from: "rs-1".into(),
+            to: "rs-2".into(),
+            sequence: 3,
+            signature: String::new(),
+        };
+        let public_key = BASE64.encode(new.verifying_key().to_bytes());
+        let signature = old.sign(rotation_payload(&rotation, &public_key).as_bytes());
+        let mut member = serde_json::json!({
+            "sequence": 4,
+            "keys": [key("rs-2", &new, "active"), key("rs-1", &old, "retired")],
+            "rotations": [{
+                "from": "rs-1", "to": "rs-2", "sequence": 3,
+                "signature": BASE64.encode(signature.to_bytes()),
+            }],
+        });
+        crate::realm_profile::sign_document(&mut member, "rs-2", &new);
+
+        let outcome = |pins: KeyPins| RealmSigningKeys::accept(&member, Some(&pins)).unwrap().1;
+        assert!(matches!(outcome(pinned(2)), KeyPinOutcome::Accepted(_)));
+        // A client that already accepted sequence 3 without rs-2 does not
+        // take the rotation from it.
+        assert!(matches!(outcome(pinned(3)), KeyPinOutcome::IdentityChange(_)));
+    }
 }
