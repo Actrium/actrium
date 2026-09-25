@@ -45,7 +45,6 @@ function CopyButton({ text, label = 'Copy', className = '' }: { text: string; la
 function StatusBadge({ status }: { status: PublisherRecord['status'] }) {
   const config = {
     active: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Active' },
-    pending: { color: 'bg-yellow-100 text-yellow-800', icon: Clock, label: 'Pending' },
     suspended: { color: 'bg-orange-100 text-orange-800', icon: AlertTriangle, label: 'Suspended' },
     revoked: { color: 'bg-red-100 text-red-800', icon: XCircle, label: 'Revoked' },
   }[status];
@@ -366,6 +365,14 @@ export function PublisherRegistryPage() {
     finally { setActionLoading(null); }
   };
 
+  const handleRevokeActiveKey = async (publisher: PublisherRecord) => {
+    if (!confirm(`Revoke the current package signing key of "${publisher.name}" (${publisher.key_id})?\n\nThis is an emergency action for a compromised key. Packages signed with it fail verification at once, and the publisher cannot publish until it registers a Publisher Profile with a new key.`)) return;
+    setActionLoading(publisher.id);
+    try { await publisherApi.revokeActiveKey(publisher.id); await loadData(); }
+    catch (e) { setError(String(e)); }
+    finally { setActionLoading(null); }
+  };
+
   const handleRevokePackage = async (pkg: ActrPackage) => {
     if (!confirm(`Revoke package "${pkg.type_str}"?`)) return;
     try { await publisherApi.revokePackage(pkg.id); await loadData(); }
@@ -468,6 +475,14 @@ export function PublisherRegistryPage() {
                             disabled={actionLoading === publisher.id}
                             className="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
                           >Suspend</button>
+                        )}
+                        {publisher.status === 'active' && publisher.key_id && (
+                          <button
+                            onClick={() => void handleRevokeActiveKey(publisher)}
+                            disabled={actionLoading === publisher.id}
+                            title="Emergency revoke of the current package signing key"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-red-700 text-white rounded hover:bg-red-800 disabled:opacity-50"
+                          ><ShieldOff size={11} /> Revoke key</button>
                         )}
                         {publisher.status === 'suspended' && (
                           <button

@@ -334,7 +334,7 @@ export interface PublisherRecord {
   public_key: string;
   key_id: string;
   contact?: string;
-  status: 'pending' | 'active' | 'suspended' | 'revoked';
+  status: 'active' | 'suspended' | 'revoked';
   created_at: number;
   updated_at?: number;
   verified_at?: number;
@@ -398,6 +398,9 @@ export const publisherApi = {
 
   revokeHistoricalKey: (historyId: number) =>
     request<void>(`/publishers/admin/keys/${historyId}/revoke`, { method: 'POST' }),
+
+  revokeActiveKey: (publisherId: number) =>
+    request<void>(`/publishers/admin/${publisherId}/keys/active/revoke`, { method: 'POST' }),
 };
 
 // Identity re-confirmation: pinned vs served signing keys of a Realm domain
