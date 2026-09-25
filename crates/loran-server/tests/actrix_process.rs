@@ -2635,6 +2635,31 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
         .expect("admin ui create realm request");
     assert_eq!(create_resp.status(), reqwest::StatusCode::FORBIDDEN);
 
+    // Identity re-confirmation: admin only, and a Realm domain's is a Realm
+    // write.
+    let identity_url = format!("http://127.0.0.1:{port}/admin/api/identity/realm-domains/acme.com");
+    let unauthenticated = http_client
+        .get(&identity_url)
+        .send()
+        .await
+        .expect("unauthenticated identity request");
+    assert_eq!(unauthenticated.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let unpinned = http_client
+        .get(&identity_url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("identity request");
+    assert_eq!(unpinned.status(), reqwest::StatusCode::NOT_FOUND);
+    let confirm = http_client
+        .post(&identity_url)
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "digest": "0" }))
+        .send()
+        .await
+        .expect("identity confirmation");
+    assert_eq!(confirm.status(), reqwest::StatusCode::FORBIDDEN);
+
     graceful_shutdown(child);
 }
 
