@@ -569,7 +569,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   `/register`、`/reissue`、`/renew` 请求新签证明；`actr realm` 提供 `join`、`invite`、`members`、
   `revoke-invite`、`revoke-client`、`remove-member`、`set-role`、`transfer-owner`、`leave`（请求有连接与总
   超时、不跟随重定向）。`join` 不给 `--issuer` 时取 `https://<domain>/.well-known/actr` 的
-  `realm_signing_keys`，从 `realms` 位置取 Realm Profile 并验证，用其 `issuer.url` 与 `provider.id`；邀请内嵌的
+  `realm_signing_keys`，从 `realms` 位置取 Realm Profile 并验证（公开文档只走 HTTPS、上限 64 KiB），用其 `issuer.url` 与 `provider.id`；邀请内嵌的
   Realm Profile 只在同样验证通过时使用，两份都有效时取 sequence 高者（须为合法后继）；`--issuer` 留给没有
   Realm Profile 的 Realm。脚本以 stdin（`-`）传邀请。Admin Web 有每个 Realm 的只读成员列表。
   e2e `package-runtime-echo` 走 owner 邀请 → 邀请 editor → 移除后拒签的全流程。尚未实现：Web（sw-host）
