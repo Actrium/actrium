@@ -222,7 +222,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         signaling_url: url::Url::parse("ws://localhost:8081/signaling/ws").unwrap(),
         realm: "test7@example.com".to_string(),
         issuer_endpoint: "http://localhost:8081/issuer".to_string(),
-        realm_secret: Some("test-realm-secret".to_string()),
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: test_acl(),
         mailbox_path: None,
@@ -494,6 +494,7 @@ async fn bootstrap_package_uses_manifest_auth() {
             "test@example.com",
             test_service_spec(),
             test_acl(),
+            None,
         )
         .await;
 
@@ -550,6 +551,7 @@ async fn bootstrap_issuer_error_propagates() {
             "test@example.com",
             test_service_spec(),
             test_acl(),
+            None,
         )
         .await;
 
@@ -596,6 +598,7 @@ async fn bootstrap_issuer_rejection_creates_no_database() {
             "test@example.com",
             test_service_spec(),
             test_acl(),
+            None,
         )
         .await;
     assert!(matches!(result, Err(HyperError::IssuerBootstrapFailed(_))));
@@ -633,7 +636,7 @@ fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config:
         signaling_url: url::Url::parse("ws://127.0.0.1:9/signaling/ws").unwrap(),
         realm: "test@example.com".to_string(),
         issuer_endpoint: "http://127.0.0.1:9/issuer".into(),
-        realm_secret: None,
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,

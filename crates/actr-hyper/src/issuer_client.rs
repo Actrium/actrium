@@ -5,14 +5,22 @@
 //! - Package registration: authenticate with manifest_raw + publisher_signature
 //! - Linked registration: authenticate with realm authorization
 //!
+//! Every `/register`, `/reissue` and `/renew` request carries an
+//! `x-actr-client-proof` signed by the node's Realm client key
+//! (`actr/protocols/realm-membership.md` section 6).
+//!
 //! Credential renewal is handled by the Credential Manager via `POST /issuer/renew`,
 //! not by re-calling `/register` with a PSK.
 
+use std::path::Path;
 use std::time::Duration;
 
 use prost::Message;
 use tracing::{debug, error, info, warn};
 
+use actr_protocol::realm_membership::{
+    CLIENT_PROOF_HEADER, ClientProof, ProofOp, RealmClientKeyFile,
+};
 use actr_protocol::{
     ErrorResponse, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
     RenewCredentialRequest, RenewCredentialResponse, renew_credential_response,
@@ -62,6 +70,79 @@ pub enum ReissueError {
     Protocol(String),
 }
 
+/// A Realm client key: signs the `x-actr-client-proof` of Issuer requests.
+#[derive(Clone)]
+pub struct RealmClientKey {
+    realm: String,
+    provider_id: String,
+    key: ed25519_dalek::SigningKey,
+}
+
+impl std::fmt::Debug for RealmClientKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RealmClientKey")
+            .field("realm", &self.realm)
+            .field("provider_id", &self.provider_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RealmClientKey {
+    pub fn new(
+        realm: impl Into<String>,
+        provider_id: impl Into<String>,
+        key: ed25519_dalek::SigningKey,
+    ) -> Self {
+        Self {
+            realm: realm.into(),
+            provider_id: provider_id.into(),
+            key,
+        }
+    }
+
+    /// Load a key file written by `actr realm join`.
+    pub fn load(path: &Path) -> HyperResult<Self> {
+        let text = std::fs::read_to_string(path).map_err(|error| {
+            HyperError::Config(format!(
+                "failed to read Realm client key {}: {error}",
+                path.display()
+            ))
+        })?;
+        let (file, key) = RealmClientKeyFile::parse(&text).map_err(|error| {
+            HyperError::Config(format!("Realm client key {}: {error}", path.display()))
+        })?;
+        Ok(Self::new(file.realm, file.provider_id, key))
+    }
+
+    /// Load the key file configured for `realm`, if any; it must be a key
+    /// of that Realm.
+    pub fn load_for(path: Option<&Path>, realm: &str) -> HyperResult<Option<Self>> {
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        let key = Self::load(path)?;
+        if key.realm != realm {
+            return Err(HyperError::Config(format!(
+                "Realm client key {} is for Realm {}, not {realm}",
+                path.display(),
+                key.realm
+            )));
+        }
+        Ok(Some(key))
+    }
+
+    pub fn realm(&self) -> &str {
+        &self.realm
+    }
+
+    /// A freshly signed proof for `body` of an `op` request on `realm`.
+    fn proof(&self, op: ProofOp, realm: &str, body: &[u8]) -> String {
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        ClientProof::new(op, realm, &self.provider_id, body, &nonce).header_value(&self.key)
+    }
+}
+
 enum ProtobufRequestError {
     HttpStatus(u16),
     Retryable(String),
@@ -75,8 +156,8 @@ enum ProtobufRequestError {
 pub struct IssuerClient {
     endpoint: String,
     http: reqwest::Client,
-    /// Optional realm secret for `x-actrix-realm-secret` header authentication
-    realm_secret: Option<String>,
+    /// Realm client key that signs each request's `x-actr-client-proof`
+    client_key: Option<RealmClientKey>,
 }
 
 const CONTROL_ATTEMPT_RETRY_DEADLINE: Duration = Duration::from_secs(95);
@@ -103,14 +184,26 @@ impl IssuerClient {
         Self {
             endpoint: endpoint.into(),
             http,
-            realm_secret: None,
+            client_key: None,
         }
     }
 
-    /// Set the realm secret for authentication
-    pub fn with_realm_secret(mut self, secret: impl Into<String>) -> Self {
-        self.realm_secret = Some(secret.into());
+    /// Sign requests with the Realm client key `key`.
+    pub fn with_client_key(mut self, key: RealmClientKey) -> Self {
+        self.client_key = Some(key);
         self
+    }
+
+    /// The `x-actr-client-proof` header for an `op` request on `realm`.
+    fn proof_header(
+        &self,
+        op: ProofOp,
+        realm: &str,
+        body: &[u8],
+    ) -> Option<(&'static str, String)> {
+        self.client_key
+            .as_ref()
+            .map(|key| (CLIENT_PROOF_HEADER, key.proof(op, realm, body)))
     }
 
     /// Initial registration: authenticate with publisher manifest
@@ -131,7 +224,7 @@ impl IssuerClient {
     /// Linked registration: authenticate with realm authorization.
     ///
     /// Sends a RegisterRequest marked as linked source mode. Issuer authorizes it
-    /// using the realm secret header instead of publisher package identity.
+    /// by the client proof alone instead of publisher package identity.
     pub async fn register_linked(&self, req: RegisterRequest) -> HyperResult<RegisterResponse> {
         info!(
             endpoint = %self.endpoint,
@@ -163,7 +256,8 @@ impl IssuerClient {
             actor_id = %req.actr_id.to_string_repr(),
             "reissuing Issuer credential for stable actor identity"
         );
-        self.do_protobuf_request("reissue", req.encode_to_vec(), true)
+        let realm = req.registration.realm.clone();
+        self.do_protobuf_request(ProofOp::Reissue, &realm, req.encode_to_vec(), true)
             .await
             .map_err(ReissueError::from)
     }
@@ -186,13 +280,18 @@ impl IssuerClient {
         let mut last_transport_error = None;
         let mut retry_count = 0u32;
         loop {
-            let pending = self
+            let mut builder = self
                 .http
                 .post(&url)
                 .header("Content-Type", "application/x-protobuf")
-                .header("Accept", "application/x-protobuf")
-                .body(body.clone())
-                .send();
+                .header("Accept", "application/x-protobuf");
+            // Each try is signed anew: the proof's nonce is single-use.
+            if let Some((name, value)) =
+                self.proof_header(ProofOp::Renew, &req.actr_id.realm, &body)
+            {
+                builder = builder.header(name, value);
+            }
+            let pending = builder.body(body.clone()).send();
 
             let response = match tokio::task::spawn(pending).await {
                 Ok(Ok(response)) => response,
@@ -246,6 +345,15 @@ impl IssuerClient {
         })?;
 
         if !status.is_success() {
+            // The message starts with a stable code (`client_revoked: …`).
+            let message = RenewCredentialResponse::decode(bytes.as_ref())
+                .ok()
+                .and_then(|response| match response.result {
+                    Some(renew_credential_response::Result::Error(error)) => Some(error.message),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            warn!(url = %url, status = %status, message = %message, "Issuer refused renewal");
             return Err(classify_renew_status(status.as_u16(), retry_after));
         }
 
@@ -274,7 +382,8 @@ impl IssuerClient {
         // `/register` is intentionally non-idempotent: a second call requests
         // a new identity, so ambiguous transport failures are surfaced rather
         // than retried automatically.
-        self.do_protobuf_request("register", req.encode_to_vec(), false)
+        let realm = req.realm.clone();
+        self.do_protobuf_request(ProofOp::Register, &realm, req.encode_to_vec(), false)
             .await
             .map_err(|error| HyperError::IssuerBootstrapFailed(error.to_string()))
     }
@@ -282,10 +391,16 @@ impl IssuerClient {
     /// Send a protobuf request that returns [`RegisterResponse`].
     async fn do_protobuf_request(
         &self,
-        path: &str,
+        op: ProofOp,
+        realm: &str,
         body: Vec<u8>,
         idempotent: bool,
     ) -> Result<RegisterResponse, ProtobufRequestError> {
+        let path = match op {
+            ProofOp::Register => "register",
+            ProofOp::Reissue => "reissue",
+            ProofOp::Renew => "renew",
+        };
         let base = self.endpoint.to_string().trim_end_matches('/').to_string();
         let url = format!("{base}/{path}");
 
@@ -302,8 +417,8 @@ impl IssuerClient {
                 .header("Content-Type", "application/x-protobuf")
                 .header("Accept", "application/x-protobuf");
 
-            if let Some(ref secret) = self.realm_secret {
-                request_builder = request_builder.header("x-actrix-realm-secret", secret);
+            if let Some((name, value)) = self.proof_header(op, realm, &body) {
+                request_builder = request_builder.header(name, value);
             }
 
             let pending = request_builder.body(body.clone()).send();

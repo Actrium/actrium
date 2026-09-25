@@ -235,9 +235,15 @@ pub struct RawDeploymentConfig {
     #[serde(default)]
     pub realm: Option<String>,
 
-    /// Realm secret for Issuer registration authentication
+    /// Realm client key file from `actr realm join`, which signs the
+    /// Issuer requests; relative to the config file's directory.
     #[serde(default)]
-    pub realm_secret: Option<String>,
+    pub realm_client_key: Option<PathBuf>,
+
+    /// Tombstone: the removed shared `realm_secret`. Kept only to produce a
+    /// migration error.
+    #[serde(default, rename = "realm_secret")]
+    pub removed_realm_secret: Option<String>,
 
     /// Issuer HTTP endpoint, e.g. `"http://issuer.example.com:8080"`.
     #[serde(default)]

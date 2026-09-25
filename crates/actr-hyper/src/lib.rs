@@ -195,7 +195,7 @@ pub use actr_platform_traits::{
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use issuer_client::IssuerClient;
+pub use issuer_client::{IssuerClient, RealmClientKey};
 // Conflict-key dispatch scheduling (B2).
 #[cfg(not(target_arch = "wasm32"))]
 pub use config::DispatchConcurrency;
@@ -1169,7 +1169,7 @@ impl Node<Attached> {
     /// Register with Issuer, obtain an AId credential, and inject it into this
     /// attached node. Consumes `Node<Attached>` and returns `Node<Registered>`.
     ///
-    /// `realm`, `acl`, and `realm_secret` come from the attached
+    /// `realm`, `acl`, and `realm_client_key` come from the attached
     /// [`RuntimeConfig`]; `service_spec` is derived from the package's proto
     /// exports when a package-backed attach was used. Linked attachments
     /// register from the runtime config's actor metadata instead.
@@ -1239,7 +1239,8 @@ impl Node<Attached> {
             .expect("Node<Attached> without attachment");
         let realm = attachment.node.config.realm.clone();
         let acl = attachment.node.config.acl.clone();
-        let realm_secret = attachment.node.config.realm_secret.clone();
+        let client_key =
+            RealmClientKey::load_for(attachment.node.config.realm_client_key.as_deref(), &realm)?;
 
         // Mint the initial publisher proof (if a re-signing provider was supplied)
         // so the same one-shot auth feeds both the saved registration context
@@ -1306,7 +1307,7 @@ impl Node<Attached> {
                     realm: &realm,
                     service_spec,
                     acl,
-                    realm_secret: realm_secret.as_deref(),
+                    client_key,
                     publisher_auth,
                 },
             )
@@ -1454,6 +1455,8 @@ impl Hyper {
     /// - `realm`: target Realm name `<realm_id>@<domain>`
     /// - `service_spec`: optional protobuf API metadata published to discovery
     /// - `acl`: optional access-control policy attached to the actor
+    /// - `client_key`: the Realm client key that signs the request's client
+    ///   proof
     pub async fn bootstrap_credential(
         &self,
         verified: &VerifiedPackage,
@@ -1461,6 +1464,7 @@ impl Hyper {
         realm: &str,
         service_spec: Option<ServiceSpec>,
         acl: Option<Acl>,
+        client_key: Option<RealmClientKey>,
     ) -> HyperResult<register_response::RegisterOk> {
         bootstrap_credential_inner(
             &self.inner,
@@ -1470,7 +1474,7 @@ impl Hyper {
                 realm,
                 service_spec,
                 acl,
-                realm_secret: None,
+                client_key,
                 publisher_auth: None,
             },
         )
@@ -1697,7 +1701,7 @@ struct CredentialBootstrapRequest<'a> {
     realm: &'a str,
     service_spec: Option<ServiceSpec>,
     acl: Option<Acl>,
-    realm_secret: Option<&'a str>,
+    client_key: Option<RealmClientKey>,
     publisher_auth: Option<PublisherRegistrationAuth>,
 }
 
@@ -1712,7 +1716,7 @@ async fn bootstrap_credential_inner(
         realm,
         service_spec,
         acl,
-        realm_secret,
+        client_key,
         publisher_auth,
     } = request;
     let manifest = &verified.manifest;
@@ -1733,8 +1737,8 @@ async fn bootstrap_credential_inner(
     // (Legacy PSK renewal path removed — credential renewal now goes through
     // the Credential Manager via POST /issuer/renew.)
     let mut issuer = IssuerClient::new(issuer_endpoint);
-    if let Some(secret) = realm_secret {
-        issuer = issuer.with_realm_secret(secret);
+    if let Some(key) = client_key {
+        issuer = issuer.with_client_key(key);
     }
 
     let actr_type = ActrType {
@@ -1847,8 +1851,9 @@ async fn bootstrap_linked_credential_inner(
     service_spec: Option<ServiceSpec>,
 ) -> HyperResult<register_response::RegisterOk> {
     let mut issuer = IssuerClient::new(issuer_endpoint);
-    if let Some(ref secret) = config.realm_secret {
-        issuer = issuer.with_realm_secret(secret.clone());
+    if let Some(key) = RealmClientKey::load_for(config.realm_client_key.as_deref(), &config.realm)?
+    {
+        issuer = issuer.with_client_key(key);
     }
 
     let req = build_linked_register_request(config, service_spec);

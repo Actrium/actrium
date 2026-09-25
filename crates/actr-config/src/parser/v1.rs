@@ -169,6 +169,14 @@ impl ParserV1 {
         // Surface the removed `[hyper].storage_path_template` as a migration error
         // instead of silently ignoring it, and resolve `[hyper].storage_root`
         // against the config dir so `actr run` honours it (CWE-22 / CWE-73).
+        if raw.deployment.removed_realm_secret.is_some() {
+            return Err(ConfigError::InvalidConfig(
+                "`deployment.realm_secret` was removed; join the Realm with `actr realm join` \
+                 and set `deployment.realm_client_key` to the key file it writes."
+                    .to_string(),
+            ));
+        }
+
         let storage_root = match raw.hyper {
             Some(hyper) => {
                 if hyper.removed_storage_path_template.is_some() {
@@ -192,7 +200,10 @@ impl ParserV1 {
             signaling_url,
             realm: self_realm,
             issuer_endpoint: issuer_endpoint.to_string(),
-            realm_secret: raw.deployment.realm_secret,
+            realm_client_key: raw
+                .deployment
+                .realm_client_key
+                .map(|path| self.resolve_manifest_path(&path)),
             visible_in_discovery: raw.discovery.visible.unwrap_or(true),
             acl,
             mailbox_path: None,
@@ -1234,6 +1245,28 @@ realm = "other@example.com"
             msg.contains("storage_path_template") && msg.contains("storage_root"),
             "error should point to the storage_root migration, got: {msg}"
         );
+    }
+
+    #[test]
+    fn test_runtime_realm_client_key_is_relative_to_the_config() {
+        let tmpdir = TempDir::new().unwrap();
+        let config_path = tmpdir.path().join("config").join("actr.toml");
+        let config = parse_runtime_str(
+            &config_path,
+            &format!("{RUNTIME_BASE}realm_client_key = \"keys/realm.json\"\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            config.realm_client_key,
+            Some(tmpdir.path().join("config").join("keys/realm.json"))
+        );
+
+        let err = parse_runtime_str(
+            &config_path,
+            &format!("{RUNTIME_BASE}realm_secret = \"rs_old\"\n"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("actr realm join"), "{err}");
     }
 
     #[test]

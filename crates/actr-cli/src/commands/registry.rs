@@ -64,7 +64,7 @@ impl Command for RegistryArgs {
 
     fn config_requirement(&self) -> ConfigRequirement {
         match &self.command {
-            // Standalone discover (--endpoint --realm --realm-secret) needs
+            // Standalone discover (--endpoint --realm --realm-client-key) needs
             // no local project files; otherwise discover needs manifest.toml or
             // actr.toml to resolve network endpoints.
             RegistryCommand::Discover(cmd) => {

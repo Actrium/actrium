@@ -1681,9 +1681,17 @@ fn standalone_discover_skips_project_config_requirement() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
 
-    // Standalone discover (--endpoint --realm --realm-secret) must bypass
+    // Standalone discover (--endpoint --realm --realm-client-key) must bypass
     // the project-config requirement even in an empty directory. It fails on
     // network unreachability (localhost:1), not on missing configuration.
+    let key_path = tmp.path().join("realm-client.json");
+    let key_file = actr_protocol::realm_membership::RealmClientKeyFile::new(
+        "dev@example.com",
+        "localhost:1",
+        "http://localhost:1",
+        &ed25519_dalek::SigningKey::from_bytes(&[1; 32]),
+    );
+    std::fs::write(&key_path, serde_json::to_string(&key_file).unwrap()).unwrap();
     let output = run_actr(
         &[
             "registry",
@@ -1693,8 +1701,8 @@ fn standalone_discover_skips_project_config_requirement() {
             "http://localhost:1",
             "--realm",
             "dev@example.com",
-            "--realm-secret",
-            "secret",
+            "--realm-client-key",
+            key_path.to_str().unwrap(),
         ],
         tmp.path(),
         &home,

@@ -2895,6 +2895,11 @@ impl Inner {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 1. Obtain registration info (Hyper pre-injected or Issuer HTTP)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        let client_key = crate::issuer_client::RealmClientKey::load_for(
+            self.config.realm_client_key.as_deref(),
+            &self.config.realm,
+        )
+        .map_err(|e| ActrError::InvalidArgument(e.to_string()))?;
         let register_ok = if let Some(injected) = self.preregistered_credential.take() {
             tracing::info!(
                 "Using Hyper pre-injected registration credential; skipping Issuer registration"
@@ -2907,8 +2912,8 @@ impl Inner {
                 "Registering actor with Issuer via HTTP"
             );
             let mut issuer = IssuerClient::new(issuer_endpoint);
-            if let Some(ref secret) = self.config.realm_secret {
-                issuer = issuer.with_realm_secret(secret);
+            if let Some(key) = client_key.clone() {
+                issuer = issuer.with_client_key(key);
             }
             let resp = issuer
                 .register_linked(register_request.clone())
@@ -3101,13 +3106,12 @@ impl Inner {
                 .take()
                 .unwrap_or_else(|| RegistrationContext::Linked {
                     request: register_request.clone(),
-                    realm_secret: self.config.realm_secret.clone(),
                 });
             credential_manager = CredentialManager::new(
                 session_state.clone(),
                 registration_context,
                 self.config.issuer_endpoint.clone(),
-                self.config.realm_secret.clone(),
+                client_key.clone(),
             );
 
             // Build the node-level lifecycle hook callback once: it is
@@ -3792,7 +3796,7 @@ impl Inner {
                     Duration::from_secs(30)
                 };
                 let issuer_endpoint_for_heartbeat = self.config.issuer_endpoint.clone();
-                let realm_secret_for_heartbeat = self.config.realm_secret.clone();
+                let client_key_for_heartbeat = client_key.clone();
                 let heartbeat_handle = tokio::spawn(crate::lifecycle::heartbeat::heartbeat_task(
                     shutdown,
                     client,
@@ -3802,7 +3806,7 @@ impl Inner {
                     heartbeat_interval,
                     register_request_for_heartbeat,
                     issuer_endpoint_for_heartbeat,
-                    realm_secret_for_heartbeat,
+                    client_key_for_heartbeat,
                     Some(credential_manager_for_heartbeat),
                     node_hook_callback.clone(),
                     membership_handle_for_heartbeat,

@@ -112,7 +112,6 @@ fn linked_ctx(actor_id: &ActrId) -> RegistrationContext {
             realm: actor_id.realm.clone(),
             ..Default::default()
         },
-        realm_secret: None,
     }
 }
 

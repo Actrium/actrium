@@ -113,7 +113,7 @@ fn runtime_config_with_type(
         signaling_url: url::Url::parse(&server.url()).unwrap(),
         realm: "test7@example.com".to_string(),
         issuer_endpoint: format!("http://127.0.0.1:{}/issuer", server.port()),
-        realm_secret: None,
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,
@@ -878,10 +878,10 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn linked_node_registers_with_realm_secret() {
-    // Setting realm_secret exercises the linked-registration auth path that
-    // supplies the x-actrix-realm-secret header, a distinct branch from the
-    // default linked register flow.
+async fn linked_node_registers_with_a_realm_client_key() {
+    // Setting realm_client_key exercises the linked-registration auth path
+    // that loads the key file and signs the x-actr-client-proof header, a
+    // distinct branch from the default linked register flow.
     let mut server = TestSignalingServer::start().await.expect("server start");
     let dir = TempDir::new().unwrap();
 
@@ -892,8 +892,16 @@ async fn linked_node_registers_with_realm_secret() {
     .await
     .unwrap();
 
-    let mut cfg = runtime_config(&dir, &server, "RealmSecretNode");
-    cfg.realm_secret = Some("test-realm-secret".to_string());
+    let mut cfg = runtime_config(&dir, &server, "RealmClientKeyNode");
+    let key_path = dir.path().join("realm-client.json");
+    let key_file = actr_protocol::realm_membership::RealmClientKeyFile::new(
+        &cfg.realm,
+        "127.0.0.1",
+        &cfg.issuer_endpoint,
+        &ed25519_dalek::SigningKey::from_bytes(&[5; 32]),
+    );
+    std::fs::write(&key_path, serde_json::to_string(&key_file).unwrap()).unwrap();
+    cfg.realm_client_key = Some(key_path);
 
     let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, cfg)
@@ -902,7 +910,7 @@ async fn linked_node_registers_with_realm_secret() {
         .unwrap()
         .register(&issuer)
         .await
-        .expect("register with realm secret should succeed")
+        .expect("register with a Realm client key should succeed")
         .start()
         .await
         .expect("start");

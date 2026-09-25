@@ -52,7 +52,7 @@ pub struct EffectiveNetworkConfig {
     pub signaling_url: String,
     pub issuer_endpoint: String,
     pub realm: Option<String>,
-    pub realm_secret: Option<String>,
+    pub realm_client_key: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,7 +113,7 @@ fn merge_configs(base: Option<CliConfig>, overlay: Option<CliConfig>) -> CliConf
                 signaling_url: o.network.signaling_url.or(b.network.signaling_url),
                 issuer_endpoint: o.network.issuer_endpoint.or(b.network.issuer_endpoint),
                 realm: o.network.realm.or(b.network.realm),
-                realm_secret: o.network.realm_secret.or(b.network.realm_secret),
+                realm_client_key: o.network.realm_client_key.or(b.network.realm_client_key),
             },
             install: InstallConfig {},
             storage: StorageConfig {
@@ -161,7 +161,7 @@ fn apply_defaults(cfg: CliConfig) -> EffectiveCliConfig {
                 .issuer_endpoint
                 .unwrap_or_else(|| "http://localhost:8081/issuer".to_string()),
             realm: cfg.network.realm,
-            realm_secret: cfg.network.realm_secret,
+            realm_client_key: cfg.network.realm_client_key.map(expand_tilde),
         },
         storage: EffectiveStorageConfig {
             hyper_data_dir: cfg

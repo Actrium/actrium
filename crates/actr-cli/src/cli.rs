@@ -238,7 +238,7 @@ fn render_result(result: CommandResult) {
 async fn build_container(
     standalone_discover: Option<StandaloneDiscoverConfig>,
 ) -> Result<ServiceContainer> {
-    // ── Standalone mode (--endpoint --realm --realm-secret) ──
+    // ── Standalone mode (--endpoint --realm --realm-client-key) ──
     if let Some(cfg) = standalone_discover {
         let mut builder = ContainerBuilder::new();
         builder = builder.config_path(std::path::Path::new("."));
@@ -255,7 +255,7 @@ async fn build_container(
             signaling_url: cfg.endpoint.clone(),
             issuer_endpoint: cfg.endpoint.to_string(),
             realm: Some(cfg.realm),
-            realm_secret: Some(cfg.realm_secret),
+            realm_client_key: Some(cfg.realm_client_key),
         };
 
         container = container
@@ -307,14 +307,14 @@ async fn build_container(
 
     let issuer_endpoint = effective_cli.network.issuer_endpoint.clone();
     let realm = effective_cli.network.realm.clone();
-    let realm_secret = effective_cli.network.realm_secret.clone();
+    let realm_client_key = effective_cli.network.realm_client_key.clone();
 
     let discovery_context = DiscoveryContext {
         package_actr_type: config.package.actr_type.clone(),
         signaling_url,
         issuer_endpoint,
         realm,
-        realm_secret,
+        realm_client_key,
     };
 
     container = container
@@ -371,7 +371,7 @@ fn validate_config_requirement(req: ConfigRequirement) -> Result<()> {
                         "No project configuration found (manifest.toml or actr.toml) in {}.\n\
                          Run this command from a project directory, or use \
                          'actr registry discover --endpoint ... --realm ... \
-                         --realm-secret ...' for standalone discovery.",
+                         --realm-client-key ...' for standalone discovery.",
                         cwd.display()
                     ),
                 }

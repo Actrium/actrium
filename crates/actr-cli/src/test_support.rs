@@ -593,23 +593,11 @@ fn ensure_realm_exists(sqlite_dir: &Path, realm: &str) -> Result<()> {
             Ok(conn) => {
                 conn.busy_timeout(Duration::from_secs(3))
                     .context("failed to set sqlite busy timeout")?;
-                conn.execute_batch(
-                    "CREATE TABLE IF NOT EXISTS realm (
-                        name TEXT PRIMARY KEY,
-                        status TEXT NOT NULL DEFAULT 'active',
-                        enabled INTEGER NOT NULL DEFAULT 1,
-                        expires_at INTEGER,
-                        created_at INTEGER NOT NULL,
-                        updated_at INTEGER,
-                        secret_current TEXT NOT NULL DEFAULT '',
-                        secret_previous_hash TEXT,
-                        secret_previous_valid_until INTEGER
-                    );",
-                )?;
+                // Actrix created the schema before reporting healthy.
                 conn.execute(
-                    "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
-                     VALUES (?1, 'active', 1, strftime('%s','now'), ?2)",
-                    rusqlite::params![realm, ""],
+                    "INSERT OR IGNORE INTO realm (name, status, enabled, created_at)
+                     VALUES (?1, 'active', 1, strftime('%s','now'))",
+                    rusqlite::params![realm],
                 )
                 .context("failed to ensure local e2e realm exists")?;
                 return Ok(());

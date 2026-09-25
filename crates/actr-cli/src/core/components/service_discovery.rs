@@ -53,8 +53,9 @@ pub struct DiscoveryContext {
     /// Realm name for temporary actor registration
     pub realm: Option<String>,
 
-    /// Optional realm secret for authentication
-    pub realm_secret: Option<String>,
+    /// Realm client key file (`actr realm join`) that signs the temporary
+    /// actor's registration
+    pub realm_client_key: Option<std::path::PathBuf>,
 }
 
 pub struct NetworkServiceDiscovery {
@@ -153,11 +154,11 @@ impl NetworkServiceDiscovery {
 
     async fn connect_and_register(&self) -> Result<SignalingState> {
         let realm = self.required_realm()?;
-        let realm_secret = self.required_realm_secret()?.to_string();
+        let client_key = self.required_client_key(realm)?;
         let register_request = self.build_linked_register_request(realm);
 
         let issuer_client =
-            IssuerClient::new(&self.context.issuer_endpoint).with_realm_secret(realm_secret);
+            IssuerClient::new(&self.context.issuer_endpoint).with_client_key(client_key);
 
         let register_response = issuer_client
             .register_linked(register_request)
@@ -399,15 +400,12 @@ impl NetworkServiceDiscovery {
         entry.actr_type == lookup_type
     }
 
-    fn required_realm_secret(&self) -> Result<&str> {
-        self.context
-            .realm_secret
-            .as_deref()
-            .map(str::trim)
-            .filter(|secret| !secret.is_empty())
-            .ok_or_else(|| {
-                anyhow!("network.realm_secret is required for CLI service discovery registration")
-            })
+    fn required_client_key(&self, realm: &str) -> Result<actr_hyper::RealmClientKey> {
+        let path = self.context.realm_client_key.as_deref().ok_or_else(|| {
+            anyhow!("network.realm_client_key is required for CLI service discovery registration")
+        })?;
+        actr_hyper::RealmClientKey::load_for(Some(path), realm)?
+            .ok_or_else(|| anyhow!("network.realm_client_key is not set"))
     }
 
     fn required_realm(&self) -> Result<&str> {

@@ -180,7 +180,7 @@ fn runtime_config(
         signaling_url: url::Url::parse(&server.url()).unwrap(),
         realm: "test7@example.com".to_string(),
         issuer_endpoint: format!("http://127.0.0.1:{}/issuer", server.port()),
-        realm_secret: None,
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,

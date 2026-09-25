@@ -155,10 +155,7 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
         session.clone(),
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request,
-            realm_secret: None,
-        },
+        RegistrationContext::Linked { request },
         None,
         None,
         pending_control_attempts(),
@@ -272,7 +269,6 @@ async fn soft_renewal_fires_credential_renewed_hook() {
                 realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         Some(hook_callback),
@@ -353,7 +349,6 @@ async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
                 realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         Some(hook_callback),
@@ -434,7 +429,6 @@ async fn reissue_possession_failure_defers_instead_of_denying() {
                 realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         None,
@@ -463,7 +457,7 @@ async fn reissue_realm_denied_is_terminal() {
         result: Some(register_response::Result::Error(
             actr_protocol::ErrorResponse {
                 code: 403,
-                message: "Invalid realm secret".to_string(),
+                message: "client_revoked: the Realm client key is revoked".to_string(),
             },
         )),
     };
@@ -511,7 +505,6 @@ async fn reissue_realm_denied_is_terminal() {
                 realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         None,
@@ -600,7 +593,6 @@ async fn legacy_hard_rebind_fires_credential_renewed_hook() {
                 realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         Some(hook_callback),
@@ -937,7 +929,6 @@ async fn legacy_hard_rebind_commits_when_issuer_omits_renewal_token() {
                 realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         None,
@@ -1020,7 +1011,6 @@ async fn credential_only_hard_reissue_commits_when_issuer_omits_renewal_token() 
                 realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         None,

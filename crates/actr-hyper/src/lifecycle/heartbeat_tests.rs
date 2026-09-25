@@ -480,7 +480,6 @@ async fn membership_heartbeat_never_drives_disconnected_socket() {
                 realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         "http://127.0.0.1:1",
         None,
@@ -542,7 +541,6 @@ async fn run_membership_heartbeat_ticks(
                 realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         "http://127.0.0.1:1",
         None,
@@ -831,7 +829,6 @@ async fn credential_warning_triggers_credential_manager_renewal() {
                 realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         server.url(),
         None,
@@ -879,14 +876,14 @@ async fn credential_warning_triggers_credential_manager_renewal() {
 use actr_protocol::RegisterAuthMode;
 use std::sync::Mutex;
 
-fn test_realm_secret_actor_id(serial_number: u64) -> ActrId {
+fn test_re_register_actor_id(serial_number: u64) -> ActrId {
     ActrId {
         realm: "test7@example.com".to_string(),
         serial_number,
     }
 }
 
-fn test_realm_secret_credential(key_id: u32) -> AIdCredential {
+fn test_re_register_credential(key_id: u32) -> AIdCredential {
     AIdCredential {
         key_id,
         claims: bytes::Bytes::from_static(b"claims"),
@@ -985,14 +982,14 @@ impl SignalingClient for FakeSignalingClient {
 }
 
 #[tokio::test]
-async fn re_registration_sends_realm_secret_to_issuer() {
+async fn re_registration_signs_a_client_proof() {
     let mut server = mockito::Server::new_async().await;
-    let new_actor_id = test_realm_secret_actor_id(42);
+    let new_actor_id = test_re_register_actor_id(42);
     let register_response = RegisterResponse {
         result: Some(register_response::Result::Success(
             register_response::RegisterOk {
                 actr_id: new_actor_id.clone(),
-                credential: test_realm_secret_credential(2),
+                credential: test_re_register_credential(2),
                 turn_credential: TurnCredential {
                     protocol_version: 1,
                     realm: "test@example.com".to_string(),
@@ -1016,15 +1013,15 @@ async fn re_registration_sends_realm_secret_to_issuer() {
     };
     let _mock = server
         .mock("POST", "/register")
-        .match_header("x-actrix-realm-secret", "rs_test_secret")
+        .match_header("x-actr-client-proof", mockito::Matcher::Any)
         .with_status(200)
         .with_body(register_response.encode_to_vec())
         .create_async()
         .await;
 
-    let old_actor_id = test_realm_secret_actor_id(1);
+    let old_actor_id = test_re_register_actor_id(1);
     let credential_state = CredentialState::new(
-        test_realm_secret_credential(1),
+        test_re_register_credential(1),
         Some(prost_types::Timestamp {
             seconds: 123,
             nanos: 0,
@@ -1045,7 +1042,11 @@ async fn re_registration_sends_realm_secret_to_issuer() {
         register_request,
         credential_state,
         server.url(),
-        Some("rs_test_secret".to_string()),
+        Some(crate::issuer_client::RealmClientKey::new(
+            "test7@example.com",
+            "provider.example",
+            ed25519_dalek::SigningKey::from_bytes(&[4; 32]),
+        )),
         None,
     )
     .await;
@@ -1166,7 +1167,6 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
                 realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         "http://127.0.0.1:1".to_string(),
         None,

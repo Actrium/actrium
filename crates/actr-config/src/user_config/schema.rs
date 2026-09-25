@@ -137,10 +137,10 @@ impl CliConfig {
                 .map_err(|error| ConfigError::ValidationError(format!("network.realm: {error}")))?;
         }
 
-        if let Some(ref secret) = self.network.realm_secret {
-            if secret.is_empty() {
+        if let Some(ref key) = self.network.realm_client_key {
+            if key.is_empty() {
                 return Err(ConfigError::ValidationError(
-                    "network.realm_secret cannot be empty string (omit the field instead)"
+                    "network.realm_client_key cannot be empty string (omit the field instead)"
                         .to_string(),
                 ));
             }
@@ -224,8 +224,9 @@ pub struct NetworkConfig {
     /// Realm name `<realm_id>@<domain>` for CLI temporary actor registration
     pub realm: Option<String>,
 
-    /// Realm secret for authentication (optional)
-    pub realm_secret: Option<String>,
+    /// Realm client key file from `actr realm join`, which signs the CLI
+    /// actor's Issuer requests (supports `~` expansion)
+    pub realm_client_key: Option<String>,
 }
 
 /// Storage settings.

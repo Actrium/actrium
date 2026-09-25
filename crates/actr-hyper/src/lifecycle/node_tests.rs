@@ -1425,7 +1425,7 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         signaling_url: url::Url::parse("ws://127.0.0.1:9/signaling/ws").unwrap(),
         realm: "test7@example.com".to_string(),
         issuer_endpoint: "http://127.0.0.1:9/issuer".to_string(),
-        realm_secret: None,
+        realm_client_key: None,
         visible_in_discovery: false,
         acl: None,
         mailbox_path: None,

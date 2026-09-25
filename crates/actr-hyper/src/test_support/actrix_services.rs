@@ -244,6 +244,9 @@ impl ActrixTestServices {
     /// Produce a short-lived AId credential signed exactly as Issuer credentials
     /// are signed. The corresponding public key is installed in Actrix's
     /// production validator during fixture startup.
+    ///
+    /// No Issuer runs here, so the Actor is bound to no Realm client key and
+    /// Signaling does not check `member` / `client_key` against one.
     pub fn aid_credential(&self, actor_id: &ActrId) -> AIdCredential {
         let expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)

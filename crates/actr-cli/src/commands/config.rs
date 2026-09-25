@@ -32,7 +32,7 @@ const KNOWN_KEYS: &[&str] = &[
     "network.signaling_url",
     "network.issuer_endpoint",
     "network.realm",
-    "network.realm_secret",
+    "network.realm_client_key",
     "storage.hyper_data_dir",
 ];
 
@@ -289,8 +289,8 @@ impl ConfigCommand {
             "network.realm" => {
                 config.network.realm = Some(value_to_realm(&parsed_value, key)?);
             }
-            "network.realm_secret" => {
-                config.network.realm_secret = Some(value_to_string(&parsed_value)?);
+            "network.realm_client_key" => {
+                config.network.realm_client_key = Some(value_to_string(&parsed_value)?);
             }
             "storage.hyper_data_dir" => {
                 config.storage.hyper_data_dir = Some(value_to_string(&parsed_value)?);
@@ -376,9 +376,9 @@ impl ConfigCommand {
                 config.network.realm = None;
                 had
             }
-            "network.realm_secret" => {
-                let had = config.network.realm_secret.is_some();
-                config.network.realm_secret = None;
+            "network.realm_client_key" => {
+                let had = config.network.realm_client_key.is_some();
+                config.network.realm_client_key = None;
                 had
             }
             "storage.hyper_data_dir" => {
@@ -502,12 +502,12 @@ impl ConfigCommand {
                 effective.network.realm.as_deref().unwrap_or("<not set>")
             ),
             format!(
-                "network.realm_secret = {}",
+                "network.realm_client_key = {}",
                 effective
                     .network
-                    .realm_secret
+                    .realm_client_key
                     .as_deref()
-                    .unwrap_or("<not set>")
+                    .map_or("<not set>".into(), |path| path.display().to_string())
             ),
             format!(
                 "storage.hyper_data_dir = {}",

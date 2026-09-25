@@ -3,7 +3,7 @@
 //! This module contains functions for sending periodic heartbeat messages
 //! to the signaling server and handling responses.
 
-use crate::issuer_client::IssuerClient;
+use crate::issuer_client::{IssuerClient, RealmClientKey};
 use crate::lifecycle::credential_manager::{CredentialManager, credential_expiry_to_system_time};
 use crate::lifecycle::membership::MembershipHandle;
 use crate::lifecycle::session_state::SessionPhase;
@@ -145,7 +145,7 @@ async fn send_heartbeat_and_handle_response(
     _register_request: &RegisterRequest,
     consecutive_failures: &mut u64,
     _issuer_endpoint: &str,
-    _realm_secret: Option<&str>,
+    _client_key: Option<&RealmClientKey>,
     credential_manager: Option<&CredentialManager>,
     hook_callback: Option<&HookCallback>,
     membership: Option<&MembershipHandle>,
@@ -362,7 +362,7 @@ pub async fn heartbeat_task(
     heartbeat_interval: Duration,
     register_request: RegisterRequest,
     issuer_endpoint: String,
-    realm_secret: Option<String>,
+    client_key: Option<RealmClientKey>,
     credential_manager: Option<CredentialManager>,
     hook_callback: Option<HookCallback>,
     membership: Option<MembershipHandle>,
@@ -415,7 +415,7 @@ pub async fn heartbeat_task(
                     &register_request,
                     &mut consecutive_failures,
                     &issuer_endpoint,
-                    realm_secret.as_deref(),
+                    client_key.as_ref(),
                     credential_manager.as_ref(),
                     hook_callback.as_ref(),
                     membership.as_ref(),
@@ -452,7 +452,7 @@ async fn re_register_task(
     register_request: RegisterRequest,
     credential_state: CredentialState,
     issuer_endpoint: String,
-    realm_secret: Option<String>,
+    client_key: Option<RealmClientKey>,
     hook_callback: Option<HookCallback>,
 ) -> ActrId {
     tracing::info!(
@@ -464,8 +464,8 @@ async fn re_register_task(
 
     // Step 1: Register via Issuer HTTP to get new credential
     let mut issuer = IssuerClient::new(&issuer_endpoint);
-    if let Some(secret) = realm_secret {
-        issuer = issuer.with_realm_secret(secret);
+    if let Some(key) = client_key {
+        issuer = issuer.with_client_key(key);
     }
     let resp = match issuer
         .register_with_manifest(register_request.clone())

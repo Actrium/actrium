@@ -45,7 +45,7 @@ fn apply_key_to_config_sets_every_known_string_field() {
         ("cache.dir", "/tmp/cache"),
         ("network.signaling_url", "ws://localhost"),
         ("network.issuer_endpoint", "http://issuer"),
-        ("network.realm_secret", "secret"),
+        ("network.realm_client_key", "/keys/realm.json"),
         ("storage.hyper_data_dir", "/hyper"),
         ("ui.format", "json"),
         ("ui.color", "auto"),

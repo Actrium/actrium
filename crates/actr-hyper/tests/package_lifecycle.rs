@@ -45,7 +45,7 @@ fn test_runtime_config(
         signaling_url: url::Url::parse(&server.url()).unwrap(),
         realm: "test7@example.com".to_string(),
         issuer_endpoint: issuer_endpoint(server),
-        realm_secret: None,
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,

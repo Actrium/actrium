@@ -61,8 +61,9 @@ pub struct RuntimeConfig {
     pub issuer_endpoint: String,
 
     // ── Optional runtime fields ──
-    /// Realm secret for Issuer registration authentication
-    pub realm_secret: Option<String>,
+    /// Realm client key file (`actr realm join`) that signs the Issuer
+    /// requests' `x-actr-client-proof`
+    pub realm_client_key: Option<PathBuf>,
 
     /// Whether visible in service discovery
     pub visible_in_discovery: bool,
@@ -638,7 +639,7 @@ mod tests {
             signaling_url: Url::parse("ws://localhost:8081").unwrap(),
             realm: "k7m2q9xh@example.com".to_string(),
             issuer_endpoint: "http://localhost:8081/issuer".to_string(),
-            realm_secret: None,
+            realm_client_key: None,
             visible_in_discovery: true,
             acl: None,
             mailbox_path: None,

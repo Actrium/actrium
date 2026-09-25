@@ -1,6 +1,6 @@
 use super::*;
 
-fn sample_context(realm_secret: Option<&str>) -> DiscoveryContext {
+fn sample_context(realm_client_key: Option<&str>) -> DiscoveryContext {
     DiscoveryContext {
         package_actr_type: ActrType {
             publisher: "acme".to_string(),
@@ -10,7 +10,7 @@ fn sample_context(realm_secret: Option<&str>) -> DiscoveryContext {
         signaling_url: Url::parse("ws://localhost:8081/signaling/ws").unwrap(),
         issuer_endpoint: "http://localhost:8081/issuer".to_string(),
         realm: Some("test@example.com".to_string()),
-        realm_secret: realm_secret.map(str::to_string),
+        realm_client_key: realm_client_key.map(std::path::PathBuf::from),
     }
 }
 
@@ -80,14 +80,17 @@ fn cli_discovery_requires_realm() {
 }
 
 #[test]
-fn cli_discovery_requires_realm_secret() {
+fn cli_discovery_requires_a_realm_client_key() {
     let missing = NetworkServiceDiscovery::new(sample_context(None));
-    let err = missing.required_realm_secret().unwrap_err();
-    assert!(err.to_string().contains("network.realm_secret is required"));
+    let err = missing.required_client_key("test@example.com").unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("network.realm_client_key is required")
+    );
 
-    let blank = NetworkServiceDiscovery::new(sample_context(Some("   ")));
-    let err = blank.required_realm_secret().unwrap_err();
-    assert!(err.to_string().contains("network.realm_secret is required"));
+    let absent = NetworkServiceDiscovery::new(sample_context(Some("/nonexistent/key.json")));
+    let err = absent.required_client_key("test@example.com").unwrap_err();
+    assert!(err.to_string().contains("Realm client key"));
 }
 
 #[test]

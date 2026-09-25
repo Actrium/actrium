@@ -196,7 +196,7 @@ impl Nodes {
                 signaling_url: services.signaling_url().parse().unwrap(),
                 realm: id.realm.clone(),
                 issuer_endpoint: "http://127.0.0.1:1/issuer".into(),
-                realm_secret: None,
+                realm_client_key: None,
                 visible_in_discovery: true,
                 acl: None,
                 mailbox_path: None,

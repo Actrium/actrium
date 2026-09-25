@@ -278,7 +278,7 @@ url = "http://localhost:8081/issuer"
 
 [deployment]
 realm = "k7m2q9xh@example.com"
-realm_secret = "rs_test123"
+realm_client_key = "keys/realm-client.json"
 
 [discovery]
 visible = true
@@ -322,8 +322,8 @@ test = "cargo test"
             Some("http://localhost:8081/issuer")
         );
         assert_eq!(
-            config.deployment.realm_secret.as_deref(),
-            Some("rs_test123")
+            config.deployment.realm_client_key.as_deref(),
+            Some(std::path::Path::new("keys/realm-client.json"))
         );
         assert_eq!(config.discovery.visible, Some(true));
         assert!(!config.webrtc.force_relay);
