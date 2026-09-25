@@ -218,7 +218,7 @@ Realm Profile。若已接受 Realm Profile 的签名 key 已从 `keys` 中移除
 退役只有一条路径：Realm 签名 key 持有方发布 `status = retired` 的新 Realm Profile（以
 `publish_profile` 提交，并发布到 `realms` 位置；即退役
 Realm Profile，永久有效；保持相同 `provider.id`，`sequence` 更高）。Loran 通过 3.3 的周期校验得知后，在单一事务中撤销
-Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer
+Actor credential、renewal token 与续期/重签 attempt 记录、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer
 key，并写入以 Realm 名为键的 Realm Provider tombstone。若绑定的 Realm Provider 已停服，
 持有方把 `realms` href 改指自控位置，并在那里发布退役 Realm Profile。若持有方本身就是已
 停服的 Realm Provider，其域名下的 Realm 随之失效、无法退役，只能在别处新建。
@@ -406,7 +406,7 @@ Provider 主密钥经 HKDF 以 Realm 名和 Realm Provider ID 派生。第三方
 | Discovery 越界 | Discovery 与 RouteCandidates 只返回同 Realm 的 Actor；v1 不做跨 Realm 发现 |
 | 管理越权 | Realm 管理请求只作用于签名 key 所属 Realm 域名；Realm 管理 token 作用域在服务端逐请求检查；列表接口只返回作用域内的 Realm |
 | 未激活或已挂起的 Realm 被使用 | 只有 `active` Realm 签发 Actor credential、接受连接与分配 TURN |
-| 删除后残留 | 退役在单一事务中撤销 Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key，并写入以 Realm 名为键的 Realm Provider tombstone |
+| 删除后残留 | 退役在单一事务中撤销 Actor credential、renewal token 与续期/重签 attempt 记录、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key，并写入以 Realm 名为键的 Realm Provider tombstone |
 | 资源挤占 | 按 Realm 域名与按 Realm 配额 |
 | 进程失陷影响全部 Realm | 首版接受 all-in-one 部署的此项风险；生产建议把 Issuer Signer 放入独立安全边界，使主进程失陷不泄露 Realm issuer key 私钥 |
 

@@ -430,13 +430,14 @@ pub(crate) async fn retire_in(
         .execute(&mut **tx)
         .await?;
     // ActorId text is `<serial_hex>.<realm>`; the serial has no dot.
-    sqlx::query(
-        "DELETE FROM issuer_renewal_token
-             WHERE substr(actor_id, instr(actor_id, '.') + 1) = ?",
-    )
-    .bind(name)
-    .execute(&mut **tx)
-    .await?;
+    for table in ["issuer_renewal_token", "issuer_control_attempt"] {
+        sqlx::query(&format!(
+            "DELETE FROM {table} WHERE substr(actor_id, instr(actor_id, '.') + 1) = ?"
+        ))
+        .bind(name)
+        .execute(&mut **tx)
+        .await?;
+    }
 
     Ok(())
 }
@@ -645,6 +646,15 @@ mod tests {
             .bind(name.as_bytes())
             .execute(pool)
             .await?;
+            sqlx::query(
+                "INSERT INTO issuer_control_attempt (operation, attempt_id, actor_id,
+                    request_hash, state, tombstone_expires_at, created_at, updated_at)
+                 VALUES ('renew', ?, ?, x'00', 1, 9999999999, 1, 1)",
+            )
+            .bind(name.as_bytes())
+            .bind(format!("1a.{name}"))
+            .execute(pool)
+            .await?;
         }
 
         Realm::retire("old@example.com").await?;
@@ -669,6 +679,11 @@ mod tests {
             .fetch_all(pool)
             .await?;
         assert_eq!(tokens, ["1a.keep@example.com"]);
+        let attempts: Vec<String> =
+            sqlx::query_scalar("SELECT actor_id FROM issuer_control_attempt")
+                .fetch_all(pool)
+                .await?;
+        assert_eq!(attempts, ["1a.keep@example.com"]);
 
         Ok(())
     }

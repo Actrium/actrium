@@ -824,8 +824,9 @@ pub(crate) mod tests {
         ));
     }
 
-    /// Retirement deletes the Realm's renewal tokens; a renewal or reissue
-    /// prepared before it must not commit (or hand out a credential) after it.
+    /// Retirement deletes the Realm's renewal tokens and attempts; a renewal
+    /// or reissue prepared before it must not commit (or hand out a
+    /// credential) after it.
     #[tokio::test]
     async fn work_prepared_before_a_realm_retired_does_not_commit() {
         setup_db().await;
@@ -879,11 +880,11 @@ pub(crate) mod tests {
             store
                 .complete_renewal(&renew, &actor, None, &rotation, b"response", now + 60)
                 .await,
-            Err(AttemptError::TokenRejected)
+            Err(AttemptError::LeaseLost)
         ));
         assert!(matches!(
             store.complete_reissue(&reissue, &actor, prepared).await,
-            Err(AttemptError::PossessionNotProven)
+            Err(AttemptError::LeaseLost)
         ));
     }
 

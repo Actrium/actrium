@@ -279,7 +279,7 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
   Signer 中生成的 key 当即退役，不留孤儿 key。Realm 不是 `active`、已有待切换的 key 或仍列着 3 把 key 时返回 `400`，
   Loran 不是 Realm Provider 时返回 `503`。Realm Provider 域名下的 Realm 每 90 天自动轮换；
 - `POST /admin/api/realms/{realm}/retire`：退役。单一事务中删除该 Realm 的连接 ACL、待连接
-  注册与 renewal token，保留已签发身份登记与撤销表；`realm` 行以 `retired` 状态永久保留，
+  注册、renewal token 与 `/renew`、`/reissue` 的 attempt 记录，保留已签发身份登记与撤销表；`realm` 行以 `retired` 状态永久保留，
   作为 Realm Provider tombstone，Realm 名不复用。没有硬删除。Realm Provider 域名下的 Realm 由
   Loran 签发退役 Realm Profile 并在同一事务中退役；其他域名的 Realm 若已有 key 持有方签名的
   Realm Profile，运营者不能退役（只能停用），退役只由持有方发布的退役 Realm Profile 触发。
