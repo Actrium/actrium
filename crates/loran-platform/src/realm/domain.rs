@@ -1,19 +1,16 @@
 //! Accepted `realm_signing_keys` of Realm domains (the key pin).
 //!
-//! Minimal pinning per `actr/protocols/authority-discovery.md` section 4.4:
-//! the member must carry a valid self-signature, the first accepted member is
-//! pinned, and later members must be signed by a pinned `active` key, never
-//! lower the `sequence`, list only pinned keys, and never make a retired key
-//! active again. Rotation chains are not
-//! followed yet, so a member that introduces a new key is rejected.
+//! Each member runs the acceptance procedure of
+//! `actr/protocols/authority-discovery.md` section 4.4 against the domain's
+//! [`KeyPins`]: the first member is pinned, later ones may retire, remove or,
+//! through a rotation chain, introduce keys. A member whose signing key does
+//! not chain to a pinned key is an identity change and is rejected; there is
+//! no re-confirmation.
 
 use actr_protocol::realm_profile::jcs;
 use actr_protocol::uri::ActrUri;
-use actr_protocol::{AuthorityDescriptor, KeyStatus, RealmSigningKeys};
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use actr_protocol::{AuthorityDescriptor, KeyPinOutcome, KeyPins, RealmSigningKeys};
 use chrono::Utc;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -24,10 +21,12 @@ use crate::storage::db::get_database;
 #[derive(Debug, Clone)]
 pub struct RealmDomain {
     pub domain: String,
+    /// The accepted member, listing only the pinned keys it still lists.
     pub keys: RealmSigningKeys,
+    pub pins: KeyPins,
     pub pinned_at: u64,
     pub checked_at: u64,
-    digest: String,
+    pins_json: String,
 }
 
 fn invalid(message: impl Into<String>) -> RealmError {
@@ -40,38 +39,12 @@ pub(crate) fn digest(bytes: &[u8]) -> String {
 }
 
 /// Check a `realm_signing_keys` member and its self-signature: an `active`
-/// listed key signs the RFC 8785 JCS form of the member without `signature`.
+/// listed key signs the RFC 8785 JCS form of the member without `signature`,
+/// and every rotation between listed keys verifies.
 pub fn verify_member(member: &Value) -> Result<RealmSigningKeys, RealmError> {
-    let keys: RealmSigningKeys = serde_json::from_value(member.clone())
-        .map_err(|error| invalid(format!("malformed realm_signing_keys: {error}")))?;
-    keys.validate()
-        .map_err(|error| invalid(error.to_string()))?;
-    let key = keys
-        .keys
-        .iter()
-        .find(|key| key.id == keys.signature.key_id)
-        .ok_or_else(|| invalid("realm_signing_keys signature key is not listed"))?;
-    let public_key: [u8; 32] = BASE64
-        .decode(&key.public_key)
-        .ok()
-        .and_then(|bytes| bytes.try_into().ok())
-        .ok_or_else(|| invalid(format!("key '{}' is not an Ed25519 key", key.id)))?;
-    let verifying_key = VerifyingKey::from_bytes(&public_key)
-        .map_err(|error| invalid(format!("key '{}': {error}", key.id)))?;
-    let signature: [u8; 64] = BASE64
-        .decode(&keys.signature.value)
-        .ok()
-        .and_then(|bytes| bytes.try_into().ok())
-        .ok_or_else(|| invalid("realm_signing_keys signature is not Ed25519"))?;
-
-    let mut payload = member.clone();
-    if let Value::Object(members) = &mut payload {
-        members.remove("signature");
-    }
-    verifying_key
-        .verify(jcs(&payload).as_bytes(), &Signature::from_bytes(&signature))
-        .map_err(|_| invalid("realm_signing_keys signature verification failed"))?;
-    Ok(keys)
+    RealmSigningKeys::accept(member, None)
+        .map(|(keys, _)| keys)
+        .map_err(|error| invalid(error.to_string()))
 }
 
 /// The `realm_signing_keys` member of `domain`'s authority descriptor, as
@@ -91,18 +64,28 @@ pub fn member_from_descriptor(domain: &str, document: &[u8]) -> Result<Value, Re
         .ok_or_else(|| invalid(format!("{domain} publishes no realm_signing_keys")))
 }
 
+/// The accepted member restricted to the keys `pins` still lists, so a key
+/// listed without a chain to a pinned key signs nothing here.
+fn pinned_keys(mut keys: RealmSigningKeys, pins: &KeyPins) -> RealmSigningKeys {
+    keys.keys = pins.signing_keys();
+    keys
+}
+
 impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for RealmDomain {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
+        let decode = |error: serde_json::Error| sqlx::Error::Decode(Box::new(error));
         let keys_json: String = row.try_get("keys_json")?;
-        let keys = serde_json::from_str(&keys_json)
-            .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
+        let pins_json: String = row.try_get("pins_json")?;
+        let pins: KeyPins = serde_json::from_str(&pins_json).map_err(decode)?;
+        let keys = serde_json::from_str(&keys_json).map_err(decode)?;
         Ok(Self {
             domain: row.try_get("domain")?,
-            keys,
+            keys: pinned_keys(keys, &pins),
+            pins,
             pinned_at: row.try_get::<i64, _>("pinned_at")? as u64,
             checked_at: row.try_get::<i64, _>("checked_at")? as u64,
-            digest: row.try_get("keys_digest")?,
+            pins_json,
         })
     }
 }
@@ -110,7 +93,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for RealmDomain {
 impl RealmDomain {
     pub async fn get(domain: &str) -> Result<Option<Self>, RealmError> {
         Ok(sqlx::query_as::<_, Self>(
-            "SELECT domain, keys_json, keys_digest, pinned_at, checked_at
+            "SELECT domain, keys_json, pins_json, pinned_at, checked_at
              FROM realm_domain WHERE domain = ?",
         )
         .bind(domain)
@@ -118,27 +101,36 @@ impl RealmDomain {
         .await?)
     }
 
-    /// Accept `member` for `domain`. The first accepted member is pinned;
-    /// later ones must pass the pin checks in the module documentation.
+    /// Accept `member` for `domain` under the domain's pins; see the module
+    /// documentation.
     pub async fn accept(domain: &str, member: &Value) -> Result<Self, RealmError> {
-        let keys = verify_member(member)?;
+        let pinned = Self::get(domain).await?;
+        let (_, outcome) = RealmSigningKeys::accept(member, pinned.as_ref().map(|p| &p.pins))
+            .map_err(|error| invalid(format!("{domain}: {error}")))?;
+        let pins = match outcome {
+            KeyPinOutcome::Accepted(pins) => pins,
+            KeyPinOutcome::IdentityChange(_) => {
+                return Err(invalid(format!(
+                    "{domain} realm_signing_keys is not signed by a key chained to a pinned \
+                     key: an identity change"
+                )));
+            }
+        };
         let keys_json = jcs(member);
-        let keys_digest = digest(keys_json.as_bytes());
+        let pins_json =
+            serde_json::to_string(&pins).map_err(|error| invalid(format!("key pins: {error}")))?;
         let now = Utc::now().timestamp();
 
-        if let Some(pinned) = Self::get(domain).await? {
-            pinned.check_successor(&keys, &keys_digest)?;
+        if let Some(pinned) = pinned {
             let updated = sqlx::query(
-                "UPDATE realm_domain
-                 SET keys_json = ?, keys_sequence = ?, keys_digest = ?, checked_at = ?
-                 WHERE domain = ? AND keys_digest = ?",
+                "UPDATE realm_domain SET keys_json = ?, pins_json = ?, checked_at = ?
+                 WHERE domain = ? AND pins_json = ?",
             )
             .bind(&keys_json)
-            .bind(keys.sequence as i64)
-            .bind(&keys_digest)
+            .bind(&pins_json)
             .bind(now)
             .bind(domain)
-            .bind(&pinned.digest)
+            .bind(&pinned.pins_json)
             .execute(get_database().get_pool())
             .await?;
             if updated.rows_affected() == 0 {
@@ -146,14 +138,12 @@ impl RealmDomain {
             }
         } else {
             sqlx::query(
-                "INSERT INTO realm_domain
-                    (domain, keys_json, keys_sequence, keys_digest, pinned_at, checked_at)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO realm_domain (domain, keys_json, pins_json, pinned_at, checked_at)
+                 VALUES (?, ?, ?, ?, ?)",
             )
             .bind(domain)
             .bind(&keys_json)
-            .bind(keys.sequence as i64)
-            .bind(&keys_digest)
+            .bind(&pins_json)
             .bind(now)
             .bind(now)
             .execute(get_database().get_pool())
@@ -167,57 +157,15 @@ impl RealmDomain {
         }
         Self::get(domain).await?.ok_or(RealmError::NotFound)
     }
-
-    fn check_successor(&self, keys: &RealmSigningKeys, digest: &str) -> Result<(), RealmError> {
-        let pinned = |id: &str, public_key: &str| {
-            self.keys
-                .keys
-                .iter()
-                .find(|key| key.id == id && key.public_key == public_key)
-        };
-        let signer = keys
-            .keys
-            .iter()
-            .find(|key| key.id == keys.signature.key_id)
-            .and_then(|key| pinned(&key.id, &key.public_key));
-        if signer.is_none_or(|key| key.status != KeyStatus::Active) {
-            return Err(invalid(format!(
-                "{} realm_signing_keys is not signed by a pinned active key",
-                self.domain
-            )));
-        }
-        if keys.sequence < self.keys.sequence
-            || (keys.sequence == self.keys.sequence && digest != self.digest)
-        {
-            return Err(invalid(format!(
-                "{} realm_signing_keys sequence {} rolls back {}",
-                self.domain, keys.sequence, self.keys.sequence
-            )));
-        }
-        for key in &keys.keys {
-            let Some(accepted) = pinned(&key.id, &key.public_key) else {
-                return Err(invalid(format!(
-                    "{} lists new Realm signing key '{}'; key rotation chains are not supported",
-                    self.domain, key.id
-                )));
-            };
-            // A retired key never signs again, so it never becomes active again.
-            if accepted.status == KeyStatus::Retired && key.status == KeyStatus::Active {
-                return Err(invalid(format!(
-                    "{} reactivates retired Realm signing key '{}'",
-                    self.domain, key.id
-                )));
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::util::test_utils::utils::setup_test_db;
-    use actr_protocol::{DetachedSignature, RealmSigningKey};
+    use actr_protocol::{DetachedSignature, KeyStatus, RealmSigningKey};
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as BASE64;
     use ed25519_dalek::{Signer, SigningKey};
     use serial_test::serial;
 
@@ -319,26 +267,87 @@ pub(crate) mod tests {
             signed_member(4, &[("rs-9", &stranger, Active)]),
             // Same id, different key.
             signed_member(4, &[("rs-1", &stranger, Active)]),
-            // A new key needs a rotation chain.
-            signed_member(4, &[("rs-1", &one, Active), ("rs-9", &stranger, Active)]),
         ];
         for member in &rejected {
             assert!(RealmDomain::accept("acme.com", member).await.is_err());
         }
+        // A new key listed without a rotation is not pinned and signs nothing.
+        let unchained = signed_member(
+            4,
+            &[
+                ("rs-1", &one, Active),
+                ("rs-2", &two, Active),
+                ("rs-9", &stranger, Active),
+            ],
+        );
+        let accepted = RealmDomain::accept("acme.com", &unchained).await?;
+        assert!(accepted.keys.keys.iter().all(|key| key.id != "rs-9"));
+        let by_unchained = signed_member(
+            5,
+            &[
+                ("rs-9", &stranger, Active),
+                ("rs-1", &one, Active),
+                ("rs-2", &two, Active),
+            ],
+        );
+        assert!(
+            RealmDomain::accept("acme.com", &by_unchained)
+                .await
+                .is_err()
+        );
 
         // Retiring and removing keys moves forward.
-        let next = signed_member(4, &[("rs-2", &two, Active), ("rs-1", &one, Retired)]);
+        let next = signed_member(5, &[("rs-2", &two, Active), ("rs-1", &one, Retired)]);
         RealmDomain::accept("acme.com", &next).await?;
         // A key retired by an accepted member no longer signs members, and
         // no member can make it active again.
-        let by_retired = signed_member(5, &[("rs-1", &one, Active), ("rs-2", &two, Active)]);
+        let by_retired = signed_member(6, &[("rs-1", &one, Active), ("rs-2", &two, Active)]);
         assert!(RealmDomain::accept("acme.com", &by_retired).await.is_err());
-        let reactivated = signed_member(5, &[("rs-2", &two, Active), ("rs-1", &one, Active)]);
+        let reactivated = signed_member(6, &[("rs-2", &two, Active), ("rs-1", &one, Active)]);
         assert!(RealmDomain::accept("acme.com", &reactivated).await.is_err());
-        let revoked = signed_member(5, &[("rs-2", &two, Active)]);
+        let revoked = signed_member(6, &[("rs-2", &two, Active)]);
         let accepted = RealmDomain::accept("acme.com", &revoked).await?;
         assert_eq!(accepted.keys.keys.len(), 1);
         assert_eq!(accepted.pinned_at, pinned.pinned_at);
+        // A removed key never comes back.
+        let back = signed_member(7, &[("rs-2", &two, Active), ("rs-1", &one, Retired)]);
+        assert!(RealmDomain::accept("acme.com", &back).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn follows_a_rotation_chain() -> anyhow::Result<()> {
+        setup_test_db().await?;
+        let old = SigningKey::from_bytes(&[1; 32]);
+        let new = SigningKey::from_bytes(&[2; 32]);
+        use KeyStatus::{Active, Retired};
+        RealmDomain::accept("acme.com", &signed_member(1, &[("rs-1", &old, Active)])).await?;
+
+        // Switched to rs-2 at sequence 3 without seeing sequence 2.
+        let rotation = actr_protocol::KeyRotation {
+            from: "rs-1".into(),
+            to: "rs-2".into(),
+            sequence: 2,
+            signature: String::new(),
+        };
+        let public_key = BASE64.encode(new.verifying_key().to_bytes());
+        let signature =
+            old.sign(actr_protocol::rotation_payload(&rotation, &public_key).as_bytes());
+        let mut member = signed_member(3, &[("rs-2", &new, Active), ("rs-1", &old, Retired)]);
+        member["rotations"] = serde_json::json!([{
+            "from": "rs-1", "to": "rs-2", "sequence": 2,
+            "signature": BASE64.encode(signature.to_bytes()),
+        }]);
+        let mut payload = member.clone();
+        payload.as_object_mut().unwrap().remove("signature");
+        member["signature"]["value"] = BASE64
+            .encode(new.sign(jcs(&payload).as_bytes()).to_bytes())
+            .into();
+
+        let accepted = RealmDomain::accept("acme.com", &member).await?;
+        assert_eq!(accepted.pins.sequence, 3);
+        assert_eq!(accepted.keys.keys.len(), 2);
         Ok(())
     }
 }

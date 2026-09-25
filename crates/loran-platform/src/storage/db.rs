@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const ACTRIX_SCHEMA_VERSION: i64 = 7;
+const ACTRIX_SCHEMA_VERSION: i64 = 8;
 
 /// Database manager
 #[derive(Clone)]
@@ -138,13 +138,14 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        // Accepted `realm_signing_keys` of a Realm domain (the key pin).
+        // Accepted `realm_signing_keys` of a Realm domain: the member as
+        // received and the key pins (every key ever accepted, with its last
+        // status, and the accepted sequence).
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS realm_domain (
                 domain TEXT PRIMARY KEY,
                 keys_json TEXT NOT NULL,
-                keys_sequence INTEGER NOT NULL,
-                keys_digest TEXT NOT NULL,
+                pins_json TEXT NOT NULL,
                 pinned_at INTEGER NOT NULL,
                 checked_at INTEGER NOT NULL
             )",
