@@ -7,7 +7,7 @@
 
 Issuer Signer 是 Issuer 的最小私钥边界：
 
-1. 生成 Ed25519 signing key：每个 Realm 一把 Realm issuer key（`issuer:<realm>`）、每个
+1. 生成 Ed25519 signing key：每个 Realm 的 Realm issuer key（首把 `issuer:<realm>`，轮换产生 `issuer:<realm>/<毫秒时间戳>`）、每个
    Realm Provider 域名一把 Realm 签名 key（`realm-signing:<domain>`），全部 Realm 共用同一
    Issuer Signer；
 2. 在服务端保存私钥，只返回 verifying key；
@@ -63,7 +63,7 @@ kek_env = "ACTRIX_SIGNER_KEK"
 - tolerance 只允许历史验签/平滑读取 verifying metadata，不延长签名能力；
 - 命名 key 不过期；`RetireNamedKey` 清除其私钥、保留名字与 verifying key，之后 `Sign`
   返回 `FAILED_PRECONDITION`。退役幂等；名字尚无 key 时直接建为已退役，名字不会再得到可用
-  key。Realm 退役时 Issuer 以此退役 `issuer:<realm>`；
+  key。Realm issuer key 轮换后移除旧 key、以及 Realm 退役时，Issuer 以此退役相应的 issuer key；
 - revocation 与轮换必须进入审计记录。
 
 ## 运维要求

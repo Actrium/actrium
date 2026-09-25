@@ -79,8 +79,8 @@ Workspace，同一 Workspace 可按写入并发策略被多个 Service 使用；
    首次信任来自对 `domain` 的 HTTPS（Web PKI）访问，或企业预置的 key pin。
 2. Realm Profile 由 Realm 签名 key 签名，把 Realm issuer key 与 Realm Provider 端点委派给
    某个 Realm Provider。Realm Profile 的有效性只取决于签名，不取决于从哪里取到。
-3. Realm issuer key（Ed25519）签发 Actor credential，每个 Realm 一把，私钥留在
-   Realm Provider 的 Issuer Signer；容忍窗口仅用于验签，绝不延长签名或 Actor credential
+3. Realm issuer key（Ed25519）签发 Actor credential，每个 Realm 同一时刻只用一把签发（轮换时
+   Realm Profile 最多列 3 把，见 5.3），私钥留在 Realm Provider 的 Issuer Signer；容忍窗口仅用于验签，绝不延长签名或 Actor credential
    生命周期。
 4. Publisher ID 是规范化 DNS 域名。Publisher Profile 是 authority descriptor
    `https://<publisher>/.well-known/actr` 中带签名的可选成员 `publisher`（Actr Authority
@@ -208,8 +208,8 @@ Realm Profile。若已接受 Realm Profile 的签名 key 已从 `keys` 中移除
 `sequence` 基线，改用最后一份由仍列出的 key 签名的 Realm Profile；没有则按从未接受处理并
 重新获取。出现以下任一情况时，本地挂起该 Realm，不再签发新 Actor credential：
 
-- Realm Profile 的 `provider.id` 不是本 Realm Provider，或其 Realm issuer key 不在本 Realm
-  Provider 的 Issuer Signer 中；
+- Realm Profile 的 `provider.id` 不是本 Realm Provider，或未把本 Realm Provider 当前签发用的
+  Realm issuer key 列为 `active`；
 - Realm Profile `status` 为 `retired`；
 - 找不到由 `realm_signing_keys` 中仍列出的 key 签名的有效 Realm Profile；
 - Realm Profile 或 `realm_signing_keys` 的 `sequence` 低于已接受的值（回滚）。
@@ -333,7 +333,10 @@ GET https://<domain>/.well-known/actr
 `key_id`、`credential_audience`）。
 
 Realm 签名 key 轮换时，新 key 由旧 key 签名，形成 Realm 签名 key 轮换链（轮换项 payload 为
-`{from, to, public_key, sequence}`）；没有有效轮换链的 key 变化按身份变化处理：签名 key
+`{from, to, public_key, sequence}`）；接受规则是 Actr Authority Discovery §4.4 的六步算法：
+Loran 为每个域名保存曾接受的每把 key（公钥与最后状态 `active`/`retired`/已移除）及已接受的
+`sequence`（`realm_domain.pins_json`），同 id 不得换公钥、`retired` 不得复活、已移除不得复现，
+新 key 只经 `sequence` 更高的轮换项引入。没有有效轮换链的 key 变化按身份变化处理：签名 key
 不在已固定的链中时不做 `sequence` 比较，直接要求重新确认信任，确认后以新成员的
 `sequence` 为基线。authority descriptor 不列出 Realm 清单，避免枚举。
 
@@ -358,7 +361,8 @@ schema 是 `actr.realm/v1`，只包含非秘密信息，至少声明：
 - `realm.name`（完整 Realm 名）、`display_name`；
 - `status`（`active` | `retired`）；
 - 单调递增的 `sequence` 与 `issued_at`（Realm Profile 不设过期时间）；
-- issuer：Realm issuer key 的 `public_key` 与 `key_id`、注册和验签端点；
+- issuer：1 至 3 把 Realm issuer key（`id` 为 Actor credential 头部 `key_id` 的十进制串，即
+  Signer 的数字 key id）、注册和验签端点；
 - provider：Realm Provider ID、signaling/STUN/TURN 端点、`credential_audience`；
 - 加入策略。
 
@@ -378,6 +382,14 @@ Realm Provider ID 是 Realm Provider 的规范化 DNS authority（例如 `provid
 - `provider = <Realm Provider ID>`
 - `audience = actr.signaling`
 - 携带 Actor 类型 `publisher/program@version`（见第 4 节）
+
+每个 Realm 的 issuer key 按 Realm Profile §6.1 轮换（「先发布、再使用、后移除」）：新 key 先以
+`active` 列入 Realm Profile，列出它的 Realm Profile 被接受满 24 小时后才开始签发，旧 key 以
+`retired` 继续列出，直到它签发的最后一个 credential 过期再过 5 分钟才移除（此时在 Signer 中
+退役）。Realm Provider 域名下的 Realm 每 90 天自动轮换，Loran 自行签新 Realm Profile；其他
+域名的 Realm 由运营者经 admin API 发起，持有方用 `draft_profile` 取得含新 key 的草案、签名后
+`publish_profile`，发布之前 Loran 继续用旧 key。签名只用当前 key；验证者（signaling、TURN）
+按 `(realm, key_id)` 查 key，退役 key 的缓存项到移除时刻失效。
 
 TURN 使用单一端口池。TURN credential 的 HMAC username 同时绑定 Realm 名、Realm Provider、
 `actr.turn` audience 和 ActorId；TURN secret 按 Realm/Realm Provider 隔离，由 Realm
@@ -411,7 +423,8 @@ v1 的连接 ACL 只作用于同一 Realm 内的 Actor 类型。ACL 数据模型
 Publisher Profile 是 `https://<publisher>/.well-known/actr` 中带签名的可选成员
 `publisher`，schema 为 `actr.publisher/v1`，字段使用 snake_case，内容以产品规范
 （`docs/product/actrium-v1` 05 §2.2、12 §2）为准：`domain` 必须等于 descriptor
-`authority` 的主机名，Publisher Profile 签名 key 与 package signing key 分离，带轮换链、
+`authority` 的主机名，Publisher Profile 签名 key 与 package signing key 分离，带轮换链
+（`rotations`）、
 `sequence` 与有效期。成员的有效性只取决于自身签名与已固定的
 key history。
 
@@ -420,12 +433,13 @@ publisher 登记到本 Realm Provider 的 Publisher Registry（此后本 Realm P
 publisher 托管包），与 Realm 管理请求共用同一端点 `POST /actr/realm-management`。它复用
 3.2 的 Actr 管理信封：以 `publisher` 字段取代 `realm`，由 Publisher Profile 中 `active` 的
 Publisher Profile 签名 key 签名，同样绑定 `provider_id`、5 分钟有效期与 nonce；公开文档中
-不放 challenge。首个 Publisher Profile 固定其 `profile_signing_keys`；之后只接受由已固定
-`active` key 签名、只列已固定 key、`sequence` 更高的 Publisher Profile（轮换链尚未支持，见
-第 9 节）。Publisher Profile 须恰有一把 `active` 包签名 key，作为该 publisher 的当前 key；
-被替换的 key 归档为 retired，默认只用于历史包验签，泄露时由实例运营者显式 revoke。Loran
-不周期刷新 Publisher Profile，key 轮换由 publisher 再次发送 `register_publisher` 完成（见
-第 9 节）。
+不放 challenge。首个 Publisher Profile 固定其 `profile_signing_keys`；之后按与 `realm_signing_keys`
+相同的 §4.4 算法接受（`publisher.profile_pins`），身份变化一律拒绝。包签名 key 的 `id` 须为
+`actr-pub-<SHA-256 前 16 hex>`；Publisher Profile 列 1 至 2 把 `active` 包签名 key，两把都可
+发布与证明持有（轮换重叠期），原当前 key 只要仍 `active` 就保持当前；不再 `active` 的 key
+归档为 retired，只用于历史包验签；Publisher Profile 不再列出的 key 即吊销（revoked），泄露时
+也可由实例运营者显式 revoke。Loran 不周期刷新 Publisher Profile，key 轮换由 publisher 再次
+发送 `register_publisher` 完成（见第 9 节）。
 
 程序身份写作 `publisher/program@version`。实例运行哪个包由 Realm Profile 的 `package`
 （下载地址与 SHA-256）给出，包可以放在任何 HTTPS 位置；消费端必须核对 SHA-256，并验证
@@ -437,14 +451,15 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议和�
 
 ## 8. 数据与升级
 
-当前 schema v7 使用 SQLite `PRAGMA user_version = 7`。Loran 遇到旧版或未知 schema
+当前 schema v8 使用 SQLite `PRAGMA user_version = 8`。Loran 遇到旧版或未知 schema
 直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3（新增
 `issuer_control_attempt`）、v3 → v4（以 Realm 名取代数值 Realm id）与 v4 → v5（去掉单
 Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `realm_domain`、
 `realm_profile`、`realm_mgmt_nonce`）与 v5 → v6（删除 `publisher_challenge`，
 `publisher.descriptor_json` 改为 `profile_json`）与 v6 → v7（删除
-`issuer_reissue_response_cache` 与 `issuer_renewal_token.delivered_at`）都没有离线迁移，需停机后
-重建数据库。
+`issuer_reissue_response_cache` 与 `issuer_renewal_token.delivered_at`）与 v7 → v8（`realm_domain`
+改存 key pins，新增 `realm_issuer_key`，`publisher` 新增第二把 `active` 包签名 key 与
+`profile_pins`，删除未用的 `realm.issuer_key_id`）都没有离线迁移，需停机后重建数据库。
 
 v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主键，`actoracl`、
 `pending_registration`、`issued_actor_identity`、`revoked_actor` 以 `realm` 列引用它，后三者按
@@ -452,14 +467,15 @@ v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主
 
 表结构：
 
-- `realm_domain`：`domain`、已接受的 authority descriptor digest、`realm_signing_keys`
-  的 `sequence` 与 key 集合、最近校验时间；
+- `realm_domain`：`domain`、已接受的 `realm_signing_keys` 成员原文、key pins（每把曾接受的
+  key 的公钥与最后状态、已接受的 `sequence` 与内容 digest）、固定与最近校验时间；
 - `realm`：以完整 Realm 名（列 `name`）为主键、状态（`pending` | `active` | `retired`，
-  实例运营者的本地挂起用独立的 `enabled` 开关）、Realm issuer key id、
-  pending 到期时间、请求方（`requester` 或 Realm Provider 账号）、Realm 管理 token
+  实例运营者的本地挂起用独立的 `enabled` 开关）、pending 到期时间、请求方（`requester` 或 Realm Provider 账号）、Realm 管理 token
   哈希及其绑定的 Realm Provider 账号（Realm Provider 域名下的 Realm）；Realm Provider tombstone 与活跃 Realm
   共用该主键约束；
 - `realm_profile`：每个 Realm 已接受的最新 Realm Profile 原文及其 digest 与 `sequence`；
+- `realm_issuer_key`：每个 Realm 的 issuer key（Signer key id 与名字、公钥、`next` | `current` |
+  `retired`、首次被已接受 Realm Profile 列出的时间、成为当前的时间、可移除时间）；
 - Realm 管理请求的 `nonce` 记录，保留到对应请求过期；
 - 其余按 Realm 分区的表（连接 ACL、已签发身份登记、Actor Registry、renewal state）以
   `realm` 为键。
@@ -492,31 +508,39 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 当前代码已承载多个 Realm，以下差异仍需跟进：
 
 - 已实现：authority descriptor 获取（逐跳 SSRF 检查、最多 5 次重定向、64 KiB、缓存含失败、按
-  主机限流）、`realm_signing_keys` 成员自签名验证与 key pin（首次接受即 pin、`sequence` 只增、
-  只接受已 pin 的 key）、Realm Provider 域名下 Realm 的 Realm Profile 签发、`realm_profile`
+  主机限流）、`realm_signing_keys` 成员自签名验证与按 key pin 的接受（Actr Authority Discovery
+  §4.4 六步算法，跟随轮换链，身份变化拒绝；以 `contracts/actr/test-vectors/realm-signing-keys-rotation.json`
+  逐条测试）、Realm Provider 域名下 Realm 的 Realm Profile 签发、`realm_profile`
   存储与 `GET /actr/realms/{domain}/{realm_id}`、其他域名 Realm 的周期性刷新（含 key 移除后丢弃
-  基线、取不到则停用）、退役 Realm Profile 触发的退役事务。尚未实现：`realm_signing_keys`
-  轮换链（引入新 key 的成员一律拒绝）、身份变化的重新确认、Realm 签名 key 本身的轮换；
-- 已实现其他域名的 Realm 管理请求 `create_realm`、`publish_profile`、`reissue_admin_token`
-  （`provider_id` 绑定、5 分钟有效期、nonce 防重放、`(realm, 请求方)` 幂等、待签 Realm Profile）、
+  基线、取不到则停用）、退役 Realm Profile 触发的退役事务。尚未实现：身份变化的重新确认（目前
+  一律拒绝，运营者只能删除该域名的 pin 重建）、Loran 自己的 Realm 签名 key
+  （`realm-signing:<domain>`）的轮换；
+- 已实现其他域名的 Realm 管理请求 `create_realm`、`publish_profile`、`reissue_admin_token`、
+  `draft_profile`（`provider_id` 绑定、5 分钟有效期、nonce 防重放、`(realm, 请求方)` 幂等、待签 Realm Profile）、
   Realm 管理 token（只存哈希、一次性返回、重签即失效、作用域一个 Realm、越权 `404`）与
   `[realm]` 按域名配额、`pending` TTL 清理。尚未实现：Realm 管理 token 目前只能查看 Realm 与 Realm Profile、轮换 secret（Realm 列表、连接 ACL、membership 待实现）；
-- 已实现运行时分区：Actor credential 由该 Realm 的 `issuer:<realm>` key 签发（随首份 Realm
-  Profile 草稿或运营者创建 `active` Realm 时生成，缺失时签发前补建），验证 key 按
-  `(realm, key_id)` 缓存；signaling 连接绑定其身份的 Realm，source/target 不在该 Realm 的
+- 已实现运行时分区：Actor credential 由该 Realm 的当前 issuer key 签发（首把为 Signer 中的
+  `issuer:<realm>`，随首份 Realm Profile 草稿或运营者创建 `active` Realm 时生成，缺失时签发前
+  补建），验证 key 按 `(realm, key_id)` 缓存；signaling 连接绑定其身份的 Realm，source/target 不在该 Realm 的
   envelope 返回 `403`；Actor Registry 与 presence 按 Realm 分区；TURN secret 由主密钥按 Realm
   HKDF 派生；注册拒绝指向其他 Realm 的 ACL `source_realm`；跨 Realm 混淆回归测试
   `realms_with_the_same_actor_type_and_serial_are_isolated`。Issuer 原有的全局轮换 key 及其
   `/issuer/current-key`、`/issuer/signing-pubkey`、admin 与 gRPC 轮换入口已删除。退役事务提交
   后，Signaling 删除该 Realm 的 Actor Registry 记录与 presence 订阅并关闭其在线连接，Issuer 在
-  Signer 中退役 `issuer:<realm>`（私钥清除，此后不再签名）；两步幂等、重启时重做，并发的连接与
-  注册要么被清理、要么被拒绝后自行关闭。尚未实现：Realm issuer key 的轮换；
+  Signer 中退役该 Realm 的全部 issuer key（私钥清除，此后不再签名）；两步幂等、重启时重做，并发的连接与
+  注册要么被清理、要么被拒绝后自行关闭；
+- 已实现 Realm issuer key 轮换（Realm Profile §6.1，见 5.3）：预发布 24 小时、切换、旧 key
+  在最后 credential 过期 +5 分钟后移除并在 Signer 中退役；Realm Provider 域名下的 Realm 每 90 天
+  自动轮换；运营者入口 `POST /admin/api/realms/{realm}/issuer-key/rotate`，持有方工具
+  `actr realm draft-request`。尚未实现：泄露时的立即移除入口（目前只能退役 Realm）、验证者遇到
+  未知 `key_id` 时按 Realm 限流刷新（Loran 内的验证者与 Issuer 同进程共享 key 缓存，不需要）；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
 - 已实现 `register_publisher`：读取 authority descriptor 的 `publisher` 成员（第 7 节），
-  `/.well-known/actr/publisher.json` 与 challenge 已移除。尚未实现：Publisher Profile 签名 key 的
-  轮换链与身份变化的重新确认、Publisher Profile 的周期刷新（过期或 key 移除后不自动停用该
-  publisher）；
+  `/.well-known/actr/publisher.json` 与 challenge 已移除；Publisher Profile 签名 key 按 key pin
+  跟随轮换链；包签名 key id 由公钥推导，轮换重叠期两把 `active` key 均可发布。尚未实现：
+  Publisher Profile 身份变化的重新确认、Publisher Profile 的周期刷新（过期或 key 移除后不自动
+  停用该 publisher）；
 - 按 Realm 的连接、注册、消息与 TURN 配额（TURN 认证已拒绝不可用 Realm 的 credential）；
 - 控制面与本契约的剩余差异：Realm Provider 域名下的 Realm 由运营者经 admin API 代办创建（等同
   Realm Provider 账号）；Loran 不是 Realm Provider（未启用 authority 或 Issuer 无 Signer）时，

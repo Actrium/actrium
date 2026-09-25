@@ -23,7 +23,7 @@ HTTP 服务在一个 listener 上组合。STUN/TURN 使用独立 UDP socket；TU
 启动顺序的安全前提：
 
 1. 解析配置并执行 fail-closed 校验；
-2. 打开 SQLite，验证 `PRAGMA user_version = 7`；
+2. 打开 SQLite，验证 `PRAGMA user_version = 8`；
 3. 初始化 recording、监控与控制面；
 4. 构建 Issuer Signer、Issuer、Signaling（含 Actor Registry）、Publisher Registry 和
    descriptor router；
@@ -79,8 +79,12 @@ database 文件。恢复演练应验证：
 
 ## Key rotation 与 revocation
 
-- Realm issuer key：每个 Realm 一把（Signer 中的 `issuer:<realm>`），不过期；轮换须由
-  Realm 签名 key 签署新 Realm Profile 委派新 key（尚未实现）。Realm 退役时该 key 在 Signer 中
+- Realm issuer key：每个 Realm 同一时刻用一把签发（首把为 Signer 中的 `issuer:<realm>`），
+  Signer 命名 key 不过期；按 Realm Profile §6.1 轮换：新 key 先列入 Realm Profile，被接受满
+  24 小时后才签发，旧 key 以 `retired` 列到其最后一个 credential 过期 +5 分钟后移除并在 Signer
+  中退役。Realm Provider 域名下的 Realm 每 90 天自动轮换，运营者可用
+  `POST /admin/api/realms/{realm}/issuer-key/rotate` 发起；其他域名的 Realm 需持有方经
+  `draft_profile` 签署含新 key 的 Realm Profile。Realm 退役时其全部 issuer key 在 Signer 中
   退役（私钥清除），此后不再签名。Issuer 没有其他签名 key。
 - Realm 签名 key：由 Realm 签名 key 持有方轮换，不在 Loran 内完成（持有方就是本 Realm
   Provider 时除外）；Loran 周期性重新获取 `realm_signing_keys`，Realm Profile 的签名 key 被
