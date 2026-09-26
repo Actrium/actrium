@@ -106,7 +106,11 @@ extension ActrBridge {
                 } catch {
                     throw ActrError.StateError(msg: "Invalid actorType format: \(actorType)")
                 }
-                let targetType = ActrType(publisher: actorTypeInfo.publisher, name: actorTypeInfo.name)
+                let targetType = ActrType(
+                    publisher: actorTypeInfo.publisher,
+                    name: actorTypeInfo.name,
+                    version: actorTypeInfo.version
+                )
                 
                 let system = try await ActrSystem.from(tomlConfig: configPath)
                 let handler = AskLocalServiceHandlerImpl(targetType)
@@ -174,9 +178,8 @@ extension ActrBridge {
         return error.errorDescription ?? ""
     }
     
-    private nonisolated func serializeRealm(_ realm: Realm) -> [String: Any] {
-        // Realm serialization - adjust based on actual Realm structure
-        return ["id": "\(realm)"]
+    private nonisolated func serializeRealm(_ realm: String) -> [String: Any] {
+        return ["realm": realm]
     }
     
     /// Initialize ActrService

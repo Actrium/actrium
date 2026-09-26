@@ -467,16 +467,18 @@ export type ActrTomlConfig = {
   key_id: string;
   publisher: string;
   name: string;
+  version: string;
   authority_services: readonly unknown[];
   signaling_services: readonly ActrServiceEndpointConfig[];
   stun_services: readonly ActrServiceEndpointConfig[];
   turn_services: readonly ActrServiceEndpointConfig[];
-  realm_id: string;
+  realm: string;
 };
 
 export type ActrLockTomlConfig = {
   publisher: string;
   name: string;
+  version: string;
 };
 
 function actrEndpointHost(endpoint: ActrServiceEndpointConfig): string {
@@ -519,6 +521,7 @@ export function generateActrToml(config: ActrTomlConfig): string {
   const turnUrls = (config.turn_services || [])
     .map((service) => `"${normalizeActrTurnUrl(service)}"`)
     .join(', ');
+  const serverActrType = `${config.publisher}/${config.name}@${config.version}`;
 
   return `edition = 1
 exports = []
@@ -535,13 +538,13 @@ publisher = "${ACTR_CONFIG_CONTRACT.clientActrType.publisher}"
 name = "${ACTR_CONFIG_CONTRACT.clientActrType.name}"
 
 [dependencies]
-${ACTR_CONFIG_CONTRACT.dependencyName} = { actr_type = "${config.publisher}+${config.name}" }
+${ACTR_CONFIG_CONTRACT.dependencyName} = { actr_type = "${serverActrType}" }
 
 [system.signaling]
 url = "${signalingUrl}"
 
 [system.deployment]
-realm_id = ${config.realm_id}
+realm = "${config.realm}"
 
 [system.discovery]
 visible = true
@@ -565,7 +568,7 @@ test = "${ACTR_CONFIG_CONTRACT.scripts.test}"
 
 [[acl.rules]]
 permission = "${ACTR_CONFIG_CONTRACT.acl.allow}"
-types = ["${config.publisher}+${config.name}"]
+types = ["${serverActrType}"]
 `;
 }
 
@@ -576,7 +579,7 @@ generated_at = "${ACTR_CONFIG_CONTRACT.lock.generatedAt}"
 
 [[dependency]]
 name = "${ACTR_CONFIG_CONTRACT.lock.dependencyName}"
-actr_type = "${config.publisher}+${config.name}"
+actr_type = "${config.publisher}/${config.name}@${config.version}"
 fingerprint = "${ACTR_CONFIG_CONTRACT.lock.dependencyFingerprint}"
 cached_at = "${ACTR_CONFIG_CONTRACT.lock.cachedAt}"
 

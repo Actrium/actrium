@@ -127,6 +127,9 @@ pub(crate) mod request_scope;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod context;
 
+// Service lookup rules for opening an instance
+pub mod service_lookup;
+
 // Runtime workload abstraction (native-only, WASM/dynclib host)
 #[cfg(not(target_arch = "wasm32"))]
 pub mod workload;
@@ -192,7 +195,7 @@ pub use actr_platform_traits::{
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use issuer_client::IssuerClient;
+pub use issuer_client::{IssuerClient, RealmClientKey};
 // Conflict-key dispatch scheduling (B2).
 #[cfg(not(target_arch = "wasm32"))]
 pub use config::DispatchConcurrency;
@@ -348,7 +351,7 @@ use uuid::Uuid;
 #[cfg(not(target_arch = "wasm32"))]
 use actr_platform_traits::KvOp;
 #[cfg(not(target_arch = "wasm32"))]
-use actr_protocol::{Realm, RegisterAuthMode, RegisterRequest, register_response};
+use actr_protocol::{RegisterAuthMode, RegisterRequest, register_response};
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Compile-time state marker: a [`Node`] has been born from a [`Hyper`]
@@ -603,7 +606,7 @@ pub trait PublisherAuthProvider: Send + Sync {
     /// random `nonce` each call.
     fn sign(
         &self,
-        realm_id: u32,
+        realm: &str,
         actr_type: &actr_protocol::ActrType,
         target: &str,
         manifest_raw: &[u8],
@@ -613,12 +616,12 @@ pub trait PublisherAuthProvider: Send + Sync {
 #[cfg(not(target_arch = "wasm32"))]
 async fn sign_publisher_proof(
     provider: Arc<dyn PublisherAuthProvider>,
-    realm_id: u32,
+    realm: String,
     actr_type: ActrType,
     target: String,
     manifest_raw: Vec<u8>,
 ) -> HyperResult<PublisherRegistrationAuth> {
-    tokio::task::spawn_blocking(move || provider.sign(realm_id, &actr_type, &target, &manifest_raw))
+    tokio::task::spawn_blocking(move || provider.sign(&realm, &actr_type, &target, &manifest_raw))
         .await
         .map_err(|err| HyperError::Runtime(format!("publisher signing task failed: {err}")))?
 }
@@ -641,7 +644,7 @@ fn publisher_auth_fields(
 impl PublisherRegistrationAuth {
     pub fn sign(
         signing_key: &ed25519_dalek::SigningKey,
-        realm_id: u32,
+        realm: &str,
         actr_type: &actr_protocol::ActrType,
         target: &str,
         manifest_raw: &[u8],
@@ -663,7 +666,7 @@ impl PublisherRegistrationAuth {
         let manifest_sha256_hex = hex::encode(manifest_sha256);
         let payload = actr_protocol::build_publisher_register_payload(
             actr_protocol::PublisherRegisterPayload {
-                realm_id,
+                realm,
                 actr_type,
                 target,
                 manifest_sha256_hex: &manifest_sha256_hex,
@@ -1166,7 +1169,7 @@ impl Node<Attached> {
     /// Register with Issuer, obtain an AId credential, and inject it into this
     /// attached node. Consumes `Node<Attached>` and returns `Node<Registered>`.
     ///
-    /// `realm_id`, `acl`, and `realm_secret` come from the attached
+    /// `realm`, `acl`, and `realm_client_key` come from the attached
     /// [`RuntimeConfig`]; `service_spec` is derived from the package's proto
     /// exports when a package-backed attach was used. Linked attachments
     /// register from the runtime config's actor metadata instead.
@@ -1234,9 +1237,10 @@ impl Node<Attached> {
             .attachment
             .as_mut()
             .expect("Node<Attached> without attachment");
-        let realm_id = attachment.node.config.realm.realm_id;
+        let realm = attachment.node.config.realm.clone();
         let acl = attachment.node.config.acl.clone();
-        let realm_secret = attachment.node.config.realm_secret.clone();
+        let client_key =
+            RealmClientKey::load_for(attachment.node.config.realm_client_key.as_deref(), &realm)?;
 
         // Mint the initial publisher proof (if a re-signing provider was supplied)
         // so the same one-shot auth feeds both the saved registration context
@@ -1247,7 +1251,7 @@ impl Node<Attached> {
             (Some(provider), Some(verified)) => Some(
                 sign_publisher_proof(
                     Arc::clone(provider),
-                    realm_id,
+                    realm.clone(),
                     ActrType {
                         publisher: verified.manifest.publisher.clone(),
                         name: verified.manifest.name.clone(),
@@ -1273,7 +1277,7 @@ impl Node<Attached> {
                             name: manifest.name.clone(),
                             version: manifest.version.clone(),
                         },
-                        realm: Realm { realm_id },
+                        realm: realm.clone(),
                         service_spec: service_spec.clone(),
                         acl: acl.clone(),
                         service: None,
@@ -1300,10 +1304,10 @@ impl Node<Attached> {
                 &verified,
                 CredentialBootstrapRequest {
                     issuer_endpoint,
-                    realm_id,
+                    realm: &realm,
                     service_spec,
                     acl,
-                    realm_secret: realm_secret.as_deref(),
+                    client_key,
                     publisher_auth,
                 },
             )
@@ -1448,26 +1452,29 @@ impl Hyper {
     ///   the parsed manifest plus the raw manifest bytes and signature needed
     ///   for phase-1 registration with Issuer.
     /// - `issuer_endpoint`: Issuer HTTP address, e.g. `"http://issuer.example.com:8080"`
-    /// - `realm_id`: target Realm ID
+    /// - `realm`: target Realm name `<realm_id>@<domain>`
     /// - `service_spec`: optional protobuf API metadata published to discovery
     /// - `acl`: optional access-control policy attached to the actor
+    /// - `client_key`: the Realm client key that signs the request's client
+    ///   proof
     pub async fn bootstrap_credential(
         &self,
         verified: &VerifiedPackage,
         issuer_endpoint: &str,
-        realm_id: u32,
+        realm: &str,
         service_spec: Option<ServiceSpec>,
         acl: Option<Acl>,
+        client_key: Option<RealmClientKey>,
     ) -> HyperResult<register_response::RegisterOk> {
         bootstrap_credential_inner(
             &self.inner,
             verified,
             CredentialBootstrapRequest {
                 issuer_endpoint,
-                realm_id,
+                realm,
                 service_spec,
                 acl,
-                realm_secret: None,
+                client_key,
                 publisher_auth: None,
             },
         )
@@ -1628,7 +1635,7 @@ async fn load_wasm_workload_inner(
                 actr_type: manifest.actr_type_str(),
                 credential: Vec::new(),
                 actor_id: Vec::new(),
-                realm_id: 0,
+                realm: String::new(),
             })
             .map_err(|e| {
                 HyperError::Runtime(format!(
@@ -1664,7 +1671,7 @@ fn load_dynclib_workload_inner(
                 actr_type: manifest.actr_type_str(),
                 credential: Vec::new(),
                 actor_id: Vec::new(),
-                realm_id: 0,
+                realm: String::new(),
             })
             .map_err(|e| {
                 HyperError::Runtime(format!(
@@ -1691,10 +1698,10 @@ fn load_dynclib_workload_inner(
 #[cfg(not(target_arch = "wasm32"))]
 struct CredentialBootstrapRequest<'a> {
     issuer_endpoint: &'a str,
-    realm_id: u32,
+    realm: &'a str,
     service_spec: Option<ServiceSpec>,
     acl: Option<Acl>,
-    realm_secret: Option<&'a str>,
+    client_key: Option<RealmClientKey>,
     publisher_auth: Option<PublisherRegistrationAuth>,
 }
 
@@ -1706,16 +1713,16 @@ async fn bootstrap_credential_inner(
 ) -> HyperResult<register_response::RegisterOk> {
     let CredentialBootstrapRequest {
         issuer_endpoint,
-        realm_id,
+        realm,
         service_spec,
         acl,
-        realm_secret,
+        client_key,
         publisher_auth,
     } = request;
     let manifest = &verified.manifest;
     info!(
         actr_type = manifest.actr_type_str(),
-        issuer_endpoint, realm_id, "starting credential bootstrap with Issuer"
+        issuer_endpoint, realm, "starting credential bootstrap with Issuer"
     );
 
     // 1. Derive and validate the opaque namespace (pure; no I/O, no database).
@@ -1730,8 +1737,8 @@ async fn bootstrap_credential_inner(
     // (Legacy PSK renewal path removed — credential renewal now goes through
     // the Credential Manager via POST /issuer/renew.)
     let mut issuer = IssuerClient::new(issuer_endpoint);
-    if let Some(secret) = realm_secret {
-        issuer = issuer.with_realm_secret(secret);
+    if let Some(key) = client_key {
+        issuer = issuer.with_client_key(key);
     }
 
     let actr_type = ActrType {
@@ -1739,8 +1746,6 @@ async fn bootstrap_credential_inner(
         name: manifest.name.clone(),
         version: manifest.version.clone(),
     };
-    let realm = Realm { realm_id };
-
     info!(
         actr_type = manifest.actr_type_str(),
         "registering with Issuer using publisher manifest"
@@ -1751,7 +1756,7 @@ async fn bootstrap_credential_inner(
 
     let req = RegisterRequest {
         actr_type,
-        realm,
+        realm: realm.to_string(),
         service_spec,
         acl,
         service: None,
@@ -1846,8 +1851,9 @@ async fn bootstrap_linked_credential_inner(
     service_spec: Option<ServiceSpec>,
 ) -> HyperResult<register_response::RegisterOk> {
     let mut issuer = IssuerClient::new(issuer_endpoint);
-    if let Some(ref secret) = config.realm_secret {
-        issuer = issuer.with_realm_secret(secret.clone());
+    if let Some(key) = RealmClientKey::load_for(config.realm_client_key.as_deref(), &config.realm)?
+    {
+        issuer = issuer.with_client_key(key);
     }
 
     let req = build_linked_register_request(config, service_spec);
@@ -1883,7 +1889,7 @@ fn build_linked_register_request(
 
     RegisterRequest {
         actr_type: config.actr_type().clone(),
-        realm: config.realm,
+        realm: config.realm.clone(),
         service_spec,
         acl: config.acl.clone(),
         service: None,

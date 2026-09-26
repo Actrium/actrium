@@ -6,7 +6,7 @@
 use actr_hyper::{IssuerClient, PublisherCertCache};
 use actr_mock_actrix::MockActrixServer;
 use actr_protocol::prost::Message as _;
-use actr_protocol::{ActrType, Realm, RegisterAuthMode, RegisterRequest, register_response};
+use actr_protocol::{ActrType, RegisterAuthMode, RegisterRequest, register_response};
 use base64::Engine;
 use ed25519_dalek::SigningKey;
 
@@ -17,7 +17,7 @@ fn test_register_request() -> RegisterRequest {
             name: "TestSvc".into(),
             version: "0.1.0".into(),
         },
-        realm: Realm { realm_id: 42 },
+        realm: "test42@example.com".to_string(),
         service_spec: None,
         acl: None,
         service: None,
@@ -47,8 +47,7 @@ async fn http_register_returns_valid_protobuf() {
     };
 
     // Sanity check: allocated actr_id + credential signed by the mock's Issuer key.
-    assert_eq!(ok.actr_id.r#type.publisher, "test-publisher");
-    assert_eq!(ok.actr_id.realm.realm_id, 42);
+    assert_eq!(ok.actr_id.realm, "test42@example.com");
     assert!(ok.actr_id.serial_number > 0);
     assert_eq!(ok.credential.key_id, 1);
     assert_eq!(
@@ -127,10 +126,7 @@ async fn admin_publisher_seeds_verifying_key() {
         .send()
         .await
         .unwrap();
-    assert!(
-        resp.status().is_success(),
-        "admin/publisher-registry should succeed"
-    );
+    assert!(resp.status().is_success(), "admin/publisher should succeed");
 
     let cache = PublisherCertCache::new(server.http_url());
     let fetched = cache.get_or_fetch("seeded", None).await.unwrap();
@@ -144,7 +140,7 @@ async fn admin_realm_and_state_endpoints() {
     let client = reqwest::Client::new();
     client
         .post(format!("{}/admin/realms", server.http_url()))
-        .json(&serde_json::json!({ "id": 99, "name": "admin-seeded" }))
+        .json(&serde_json::json!({ "realm": "admin-seeded@example.com" }))
         .send()
         .await
         .unwrap()
@@ -160,7 +156,11 @@ async fn admin_realm_and_state_endpoints() {
         .await
         .unwrap();
     let realms = snapshot["realms"].as_array().unwrap();
-    assert!(realms.iter().any(|v| v.as_u64() == Some(99)));
+    assert!(
+        realms
+            .iter()
+            .any(|v| v.as_str() == Some("admin-seeded@example.com"))
+    );
 }
 
 #[tokio::test]

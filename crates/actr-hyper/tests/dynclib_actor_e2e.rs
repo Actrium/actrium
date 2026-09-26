@@ -21,8 +21,7 @@ use actr_hyper::dynclib::DynclibHost;
 use actr_hyper::test_support::{dynclib_active_bridge_count, instantiate_dynclib_workload};
 use actr_hyper::workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationContext};
 use actr_protocol::{
-    ActrError, ActrId, ActrType, ConnectionNotReadyInfo, Realm, RpcEnvelope,
-    prost::Message as ProstMessage,
+    ActrError, ActrId, ConnectionNotReadyInfo, RpcEnvelope, prost::Message as ProstMessage,
 };
 
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
@@ -73,13 +72,8 @@ fn make_envelope(route_key: &str, payload: Vec<u8>) -> Vec<u8> {
 
 fn test_actr_id() -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 1,
-        r#type: ActrType {
-            publisher: "test".to_string(),
-            name: "fixture".to_string(),
-            version: "0.1.0".to_string(),
-        },
     }
 }
 
@@ -97,7 +91,7 @@ fn test_config() -> InitPayloadV1 {
         actr_type: "test/fixture@0.1.0".to_string(),
         credential: Vec::new(),
         actor_id: Vec::new(),
-        realm_id: 1,
+        realm: "test@example.com".to_string(),
     }
 }
 

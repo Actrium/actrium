@@ -5,23 +5,11 @@
 //! whole `Context`-trait impl surface. Every helper is a one-shot pure
 //! conversion with no I/O or async side effects.
 
-use actr_protocol::{ActrId, ActrType, DataChunk, MetadataEntry, PayloadType, Realm};
+use actr_protocol::{ActrId, ActrType, DataChunk, MetadataEntry, PayloadType};
 
 use crate::Dest;
 
 use super::generated::actr::workload::types as wit_types;
-
-pub(crate) fn realm_to_wit(r: &Realm) -> wit_types::Realm {
-    wit_types::Realm {
-        realm_id: r.realm_id,
-    }
-}
-
-pub(crate) fn realm_from_wit(r: &wit_types::Realm) -> Realm {
-    Realm {
-        realm_id: r.realm_id,
-    }
-}
 
 pub(crate) fn actr_type_to_wit(t: &ActrType) -> wit_types::ActrType {
     wit_types::ActrType {
@@ -41,17 +29,15 @@ pub(crate) fn actr_type_from_wit(t: &wit_types::ActrType) -> ActrType {
 
 pub(crate) fn actr_id_to_wit(id: &ActrId) -> wit_types::ActrId {
     wit_types::ActrId {
-        realm: realm_to_wit(&id.realm),
+        realm: id.realm.clone(),
         serial_number: id.serial_number,
-        type_: actr_type_to_wit(&id.r#type),
     }
 }
 
 pub(crate) fn actr_id_from_wit(id: &wit_types::ActrId) -> ActrId {
     ActrId {
-        realm: realm_from_wit(&id.realm),
+        realm: id.realm.clone(),
         serial_number: id.serial_number,
-        r#type: actr_type_from_wit(&id.type_),
     }
 }
 

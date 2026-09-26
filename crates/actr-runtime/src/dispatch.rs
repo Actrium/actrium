@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use actr_framework::{Context, ErrorCategory, ErrorEvent, MessageDispatcher, Workload};
-use actr_protocol::{Acl, ActorResult, ActrError, ActrId, RpcEnvelope};
+use actr_protocol::{Acl, ActorResult, ActrError, ActrId, ActrType, RpcEnvelope};
 use bytes::Bytes;
 use futures_util::FutureExt as _;
 
@@ -65,6 +65,7 @@ impl<W: Workload> ActrDispatch<W> {
     /// # Arguments
     /// - `self_id`: Current Actor's ID
     /// - `caller_id`: Caller ID (`None` for local calls)
+    /// - `caller_type`: Caller's verified Actor type (`None` when unknown)
     /// - `envelope`: RPC envelope (contains route_key and payload)
     /// - `ctx`: Execution context (generic, provided by upper layer)
     ///
@@ -74,11 +75,12 @@ impl<W: Workload> ActrDispatch<W> {
         &self,
         self_id: &ActrId,
         caller_id: Option<&ActrId>,
+        caller_type: Option<&ActrType>,
         envelope: RpcEnvelope,
         ctx: &C,
     ) -> ActorResult<Bytes> {
         // -- ACL check --
-        let allowed = check_acl_permission(caller_id, self_id, self.acl.as_ref())
+        let allowed = check_acl_permission(caller_id, caller_type, self_id, self.acl.as_ref())
             .map_err(|e| ActrError::Internal(format!("ACL check failed: {e}")))?;
 
         if !allowed {

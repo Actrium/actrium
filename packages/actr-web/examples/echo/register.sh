@@ -140,15 +140,15 @@ fi
 echo ""
 echo "🔑 Step 1: Creating realms..."
 
-SERVER_REALM=$(grep -E 'realm_id\s*=' "$SERVER_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
-CLIENT_REALM=$(grep -E 'realm_id\s*=' "$CLIENT_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+SERVER_REALM=$(grep -E '^\s*realm\s*=' "$SERVER_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' "')
+CLIENT_REALM=$(grep -E '^\s*realm\s*=' "$CLIENT_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' "')
 
 NOW=$(date +%s)
 
-for REALM_ID in $SERVER_REALM $CLIENT_REALM; do
+for REALM in $SERVER_REALM $CLIENT_REALM; do
     sqlite3 "$ACTRIX_DB" \
-        "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) \
-         VALUES ($REALM_ID, 'web-echo-realm', 'Active', 1, $NOW, '');"
+        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) \
+         VALUES ('$REALM', 'active', 1, $NOW);"
 done
 
 echo -e "${GREEN}✅ Realms ready: $SERVER_REALM, $CLIENT_REALM${NC}"

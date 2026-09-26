@@ -1339,13 +1339,8 @@ mod tracing_lifetime_tests {
         };
         tracing::subscriber::with_default(subscriber, || {
             let peer_id = ActrId {
-                realm: actr_protocol::Realm { realm_id: 1 },
+                realm: "test@example.com".to_string(),
                 serial_number: 1,
-                r#type: actr_protocol::ActrType {
-                    publisher: "test".into(),
-                    name: "node".into(),
-                    version: "1".into(),
-                },
             };
             let attempt = tracing::info_span!("webrtc.recover");
             let operation = attempt.in_scope(|| {

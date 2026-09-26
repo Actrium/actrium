@@ -23,7 +23,7 @@ import { initConfig, actrType, system, buildActrConfig } from './generated';
 const statusEl = document.getElementById('status')!;
 const serviceNameEl = document.getElementById('serviceName')!;
 const signalingUrlEl = document.getElementById('signalingUrl')!;
-const realmIdEl = document.getElementById('realmId')!;
+const realmEl = document.getElementById('realm')!;
 const actrTypeEl = document.getElementById('actrType')!;
 const requestCountEl = document.getElementById('requestCount')!;
 const successCountEl = document.getElementById('successCount')!;
@@ -80,7 +80,7 @@ function updateStatsUI(): void {
 function updateServerInfo(): void {
     serviceNameEl.textContent = `echo.${actrType.name}`;
     signalingUrlEl.textContent = system.signaling.url;
-    realmIdEl.textContent = String(system.deployment.realm_id);
+    realmEl.textContent = system.deployment.realm;
     actrTypeEl.textContent = actrType.fullType;
 }
 

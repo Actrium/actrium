@@ -11,9 +11,7 @@ import android.util.Log
 import io.actrium.actro.datastream.generated.UnifiedDispatcher
 import io.actrium.actro.datastream.generated.UnifiedHandler
 import io.actor_rtc.actr.ActrId
-import io.actor_rtc.actr.ActrType
 import io.actor_rtc.actr.ContextBridge
-import io.actor_rtc.actr.Realm
 import io.actor_rtc.actr.RpcEnvelopeBridge
 import io.actor_rtc.actr.WorkloadBridge
 
@@ -37,7 +35,7 @@ import io.actor_rtc.actr.WorkloadBridge
  */
 class UnifiedWorkload(
     private val handler: UnifiedHandler,
-    private val realmId: UInt = 2368266035u
+    private val realm: String = "actro@example.com"
 ) : WorkloadBridge {
 
     companion object {
@@ -45,9 +43,8 @@ class UnifiedWorkload(
     }
 
     private val selfId = ActrId(
-        realm = Realm(realmId = realmId),
-        serialNumber = System.currentTimeMillis().toULong(),
-        type = ActrType(publisher = "actro", name = "UnifiedActor", version = "")
+        realm = realm,
+        serialNumber = System.currentTimeMillis().toULong()
     )
 
     override suspend fun onStart(ctx: ContextBridge) {

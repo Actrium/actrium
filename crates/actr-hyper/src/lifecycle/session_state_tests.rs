@@ -3,13 +3,8 @@ use crate::lifecycle::test_recovery_policy as tp;
 
 fn test_actor_id() -> ActrId {
     ActrId {
-        realm: actr_protocol::Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 42,
-        r#type: actr_protocol::ActrType {
-            publisher: "test".into(),
-            name: "actor".into(),
-            version: "1.0.0".into(),
-        },
     }
 }
 

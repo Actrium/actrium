@@ -41,7 +41,7 @@ use actr_hyper::outbound::PeerGate;
 use actr_hyper::transport::{
     ConnType, DataLane, NetworkError, NetworkResult, PeerTransport, WireBuilder, WireHandle,
 };
-use actr_protocol::{ActrId, ActrType, PayloadType, Realm, RpcEnvelope};
+use actr_protocol::{ActrId, PayloadType, RpcEnvelope};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::{
@@ -56,25 +56,15 @@ use uuid::Uuid;
 
 fn test_actor_id() -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 42,
-        r#type: ActrType {
-            publisher: "test".to_string(),
-            name: "retry-target".to_string(),
-            version: "0.1.0".to_string(),
-        },
     }
 }
 
 fn local_actor_id() -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 1,
-        r#type: ActrType {
-            publisher: "test".to_string(),
-            name: "retry-sender".to_string(),
-            version: "0.1.0".to_string(),
-        },
     }
 }
 

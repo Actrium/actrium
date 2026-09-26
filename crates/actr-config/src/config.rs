@@ -1,6 +1,6 @@
 //! Final configuration structures - fully parsed and validated
 
-use actr_protocol::{Acl, ActrType, Realm};
+use actr_protocol::{Acl, ActrType};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use url::Url;
@@ -54,15 +54,16 @@ pub struct RuntimeConfig {
     /// Signaling server URL (validated)
     pub signaling_url: Url,
 
-    /// Owning Realm (Security Realm)
-    pub realm: Realm,
+    /// Owning Realm name `<realm_id>@<domain>`
+    pub realm: String,
 
     /// Issuer HTTP endpoint
     pub issuer_endpoint: String,
 
     // ── Optional runtime fields ──
-    /// Realm secret for Issuer registration authentication
-    pub realm_secret: Option<String>,
+    /// Realm client key file (`actr realm join`) that signs the Issuer
+    /// requests' `x-actr-client-proof`
+    pub realm_client_key: Option<PathBuf>,
 
     /// Whether visible in service discovery
     pub visible_in_discovery: bool,
@@ -231,8 +232,8 @@ pub struct Dependency {
     /// Dependency alias (key in dependencies)
     pub alias: String,
 
-    /// Owning Realm
-    pub realm: Realm,
+    /// Realm name `<realm_id>@<domain>`
+    pub realm: String,
 
     /// Actor type (publisher/program@version)
     pub actr_type: Option<ActrType>,
@@ -518,8 +519,8 @@ impl BuildProfile {
 
 impl Dependency {
     /// Whether this is a cross-Realm dependency
-    pub fn is_cross_realm(&self, self_realm: &Realm) -> bool {
-        self.realm.realm_id != self_realm.realm_id
+    pub fn is_cross_realm(&self, self_realm: &str) -> bool {
+        self.realm != self_realm
     }
 
     /// Check whether exact fingerprint matching is required (i.e., `service` field exists)
@@ -577,7 +578,7 @@ mod tests {
             dependencies: vec![
                 Dependency {
                     alias: "user-service".to_string(),
-                    realm: Realm { realm_id: 1001 },
+                    realm: "k7m2q9xh@example.com".to_string(),
                     actr_type: Some(ActrType {
                         publisher: "acme".to_string(),
                         name: "user-service".to_string(),
@@ -590,7 +591,7 @@ mod tests {
                 },
                 Dependency {
                     alias: "shared-logger".to_string(),
-                    realm: Realm { realm_id: 9999 },
+                    realm: "other@example.com".to_string(),
                     actr_type: Some(ActrType {
                         publisher: "common".to_string(),
                         name: "logging-service".to_string(),
@@ -636,9 +637,9 @@ mod tests {
                 license: None,
             },
             signaling_url: Url::parse("ws://localhost:8081").unwrap(),
-            realm: Realm { realm_id: 1001 },
+            realm: "k7m2q9xh@example.com".to_string(),
             issuer_endpoint: "http://localhost:8081/issuer".to_string(),
-            realm_secret: None,
+            realm_client_key: None,
             visible_in_discovery: true,
             acl: None,
             mailbox_path: None,

@@ -16,7 +16,7 @@ url = "ws://localhost:8081/signaling/ws"
 [issuer_endpoint]
 url = "http://localhost:8081/issuer"
 [deployment]
-realm_id = 1
+realm = "test@example.com"
 "#;
 
 #[tokio::test]

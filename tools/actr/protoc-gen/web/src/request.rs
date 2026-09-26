@@ -31,7 +31,8 @@ pub struct WebCodegenRequest {
 
     // ── System config ──
     pub signaling_url: String,
-    pub realm_id: u32,
+    /// Realm name, `<realm_id>@<domain>`
+    pub realm: String,
     pub visible_in_discovery: bool,
 
     /// Issuer HTTP endpoint

@@ -71,11 +71,6 @@ package actr:workload@0.7.0;
 // exports.
 
 interface types {
-    // Actor realm container identifier (see actr_protocol::Realm).
-    record realm {
-        realm-id: u32,
-    }
-
     // Three-part actor type coordinate (publisher, name, semantic
     // version string). Mirrors actr_protocol::ActrType.
     record actr-type {
@@ -84,12 +79,12 @@ interface types {
         version: string,
     }
 
-    // Fully-qualified actor identity — the Component Model analogue of
-    // actr_protocol::ActrId.
+    // Actor identity — the Component Model analogue of
+    // actr_protocol::ActrId. `realm` is the Realm name
+    // `<realm_id>@<domain>`; the Actor type is not part of the identity.
     record actr-id {
-        realm: realm,
+        realm: string,
         serial-number: u64,
-        %type: actr-type,
     }
 
     // Dispatch destination for host-routed calls (the Component Model

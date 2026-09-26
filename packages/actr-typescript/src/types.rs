@@ -1,29 +1,6 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-// Realm
-#[napi(object)]
-pub struct Realm {
-    #[napi(js_name = "realmId")]
-    pub realm_id: u32,
-}
-
-impl From<actr_protocol::Realm> for Realm {
-    fn from(realm: actr_protocol::Realm) -> Self {
-        Self {
-            realm_id: realm.realm_id,
-        }
-    }
-}
-
-impl From<Realm> for actr_protocol::Realm {
-    fn from(realm: Realm) -> Self {
-        Self {
-            realm_id: realm.realm_id,
-        }
-    }
-}
-
 // ActrType
 #[napi(object)]
 pub struct ActrType {
@@ -55,18 +32,17 @@ impl From<ActrType> for actr_protocol::ActrType {
 // ActrId
 #[napi(object)]
 pub struct ActrId {
-    pub realm: Realm,
+    /// Realm name, `<realm_id>@<domain>`
+    pub realm: String,
     #[napi(js_name = "serialNumber")]
     pub serial_number: i64, // i64 for JavaScript number safety
-    pub r#type: ActrType,
 }
 
 impl From<actr_protocol::ActrId> for ActrId {
     fn from(id: actr_protocol::ActrId) -> Self {
         Self {
-            realm: id.realm.into(),
+            realm: id.realm,
             serial_number: id.serial_number as i64,
-            r#type: id.r#type.into(),
         }
     }
 }
@@ -74,9 +50,8 @@ impl From<actr_protocol::ActrId> for ActrId {
 impl From<ActrId> for actr_protocol::ActrId {
     fn from(id: ActrId) -> Self {
         Self {
-            realm: id.realm.into(),
+            realm: id.realm,
             serial_number: id.serial_number as u64,
-            r#type: id.r#type.into(),
         }
     }
 }

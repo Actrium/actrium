@@ -5,23 +5,73 @@ use reqwest::header::HeaderValue;
 // ── client construction (no network) ────────────────────────────────────
 
 #[test]
-fn client_new_holds_endpoint_and_no_secret() {
+fn client_new_holds_endpoint_and_no_key() {
     let c = IssuerClient::new("http://issuer.example.com:8080");
     assert_eq!(c.endpoint, "http://issuer.example.com:8080");
-    assert!(c.realm_secret.is_none());
-
-    let chained = c.with_realm_secret("s3cr3t");
-    assert_eq!(chained.realm_secret.as_deref(), Some("s3cr3t"));
+    assert!(c.client_key.is_none());
+    assert!(
+        c.proof_header(ProofOp::Register, "r@acme.com", b"x")
+            .is_none()
+    );
 }
 
 #[test]
-fn with_realm_secret_is_chainable_idempotent_builder() {
-    let c = IssuerClient::new("http://issuer").with_realm_secret("abc");
-    assert_eq!(c.realm_secret.as_deref(), Some("abc"));
+fn client_key_signs_a_fresh_proof_of_the_body() {
+    let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+    let public_key = key.verifying_key().to_bytes();
+    let c = IssuerClient::new("http://issuer").with_client_key(RealmClientKey::new(
+        "k7m2q9xh@acme.com",
+        "issuer:8081",
+        key,
+    ));
+    let (name, first) = c
+        .proof_header(ProofOp::Renew, "k7m2q9xh@acme.com", b"body")
+        .unwrap();
+    assert_eq!(name, "x-actr-client-proof");
+    let proof = ClientProof::parse_header(&first).unwrap();
+    proof.verify(&public_key).unwrap();
+    proof
+        .check(
+            ProofOp::Renew,
+            "k7m2q9xh@acme.com",
+            "issuer:8081",
+            b"body",
+            chrono::Utc::now(),
+        )
+        .unwrap();
+    let (_, second) = c
+        .proof_header(ProofOp::Renew, "k7m2q9xh@acme.com", b"body")
+        .unwrap();
+    assert_ne!(first, second, "each request is signed with a new nonce");
+}
 
-    let c2 = c.with_realm_secret("def");
-    assert_eq!(c2.endpoint, "http://issuer");
-    assert_eq!(c2.realm_secret.as_deref(), Some("def"));
+#[test]
+fn client_key_file_must_be_of_the_configured_realm() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("key.json");
+    let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+    let file = RealmClientKeyFile::new("k7m2q9xh@acme.com", "issuer:8081", "http://issuer", &key);
+    std::fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let set = |mode| std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode));
+        set(0o644).unwrap();
+        let error = RealmClientKey::load_for(Some(&path), "k7m2q9xh@acme.com").unwrap_err();
+        assert!(error.to_string().contains("chmod 600"), "{error}");
+        set(0o600).unwrap();
+    }
+
+    let loaded = RealmClientKey::load_for(Some(&path), "k7m2q9xh@acme.com")
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.realm(), "k7m2q9xh@acme.com");
+    assert!(RealmClientKey::load_for(Some(&path), "other@acme.com").is_err());
+    assert!(
+        RealmClientKey::load_for(None, "k7m2q9xh@acme.com")
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

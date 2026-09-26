@@ -83,23 +83,23 @@ fi
 echo ""
 echo "Step 1: Creating realms..."
 
-SERVER_REALM=$(grep -E 'realm_id\s*=' "$SERVER_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
-CLIENT_REALM=$(grep -E 'realm_id\s*=' "$CLIENT_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+SERVER_REALM=$(grep -E '^\s*realm\s*=' "$SERVER_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' "')
+CLIENT_REALM=$(grep -E '^\s*realm\s*=' "$CLIENT_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' "')
 
-for REALM_ID in "$SERVER_REALM" "$CLIENT_REALM"; do
+for REALM in "$SERVER_REALM" "$CLIENT_REALM"; do
     curl -fsS -X POST "$ENDPOINT/admin/realms" \
         -H 'content-type: application/json' \
-        --data "{\"id\": $REALM_ID, \"name\": \"web-echo-realm\"}" >/dev/null
+        --data "{\"realm\": \"$REALM\"}" >/dev/null
 done
 
 echo -e "${GREEN}realms ready: $SERVER_REALM, $CLIENT_REALM${NC}"
 
-# --- Step 2: Register publisher via /admin/publisher-registry ---
+# --- Step 2: Register publisher via /admin/publisher ---
 
 echo ""
 echo "Step 2: Registering publisher '$PUBLISHER_NAME'..."
 
-curl -fsS -X POST "$ENDPOINT/admin/publisher-registry" \
+curl -fsS -X POST "$ENDPOINT/admin/publisher" \
     -H 'content-type: application/json' \
     --data "{\"name\": \"$PUBLISHER_NAME\", \"pubkey_b64\": \"$PUBLISHER_PUBKEY\", \"contact\": \"dev@example.com\"}" >/dev/null
 

@@ -46,6 +46,11 @@ pub struct MessageRecord {
     /// - Gateway passes bytes directly, zero overhead
     /// - All messages entering the Mailbox originate from WebRTC and always have a sender
     pub from: Vec<u8>,
+    /// Sender's verified `ActrType` (Protobuf bytes) as known when the message
+    /// arrived; `None` when the transport did not know it. The inbound ACL is
+    /// checked against this, so a message dequeued after its sender
+    /// disconnected, or after a restart, is judged by the type it came with.
+    pub from_type: Option<Vec<u8>>,
     /// Message content (raw bytes, not unpacked)
     pub payload: Vec<u8>,
     /// Priority
@@ -139,11 +144,13 @@ pub trait Mailbox: Send + Sync {
     ///
     /// # Arguments
     /// - `from`: Sender's ActrId (Protobuf bytes, provided directly by Gateway, not unpacked)
+    /// - `from_type`: Sender's verified `ActrType` (Protobuf bytes), if known
     /// - `payload`: Message content (raw bytes, not unpacked)
     /// - `priority`: Message priority
     async fn enqueue(
         &self,
         from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
         payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid>;

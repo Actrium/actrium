@@ -175,10 +175,10 @@ impl MockActrixServer {
         self.state.builtin_publisher_signing_key()
     }
 
-    /// Register a realm. `name` is advisory; `id` must match `realm_id` in the
-    /// caller's config.
-    pub async fn add_realm(&self, id: u32, name: &str) {
-        self.state.add_realm(id, name.to_string()).await;
+    /// Register a Realm by name (`<realm_id>@<domain>`); it must match
+    /// `realm` in the caller's config.
+    pub async fn add_realm(&self, realm: &str) {
+        self.state.add_realm(realm.to_string()).await;
     }
 
     /// Register a publisher. The `verifying_key` will be returned by

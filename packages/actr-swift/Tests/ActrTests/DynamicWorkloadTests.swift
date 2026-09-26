@@ -223,7 +223,7 @@ private func writeLinkedWorkloadConfig(in tempDir: URL) throws -> URL {
     url = "http://127.0.0.1:8081/issuer"
 
     [deployment]
-    realm_id = 1
+    realm = "test@example.com"
 
     [hyper]
     data_dir = "\(dataDir)"

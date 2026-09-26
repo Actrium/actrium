@@ -9,18 +9,13 @@ use crate::wire::webrtc::{
 };
 use actr_framework::Context as FrameworkContext;
 use actr_framework::test_support::DummyContext;
-use actr_protocol::{AIdCredential, ActrId, ActrType, Realm};
+use actr_protocol::{AIdCredential, ActrId};
 use tokio::sync::mpsc;
 
 fn make_id(serial: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: serial,
-        r#type: ActrType {
-            publisher: "test".to_string(),
-            name: "UnitTestActor".to_string(),
-            version: "0.0.1".to_string(),
-        },
     }
 }
 
