@@ -289,7 +289,8 @@ creation_intent
   intent_id, package_source, stage, result_actor_id, timestamps
 
 realm_domain
-  domain, signing_keys, signing_keys_sequence, authority_descriptor_digest
+  domain, signing_keys, signing_keys_sequence, signing_keys_digest,
+  authority_descriptor_digest
 
 realm
   realm_name, profile_digest, profile_sequence, provider_id,
@@ -298,7 +299,7 @@ realm
 
 实例以 Realm 名为业务主键（升级时 Realm 名不变），当前 Service 的 ActorId 作为字段记录；`actor_id_hash` 只用于索引和目录。
 
-`realm_domain` 记录每个已信任的 Realm 域名及其 Realm 签名 key（来自 `https://<domain>/.well-known/actr` 的 `realm_signing_keys` 成员，已在 Actr Authority Discovery §4.4 定义；`signing_keys` 为曾接受并固定的 key，`signing_keys_sequence` 为已接受的 `sequence`），随 Realm Profile 一同刷新，以便被移除的 key 使其签过的 Realm Profile 失效；`realm` 记录每个实例 Realm，`profile_sequence` 与 `provider_id` 用于拒绝回滚或 `provider.id` 改变的 Realm Profile（本机 Realm 无 Realm Profile，两者为空），`client_key_ref` 指向该 Realm 独立的 Realm 客户端 key（不跨 Realm 复用）。两者都以完整 Realm 名为键。
+`realm_domain` 记录每个已信任的 Realm 域名及其 Realm 签名 key（来自 `https://<domain>/.well-known/actr` 的 `realm_signing_keys` 成员，已在 Actr Authority Discovery §4.4 定义；`signing_keys` 为该域名曾接受过的每一把 key 及其最后状态——`id`、公钥与 `active`、`retired` 或已移除；已移除的 key 也保留，使同一 `id` 不能换公钥、已移除的 key 不能再被接受；`signing_keys_sequence` 为已接受的 `sequence`，`signing_keys_digest` 为已接受 member 的摘要，用于判断同一 `sequence` 的内容是否相同；身份变化经用户重新确认后清空这些记录，以新 member 为基线），随 Realm Profile 一同刷新，以便被移除的 key 使其签过的 Realm Profile 失效；`realm` 记录每个实例 Realm，`profile_sequence` 与 `provider_id` 用于拒绝回滚或 `provider.id` 改变的 Realm Profile（本机 Realm 无 Realm Profile，两者为空），`client_key_ref` 指向该 Realm 独立的 Realm 客户端 key（不跨 Realm 复用）。两者都以完整 Realm 名为键。
 
 `ApplicationAssurance` 是当前切面的派生结论，不是 Service 的永久属性。缓存过期、Tab 重建、状态或图变化后必须重算；展示还须 `Ready`。原始 attestation token 和完整远端拓扑优先保存在短期加密缓存或内存中，不能因便于 UI 展示而长期明文落库。
 

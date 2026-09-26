@@ -102,11 +102,15 @@
 | FR-NET-012 | In v1, multiple signaling endpoints may only serve as failover within the same Realm's control plane; implicit cross-control-plane federation is not supported. |
 | FR-NET-013 | A local Realm's ActorId MUST use the local pseudo-domain `<installation-id>.actr.alt`, which is forbidden to be copied as a cross-device link. |
 | FR-NET-015 | A Realm domain's bootstrap (`https://<domain>/.well-known/actr`) MUST be pinned to HTTPS 443, and rollback MUST be prevented by the Realm signing key rotation chain plus the Realm Profile's sequence number (a Realm Profile does not expire). |
-| FR-NET-016 | Actrium MUST provide flows for trusting a domain, joining an instance's Realm via a Realm invitation, re-authentication, client revocation, leaving, and handling Realm signing key changes. |
+| FR-NET-016 | Actrium MUST provide flows for trusting a domain, joining an instance's Realm via a Realm invitation, adding a client, re-authentication, client revocation, member management (owner only), leaving, owner recovery, and handling Realm signing key changes. |
 | FR-NET-017 | Creating an instance MUST create a new Realm under the chosen domain; the RealmId is unique within the domain, immutable after creation, and never reused after retirement. |
 | FR-NET-018 | When a Service is upgraded to a new Program Release, the Realm MUST publish a Realm Profile whose `package` points to the new package, and the new Service MUST be created in the same Realm; migrating to a different Realm MUST produce a new ActorId. |
 | FR-NET-019 | When the Realm Profile cannot be fetched, fails verification, or is retired, Actrium MUST NOT use any Realm Provider other than the one specified in the Realm Profile to communicate with that Realm (including services listed in the authority descriptor's `services`). |
-| FR-NET-020 | The Realm domain chosen for creating an instance MUST already be trusted, or first trust MUST be established on the creation confirmation page; no domain means no Realm is assigned (except the local Realm); creation MUST be authorized by the holder of that Realm domain's Realm signing key: when the Realm domain equals or belongs to the Realm Provider ID, that Realm Provider authenticates the user with a Realm Provider account and the confirmation page shows it as the trust root; for any other Realm domain, the holder's signing service signs an Actr management envelope and the confirmation page shows that Realm domain as the trust root. |
+| FR-NET-020 | The Realm domain chosen for creating an instance MUST already be trusted, or first trust MUST be established on the creation confirmation page; no domain means no Realm is assigned (except the local Realm); creation MUST be authorized by the holder of that Realm domain's Realm signing key: for any other Realm domain, the holder's signing service signs an Actr management envelope and the confirmation page shows that Realm domain as the trust root; when the Realm domain equals or belongs to the Realm Provider ID, in v1 only that Realm Provider's operator creates the Realm, the user joins with the owner invite the operator hands over, and the confirmation page shows the Realm Provider as the trust root. |
+| FR-NET-021 | Each networked Realm MUST have exactly one owner (its creator or whoever received ownership by transfer); an ownership transfer MUST be atomic, with the previous owner becoming an editor by default; the owner MUST transfer before leaving and MUST NOT revoke its own last client; multiple owners are not part of v1. |
+| FR-NET-022 | Each client MUST register a separate Realm client key in each Realm; registering, reissuing and renewing an Actor credential MUST all prove possession with a signature by that key, and the Issuer issues only for registered, unrevoked keys of active members; a shared Realm registration secret MUST NOT be used. |
+| FR-NET-023 | Revoking a Realm client key MUST immediately refuse its new Actor credentials, revoke the unused invites it issued, disable the Actors bound to it, and close their signaling connections and TURN allocations; removing a member and leaving a Realm MUST revoke all of that member's client keys; changing a role changes only application permissions and takes effect in the member's next Actor credential. |
+| FR-NET-024 | Creating a Realm and recovering ownership MUST deliver the management right as a one-time owner invite, with no Realm admin token; owner invites are issued by the Realm signing key holder (activation response, `reissue_owner_invite`) or the Realm Provider's operator, and a new one invalidates earlier unused ones. Self-service creation with Realm Provider accounts is a later capability. |
 
 ### 1.7 Permissions, security and privacy
 
@@ -123,8 +127,8 @@
 | FR-SEC-009 | Trashing, quarantining or purging a Service MUST NOT automatically delete the Workspace. |
 | FR-SEC-010 | Telemetry MUST default to off; once a user or administrator enables it, sensitive identifiers MUST still be minimized. |
 | FR-SEC-011 | Revoking a grant MUST immediately invalidate the corresponding capability handle, and terminate or downgrade active sessions. |
-| FR-SEC-012 | A Service invitation MUST be one-time, expirable and revocable, and MUST NOT enter an instance's URI as a bearer secret. |
-| FR-SEC-013 | Application permissions MUST support at least owner/editor/viewer roles, and MUST keep Realm membership separate from instance authorization: membership only decides whether one can enter that instance's network (a prerequisite for obtaining an Actor credential, connecting to signaling and doing the Attach handshake); roles and permissions inside the instance are still decided by application permissions and session authorization. |
+| FR-SEC-012 | A Realm invitation MUST be one-time, expirable and revocable, redeemed with a signature by a new Realm client key and consumed atomically, and MUST NOT enter an instance's URI as a bearer secret; expired, used, revoked and Realm-mismatched invitations MUST be distinct errors. |
+| FR-SEC-013 | Application permissions MUST support at least owner/editor/viewer roles, and MUST keep Realm membership separate from instance authorization: membership only decides whether one can enter that instance's network (a prerequisite for obtaining an Actor credential, connecting to signaling and doing the Attach handshake); roles and permissions inside the instance are still decided by application permissions and session authorization; the member role is kept by the Realm Provider, written into the Actor credential and enforced by the Service, and a session never outlives the Front credential. |
 | FR-SEC-014 | The application color MUST be expressed as separate fields for lifecycle, reachability, health and enforcement. |
 | FR-SEC-015 | The application graph MUST be a rootless connected component of effective dependencies and MUST include every effective `Transfer(ActorId)` member. |
 | FR-SEC-016 | When the channel is valid and `Ready`, the displayed color MUST take the weakest of all node conclusions. |
@@ -586,6 +590,24 @@ Any increase MUST still be bounded by the platform's cap and permission policy.
 **When** the Realm signing key holder is unreachable, or the Realm Provider fails to activate the Realm, and the user then retries with the same `idempotency_key`<br>
 **Then** no Service is produced on failure; the retry continues the same pending Realm (same RealmId; the Realm Provider identifies it by `(realm, requester)`) instead of creating a new Realm; an expired pending Realm is cleaned up automatically.
 
+### AC-056: Distinct invitation errors
+
+**Given** the owner issued a one-time viewer invitation for `k7m2q9xh@acme.com`<br>
+**When** a member redeems it and then redeems it again; another invitation has expired; a third was revoked by the owner; a fourth belongs to another Realm but is used for this one<br>
+**Then** they are refused with `invite_used`, `invite_expired`, `invite_revoked` and `invite_realm_mismatch` respectively; the same client retrying its first redemption gets the same result; of two clients redeeming the same invitation concurrently only one succeeds.
+
+### AC-057: Removing a member revokes all its clients
+
+**Given** an editor has two clients, each running an online Actor<br>
+**When** the owner removes that member<br>
+**Then** both clients' Realm client keys are revoked: registration, renewal and reissue are refused at once with `client_revoked` or `member_removed`, their Actors' signaling connections and TURN allocations are closed and cannot reconnect, and the Service ends established Attach sessions at the latest when their credentials expire; changing another member to viewer revokes no key, and that member's next credential carries `viewer`.
+
+### AC-058: Ownership transfer and recovery
+
+**Given** the owner has a single client, and the Realm also has editor B<br>
+**When** the owner tries to revoke its client or leave; then transfers ownership to B; later B loses all its clients and the Realm signing key holder issues a new owner invite that gets redeemed<br>
+**Then** the revocation and leaving are refused with `owner_last_client` and `owner_must_transfer`; after the transfer B is the only owner and the previous owner is an editor; the client redeeming the recovery invite becomes a new client of B, all of B's previous client keys are revoked, and earlier unused owner invites stop working.
+
 ## 4. Compatibility acceptance matrix
 
 Every release candidate covers at least:
@@ -694,7 +716,7 @@ Telemetry defaults to off. Release metrics are obtained primarily through local 
 | Unified Tab/Front/Service model | FR-SH-001—006, FR-FRONT-001 | AC-002, AC-008—010 | P2-A, P3-A |
 | Precise, persistent Actor identity | FR-SVC-001—003, FR-NET-005—006 | AC-009, AC-011, AC-019 | P1-A |
 | Publisher and package supply chain | FR-PKG-002—014 | AC-005, AC-016, AC-021 | P1-B |
-| Realm/signaling authoritative but bounded | FR-NET-001—020 | AC-011, AC-012, AC-021—023, AC-051—055 | P1-A, P3-B |
+| Realm/signaling authoritative but bounded | FR-NET-001—024 | AC-011, AC-012, AC-021—023, AC-051—058 | P1-A, P3-B |
 | Workspace not harmed by the UI/deletion | FR-SVC-005—016, FR-SEC-009 | AC-013—015, AC-023 | P2-B |
 | Guest can run but not overreach | FR-FRONT-002—010, NFR-SEC-001—004 | AC-006, AC-007 | P2-A, P4 |
 | Application-instance privacy snapshot and dynamic graph re-evaluation | FR-SEC-014—059, NFR-SEC-007—014 | AC-024—050 | P0, P1-A, P2, P3-A, P4 |

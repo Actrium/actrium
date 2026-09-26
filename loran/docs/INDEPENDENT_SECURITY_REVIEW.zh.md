@@ -46,7 +46,7 @@ Realm Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷�
 | Signaling | `crates/loran-signaling/src/axum_router.rs`、`server.rs` | WS transport、source binding、连接 ACL、限流 |
 | TURN/STUN | `crates/loran-turn/src/authenticator.rs`、`crates/loran-stun/src/lib.rs` | credential、cache、allocation、畸形流量 |
 | Publisher Registry | `crates/loran-publisher-registry/src/`（publisher 发现、`manager.rs`） | SSRF、descriptor、rotation、nonce、签名 |
-| Admin | `crates/loran-server/src/service/http/admin_api.rs` | Argon2id/JWT、Realm 唯一性（目标：Realm 管理请求与单 Realm 的 Realm 管理 token 的作用域）、审计 |
+| Admin | `crates/loran-server/src/service/http/admin_api.rs` | Argon2id/JWT、Realm 唯一性、owner 邀请签发与只读成员列表、审计 |
 
 评审还应确认 SDK/authoring 源码中的历史发布者字段名（见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）没有
 意外重新进入 Loran v1 的 HTTP/JSON、包清单和 ActorId 边界；源码命名迁移本身不作为安全通过的替代条件。
@@ -113,6 +113,6 @@ Realm Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷�
 ### 已确认的正向控制（做对的部分，勿回退）
 
 - schema 版本 gate（当前 v2）对未版本化/错误版本库 fail-closed（`unsupported ... run the standalone migration tool`）。
-- JWT 算法锁定 HS256、无 `alg:none`/RS-HS 混淆；realm 单例唯一索引（该控制针对当时的单 Realm 契约；多 Realm 目标契约中由按 Realm
+- JWT 算法锁定 HS256、无 `alg:none`/RS-HS 混淆；realm 单例唯一索引（该控制针对当时的单 Realm 契约；已由按 Realm
 分区与 Realm 名唯一约束取代，见架构契约第 9 节）；signaling 侧 credential source/连接绑定；移除全局 `CorsLayer::permissive`；TURN 出厂 placeholder secret 已移除并 fail-closed。
 - 浏览器 TURN relay-only 互操作：Chrome 148、Firefox 152 均 PASS（relay/relay UDP）；Safari 26.5 经自动化未在窗口内完成握手，记为待人工复核；独立 RFC5766 客户端 / iOS·Android 原生 / NAT 矩阵 / TURN-over-TCP·TLS 仍为发布前外部矩阵缺口。

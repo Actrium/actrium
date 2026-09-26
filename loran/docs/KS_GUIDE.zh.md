@@ -7,11 +7,12 @@
 
 Issuer Signer 是 Issuer 的最小私钥边界：
 
-1. 生成 Ed25519 signing key（目标契约下每个 Realm 一把 Realm issuer key，全部 Realm 共用
-   同一 Issuer Signer）；
+1. 生成 Ed25519 signing key：每个 Realm 的 Realm issuer key（首把 `issuer:<realm>`，轮换产生 `issuer:<realm>/<毫秒时间戳>`）、每个
+   Realm Provider 域名一把 Realm 签名 key（`realm-signing:<domain>`），全部 Realm 共用同一
+   Issuer Signer；
 2. 在服务端保存私钥，只返回 verifying key；
 3. 对 Issuer 提交的精确消息签名；
-4. 按 `expires_at` 停止签名，并支持 key rotation/revocation 审计。
+4. 退役 key：退役即销毁私钥，此后不再签名。key 都是具名 key，不按时间过期。
 
 Issuer Signer 不负责 Actor 路由、Realm 管理、Publisher 下载，也不提供「获取私钥」接口。
 
@@ -20,9 +21,10 @@ Issuer Signer 不负责 Actor 路由、Realm 管理、Publisher 下载，也不�
 Loran all-in-one profile 将 Issuer Signer gRPC 挂载在主 HTTP/2 监听器：
 
 ```text
-/signer.v1.Signer/GenerateSigningKey
 /signer.v1.Signer/Sign
 /signer.v1.Signer/GetVerifyingKey
+/signer.v1.Signer/EnsureNamedKey
+/signer.v1.Signer/RetireNamedKey
 /signer.v1.Signer/HealthCheck
 ```
 
@@ -54,15 +56,15 @@ kek_env = "ACTRIX_SIGNER_KEK"
 
 ## 生命周期
 
-- 新 key 在 `expires_at` 前可用于签名；
-- 到期后立即拒绝新签名；
-- tolerance 只允许历史验签/平滑读取 verifying metadata，不延长签名能力；
-- Issuer rotation 先生成并发布 successor，再切换 active key；
+- `EnsureNamedKey` 按名字取 key，缺失时生成；key 不按时间过期；
+- `RetireNamedKey` 清除其私钥、保留名字与 verifying key，之后 `Sign`
+  返回 `FAILED_PRECONDITION`。退役幂等；名字尚无 key 时直接建为已退役，名字不会再得到可用
+  key。Realm issuer key 轮换后移除旧 key、以及 Realm 退役时，Issuer 以此退役相应的 issuer key；
 - revocation 与轮换必须进入审计记录。
 
 ## 运维要求
 
-- `actrix_shared_key`、KEK、Realm secret、TURN secret 和 renewal secret 分离；
+- `actrix_shared_key`、KEK、TURN secret 和 renewal secret 分离；
 - secrets 不使用示例值，不写普通日志，不放命令行或 URL；
 - 生产使用 HTTPS/mTLS 或等价的受保护内部链路；
 - 备份 SQLite 时同时保护 KEK；只有数据库或只有 KEK 都不足以恢复签名能力；

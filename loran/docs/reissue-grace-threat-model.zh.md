@@ -32,7 +32,7 @@ pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400; // 30 天
 
 1. **reissue 不是「只凭令牌」就能通过。** `/reissue` 仍然要求完整的注册认证（`verify_registration_identity`）：
    - 包注册（Package）需要 publisher 签名证明，且原 nonce 已被首次注册消费、必须重新签名，无法重放；
-   - 源关联注册（Linked）需要 realm secret。
+   - 源关联注册（Linked）需要该 Realm 的 Realm 客户端 key 证明（`x-actr-client-proof`）。
 
    也就是说，**单靠一份泄露的旧 renewal token 不足以完成 reissue**——攻击者还必须突破注册层认证。宽限期放大的是「令牌 + 注册认证同时被攻破」这一复合条件下的时间窗口，而不是单一令牌的独立权限。
 
@@ -42,9 +42,9 @@ pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400; // 30 天
 
 4. **只恢复稳定身份，从不铸造新序列号。** reissue 契约上是 stable-identity：响应的 `ActrId` 必须与请求一致，客户端侧也再次校验。它不能被用来批量申请新身份。
 
-5. **续期权限没有被一起放宽。** 宽限期只作用于 `/reissue` 的持有证明判定；`/renew` 仍然要求未过期令牌。换言之，旧令牌不能拿去做常规续期，只能走「认证 + 恢复」这条更重的路径。
+5. **续期权限没有被一起放宽。** 宽限期只作用于 `/reissue` 的持有证明判定；`/renew` 仍然要求未过期令牌。换言之，旧令牌不能拿去做常规续期，只能走「认证 + 恢复」这条更重的路径。已被 `/reissue` 消耗（后继已生成）的令牌，`/renew` 只在消耗后 5 分钟内接受，且只返回已派生的同一后继，供响应丢失的节点恢复；过了 5 分钟即拒绝，泄露的旧令牌无法再续期。
 
-6. **令牌只以哈希存储、从不落日志。** 数据库只保存 `SHA-256(token)`，日志层禁止输出令牌、令牌哈希与 realm secret。即使数据库被读取，也拿不到可直接使用的令牌明文。
+6. **令牌只以哈希存储、从不落日志。** 数据库只保存 `SHA-256(token)`，日志层禁止输出令牌、令牌哈希与 Realm 客户端私钥。即使数据库被读取，也拿不到可直接使用的令牌明文。
 
 7. **本次 PR 收紧了失败分类。** possession 失败与 realm 拒绝在协议层用不同的错误码区分（possession 失败使用 `REISSUE_POSSESSION_NOT_PROVEN_CODE`，realm 拒绝保留 `403`）：一次过期/未知的持有证明不会被误判为「realm 永久拒绝」而终止恢复，也不会把一次身份问题伪装成 realm 层决策。这让「宽限期外/证明不匹配」的失败路径行为明确、可观测（见 warn 级别 `membership_identity_loss` 日志）。
 

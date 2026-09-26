@@ -49,7 +49,7 @@ flowchart LR
 
 - Workspace 内容；
 - Actor 长期私钥；
-- Realm membership 与 renewal token；
+- Realm 客户端 key、未用的 Realm 邀请与 renewal token；
 - Service 状态与 snapshot；
 - Workspace Provider credential；
 - 用户身份和应用权限；
@@ -103,6 +103,9 @@ flowchart LR
 | 批量创建实例 | 用户确认、creation intent 幂等、来源限流和配额 |
 | 链接泄露权限 | Realm 链接与 ActorId 都不是凭证，URI 不含任何 token |
 | Actor 冒充 | Actor credential、Actor key proof、challenge |
+| Realm 邀请泄露 | 一次性、可过期，兑换时须用新 Realm 客户端 key 签名并原子消耗；签发者可撤销未用邀请，owner 可移除误入成员；邀请不进入 URI |
+| 客户端丢失或被盗 | 每个客户端独立的 Realm 客户端 key，成员或 owner 可单独撤销；撤销立即拒绝新 Actor credential 并断开其 signaling/TURN；owner 丢失全部客户端时经 Realm 签名 key 持有方或 Realm Provider 运营者签发的 owner 邀请恢复 |
+| 低权限成员冒充 Service 或改写其连接 ACL | 该实例程序（Realm Profile `package.type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 客户端注册；注册携带的连接 ACL 只作用于所注册 Actor 自己的类型 |
 | 伪造或回滚 Realm Profile | Realm Profile 必须由已固定的 Realm 签名 key 签名；首次信任经 Web PKI 或企业 pin；Realm 签名 key 变化须有有效轮换链；`sequence` 单调、`provider.id` 不可变、已退役 Realm 拒绝；Realm Profile 不过期，客户端定期刷新；取不到、验不过或已退役的 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Provider |
 | 客户端伪装成官方 Actrium Front | Actor credential 不证明对端代码；平台提供可选的 platform/runtime attestation |
 | 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Actr Host 闭合 |
@@ -328,6 +331,7 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 | TURN credential | 内存 | ICE stack，短期 |
 | Workspace credential | OS secure storage | Workspace broker |
 | session secret | Front/Service Host 内存 | Guest 不可见 |
+| 未用的 Realm 邀请 | 带外渠道，兑换一次即失效 | 接收者；Realm Provider 只存其哈希 |
 
 禁止：
 
@@ -378,6 +382,7 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 - Actrium Host 安全更新可要求重启 Front；
 - package 撤销按等级处理；
 - Realm issuer key 或 Realm 签名 key 撤销立即影响新连接；
+- Realm 客户端 key 撤销或成员移除立即拒绝新 Actor credential，并关闭其 Actor 的 signaling 连接与 TURN allocation；
 - 已建立 session 最迟在 credential/lease 到期终止；
 - compromised Publisher key 的历史可信版本按签名时间和撤销范围判断；
 - emergency blocklist 必须签名、过期、可审计；
@@ -396,7 +401,7 @@ Actrium 不应默认建立中心化账户或同步服务。用户数据流向取
 
 安装页和安全中心必须提供「数据会去哪里」的分层说明，而不是一个总隐私开关。
 
-Realm 名出现在分享的 Realm 链接中，会暴露 Realm 域名与 RealmId（`realm_id`）。Actrium 默认为实例生成完全随机的 RealmId（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 RealmId 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actrium 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。对 Realm Provider 域名下的 Realm，用户以 Realm Provider 账号登录创建；Realm Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。
+Realm 名出现在分享的 Realm 链接中，会暴露 Realm 域名与 RealmId（`realm_id`）。Actrium 默认为实例生成完全随机的 RealmId（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 RealmId 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actrium 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。Realm Provider 与持有方的签名服务知道自己为谁创建了哪些实例（它们本来就是签名方），实例成员看不到这一点；客户端名称由客户端自定，默认不含个人信息。
 
 ## 17. 安全开发要求
 

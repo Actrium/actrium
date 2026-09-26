@@ -1,7 +1,6 @@
 # Loran Realm v1 配置
 
-本文描述当前实现的单 Realm、单节点、SQLite profile。目标契约下一个实例承载多个
-Realm，配置中与之相关的差异在对应小节标注，完整差异见
+本文描述当前实现的单节点、SQLite profile：一个实例承载多个 Realm。尚未实现的部分见
 [架构契约](REALM_V1_ARCHITECTURE.zh.md)第 9 节。字段的可运行模板以
 [`actrix.example.toml`](../config/actrix.example.toml)为准；配置结构使用
 `deny_unknown_fields`，旧字段或拼错字段会导致启动失败。
@@ -62,8 +61,8 @@ advertised_ip = "203.0.113.10"
 advertised_port = 3478
 ```
 
-HTTP 与 ICE 端口均可配置，并会精确出现在 Realm descriptor 中（目标契约：出现在
-待签 Realm Profile 的 Realm Provider 端点中）。防火墙必须放行
+HTTP 与 ICE 端口均可配置，并会精确出现在待签 Realm Profile 的 Realm Provider 端点中。
+防火墙必须放行
 HTTP/TCP、ICE/UDP 以及 TURN relay port range。`advertised_ip` 必须是客户端可达
 地址，不能用监听通配地址代替。
 
@@ -79,27 +78,29 @@ turn_secret = "<generate-with-openssl-rand-base64-48>"
 `[turn].realm` 是 TURN 长期凭据算法中的认证域字符串（TURN REALM），与 Actr Realm
 不是一回事，不随 Actr Realm 数量变化。
 
-`turn_secret` 同时供 Issuer 签发和 TURN 验证时效凭证，必须按 Realm Provider 独立、稳定保存。
-目标契约下它作为 Realm Provider 主密钥，每个 Actr Realm 的 TURN secret 由它按 Realm 名
-与 Realm Provider ID 经 HKDF 派生，不在配置中逐个声明。直接替换会使尚未过期的 TURN credential 失效，因此轮换必须作为显式
+`turn_secret` 是 Realm Provider 主密钥，供 Issuer 签发和 TURN 验证时效凭证，必须按 Realm
+Provider 独立、稳定保存。每个 Actr Realm 的 TURN secret 由它按 Realm 名与 Realm Provider ID
+经 HKDF-SHA256 派生（salt `actr.turn`，info `<realm>|<provider>`），不在配置中逐个声明；外部
+coturn 无法直接使用主密钥验证。直接替换会使尚未过期的 TURN credential 失效，因此轮换必须作为显式
 维护操作。relay range 不得包含特权端口，起始值不得大于结束值。
 
 ## Issuer Signer
 
 ```toml
 [services.signer]
-tolerance_seconds = 3600
 kek_env = "ACTRIX_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 ```
 
 首版推荐 SQLite。生产环境必须从 `kek_file`、`kek_env` 或 `kek` 提供 KEK；
-推荐前两者。KEK 与 Realm secret、TURN secret、renewal secret 不得复用。
+推荐前两者。KEK 与 TURN secret、renewal secret 不得复用。
+Signer 只保存具名 key，key 不按时间过期，由 Realm 退役或 issuer key 轮换退役。旧版的
+`[services.signer] tolerance_seconds` 与 `[services.signer.storage] key_ttl_seconds` 已删除；
+配置段拒绝未知字段，仍写这两项的配置会启动失败，删掉即可。
 Issuer Signer 可以留在 all-in-one 进程；需要更强隔离时可使用现有 TLS/mTLS gRPC
 客户端配置部署为独立安全边界。
 
@@ -142,7 +143,8 @@ nonce_retain_secs = 86400
 ```
 
 该值决定已使用或过期发布 nonce 的审计保留期，不改变 nonce 的一次性语义。
-Publisher ID 是域名；当前实现通过 HTTPS descriptor 验证域名控制权，目标契约见架构契约第 7 节。
+Publisher ID 是域名，通过 HTTPS descriptor 验证域名控制权并以 `register_publisher` 登记，
+见架构契约第 7 节。
 
 ## 管理面
 
@@ -156,9 +158,10 @@ session_expiry_secs = 86400
 enabled = false
 ```
 
-Admin UI 密码只接受 Argon2id PHC hash，明文密码字段不存在。当前实现推荐只启用 Admin
-UI，由系统管理员 provision 唯一 Realm；目标契约下 Realm 由经 Realm 签名 key 持有方授权的
-Realm 管理请求创建，Admin UI 用于实例运营。`grpc_api` 是 supervisor 集成接口；启用后
+Admin UI 密码只接受 Argon2id PHC hash，明文密码字段不存在。v1 推荐只启用 Admin UI：
+系统管理员经它创建、停用/恢复、退役 Realm 并代办 Realm Provider 域名下的 Realm；其他域名
+的 Realm 由经 Realm 签名 key 持有方授权的 Realm 管理请求创建。`grpc_api` 是 supervisor
+集成接口；启用后
 需要独立的 hex shared secret，并会改变 Realm 写入归属，不属于首版默认部署。
 
 ## Recording 与监控
@@ -172,17 +175,39 @@ operations 分成独立 channel。secret、Actor credential、Authorization、We
 
 ## Realm provision 与数据
 
-Realm 不在 TOML 中声明。
+Realm 不在 TOML 中声明。一个实例承载多个 Realm，默认不限制数量；需要独占部署时可配置
+`[realm] max_realms = 1`。空 schema 启动后没有任何 Realm；Realm 经 Realm 签名 key 持有方
+授权的创建请求（`create_realm` + `publish_profile`）与 Realm Profile 验证后激活，Realm
+Provider 域名下的 Realm 由系统管理员经 Admin API 代办创建；收到退役 Realm Profile 或经
+`…/retire` 时退役，写入 Realm Provider tombstone，运行时不提供硬删除。按 Realm 的连接、
+消息与 TURN 配额尚未实现，见架构契约第 9 节。
 
-当前实现：空 schema 启动后，由系统管理员通过受保护管理面创建唯一 Realm。数据库
-唯一约束阻止第二个 Realm；运行时不提供硬删除/替换。
+`[realm] profile_refresh_secs`（默认 3600，限定在 60–86400）是 Loran 刷新其他域名
+`realm_signing_keys` 与 Realm Profile 的间隔（API.zh.md「Realm discovery」），每轮同时清除过期的
+`pending` Realm。Realm 管理请求（API.zh.md「Realm 管理请求」）的 `create_realm` 另受：
 
-目标契约：一个实例承载多个 Realm，默认不限制数量；需要独占部署时可配置
-`max_realms = 1`（该字段尚未实现）。Realm 经持有方授权的创建请求与 Realm
-Profile 验证后激活，收到退役 Realm Profile 时退役并写入 Realm Provider tombstone。Realm
-Provider ID（Realm Provider 的规范化 DNS authority，取代当前常量）、按 Realm 域名与按
-Realm 的配额同样属于
-待实现配置。
+- `max_realms_per_domain`：每个 Realm 域名的 `pending` 与 `active` Realm 数，默认不限；
+- `max_pending_per_domain`：每个 Realm 域名的 `pending` Realm 数，默认 10；
+- `pending_ttl_secs`：`pending` Realm 等待首份 Realm Profile 的时间，默认 3600，限定在
+  60–86400；过期即删除，名字可再用（从未提供服务，不是 tombstone）。运营者创建的 `pending`
+  Realm 同样受此限制。
+
+`register_publisher` 受 `[realm] max_publishers` 约束：已登记的 Publisher 总数（不论状态），默认
+1000，达到后新登记返回 `429`，已登记的 Publisher 仍可更新其 Publisher Profile。
+
+Realm membership（API.zh.md「Realm membership」）的限额，超出返回 `429 quota`，邀请不被消耗：
+
+- `max_members_per_realm`：每个 Realm 的 active 成员数，默认 1000；
+- `max_clients_per_member`：每个成员未撤销的 Realm 客户端 key 数，默认 20；
+- `max_open_invites_per_realm`：每个 Realm 未用、未撤销、未过期的邀请数，默认 100（owner 邀请不计）。
+
+邀请有效期不超过 30 天，owner 邀请固定 7 天。
+
+Realm Provider ID 取 `[authority] uri`（`actr://<domain>`，不带端口）的规范化 DNS 域名。
+启用 Issuer、Signaling 或 TURN 时 `uri` 必填，缺失或非法即配置校验失败；它写入 Actor
+credential 与 TURN username 的 `provider`，并由 Signaling、TURN 校验。`[authority] enabled`
+控制是否提供 `/.well-known/actr`（此时域名须与 `bind.http` 一致），`[authority] links`
+是 descriptor 的 Realm 链接前缀（如 `["/i/"]`），默认不输出。
 
 旧 SQLite 必须停机后运行：
 
@@ -190,10 +215,13 @@ Realm 的配额同样属于
 # 未版本化库：先升到 v1
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db --dry-run
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db
-# v1 库：升到当前 v2
+# v1 库：升到 v2
 python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db --dry-run
 python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db
 ```
+
+v2 之后没有离线迁移工具：升到当前 schema v9 需要停机后重建数据库（见「Realm provision
+与数据」）。
 
 详见[架构契约](REALM_V1_ARCHITECTURE.zh.md)和
 [威胁模型](THREAT_MODEL_REALM_V1.zh.md)。

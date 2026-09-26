@@ -13,8 +13,8 @@
 - Publisher Registry/GitHub 身份作为 Publisher 信任根；
 - 只修复单个 P0 即「适合内部生产」。
 
-Realm v1 的安全基线是 fail closed 配置、按 Realm 显式分区与隔离（当前实现仍以单
-Realm 数据库约束代替，见架构契约第 9 节）、以 Realm 签名 key 为根的 Realm Profile、
+Realm v1 的安全基线是 fail closed 配置、按 Realm 显式分区与隔离（详见架构契约第 6 节，
+尚未落地的部分见第 9 节）、以 Realm 签名 key 为根的 Realm Profile、
 短期 scoped Actor credential、Publisher 域名发现与签名、连接 ACL 默认拒绝、日志脱敏、有界资源、显式
 迁移和 key 生命周期。生产声明还必须完成独立安全审查或渗透测试，并关闭全部
 P0/P1。

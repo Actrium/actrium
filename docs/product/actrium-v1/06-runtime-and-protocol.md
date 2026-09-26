@@ -406,7 +406,7 @@ The Service checks, in order:
 6. the Program Release (a compatibility declaration);
 7. the package digest (a compatibility declaration; without attestation it is not proof of the remote code);
 8. the protocol fingerprint;
-9. Principal/Device/Workspace application permissions;
+9. Application permissions: the member id, Realm client key id and role (owner/editor/viewer) in the Front credential, plus the Workspace scope;
 10. the attachment policy;
 11. the current lease;
 12. the caller-required policy, the current `ActorStateDigest` / AA, and the nonce;
@@ -422,6 +422,7 @@ v1's exclusive lease:
 
 - a short-lived, renewable lease is created after Attach succeeds;
 - a Heartbeat only renews the session, not the Actor identity;
+- a session never outlives the Front credential: after renewing its credential, the Front presents the new one when renewing the lease and the Service reads the role again; otherwise the session ends when the old credential expires;
 - a transient disconnect enters a grace period;
 - `Detach` releases it actively;
 - the lease expires after a Front crash;

@@ -102,11 +102,15 @@
 | FR-NET-012 | v1 的多个 signaling endpoint 只能作为同一 Realm 控制面的 failover，不支持隐式跨控制面 federation。 |
 | FR-NET-013 | 本机 Realm 的 ActorId 必须使用本机伪域名 `<installation-id>.actr.alt`，禁止复制为跨设备链接。 |
 | FR-NET-015 | Realm 域名 bootstrap（`https://<domain>/.well-known/actr`）必须固定 HTTPS 443，并以 Realm 签名 key 轮换链与 Realm Profile 序号防回滚（Realm Profile 不设过期时间）。 |
-| FR-NET-016 | Actrium 必须提供域名信任、经 Realm 邀请加入实例 Realm、重新认证、客户端撤销、离开和 Realm 签名 key 变化处置流程。 |
+| FR-NET-016 | Actrium 必须提供域名信任、经 Realm 邀请加入实例 Realm、添加客户端、重新认证、客户端撤销、成员管理（仅 owner）、离开、owner 恢复和 Realm 签名 key 变化处置流程。 |
 | FR-NET-017 | 新建实例必须在所选域名下新建一个 Realm；RealmId 在域名内唯一、创建后不可修改、退役后不复用。 |
 | FR-NET-018 | Service 升级为新 Program Release 时，Realm 必须发布 `package` 指向新包的 Realm Profile，新 Service 必须创建在同一 Realm；迁移到另一个 Realm 必须产生新 ActorId。 |
 | FR-NET-019 | 取不到、验不过或已退役的 Realm Profile 时，Actrium 不得使用 Realm Profile 以外的任何 Realm Provider（包括 authority descriptor `services` 中的服务）与该 Realm 通信。 |
-| FR-NET-020 | 新建实例所选的 Realm 域名必须已受信，或在新建确认页完成首次信任；没有域名不分配 Realm（本机 Realm 除外）；创建须经该 Realm 域名的 Realm 签名 key 持有方授权：Realm 域名等于或属于 Realm Provider ID 时由该 Realm Provider 以 Realm Provider 账号认证用户，确认页显示其为信任根；其他 Realm 域名由持有方的签名服务签署 Actr 管理信封，确认页显示信任根为该 Realm 域名。 |
+| FR-NET-020 | 新建实例所选的 Realm 域名必须已受信，或在新建确认页完成首次信任；没有域名不分配 Realm（本机 Realm 除外）；创建须经该 Realm 域名的 Realm 签名 key 持有方授权：其他 Realm 域名由持有方的签名服务签署 Actr 管理信封，确认页显示信任根为该 Realm 域名；Realm 域名等于或属于 Realm Provider ID 时，v1 只由该 Realm Provider 的运营者创建，用户以其交付的 owner 邀请加入，确认页显示其为信任根。 |
+| FR-NET-021 | 每个联网 Realm 必须恰好一个 owner（创建者或经转让得到者）；owner 转让必须原子完成，原 owner 默认改为 editor；owner 离开前必须先转让，且不能撤销自己最后一个客户端；多 owner 不属于 v1。 |
+| FR-NET-022 | 每个客户端必须在每个 Realm 登记独立的 Realm 客户端 key；注册、重签与续期 Actor credential 都必须以该 key 签名证明持有，Issuer 只对已登记、未撤销、属于 active 成员的 key 签发；不得使用 Realm 共享注册 secret。 |
+| FR-NET-023 | 撤销 Realm 客户端 key 必须立即拒绝其新 Actor credential、撤销它签发的未用邀请、停用绑定到它的 Actor 并关闭它们的 signaling 连接与 TURN allocation；移除成员与离开 Realm 必须撤销该成员全部客户端 key；改角色只改应用权限，在该成员下一份 Actor credential 生效。 |
+| FR-NET-024 | 创建 Realm 与 owner 恢复必须以一次性 owner 邀请交付管理权，不设 Realm 管理 token；owner 邀请由 Realm 签名 key 持有方（激活响应、`reissue_owner_invite`）或 Realm Provider 运营者签发，新签发的使此前未用的失效。Realm Provider 账号自助创建属于后续能力。 |
 
 ### 1.7 Permission、安全与隐私
 
@@ -123,8 +127,8 @@
 | FR-SEC-009 | 回收站、隔离或彻底清除 Service 均不得自动删除 Workspace。 |
 | FR-SEC-010 | 遥测必须默认关闭；用户或管理员启用后仍必须最小化敏感标识。 |
 | FR-SEC-011 | 撤销 grant 必须立即失效对应 capability handle，并终止或降权活跃会话。 |
-| FR-SEC-012 | Service 邀请必须一次性、可过期、可撤销，且不得作为 bearer secret 进入实例 URI。 |
-| FR-SEC-013 | 应用权限至少支持 owner/editor/viewer 角色，并把 Realm membership 与实例授权分开：membership 只决定能否进入该实例的网络（取得 Actor credential、连接 signaling、Attach 握手的前提），实例内角色与权限仍由应用权限与会话授权决定。 |
+| FR-SEC-012 | Realm 邀请必须一次性、可过期、可撤销，兑换时由新 Realm 客户端 key 签名并原子消耗，且不得作为 bearer secret 进入实例 URI；过期、已使用、已撤销与 Realm 不匹配必须是不同错误。 |
+| FR-SEC-013 | 应用权限至少支持 owner/editor/viewer 角色，并把 Realm membership 与实例授权分开：membership 只决定能否进入该实例的网络（取得 Actor credential、连接 signaling、Attach 握手的前提），实例内角色与权限仍由应用权限与会话授权决定；成员角色由 Realm Provider 保存并写入 Actor credential，由 Service 执行，会话不超过 Front credential 的有效期。 |
 | FR-SEC-014 | 应用颜色必须与 lifecycle、reachability、health 和 enforcement 分字段表达。 |
 | FR-SEC-015 | 应用图必须是无根有效依赖连通分量，并包含全部有效 `Transfer(ActorId)` 成员。 |
 | FR-SEC-016 | 通道有效且 `Ready` 时，展示颜色必须取全部节点结论的最弱项。 |
@@ -586,6 +590,24 @@
 **When** Realm 签名 key 持有方不可达，或 Realm Provider 激活 Realm 失败，随后用户以同一 `idempotency_key` 重试<br>
 **Then** 失败时不产生 Service；重试继续同一个 pending Realm（同一 RealmId，Realm Provider 以 `(realm, 请求方)` 识别），不重复创建 Realm；过期的 pending Realm 被自动清理。
 
+### AC-056：邀请错误分明
+
+**Given** owner 为 `k7m2q9xh@acme.com` 签发了一次性 viewer 邀请<br>
+**When** 成员兑换后再次兑换；另一邀请已过期；第三个邀请已被 owner 撤销；第四个属于另一个 Realm 却被用于本 Realm<br>
+**Then** 分别以 `invite_used`、`invite_expired`、`invite_revoked`、`invite_realm_mismatch` 拒绝；同一客户端重试首次兑换得到相同结果；两个客户端并发兑换同一邀请只有一个成功。
+
+### AC-057：移除成员即撤销全部客户端
+
+**Given** editor 有两个客户端，各自运行一个在线 Actor<br>
+**When** owner 移除该成员<br>
+**Then** 两个客户端的 Realm 客户端 key 均被撤销：注册、续期与重签立即以 `client_revoked` 或 `member_removed` 拒绝，其 Actor 的 signaling 连接与 TURN allocation 被关闭且不能重连；已建立的 Attach 会话至迟在其 credential 到期时由 Service 结束；另一成员被改为 viewer 时不撤销任何 key，其下一份 credential 带 `viewer`。
+
+### AC-058：owner 转让与恢复
+
+**Given** owner 只有一个客户端，Realm 另有 editor B<br>
+**When** owner 试图撤销自己的客户端或离开；随后把 owner 转让给 B；之后 B 丢失全部客户端，Realm 签名 key 持有方签发新的 owner 邀请并被兑换<br>
+**Then** 撤销与离开以 `owner_last_client`、`owner_must_transfer` 拒绝；转让后 B 为唯一 owner、原 owner 为 editor；兑换恢复邀请的客户端成为 B 的新客户端，B 原有客户端 key 全部撤销，此前未用的 owner 邀请失效。
+
 ## 4. 兼容性验收矩阵
 
 每个发布候选至少覆盖：
@@ -694,7 +716,7 @@ Linux/通用服务器宿主、云端自动调度、浏览器 Web 版和跨 Realm
 | Tab/Front/Service 统一模型 | FR-SH-001—006、FR-FRONT-001 | AC-002、AC-008—010 | P2-A、P3-A |
 | 精确、持久 Actor 身份 | FR-SVC-001—003、FR-NET-005—006 | AC-009、AC-011、AC-019 | P1-A |
 | Publisher 与包供应链 | FR-PKG-002—014 | AC-005、AC-016、AC-021 | P1-B |
-| Realm/信令有权但受限 | FR-NET-001—020 | AC-011、AC-012、AC-021—023、AC-051—055 | P1-A、P3-B |
+| Realm/信令有权但受限 | FR-NET-001—024 | AC-011、AC-012、AC-021—023、AC-051—058 | P1-A、P3-B |
 | Workspace 不被 UI/删除误伤 | FR-SVC-005—016、FR-SEC-009 | AC-013—015、AC-023 | P2-B |
 | Guest 可运行但不越界 | FR-FRONT-002—010、NFR-SEC-001—004 | AC-006、AC-007 | P2-A、P4 |
 | 应用实例隐私快照与动态图重评 | FR-SEC-014—059、NFR-SEC-007—014 | AC-024—050 | P0、P1-A、P2、P3-A、P4 |

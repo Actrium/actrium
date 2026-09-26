@@ -87,7 +87,7 @@ flowchart LR
 ### Actr 必改
 
 1. Actor长期 key 模型；
-2. ActorId 文本和 wire model 改为 `<serial>.<realm_id>@<domain>`：以可验证的 Realm 名取代数值 realm_id，并把 Actor 类型移到注册与 credential；
+2. ActorId 文本和 wire model 改为 `<serial>.<realm_id>@<domain>`：以可验证的 Realm 名取代数值 realm_id，并把 Actor 类型移到注册与 credential（已完成）；
 3. 新建与 reclaim ActorId 两条注册路径；
 4. ActorId、renewal/identity state 持久化；
 5. hard re-auth 保持同一 ActorId；

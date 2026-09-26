@@ -130,7 +130,8 @@ sequenceDiagram
     A->>M: Create(idempotency_key, package, workspace, domain, realm_id, display_name)
     M->>M: 取得 Realm 签名 key 持有方授权
     M->>M: Realm Provider 创建 pending Realm
-    M->>M: 签名 Realm Profile（含 package）并提交激活，Realm 变为 active，取得 Realm membership
+    M->>M: 签名 Realm Profile（含 package）并提交激活，Realm 变为 active
+    M->>M: 兑换 owner 邀请，成为该 Realm 的 owner（取得 Realm membership）
     M->>S: 在新 Realm 内持久化身份并启动 Service
     S-->>M: stable ActorId
     M-->>A: Service record + ActorId
@@ -148,7 +149,8 @@ sequenceDiagram
 
 - Realm 域名：默认创建本机 Realm；可选任一已信任的 Realm 域名。没有域名就不分配 Realm（本机 Realm 除外）；没有自己域名的用户使用 Realm Provider 在其域名下分配的 Realm；
 - `realm_id`：Actrium 默认生成完全随机的短串（如 `k7m2q9xh`，base32 小写），不含程序名或用户输入；可读名称写入 `display_name` 显示给用户，只在本地和 Realm Profile 中出现，不进入 ActorId；用户也可以显式改用可读的 `realm_id`（如 `notes`），确认页提示可读名会随分享链接暴露；
-- 创建须经该 Realm 域名的 Realm 签名 key 持有方授权。Realm 域名等于或属于 Realm Provider ID 时，确认页提示信任根即该 Realm Provider，用户登录其 Realm Provider 账号（OAuth 2.0 + PKCE，首次登录后 Actrium 保存会话），Realm 管理权绑定该账号，换机或丢失客户端后重新登录即可恢复；其他 Realm 域名由持有方的签名服务按其自身策略认证当前用户后签署 Actr 管理信封与 Realm Profile，确认页显示信任根为该 Realm 域名（受托代持对用户不可见）；
+- 创建须经该 Realm 域名的 Realm 签名 key 持有方授权：持有方的签名服务按其自身策略认证当前用户后签署 Actr 管理信封与 Realm Profile，激活后把一次性 owner 邀请交回 Actrium，Actrium 当场兑换，创建者即该 Realm 唯一的 owner；确认页显示信任根为该 Realm 域名（受托代持对用户不可见）；
+- Realm 域名等于或属于 Realm Provider ID 时，v1 不能自助新建：用户向该 Realm Provider 的运营者申请，运营者建好 Realm 后把 owner 邀请经带外渠道交给用户，用户在身份页「使用邀请加入」，兑换后 Actrium 在该 Realm 中创建 Service 与 Front，确认页提示信任根即该 Realm Provider。以 Realm Provider 账号自助新建属于后续能力；
 - 授权被拒或持有方不可达时给出明确错误，不回落到其他 Realm 域名。
 
 Realm 域名尚未受信时，必须在确认页完成首次信任。
@@ -187,7 +189,7 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 
 - 在 Realm 变为 active 之前的任一步失败，都不创建 Service，Inventory 中不出现半成品实例；页面说明失败在哪一步（授权被拒、Realm Provider 不可达、Realm Profile 发布失败），并提供重试；
 - 默认随机的 RealmId 在开始新建时生成一次并随之持久化，重试不会重新生成；
-- 重试沿用同一 `idempotency_key`，继续同一个 pending Realm 与同一 RealmId，不重复创建；若 Realm 已激活但响应丢失，重试只返回其状态，Realm 管理 token 用 `reissue_admin_token` 取回；
+- 重试沿用同一 `idempotency_key`，继续同一个 pending Realm 与同一 RealmId，不重复创建；若 Realm 已激活但响应丢失，重试只返回其状态，owner 邀请用 `reissue_owner_invite` 重新签发；
 - 用户放弃后，pending Realm 由 Realm Provider 过期自动清理。
 
 ## 6. 连接已有实例
@@ -298,7 +300,7 @@ Guest 崩溃不得自动重启 Service。Service 崩溃则显示单独状态，�
 
 - 接收者仍需加入该实例的 Realm；
 - 应用权限必须允许；
-- 邀请通过该 Realm 与 Service 的独立授权流程完成；
+- 邀请由 owner 签发一次性 Realm 邀请完成（见第 15 节）；
 - bearer token 不进入 URI query 或 fragment；
 - 实例地址会暴露 Realm 域名与 RealmId；分享私密实例前应提示这一点，若实例使用了可读 RealmId，分享前应额外提示。
 
@@ -367,6 +369,9 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 | Domain untrusted | 实例所属 Realm 域名尚未受信 | 查看 Realm 域名与 key 指纹、确认信任 |
 | Domain authorization failed | Realm 签名 key 持有方拒绝授权或不可达，无法在该 Realm 域名下创建实例 | 联系该域名的管理员，或改用本机 Realm 或其他 Realm 域名 |
 | Realm not joined | Realm 域名已信任，但尚未加入该实例的 Realm | 使用 Realm 邀请加入或请求 Realm 邀请 |
+| Invite expired / used / revoked | Realm 邀请已过期、已被使用或已被撤销（三者分别提示） | 向 owner 请求新邀请 |
+| Invite realm mismatch | 该邀请属于另一个实例的 Realm | 确认要加入的实例，改用对应邀请 |
+| Client revoked / Removed from Realm | 本客户端已被撤销，或本成员已被移出该实例的 Realm | 向 owner 请求新邀请；本地数据保留 |
 | Realm retired | 该实例的 Realm 已退役 | 查看归档信息，不新建替代实例 |
 | Service offline | 精确实例不在线 | 重试、查看实例；仅本地已知 stopped 时提供启动 |
 | Permission denied | 找到了但无权 Attach | 请求授权 |
@@ -411,12 +416,14 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 Realm 对应单个实例，因此身份页按两层组织：信任的 Realm 域名，以及已加入的 Realm（实例）。至少支持：
 
 - 信任 Realm 域名：首次遇到某个 Realm 域名时，经 HTTPS 获取该域名的 authority descriptor（`https://<domain>/.well-known/actr`）中的 Realm 签名 key，展示域名与 key 指纹，由用户或组织策略确认后固定；
-- 加入 Realm：通过一次性 Realm 邀请加入某个实例的 Realm，完成登录、客户端注册和 Realm membership 获取；Actrium 自动完成各 Realm 的客户端注册，不要求用户逐个配置；每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端；
+- 加入 Realm：粘贴或扫描一次性 Realm 邀请加入某个实例的 Realm，完成客户端注册和 Realm membership 获取；Actrium 自动完成各 Realm 的客户端注册，不要求用户逐个配置；每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端；
 - 重新认证：credential 到期或管理员要求时，暂停新的 Attach，保留本地数据并引导恢复；
-- 客户端撤销：列出客户端、最后活动时间和已托管 Service；撤销后该客户端的 Realm 客户端 key 注册失效，不能再申请 Actor credential；
-- 离开 Realm：即失去对该实例的访问；先说明受影响的 Service、Workspace 与分享关系，不静默迁到本机 Realm；
+- 添加客户端：在已加入的客户端上为自己签发「添加客户端」邀请，在新客户端上兑换；
+- 客户端撤销：列出客户端、最后活动时间和已托管 Service；成员可撤销自己的客户端，owner 可撤销任何成员的客户端；撤销后该客户端的 Realm 客户端 key 注册失效，不能再申请 Actor credential，其 Actor 立即断开 signaling 与 TURN；撤销托管 Service 的客户端会使实例离线，须先提示；
+- 成员管理（仅 owner）：列出成员与角色，签发与撤销邀请，改角色，移除成员（同时撤销其全部客户端），把 owner 转让给另一成员；
+- 离开 Realm：即失去对该实例的访问，本成员的全部客户端随之撤销；先说明受影响的 Service、Workspace 与分享关系，不静默迁到本机 Realm；owner 须先转让；
 - Realm 签名 key 变更：展示经过签名的轮换链；没有有效轮换链时按身份变化处理，重新确认信任；
-- 恢复：设备丢失后只恢复已加密备份或远端宿主中的数据，不承诺恢复从未备份的 Actor 私钥。
+- 恢复：设备丢失后只恢复已加密备份或远端宿主中的数据，不承诺恢复从未备份的 Actor 私钥；成员用其他客户端撤销丢失的客户端，或请 owner 签发「添加客户端」邀请；owner 丢失全部客户端时，向 Realm 签名 key 持有方或 Realm Provider 运营者申请新的 owner 邀请，兑换后原有客户端全部撤销。
 
 信任 Realm 域名不等于加入其中任何 Realm；加入 Realm 也只建立 Realm 客户端身份，实际 Attach 仍由应用权限决定。Realm 域名级 SSO/目录属于后续能力，v1 不做。
 
@@ -430,14 +437,16 @@ Service 的最小应用权限角色为：
 | editor | Attach 并按 contract 修改业务状态 |
 | viewer | 只读 Attach；是否可用取决于程序 contract |
 
+每个实例恰好一个 owner，即创建者；owner 可以把 owner 转让给另一成员（原 owner 默认改为 editor），v1 不支持多个 owner。成员角色由 Realm Provider 随成员记录保存并写入 Actor credential，Service 从 Front 的 credential 读取并执行。
+
 分享流程：
 
-1. owner 选择成员/组织主体、角色和过期时间；
-2. Service 或该实例 Realm 的 Issuer 生成一次性 Realm 邀请，Realm 邀请携带 Realm 名，可内嵌 Realm Profile；
+1. owner 选择角色（editor 或 viewer）和过期时间；
+2. 该实例 Realm 的 Issuer 生成一次性 Realm 邀请（文本 `ri_…`），携带 Realm 名，可内嵌 Realm Profile；
 3. 邀请通过独立安全通道传递，不写进 `actr://` URI；
-4. 接收者信任该域名（如尚未信任）、加入该 Realm、接受邀请；
-5. 应用权限记录主体和角色，邀请随即失效；
-6. owner 可以撤销应用权限；下一次调用必须失败，活跃会话按策略立即终止或降权。
+4. 接收者信任该域名（如尚未信任），兑换邀请加入该 Realm，成为该角色的成员；
+5. 邀请随即失效；owner 可在兑换前撤销未用的邀请；
+6. owner 可以改角色或移除成员：移除立即使该成员不能再取得 Actor credential、连接 signaling 与 TURN，已建立的会话至迟在其 credential 到期时由 Service 终止；改角色在该成员下一份 credential 生效。
 
 只复制实例地址不改变应用权限。邀请过期、已使用、被撤销和 Realm 不匹配必须是不同错误。
 

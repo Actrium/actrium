@@ -1,9 +1,9 @@
 # Loran Realm v1 配置示例
 
-v1 只推荐一种生产拓扑：单节点、SQLite、单一 Realm Provider、all-in-one。目标契约下
-这个单节点作为共享 Realm Provider 承载多个 Realm，无需为每个 Realm 另起实例；当前实现仍只
-允许一个 Realm（见[架构契约](REALM_V1_ARCHITECTURE.zh.md)第 9 节）。本文不提供集群、
-跨区域或 federation 示例，因为实现不承诺这些能力。
+v1 只推荐一种生产拓扑：单节点、SQLite、单一 Realm Provider、all-in-one。这个单节点作为
+共享 Realm Provider 承载多个 Realm，无需为每个 Realm 另起实例（见
+[架构契约](REALM_V1_ARCHITECTURE.zh.md)）。本文不提供集群、跨区域或 federation 示例，
+因为实现不承诺这些能力。
 
 ## 安全单节点生产版
 
@@ -24,6 +24,10 @@ enable = 31
 sqlite_path = "/var/lib/actrix"
 location_tag = "single-node"
 actrix_shared_key = "<独立随机值>"
+
+[authority]
+enabled = true
+uri = "actr://realm.example.com"
 
 [bind.http]
 domain_name = "realm.example.com"
@@ -49,7 +53,6 @@ kek_env = "ACTRIX_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 
@@ -89,10 +92,10 @@ ACTRIX_SIGNER_KEK="<64-hex-or-44-base64>" \
 
 验证通过后再由 service manager/systemd 注入同一环境变量并启动。首次启动后：
 
-- 当前实现：管理员在 Admin UI 中创建唯一 Realm；在此之前 descriptor 返回 503 是
-  正确行为。
-- 目标契约：Realm 由经 Realm 签名 key 持有方授权的创建请求建立，Realm Profile 验证
-  通过后激活；
+- 在 authority descriptor 中的 Realm 签名 key 生成完成前，`GET /.well-known/actr` 返回
+  503，这是正确行为；
+- 之后 Realm 由经 Realm 签名 key 持有方授权的创建请求建立，`publish_profile` 验证通过后
+  激活；Realm Provider 域名下的 Realm 目前由管理员在 Admin UI 中经 Admin API 代办创建。
   实例本身不需要预先 provision 任何 Realm。
 
 ## 本地开发
@@ -106,6 +109,10 @@ enable = 31
 sqlite_path = "database"
 location_tag = "local"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
+
+[authority]
+enabled = true
+uri = "actr://localhost"
 
 [bind.http]
 domain_name = "localhost"
@@ -128,7 +135,6 @@ turn_secret = "0123456789abcdef0123456789abcdef"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 
