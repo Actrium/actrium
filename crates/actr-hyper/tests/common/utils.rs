@@ -9,7 +9,7 @@ use crate::wire::webrtc::{
 };
 use crate::wire::{DirectionError, direction_for_routing};
 use actr_protocol::prost::Message;
-use actr_protocol::{AIdCredential, ActrError, ActrId, ActrType, Direction, Realm, RpcEnvelope};
+use actr_protocol::{AIdCredential, ActrError, ActrId, Direction, RpcEnvelope};
 use std::sync::Arc;
 
 pub fn install_test_crypto_provider() {
@@ -19,13 +19,8 @@ pub fn install_test_crypto_provider() {
 /// Create a test ActrId with the given serial number
 pub fn make_actor_id(serial_number: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number,
-        r#type: ActrType {
-            publisher: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
     }
 }
 

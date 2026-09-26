@@ -42,8 +42,8 @@ impl From<ActrPackageManifest> for ActrPackageManifestInfo {
             version: manifest.actor.version.clone(),
             description: extension.and_then(|value| value.description.clone()),
             app_id: Some(format!(
-                "{}+{}",
-                manifest.actor.publisher, manifest.actor.name
+                "{}/{}@{}",
+                manifest.actor.publisher, manifest.actor.name, manifest.actor.version
             )),
             icon: extension.and_then(|value| value.icon.clone()),
             entry: manifest.workload.entry,
@@ -659,7 +659,7 @@ pub enum CoreError {
     UnknownSystemAppType(String),
     #[error("unknown app source type `{0}`")]
     UnknownAppSourceType(String),
-    #[error("invalid Actr actor type `{0}`, expected `publisher+name`")]
+    #[error("invalid Actr actor type `{0}`, expected `publisher/program@version`")]
     InvalidActrActorType(String),
 }
 
@@ -2917,7 +2917,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(info.app_id.as_deref(), Some("demo+app"));
+        assert_eq!(info.app_id.as_deref(), Some("demo/app@1.0.0"));
         assert_eq!(info.theme_color.as_deref(), Some("#111111"));
         assert_eq!(info.contract_name.as_deref(), Some("keel.guest"));
         assert_eq!(info.contract_version, Some(1));
@@ -4413,20 +4413,20 @@ mod tests {
 
     #[test]
     fn ffi_parse_actr_actor_type_returns_sdk_parts() {
-        let actor_type = parse_actr_actor_type(" actro + app_server ".to_string()).unwrap();
+        let actor_type = parse_actr_actor_type(" actro/app_server@1.0.0 ".to_string()).unwrap();
 
         assert_eq!(actor_type.publisher, "actro");
         assert_eq!(actor_type.name, "app_server");
-        assert_eq!(actor_type.version, "");
+        assert_eq!(actor_type.version, "1.0.0");
     }
 
     #[test]
     fn ffi_parse_actr_actor_type_rejects_invalid_wire_values() {
-        let error = parse_actr_actor_type("actro+server+extra".to_string()).unwrap_err();
+        let error = parse_actr_actor_type("actro+server".to_string()).unwrap_err();
 
         assert!(matches!(
             error,
-            CoreError::InvalidActrActorType(raw) if raw == "actro+server+extra"
+            CoreError::InvalidActrActorType(raw) if raw == "actro+server"
         ));
     }
 

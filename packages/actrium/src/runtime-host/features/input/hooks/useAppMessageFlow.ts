@@ -577,7 +577,7 @@ export function useAppMessageFlow(
           signaling_services: appInfo.signaling_services,
           stun_services: appInfo.stun_services,
           turn_services: appInfo.turn_services,
-          realm_id: appInfo.realm_id,
+          realm: appInfo.realm,
           server_actor_type: appInfo.server_actor_type,
         }
       : undefined,

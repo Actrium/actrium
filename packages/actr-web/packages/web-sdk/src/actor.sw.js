@@ -227,29 +227,24 @@ function emitSwLog(level, message, detail) {
 // Schema adapters between sw-host (camelCase) and actr-web-abi guest
 // (kebab-case, from serde with `#[serde(rename = "...")]`).
 //
-// sw-host's `actr_id_to_js` emits `{ realm: { realmId }, serialNumber,
-// type: { publisher, name, version } }` (camelCase, the WBG guest's
-// `serde-wasm-bindgen` shape).
-// actr-web-abi `ActrId` deserialises from `{ realm: { "realm-id" },
-// "serial-number", type: {...} }`.
+// sw-host's `actr_id_to_js` emits `{ realm, serialNumber }` (camelCase, the
+// WBG guest's `serde-wasm-bindgen` shape; `realm` is the Realm name).
+// actr-web-abi `ActrId` deserialises from `{ realm, "serial-number" }`.
 // ─────────────────────────────────────────────────────────────────────────
 
 function actrIdCamelToKebab(id) {
   if (id == null) return id;
   return {
-    realm: { 'realm-id': id.realm && id.realm.realmId },
+    realm: id.realm,
     'serial-number': id.serialNumber,
-    // `type` is a WIT-reserved-ish name; both sides keep the key as `type`.
-    type: id.type,
   };
 }
 
 function actrIdKebabToCamel(id) {
   if (id == null) return id;
   return {
-    realm: { realmId: id.realm && id.realm['realm-id'] },
+    realm: id.realm,
     serialNumber: id['serial-number'],
-    type: id.type,
   };
 }
 

@@ -177,15 +177,15 @@ start_mock_actrix() {
 setup_realm() {
     log_step "Setting up realm (Issuer identity)..."
 
-    # realm_id is hardcoded in config.ts files
-    local REALM_ID=2368266035
+    # The Realm name is hardcoded in config.ts files
+    local REALM=data-stream@example.com
 
-    log_info "Creating realm $REALM_ID..."
+    log_info "Creating realm $REALM..."
     curl -fsS -X POST "$ACTRIX_HTTP_URL/admin/realms" \
         -H 'content-type: application/json' \
-        --data "{\"id\": $REALM_ID, \"name\": \"data-stream-realm\"}" >/dev/null
+        --data "{\"realm\": \"$REALM\"}" >/dev/null
 
-    log_success "Realm setup complete (realm_id=$REALM_ID)"
+    log_success "Realm setup complete (realm=$REALM)"
     echo ""
 }
 

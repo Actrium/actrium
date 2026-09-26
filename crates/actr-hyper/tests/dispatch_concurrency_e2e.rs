@@ -26,7 +26,7 @@ use actr_hyper::{
     PayloadFieldKind, StaticTrust,
 };
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrId, ActrType, Realm, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActrId, ActrType, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use tempfile::TempDir;
 
@@ -178,9 +178,9 @@ fn runtime_config(
             license: None,
         },
         signaling_url: url::Url::parse(&server.url()).unwrap(),
-        realm: Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         issuer_endpoint: format!("http://127.0.0.1:{}/issuer", server.port()),
-        realm_secret: None,
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,

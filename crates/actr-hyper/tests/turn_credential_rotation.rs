@@ -31,7 +31,11 @@ impl CountingAuthenticator {
     fn new() -> (Self, Arc<AtomicUsize>) {
         let auth_calls = Arc::new(AtomicUsize::new(0));
         let inner = Arc::new(
-            turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned()).expect("TURN authenticator"),
+            turn::Authenticator::new(
+                TURN_SHARED_TEST_KEY.to_owned(),
+                "provider.example".to_owned(),
+            )
+            .expect("TURN authenticator"),
         );
         (
             Self {
@@ -57,21 +61,25 @@ impl AuthHandler for CountingAuthenticator {
 
 fn turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
     // Username must match the scoped format enforced by `turn::Authenticator`:
-    // `{expires_at}:realm={realm_id}:provider=actrix-official:audience=actr.turn:actor={actr_id}`
+    // `{expires_at}:realm={realm}:provider=provider.example:audience=actr.turn:actor={actr_id}`
     let username = format!(
-        "{expires_at}:realm={}:provider=actrix-official:audience=actr.turn:actor={id}",
-        id.realm.realm_id
+        "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:actor={id}",
+        id.realm
     );
-    let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
-        .expect("HMAC-SHA1 accepts the fixed test key");
+    let secret = platform::realm::realm_turn_secret(
+        TURN_SHARED_TEST_KEY.as_bytes(),
+        &id.realm,
+        "provider.example",
+    );
+    let mut mac = HmacSha1::new_from_slice(&secret).expect("HMAC-SHA1 accepts any key length");
     mac.update(username.as_bytes());
     TurnCredential {
         username,
         password: BASE64_STANDARD.encode(mac.finalize().into_bytes()),
         expires_at,
         protocol_version: 1,
-        realm_id: id.realm.realm_id,
-        provider: "actrix-official".to_string(),
+        realm: id.realm.clone(),
+        provider: "provider.example".to_string(),
         audience: "actr.turn".to_string(),
     }
 }
@@ -138,7 +146,11 @@ async fn start_turn(
 async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_turn() {
     install_test_crypto_provider();
     let authenticator = Arc::new(
-        turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned()).expect("TURN authenticator"),
+        turn::Authenticator::new(
+            TURN_SHARED_TEST_KEY.to_owned(),
+            "provider.example".to_owned(),
+        )
+        .expect("TURN authenticator"),
     );
     let (turn_address, turn_server) = start_turn(authenticator.clone()).await;
     let now = SystemTime::now()

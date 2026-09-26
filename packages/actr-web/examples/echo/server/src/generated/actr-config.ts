@@ -15,7 +15,7 @@ import type { ActorClientConfig, SwRuntimeConfig, TrustAnchor } from '@actrium/a
 export interface RuntimeConfigJson {
     signaling_url: string;
     issuer_endpoint: string;
-    realm_id: number;
+    realm: string;
     visible: boolean;
     force_relay: boolean;
     stun_urls: string[];
@@ -85,8 +85,8 @@ export const system = {
         },
     },
     deployment: {
-        get realm_id() {
-            return requireConfig().realm_id;
+        get realm() {
+            return requireConfig().realm;
         },
         get issuer_endpoint() {
             return requireConfig().issuer_endpoint;
@@ -128,7 +128,7 @@ export function buildRuntimeConfig(): SwRuntimeConfig {
     return {
         issuer_endpoint: c.issuer_endpoint,
         signaling_url: c.signaling_url,
-        realm_id: c.realm_id,
+        realm: c.realm,
         client_actr_type: c.package.full_type,
         service_fingerprint: '',
         acl_allow_types: c.acl_allow_types,
@@ -153,7 +153,7 @@ export function buildActrConfig(): ActorClientConfig {
     const rc = buildRuntimeConfig();
     return {
         signalingUrl: c.signaling_url,
-        realm: String(c.realm_id),
+        realm: c.realm,
         iceServers: [
             ...c.stun_urls.map((url: string) => ({ urls: url })),
             ...c.turn_urls.map((url: string) => ({ urls: url })),

@@ -242,13 +242,8 @@ mod tests {
     #[test]
     fn to_public_maps_network_path_to_relayed() {
         let peer = ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 1,
-            r#type: actr_protocol::ActrType {
-                publisher: "acme".to_string(),
-                name: "node".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
         let mut snap = RtcPeerSnapshot::idle(peer);
         assert_eq!(snap.to_public().relayed, None);
@@ -264,13 +259,8 @@ mod tests {
     #[tokio::test]
     async fn subscribe_public_replays_initial_then_forwards() {
         let peer = ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 2,
-            r#type: actr_protocol::ActrType {
-                publisher: "acme".to_string(),
-                name: "node".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
         let mut snap = RtcPeerSnapshot::idle(peer);
         snap.revision = 5;
@@ -300,13 +290,8 @@ mod tests {
     #[tokio::test]
     async fn subscribe_public_releases_forwarder_after_business_drop() {
         let peer = ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 3,
-            r#type: actr_protocol::ActrType {
-                publisher: "acme".to_string(),
-                name: "node".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
         let mut snap = RtcPeerSnapshot::idle(peer);
         let (tx, rx) = tokio::sync::watch::channel(snap.clone());

@@ -31,7 +31,9 @@ use actr_protocol::{
 use tokio::sync::Mutex;
 use tracing::Instrument;
 
-use crate::issuer_client::{IssuerClient, ReissueError, RenewError, new_control_attempt_id};
+use crate::issuer_client::{
+    IssuerClient, RealmClientKey, ReissueError, RenewError, new_control_attempt_id,
+};
 use crate::transport::PeerTransport;
 use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient};
 
@@ -89,13 +91,10 @@ pub(crate) enum RegistrationContext {
         request: actr_protocol::RegisterRequest,
         resign: Option<Arc<dyn crate::PublisherAuthProvider>>,
     },
-    /// Source-linked registration — carries the request and an optional
-    /// realm secret (kept in memory only, never logged).
+    /// Source-linked registration — carries the request.
     Linked {
         #[allow(dead_code)]
         request: actr_protocol::RegisterRequest,
-        #[allow(dead_code)]
-        realm_secret: Option<String>,
     },
 }
 
@@ -107,7 +106,8 @@ pub(crate) struct CredentialManager {
     session: SessionState,
     registration_ctx: RegistrationContext,
     issuer_endpoint: String,
-    realm_secret: Option<String>,
+    /// Signs the Issuer requests' client proof.
+    client_key: Option<RealmClientKey>,
 
     /// Single-flight guard: only one renewal attempt at a time.
     renewing: Arc<AtomicBool>,
@@ -154,13 +154,13 @@ impl CredentialManager {
         session: SessionState,
         registration_ctx: RegistrationContext,
         issuer_endpoint: impl Into<String>,
-        realm_secret: Option<String>,
+        client_key: Option<RealmClientKey>,
     ) -> Self {
         Self {
             session,
             registration_ctx,
             issuer_endpoint: issuer_endpoint.into(),
-            realm_secret,
+            client_key,
             renewing: Arc::new(AtomicBool::new(false)),
             non_transient_failures: Arc::new(AtomicU32::new(0)),
             inflight: Arc::new(Mutex::new(None)),
@@ -231,7 +231,7 @@ impl CredentialManager {
         run_reacquire_once(
             self.session.clone(),
             self.issuer_endpoint.clone(),
-            self.realm_secret.clone(),
+            self.client_key.clone(),
             self.registration_ctx.clone(),
             handles,
             hook_callback,
@@ -251,7 +251,7 @@ impl CredentialManager {
 
         let session = self.session.clone();
         let issuer_endpoint = self.issuer_endpoint.clone();
-        let realm_secret = self.realm_secret.clone();
+        let client_key = self.client_key.clone();
         let registration_ctx = self.registration_ctx.clone();
         let renewing = self.renewing.clone();
         let hard_rebind_handles = self.hard_rebind_handles.clone();
@@ -267,7 +267,7 @@ impl CredentialManager {
             let result = run_renewal_once(
                 session,
                 issuer_endpoint,
-                realm_secret,
+                client_key,
                 registration_ctx,
                 handles,
                 hook_callback,
@@ -387,29 +387,19 @@ async fn clear_pending_reissue(
     }
 }
 
-fn reissue_client_for_context(
-    endpoint: &str,
-    registration_ctx: &RegistrationContext,
-    realm_secret: Option<&str>,
-) -> IssuerClient {
-    let mut issuer = IssuerClient::new(endpoint);
-    if let RegistrationContext::Linked {
-        realm_secret: Some(secret),
-        ..
-    } = registration_ctx
-    {
-        issuer = issuer.with_realm_secret(secret);
+/// An Issuer client signing with `client_key`, if any.
+fn issuer_client(endpoint: &str, client_key: Option<&RealmClientKey>) -> IssuerClient {
+    let issuer = IssuerClient::new(endpoint);
+    match client_key {
+        Some(key) => issuer.with_client_key(key.clone()),
+        None => issuer,
     }
-    if let Some(secret) = realm_secret {
-        issuer = issuer.with_realm_secret(secret);
-    }
-    issuer
 }
 
 async fn run_renewal_once(
     session: SessionState,
     issuer_endpoint: String,
-    realm_secret: Option<String>,
+    client_key: Option<RealmClientKey>,
     registration_ctx: RegistrationContext,
     hard_rebind_handles: Option<HardRebindHandles>,
     hook_callback: Option<HookCallback>,
@@ -421,7 +411,7 @@ async fn run_renewal_once(
         return run_hard_rebind(
             session,
             issuer_endpoint,
-            realm_secret,
+            client_key,
             registration_ctx,
             hard_rebind_handles,
             hook_callback,
@@ -433,7 +423,7 @@ async fn run_renewal_once(
         return run_hard_rebind(
             session,
             issuer_endpoint,
-            realm_secret,
+            client_key,
             registration_ctx,
             hard_rebind_handles,
             hook_callback,
@@ -441,10 +431,7 @@ async fn run_renewal_once(
         .await;
     }
 
-    let mut issuer = IssuerClient::new(&issuer_endpoint);
-    if let Some(secret) = realm_secret.as_deref() {
-        issuer = issuer.with_realm_secret(secret);
-    }
+    let issuer = issuer_client(&issuer_endpoint, client_key.as_ref());
 
     let request = pending_renew_request(&pending_control_attempts, &snapshot).await;
 
@@ -463,7 +450,7 @@ async fn run_renewal_once(
             return run_hard_rebind(
                 session,
                 issuer_endpoint,
-                realm_secret,
+                client_key,
                 registration_ctx,
                 hard_rebind_handles,
                 hook_callback,
@@ -562,7 +549,7 @@ async fn run_renewal_once(
 async fn run_hard_rebind(
     session: SessionState,
     issuer_endpoint: String,
-    realm_secret: Option<String>,
+    client_key: Option<RealmClientKey>,
     registration_ctx: RegistrationContext,
     hard_rebind_handles: Option<HardRebindHandles>,
     hook_callback: Option<HookCallback>,
@@ -584,9 +571,8 @@ async fn run_hard_rebind(
     // servers (which answer `/reissue` with 404) and after the binding grace has
     // lapsed (403 possession failure) — the two regressions a `/reissue`-only
     // legacy path would introduce.
-    let issuer = IssuerClient::new(&issuer_endpoint);
-    let (issuer, registration) =
-        build_reissue_registration(issuer, registration_ctx, realm_secret).await?;
+    let issuer = issuer_client(&issuer_endpoint, client_key.as_ref());
+    let registration = build_reissue_registration(registration_ctx).await?;
 
     let response = issuer
         .register_with_manifest(registration)
@@ -741,22 +727,19 @@ async fn run_hard_rebind(
 // ---- Membership-controller re-acquire (credential-only) --------------------
 
 /// Build the authenticated registration payload for a hard rebind, applying the
-/// publisher re-sign for package registrations and installing the realm
-/// secret on `issuer`.
+/// publisher re-sign for package registrations.
 ///
 /// Shared by the legacy `run_hard_rebind` fresh-`/register` path and the
 /// credential-only controller `/reissue` path so the re-sign / replay-avoidance
 /// logic lives once.
 async fn build_reissue_registration(
-    mut issuer: IssuerClient,
     registration_ctx: RegistrationContext,
-    realm_secret: Option<String>,
-) -> Result<(IssuerClient, actr_protocol::RegisterRequest), String> {
+) -> Result<actr_protocol::RegisterRequest, String> {
     let request = match registration_ctx {
         RegistrationContext::Package { request, resign } => {
             let mut request = request;
             if let Some(provider) = resign.as_ref() {
-                let realm_id = request.realm.realm_id;
+                let realm = request.realm.clone();
                 let actr_type = request.actr_type.clone();
                 let target = request
                     .target
@@ -777,7 +760,7 @@ async fn build_reissue_registration(
                     })?;
                 let fresh = crate::sign_publisher_proof(
                     Arc::clone(provider),
-                    realm_id,
+                    realm,
                     actr_type,
                     target,
                     manifest_raw,
@@ -790,20 +773,9 @@ async fn build_reissue_registration(
             }
             request
         }
-        RegistrationContext::Linked {
-            request,
-            realm_secret,
-        } => {
-            if let Some(secret) = realm_secret {
-                issuer = issuer.with_realm_secret(secret);
-            }
-            request
-        }
+        RegistrationContext::Linked { request } => request,
     };
-    if let Some(secret) = realm_secret {
-        issuer = issuer.with_realm_secret(secret);
-    }
-    Ok((issuer, request))
+    Ok(request)
 }
 
 /// Credential-only single-flight re-acquire for the membership controller.
@@ -814,7 +786,7 @@ async fn build_reissue_registration(
 async fn run_reacquire_once(
     session: SessionState,
     issuer_endpoint: String,
-    realm_secret: Option<String>,
+    client_key: Option<RealmClientKey>,
     registration_ctx: RegistrationContext,
     hard_rebind_handles: Option<HardRebindHandles>,
     hook_callback: Option<HookCallback>,
@@ -829,7 +801,7 @@ async fn run_reacquire_once(
         match run_soft_renew(
             &session,
             &issuer_endpoint,
-            realm_secret.as_deref(),
+            client_key.as_ref(),
             hard_rebind_handles.as_ref(),
             hook_callback.as_ref(),
             &snapshot,
@@ -848,7 +820,7 @@ async fn run_reacquire_once(
     run_credential_only_hard_rebind(
         session,
         issuer_endpoint,
-        realm_secret,
+        client_key,
         registration_ctx,
         hard_rebind_handles,
         hook_callback,
@@ -872,16 +844,13 @@ enum SoftRenewOutcome {
 async fn run_soft_renew(
     session: &SessionState,
     issuer_endpoint: &str,
-    realm_secret: Option<&str>,
+    client_key: Option<&RealmClientKey>,
     hard_rebind_handles: Option<&HardRebindHandles>,
     hook_callback: Option<&HookCallback>,
     snapshot: &SessionSnapshot,
     pending_control_attempts: &Arc<Mutex<PendingControlAttempts>>,
 ) -> SoftRenewOutcome {
-    let mut issuer = IssuerClient::new(issuer_endpoint);
-    if let Some(secret) = realm_secret {
-        issuer = issuer.with_realm_secret(secret);
-    }
+    let issuer = issuer_client(issuer_endpoint, client_key);
 
     let request = pending_renew_request(pending_control_attempts, snapshot).await;
 
@@ -1018,7 +987,7 @@ async fn run_soft_renew(
 async fn run_credential_only_hard_rebind(
     session: SessionState,
     issuer_endpoint: String,
-    realm_secret: Option<String>,
+    client_key: Option<RealmClientKey>,
     registration_ctx: RegistrationContext,
     hard_rebind_handles: Option<HardRebindHandles>,
     hook_callback: Option<HookCallback>,
@@ -1031,27 +1000,14 @@ async fn run_credential_only_hard_rebind(
         "membership: starting credential-only hard rebind"
     );
 
-    let (issuer, request) = if let Some(request) =
+    let issuer = issuer_client(&issuer_endpoint, client_key.as_ref());
+    let request = if let Some(request) =
         pending_reissue_request(&pending_control_attempts, &old_snapshot).await
     {
-        (
-            reissue_client_for_context(
-                &issuer_endpoint,
-                &registration_ctx,
-                realm_secret.as_deref(),
-            ),
-            request,
-        )
+        request
     } else {
-        let issuer = IssuerClient::new(&issuer_endpoint);
-        let (issuer, registration) = match build_reissue_registration(
-            issuer,
-            registration_ctx.clone(),
-            realm_secret.clone(),
-        )
-        .await
-        {
-            Ok(pair) => pair,
+        let registration = match build_reissue_registration(registration_ctx.clone()).await {
+            Ok(registration) => registration,
             Err(reason) => return ReacquireOutcome::Deferred(reason),
         };
         let request = ReissueCredentialRequest {
@@ -1061,7 +1017,7 @@ async fn run_credential_only_hard_rebind(
             attempt_id: new_control_attempt_id(),
         };
         store_pending_reissue(&pending_control_attempts, &request).await;
-        (issuer, request)
+        request
     };
 
     let response = match issuer.reissue_credential_classified(request.clone()).await {

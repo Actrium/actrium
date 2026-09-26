@@ -19,7 +19,7 @@ ask-service = { actr_type = "acmeopenclaw+AskService" }
 url = "wss://actrix1.actro.chat:443/signaling/ws"
 
 [system.deployment]
-realm_id = 349
+realm = "openclaw@example.com"
 
 [system.discovery]
 visible = true

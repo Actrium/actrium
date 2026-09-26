@@ -143,14 +143,12 @@ impl InboundRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{ActrType, Realm};
 
     fn message(bytes: usize) -> InboundMessage {
         InboundMessage {
             peer: ActrId {
-                realm: Realm { realm_id: 1 },
+                realm: "test@example.com".to_string(),
                 serial_number: 1,
-                r#type: ActrType::default(),
             },
             generation: 1,
             lane: LaneKind::RpcReliable,

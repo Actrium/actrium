@@ -4,7 +4,7 @@
 //! a single JSON line to stdout:
 //!
 //! ```json
-//! {"port":PORT,"publisher_pubkey_b64":"BASE64","realm_id":1}
+//! {"port":PORT,"publisher_pubkey_b64":"BASE64","realm":"test@example.com"}
 //! ```
 //!
 //! The calling test process reads that line, writes temp config files,
@@ -152,7 +152,7 @@ url = "ws://127.0.0.1:{port}/signaling/ws"
 url = "http://127.0.0.1:{port}/issuer"
 
 [deployment]
-realm_id = 1
+realm = "test@example.com"
 
 [discovery]
 visible = true
@@ -204,7 +204,7 @@ pubkey_b64 = "{publisher_pubkey_b64}"
         "port": port,
         "ws_port": ws_port,
         "publisher_pubkey_b64": publisher_pubkey_b64,
-        "realm_id": 1,
+        "realm": "test@example.com",
         "actr_type": {
             "publisher": "test",
             "name": "ErrorFixture",

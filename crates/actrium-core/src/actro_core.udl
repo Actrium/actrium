@@ -913,7 +913,7 @@ namespace actro_core {
     /// Return the canonical ActrBridge native module/event/payload contract.
     ActrBridgeContractInfo actr_bridge_contract();
 
-    /// Parse an Actr actor type wire value in `publisher+name` format.
+    /// Parse an Actor type in `publisher/program@version` form.
     [Throws=CoreError]
     ActrActorTypeInfo parse_actr_actor_type(string raw);
 

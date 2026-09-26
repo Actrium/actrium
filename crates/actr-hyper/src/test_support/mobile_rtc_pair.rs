@@ -329,18 +329,8 @@ impl MobileRtcPairHarness {
         let ready = self.wait_pair_ready(Duration::from_secs(30)).await;
         let a = self.id(PairEndpoint::A);
         let b = self.id(PairEndpoint::B);
-        let a_key = (
-            a.realm.realm_id,
-            a.serial_number,
-            a.r#type.publisher.as_str(),
-            a.r#type.name.as_str(),
-        );
-        let b_key = (
-            b.realm.realm_id,
-            b.serial_number,
-            b.r#type.publisher.as_str(),
-            b.r#type.name.as_str(),
-        );
+        let a_key = (a.realm.as_str(), a.serial_number);
+        let b_key = (b.realm.as_str(), b.serial_number);
         // The fixture registers no explicit `webrtc_role=answer` preference,
         // so production Actrix falls back to its reverse ActorId ordering.
         let expected = if a_key > b_key {

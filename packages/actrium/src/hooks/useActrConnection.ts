@@ -40,7 +40,7 @@ export function useActrConnection({
     stun_services: AppInfo['stun_services'];
     turn_services: AppInfo['turn_services'];
     server_actor_type: AppInfo['server_actor_type'];
-    realm_id: AppInfo['realm_id'];
+    realm: AppInfo['realm'];
   };
   callbacks?: {
     onMessage?: (data: TActrMessageResponse) => void;
@@ -53,8 +53,7 @@ export function useActrConnection({
     return ActrConnectionManager.getOrCreate({
       appId,
       tabId,
-      actorType: `${config?.server_actor_type?.publisher}+${config?.server_actor_type?.name}`,
-      // actorType: 'bot+bot-service'
+      actorType: `${config?.server_actor_type?.publisher}/${config?.server_actor_type?.name}@${config?.server_actor_type?.version}`,
     });
   }, [appId, config]);
 
@@ -67,15 +66,16 @@ export function useActrConnection({
     if (!connection.isConnected()) {
       const runInit = async () => {
         try {
-          const { publisher, name } = config.server_actor_type || {};
+          const { publisher, name, version } = config.server_actor_type || {};
 
           // 1. Yes. RN Side Generate TOML String
           const tomlString = generateActrToml({
             ...config,
             publisher,
             name,
+            version,
           });
-          const lockTomlString = generateActrLockToml({ publisher, name });
+          const lockTomlString = generateActrLockToml({ publisher, name, version });
 
           // 2. Generate Profile
           const fileName = `Actr.toml`;

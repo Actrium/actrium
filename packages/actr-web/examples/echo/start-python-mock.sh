@@ -19,7 +19,7 @@ RELEASE_DIR="$SCRIPT_DIR/release"
 LOG_DIR="$SCRIPT_DIR/logs/python-workload"
 RUN_DIR="$LOG_DIR/run"
 MOCK_PORT="${1:-18081}"
-REALM_ID="2368266035"
+REALM="python-web-echo@example.com"
 PUBLISHER_NAME="acme"
 PYTHON_SERVER_READY_ATTEMPTS="${PYTHON_SERVER_READY_ATTEMPTS:-600}"
 ACTR_E2E_RUST_LOG="${ACTR_E2E_RUST_LOG:-${RUST_LOG:-info}}"
@@ -164,8 +164,8 @@ ENDPOINT="http://127.0.0.1:$MOCK_PORT"
 log_step "Registering realm, publisher, and packages..."
 curl -fsS -X POST "$ENDPOINT/admin/realms" \
     -H 'content-type: application/json' \
-    --data "{\"id\": $REALM_ID, \"name\": \"python-web-echo\"}" >/dev/null
-curl -fsS -X POST "$ENDPOINT/admin/publisher-registry" \
+    --data "{\"realm\": \"$REALM\"}" >/dev/null
+curl -fsS -X POST "$ENDPOINT/admin/publisher" \
     -H 'content-type: application/json' \
     --data "{\"name\": \"$PUBLISHER_NAME\", \"pubkey_b64\": \"$PUBLISHER_PUBKEY\", \"contact\": \"dev@example.com\"}" >/dev/null
 
@@ -188,7 +188,7 @@ url = "ws://127.0.0.1:$MOCK_PORT/signaling/ws"
 url = "http://127.0.0.1:$MOCK_PORT/issuer"
 
 [deployment]
-realm_id = $REALM_ID
+realm = "$REALM"
 
 [discovery]
 visible = true
@@ -226,7 +226,7 @@ url = "ws://127.0.0.1:$MOCK_PORT/signaling/ws"
 url = "http://127.0.0.1:$MOCK_PORT/issuer"
 
 [deployment]
-realm_id = $REALM_ID
+realm = "$REALM"
 
 [discovery]
 visible = true

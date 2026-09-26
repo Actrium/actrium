@@ -88,9 +88,9 @@ export declare class ActrRef {
 }
 
 export interface ActrId {
-  realm: Realm;
+  /** Realm name, `<realm_id>@<domain>` */
+  realm: string;
   serialNumber: number;
-  type: ActrType;
 }
 
 export interface ActrType {
@@ -118,10 +118,6 @@ export declare const enum PayloadType {
   StreamReliable = 2,
   StreamLatencyFirst = 3,
   MediaRtp = 4,
-}
-
-export interface Realm {
-  realmId: number;
 }
 
 export interface RpcEnvelopeBridge {

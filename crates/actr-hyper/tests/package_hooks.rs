@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use actr_framework::WebRtcPeerStatus;
 use actr_hyper::test_support::{TestPackageHookEvent, runtime_context_with_host_transport};
 use actr_hyper::workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationContext};
-use actr_protocol::{ActrError, ActrId, ActrType, PayloadType, Realm};
+use actr_protocol::{ActrError, ActrId, PayloadType};
 
 #[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
 use actr_hyper::test_support::instantiate_wasm_workload;
@@ -34,13 +34,8 @@ static DYNCLIB_PACKAGE_HOOK_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
 
 fn test_actr_id() -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 1,
-        r#type: ActrType {
-            publisher: "test".to_string(),
-            name: "fixture".to_string(),
-            version: "0.1.0".to_string(),
-        },
     }
 }
 
@@ -322,7 +317,7 @@ fn dynclib_init_payload() -> InitPayloadV1 {
         actr_type: "test/fixture@0.1.0".to_string(),
         credential: Vec::new(),
         actor_id: Vec::new(),
-        realm_id: 1,
+        realm: "test@example.com".to_string(),
     }
 }
 

@@ -47,10 +47,7 @@ pub async fn register_handler(
         .map_err(|e| ApiError::bad_request(format!("protobuf decode failed: {e}")))?;
 
     // Lazily register the realm so callers don't have to pre-seed.
-    let realm_id = req.realm.realm_id;
-    state
-        .add_realm(realm_id, format!("mock-realm-{realm_id}"))
-        .await;
+    state.add_realm(req.realm.clone()).await;
 
     let register_ok = signaling::build_register_ok(&req, &state).await;
 
@@ -129,10 +126,19 @@ pub async fn renew_handler(
             .into_response());
     }
 
-    // Build fresh credentials for the same ActrId.
+    // Build fresh credentials for the same ActrId. The Actor type is not part
+    // of the ActrId; take the one recorded at registration.
+    let actr_type = state
+        .registry
+        .read()
+        .await
+        .iter()
+        .find(|entry| entry.actr_id == *actor_id)
+        .map(|entry| entry.actr_type.clone())
+        .unwrap_or_default();
     let fake_req = RegisterRequest {
-        actr_type: actor_id.r#type.clone(),
-        realm: actor_id.realm,
+        actr_type,
+        realm: actor_id.realm.clone(),
         service: None,
         service_spec: None,
         acl: None,
@@ -300,9 +306,7 @@ pub async fn publish_handler(
 
 #[derive(Debug, Deserialize)]
 pub struct AdminRealmRequest {
-    pub id: u32,
-    #[serde(default)]
-    pub name: Option<String>,
+    pub realm: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -314,12 +318,7 @@ pub async fn admin_realm_handler(
     State(state): State<Arc<MockState>>,
     Json(req): Json<AdminRealmRequest>,
 ) -> Json<AdminOk> {
-    state
-        .add_realm(
-            req.id,
-            req.name.unwrap_or_else(|| format!("realm-{}", req.id)),
-        )
-        .await;
+    state.add_realm(req.realm).await;
     Json(AdminOk { ok: true })
 }
 
@@ -387,13 +386,13 @@ pub async fn admin_package_handler(
 
 #[derive(Debug, Serialize)]
 pub struct AdminStateSnapshot {
-    pub realms: Vec<u32>,
+    pub realms: Vec<String>,
     pub publishers: Vec<String>,
     pub packages: Vec<String>,
 }
 
 pub async fn admin_state_handler(State(state): State<Arc<MockState>>) -> Json<AdminStateSnapshot> {
-    let realms: Vec<u32> = state.realms.read().await.keys().copied().collect();
+    let realms: Vec<String> = state.realms.read().await.keys().cloned().collect();
     let publishers: Vec<String> = state.publishers.read().await.keys().cloned().collect();
     let packages: Vec<String> = state
         .packages

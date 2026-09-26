@@ -984,7 +984,7 @@ mod tests {
                  [issuer_endpoint]\n\
                  url = \"{}/issuer\"\n\
                  [deployment]\n\
-                 realm_id = 1\n\
+                 realm = \"test@example.com\"\n\
                  [hyper]\n\
                  data_dir = \"{}\"\n\
                  [hyper.trust]\n\
@@ -1174,7 +1174,7 @@ mod tests {
                  [issuer_endpoint]\n\
                  url = \"{}/issuer\"\n\
                  [deployment]\n\
-                 realm_id = 1\n\
+                 realm = \"test@example.com\"\n\
                  [hyper]\n\
                  data_dir = \"{}\"\n\
                  [hyper.trust]\n\

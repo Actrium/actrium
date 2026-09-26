@@ -18,6 +18,8 @@ use sha1::Sha1;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::{OnceCell, broadcast};
 use tokio_util::sync::CancellationToken;
+
+use super::{TEST_REALM, make_actor_type};
 use webrtc::peer_connection::{
     RTCConfiguration, RTCConfigurationBuilder, RTCIceServer, RTCIceTransportPolicy,
 };
@@ -56,27 +58,23 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
             ));
             std::fs::create_dir_all(&sqlite_path)?;
 
-            // `make_actor_id` uses realm 1. The production signaling router
-            // validates every websocket identity against the Actrix realm
-            // store before registering it; an empty schema is therefore not a
-            // usable signaling fixture.
-            platform::Realm::upsert_managed(
-                1,
-                "actr-rtc-integration".to_string(),
-                platform::realm::RealmStatus::Active,
-                true,
-                None,
-                platform::realm::hash_realm_secret("actr-rtc-integration-secret"),
-                None,
-            )
-            .await?;
+            // `make_actor_id` uses `TEST_REALM`. The production signaling
+            // router validates every websocket identity against the Actrix
+            // realm store before registering it; an empty schema is therefore
+            // not a usable signaling fixture.
+            platform::Realm::upsert_managed(TEST_REALM.to_string(), true, None, None).await?;
 
-            let actor_type = "acme/node@1.0.0".to_string();
-            if platform::ActorAcl::get_by_types(1, 1, &actor_type, &actor_type)
+            let actor_type = make_actor_type().to_string_repr();
+            if platform::ActorAcl::get_by_types(TEST_REALM, TEST_REALM, &actor_type, &actor_type)
                 .await?
                 .is_none()
             {
-                let mut acl = platform::ActorAcl::new(1, actor_type.clone(), actor_type, true);
+                let mut acl = platform::ActorAcl::new(
+                    TEST_REALM.to_string(),
+                    actor_type.clone(),
+                    actor_type,
+                    true,
+                );
                 acl.save().await?;
             }
 
@@ -87,6 +85,7 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
                 .as_secs()
                 + 24 * 60 * 60;
             platform::AIdCredentialValidator::populate_key(
+                TEST_REALM,
                 AID_KEY_ID,
                 &aid_signing_key().verifying_key(),
                 key_expires_at,
@@ -123,6 +122,10 @@ impl ActrixTestServices {
         let signaling_config = platform::config::ActrixConfig {
             env: "test".to_string(),
             sqlite_path,
+            authority: platform::config::AuthorityConfig {
+                uri: Some("actr://provider.example".to_string()),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let signaling_router = actrix_signaling_service::create_signaling_router_with_config(
@@ -159,8 +162,11 @@ impl ActrixTestServices {
         let turn_socket = Arc::new(UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await?);
         let turn_addr = turn_socket.local_addr()?;
         let authenticator = Arc::new(
-            turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned())
-                .map_err(|error| anyhow::anyhow!("Actrix TURN authenticator: {error}"))?,
+            turn::Authenticator::new(
+                TURN_SHARED_TEST_KEY.to_owned(),
+                "provider.example".to_owned(),
+            )
+            .map_err(|error| anyhow::anyhow!("Actrix TURN authenticator: {error}"))?,
         );
         let turn_server = turn::create_turn_server(
             turn_socket,
@@ -211,21 +217,26 @@ impl ActrixTestServices {
             .saturating_add(CREDENTIAL_LIFETIME)
             .as_secs();
         // Username must match the scoped format enforced by `turn::Authenticator`:
-        // `{expires_at}:realm={realm_id}:provider=actrix-official:audience=actr.turn:actor={actr_id}`
+        // `{expires_at}:realm={realm}:provider=provider.example:audience=actr.turn:actor={actr_id}`
         let username = format!(
-            "{expires_at}:realm={}:provider=actrix-official:audience=actr.turn:actor={actor_id}",
-            actor_id.realm.realm_id
+            "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:actor={actor_id}",
+            actor_id.realm
         );
-        let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
-            .expect("HMAC accepts an arbitrary key length");
+        let secret = platform::realm::realm_turn_secret(
+            TURN_SHARED_TEST_KEY.as_bytes(),
+            &actor_id.realm,
+            "provider.example",
+        );
+        let mut mac =
+            HmacSha1::new_from_slice(&secret).expect("HMAC accepts an arbitrary key length");
         mac.update(username.as_bytes());
         TurnCredential {
             username,
             password: BASE64_STANDARD.encode(mac.finalize().into_bytes()),
             expires_at,
             protocol_version: 1,
-            realm_id: actor_id.realm.realm_id,
-            provider: "actrix-official".to_string(),
+            realm: actor_id.realm.clone(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
         }
     }
@@ -233,6 +244,9 @@ impl ActrixTestServices {
     /// Produce a short-lived AId credential signed exactly as Issuer credentials
     /// are signed. The corresponding public key is installed in Actrix's
     /// production validator during fixture startup.
+    ///
+    /// No Issuer runs here, so the Actor is bound to no Realm client key and
+    /// Signaling does not check `member` / `client_key` against one.
     pub fn aid_credential(&self, actor_id: &ActrId) -> AIdCredential {
         let expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -240,13 +254,17 @@ impl ActrixTestServices {
             .saturating_add(CREDENTIAL_LIFETIME)
             .as_secs();
         let claims = IdentityClaims {
-            realm_id: actor_id.realm.realm_id,
+            realm: actor_id.realm.clone(),
             actor_id: actor_id.to_string_repr(),
             expires_at,
             protocol_version: 1,
-            issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
-            provider: "actrix-official".to_string(),
+            issuer: actor_id.realm.clone(),
+            provider: "provider.example".to_string(),
             audience: "actr.signaling".to_string(),
+            actor_type: make_actor_type(),
+            member: "member-1".to_string(),
+            client_key: "0000000000000000".to_string(),
+            role: actr_protocol::MemberRole::Owner as i32,
         }
         .encode_to_vec();
         let signature = aid_signing_key().sign(&claims).to_bytes();

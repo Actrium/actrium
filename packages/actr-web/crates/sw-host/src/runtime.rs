@@ -389,7 +389,8 @@ impl Default for ReconnectConfig {
 struct SwConfig {
     issuer_endpoint: String,
     signaling_url: String,
-    realm_id: u32,
+    /// Realm name `<realm_id>@<domain>`.
+    realm: String,
     client_actr_type: String,
     #[serde(default)]
     target_actr_type: Option<String>,
@@ -559,7 +560,7 @@ struct SwRuntime {
     issuer_endpoint: String,
     signaling_url: String,
     reconnect_config: ReconnectConfig,
-    realm_id: u32,
+    realm: String,
     client_actr_type: ActrType,
     target_actr_type: Option<ActrType>,
     service_fingerprint: String,
@@ -609,9 +610,9 @@ impl SwRuntime {
                         permission: acl_rule::Permission::Allow as i32,
                         from_type: actr_type,
                         // Actrix's DB-backed ACL lookup currently matches on an explicit
-                        // `source_realm_id` equality. Using `any_realm` would not match and
+                        // `source_realm` equality. Using `any_realm` would not match and
                         // would default-deny discovery.
-                        source_realm: Some(acl_rule::SourceRealm::RealmId(config.realm_id)),
+                        source_realm: Some(acl_rule::SourceRealm::Realm(config.realm.clone())),
                     })
                 })
                 .collect::<Result<Vec<_>, JsValue>>()?;
@@ -632,7 +633,7 @@ impl SwRuntime {
         let (actor_id, credential, turn_credential) = Self::obtain_credential_from_issuer(
             &config.issuer_endpoint,
             &client_actr_type,
-            config.realm_id,
+            &config.realm,
             &acl,
             &platform,
             &cred_kv_ns,
@@ -658,7 +659,7 @@ impl SwRuntime {
             issuer_endpoint: config.issuer_endpoint,
             signaling_url: config.signaling_url,
             reconnect_config: config.reconnect_config,
-            realm_id: config.realm_id,
+            realm: config.realm,
             client_actr_type,
             target_actr_type: config
                 .target_actr_type
@@ -698,7 +699,7 @@ impl SwRuntime {
         let (actor_id, credential, turn_credential) = Self::obtain_credential_from_issuer(
             &self.issuer_endpoint,
             &self.client_actr_type,
-            self.realm_id,
+            &self.realm,
             &self.acl,
             &self.platform,
             &self.cred_kv_namespace(),
@@ -718,7 +719,7 @@ impl SwRuntime {
     async fn obtain_credential_from_issuer(
         issuer_endpoint: &str,
         client_actr_type: &ActrType,
-        realm_id: u32,
+        realm: &str,
         acl: &Option<Acl>,
         platform: &WebPlatformProvider,
         cred_kv_ns: &StorageNamespace,
@@ -754,7 +755,7 @@ impl SwRuntime {
         // through the Web Credential Manager via POST /issuer/renew.
         let request = RegisterRequest {
             actr_type: client_actr_type.clone(),
-            realm: actr_protocol::Realm { realm_id },
+            realm: realm.to_string(),
             service_spec: None,
             acl: acl.clone(),
             service: None,
@@ -1715,6 +1716,7 @@ impl SwRuntime {
             credential,
             target: target.clone(),
             delivery_context: None,
+            source_type: None,
             payload: Some(actr_relay::Payload::IceRestartRejected(
                 IceRestartRejected {
                     sdp_exchange_id: sdp_exchange_id.to_string(),
@@ -1746,13 +1748,13 @@ impl SwRuntime {
         let payload = actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: actor_id.clone(),
             to: target.clone(),
-            realm_id: actor_id.realm.realm_id,
         });
         let relay = actr_protocol::ActrRelay {
             source: actor_id,
             credential,
             target: target.clone(),
             delivery_context: None,
+            source_type: None,
             payload: Some(payload),
         };
         let envelope = SignalingEnvelope {
@@ -2359,6 +2361,7 @@ impl SwRuntime {
                     credential,
                     target,
                     delivery_context: None,
+                    source_type: None,
                     payload: Some(actr_relay::Payload::SessionDescription(sd)),
                 };
                 let envelope = SignalingEnvelope {
@@ -2388,6 +2391,7 @@ impl SwRuntime {
                     credential,
                     target,
                     delivery_context: None,
+                    source_type: None,
                     payload: Some(actr_relay::Payload::IceCandidate(ice)),
                 };
                 let envelope = SignalingEnvelope {
@@ -2597,6 +2601,7 @@ impl SwRuntime {
                     credential,
                     target,
                     delivery_context: None,
+                    source_type: None,
                     payload: Some(actr_relay::Payload::SessionDescription(sd)),
                 };
                 let envelope = SignalingEnvelope {

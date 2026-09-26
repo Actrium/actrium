@@ -14,20 +14,13 @@ use actr_hyper::config::WasmRuntimeLimits;
 use actr_hyper::test_support::instantiate_wasm_workload;
 use actr_hyper::wasm::WasmHost;
 use actr_hyper::workload::{HostAbiFn, HostOperationResult, InvocationContext};
-use actr_protocol::{
-    ActrId, ActrType, Direction, Realm, RpcEnvelope, prost::Message as ProstMessage,
-};
+use actr_protocol::{ActrId, Direction, RpcEnvelope, prost::Message as ProstMessage};
 
 fn invocation_context(language: &str) -> InvocationContext {
     InvocationContext {
         self_id: ActrId {
-            realm: Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 1,
-            r#type: ActrType {
-                publisher: "actr-ci".to_string(),
-                name: format!("{language}-echo-workload"),
-                version: "0.1.0".to_string(),
-            },
         },
         caller_id: None,
         request_id: format!("native-{language}-smoke"),

@@ -154,9 +154,10 @@ pub enum RawDependency {
         #[serde(default)]
         service: Option<String>,
 
-        /// Optional cross-realm override. Defaults to self realm.
+        /// Optional cross-Realm override: a Realm name `<realm_id>@<domain>`.
+        /// Defaults to the Actor's own Realm.
         #[serde(default)]
-        realm: Option<u32>,
+        realm: Option<String>,
     },
 
     /// Empty dependency declaration: {} (populated by actr deps install)
@@ -230,12 +231,19 @@ pub struct RawIssuerEndpointConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawDeploymentConfig {
+    /// Realm name `<realm_id>@<domain>`
     #[serde(default)]
-    pub realm_id: Option<u32>,
+    pub realm: Option<String>,
 
-    /// Realm secret for Issuer registration authentication
+    /// Realm client key file from `actr realm join`, which signs the
+    /// Issuer requests; relative to the config file's directory.
     #[serde(default)]
-    pub realm_secret: Option<String>,
+    pub realm_client_key: Option<PathBuf>,
+
+    /// Tombstone: the removed shared `realm_secret`. Kept only to produce a
+    /// migration error.
+    #[serde(default, rename = "realm_secret")]
+    pub removed_realm_secret: Option<String>,
 
     /// Issuer HTTP endpoint, e.g. `"http://issuer.example.com:8080"`.
     #[serde(default)]
@@ -443,7 +451,7 @@ user-service = {}
 name = "test"
 publisher = "acme"
 [dependencies]
-shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:abc123", realm = 9999 }
+shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:abc123", realm = "other@example.com" }
 "#;
         let config = ManifestRawConfig::from_str(toml_content).unwrap();
         let dep = config.dependencies.get("shared").unwrap();
@@ -455,7 +463,7 @@ shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:a
         {
             assert_eq!(actr_type, "acme/logging-service@1.0.0");
             assert_eq!(service.as_deref(), Some("LoggingService:abc123"));
-            assert_eq!(*realm, Some(9999));
+            assert_eq!(realm.as_deref(), Some("other@example.com"));
         } else {
             panic!("Expected Specified");
         }

@@ -10,7 +10,7 @@ url = "ws://localhost:8081/signaling/ws"
 url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 2368266035
+realm = "web-echo@example.com"
 
 
 [discovery]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use actr_protocol::{ActrId, ActrType, Realm};
+use actr_protocol::ActrId;
 use webrtc::runtime::{Runtime, default_runtime};
 
 use crate::wire::webrtc::v020::fault::{
@@ -21,13 +21,8 @@ const WAIT: Duration = Duration::from_secs(5);
 
 fn test_actor_id(serial_number: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number,
-        r#type: ActrType {
-            publisher: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
     }
 }
 

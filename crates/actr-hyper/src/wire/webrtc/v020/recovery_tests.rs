@@ -239,17 +239,12 @@ mod inv33_obligation_log {
     };
     use super::super::status::RtcPeerSnapshot;
     use actr_framework::WebRtcPeerStatus;
-    use actr_protocol::{ActrId, ActrType, Realm};
+    use actr_protocol::ActrId;
 
     fn obligation_peer(serial: u64) -> ActrId {
         ActrId {
-            realm: Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: serial,
-            r#type: ActrType {
-                publisher: "acme".to_string(),
-                name: "node".to_string(),
-                version: "1.0.0".to_string(),
-            },
         }
     }
 

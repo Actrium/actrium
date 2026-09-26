@@ -58,7 +58,7 @@ let location = geoip.lookup(my_ip).map(|(lat, lon)| ServiceLocation {
 
 // Provide coordinates during registration
 let request = RegisterRequest {
-    realm: Realm { realm_id: 1 },
+    realm: "k7m2q9xh@example.com".to_string(),
     actr_type: my_type,
     geo_location: location,
     // ... other fields
@@ -134,10 +134,10 @@ impl Workload for MyService {
     async fn on_start<C: Context>(&mut self, ctx: &C) -> ActorResult<()> {
         // Get coordinates
         let location = self.get_my_location();
-        let actor_type = ctx.self_id().r#type;
+        let actr_type = ActrType::from_string_repr("acme.example/my-service@1.0.0")?;
         // Register to signaling service (with coordinates)
         let register_req = RegisterRequest {
-            realm: Realm { realm_id: 1 },
+            realm: "k7m2q9xh@example.com".to_string(),
             actr_type,
             geo_location: location,
             // ... other fields

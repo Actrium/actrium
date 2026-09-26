@@ -22,11 +22,9 @@ use serde::{Deserialize, Serialize};
 /// Lowered from WIT `record actr-id`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActrId {
-    pub realm: Realm,
+    pub realm: String,
     #[serde(rename = "serial-number")]
     pub serial_number: u64,
-    #[serde(rename = "type")]
-    pub actr_type: ActrType,
 }
 
 /// Lowered from WIT `record actr-type`.
@@ -109,13 +107,6 @@ pub struct PeerEvent {
     pub peer: ActrId,
     pub relayed: Option<bool>,
     pub status: Option<WebrtcPeerStatus>,
-}
-
-/// Lowered from WIT `record realm`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Realm {
-    #[serde(rename = "realm-id")]
-    pub realm_id: u32,
 }
 
 /// Lowered from WIT `record rpc-envelope`.

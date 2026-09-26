@@ -5,6 +5,7 @@
 use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
 use crate::lifecycle::session_state::{SessionPhase, SessionState};
 use crate::outbound::Gate;
+use crate::service_lookup::{SERVICE_CANDIDATE_COUNT, select_service};
 use crate::wire::webrtc::SignalingClient;
 #[cfg(feature = "opentelemetry")]
 use crate::wire::webrtc::trace::inject_span_context_to_rpc;
@@ -56,7 +57,7 @@ pub struct RuntimeContext {
     /// Strict service fingerprints keyed by complete dependency ActrType.
     dependency_fingerprints: Arc<HashMap<ActrType, String>>,
     /// Shared map of discovered direct-connect WebSocket URLs, keyed by ActrId.
-    /// Populated by `discover_route_candidate` from the signaling `ws_address_map`,
+    /// Populated by route discovery from the signaling `ws_address_map`,
     /// then read by `DefaultWireBuilder` when establishing outbound connections.
     discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
     /// Session state handle — when set, outbound sends dynamically read the
@@ -584,6 +585,113 @@ impl RuntimeContext {
         self.dependency_fingerprints.get(target_type).cloned()
     }
 
+    /// Discover up to `candidate_count` route candidates for `target_type`.
+    ///
+    /// With `require_dependency`, a loaded manifest.lock.toml must declare
+    /// `target_type`; otherwise its fingerprint is only used when present.
+    async fn discover_candidates(
+        &self,
+        target_type: &ActrType,
+        candidate_count: u32,
+        require_dependency: bool,
+    ) -> ActorResult<Vec<ActrId>> {
+        self.ensure_session_ready().await?;
+
+        if !self.signaling_client.is_connected() {
+            return Err(ActrError::Unavailable(
+                "Signaling client is not connected.".to_string(),
+            ));
+        }
+
+        let service_name = format!("{}/{}", target_type.publisher, target_type.name);
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // Step 1: Get fingerprint from manifest.lock.toml (when available)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        let client_fingerprint = match self.get_dependency_fingerprint(target_type) {
+            Some(fingerprint) => fingerprint,
+            None => {
+                if self.actr_lock.is_none() || !require_dependency {
+                    tracing::debug!(
+                        "no dependency fingerprint; sending discovery without fingerprint for '{}'",
+                        service_name
+                    );
+                    String::new()
+                } else {
+                    tracing::error!(
+                        severity = 10,
+                        error_category = "dependency_missing",
+                        "❌ DEPENDENCY NOT FOUND: Service '{}' is not declared in manifest.lock.toml.\n\
+                         Please run 'actr deps install' to generate the lock file with all dependencies.",
+                        service_name
+                    );
+                    return Err(ActrError::DependencyNotFound {
+                        service_name: service_name.clone(),
+                        message: format!(
+                            "Dependency '{}' not found in manifest.lock.toml. Run 'actr deps install' to resolve dependencies.",
+                            service_name
+                        ),
+                    });
+                }
+            }
+        };
+
+        if !client_fingerprint.is_empty() {
+            tracing::debug!(
+                "📋 Found dependency fingerprint for '{}': {}",
+                service_name,
+                &client_fingerprint[..20.min(client_fingerprint.len())]
+            );
+        }
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // Step 2: Send discovery request to signaling server
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        let result = self
+            .send_discovery_request(target_type, candidate_count, client_fingerprint)
+            .await?;
+
+        tracing::info!(
+            "Discovery result [{}]: {} candidates, {} ws_address entries",
+            service_name,
+            result.candidates.len(),
+            result.ws_address_map.len(),
+        );
+
+        // Populate the shared discovered_ws_addresses map so DefaultWireBuilder
+        // can use direct WebSocket connections instead of WebRTC for peers that
+        // advertise a ws:// address through the signaling server.
+        if !result.ws_address_map.is_empty() {
+            let mut map = self.discovered_ws_addresses.write().await;
+            for entry in result.ws_address_map {
+                if let Some(url) = entry.ws_address {
+                    tracing::debug!(
+                        actor_id = ?entry.candidate_id,
+                        ws_url = %url,
+                        "discovered direct WebSocket address",
+                    );
+                    map.insert(entry.candidate_id, url);
+                }
+            }
+        }
+
+        Ok(result.candidates)
+    }
+
+    /// Find the Service for `package_type`: the only Actor in this Realm whose
+    /// Actor type equals the package type. Zero or more than one candidate
+    /// fails with `SERVICE_NOT_FOUND`.
+    pub async fn discover_service(&self, package_type: &ActrType) -> ActorResult<ActrId> {
+        let candidates = self
+            .discover_candidates(package_type, SERVICE_CANDIDATE_COUNT, false)
+            .await?;
+        let realm = match &self.session_state {
+            Some(session_state) => session_state.actor_id().await.realm,
+            None => self.self_id.realm.clone(),
+        };
+        Ok(select_service(package_type, &realm, candidates)?)
+    }
+
     /// Internal: Send discovery request to signaling server
     async fn send_discovery_request(
         &self,
@@ -1023,92 +1131,16 @@ impl Context for RuntimeContext {
         )
     )]
     async fn discover_route_candidate(&self, target_type: &ActrType) -> ActorResult<ActrId> {
-        self.ensure_session_ready().await?;
-
-        if !self.signaling_client.is_connected() {
-            return Err(ActrError::Unavailable(
-                "Signaling client is not connected.".to_string(),
-            ));
-        }
-
-        let service_name = format!("{}/{}", target_type.publisher, target_type.name);
-
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // Step 1: Get fingerprint from manifest.lock.toml (when available)
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        let client_fingerprint = match self.get_dependency_fingerprint(target_type) {
-            Some(fingerprint) => fingerprint,
-            None => {
-                if self.actr_lock.is_none() {
-                    tracing::debug!(
-                        "manifest.lock.toml not loaded; sending discovery without fingerprint for '{}'",
-                        service_name
-                    );
-                    String::new()
-                } else {
-                    tracing::error!(
-                        severity = 10,
-                        error_category = "dependency_missing",
-                        "❌ DEPENDENCY NOT FOUND: Service '{}' is not declared in manifest.lock.toml.\n\
-                         Please run 'actr deps install' to generate the lock file with all dependencies.",
-                        service_name
-                    );
-                    return Err(ActrError::DependencyNotFound {
-                        service_name: service_name.clone(),
-                        message: format!(
-                            "Dependency '{}' not found in manifest.lock.toml. Run 'actr deps install' to resolve dependencies.",
-                            service_name
-                        ),
-                    });
-                }
-            }
-        };
-
-        if !client_fingerprint.is_empty() {
-            tracing::debug!(
-                "📋 Found dependency fingerprint for '{}': {}",
-                service_name,
-                &client_fingerprint[..20.min(client_fingerprint.len())]
-            );
-        }
-
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // Step 2: Send discovery request to signaling server
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        let result = self
-            .send_discovery_request(target_type, 1, client_fingerprint)
-            .await?;
-
-        tracing::info!(
-            "Discovery result [{}]: {} candidates, {} ws_address entries",
-            service_name,
-            result.candidates.len(),
-            result.ws_address_map.len(),
-        );
-
-        // Populate the shared discovered_ws_addresses map so DefaultWireBuilder
-        // can use direct WebSocket connections instead of WebRTC for peers that
-        // advertise a ws:// address through the signaling server.
-        if !result.ws_address_map.is_empty() {
-            let mut map = self.discovered_ws_addresses.write().await;
-            for entry in result.ws_address_map {
-                if let Some(url) = entry.ws_address {
-                    tracing::debug!(
-                        actor_id = ?entry.candidate_id,
-                        ws_url = %url,
-                        "discovered direct WebSocket address",
-                    );
-                    map.insert(entry.candidate_id, url);
-                }
-            }
-        }
-
-        result.candidates.into_iter().next().ok_or_else(|| {
-            ActrError::NotFound(format!(
-                "No route candidates for type {}/{}",
-                target_type.publisher, target_type.name
-            ))
-        })
+        self.discover_candidates(target_type, 1, true)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                ActrError::NotFound(format!(
+                    "No route candidates for type {}/{}",
+                    target_type.publisher, target_type.name
+                ))
+            })
     }
 
     async fn resolve_dependency(&self, alias: &str) -> ActorResult<ActrType> {

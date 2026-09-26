@@ -15,7 +15,7 @@ use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
 use crate::wire::webrtc::v020::status::{LaneKind, NetworkPath, RtcUnavailableReason};
 
 use actr_framework::WebRtcPeerStatus;
-use actr_protocol::{ActrId, ActrType, Realm};
+use actr_protocol::ActrId;
 use webrtc::peer_connection::{
     RTCConfiguration, RTCIceCandidate, RTCIceCandidateType, RTCIceConnectionState, RTCIceProtocol,
     RTCPeerConnectionState, RTCSdpType, RTCSessionDescription,
@@ -23,13 +23,8 @@ use webrtc::peer_connection::{
 
 fn test_actor_id(serial_number: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number,
-        r#type: ActrType {
-            publisher: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
     }
 }
 

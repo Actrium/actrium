@@ -1,7 +1,7 @@
 //! SQLite storage backend implementation
 
 use crate::{
-    error::StorageResult,
+    error::{StorageError, StorageResult},
     mailbox::{
         Mailbox, MailboxDepthObserver, MailboxStats, MessagePriority, MessageRecord, MessageStatus,
     },
@@ -34,6 +34,12 @@ impl Default for SqliteConfig {
     }
 }
 
+/// Current on-disk schema version, stored in `PRAGMA user_version`.
+///
+/// Version 1 added `from_actr_type`. Older mailbox databases are refused
+/// rather than migrated: delete the file to start with an empty mailbox.
+pub const MAILBOX_SCHEMA_VERSION: i64 = 1;
+
 /// SQLite connection wrapper
 struct SqliteConnection {
     conn: Mutex<Connection>,
@@ -52,11 +58,24 @@ impl SqliteConnection {
     }
 
     fn create_tables(conn: &Connection) -> StorageResult<()> {
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        let has_messages: bool = conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages')",
+            [],
+            |row| row.get(0),
+        )?;
+        if version > MAILBOX_SCHEMA_VERSION || (version < MAILBOX_SCHEMA_VERSION && has_messages) {
+            return Err(StorageError::ConfigError(format!(
+                "mailbox database schema version {version} is not supported (expected \
+                 {MAILBOX_SCHEMA_VERSION}); delete the mailbox database to start empty"
+            )));
+        }
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
                 from_actr_id BLOB NOT NULL,  -- ActrId Protobuf bytes (all messages must have a sender)
+                from_actr_type BLOB,         -- verified ActrType Protobuf bytes, NULL when unknown
                 payload BLOB NOT NULL,
                 priority INTEGER NOT NULL,
                 status INTEGER NOT NULL DEFAULT 0, -- 0: Queued, 1: Inflight
@@ -65,6 +84,9 @@ impl SqliteConnection {
             CREATE INDEX IF NOT EXISTS idx_messages_priority_status ON messages(priority DESC, status, created_at ASC);
             "#,
         )?;
+        if version != MAILBOX_SCHEMA_VERSION {
+            conn.execute_batch(&format!("PRAGMA user_version = {MAILBOX_SCHEMA_VERSION}"))?;
+        }
         Ok(())
     }
 }
@@ -113,6 +135,7 @@ impl Mailbox for SqliteMailbox {
     async fn enqueue(
         &self,
         from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
         payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid> {
@@ -128,10 +151,11 @@ impl Mailbox for SqliteMailbox {
         let depth = {
             let conn = self.connection.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO messages (id, from_actr_id, payload, priority, status, created_at) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+                "INSERT INTO messages (id, from_actr_id, from_actr_type, payload, priority, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
                 params![
                     id.to_string(),
                     from,
+                    from_type,
                     payload,
                     priority as i64,
                     Utc::now().to_rfc3339(),
@@ -171,7 +195,7 @@ impl Mailbox for SqliteMailbox {
                 ORDER BY priority DESC, created_at ASC
                 LIMIT ?1
             )
-            RETURNING id, from_actr_id, payload, priority, created_at, status;
+            RETURNING id, from_actr_id, payload, priority, created_at, status, from_actr_type;
             "#,
         )?;
 
@@ -202,6 +226,7 @@ impl Mailbox for SqliteMailbox {
                 Ok(MessageRecord {
                     id,
                     from,
+                    from_type: row.get(6)?,
                     payload: row.get(2)?,
                     priority: if priority_val == 1 {
                         MessagePriority::High
@@ -291,8 +316,8 @@ impl Mailbox for SqliteMailbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actr_protocol::ActrId;
     use actr_protocol::prost::Message as ProstMessage;
-    use actr_protocol::{ActrId, ActrType, Realm};
     use tempfile::tempdir;
 
     async fn setup_mailbox() -> SqliteMailbox {
@@ -303,13 +328,8 @@ mod tests {
 
     fn dummy_actr_id_bytes() -> Vec<u8> {
         let actr_id = ActrId {
-            realm: Realm { realm_id: 1 },
+            realm: "k7m2q9xh@example.com".to_string(),
             serial_number: 1000,
-            r#type: ActrType {
-                publisher: "test".to_string(),
-                name: "TestActor".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
         let mut buf = Vec::new();
         actr_id.encode(&mut buf).unwrap();
@@ -324,7 +344,7 @@ mod tests {
         let from = dummy_actr_id_bytes();
         let payload = b"hello".to_vec();
         let msg_id = mailbox
-            .enqueue(from.clone(), payload.clone(), MessagePriority::Normal)
+            .enqueue(from.clone(), None, payload.clone(), MessagePriority::Normal)
             .await
             .unwrap();
 
@@ -355,11 +375,16 @@ mod tests {
 
         let from = dummy_actr_id_bytes();
         let normal_id = mailbox
-            .enqueue(from.clone(), b"normal".to_vec(), MessagePriority::Normal)
+            .enqueue(
+                from.clone(),
+                None,
+                b"normal".to_vec(),
+                MessagePriority::Normal,
+            )
             .await
             .unwrap();
         let high_id = mailbox
-            .enqueue(from.clone(), b"high".to_vec(), MessagePriority::High)
+            .enqueue(from.clone(), None, b"high".to_vec(), MessagePriority::High)
             .await
             .unwrap();
 
@@ -396,15 +421,15 @@ mod tests {
 
         let from = dummy_actr_id_bytes();
         mailbox
-            .enqueue(from.clone(), b"a".to_vec(), MessagePriority::Normal)
+            .enqueue(from.clone(), None, b"a".to_vec(), MessagePriority::Normal)
             .await
             .unwrap();
         mailbox
-            .enqueue(from.clone(), b"b".to_vec(), MessagePriority::Normal)
+            .enqueue(from.clone(), None, b"b".to_vec(), MessagePriority::Normal)
             .await
             .unwrap();
         mailbox
-            .enqueue(from.clone(), b"c".to_vec(), MessagePriority::High)
+            .enqueue(from.clone(), None, b"c".to_vec(), MessagePriority::High)
             .await
             .unwrap();
 
@@ -426,15 +451,25 @@ mod tests {
 
         let from = dummy_actr_id_bytes();
         mailbox
-            .enqueue(from.clone(), b"msg1".to_vec(), MessagePriority::Normal)
+            .enqueue(
+                from.clone(),
+                None,
+                b"msg1".to_vec(),
+                MessagePriority::Normal,
+            )
             .await
             .unwrap();
         mailbox
-            .enqueue(from.clone(), b"msg2".to_vec(), MessagePriority::Normal)
+            .enqueue(
+                from.clone(),
+                None,
+                b"msg2".to_vec(),
+                MessagePriority::Normal,
+            )
             .await
             .unwrap();
         mailbox
-            .enqueue(from.clone(), b"msg3".to_vec(), MessagePriority::High)
+            .enqueue(from.clone(), None, b"msg3".to_vec(), MessagePriority::High)
             .await
             .unwrap();
 
@@ -466,5 +501,86 @@ mod tests {
         let final_stats = mailbox.status().await.unwrap();
         assert_eq!(final_stats.queued_messages, 0);
         assert_eq!(final_stats.inflight_messages, 2);
+    }
+
+    #[tokio::test]
+    async fn sender_type_survives_a_reopen() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mailbox.db");
+        let from = dummy_actr_id_bytes();
+        let from_type = b"type-bytes".to_vec();
+        {
+            let mailbox = SqliteMailbox::new(&path).await.unwrap();
+            mailbox
+                .enqueue(
+                    from.clone(),
+                    Some(from_type.clone()),
+                    b"typed".to_vec(),
+                    MessagePriority::Normal,
+                )
+                .await
+                .unwrap();
+            mailbox
+                .enqueue(
+                    from.clone(),
+                    None,
+                    b"untyped".to_vec(),
+                    MessagePriority::Normal,
+                )
+                .await
+                .unwrap();
+        }
+
+        let mailbox = SqliteMailbox::new(&path).await.unwrap();
+        let messages = mailbox.dequeue().await.unwrap();
+        assert_eq!(messages.len(), 2);
+        let typed = messages.iter().find(|m| m.payload == b"typed").unwrap();
+        let untyped = messages.iter().find(|m| m.payload == b"untyped").unwrap();
+        assert_eq!(typed.from_type.as_deref(), Some(&from_type[..]));
+        assert_eq!(untyped.from_type, None);
+    }
+
+    #[tokio::test]
+    async fn refuses_a_mailbox_database_of_another_schema_version() {
+        let dir = tempdir().unwrap();
+
+        // A database written before the sender type column existed.
+        let old = dir.path().join("old.db");
+        Connection::open(&old)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE messages (id TEXT PRIMARY KEY, from_actr_id BLOB NOT NULL, \
+                 payload BLOB NOT NULL, priority INTEGER NOT NULL, \
+                 status INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);",
+            )
+            .unwrap();
+        assert!(matches!(
+            SqliteMailbox::new(&old).await,
+            Err(StorageError::ConfigError(_))
+        ));
+
+        // A database from a newer build.
+        let newer = dir.path().join("newer.db");
+        Connection::open(&newer)
+            .unwrap()
+            .execute_batch(&format!(
+                "PRAGMA user_version = {}",
+                MAILBOX_SCHEMA_VERSION + 1
+            ))
+            .unwrap();
+        assert!(matches!(
+            SqliteMailbox::new(&newer).await,
+            Err(StorageError::ConfigError(_))
+        ));
+
+        // A new database is stamped and reopens.
+        let fresh = dir.path().join("fresh.db");
+        drop(SqliteMailbox::new(&fresh).await.unwrap());
+        let version: i64 = Connection::open(&fresh)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MAILBOX_SCHEMA_VERSION);
+        SqliteMailbox::new(&fresh).await.unwrap();
     }
 }

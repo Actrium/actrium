@@ -7,7 +7,7 @@ use crate::wire::webrtc::{
     InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig, WebSocketSignalingClient,
 };
 use actr_framework::Context as _;
-use actr_protocol::{AIdCredential, ActrId, ActrType, Realm};
+use actr_protocol::{AIdCredential, ActrId};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Notify, mpsc};
 
@@ -70,13 +70,8 @@ async fn call_lifecycle_hook_converts_panic_to_error() {
 
 fn test_actr_id(serial_number: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number,
-        r#type: ActrType {
-            publisher: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
     }
 }
 

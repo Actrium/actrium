@@ -1,14 +1,13 @@
 type ActrId = {
-  realm: { realmId: number };
+  realm: string;
   serialNumber: bigint;
-  type: {
-    publisher: string;
-    name: string;
-    version: string;
-  };
 };
 
-type ActrType = ActrId['type'];
+type ActrType = {
+  publisher: string;
+  name: string;
+  version: string;
+};
 
 type Dest =
   { tag: 'host' } | { tag: 'workload' } | { tag: 'peer'; val: ActrId };
@@ -130,9 +129,8 @@ export async function discover(
 ): Promise<ActrId> {
   record(ctxToken, 'discover');
   return {
-    realm: { realmId: 1 },
+    realm: 'test@example.com',
     serialNumber: 1n,
-    type: targetType,
   };
 }
 
