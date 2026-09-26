@@ -5,11 +5,14 @@
 //! # Authentication Flow
 //!
 //! 1. Issuer generates a Realm/provider/audience/Actor scoped username, and uses
-//!    `base64(HMAC-SHA1(turn_secret, username))` as the password.
+//!    `base64(HMAC-SHA1(realm_turn_secret, username))` as the password, where
+//!    the Realm's secret is derived from the master `turn_secret` with HKDF
+//!    (`platform::realm::realm_turn_secret`).
 //! 2. The client authenticates with the TURN server using (username, password)
 //! 3. The TURN server computes MD5(username:realm:password) as the long-term credential key
 //! 4. turn_crate uses this key to verify the HMAC-SHA1 message integrity in requests
 
+use crate::inactive_realms::InactiveRealms;
 use base64::prelude::*;
 use hmac::{Hmac, Mac};
 use lru::LruCache;
@@ -168,12 +171,16 @@ struct CachedAuthKey {
 /// TURN authenticator (HMAC time-limited credential mode).
 pub struct Authenticator {
     turn_secret: String,
+    /// Realm Provider ID that credential usernames must carry.
+    provider_id: String,
     auth_key_cache: Mutex<LruCache<AuthCacheKey, CachedAuthKey>>,
     admission: AdmissionControl,
+    /// Realms whose credentials are refused
+    inactive_realms: InactiveRealms,
 }
 
 impl Authenticator {
-    pub fn new(turn_secret: String) -> Result<Self, Error> {
+    pub fn new(turn_secret: String, provider_id: String) -> Result<Self, Error> {
         if turn_secret.len() < 32 {
             return Err(Error::Other(
                 "TURN secret must be at least 32 bytes".to_string(),
@@ -186,9 +193,17 @@ impl Authenticator {
             NonZeroUsize::new(AUTH_CACHE_CAPACITY).expect("AUTH_CACHE_CAPACITY must be non-zero");
         Ok(Self {
             turn_secret,
+            provider_id,
             auth_key_cache: Mutex::new(LruCache::new(capacity)),
             admission: AdmissionControl::new(),
+            inactive_realms: InactiveRealms::default(),
         })
+    }
+
+    /// Refuse credentials of the Realms in `inactive_realms`
+    pub fn with_inactive_realms(mut self, inactive_realms: InactiveRealms) -> Self {
+        self.inactive_realms = inactive_realms;
+        self
     }
 
     /// Get cache statistics (for monitoring and debugging)
@@ -207,10 +222,14 @@ impl Authenticator {
 
     /// Compute the HMAC-SHA1 password (base64-encoded)
     ///
-    /// `password = base64(HMAC-SHA1(turn_secret, username))`
-    fn compute_password(&self, username: &str) -> String {
-        let mut mac = HmacSha1::new_from_slice(self.turn_secret.as_bytes())
-            .expect("HMAC-SHA1 accepts any key length");
+    /// `password = base64(HMAC-SHA1(realm_turn_secret, username))`
+    fn compute_password(&self, realm: &str, username: &str) -> String {
+        let secret = platform::realm::realm_turn_secret(
+            self.turn_secret.as_bytes(),
+            realm,
+            &self.provider_id,
+        );
+        let mut mac = HmacSha1::new_from_slice(&secret).expect("HMAC-SHA1 accepts any key length");
         mac.update(username.as_bytes());
         BASE64_STANDARD.encode(mac.finalize().into_bytes())
     }
@@ -252,7 +271,7 @@ impl Authenticator {
         let scoped_identity = scoped_identity
             .strip_prefix("realm=")
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
-        let (realm_id, scoped_identity) = scoped_identity
+        let (realm, scoped_identity) = scoped_identity
             .split_once(":provider=")
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
         let (provider, scoped_identity) = scoped_identity
@@ -261,17 +280,25 @@ impl Authenticator {
         let (audience, actor_id) = scoped_identity
             .split_once(":actor=")
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
-        let credential_realm_id = realm_id
-            .parse::<u32>()
-            .map_err(|_| Error::Other("invalid TURN credential Realm".to_string()))?;
         let actor = actr_protocol::ActrId::from_string_repr(actor_id)
             .map_err(|_| Error::Other("invalid TURN credential Actor ID".to_string()))?;
-        if credential_realm_id != actor.realm.realm_id
-            || provider != "actrix-official"
-            || audience != "actr.turn"
-        {
+        if realm != actor.realm || provider != self.provider_id || audience != "actr.turn" {
             return Err(Error::Other(
                 "TURN credential scope does not match this Realm/provider".to_string(),
+            ));
+        }
+        // Checked before the cache, so a cached key never outlives the Realm
+        // or the Actor's Realm client key.
+        if self.inactive_realms.contains(realm) {
+            platform::recording::warn!("TURN credential refused: Realm {} is not active", realm);
+            return Err(Error::Other(
+                "TURN credential Realm is not active".to_string(),
+            ));
+        }
+        if self.inactive_realms.contains_actor(actor_id) {
+            platform::recording::warn!("TURN credential refused: Actor {} is disabled", actor_id);
+            return Err(Error::Other(
+                "TURN credential Actor is disabled".to_string(),
             ));
         }
 
@@ -291,7 +318,7 @@ impl Authenticator {
             return Ok(cached.integrity_key);
         }
 
-        let password = self.compute_password(username);
+        let password = self.compute_password(realm, username);
 
         // Per-actor admission on the cache-miss path. NOTE: this is a throttle,
         // not an authentication gate — `compute_password` is a server-side HMAC
@@ -428,20 +455,23 @@ mod tests {
     use std::time::Duration;
 
     fn make_auth() -> Authenticator {
-        Authenticator::new("test-secret-at-least-32-bytes-long".to_string())
-            .expect("authenticator should initialize")
+        Authenticator::new(
+            "test-secret-at-least-32-bytes-long".to_string(),
+            "provider.example".to_string(),
+        )
+        .expect("authenticator should initialize")
     }
 
     fn username(expires_at: u64) -> String {
         format!(
-            "{expires_at}:realm=1001:provider=actrix-official:audience=actr.turn:actor=1@1001/apps.example.com/svc@1.0.0"
+            "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com"
         )
     }
 
     #[test]
     fn test_authenticator_creation() {
         let _auth = make_auth();
-        assert!(Authenticator::new("short".to_string()).is_err());
+        assert!(Authenticator::new("short".to_string(), "provider.example".to_string()).is_err());
     }
 
     #[test]
@@ -527,16 +557,49 @@ mod tests {
     }
 
     #[test]
+    fn test_auth_handle_refuses_inactive_realm_even_when_cached() {
+        let inactive = InactiveRealms::default();
+        let auth = make_auth().with_inactive_realms(inactive.clone());
+        let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
+        let username = username(2_000_000_060);
+
+        auth.auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .expect("active Realm authenticates");
+        inactive.insert("k7m2q9xh@example.com");
+        let error = auth
+            .auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .expect_err("inactive Realm is refused");
+        assert!(error.to_string().contains("not active"), "{error}");
+    }
+
+    #[test]
+    fn test_auth_handle_refuses_disabled_actor_even_when_cached() {
+        let inactive = InactiveRealms::default();
+        let auth = make_auth().with_inactive_realms(inactive.clone());
+        let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
+        let username = username(2_000_000_060);
+        let actor = username.split_once(":actor=").unwrap().1.to_string();
+
+        auth.auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .expect("enabled Actor authenticates");
+        inactive.insert_actor(&actor);
+        let error = auth
+            .auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .expect_err("disabled Actor is refused");
+        assert!(error.to_string().contains("disabled"), "{error}");
+    }
+
+    #[test]
     fn test_auth_handle_rejects_cross_realm_or_audience_scope() {
         let auth = make_auth();
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
-        let base = "2000000060:realm=1001:provider=actrix-official:audience=actr.turn:actor=1@1001/apps.example.com/svc@1.0.0";
+        let base = "2000000060:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com";
 
         for invalid in [
-            base.replace("realm=1001", "realm=1002"),
+            base.replace("realm=k7m2q9xh@", "realm=other@"),
             base.replace("audience=actr.turn", "audience=actr.signaling"),
-            base.replace("provider=actrix-official", "provider=other"),
-            base.replace("@1001/", "@1002/"),
+            base.replace("provider=provider.example", "provider=other"),
+            base.replace("actor=1.k7m2q9xh@", "actor=1.other@"),
         ] {
             let error = auth
                 .auth_handle_at(&invalid, "actrix.local", src_addr, 2_000_000_000)
@@ -594,10 +657,41 @@ mod tests {
     }
 
     #[test]
+    fn realm_credentials_are_not_interchangeable() {
+        // Same serial, same Actor type, two Realms: each Realm's password is
+        // keyed by its own derived secret.
+        let auth = make_auth();
+        let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
+        let a = username(2_000_000_060);
+        let b = a.replace("k7m2q9xh@example.com", "p3n8w2rt@example.com");
+
+        let a_key = auth
+            .auth_handle_at(&a, "actrix.local", src_addr, 2_000_000_000)
+            .unwrap();
+        let b_key = auth
+            .auth_handle_at(&b, "actrix.local", src_addr, 2_000_000_000)
+            .unwrap();
+        assert_ne!(a_key, b_key);
+
+        // Realm A's secret does not produce Realm B's passwords.
+        assert_ne!(
+            auth.compute_password("k7m2q9xh@example.com", &b),
+            auth.compute_password("p3n8w2rt@example.com", &b)
+        );
+    }
+
+    #[test]
     fn test_auth_cache_is_scoped_to_secret_bearing_instance() {
-        let first = Authenticator::new("first-secret-at-least-32-bytes-long".to_string()).unwrap();
-        let second =
-            Authenticator::new("second-secret-at-least-32-bytes-long".to_string()).unwrap();
+        let first = Authenticator::new(
+            "first-secret-at-least-32-bytes-long".to_string(),
+            "provider.example".to_string(),
+        )
+        .unwrap();
+        let second = Authenticator::new(
+            "second-secret-at-least-32-bytes-long".to_string(),
+            "provider.example".to_string(),
+        )
+        .unwrap();
         let username = username(2_000_000_060);
         let server_realm = "actrix.local";
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
@@ -623,7 +717,7 @@ mod tests {
 
         for serial in 1..=(AUTH_CACHE_CAPACITY + 64) {
             let username = format!(
-                "{}:realm=1001:provider=actrix-official:audience=actr.turn:actor={}@1001/apps.example.com/svc@1.0.0",
+                "{}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor={:x}.k7m2q9xh@example.com",
                 now + 60,
                 serial
             );
@@ -698,7 +792,7 @@ mod tests {
     #[test]
     fn admission_throttles_single_actor_flood() {
         let control = AdmissionControl::new();
-        let actor = "1@1001/apps.example.com/svc@1.0.0";
+        let actor = "1.k7m2q9xh@example.com";
         let now = Instant::now();
 
         let mut admitted = 0usize;
@@ -715,7 +809,7 @@ mod tests {
     fn actor_scope_key_extracts_actor_or_none() {
         assert_eq!(
             Authenticator::actor_scope_key(&username(2_000_000_060)),
-            Some("1@1001/apps.example.com/svc@1.0.0")
+            Some("1.k7m2q9xh@example.com")
         );
         assert_eq!(Authenticator::actor_scope_key("no-actor-here"), None);
     }

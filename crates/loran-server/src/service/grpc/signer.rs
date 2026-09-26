@@ -59,28 +59,16 @@ pub async fn build_signer_grpc_router(
     .await
     .map_err(|e| anyhow::anyhow!("Failed to create Signer storage: {e}"))?;
 
-    // SGN-04/07: drive background pruning of expired signer keys and nonce
-    // rows on the gRPC path (the HTTP path has its own lazy, per-request
-    // trigger; the gRPC path had none, so both tables grew unbounded). Clone
-    // the stores before they are moved into the gRPC service; both loops exit
-    // when `cancel` fires on reload/shutdown.
-    tokio::spawn(signer::run_key_cleanup(
-        storage.clone(),
-        signer_service_config.tolerance_seconds,
-        cancel.clone().cancelled_owned(),
-    ));
+    // SGN-04/07: drive background pruning of nonce rows on the gRPC path; the
+    // loop exits when `cancel` fires on reload/shutdown.
     tokio::spawn(platform::storage::nonce::run_nonce_cleanup(
         Arc::new(nonce_storage.clone()),
         cancel.cancelled_owned(),
     ));
 
     // Create the gRPC service (this moves the stores).
-    let grpc_service = create_grpc_service(
-        storage,
-        nonce_storage,
-        config.actrix_shared_key.clone(),
-        signer_service_config.tolerance_seconds,
-    );
+    let grpc_service =
+        create_grpc_service(storage, nonce_storage, config.actrix_shared_key.clone());
 
     platform::recording::info!("Signer gRPC service router built for the dedicated listener");
 

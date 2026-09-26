@@ -1,9 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
-import { api, type ServiceDetail, type KeyEntry } from "../../lib/api";
+import { api, type ServiceDetail } from "../../lib/api";
 import { ServicePageLayout, ConfigSection, StatusSection } from "../../components/layout/ServicePageLayout";
 import { HowItWorks } from "../../components/ui/HowItWorks";
 import { ServiceMetrics } from "./shared";
-import { CollapsibleCard } from "../../components/ui/CollapsibleCard";
 
 function IssuerDiagram({ config }: { config: Record<string, unknown> }) {
   const ttl = String(config.token_ttl_secs ?? "3600");
@@ -62,16 +61,16 @@ function IssuerDiagram({ config }: { config: Record<string, unknown> }) {
       <line x1={cX} y1={lifeTop} x2={cX} y2={lifeBot} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 3" />
       <line x1={sX} y1={lifeTop} x2={sX} y2={lifeBot} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 3" />
 
-      {/* 1. Issuer generates signing key from Signer */}
+      {/* 1. Issuer gets the Realm's issuer key from Signer */}
       <line x1={aX - 4} y1={74} x2={kX + 4} y2={74} stroke="#d97706" strokeWidth="1.5" markerEnd="url(#issuer-ao)" />
-      <text x={(kX + aX) / 2} y={68} textAnchor="middle" fontSize="9" fontWeight="600" fill="#d97706">GenerateSigningKey</text>
+      <text x={(kX + aX) / 2} y={68} textAnchor="middle" fontSize="9" fontWeight="600" fill="#d97706">EnsureNamedKey</text>
 
       <line x1={kX + 4} y1={94} x2={aX - 4} y2={94} stroke="#d97706" strokeWidth="1.5" markerEnd="url(#issuer-ao)" />
-      <text x={(kX + aX) / 2} y={88} textAnchor="middle" fontSize="8" fill="#d97706">key_id + verifying_key</text>
+      <text x={(kX + aX) / 2} y={88} textAnchor="middle" fontSize="8" fill="#d97706">issuer:&lt;realm&gt; key</text>
 
       {/* Cache note */}
       <rect x={aX - 86} y={100} width="80" height="18" rx="3" fill="#fef3c7" stroke="#fcd34d" strokeWidth="0.8" />
-      <text x={aX - 46} y={112} textAnchor="middle" fontSize="7" fill="#92400e">cache locally</text>
+      <text x={aX - 46} y={112} textAnchor="middle" fontSize="7" fill="#92400e">cache per Realm</text>
 
       {/* 2. Client registers */}
       <line x1={cX - 4} y1={136} x2={aX + 4} y2={136} stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#issuer-ab)" />
@@ -107,19 +106,11 @@ function IssuerDiagram({ config }: { config: Record<string, unknown> }) {
 
 export function IssuerService() {
   const [data, setData] = useState<ServiceDetail | null>(null);
-  const [keys, setKeys] = useState<KeyEntry[]>([]);
   const [error, setError] = useState("");
-  const [rotating, setRotating] = useState(false);
-  const [rotateMsg, setRotateMsg] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
-      const [d, k] = await Promise.all([
-        api.getServiceDetail("issuer"),
-        api.getIssuerKeys().catch(() => ({ keys: [] })),
-      ]);
-      setData(d);
-      setKeys(k.keys);
+      setData(await api.getServiceDetail("issuer"));
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -160,10 +151,11 @@ export function IssuerService() {
       {data.config && (
         <HowItWorks storageKey="issuer">
           <p className="text-xs text-gray-500 mb-4">
-            Issuer issues identity credentials for WebRTC peers. On startup it generates a signing key
-            via Signer and caches the verifying key locally. When a client registers, Issuer generates
-            a unique ActrId, calls Signer to Ed25519-sign the credential claims, and returns the
-            signed access credential, TURN credential, and renewal token. The client then uses the
+            Issuer issues identity credentials for WebRTC peers. Each Realm has its own issuer key,
+            <code>issuer:&lt;realm&gt;</code>, held by Signer and listed in the Realm Profile. When a
+            client registers, Issuer generates a unique ActrId, calls Signer to Ed25519-sign the
+            credential claims with the Realm's key, and returns the signed access credential, TURN
+            credential, and renewal token. Retiring a Realm retires its key. The client then uses the
             access credential to connect to the Signaling server.
           </p>
           <IssuerDiagram config={data.config} />
@@ -180,8 +172,8 @@ export function IssuerService() {
                 the client so it knows how often to ping the Signaling server to maintain its WebSocket connection.
               </li>
               <li>
-                Issuer caches the Signer verifying key locally and refreshes it in the background.
-                If Signer is temporarily unavailable, Issuer can continue serving from cache.
+                Realm issuer keys do not expire. Signing needs Signer, so registration fails while
+                Signer is unavailable.
               </li>
             </ul>
           </div>
@@ -191,82 +183,6 @@ export function IssuerService() {
       {data.config_fields && (
         <ConfigSection storageKey="issuer" fields={data.config_fields} onRefresh={fetchData} />
       )}
-
-      <CollapsibleCard storageKey="issuer_keys" title="Current Key">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs text-gray-500">
-            {keys.length > 0 && `key_id ${keys[0].key_id}${keys[0].is_expired ? " (expired)" : ""}`}
-          </span>
-          <div className="flex items-center gap-2">
-            {rotateMsg && (
-              <span className="text-xs text-green-600">{rotateMsg}</span>
-            )}
-            <button
-              onClick={async () => {
-                setRotating(true);
-                setRotateMsg("");
-                try {
-                  const r = await api.rotateIssuerKey();
-                  setRotateMsg(`Rotated to key_id ${r.new_key_id}`);
-                  fetchData();
-                } catch {
-                  setRotateMsg("Rotation failed");
-                } finally {
-                  setRotating(false);
-                }
-              }}
-              disabled={rotating || !data.enabled}
-              className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-            >
-              {rotating ? "Rotating..." : "Rotate key"}
-            </button>
-          </div>
-        </div>
-        {keys.length === 0 ? (
-          <p className="text-sm text-gray-500">No key cached yet</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 text-left">
-                  <th className="pb-2 pr-4 font-medium text-gray-500">Key ID</th>
-                  <th className="pb-2 pr-4 font-medium text-gray-500">PK Size</th>
-                  <th className="pb-2 pr-4 font-medium text-gray-500">Fetched At</th>
-                  <th className="pb-2 pr-4 font-medium text-gray-500">Expires At</th>
-                  <th className="pb-2 pr-4 font-medium text-gray-500">Tolerance</th>
-                  <th className="pb-2 font-medium text-gray-500">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keys.map((k) => (
-                  <tr key={k.key_id} className="border-b border-gray-100 last:border-0">
-                    <td className="py-2 pr-4 font-mono">{k.key_id}</td>
-                    <td className="py-2 pr-4">{k.pk_size} bytes</td>
-                    <td className="py-2 pr-4 font-mono text-xs">
-                      {k.fetched_at ? new Date(k.fetched_at * 1000).toLocaleString() : "—"}
-                    </td>
-                    <td className="py-2 pr-4 font-mono text-xs">
-                      {new Date(k.expires_at * 1000).toLocaleString()}
-                    </td>
-                    <td className="py-2 pr-4">{k.tolerance_seconds != null ? `${k.tolerance_seconds}s` : "—"}</td>
-                    <td className="py-2">
-                      {k.is_expired ? (
-                        <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                          Expired
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                          Valid
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CollapsibleCard>
     </ServicePageLayout>
   );
 }

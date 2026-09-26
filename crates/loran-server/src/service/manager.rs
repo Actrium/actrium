@@ -6,9 +6,7 @@
 use super::{HttpRouterService, IceService, http::build_control_router};
 use crate::service::container::ServiceContainer;
 use crate::service::grpc::build_signer_grpc_router;
-use crate::service::http::{
-    IssuerService, PublisherRegistryService, SignalingService, build_realm_descriptor_router,
-};
+use crate::service::http::{IssuerService, PublisherRegistryService, SignalingService};
 use crate::service::ice::{StunService, TurnService};
 use anyhow::Result;
 use axum::Router;
@@ -239,7 +237,6 @@ impl ServiceManager {
         self.bg_cancel = Some(cancel.clone());
 
         let mut app = Router::new();
-        app = app.merge(build_realm_descriptor_router(self.config.clone()));
 
         // Refresh ServiceCollector to reflect currently enabled services.
         // This ensures the admin dashboard shows accurate service status after reload.
@@ -356,6 +353,16 @@ impl ServiceManager {
             None
         };
 
+        // As Realm Provider for its own domain, Loran signs Realm Profiles and
+        // refreshes those of other domains in the background.
+        let realm_profiles = crate::service::http::build_realm_profiles(&self.config).await?;
+        if let Some(profiles) = &realm_profiles {
+            profiles.spawn(
+                Duration::from_secs(self.config.realm.profile_refresh_secs()),
+                cancel.clone(),
+            );
+        }
+
         // Control plane always present.
         // Pass existing JWT secret so admin sessions survive reloads.
         let (control_router, jwt_secret) = build_control_router(
@@ -367,6 +374,7 @@ impl ServiceManager {
             config_store,
             self.metrics_store.clone(),
             issuer_state.as_ref().map(|state| state.issuer.clone()),
+            realm_profiles.clone(),
         )
         .await?;
         self.jwt_secret = Some(jwt_secret);
@@ -380,7 +388,11 @@ impl ServiceManager {
         // Public authority bootstrap is an instance-level concern. It stays
         // separate from the individual signaling, identity, and package roles
         // even when Loran serves them from the same process.
-        app = app.merge(crate::service::http::build_authority_router(&self.config)?);
+        // `update_realm` membership requests sign Realm Profiles too.
+        let membership_profiles = realm_profiles.clone();
+        app = app.merge(
+            crate::service::http::build_authority_router(&self.config, realm_profiles).await?,
+        );
 
         // Business services based on enable bitmask
         if self.config.is_signaling_enabled() {
@@ -410,6 +422,7 @@ impl ServiceManager {
 
         if self.config.is_issuer_enabled() {
             if let Some(state) = issuer_state.clone() {
+                let state = state.with_membership(&self.config.realm, membership_profiles.clone());
                 let mut svc = IssuerService::with_state(&self.config, state);
                 if let Some(ctr) = self.service_counters.get(&(resource_type::ISSUER)) {
                     svc.set_counters(ctr.clone());

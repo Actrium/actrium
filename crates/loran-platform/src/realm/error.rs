@@ -16,8 +16,17 @@ pub enum RealmError {
     #[error("Realm not found")]
     NotFound,
 
-    #[error("Realm already exists")]
+    #[error("Realm already exists; Realm names are never reused")]
     AlreadyExists,
+
+    #[error("Realm is retired")]
+    Retired,
+
+    #[error("Realm quota exceeded: {0}")]
+    QuotaExceeded(String),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
 
     #[error("Key expired")]
     KeyExpired,

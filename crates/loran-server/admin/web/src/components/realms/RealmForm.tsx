@@ -1,31 +1,32 @@
 import { useState, type FormEvent, useEffect } from "react";
-import { api, type RealmInfo, type RealmMutationResponse } from "../../lib/api";
+import { api, type RealmMutationResponse } from "../../lib/api";
 import { X, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
 
 interface RealmFormProps {
-  realm: RealmInfo | null;
-  existingRealmIds?: Set<number>;
-  onSubmit: (data: { realm_id?: number; name: string; enabled: boolean }) => Promise<RealmMutationResponse | void>;
+  onSubmit: (data: Parameters<typeof api.createRealm>[0]) => Promise<RealmMutationResponse>;
   onClose: () => void;
   onRefresh?: () => void;
 }
 
-export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProps) {
-  const isEditing = !!realm;
-
-  const [realmId] = useState(() => {
-    if (realm?.realm_id) return realm.realm_id.toString();
-    return "";
-  });
-  const [name, setName] = useState(realm?.name ?? "");
-  const [enabled, setEnabled] = useState(realm?.enabled ?? true);
+/**
+ * Creates a Realm. A Realm name is fixed at creation and never reused. A
+ * Realm under the Provider domain gets a Loran-signed Realm Profile, which
+ * names its package.
+ */
+export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
+  const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [packageHref, setPackageHref] = useState("");
+  const [packageSha256, setPackageSha256] = useState("");
+  const [packageType, setPackageType] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Wizard state
   const [step, setStep] = useState<"input" | "success">("input");
-  const [createdSecret, setCreatedSecret] = useState<string | null>(null);
-  const [createdRealm, setCreatedRealm] = useState<{ id: number; name: string } | null>(null);
+  const [ownerInvite, setOwnerInvite] = useState<string | null>(null);
+  const [inviteExpiresAt, setInviteExpiresAt] = useState<string | null>(null);
+  const [createdRealm, setCreatedRealm] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -40,53 +41,29 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, step, createdRealm]); // Add step dependency
 
-  // If we are in creation mode (no realm prop), force enabled=false initially
-  // The user will choose to activate or keep stored in the second step.
-  // Actually, wait - if we want to support "Activate Realm" button in step 2,
-  // we should probably create it as DISABLED first, then update it?
-  // OR, we create it as ENABLED if they click "Activate", and DISABLED if they click "Store".
-  // But the secret is returned on CREATE. So we must create it first.
-
-  // Let's stick to the plan:
-  // Step 1: Input ID & Name. (Remove enabled toggle).
-  // Step 2: Create (initially disabled). Show Secret.
-  // Step 3: User clicks "Activate" -> Update to enabled=true.
-  //         User clicks "Store only" -> Keep enabled=false.
-
+  // The Realm is created suspended so the owner invite can be saved before
+  // it serves Actors; the second step resumes it.
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      if (isEditing) {
-        // Update existing
-        await onSubmit({
-          realm_id: parseInt(realmId, 10),
-          name,
-          enabled, // Use the state for editing
-        });
-        onClose();
+      const resp = await onSubmit({
+        realm: name,
+        enabled: false,
+        ...(displayName ? { display_name: displayName } : {}),
+        ...(packageHref
+          ? { package: { href: packageHref, sha256: packageSha256, type: packageType } }
+          : {}),
+      });
+      if (resp.owner_invite) {
+        setOwnerInvite(resp.owner_invite);
+        setInviteExpiresAt(resp.owner_invite_expires_at ?? null);
+        setCreatedRealm(resp.realm?.realm ?? name);
+        setStep("success");
       } else {
-        // Create new - always create as DISABLED first to ensure we get secret
-        // before activation decision in step 2
-        const resp = await onSubmit({
-          name,
-          enabled: false, // Create disabled initially
-        });
-
-        if (resp && 'realm_secret' in resp && resp.realm_secret) {
-          setCreatedSecret(resp.realm_secret);
-          setCreatedRealm({
-            id: resp.realm?.realm_id ?? 0,
-            name: name
-          });
-          setStep("success");
-          // Update local enabled state to false to match
-          setEnabled(false);
-        } else {
-          onClose();
-        }
+        onClose();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Operation failed");
@@ -99,34 +76,34 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
     if (!createdRealm) return;
     setLoading(true);
     try {
-      await api.updateRealm(createdRealm.id, { enabled: true });
+      await api.updateRealm(createdRealm, { enabled: true });
       if (onRefresh) onRefresh();
       onClose();
-    } catch (err) {
-      setError("Failed to activate realm");
+    } catch {
+      setError("Failed to resume realm");
     } finally {
       setLoading(false);
     }
   }
 
   function handleDownload() {
-    if (!createdSecret || !createdRealm) return;
-    const blob = new Blob([createdSecret], { type: "text/plain" });
+    if (!ownerInvite || !createdRealm) return;
+    const blob = new Blob([ownerInvite], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `realm-${createdRealm.id}-secret.txt`;
+    a.download = `realm-${createdRealm}-owner-invite.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
   function handleCopy() {
-    if (createdSecret) {
-      navigator.clipboard.writeText(createdSecret);
+    if (ownerInvite) {
+      navigator.clipboard.writeText(ownerInvite);
     }
   }
 
-  if (step === "success" && createdSecret && createdRealm) {
+  if (step === "success" && ownerInvite && createdRealm) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
@@ -142,9 +119,10 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
               <div className="flex items-start gap-3">
                 <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-amber-900">Save this secret now</p>
+                  <p className="text-sm font-medium text-amber-900">Save the owner invite now</p>
                   <p className="text-xs text-amber-700">
-                    This secret will only be shown once. It is required for actors to join this realm.
+                    It is shown only once. Hand it to the Realm&apos;s owner, who redeems it with a
+                    new client and then invites the other members.
                   </p>
                 </div>
               </div>
@@ -152,20 +130,21 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase">Realm ID</label>
-                <p className="text-sm font-mono text-gray-900">{createdRealm.id}</p>
-              </div>
-              <div>
                 <label className="text-xs font-medium text-gray-500 uppercase">Realm Name</label>
-                <p className="text-sm font-medium text-gray-900">{createdRealm.name}</p>
+                <p className="text-sm font-mono text-gray-900">{createdRealm}</p>
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase">Realm Secret</label>
+                <label className="text-xs font-medium text-gray-500 uppercase">Owner Invite</label>
                 <div className="mt-1 flex items-center gap-2">
                   <code className="flex-1 rounded bg-gray-100 px-3 py-2 text-sm font-mono text-gray-800 border border-gray-200 break-all">
-                    {createdSecret}
+                    {ownerInvite}
                   </code>
                 </div>
+                {inviteExpiresAt && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Expires {new Date(inviteExpiresAt).toLocaleString()}.
+                  </p>
+                )}
                 <div className="flex gap-2 mt-2">
                   <button
                     onClick={handleCopy}
@@ -189,13 +168,13 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
                 disabled={loading}
                 className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? "Activating..." : "I have saved the secret, Activate Realm"}
+                {loading ? "Resuming..." : "I have saved the invite, resume Realm"}
               </button>
               <button
                 onClick={onClose}
                 className="text-xs text-gray-500 hover:text-gray-700 hover:underline text-center"
               >
-                Store only (do not activate yet)
+                Keep suspended for now
               </button>
             </div>
           </div>
@@ -209,7 +188,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            {isEditing ? "Edit Realm" : "Create Realm"}
+            Create Realm
           </h2>
           <button
             onClick={onClose}
@@ -222,64 +201,68 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Realm ID
-            </label>
-            <input
-              type={isEditing ? "number" : "text"}
-              value={isEditing ? realmId : "Auto-generated by server"}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 font-mono"
-              disabled
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Name
+              Realm Name
             </label>
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              onChange={(e) => setName(e.target.value.trim())}
+              placeholder="realm-id@example.com"
+              title="<realm_id>@<domain>"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 font-mono"
               required
               autoFocus
             />
+            <p className="mt-1 text-xs text-gray-500">
+              The name cannot be changed later, and a retired name is never reused.
+            </p>
           </div>
 
-          {isEditing && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Status
-              </label>
-              <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-1">
-                <button
-                  type="button"
-                  onClick={() => setEnabled(true)}
-                  className={`flex-1 rounded-md py-1 text-sm font-medium transition-colors ${enabled
-                    ? "bg-white text-blue-600 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                    }`}
-                >
-                  Enabled
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEnabled(false)}
-                  className={`flex-1 rounded-md py-1 text-sm font-medium transition-colors ${!enabled
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                    }`}
-                >
-                  Stored only
-                </button>
-              </div>
-              <p className="mt-1 text-xs text-gray-500">
-                {enabled
-                  ? "Realm is active and can be used by actors immediately."
-                  : "Realm is saved but inactive. Actors cannot join until enabled."}
-              </p>
-            </div>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Display Name <span className="font-normal text-gray-400">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Package</label>
+            <input
+              type="url"
+              value={packageHref}
+              onChange={(e) => setPackageHref(e.target.value.trim())}
+              placeholder="https://cdn.example.com/app-1.0.0.actr"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+            <input
+              type="text"
+              value={packageSha256}
+              onChange={(e) => setPackageSha256(e.target.value.trim().toLowerCase())}
+              placeholder="SHA-256 (64 hex)"
+              pattern="[0-9a-f]{64}"
+              required={packageHref !== ""}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+            <input
+              type="text"
+              value={packageType}
+              onChange={(e) => setPackageType(e.target.value.trim())}
+              placeholder="publisher.example/app@1.0.0"
+              title="Actor type of the package manifest"
+              required={packageHref !== ""}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Required for Realms under this Realm Provider&apos;s domain: it goes into the
+              Realm Profile this instance signs. The type is the package manifest&apos;s
+              <code> publisher/program@version</code>.
+            </p>
+          </div>
 
           {error && (
             <p className="text-sm text-red-600">{error}</p>
@@ -298,7 +281,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
               disabled={loading}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? "Saving..." : isEditing ? "Update" : "Next"}
+              {loading ? "Saving..." : "Next"}
             </button>
           </div>
         </form>

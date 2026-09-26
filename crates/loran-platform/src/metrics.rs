@@ -22,7 +22,7 @@ lazy_static! {
     pub static ref ACTORS_TOTAL: IntGaugeVec = IntGaugeVec::new(
         Opts::new("actrix_actors_total", "Total number of registered actors")
             .namespace("actrix"),
-        &["realm_id", "service"]
+        &["realm", "service"]
     ).unwrap();
 
     /// Total number of registered services
@@ -42,7 +42,7 @@ lazy_static! {
     pub static ref TOKENS_ISSUED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_tokens_issued_total", "Total number of tokens issued")
             .namespace("actrix"),
-        &["realm_id", "status"]
+        &["realm", "status"]
     ).unwrap();
 
     /// Token validation count (Signaling/TURN)

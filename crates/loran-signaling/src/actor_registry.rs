@@ -12,7 +12,7 @@ use actr_protocol::{ActrId, ActrType};
 use platform::RealmError;
 use platform::realm::acl::ActorAcl;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -50,6 +50,8 @@ pub enum ServiceStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceInfo {
     pub actor_id: ActrId,
+    /// Actor type from the verified credential claims
+    pub actor_type: ActrType,
     pub service_name: String,
     pub message_types: Vec<String>,
     pub capabilities: Option<ServiceCapabilities>,
@@ -139,24 +141,18 @@ pub struct ServiceMetrics {
     pub error_rate: f64,
 }
 
-/// Actor registry
+/// One Realm's services and their indexes
 #[derive(Debug, Default)]
-pub struct ActorRegistry {
+struct Partition {
     /// Service map: service_name -> list of service instances
     services: HashMap<String, Vec<ServiceInfo>>,
     /// Message type index: message_type -> list of service names
     message_type_index: HashMap<String, Vec<String>>,
     /// Actor ID index: actor_id -> list of services
     actor_index: HashMap<ActrId, Vec<String>>,
-    /// SQLite persistence cache (optional)
-    storage: Option<Arc<ActorRegistryStorage>>,
 }
 
-impl ActorRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
+impl Partition {
     /// Rebuild the secondary indexes for one service name after replacing instances.
     fn rebuild_indexes_for_service(&mut self, service_name: &str) {
         let mut actor_ids = Vec::new();
@@ -198,6 +194,105 @@ impl ActorRegistry {
         }
     }
 
+    /// The first service instance registered by an Actor
+    fn find(&self, actor_id: &ActrId) -> Option<&ServiceInfo> {
+        let service_name = self.actor_index.get(actor_id)?.first()?;
+        self.services
+            .get(service_name)?
+            .iter()
+            .find(|s| &s.actor_id == actor_id)
+    }
+
+    /// All available service instances
+    fn available(&self) -> impl Iterator<Item = &ServiceInfo> {
+        self.services
+            .values()
+            .flatten()
+            .filter(|s| s.status == ServiceStatus::Available)
+    }
+
+    /// Remove one service instance from memory
+    fn remove(&mut self, actor_id: &ActrId, service_name: &str) -> Result<(), String> {
+        // Remove from service map
+        if let Some(services) = self.services.get_mut(service_name) {
+            let original_len = services.len();
+            services.retain(|s| s.actor_id != *actor_id);
+
+            if services.len() == original_len {
+                return Err(format!(
+                    "Service instance to unregister not found: {} (Actor {})",
+                    service_name, actor_id.serial_number
+                ));
+            }
+
+            // If this is the last instance, clean up the message type index
+            if services.is_empty() {
+                self.services.remove(service_name);
+
+                // Remove from message type index
+                self.message_type_index.retain(|_, service_names| {
+                    service_names.retain(|name| name != service_name);
+                    !service_names.is_empty()
+                });
+            }
+        }
+
+        // Remove from Actor index
+        if let Some(actor_services) = self.actor_index.get_mut(actor_id) {
+            actor_services.retain(|name| name != service_name);
+
+            if actor_services.is_empty() {
+                self.actor_index.remove(actor_id);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Actor registry
+///
+/// Partitioned by Realm: every lookup happens within one Realm's partition,
+/// so Actors of different Realms never see each other, even with the same
+/// Actor type and serial number.
+#[derive(Debug, Default)]
+pub struct ActorRegistry {
+    /// Realm name -> that Realm's services
+    realms: HashMap<String, Partition>,
+    /// Realms retired while this process runs; nothing registers in them again
+    retired: HashSet<String>,
+    /// SQLite persistence cache (optional)
+    storage: Option<Arc<ActorRegistryStorage>>,
+}
+
+impl ActorRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn realm_mut(&mut self, realm: &str) -> &mut Partition {
+        self.realms.entry(realm.to_string()).or_default()
+    }
+
+    /// Drop a retired Realm's services and refuse new ones. Returns the
+    /// storage so the caller can delete the Realm's cached rows without
+    /// holding the registry lock.
+    pub fn retire_realm(&mut self, realm: &str) -> Option<Arc<ActorRegistryStorage>> {
+        self.retired.insert(realm.to_string());
+        self.realms.remove(realm);
+        self.storage.clone()
+    }
+
+    /// Whether `realm` was retired while this process runs
+    pub fn is_retired(&self, realm: &str) -> bool {
+        self.retired.contains(realm)
+    }
+
+    /// The Realms that have services here
+    pub fn realm_names(&self) -> Vec<String> {
+        self.realms.keys().cloned().collect()
+    }
+
     /// Set persistence storage (called at startup)
     pub fn set_storage(&mut self, storage: Arc<ActorRegistryStorage>) {
         platform::recording::info!("ActorRegistry enabling SQLite persistence cache");
@@ -207,7 +302,7 @@ impl ActorRegistry {
     /// Restore service list from storage (called at startup)
     pub async fn restore_from_storage(&mut self) -> Result<usize, String> {
         let storage = match &self.storage {
-            Some(s) => s,
+            Some(s) => s.clone(),
             None => {
                 platform::recording::warn!("No storage configured, skipping recovery");
                 return Ok(0);
@@ -225,23 +320,27 @@ impl ActorRegistry {
                     let actor_id = service.actor_id.clone();
                     let service_name = service.service_name.clone();
                     let message_types = service.message_types.clone();
+                    let partition = self.realm_mut(&actor_id.realm);
 
                     // Add to service map
-                    self.services
+                    partition
+                        .services
                         .entry(service_name.clone())
                         .or_default()
                         .push(service);
 
                     // Update message type index
                     for message_type in &message_types {
-                        self.message_type_index
+                        partition
+                            .message_type_index
                             .entry(message_type.clone())
                             .or_default()
                             .push(service_name.clone());
                     }
 
                     // Update Actor index
-                    self.actor_index
+                    partition
+                        .actor_index
                         .entry(actor_id)
                         .or_default()
                         .push(service_name);
@@ -261,6 +360,7 @@ impl ActorRegistry {
     pub fn register_service_full(
         &mut self,
         actor_id: ActrId,
+        actor_type: ActrType,
         service_name: String,
         message_types: Vec<String>,
         capabilities: Option<ServiceCapabilities>,
@@ -268,6 +368,9 @@ impl ActorRegistry {
         acl: Option<actr_protocol::Acl>,
         ws_address: Option<String>,
     ) -> Result<(), String> {
+        if self.is_retired(&actor_id.realm) {
+            return Err(format!("Realm {} is retired", actor_id.realm));
+        }
         platform::recording::info!(
             "Register service: {} (Actor {}), has_spec={}, has_acl={}, ws_address={:?}",
             service_name,
@@ -279,6 +382,7 @@ impl ActorRegistry {
 
         let service_info = ServiceInfo {
             actor_id: actor_id.clone(),
+            actor_type,
             service_name: service_name.clone(),
             message_types: message_types.clone(),
             capabilities,
@@ -307,10 +411,11 @@ impl ActorRegistry {
             });
         }
 
-        // Add to service map. Clear storage-restored ghost candidates and replace the same Actor's
-        // existing registration for the same service. Other active Actor instances are retained
-        // to support horizontal scaling.
-        let entry = self.services.entry(service_name.clone()).or_default();
+        // Add to the Realm's service map. Clear storage-restored ghost candidates and replace
+        // the same Actor's existing registration for the same service. Other active Actor
+        // instances are retained to support horizontal scaling.
+        let partition = self.realm_mut(&actor_id.realm);
+        let entry = partition.services.entry(service_name.clone()).or_default();
         let ghost_actor_ids: Vec<ActrId> = entry
             .iter()
             .filter(|s| s.is_restored_from_storage)
@@ -327,7 +432,7 @@ impl ActorRegistry {
             );
         }
 
-        self.rebuild_indexes_for_service(&service_name);
+        partition.rebuild_indexes_for_service(&service_name);
 
         Ok(())
     }
@@ -336,12 +441,14 @@ impl ActorRegistry {
     pub fn register_service(
         &mut self,
         actor_id: ActrId,
+        actor_type: ActrType,
         service_name: String,
         message_types: Vec<String>,
         capabilities: Option<ServiceCapabilities>,
     ) -> Result<(), String> {
         self.register_service_full(
             actor_id,
+            actor_type,
             service_name,
             message_types,
             capabilities,
@@ -367,10 +474,18 @@ impl ActorRegistry {
             mailbox_backlog
         );
 
+        let storage = self.storage.clone();
+        let Some(partition) = self.realms.get_mut(&actor_id.realm) else {
+            return Err(format!(
+                "No service registration found for Actor {}",
+                actor_id.serial_number
+            ));
+        };
+
         // Find all services for this Actor
-        if let Some(service_names) = self.actor_index.get(actor_id) {
+        if let Some(service_names) = partition.actor_index.get(actor_id) {
             for service_name in service_names {
-                if let Some(services) = self.services.get_mut(service_name) {
+                if let Some(services) = partition.services.get_mut(service_name) {
                     for service in services {
                         if service.actor_id == *actor_id {
                             service.service_availability_state = Some(service_availability_state);
@@ -383,7 +498,7 @@ impl ActorRegistry {
                             );
 
                             // Async update heartbeat time in SQLite cache (background task, non-blocking)
-                            if let Some(storage) = self.storage.clone() {
+                            if let Some(storage) = storage.clone() {
                                 let actor_id_clone = actor_id.clone();
                                 let service_name_clone = service_name.clone();
                                 tokio::spawn(async move {
@@ -413,31 +528,25 @@ impl ActorRegistry {
 
     /// Get service's ServiceSpec (for compatibility checking)
     pub fn get_service_spec(&self, actor_id: &ActrId) -> Option<&actr_protocol::ServiceSpec> {
-        // Find service name from actor_index, then find the instance from services
-        self.actor_index.get(actor_id).and_then(|service_names| {
-            service_names.first().and_then(|service_name| {
-                self.services.get(service_name).and_then(|services| {
-                    services
-                        .iter()
-                        .find(|s| &s.actor_id == actor_id)
-                        .and_then(|s| s.service_spec.as_ref())
-                })
-            })
-        })
+        self.realms
+            .get(&actor_id.realm)?
+            .find(actor_id)?
+            .service_spec
+            .as_ref()
+    }
+
+    /// Get the registered Actor type of an Actor
+    pub fn get_actor_type(&self, actor_id: &ActrId) -> Option<&ActrType> {
+        Some(&self.realms.get(&actor_id.realm)?.find(actor_id)?.actor_type)
     }
 
     /// Get service's ACL (for access control)
     pub fn get_acl(&self, actor_id: &ActrId) -> Option<&actr_protocol::Acl> {
-        self.actor_index.get(actor_id).and_then(|service_names| {
-            service_names.first().and_then(|service_name| {
-                self.services.get(service_name).and_then(|services| {
-                    services
-                        .iter()
-                        .find(|s| &s.actor_id == actor_id)
-                        .and_then(|s| s.acl.as_ref())
-                })
-            })
-        })
+        self.realms
+            .get(&actor_id.realm)?
+            .find(actor_id)?
+            .acl
+            .as_ref()
     }
 
     /// Get ActorRegistryStorage reference (for querying proto specs during compatibility negotiation)
@@ -445,14 +554,17 @@ impl ActorRegistry {
         self.storage.clone()
     }
 
-    /// Discover services by message type
-    pub fn discover_by_message_type(&self, message_type: &str) -> Vec<&ServiceInfo> {
+    /// Discover a Realm's services by message type
+    pub fn discover_by_message_type(&self, realm: &str, message_type: &str) -> Vec<&ServiceInfo> {
         platform::recording::debug!("Discovering services by message type: {}", message_type);
 
-        if let Some(service_names) = self.message_type_index.get(message_type) {
+        let Some(partition) = self.realms.get(realm) else {
+            return Vec::new();
+        };
+        if let Some(service_names) = partition.message_type_index.get(message_type) {
             let mut services = Vec::new();
             for service_name in service_names {
-                if let Some(service_instances) = self.services.get(service_name) {
+                if let Some(service_instances) = partition.services.get(service_name) {
                     // Only return available service instances
                     services.extend(
                         service_instances
@@ -471,11 +583,15 @@ impl ActorRegistry {
         }
     }
 
-    /// Discover services by service name
-    pub fn discover_by_service_name(&self, service_name: &str) -> Vec<&ServiceInfo> {
+    /// Discover a Realm's services by service name
+    pub fn discover_by_service_name(&self, realm: &str, service_name: &str) -> Vec<&ServiceInfo> {
         platform::recording::debug!("Discovering services by name: {}", service_name);
 
-        if let Some(services) = self.services.get(service_name) {
+        if let Some(services) = self
+            .realms
+            .get(realm)
+            .and_then(|partition| partition.services.get(service_name))
+        {
             services
                 .iter()
                 .filter(|s| s.status == ServiceStatus::Available)
@@ -486,78 +602,78 @@ impl ActorRegistry {
         }
     }
 
-    /// Discover services by ServiceSpec name (search across all service types)
-    pub fn discover_by_spec_name(&self, spec_name: &str) -> Vec<&ServiceInfo> {
-        self.services
-            .values()
-            .flatten()
+    /// Discover a Realm's services by ServiceSpec name (search across all service types)
+    pub fn discover_by_spec_name(&self, realm: &str, spec_name: &str) -> Vec<&ServiceInfo> {
+        self.realms
+            .get(realm)
+            .into_iter()
+            .flat_map(Partition::available)
             .filter(|s| {
-                s.status == ServiceStatus::Available
-                    && s.service_spec
-                        .as_ref()
-                        .is_some_and(|spec| spec.name == spec_name)
+                s.service_spec
+                    .as_ref()
+                    .is_some_and(|spec| spec.name == spec_name)
             })
             .collect()
     }
 
-    /// Discover services by requirements
+    /// Discover a Realm's services by requirements
     pub fn discover_by_requirements(
         &self,
+        realm: &str,
         requirements: &ServiceRequirements,
     ) -> Vec<&ServiceInfo> {
         platform::recording::debug!("Discovering services by requirements: {:?}", requirements);
 
         let mut matching_services = Vec::new();
 
-        for services in self.services.values() {
-            for service in services {
-                if service.status != ServiceStatus::Available {
+        for service in self
+            .realms
+            .get(realm)
+            .into_iter()
+            .flat_map(Partition::available)
+        {
+            // Check version requirements
+            if let (Some(min_version), Some(capabilities)) =
+                (&requirements.min_version, &service.capabilities)
+                && let Some(version_range) = &capabilities.version_range
+            {
+                // Simple version comparison; should use semantic versioning in practice
+                if version_range < min_version {
                     continue;
                 }
-
-                // Check version requirements
-                if let (Some(min_version), Some(capabilities)) =
-                    (&requirements.min_version, &service.capabilities)
-                    && let Some(version_range) = &capabilities.version_range
-                {
-                    // Simple version comparison; should use semantic versioning in practice
-                    if version_range < min_version {
-                        continue;
-                    }
-                }
-
-                // Check region preference
-                if let (Some(preferred_regions), Some(capabilities)) =
-                    (&requirements.preferred_regions, &service.capabilities)
-                    && let Some(region) = &capabilities.region
-                    && !preferred_regions.contains(region)
-                {
-                    continue;
-                }
-
-                // Check required tags
-                if let (Some(required_tags), Some(capabilities)) =
-                    (&requirements.required_tags, &service.capabilities)
-                {
-                    if let Some(service_tags) = &capabilities.tags {
-                        let mut all_tags_match = true;
-                        for (key, value) in required_tags {
-                            if service_tags.get(key) != Some(value) {
-                                all_tags_match = false;
-                                break;
-                            }
-                        }
-                        if !all_tags_match {
-                            continue;
-                        }
-                    } else {
-                        // Service has no tags but tags are required
-                        continue;
-                    }
-                }
-
-                matching_services.push(service);
             }
+
+            // Check region preference
+            if let (Some(preferred_regions), Some(capabilities)) =
+                (&requirements.preferred_regions, &service.capabilities)
+                && let Some(region) = &capabilities.region
+                && !preferred_regions.contains(region)
+            {
+                continue;
+            }
+
+            // Check required tags
+            if let (Some(required_tags), Some(capabilities)) =
+                (&requirements.required_tags, &service.capabilities)
+            {
+                if let Some(service_tags) = &capabilities.tags {
+                    let mut all_tags_match = true;
+                    for (key, value) in required_tags {
+                        if service_tags.get(key) != Some(value) {
+                            all_tags_match = false;
+                            break;
+                        }
+                    }
+                    if !all_tags_match {
+                        continue;
+                    }
+                } else {
+                    // Service has no tags but tags are required
+                    continue;
+                }
+            }
+
+            matching_services.push(service);
         }
 
         matching_services
@@ -578,7 +694,11 @@ impl ActorRegistry {
             status
         );
 
-        if let Some(services) = self.services.get_mut(service_name) {
+        if let Some(services) = self
+            .realms
+            .get_mut(&actor_id.realm)
+            .and_then(|partition| partition.services.get_mut(service_name))
+        {
             for service in services {
                 if service.actor_id == *actor_id {
                     service.status = status;
@@ -612,37 +732,8 @@ impl ActorRegistry {
             actor_id.to_string_repr()
         );
 
-        // Remove from service map
-        if let Some(services) = self.services.get_mut(service_name) {
-            let original_len = services.len();
-            services.retain(|s| s.actor_id != *actor_id);
-
-            if services.len() == original_len {
-                return Err(format!(
-                    "Service instance to unregister not found: {} (Actor {})",
-                    service_name, actor_id.serial_number
-                ));
-            }
-
-            // If this is the last instance, clean up the message type index
-            if services.is_empty() {
-                self.services.remove(service_name);
-
-                // Remove from message type index
-                self.message_type_index.retain(|_, service_names| {
-                    service_names.retain(|name| name != service_name);
-                    !service_names.is_empty()
-                });
-            }
-        }
-
-        // Remove from Actor index
-        if let Some(actor_services) = self.actor_index.get_mut(actor_id) {
-            actor_services.retain(|name| name != service_name);
-
-            if actor_services.is_empty() {
-                self.actor_index.remove(actor_id);
-            }
+        if let Some(partition) = self.realms.get_mut(&actor_id.realm) {
+            partition.remove(actor_id, service_name)?;
         }
 
         // Async delete from SQLite cache (background task, non-blocking)
@@ -662,6 +753,15 @@ impl ActorRegistry {
         Ok(())
     }
 
+    /// The service names an Actor has registered
+    fn service_names(&self, actor_id: &ActrId) -> Vec<String> {
+        self.realms
+            .get(&actor_id.realm)
+            .and_then(|partition| partition.actor_index.get(actor_id))
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Unregister all services for an Actor
     pub fn unregister_actor(&mut self, actor_id: &ActrId) {
         platform::recording::info!(
@@ -669,7 +769,11 @@ impl ActorRegistry {
             actor_id.to_string_repr()
         );
 
-        if let Some(service_names) = self.actor_index.remove(actor_id) {
+        if let Some(service_names) = self
+            .realms
+            .get_mut(&actor_id.realm)
+            .and_then(|partition| partition.actor_index.remove(actor_id))
+        {
             for service_name in &service_names {
                 let _ = self.unregister_service(actor_id, service_name);
             }
@@ -683,11 +787,7 @@ impl ActorRegistry {
     /// of on a detached task; callers may only acknowledge an unregistration
     /// with `UnregisterOk` after this returns `Ok`.
     pub async fn unregister_actor_durable(&mut self, actor_id: &ActrId) -> Result<(), String> {
-        let service_names: Vec<String> = self
-            .actor_index
-            .get(actor_id)
-            .map(|names| names.to_vec())
-            .unwrap_or_default();
+        let service_names = self.service_names(actor_id);
         if let Some(storage) = self.storage.clone() {
             for service_name in &service_names {
                 storage
@@ -713,9 +813,15 @@ impl ActorRegistry {
             actor_id.to_string_repr()
         );
 
-        if let Some(service_names) = self.actor_index.get(actor_id).cloned() {
-            for service_name in &service_names {
-                let _ = self.unregister_service_memory_only(actor_id, service_name);
+        if let Some(partition) = self.realms.get_mut(&actor_id.realm) {
+            for service_name in partition
+                .actor_index
+                .get(actor_id)
+                .cloned()
+                .unwrap_or_default()
+            {
+                // Note: do not delete database data; preserve for later recovery
+                let _ = partition.remove(actor_id, &service_name);
             }
         }
     }
@@ -729,71 +835,27 @@ impl ActorRegistry {
         let current_time = current_timestamp();
         let expiry_threshold = SERVICE_EXPIRY_THRESHOLD_SECS;
 
-        let mut services_to_remove = Vec::new();
+        for partition in self.realms.values_mut() {
+            let mut services_to_remove = Vec::new();
 
-        for (service_name, services) in &self.services {
-            for service in services {
-                if current_time - service.last_heartbeat_time_secs > expiry_threshold {
-                    services_to_remove.push((service.actor_id.clone(), service_name.clone()));
+            for (service_name, services) in &partition.services {
+                for service in services {
+                    if current_time - service.last_heartbeat_time_secs > expiry_threshold {
+                        services_to_remove.push((service.actor_id.clone(), service_name.clone()));
+                    }
                 }
             }
-        }
 
-        for (actor_id, service_name) in services_to_remove {
-            platform::recording::warn!(
-                "Cleaning expired service from memory: {} (Actor {}) [database retained for recovery]",
-                service_name,
-                actor_id.to_string_repr()
-            );
-            // Only clean up memory; do not delete from database
-            let _ = self.unregister_service_memory_only(&actor_id, &service_name);
-        }
-    }
-
-    /// Unregister service from memory only, without deleting database data
-    ///
-    /// Used for expired service cleanup; preserves database data for later recovery.
-    fn unregister_service_memory_only(
-        &mut self,
-        actor_id: &ActrId,
-        service_name: &str,
-    ) -> Result<(), String> {
-        // Remove from service map
-        if let Some(services) = self.services.get_mut(service_name) {
-            let original_len = services.len();
-            services.retain(|s| s.actor_id != *actor_id);
-
-            if services.len() == original_len {
-                return Err(format!(
-                    "Service instance to unregister not found: {} (Actor {})",
-                    service_name, actor_id.serial_number
-                ));
-            }
-
-            // If this is the last instance, clean up the message type index
-            if services.is_empty() {
-                self.services.remove(service_name);
-
-                // Remove from message type index
-                self.message_type_index.retain(|_, service_names| {
-                    service_names.retain(|name| name != service_name);
-                    !service_names.is_empty()
-                });
+            for (actor_id, service_name) in services_to_remove {
+                platform::recording::warn!(
+                    "Cleaning expired service from memory: {} (Actor {}) [database retained for recovery]",
+                    service_name,
+                    actor_id.to_string_repr()
+                );
+                // Only clean up memory; do not delete from database
+                let _ = partition.remove(&actor_id, &service_name);
             }
         }
-
-        // Remove from Actor index
-        if let Some(actor_services) = self.actor_index.get_mut(actor_id) {
-            actor_services.retain(|name| name != service_name);
-
-            if actor_services.is_empty() {
-                self.actor_index.remove(actor_id);
-            }
-        }
-
-        // Note: do not delete database data; preserve for later recovery
-
-        Ok(())
     }
 
     /// Restore service from database (used during heartbeat recovery)
@@ -817,7 +879,7 @@ impl ActorRegistry {
     ) -> Result<bool, String> {
         // Check if a storage backend is available
         let storage = match &self.storage {
-            Some(s) => s,
+            Some(s) => s.clone(),
             None => {
                 platform::recording::debug!("No storage backend available for service recovery");
                 return Ok(false);
@@ -844,7 +906,11 @@ impl ActorRegistry {
             actor_id.to_string_repr()
         );
 
+        if self.is_retired(&actor_id.realm) {
+            return Ok(false);
+        }
         let mut restored_count = 0;
+        let partition = self.realm_mut(&actor_id.realm);
 
         // Re-register each service into memory
         for mut service in services {
@@ -860,7 +926,7 @@ impl ActorRegistry {
             service.is_restored_from_storage = true;
 
             let service_name = service.service_name.clone();
-            let service_entries = self.services.entry(service_name.clone()).or_default();
+            let service_entries = partition.services.entry(service_name.clone()).or_default();
             let inserted = if service_entries
                 .iter()
                 .any(|entry| entry.actor_id == service.actor_id)
@@ -874,7 +940,7 @@ impl ActorRegistry {
             // The message type index stores service_name; ensure each mapping appears only once.
             let mut message_index_updated = false;
             for message_type in &service.message_types {
-                let service_names = self
+                let service_names = partition
                     .message_type_index
                     .entry(message_type.clone())
                     .or_default();
@@ -885,7 +951,7 @@ impl ActorRegistry {
             }
 
             // Update Actor index
-            let actor_services = self
+            let actor_services = partition
                 .actor_index
                 .entry(service.actor_id.clone())
                 .or_default();
@@ -917,10 +983,12 @@ impl ActorRegistry {
         Ok(restored_count > 0)
     }
 
-    /// Get all service statistics
-    pub fn get_service_stats(&self) -> HashMap<String, usize> {
-        self.services
-            .iter()
+    /// Get a Realm's service statistics
+    pub fn get_service_stats(&self, realm: &str) -> HashMap<String, usize> {
+        self.realms
+            .get(realm)
+            .into_iter()
+            .flat_map(|partition| &partition.services)
             .map(|(name, instances)| {
                 let available_count = instances
                     .iter()
@@ -931,83 +999,61 @@ impl ActorRegistry {
             .collect()
     }
 
-    /// Get message type mapping statistics
-    pub fn get_message_type_stats(&self) -> HashMap<String, usize> {
-        self.message_type_index
-            .iter()
+    /// Get a Realm's message type mapping statistics
+    pub fn get_message_type_stats(&self, realm: &str) -> HashMap<String, usize> {
+        self.realms
+            .get(realm)
+            .into_iter()
+            .flat_map(|partition| &partition.message_type_index)
             .map(|(msg_type, services)| (msg_type.clone(), services.len()))
             .collect()
     }
 
-    /// Get all services (for service discovery)
+    /// Get all services of a Realm (for service discovery)
     ///
     /// # Arguments
+    /// - `realm`: Realm of the requester
     /// - `publisher`: Optional publisher filter
     ///
     /// # Returns
     /// List of all matching service instances
-    pub fn discover_all(&self, publisher: Option<&str>) -> Vec<&ServiceInfo> {
-        let mut results = Vec::new();
-
-        for services in self.services.values() {
-            for service in services {
-                // Only return available services
-                if service.status != ServiceStatus::Available {
-                    continue;
-                }
-
-                // Filter by publisher
-                if let Some(publisher) = publisher
-                    && service.actor_id.r#type.publisher != publisher
-                {
-                    continue;
-                }
-
-                results.push(service);
-            }
-        }
-
-        results
+    pub fn discover_all(&self, realm: &str, publisher: Option<&str>) -> Vec<&ServiceInfo> {
+        self.realms
+            .get(realm)
+            .into_iter()
+            .flat_map(Partition::available)
+            .filter(|service| publisher.is_none_or(|p| service.actor_type.publisher == p))
+            .collect()
     }
 
-    /// Find service instances by ActrType (for load-balancing routing)
+    /// Find a Realm's service instances by ActrType (for load-balancing routing)
     ///
     /// # Arguments
+    /// - `realm`: Realm of the requester
     /// - `target_type`: Target Actor type
     ///
     /// # Returns
     /// All available service instances matching the type (cloned)
-    pub fn find_by_actr_type(&self, target_type: &ActrType) -> Vec<ServiceInfo> {
-        let mut results = Vec::new();
-
-        for services in self.services.values() {
-            for service in services {
-                // Only return available services
-                if service.status != ServiceStatus::Available {
-                    continue;
-                }
-
-                // Exact match ActrType (publisher + name + version)
-                if service.actor_id.r#type.publisher == target_type.publisher
-                    && service.actor_id.r#type.name == target_type.name
-                    && service.actor_id.r#type.version == target_type.version
-                {
-                    results.push(service.clone());
-                }
-            }
-        }
-
-        results
+    pub fn find_by_actr_type(&self, realm: &str, target_type: &ActrType) -> Vec<ServiceInfo> {
+        self.realms
+            .get(realm)
+            .into_iter()
+            .flat_map(Partition::available)
+            // Exact match ActrType (publisher + name + version)
+            .filter(|service| &service.actor_type == target_type)
+            .cloned()
+            .collect()
     }
 
     /// Discover services by ActrType with ACL filtering
     ///
-    /// Returns only services that the requester is allowed to discover
-    /// based on ACL rules
+    /// Returns only services of the requester's Realm that the requester is
+    /// allowed to discover based on ACL rules
     ///
     /// # Arguments
     ///
     /// - `requester_id`: Actor requesting discovery
+    /// - `requester_type`: Verified Actor type of the requester
     /// - `target_type`: Target service type
     ///
     /// # Returns
@@ -1016,9 +1062,10 @@ impl ActorRegistry {
     pub async fn discover_with_acl(
         &self,
         requester_id: &ActrId,
+        requester_type: &ActrType,
         target_type: &ActrType,
     ) -> Result<Vec<ServiceInfo>, RealmError> {
-        let all_services = self.find_by_actr_type(target_type);
+        let all_services = self.find_by_actr_type(&requester_id.realm, target_type);
         let total_count = all_services.len(); // Save count before moving
 
         let mut allowed_services = Vec::new();
@@ -1030,7 +1077,13 @@ impl ActorRegistry {
             }
 
             // ACL check: can requester discover this service?
-            let can_discover = Self::check_discovery_acl(requester_id, &service.actor_id).await?;
+            let can_discover = Self::check_discovery_acl(
+                requester_id,
+                requester_type,
+                &service.actor_id,
+                &service.actor_type,
+            )
+            .await?;
 
             if can_discover {
                 allowed_services.push(service);
@@ -1058,32 +1111,37 @@ impl ActorRegistry {
     ///
     /// # Arguments
     ///
-    /// - `from_actor`: Actor requesting discovery
-    /// - `to_actor`: Target actor
+    /// - `from_actor` / `from_type`: Actor requesting discovery and its type
+    /// - `to_actor` / `to_type`: Target actor and its type
     ///
     /// # Returns
     ///
     /// Returns true if discovery is allowed based on ACL rules
     async fn check_discovery_acl(
         from_actor: &ActrId,
+        from_type: &ActrType,
         to_actor: &ActrId,
+        to_type: &ActrType,
     ) -> Result<bool, RealmError> {
-        // Extract realm and actor types
-        let from_realm = from_actor.realm.realm_id;
-        let to_realm = to_actor.realm.realm_id;
-
-        let from_type = from_actor.r#type.to_string_repr();
-        let to_type = to_actor.r#type.to_string_repr();
-
-        ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
+        ActorAcl::can_discover(
+            &from_actor.realm,
+            &to_actor.realm,
+            &from_type.to_string_repr(),
+            &to_type.to_string_repr(),
+        )
+        .await
     }
 
     /// Simulate restore_from_storage scenario: mark all entries under the given service_name as storage-restored.
     ///
     /// Test-only helper for verifying ghost candidate cleanup logic.
     #[cfg(test)]
-    pub fn mark_all_as_restored(&mut self, service_name: &str) {
-        if let Some(entries) = self.services.get_mut(service_name) {
+    pub fn mark_all_as_restored(&mut self, realm: &str, service_name: &str) {
+        if let Some(entries) = self
+            .realms
+            .get_mut(realm)
+            .and_then(|partition| partition.services.get_mut(service_name))
+        {
             for entry in entries.iter_mut() {
                 entry.is_restored_from_storage = true;
             }
@@ -1110,28 +1168,32 @@ mod tests {
     use std::path::Path;
     use tokio::sync::OnceCell;
 
+    const TEST_REALM: &str = "test@example.com";
+
     fn create_test_actor_id(serial: u64) -> ActrId {
         ActrId {
             serial_number: serial,
-            r#type: ActrType {
-                publisher: "test".to_string(),
-                name: "test".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: actr_protocol::Realm { realm_id: 0 },
+            realm: TEST_REALM.to_string(),
         }
     }
 
-    fn create_actor_id(serial: u64, realm_id: u32, publisher: &str, name: &str) -> ActrId {
+    fn create_actor_id(serial: u64, realm: &str) -> ActrId {
         ActrId {
             serial_number: serial,
-            r#type: ActrType {
-                publisher: publisher.to_string(),
-                name: name.to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: actr_protocol::Realm { realm_id },
+            realm: realm.to_string(),
         }
+    }
+
+    fn create_actor_type(publisher: &str, name: &str) -> ActrType {
+        ActrType {
+            publisher: publisher.to_string(),
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+        }
+    }
+
+    fn test_type() -> ActrType {
+        create_actor_type("test", "test")
     }
 
     async fn setup_test_db() -> anyhow::Result<()> {
@@ -1180,6 +1242,7 @@ mod tests {
 
         let result = registry.register_service(
             actor_id.clone(),
+            test_type(),
             "test_service".to_string(),
             vec!["TestMessage".to_string()],
             None,
@@ -1187,7 +1250,7 @@ mod tests {
 
         assert!(result.is_ok());
 
-        let services = registry.discover_by_message_type("TestMessage");
+        let services = registry.discover_by_message_type(TEST_REALM, "TestMessage");
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].actor_id, actor_id);
     }
@@ -1201,6 +1264,7 @@ mod tests {
         registry
             .register_service(
                 actor_id1,
+                test_type(),
                 "service1".to_string(),
                 vec!["Message1".to_string()],
                 None,
@@ -1210,19 +1274,20 @@ mod tests {
         registry
             .register_service(
                 actor_id2,
+                test_type(),
                 "service2".to_string(),
                 vec!["Message1".to_string(), "Message2".to_string()],
                 None,
             )
             .unwrap();
 
-        let services = registry.discover_by_message_type("Message1");
+        let services = registry.discover_by_message_type(TEST_REALM, "Message1");
         assert_eq!(services.len(), 2);
 
-        let services = registry.discover_by_message_type("Message2");
+        let services = registry.discover_by_message_type(TEST_REALM, "Message2");
         assert_eq!(services.len(), 1);
 
-        let services = registry.discover_by_message_type("Message3");
+        let services = registry.discover_by_message_type(TEST_REALM, "Message3");
         assert_eq!(services.len(), 0);
     }
 
@@ -1234,6 +1299,7 @@ mod tests {
         registry
             .register_service(
                 actor_id.clone(),
+                test_type(),
                 "test_service".to_string(),
                 vec!["TestMessage".to_string()],
                 None,
@@ -1241,7 +1307,7 @@ mod tests {
             .unwrap();
 
         // Verify service is registered
-        let services = registry.discover_by_message_type("TestMessage");
+        let services = registry.discover_by_message_type(TEST_REALM, "TestMessage");
         assert_eq!(services.len(), 1);
 
         // Unregister service
@@ -1249,7 +1315,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify service has been removed
-        let services = registry.discover_by_message_type("TestMessage");
+        let services = registry.discover_by_message_type(TEST_REALM, "TestMessage");
         assert_eq!(services.len(), 0);
     }
 
@@ -1270,6 +1336,7 @@ mod tests {
         registry
             .register_service(
                 actor_id1.clone(),
+                test_type(),
                 "test_service".to_string(),
                 vec!["Test".to_string()],
                 None,
@@ -1289,6 +1356,7 @@ mod tests {
         registry
             .register_service(
                 actor_id.clone(),
+                test_type(),
                 "test_service".to_string(),
                 vec!["TestMessage".to_string()],
                 None,
@@ -1301,7 +1369,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify status updated (Busy services should not appear in discovery results)
-        let services = registry.discover_by_message_type("TestMessage");
+        let services = registry.discover_by_message_type(TEST_REALM, "TestMessage");
         assert_eq!(
             services.len(),
             0,
@@ -1312,7 +1380,7 @@ mod tests {
         registry
             .update_service_status(&actor_id, "test_service", ServiceStatus::Available, None)
             .unwrap();
-        let services = registry.discover_by_message_type("TestMessage");
+        let services = registry.discover_by_message_type(TEST_REALM, "TestMessage");
         assert_eq!(services.len(), 1);
     }
 
@@ -1324,6 +1392,7 @@ mod tests {
         registry
             .register_service(
                 actor_id.clone(),
+                test_type(),
                 "test_service".to_string(),
                 vec!["TestMessage".to_string()],
                 None,
@@ -1335,7 +1404,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify metrics have been updated
-        let services = registry.discover_by_service_name("test_service");
+        let services = registry.discover_by_service_name(TEST_REALM, "test_service");
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].service_availability_state, Some(0));
         assert_eq!(services[0].power_reserve, Some(0.8));
@@ -1352,6 +1421,7 @@ mod tests {
         registry
             .register_service(
                 actor_id1,
+                test_type(),
                 "api_service".to_string(),
                 vec!["ApiMessage".to_string()],
                 None,
@@ -1361,16 +1431,17 @@ mod tests {
         registry
             .register_service(
                 actor_id2,
+                test_type(),
                 "api_service".to_string(),
                 vec!["ApiMessage".to_string()],
                 None,
             )
             .unwrap();
 
-        let services = registry.discover_by_service_name("api_service");
+        let services = registry.discover_by_service_name(TEST_REALM, "api_service");
         assert_eq!(services.len(), 2);
 
-        let services = registry.discover_by_service_name("nonexistent");
+        let services = registry.discover_by_service_name(TEST_REALM, "nonexistent");
         assert_eq!(services.len(), 0);
     }
 
@@ -1383,6 +1454,7 @@ mod tests {
         registry
             .register_service(
                 actor_id.clone(),
+                test_type(),
                 "service1".to_string(),
                 vec!["Message1".to_string()],
                 None,
@@ -1392,6 +1464,7 @@ mod tests {
         registry
             .register_service(
                 actor_id.clone(),
+                test_type(),
                 "service2".to_string(),
                 vec!["Message2".to_string()],
                 None,
@@ -1399,15 +1472,172 @@ mod tests {
             .unwrap();
 
         // Verify service is registered
-        assert_eq!(registry.discover_by_message_type("Message1").len(), 1);
-        assert_eq!(registry.discover_by_message_type("Message2").len(), 1);
+        assert_eq!(
+            registry
+                .discover_by_message_type(TEST_REALM, "Message1")
+                .len(),
+            1
+        );
+        assert_eq!(
+            registry
+                .discover_by_message_type(TEST_REALM, "Message2")
+                .len(),
+            1
+        );
 
         // Unregister all services for the Actor
         registry.unregister_actor(&actor_id);
 
         // Verify all services have been removed
-        assert_eq!(registry.discover_by_message_type("Message1").len(), 0);
-        assert_eq!(registry.discover_by_message_type("Message2").len(), 0);
+        assert_eq!(
+            registry
+                .discover_by_message_type(TEST_REALM, "Message1")
+                .len(),
+            0
+        );
+        assert_eq!(
+            registry
+                .discover_by_message_type(TEST_REALM, "Message2")
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_actors_are_keyed_by_realm_and_serial() {
+        let mut registry = ActorRegistry::new();
+        let other_type = create_actor_type("test", "other");
+        let same_serial_other_realm = create_actor_id(1, "other@example.com");
+        let other_serial_same_realm = create_test_actor_id(2);
+        for (actor_id, actor_type) in [
+            (create_test_actor_id(1), test_type()),
+            (same_serial_other_realm.clone(), other_type.clone()),
+            (other_serial_same_realm.clone(), other_type.clone()),
+        ] {
+            registry
+                .register_service(
+                    actor_id,
+                    actor_type,
+                    "service".to_string(),
+                    vec!["Message".to_string()],
+                    None,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            registry
+                .discover_by_message_type(TEST_REALM, "Message")
+                .len(),
+            2
+        );
+        assert_eq!(
+            registry
+                .discover_by_message_type("other@example.com", "Message")
+                .len(),
+            1
+        );
+        assert_eq!(
+            registry.get_actor_type(&create_test_actor_id(1)),
+            Some(&test_type())
+        );
+        assert_eq!(
+            registry.get_actor_type(&same_serial_other_realm),
+            Some(&other_type)
+        );
+
+        registry.unregister_actor(&create_test_actor_id(1));
+        assert_eq!(registry.get_actor_type(&create_test_actor_id(1)), None);
+        assert_eq!(
+            registry.get_actor_type(&same_serial_other_realm),
+            Some(&other_type)
+        );
+        assert_eq!(
+            registry.get_actor_type(&other_serial_same_realm),
+            Some(&other_type)
+        );
+    }
+
+    #[test]
+    fn realms_with_the_same_type_and_serial_are_partitioned() {
+        let mut registry = ActorRegistry::new();
+        let other_realm = "other@example.com";
+        let spec = actr_protocol::ServiceSpec {
+            name: "echo.Echo".to_string(),
+            ..Default::default()
+        };
+        let a = create_test_actor_id(7);
+        let b = create_actor_id(7, other_realm);
+        for actor_id in [a.clone(), b.clone()] {
+            registry
+                .register_service_full(
+                    actor_id,
+                    test_type(),
+                    "svc".to_string(),
+                    vec!["Message".to_string()],
+                    None,
+                    Some(spec.clone()),
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+
+        for (realm, actor_id) in [(TEST_REALM, &a), (other_realm, &b)] {
+            let only = |services: Vec<&ServiceInfo>| {
+                services
+                    .iter()
+                    .map(|s| s.actor_id.clone())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                only(registry.discover_all(realm, None)),
+                vec![actor_id.clone()]
+            );
+            assert_eq!(
+                only(registry.discover_by_spec_name(realm, "echo.Echo")),
+                vec![actor_id.clone()]
+            );
+            assert_eq!(
+                only(registry.discover_by_message_type(realm, "Message")),
+                vec![actor_id.clone()]
+            );
+            let by_type = registry.find_by_actr_type(realm, &test_type());
+            assert_eq!(by_type.len(), 1);
+            assert_eq!(&by_type[0].actor_id, actor_id);
+        }
+        assert!(registry.discover_all("third@example.com", None).is_empty());
+
+        // A registration in one Realm clears only that Realm's restored
+        // candidates.
+        registry.mark_all_as_restored(TEST_REALM, "svc");
+        registry.mark_all_as_restored(other_realm, "svc");
+        registry
+            .register_service(
+                create_test_actor_id(8),
+                test_type(),
+                "svc".to_string(),
+                vec![],
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            registry.find_by_actr_type(TEST_REALM, &test_type()).len(),
+            1
+        );
+        let other = registry.find_by_actr_type(other_realm, &test_type());
+        assert_eq!(other.len(), 1);
+        assert!(other[0].is_restored_from_storage);
+
+        registry.unregister_actor(&b);
+        assert!(
+            registry
+                .find_by_actr_type(other_realm, &test_type())
+                .is_empty()
+        );
+        assert_eq!(
+            registry.find_by_actr_type(TEST_REALM, &test_type()).len(),
+            1
+        );
     }
 
     #[test]
@@ -1428,13 +1658,14 @@ mod tests {
         registry
             .register_service(
                 actor_id,
+                test_type(),
                 "test_service".to_string(),
                 vec!["TestMessage".to_string()],
                 Some(capabilities),
             )
             .unwrap();
 
-        let services = registry.discover_by_message_type("TestMessage");
+        let services = registry.discover_by_message_type(TEST_REALM, "TestMessage");
         assert_eq!(services.len(), 1);
         assert!(services[0].capabilities.is_some());
         assert_eq!(
@@ -1456,6 +1687,7 @@ mod tests {
         registry
             .register_service(
                 actor_id1,
+                test_type(),
                 "service_us".to_string(),
                 vec!["Message1".to_string()],
                 Some(ServiceCapabilities {
@@ -1473,6 +1705,7 @@ mod tests {
         registry
             .register_service(
                 actor_id2,
+                test_type(),
                 "service_eu".to_string(),
                 vec!["Message1".to_string()],
                 Some(ServiceCapabilities {
@@ -1491,7 +1724,7 @@ mod tests {
             required_tags: None,
         };
 
-        let services = registry.discover_by_requirements(&requirements);
+        let services = registry.discover_by_requirements(TEST_REALM, &requirements);
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].service_name, "service_us");
 
@@ -1502,7 +1735,7 @@ mod tests {
             required_tags: Some(tags_us),
         };
 
-        let services = registry.discover_by_requirements(&requirements);
+        let services = registry.discover_by_requirements(TEST_REALM, &requirements);
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].service_name, "service_us");
     }
@@ -1517,6 +1750,7 @@ mod tests {
         registry
             .register_service(
                 actor_id1,
+                test_type(),
                 "service1".to_string(),
                 vec!["Message1".to_string()],
                 None,
@@ -1526,19 +1760,20 @@ mod tests {
         registry
             .register_service(
                 actor_id2,
+                test_type(),
                 "service2".to_string(),
                 vec!["Message1".to_string()],
                 None,
             )
             .unwrap();
 
-        let stats = registry.get_service_stats();
+        let stats = registry.get_service_stats(TEST_REALM);
         assert_eq!(stats.get("service1"), Some(&1)); // service1 has 1 instance
         assert_eq!(stats.get("service2"), Some(&1)); // service2 has 1 instance
 
         // get_message_type_stats() returns the number of service names per message type
         // Note: the current implementation may add duplicate service names to the index for each registered service instance
-        let msg_stats = registry.get_message_type_stats();
+        let msg_stats = registry.get_message_type_stats(TEST_REALM);
         assert_eq!(msg_stats.get("Message1"), Some(&2)); // Message1 is supported by 2 service names
     }
 
@@ -1560,6 +1795,7 @@ mod tests {
 
         let result = registry.register_service_full(
             actor_id.clone(),
+            test_type(),
             "secure_service".to_string(),
             vec!["SecureMessage".to_string()],
             None,
@@ -1585,39 +1821,14 @@ mod tests {
     fn test_find_by_actr_type() {
         let mut registry = ActorRegistry::new();
 
-        let actor_id1 = ActrId {
-            serial_number: 1,
-            r#type: ActrType {
-                publisher: "acme".to_string(),
-                name: "worker".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: actr_protocol::Realm { realm_id: 0 },
-        };
-
-        let actor_id2 = ActrId {
-            serial_number: 2,
-            r#type: ActrType {
-                publisher: "acme".to_string(),
-                name: "worker".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: actr_protocol::Realm { realm_id: 0 },
-        };
-
-        let actor_id3 = ActrId {
-            serial_number: 3,
-            r#type: ActrType {
-                publisher: "other".to_string(),
-                name: "service".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: actr_protocol::Realm { realm_id: 0 },
-        };
+        let actor_id1 = create_test_actor_id(1);
+        let actor_id2 = create_test_actor_id(2);
+        let actor_id3 = create_test_actor_id(3);
 
         registry
             .register_service(
                 actor_id1,
+                create_actor_type("acme", "worker"),
                 "worker1".to_string(),
                 vec!["Work".to_string()],
                 None,
@@ -1627,6 +1838,7 @@ mod tests {
         registry
             .register_service(
                 actor_id2,
+                create_actor_type("acme", "worker"),
                 "worker2".to_string(),
                 vec!["Work".to_string()],
                 None,
@@ -1636,6 +1848,7 @@ mod tests {
         registry
             .register_service(
                 actor_id3,
+                create_actor_type("other", "service"),
                 "other_service".to_string(),
                 vec!["Other".to_string()],
                 None,
@@ -1648,12 +1861,12 @@ mod tests {
             version: "1.0.0".to_string(),
         };
 
-        let results = registry.find_by_actr_type(&target_type);
+        let results = registry.find_by_actr_type(TEST_REALM, &target_type);
         assert_eq!(results.len(), 2);
         assert!(
-            results.iter().all(
-                |s| s.actor_id.r#type.publisher == "acme" && s.actor_id.r#type.name == "worker"
-            )
+            results
+                .iter()
+                .all(|s| s.actor_type.publisher == "acme" && s.actor_type.name == "worker")
         );
     }
 
@@ -1661,102 +1874,98 @@ mod tests {
     fn test_discover_all_with_publisher_filter() {
         let mut registry = ActorRegistry::new();
 
-        let actor_id1 = ActrId {
-            serial_number: 1,
-            r#type: ActrType {
-                publisher: "acme".to_string(),
-                name: "service1".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: actr_protocol::Realm { realm_id: 0 },
-        };
-
-        let actor_id2 = ActrId {
-            serial_number: 2,
-            r#type: ActrType {
-                publisher: "vendor".to_string(),
-                name: "service2".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: actr_protocol::Realm { realm_id: 0 },
-        };
+        let actor_id1 = create_test_actor_id(1);
+        let actor_id2 = create_test_actor_id(2);
 
         registry
-            .register_service(actor_id1, "s1".to_string(), vec!["M1".to_string()], None)
+            .register_service(
+                actor_id1,
+                create_actor_type("acme", "service1"),
+                "s1".to_string(),
+                vec!["M1".to_string()],
+                None,
+            )
             .unwrap();
 
         registry
-            .register_service(actor_id2, "s2".to_string(), vec!["M2".to_string()], None)
+            .register_service(
+                actor_id2,
+                create_actor_type("vendor", "service2"),
+                "s2".to_string(),
+                vec!["M2".to_string()],
+                None,
+            )
             .unwrap();
 
         // No filter
-        let all = registry.discover_all(None);
+        let all = registry.discover_all(TEST_REALM, None);
         assert_eq!(all.len(), 2);
 
         // Filter by publisher
-        let acme_only = registry.discover_all(Some("acme"));
+        let acme_only = registry.discover_all(TEST_REALM, Some("acme"));
         assert_eq!(acme_only.len(), 1);
-        assert_eq!(acme_only[0].actor_id.r#type.publisher, "acme");
+        assert_eq!(acme_only[0].actor_type.publisher, "acme");
     }
 
-    /// Disabled under the single-Realm v1 production profile: the `realm`
-    /// table carries a singleton unique index (`idx_realm_singleton`) and
-    /// `actoracl.realm_id` has a FK to `realm(id)`, so seeding three distinct
-    /// cross-realm rows is impossible. The cross-realm ACL *logic* in
-    /// `check_discovery_acl` is retained; re-enable when multi-realm returns.
+    /// Actors in different Realms never discover each other, even when a
+    /// connection ACL rule names the source Realm; within a Realm the full
+    /// Actor type decides.
     #[tokio::test]
     #[serial]
-    #[ignore = "single-Realm v1 schema forbids multi-realm seeding"]
     async fn test_check_discovery_acl_cross_realm_and_full_type() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        let source_realm = 4_100_001;
-        let target_realm = 4_100_002;
-        let other_realm = 4_100_003;
-
-        let mut source_realm_entity = RealmEntity {
-            id: source_realm,
-            name: "source-realm".to_string(),
-            ..Default::default()
-        };
-        let mut target_realm_entity = RealmEntity {
-            id: target_realm,
-            name: "target-realm".to_string(),
-            ..Default::default()
-        };
-        let mut other_realm_entity = RealmEntity {
-            id: other_realm,
-            name: "other-realm".to_string(),
-            ..Default::default()
-        };
-        let _ = source_realm_entity.save().await;
-        let _ = target_realm_entity.save().await;
-        let _ = other_realm_entity.save().await;
+        let source_realm = "source@example.com";
+        let target_realm = "target@example.com";
+        let other_realm = "other@acme.com";
+        for name in [source_realm, target_realm, other_realm] {
+            if RealmEntity::get(name).await?.is_none() {
+                RealmEntity::create(name.to_string()).await?;
+            }
+        }
 
         let _ = ActorAcl::delete_by_target(target_realm, "acme/worker@1.0.0").await?;
+        let rules = [
+            ActorAcl::new_with_source_realm(
+                target_realm.to_string(),
+                Some(source_realm.to_string()),
+                "acme/edge@1.0.0".to_string(),
+                "acme/worker@1.0.0".to_string(),
+                true,
+            ),
+            ActorAcl::new(
+                target_realm.to_string(),
+                "acme/edge@1.0.0".to_string(),
+                "acme/worker@1.0.0".to_string(),
+                true,
+            ),
+        ];
+        ActorAcl::replace_for_target(target_realm, "acme/worker@1.0.0", &rules).await?;
 
-        let mut acl = ActorAcl::new_with_source_realm(
-            target_realm,
-            Some(source_realm),
-            "acme/edge@1.0.0".to_string(),
-            "acme/worker@1.0.0".to_string(),
-            true,
-        );
-        let _ = acl.save().await?;
+        let edge = create_actor_type("acme", "edge");
+        let worker = create_actor_type("acme", "worker");
+        let to_target = create_actor_id(2, target_realm);
 
-        let from_allowed = create_actor_id(1, source_realm, "acme", "edge");
-        let to_target = create_actor_id(2, target_realm, "acme", "worker");
-        let allowed = ActorRegistry::check_discovery_acl(&from_allowed, &to_target).await?;
+        let same_realm = create_actor_id(1, target_realm);
+        let allowed =
+            ActorRegistry::check_discovery_acl(&same_realm, &edge, &to_target, &worker).await?;
         assert!(allowed);
 
-        let from_wrong_realm = create_actor_id(3, other_realm, "acme", "edge");
-        let denied_wrong_realm =
-            ActorRegistry::check_discovery_acl(&from_wrong_realm, &to_target).await?;
-        assert!(!denied_wrong_realm);
+        for realm in [source_realm, other_realm] {
+            let from_other_realm = create_actor_id(3, realm);
+            let denied =
+                ActorRegistry::check_discovery_acl(&from_other_realm, &edge, &to_target, &worker)
+                    .await?;
+            assert!(!denied, "cross-Realm discovery from {realm} must be denied");
+        }
 
-        let from_wrong_publisher = create_actor_id(4, source_realm, "other", "edge");
-        let denied_wrong_publisher =
-            ActorRegistry::check_discovery_acl(&from_wrong_publisher, &to_target).await?;
+        let denied_wrong_publisher = ActorRegistry::check_discovery_acl(
+            &same_realm,
+            &create_actor_type("other", "edge"),
+            &to_target,
+            &worker,
+        )
+        .await?;
         assert!(!denied_wrong_publisher);
 
         Ok(())
@@ -1782,24 +1991,17 @@ mod tests {
         };
 
         // ActorId A: from SQLite restore (loaded by restore_from_storage during actrix restart)
-        let actor_id_a = ActrId {
-            serial_number: 11111, // old serial
-            realm: actr_protocol::Realm { realm_id: 1 },
-            r#type: actr_type.clone(),
-        };
+        let actor_id_a = create_test_actor_id(11111); // old serial
 
         // ActorId B: new service process registration, new serial assigned by Issuer
-        let actor_id_b = ActrId {
-            serial_number: 22222, // new serial, different from A
-            realm: actr_protocol::Realm { realm_id: 1 },
-            r#type: actr_type.clone(),
-        };
+        let actor_id_b = create_test_actor_id(22222); // new serial, different from A
 
         // First registration: simulate actrix restart loading ActorId A via restore_from_storage()
         // Immediately mark as storage-restored (matching the real restore_from_storage behavior)
         registry
             .register_service_full(
                 actor_id_a.clone(),
+                actr_type.clone(),
                 "EchoService".to_string(),
                 vec!["echo.EchoRequest".to_string()],
                 None,
@@ -1808,9 +2010,9 @@ mod tests {
                 None,
             )
             .unwrap();
-        registry.mark_all_as_restored("EchoService");
+        registry.mark_all_as_restored(TEST_REALM, "EchoService");
 
-        let candidates = registry.find_by_actr_type(&actr_type);
+        let candidates = registry.find_by_actr_type(TEST_REALM, &actr_type);
         assert_eq!(
             candidates.len(),
             1,
@@ -1822,6 +2024,7 @@ mod tests {
         registry
             .register_service_full(
                 actor_id_b.clone(),
+                actr_type.clone(),
                 "EchoService".to_string(),
                 vec!["echo.EchoRequest".to_string()],
                 None,
@@ -1831,7 +2034,7 @@ mod tests {
             )
             .unwrap();
 
-        let candidates_after = registry.find_by_actr_type(&actr_type);
+        let candidates_after = registry.find_by_actr_type(TEST_REALM, &actr_type);
 
         // With bug: memory [ActorId A (ghost), ActorId B (real)] -> returns 2 candidates -> FAIL
         // After fix: registering B clears old entry -> only B retained -> returns 1 candidate -> PASS
@@ -1849,19 +2052,12 @@ mod tests {
     fn test_find_by_actr_type_requires_exact_version() {
         let mut registry = ActorRegistry::new();
 
-        let actor_id = ActrId {
-            serial_number: 1,
-            r#type: ActrType {
-                publisher: "acme".to_string(),
-                name: "worker".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: actr_protocol::Realm { realm_id: 0 },
-        };
+        let actor_id = create_test_actor_id(1);
 
         registry
             .register_service(
                 actor_id,
+                create_actor_type("acme", "worker"),
                 "worker1".to_string(),
                 vec!["Work".to_string()],
                 None,
@@ -1874,25 +2070,21 @@ mod tests {
             version: "2.0.0".to_string(),
         };
 
-        let results = registry.find_by_actr_type(&target_type);
+        let results = registry.find_by_actr_type(TEST_REALM, &target_type);
         assert!(results.is_empty(), "version mismatch must not match");
     }
 
     #[tokio::test]
     async fn test_restore_service_from_storage_preserves_actor_version() {
-        let actor_id = ActrId {
-            serial_number: 914_562_612_010_752,
-            realm: actr_protocol::Realm {
-                realm_id: 33_554_433,
-            },
-            r#type: ActrType {
-                publisher: "acme".to_string(),
-                name: "BotService".to_string(),
-                version: "4.0.0".to_string(),
-            },
+        let actor_id = create_test_actor_id(914_562_612_010_752);
+        let actor_type = ActrType {
+            publisher: "acme".to_string(),
+            name: "BotService".to_string(),
+            version: "4.0.0".to_string(),
         };
         let service = ServiceInfo {
             actor_id: actor_id.clone(),
+            actor_type: actor_type.clone(),
             service_name: "acme:BotService".to_string(),
             message_types: vec!["acme.Ask".to_string()],
             capabilities: None,
@@ -1932,7 +2124,11 @@ mod tests {
             .unwrap();
 
         registry.unregister_actor_memory_only(&actor_id);
-        assert!(registry.find_by_actr_type(&actor_id.r#type).is_empty());
+        assert!(
+            registry
+                .find_by_actr_type(TEST_REALM, &actor_type)
+                .is_empty()
+        );
 
         assert!(
             registry
@@ -1944,7 +2140,7 @@ mod tests {
             .update_load_metrics(&actor_id, 0, 0.75, 0.1)
             .unwrap();
 
-        let candidates = registry.find_by_actr_type(&actor_id.r#type);
+        let candidates = registry.find_by_actr_type(TEST_REALM, &actor_type);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].actor_id, actor_id);
         assert_eq!(candidates[0].power_reserve, Some(0.75));
@@ -1956,17 +2152,21 @@ mod tests {
                 .unwrap(),
             "a repeated restore with no index changes must report false"
         );
-        let candidates_after_retry = registry.find_by_actr_type(&actor_id.r#type);
+        let candidates_after_retry = registry.find_by_actr_type(TEST_REALM, &actor_type);
         assert_eq!(candidates_after_retry.len(), 1);
         assert_eq!(candidates_after_retry[0].power_reserve, Some(0.75));
 
-        let services_by_message = registry.discover_by_message_type("acme.Ask");
+        let services_by_message = registry.discover_by_message_type(TEST_REALM, "acme.Ask");
         assert_eq!(services_by_message.len(), 1);
-        assert_eq!(registry.get_message_type_stats().get("acme.Ask"), Some(&1));
+        assert_eq!(
+            registry.get_message_type_stats(TEST_REALM).get("acme.Ask"),
+            Some(&1)
+        );
 
         registry
             .register_service_full(
                 actor_id.clone(),
+                actor_type.clone(),
                 service.service_name.clone(),
                 service.message_types.clone(),
                 None,
@@ -1976,16 +2176,19 @@ mod tests {
             )
             .unwrap();
 
-        let candidates_after_registration = registry.find_by_actr_type(&actor_id.r#type);
+        let candidates_after_registration = registry.find_by_actr_type(TEST_REALM, &actor_type);
         assert_eq!(candidates_after_registration.len(), 1);
         assert_eq!(candidates_after_registration[0].actor_id, actor_id);
         assert!(!candidates_after_registration[0].is_restored_from_storage);
 
-        let services_by_message = registry.discover_by_message_type("acme.Ask");
+        let services_by_message = registry.discover_by_message_type(TEST_REALM, "acme.Ask");
         assert_eq!(services_by_message.len(), 1);
-        assert_eq!(registry.get_message_type_stats().get("acme.Ask"), Some(&1));
         assert_eq!(
-            registry.actor_index.get(&actor_id),
+            registry.get_message_type_stats(TEST_REALM).get("acme.Ask"),
+            Some(&1)
+        );
+        assert_eq!(
+            registry.realms[TEST_REALM].actor_index.get(&actor_id),
             Some(&vec![service.service_name])
         );
     }

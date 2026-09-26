@@ -116,6 +116,8 @@ actr-runtime-mailbox = { workspace = true }
 prost = { workspace = true }
 serial_test = "3.3"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
+hmac = { workspace = true }
+sha1 = "0.10"
 opentelemetry-proto = { version = "0.32.0", default-features = false, features = ["gen-tonic", "trace"] }
 
 [lints]

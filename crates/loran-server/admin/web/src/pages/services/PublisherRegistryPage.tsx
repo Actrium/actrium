@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Package, Key, Copy, Plus, Terminal, ShieldOff, Timer } from 'lucide-react';
-import { publisherApi, type PublisherRecord, type ActrPackage, type PublisherVerificationResponse, type ApplyResponse, type PublisherKeyHistory } from '../../lib/api';
+import { useState, useEffect, useCallback } from 'react';
+import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Package, Key, Copy, ShieldOff, Timer } from 'lucide-react';
+import { publisherApi, type PublisherRecord, type ActrPackage, type PublisherKeyHistory } from '../../lib/api';
+import { IdentityReview } from '../../components/identity/IdentityReview';
 
 function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -39,14 +40,11 @@ function CopyButton({ text, label = 'Copy', className = '' }: { text: string; la
   );
 }
 
-const VERIFY_COOLDOWN_SECS = 15;
-
 // ── Status badge ──────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: PublisherRecord['status'] }) {
   const config = {
     active: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Active' },
-    pending: { color: 'bg-yellow-100 text-yellow-800', icon: Clock, label: 'Pending' },
     suspended: { color: 'bg-orange-100 text-orange-800', icon: AlertTriangle, label: 'Suspended' },
     revoked: { color: 'bg-red-100 text-red-800', icon: XCircle, label: 'Revoked' },
   }[status];
@@ -207,707 +205,22 @@ function KeyHistoryPanel({ publisher, onRevoked }: { publisher: PublisherRecord;
   );
 }
 
-// ── Publisher verification modal ─────────────────────────────────
-
-function VerificationModal({ response, onClose }: { response: PublisherVerificationResponse; onClose: () => void }) {
-  const json = JSON.stringify(response, null, 2);
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4">
-        <div className="flex items-center gap-2 mb-4">
-          <CheckCircle className="text-teal-600" size={20} />
-          <h2 className="text-lg font-semibold">Publisher Verified</h2>
-          <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-medium bg-teal-100 text-teal-800">
-            Domain + Public Key Bound
-          </span>
-        </div>
-
-        <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 mb-4 text-sm text-teal-800">
-          Actrix verified the HTTPS descriptor and registered its public key. The publisher keeps
-          the private key; Actrix never receives, generates, or returns it.
-        </div>
-
-        <div className="mb-4">
-          <label className="block text-xs text-gray-500 uppercase font-semibold mb-1">Key ID (Fingerprint)</label>
-          <div className="flex items-center gap-2">
-            <code className="text-sm bg-gray-100 border border-gray-200 rounded px-2 py-1 text-gray-800">{response.certificate.key_id}</code>
-            <CopyButton text={response.certificate.key_id} label="Copy ID" className="text-xs text-gray-500 hover:text-gray-700" />
-          </div>
-        </div>
-
-        <details className="mb-4">
-          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Raw JSON</summary>
-          <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-auto max-h-40 font-mono mt-1">{json}</pre>
-        </details>
-
-        <div className="flex gap-2">
-          <CopyButton
-            text={json}
-            label="Copy JSON"
-            className="relative flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-700"
-          />
-          <button
-            onClick={onClose}
-            className="ml-auto px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── How it works diagram ──────────────────────────────────────────
+// ── Registration ──────────────────────────────────────────────────
 
 function HowItWorks() {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <details>
-        <summary className="px-4 py-3 cursor-pointer hover:bg-gray-50 text-sm font-semibold text-gray-800 select-none">
-          How it Works
-        </summary>
-        <div className="px-4 pb-5 space-y-5">
-          {/* Row 1: Registration & Identity */}
-          <div>
-            <div className="text-xs font-medium text-gray-500 mb-2">Phase 1: HTTPS Publisher Identity</div>
-            <svg viewBox="0 0 760 145" className="w-full" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f8fafc"/><stop offset="100%" stopColor="#e2e8f0"/></linearGradient>
-                <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#fefce8"/><stop offset="100%" stopColor="#fef08a"/></linearGradient>
-                <linearGradient id="g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#eff6ff"/><stop offset="100%" stopColor="#bfdbfe"/></linearGradient>
-                <linearGradient id="g4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f0fdf4"/><stop offset="100%" stopColor="#bbf7d0"/></linearGradient>
-                <filter id="ds"><feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.1"/></filter>
-              </defs>
-
-              {/* Person icon */}
-              <g transform="translate(30,12)" filter="url(#ds)">
-                <rect width="100" height="90" rx="12" fill="url(#g1)" stroke="#cbd5e1" strokeWidth="1"/>
-                <circle cx="50" cy="32" r="14" fill="#94a3b8" />
-                <circle cx="50" cy="28" r="6" fill="#f1f5f9" />
-                <ellipse cx="50" cy="42" rx="10" ry="6" fill="#f1f5f9" />
-                <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#475569">Register</text>
-                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#94a3b8">HTTPS domain</text>
-              </g>
-
-              {/* Register desc */}
-              <text x="80" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">Publisher ID</text>
-
-              {/* Curved arrow 1 */}
-              <path d="M138,57 C158,57 158,57 178,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
-              <polygon points="176,53 184,57 176,61" fill="#cbd5e1"/>
-
-              {/* Token / Challenge */}
-              <g transform="translate(190,12)" filter="url(#ds)">
-                <rect width="100" height="90" rx="12" fill="url(#g2)" stroke="#fbbf24" strokeWidth="1"/>
-                {/* Shield with star */}
-                <path d="M50,22 L62,28 L62,40 C62,48 50,54 50,54 C50,54 38,48 38,40 L38,28 Z" fill="#fbbf24" opacity="0.3"/>
-                <path d="M50,22 L62,28 L62,40 C62,48 50,54 50,54 C50,54 38,48 38,40 L38,28 Z" fill="none" stroke="#f59e0b" strokeWidth="1.2"/>
-                <text x="50" y="41" textAnchor="middle" fontSize="12" fill="#b45309">?</text>
-                <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#92400e">Challenge</text>
-                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#b45309">Unique token</text>
-              </g>
-
-              {/* Challenge desc */}
-              <text x="240" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">{'verification_challenge · 24h'}</text>
-
-              {/* Curved arrow 2 */}
-              <path d="M298,57 C318,57 318,57 338,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
-              <polygon points="336,53 344,57 336,61" fill="#cbd5e1"/>
-
-              {/* Publisher well-known descriptor */}
-              <g transform="translate(350,12)" filter="url(#ds)">
-                <rect width="100" height="90" rx="12" fill="url(#g3)" stroke="#60a5fa" strokeWidth="1"/>
-                {/* HTTPS descriptor mark */}
-                <circle cx="50" cy="34" r="14" fill="#1e40af" opacity="0.15"/>
-                <circle cx="50" cy="31" r="8" fill="none" stroke="#3b82f6" strokeWidth="1.5"/>
-                <path d="M44,35 C44,41 56,41 56,35" fill="none" stroke="#3b82f6" strokeWidth="1.2"/>
-                <circle cx="47" cy="30" r="1.5" fill="#3b82f6"/>
-                <circle cx="53" cy="30" r="1.5" fill="#3b82f6"/>
-                <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#1e40af">Prove</text>
-                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#3b82f6">Well-known JSON</text>
-              </g>
-
-              {/* Prove desc */}
-              <text x="400" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">{'/.well-known/actr/publisher.json'}</text>
-
-              {/* Curved arrow 3 */}
-              <path d="M458,57 C478,57 478,57 498,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
-              <polygon points="496,53 504,57 496,61" fill="#cbd5e1"/>
-
-              {/* Verify + issue */}
-              <g transform="translate(510,12)" filter="url(#ds)">
-                <rect width="100" height="90" rx="12" fill="#f0fdf4" stroke="#4ade80" strokeWidth="1"/>
-                <circle cx="50" cy="33" r="13" fill="#22c55e" opacity="0.15"/>
-                <path d="M42,33 L48,39 L58,27" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#166534">Verified</text>
-                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#16a34a">Server confirms</text>
-              </g>
-
-              {/* Verified desc */}
-              <text x="560" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">HTTPS + DNS pinning</text>
-
-              {/* Arrow 4 */}
-              <path d="M618,57 C638,57 638,57 658,57" fill="none" stroke="#22c55e" strokeWidth="1.5"/>
-              <polygon points="656,53 664,57 656,61" fill="#22c55e"/>
-
-              {/* Key issued */}
-              <g transform="translate(670,12)" filter="url(#ds)">
-                <rect width="80" height="90" rx="12" fill="url(#g4)" stroke="#22c55e" strokeWidth="1.5"/>
-                {/* Key icon */}
-                <circle cx="40" cy="30" r="8" fill="none" stroke="#f59e0b" strokeWidth="2"/>
-                <circle cx="40" cy="30" r="3" fill="#f59e0b" opacity="0.3"/>
-                <line x1="48" y1="30" x2="58" y2="30" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
-                <line x1="54" y1="30" x2="54" y2="35" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
-                <line x1="58" y1="30" x2="58" y2="35" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
-                <text x="40" y="58" textAnchor="middle" fontSize="9" fontWeight="700" fill="#166534">Public Key</text>
-                <text x="40" y="70" textAnchor="middle" fontSize="7.5" fill="#16a34a">Ed25519</text>
-                <text x="40" y="80" textAnchor="middle" fontSize="7.5" fill="#16a34a">binding</text>
-              </g>
-
-              {/* Keychain desc */}
-              <text x="710" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">Private key stays local</text>
-
-            </svg>
-          </div>
-
-          {/* Row 2: Phase 2 — Build + Sign */}
-          <div className="mt-8 relative pt-4 before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-gray-200 before:to-transparent">
-            <div className="text-xs font-medium text-gray-500 mb-2">Phase 2: actr pkg build — SHA-256 + Publisher Ed25519 Signature</div>
-            <svg viewBox="0 0 760 210" className="w-full" xmlns="http://www.w3.org/2000/svg" fontFamily="system-ui, sans-serif">
-              <defs>
-                <marker id="ar2a" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#3b82f6"/>
-                </marker>
-                <marker id="ar2a-amber" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#f59e0b"/>
-                </marker>
-              </defs>
-
-              {/* ── Developer ── */}
-              <g transform="translate(10,20)">
-                <circle cx="22" cy="12" r="10" fill="#bfdbfe"/>
-                <circle cx="22" cy="9" r="5" fill="#eff6ff"/>
-                <ellipse cx="22" cy="18" rx="7" ry="4" fill="#eff6ff"/>
-                <rect x="10" y="30" width="24" height="16" rx="2" fill="#93c5fd" stroke="#3b82f6" strokeWidth="0.8"/>
-                <rect x="13" y="33" width="18" height="10" rx="1" fill="#eff6ff"/>
-                <rect x="6" y="46" width="32" height="3" rx="1.5" fill="#60a5fa"/>
-              </g>
-              <text x="32" y="92" textAnchor="middle" fontSize="9" fill="#1e40af" fontWeight="600">Dev</text>
-
-              {/* Arrow: dev → inputs */}
-              <line x1="54" y1="55" x2="88" y2="55" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar2a)"/>
-              <text x="71" y="48" textAnchor="middle" fontSize="7" fill="#1e40af">actr pkg build</text>
-
-              {/* ── Inputs: binary + proto + actr.toml ── */}
-              <g transform="translate(92,22)">
-                <rect width="92" height="66" rx="6" fill="#f0f9ff" stroke="#93c5fd" strokeWidth="1"/>
-                <text x="46" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#1e40af">Inputs</text>
-                <rect x="6" y="19" width="80" height="12" rx="2" fill="#dbeafe"/>
-                <text x="46" y="28" textAnchor="middle" fontSize="6.5" fill="#1e40af">binary(wasm/so)</text>
-                <rect x="6" y="34" width="80" height="12" rx="2" fill="#dbeafe"/>
-                <text x="46" y="43" textAnchor="middle" fontSize="7" fill="#1e40af">*.proto files</text>
-                <rect x="6" y="49" width="80" height="12" rx="2" fill="#e0e7ff"/>
-                <text x="46" y="58" textAnchor="middle" fontSize="7" fill="#3730a3">actr.toml</text>
-              </g>
-
-              {/* Arrow: inputs → SHA-256 */}
-              <line x1="184" y1="55" x2="218" y2="55" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar2a)"/>
-
-              {/* ── SHA-256 Hash ── */}
-              <g transform="translate(220,35)">
-                <rect width="100" height="40" rx="6" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.2"/>
-                <text x="50" y="18" textAnchor="middle" fontSize="9" fontWeight="600" fill="#3730a3">SHA-256</text>
-                <text x="50" y="30" textAnchor="middle" fontSize="7" fill="#4f46e5">binary + proto hash</text>
-              </g>
-              <text x="270" y="90" textAnchor="middle" fontSize="7" fill="#6366f1">hash written to manifest</text>
-
-              {/* Arrow: SHA-256 → Sign */}
-              <line x1="320" y1="55" x2="374" y2="55" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar2a)"/>
-              <text x="347" y="48" textAnchor="middle" fontSize="7" fill="#1e40af">manifest bytes</text>
-
-              {/* ── Ed25519 Sign ── */}
-              <g transform="translate(376,35)">
-                <rect width="110" height="40" rx="6" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.2"/>
-                <text x="55" y="18" textAnchor="middle" fontSize="9" fontWeight="600" fill="#92400e">Ed25519 Sign</text>
-                <text x="55" y="30" textAnchor="middle" fontSize="7" fill="#b45309">actr.toml bytes</text>
-              </g>
-
-              {/* Private Key → Sign */}
-              <g transform="translate(416,90)">
-                <circle cx="12" cy="12" r="8" fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
-                <circle cx="12" cy="12" r="3" fill="#fbbf24" opacity="0.4"/>
-                <line x1="20" y1="12" x2="32" y2="12" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
-                <line x1="26" y1="12" x2="26" y2="17" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
-                <line x1="30" y1="12" x2="30" y2="17" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
-              </g>
-              <text x="432" y="124" textAnchor="middle" fontSize="8" fill="#b45309" fontWeight="600">Publisher Signing Key</text>
-              <text x="432" y="132" textAnchor="middle" fontSize="6.5" fill="#d97706">(Private Key)</text>
-              <line x1="432" y1="90" x2="432" y2="80" stroke="#f59e0b" strokeWidth="1.2" markerEnd="url(#ar2a-amber)"/>
-
-              {/* Arrow: Sign → .actr output */}
-              <line x1="486" y1="55" x2="538" y2="55" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar2a)"/>
-              <text x="512" y="48" textAnchor="middle" fontSize="7" fill="#1e40af">64 bytes sig</text>
-
-              {/* ── .actr Package (ZIP) ── */}
-              <g transform="translate(540,16)">
-                <rect width="120" height="78" rx="8" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1.5"/>
-                <text x="60" y="16" textAnchor="middle" fontSize="10" fontWeight="700" fill="#166534">.actr Package</text>
-                <rect x="8" y="22" width="104" height="13" rx="2" fill="#dcfce7"/>
-                <text x="60" y="32" textAnchor="middle" fontSize="7" fill="#166534">actr.toml - manifest</text>
-                <rect x="8" y="37" width="104" height="13" rx="2" fill="#fef9c3"/>
-                <text x="60" y="47" textAnchor="middle" fontSize="7" fill="#92400e">actr.sig - 64 bytes Ed25519</text>
-                <rect x="8" y="52" width="50" height="13" rx="2" fill="#dbeafe"/>
-                <text x="33" y="62" textAnchor="middle" fontSize="6.5" fill="#1e40af">bin/ (wasm/so)</text>
-                <rect x="62" y="52" width="50" height="13" rx="2" fill="#e0e7ff"/>
-                <text x="87" y="62" textAnchor="middle" fontSize="7" fill="#3730a3">proto/*.proto</text>
-                <text x="60" y="75" textAnchor="middle" fontSize="6" fill="#94a3b8">ZIP STORE format</text>
-              </g>
-
-              {/* Signing chain summary at bottom */}
-              <g transform="translate(92,144)">
-                <rect width="566" height="56" rx="6" fill="#fafafa" stroke="#e5e7eb" strokeWidth="1" strokeDasharray="4 2"/>
-                <text x="283" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#6b7280">Signing Chain</text>
-                <text x="283" y="28" textAnchor="middle" fontSize="7" fill="#9ca3af">binary bytes -{`>`} SHA-256 -{`>`} actr.toml binary.hash</text>
-                <text x="283" y="38" textAnchor="middle" fontSize="7" fill="#9ca3af">proto bytes  -{`>`} SHA-256 -{`>`} actr.toml proto_files.hash</text>
-                <text x="283" y="48" textAnchor="middle" fontSize="7" fill="#9ca3af">actr.toml bytes -{`>`} Ed25519 Sign -{`>`} actr.sig 64 bytes</text>
-              </g>
-            </svg>
-          </div>
-
-          {/* Row 3: Phase 3 — Publish with Nonce Challenge-Response */}
-          <div className="mt-8 relative pt-4 before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-gray-200 before:to-transparent">
-            <div className="text-xs font-medium text-gray-500 mb-2">Phase 3: actr pkg publish — Nonce Challenge-Response</div>
-            <svg viewBox="0 0 760 270" className="w-full" xmlns="http://www.w3.org/2000/svg" fontFamily="system-ui, sans-serif">
-              <defs>
-                <marker id="ar2b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#3b82f6"/>
-                </marker>
-                <marker id="ar2b-green" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#16a34a"/>
-                </marker>
-                <marker id="ar2b-gray" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#94a3b8"/>
-                </marker>
-                <marker id="ar2b-amber" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#f59e0b"/>
-                </marker>
-              </defs>
-
-              {/* ====== LEFT: CLI Side ====== */}
-              <text x="120" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#3b82f6">actr CLI</text>
-
-              {/* Step 1: Request Nonce */}
-              <g transform="translate(20,28)">
-                <rect width="200" height="32" rx="6" fill="#dbeafe" stroke="#2563eb" strokeWidth="1.2"/>
-                <text x="100" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#1d4ed8">1. POST /registry/packages/nonce</text>
-                <text x="100" y="26" textAnchor="middle" fontSize="7" fill="#3b82f6">publisher domain</text>
-              </g>
-
-              {/* Arrow: CLI → Publisher Registry (nonce request) */}
-              <line x1="220" y1="44" x2="430" y2="44" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar2b)"/>
-
-              {/* Arrow: Publisher Registry → CLI (nonce response) */}
-              <line x1="430" y1="58" x2="220" y2="58" stroke="#94a3b8" strokeWidth="1.2" strokeDasharray="4 2" markerEnd="url(#ar2b-gray)"/>
-              <text x="325" y="54" textAnchor="middle" fontSize="7" fill="#94a3b8">nonce base64 32 bytes</text>
-
-              {/* Step 2: Build nonce_sig */}
-              <g transform="translate(20,76)">
-                <rect width="200" height="56" rx="6" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.2"/>
-                {/* Publisher Registry Keychain icon inside box */}
-                <g transform="translate(20,12)">
-                  <circle cx="12" cy="12" r="8" fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
-                  <circle cx="12" cy="12" r="3" fill="#fbbf24" opacity="0.4"/>
-                  <line x1="20" y1="12" x2="32" y2="12" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
-                  <line x1="26" y1="12" x2="26" y2="17" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
-                  <line x1="30" y1="12" x2="30" y2="17" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
-                  <text x="16" y="34" textAnchor="middle" fontSize="7" fill="#b45309" fontWeight="600">Signing Key</text>
-                </g>
-                <text x="130" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#92400e">2. Sign Nonce Payload</text>
-                <text x="130" y="26" textAnchor="middle" fontSize="7" fill="#b45309">ACTR-PUBLISH-V2</text>
-                <text x="130" y="36" textAnchor="middle" fontSize="7" fill="#b45309">publisher + method + path</text>
-                <text x="130" y="46" textAnchor="middle" fontSize="7" fill="#b45309">+ nonce_hex + body_sha256</text>
-              </g>
-
-              {/* Step 3: POST publish */}
-              <g transform="translate(20,146)">
-                <rect width="200" height="48" rx="6" fill="#dbeafe" stroke="#2563eb" strokeWidth="1.2"/>
-                <text x="100" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#1d4ed8">3. POST /registry/packages/publish</text>
-                <text x="100" y="26" textAnchor="middle" fontSize="7" fill="#3b82f6">manifest + actr.sig + proto_files</text>
-                <text x="100" y="36" textAnchor="middle" fontSize="7" fill="#3b82f6">+ nonce + nonce_sig</text>
-              </g>
-
-              {/* Arrow: CLI → Publisher Registry (publish) */}
-              <line x1="220" y1="170" x2="430" y2="170" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar2b)"/>
-
-              {/* ====== RIGHT: Publisher Registry Service Side ====== */}
-              <text x="560" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#16a34a">Publisher Registry</text>
-
-              {/* Nonce generation */}
-              <g transform="translate(440,28)">
-                <rect width="240" height="32" rx="6" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1"/>
-                <text x="120" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#166534">Generate Nonce</text>
-                <text x="120" y="26" textAnchor="middle" fontSize="7" fill="#16a34a">Store pending nonce in DB (TTL 5m)</text>
-              </g>
-
-              {/* Publisher Registry verification pipeline */}
-              <g transform="translate(440,76)">
-                <rect width="240" height="126" rx="8" fill="#fafafa" stroke="#d1d5db" strokeWidth="1"/>
-                <text x="120" y="18" textAnchor="middle" fontSize="9" fontWeight="700" fill="#374151">Verification Pipeline</text>
-
-                <g transform="translate(10,26)">
-                  <rect width="220" height="22" rx="4" fill="#fef9c3" stroke="#ca8a04" strokeWidth="0.8"/>
-                  <text x="110" y="15" textAnchor="middle" fontSize="7" fontWeight="600" fill="#854d0e">Validate Publisher Identity &amp; Nonce State</text>
-                </g>
-
-                <g transform="translate(10,54)">
-                  <rect width="220" height="22" rx="4" fill="#fef3c7" stroke="#f59e0b" strokeWidth="0.8"/>
-                  <text x="110" y="15" textAnchor="middle" fontSize="7" fontWeight="600" fill="#92400e">Dual Verify: nonce_sig + manifest actr.sig</text>
-                </g>
-
-                <g transform="translate(10,82)">
-                  <rect width="220" height="30" rx="4" fill="#f0fdf4" stroke="#16a34a" strokeWidth="0.8"/>
-                  <text x="110" y="13" textAnchor="middle" fontSize="7" fontWeight="600" fill="#166534">Atomic Consume Nonce</text>
-                  <text x="110" y="24" textAnchor="middle" fontSize="6" fill="#16a34a">Cross-validate TOML vs request</text>
-                </g>
-              </g>
-
-              {/* Step arrows within pipeline */}
-              <line x1="560" y1="124" x2="560" y2="130" stroke="#94a3b8" strokeWidth="0.8"/>
-              <line x1="560" y1="152" x2="560" y2="158" stroke="#94a3b8" strokeWidth="0.8"/>
-
-              {/* ====== BOTTOM: Result ====== */}
-
-              {/* DB insert */}
-              <g transform="translate(440,216)">
-                <rect width="240" height="36" rx="6" fill="#dbeafe" stroke="#2563eb" strokeWidth="1.2"/>
-                <text x="120" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#1d4ed8">Save Package Metadata</text>
-                <text x="120" y="28" textAnchor="middle" fontSize="7" fill="#3b82f6">type_str + manifest + sig + proto_files</text>
-              </g>
-
-              {/* Arrow: pipeline → DB */}
-              <line x1="560" y1="202" x2="560" y2="216" stroke="#16a34a" strokeWidth="1.5" markerEnd="url(#ar2b-green)"/>
-
-              {/* Arrow: Publisher Registry → CLI (success response) */}
-              <line x1="440" y1="234" x2="220" y2="234" stroke="#16a34a" strokeWidth="1.5" markerEnd="url(#ar2b-green)"/>
-              <text x="330" y="230" textAnchor="middle" fontSize="8" fill="#16a34a" fontWeight="600">Published: publisher/program@version</text>
-
-              {/* CLI receives result */}
-              <g transform="translate(20,220)">
-                <rect width="200" height="28" rx="6" fill="#d1fae5" stroke="#16a34a" strokeWidth="1.2"/>
-                <text x="100" y="18" textAnchor="middle" fontSize="9" fontWeight="600" fill="#166534">Publish Success</text>
-              </g>
-
-            </svg>
-          </div>
-
-          {/* Row 4: Publisher Registry Key Rotation */}
-          <div className="mt-8 relative pt-4 before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-gray-200 before:to-transparent">
-            <div className="text-xs font-medium text-gray-500 mb-2">Phase 4: Publisher Key Rotation and Revocation</div>
-            <svg viewBox="0 0 760 170" className="w-full" xmlns="http://www.w3.org/2000/svg" fontFamily="system-ui, sans-serif">
-              <defs>
-                <marker id="ar4b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#4f46e5"/>
-                </marker>
-                <marker id="ar4b-green" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#16a34a"/>
-                </marker>
-                <marker id="ar4b-gray" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
-                  <path d="M0,0 L10,3.5 L0,7Z" fill="#94a3b8"/>
-                </marker>
-              </defs>
-
-               {/* Left: Admin */}
-               <text x="120" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#4f46e5">Realm Admin</text>
-
-               {/* Right: Publisher Registry */}
-               <text x="560" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#16a34a">Publisher Registry / DB</text>
-
-               {/* Step 1: POST renew */}
-               <g transform="translate(20,40)">
-                 <rect width="200" height="36" rx="6" fill="#e0e7ff" stroke="#4f46e5" strokeWidth="1.2"/>
-                 <text x="100" y="16" textAnchor="middle" fontSize="8" fontWeight="600" fill="#312e81">1. POST /admin/api/publishers/…/renew</text>
-                 <text x="100" y="28" textAnchor="middle" fontSize="7" fill="#4f46e5">(Optional: Provide new public key)</text>
-               </g>
-
-               {/* Arrow Request */}
-               <line x1="220" y1="58" x2="430" y2="58" stroke="#4f46e5" strokeWidth="1.5" markerEnd="url(#ar4b)"/>
-
-               {/* Archive Old Key */}
-               <g transform="translate(440,30)">
-                 <rect width="240" height="32" rx="6" fill="#fef3c7" stroke="#d97706" strokeWidth="1.2" strokeDasharray="4 2"/>
-                 <text x="120" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#92400e">2. Archive Current Key</text>
-                 <text x="120" y="26" textAnchor="middle" fontSize="7" fill="#b45309">Save to key history (status = retired)</text>
-               </g>
-
-               {/* Step Arrow */}
-               <line x1="560" y1="62" x2="560" y2="76" stroke="#94a3b8" strokeWidth="1" markerEnd="url(#ar4b-gray)"/>
-
-               {/* Set New Key */}
-               <g transform="translate(440,76)">
-                 <rect width="240" height="32" rx="6" fill="#dcfce7" stroke="#16a34a" strokeWidth="1.2"/>
-                 <text x="120" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#166534">3. Activate New Key</text>
-                 <text x="120" y="26" textAnchor="middle" fontSize="7" fill="#15803d">Update publisher public_key &amp; key_id</text>
-               </g>
-
-               {/* Step Arrow */}
-               <line x1="560" y1="108" x2="560" y2="122" stroke="#94a3b8" strokeWidth="1" markerEnd="url(#ar4b-gray)"/>
-
-               {/* Success Response handling */}
-               <g transform="translate(440,122)">
-                 <rect width="240" height="28" rx="6" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1"/>
-                 <text x="120" y="18" textAnchor="middle" fontSize="8" fontWeight="600" fill="#166534">Return new publisher-keychain.json</text>
-               </g>
-
-               {/* Arrow Response */}
-               <line x1="440" y1="136" x2="220" y2="136" stroke="#16a34a" strokeWidth="1.5" markerEnd="url(#ar4b-green)"/>
-               <text x="330" y="132" textAnchor="middle" fontSize="8" fill="#16a34a" fontWeight="600">Verification Result</text>
-
-               {/* Admin Receives */}
-               <g transform="translate(20,118)">
-                 <rect width="200" height="36" rx="6" fill="#d1fae5" stroke="#10b981" strokeWidth="1.2"/>
-                 <text x="100" y="16" textAnchor="middle" fontSize="8" fontWeight="600" fill="#065f46">Publisher retains private key</text>
-                 <text x="100" y="28" textAnchor="middle" fontSize="7" fill="#047857">Old keys still valid for old packages</text>
-               </g>
-            </svg>
-          </div>
-        </div>
-      </details>
-    </div>
-  );
-}
-
-// ── Create modal (3-step) ─────────────────────────────────────────
-
-type CreateStep = 'input' | 'verify' | 'done';
-
-function CreateModal({
-  onClose,
-  onDone,
-  resumePublisher,
-}: {
-  onClose: () => void;
-  onDone: (response: PublisherVerificationResponse) => void;
-  resumePublisher?: PublisherRecord;
-}) {
-  const [step, setStep] = useState<CreateStep>(resumePublisher ? 'verify' : 'input');
-  const [name, setName] = useState(resumePublisher?.name ?? '');
-  const [contact, setContact] = useState('');
-  const [loading, setLoading] = useState(!!resumePublisher);
-  const [error, setError] = useState<string | null>(null);
-  const [applyResult, setApplyResult] = useState<ApplyResponse | null>(null);
-  const [cooldown, setCooldown] = useState(0);
-  const [verifyAttempted, setVerifyAttempted] = useState(false);
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Resume: fetch existing challenge
-  useEffect(() => {
-    if (!resumePublisher) return;
-    publisherApi.getChallenge(resumePublisher.id).then(res => {
-      setApplyResult(res);
-      setLoading(false);
-    }).catch(e => {
-      setError(String(e));
-      setLoading(false);
-    });
-  }, [resumePublisher]);
-
-  // Cleanup cooldown timer
-  useEffect(() => () => {
-    if (cooldownRef.current) clearInterval(cooldownRef.current);
-  }, []);
-
-  // Cancel: void the pending record only if freshly created (not resumed)
-  const handleCancel = () => {
-    if (applyResult && !resumePublisher) {
-      publisherApi.delete(applyResult.publisher_id).catch(() => {});
-    }
-    onClose();
-  };
-
-  const startCooldown = () => {
-    setCooldown(VERIFY_COOLDOWN_SECS);
-    if (cooldownRef.current) clearInterval(cooldownRef.current);
-    cooldownRef.current = setInterval(() => {
-      setCooldown(prev => {
-        if (prev <= 1) {
-          clearInterval(cooldownRef.current!);
-          cooldownRef.current = null;
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  const handleApply = async () => {
-    if (!name.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await publisherApi.apply({
-        publisher: name.trim(),
-        contact: contact.trim() || undefined,
-      });
-      setApplyResult(res);
-      setStep('verify');
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerify = async () => {
-    if (!applyResult) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const kc = await publisherApi.verify(applyResult.publisher_id);
-      onDone(kc);
-    } catch (e) {
-      setError(String(e));
-      setVerifyAttempted(true);
-      startCooldown();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const publisher = name.trim().toLowerCase();
-  const descriptorTemplate = applyResult
-    ? JSON.stringify({
-        schema: 'actr.publisher/v1',
-        publisher,
-        key_id: 'actr-pub-<first-16-hex-of-sha256-public-key>',
-        public_key: '<base64-ed25519-public-key>',
-        registries: [`https://${publisher}/actr/registry/v1`],
-        origins: [`https://${publisher}/actr/packages/`],
-        verification_challenge: applyResult.challenge_token,
-      }, null, 2)
-    : '';
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold text-gray-900">Register Publisher</h2>
-          <button onClick={handleCancel} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
-        </div>
-
-        {/* Step indicators */}
-        <div className="flex items-center gap-2 mb-5 text-xs">
-          {(['input', 'verify', 'done'] as CreateStep[]).map((s, i) => {
-            const labels = ['1. Name', '2. Verify', '3. Certificate'];
-            const active = s === step;
-            const done = (['input', 'verify', 'done'].indexOf(step) > i);
-            return (
-              <span
-                key={s}
-                className={`px-2 py-1 rounded-full ${
-                  active ? 'bg-gray-800 text-white' : done ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-400'
-                }`}
-              >
-                {labels[i]}
-              </span>
-            );
-          })}
-        </div>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">{error}</div>
-        )}
-
-        {/* Step 1: Input + Key Mode */}
-        {step === 'input' && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Publisher Domain</label>
-              <input
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && void handleApply()}
-                placeholder="apps.example.com"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-                autoFocus
-              />
-              <p className="text-xs text-gray-400 mt-1">HTTPS is implicit. Do not include a scheme, port, or path.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contact (optional)</label>
-              <input
-                type="text"
-                value={contact}
-                onChange={e => setContact(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && void handleApply()}
-                placeholder="email or URL"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={handleCancel} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
-              <button
-                onClick={() => void handleApply()}
-                disabled={loading || !name.trim()}
-                className="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-700 disabled:opacity-50"
-              >
-                {loading ? 'Submitting...' : 'Next'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Verify */}
-        {step === 'verify' && applyResult && (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600">
-              Publish the descriptor below at <code className="bg-gray-100 px-1 rounded text-gray-800">{applyResult.descriptor_url}</code>. It must be served directly over HTTPS without redirects.
-            </p>
-
-            {/* Token */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs text-gray-500">Challenge Token</label>
-                <CopyButton text={applyResult.challenge_token} className="text-xs text-blue-600 hover:text-blue-800 relative" />
-              </div>
-              <div className="bg-gray-100 rounded-lg p-3 font-mono text-xs break-all select-all">{applyResult.challenge_token}</div>
-            </div>
-
-            {/* Descriptor */}
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Terminal size={12} className="text-gray-400" />
-                <label className="text-xs text-gray-500">Publisher descriptor template</label>
-                <CopyButton text={descriptorTemplate} className="text-xs text-blue-600 hover:text-blue-800 ml-auto relative" />
-              </div>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap">{descriptorTemplate}</pre>
-            </div>
-
-            <p className="text-xs text-gray-500">
-              The Ed25519 private key remains with the publisher. Actrix binds the domain to the public key discovered in this descriptor.
-            </p>
-
-            <div className="text-xs text-gray-400">
-              Expires: {new Date(applyResult.expires_at * 1000).toLocaleString()}
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={handleCancel} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
-              <button
-                onClick={() => void handleVerify()}
-                disabled={loading || cooldown > 0}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50"
-              >
-                {loading ? 'Verifying...' : cooldown > 0 ? `Retry in ${cooldown}s` : verifyAttempted ? 'Verify Again' : 'Verify'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+    <div className="bg-white rounded-xl border border-gray-200 p-4 text-sm text-gray-600 space-y-2">
+      <div className="font-semibold text-gray-800">How publishers register</div>
+      <p>
+        A publisher signs a Publisher Profile and serves it as the <code className="bg-gray-100 px-1 rounded">publisher</code> member
+        of <code className="bg-gray-100 px-1 rounded">{'https://<publisher>/.well-known/actr'}</code>. It then sends a
+        <code className="bg-gray-100 px-1 mx-1 rounded">register_publisher</code> request, signed by an active Publisher Profile
+        signing key, to this Realm Provider&apos;s <code className="bg-gray-100 px-1 rounded">realm-management</code> endpoint.
+      </p>
+      <p>
+        The first accepted profile pins its signing keys; its one active package signing key becomes the publisher&apos;s key.
+        A key rotation is a later profile with a higher sequence. Replaced keys still verify old packages until revoked here.
+      </p>
     </div>
   );
 }
@@ -1001,93 +314,6 @@ function ProtoExpandableRow({
   );
 }
 
-// ── Rotate key modal ──────────────────────────────────────────────
-
-function RotateKeyModal({ publisher, onClose, onDone }: { publisher: PublisherRecord; onClose: () => void; onDone: (res: PublisherVerificationResponse) => void }) {
-  const [challenge, setChallenge] = useState<ApplyResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const startedRef = useRef(false);
-
-  useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    publisherApi.beginKeyRotation(publisher.id)
-      .then(setChallenge)
-      .catch(e => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, [publisher.id]);
-
-  const handleVerify = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await publisherApi.verify(publisher.id);
-      onDone(res);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const descriptorTemplate = challenge
-    ? JSON.stringify({
-        schema: 'actr.publisher/v1',
-        publisher: publisher.name,
-        key_id: 'actr-pub-<first-16-hex-of-sha256-public-key>',
-        public_key: '<new-base64-ed25519-public-key>',
-        registries: [`https://${publisher.name}/actr/registry/v1`],
-        origins: [`https://${publisher.name}/actr/packages/`],
-        verification_challenge: challenge.challenge_token,
-      }, null, 2)
-    : '';
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-            <Key size={20} className="text-blue-500" /> Rotate Key — {publisher.name}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
-        </div>
-
-        {error && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">{error}</div>}
-
-        <div className="mb-4 text-sm text-gray-600">
-          <p>Generate the new private key on the publisher side, then publish the new public key and fresh challenge in the HTTPS descriptor.</p>
-          <p className="mt-2">Actrix will fetch and verify the descriptor before rotating. The old key remains available only for historical package verification unless explicitly revoked.</p>
-        </div>
-
-        {challenge && (
-          <div className="space-y-3 mb-4">
-            <p className="text-xs text-gray-500">
-              Publish at <code className="bg-gray-100 px-1 rounded">{challenge.descriptor_url}</code>
-            </p>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-500">Challenge</span>
-              <CopyButton text={challenge.challenge_token} className="text-xs text-blue-600 relative" />
-            </div>
-            <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap">{descriptorTemplate}</pre>
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-2">
-          <button onClick={onClose} disabled={loading} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
-          <button
-            onClick={() => void handleVerify()}
-            disabled={loading || !challenge}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Verifying...' : 'Verify & Rotate'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────
 
 export function PublisherRegistryPage() {
@@ -1096,11 +322,7 @@ export function PublisherRegistryPage() {
   const [selectedPublisher, setSelectedPublisher] = useState<PublisherRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [verificationResult, setVerificationResult] = useState<PublisherVerificationResponse | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [resumePublisher, setResumePublisher] = useState<PublisherRecord | null>(null);
-  const [rotatePublisher, setRotatePublisher] = useState<PublisherRecord | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -1143,23 +365,23 @@ export function PublisherRegistryPage() {
     finally { setActionLoading(null); }
   };
 
+  const handleRevokeActiveKey = async (publisher: PublisherRecord) => {
+    if (!confirm(`Revoke the current package signing key of "${publisher.name}" (${publisher.key_id})?\n\nThis is an emergency action for a compromised key. Packages signed with it fail verification at once, and the publisher cannot publish until it registers a Publisher Profile with a new key.`)) return;
+    setActionLoading(publisher.id);
+    try { await publisherApi.revokeActiveKey(publisher.id); await loadData(); }
+    catch (e) { setError(String(e)); }
+    finally { setActionLoading(null); }
+  };
+
   const handleRevokePackage = async (pkg: ActrPackage) => {
     if (!confirm(`Revoke package "${pkg.type_str}"?`)) return;
     try { await publisherApi.revokePackage(pkg.id); await loadData(); }
     catch (e) { setError(String(e)); }
   };
 
-  const handleCreateDone = (res: PublisherVerificationResponse) => {
-    setVerificationResult(res);
-    setShowCreate(false);
-    setResumePublisher(null);
-    void loadData();
-  };
-
   const stats = {
     total: publishers.length,
     active: publishers.filter(m => m.status === 'active').length,
-    pending: publishers.filter(m => m.status === 'pending').length,
     suspended: publishers.filter(m => m.status === 'suspended').length,
   };
 
@@ -1173,39 +395,13 @@ export function PublisherRegistryPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {verificationResult && <VerificationModal response={verificationResult} onClose={() => setVerificationResult(null)} />}
-      {(showCreate || resumePublisher) && (
-        <CreateModal
-          onClose={() => { setShowCreate(false); setResumePublisher(null); }}
-          onDone={handleCreateDone}
-          resumePublisher={resumePublisher ?? undefined}
-        />
-      )}
-      {rotatePublisher && (
-        <RotateKeyModal
-          publisher={rotatePublisher}
-          onClose={() => setRotatePublisher(null)}
-          onDone={(res) => {
-            setRotatePublisher(null);
-            setVerificationResult(res);
-            void loadData();
-          }}
-        />
-      )}
-
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <Building2 size={24} /> Publisher Registry
           </h1>
-          <p className="text-gray-500 text-sm mt-1">Manage HTTPS publisher identities, signing keys, and published packages.</p>
+          <p className="text-gray-500 text-sm mt-1">Review registered publishers, their signing keys, and published packages.</p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1 px-4 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-700"
-        >
-          <Plus size={14} /> New
-        </button>
       </div>
 
       <HowItWorks />
@@ -1215,11 +411,10 @@ export function PublisherRegistryPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         {[
           { label: 'Total', value: stats.total, color: 'text-gray-700' },
           { label: 'Active', value: stats.active, color: 'text-green-700' },
-          { label: 'Pending', value: stats.pending, color: 'text-yellow-700' },
           { label: 'Suspended', value: stats.suspended, color: 'text-orange-700' },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4">
@@ -1274,25 +469,20 @@ export function PublisherRegistryPage() {
                     </td>
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
-                        {publisher.status === 'pending' && (
-                          <button
-                            onClick={() => setResumePublisher(publisher)}
-                            className="px-2 py-1 text-xs bg-gray-800 text-white rounded hover:bg-gray-700"
-                          >Continue</button>
-                        )}
                         {publisher.status === 'active' && (
-                          <>
-                            <button
-                              onClick={() => setRotatePublisher(publisher)}
-                              disabled={actionLoading === publisher.id}
-                              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                            >Rotate Key</button>
-                            <button
-                              onClick={() => void handleSuspend(publisher)}
-                              disabled={actionLoading === publisher.id}
-                              className="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
-                            >Suspend</button>
-                          </>
+                          <button
+                            onClick={() => void handleSuspend(publisher)}
+                            disabled={actionLoading === publisher.id}
+                            className="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
+                          >Suspend</button>
+                        )}
+                        {publisher.status === 'active' && publisher.key_id && (
+                          <button
+                            onClick={() => void handleRevokeActiveKey(publisher)}
+                            disabled={actionLoading === publisher.id}
+                            title="Emergency revoke of the current package signing key"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-red-700 text-white rounded hover:bg-red-800 disabled:opacity-50"
+                          ><ShieldOff size={11} /> Revoke key</button>
                         )}
                         {publisher.status === 'suspended' && (
                           <button
@@ -1322,6 +512,8 @@ export function PublisherRegistryPage() {
           </tbody>
         </table>
       </div>
+
+      <IdentityReview kind="publishers" />
 
       {/* Package Table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
