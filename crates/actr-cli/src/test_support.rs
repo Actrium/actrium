@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-pub const LOCAL_E2E_REALM_ID: u32 = 1001;
+pub const LOCAL_E2E_REALM: &str = "e2e-local@e2e.test";
 const SIGNER_GRPC_PORT: u16 = 50052;
 const E2E_RENEWAL_TOKEN_SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
@@ -98,7 +98,7 @@ pub fn random_publisher() -> String {
 }
 
 pub fn align_project_with_local_actrix(project_dir: &Path) -> Result<()> {
-    rewrite_project_realm_id(project_dir, LOCAL_E2E_REALM_ID)
+    rewrite_project_realm(project_dir, LOCAL_E2E_REALM)
 }
 
 pub fn pin_echo_service_dependency_version(project_dir: &Path, publisher: &str) -> Result<()> {
@@ -394,7 +394,7 @@ impl LocalActrix {
             );
         }
 
-        ensure_realm_exists(&state_dir.path().join("sqlite"), LOCAL_E2E_REALM_ID)?;
+        ensure_realm_exists(&state_dir.path().join("sqlite"), LOCAL_E2E_REALM)?;
 
         Ok(Self {
             state_dir,
@@ -470,6 +470,8 @@ impl LocalRustEchoService {
                 "service",
                 "--publisher",
                 "acme",
+                "--realm",
+                LOCAL_E2E_REALM,
                 "--signaling",
                 signaling_ws_url,
                 project_name,
@@ -514,26 +516,23 @@ impl LocalRustEchoService {
     }
 }
 
-fn rewrite_project_realm_id(project_dir: &Path, realm_id: u32) -> Result<()> {
-    // realm_id placement varies by template:
+fn rewrite_project_realm(project_dir: &Path, realm: &str) -> Result<()> {
+    // The deployment Realm placement varies by template:
     // - Rust echo (split layout): runtime config goes to `actr.toml`; the
     //   service subproject has no deployment file at all (services are
     //   realm-neutral packages) so we skip silently.
-    // - TS / Swift / Kotlin echo (single-file layout): realm_id still lives
+    // - TS / Swift / Kotlin echo (single-file layout): the Realm still lives
     //   inline in `manifest.toml`.
     // Visit every candidate, rewrite where the line exists, no-op otherwise.
     let candidates = ["actr.toml", "manifest.toml"];
     let mut visited_any = false;
-    let mut rewrote_any = false;
     for filename in candidates {
         let path = project_dir.join(filename);
         if !path.exists() {
             continue;
         }
         visited_any = true;
-        if rewrite_realm_id_in_file(&path, realm_id)? {
-            rewrote_any = true;
-        }
+        rewrite_deployment_realm_in_file(&path, realm)?;
     }
     if !visited_any {
         bail!(
@@ -541,25 +540,30 @@ fn rewrite_project_realm_id(project_dir: &Path, realm_id: u32) -> Result<()> {
             project_dir.display()
         );
     }
-    let _ = rewrote_any;
     Ok(())
 }
 
-/// Returns `true` when a `realm_id =` line was found and rewritten;
-/// `false` when the file simply has no realm_id (e.g. a service-only
-/// `manifest.toml` whose deployment lives elsewhere).
-fn rewrite_realm_id_in_file(path: &Path, realm_id: u32) -> Result<bool> {
+/// Rewrites `realm = ...` inside `[deployment]` / `[system.deployment]`.
+/// Returns `false` when the file has no deployment Realm (e.g. a
+/// service-only `manifest.toml` whose deployment lives elsewhere). ACL and
+/// dependency `realm` keys live in other sections and are left alone.
+fn rewrite_deployment_realm_in_file(path: &Path, realm: &str) -> Result<bool> {
     let content =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
 
     let mut replaced = false;
+    let mut in_deployment = false;
     let mut rewritten = String::with_capacity(content.len() + 32);
     for line in content.lines() {
-        if line.trim_start().starts_with("realm_id =") {
-            let prefix = line.split("realm_id").next().unwrap_or_default();
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            let section = trimmed.trim_end();
+            in_deployment = section == "[deployment]" || section == "[system.deployment]";
+        }
+        if in_deployment && trimmed.starts_with("realm =") {
+            let prefix = &line[..line.len() - trimmed.len()];
             rewritten.push_str(prefix);
-            rewritten.push_str("realm_id = ");
-            rewritten.push_str(&realm_id.to_string());
+            rewritten.push_str(&format!("realm = \"{realm}\""));
             rewritten.push('\n');
             replaced = true;
         } else {
@@ -580,7 +584,7 @@ fn rewrite_realm_id_in_file(path: &Path, realm_id: u32) -> Result<bool> {
     Ok(true)
 }
 
-fn ensure_realm_exists(sqlite_dir: &Path, realm_id: u32) -> Result<()> {
+fn ensure_realm_exists(sqlite_dir: &Path, realm: &str) -> Result<()> {
     let db_path = sqlite_dir.join("actrix.db");
     let deadline = Instant::now() + Duration::from_secs(10);
 
@@ -589,25 +593,11 @@ fn ensure_realm_exists(sqlite_dir: &Path, realm_id: u32) -> Result<()> {
             Ok(conn) => {
                 conn.busy_timeout(Duration::from_secs(3))
                     .context("failed to set sqlite busy timeout")?;
-                conn.execute_batch(
-                    "CREATE TABLE IF NOT EXISTS realm (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL,
-                        status TEXT NOT NULL DEFAULT 'Active',
-                        enabled INTEGER NOT NULL DEFAULT 1,
-                        expires_at INTEGER,
-                        created_at INTEGER NOT NULL,
-                        updated_at INTEGER,
-                        secret_current TEXT NOT NULL DEFAULT '',
-                        secret_previous_hash TEXT,
-                        secret_previous_valid_until INTEGER
-                    );
-                     INSERT OR IGNORE INTO sqlite_sequence(name, seq) VALUES('realm', 33554431);",
-                )?;
+                // Actrix created the schema before reporting healthy.
                 conn.execute(
-                    "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current)
-                     VALUES (?1, 'e2e-realm', 'Active', 1, strftime('%s','now'), ?2)",
-                    rusqlite::params![realm_id, ""],
+                    "INSERT OR IGNORE INTO realm (name, status, enabled, created_at)
+                     VALUES (?1, 'active', 1, strftime('%s','now'))",
+                    rusqlite::params![realm],
                 )
                 .context("failed to ensure local e2e realm exists")?;
                 return Ok(());
@@ -649,7 +639,7 @@ fn write_package_runtime_config(project_dir: &Path, signaling_ws_url: &str) -> R
     };
 
     let runtime_config = format!(
-        "edition = 1\n\n[signaling]\nurl = \"{signaling_ws_url}\"\n\n[issuer_endpoint]\nurl = \"{issuer_url}\"\n\n[deployment]\nrealm_id = {LOCAL_E2E_REALM_ID}\n\n[package]\npath = \"{}\"\n\n[hyper]\ndata_dir = \"{}\"\n\n[[trust]]\nkind = \"static\"\npubkey_file = \"{}\"\n",
+        "edition = 1\n\n[signaling]\nurl = \"{signaling_ws_url}\"\n\n[issuer_endpoint]\nurl = \"{issuer_url}\"\n\n[deployment]\nrealm = \"{LOCAL_E2E_REALM}\"\n\n[package]\npath = \"{}\"\n\n[hyper]\ndata_dir = \"{}\"\n\n[[trust]]\nkind = \"static\"\npubkey_file = \"{}\"\n",
         normalize_path_for_toml(&package_path),
         normalize_path_for_toml(&data_dir),
         normalize_path_for_toml(&key_path),
@@ -897,6 +887,9 @@ head = "admin_ui"
 
 [control.admin_ui]
 password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
+
+[authority]
+uri = "actr://localhost"
 
 [bind.http]
 domain_name = "127.0.0.1"

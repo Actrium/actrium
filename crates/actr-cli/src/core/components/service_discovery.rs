@@ -5,7 +5,7 @@ use crate::core::{
 use actr_hyper::IssuerClient;
 use actr_protocol::{
     AIdCredential, ActrId, ActrToSignaling, ActrType, DiscoveryRequest, ErrorResponse,
-    GetServiceSpecRequest, Realm, RegisterAuthMode, RegisterRequest, SIGNALING_ENVELOPE_VERSION,
+    GetServiceSpecRequest, RegisterAuthMode, RegisterRequest, SIGNALING_ENVELOPE_VERSION,
     SignalingEnvelope, actr_to_signaling, discovery_response, get_service_spec_response,
     register_response, signaling_envelope, signaling_to_actr,
 };
@@ -50,11 +50,12 @@ pub struct DiscoveryContext {
     /// Issuer endpoint URL
     pub issuer_endpoint: String,
 
-    /// Realm for temporary actor registration
-    pub realm: Realm,
+    /// Realm name for temporary actor registration
+    pub realm: Option<String>,
 
-    /// Optional realm secret for authentication
-    pub realm_secret: Option<String>,
+    /// Realm client key file (`actr realm join`) that signs the temporary
+    /// actor's registration
+    pub realm_client_key: Option<std::path::PathBuf>,
 }
 
 pub struct NetworkServiceDiscovery {
@@ -152,11 +153,12 @@ impl NetworkServiceDiscovery {
     }
 
     async fn connect_and_register(&self) -> Result<SignalingState> {
-        let realm_secret = self.required_realm_secret()?.to_string();
-        let register_request = self.build_linked_register_request();
+        let realm = self.required_realm()?;
+        let client_key = self.required_client_key(realm)?;
+        let register_request = self.build_linked_register_request(realm);
 
         let issuer_client =
-            IssuerClient::new(&self.context.issuer_endpoint).with_realm_secret(realm_secret);
+            IssuerClient::new(&self.context.issuer_endpoint).with_client_key(client_key);
 
         let register_response = issuer_client
             .register_linked(register_request)
@@ -398,21 +400,29 @@ impl NetworkServiceDiscovery {
         entry.actr_type == lookup_type
     }
 
-    fn required_realm_secret(&self) -> Result<&str> {
+    fn required_client_key(&self, realm: &str) -> Result<actr_hyper::RealmClientKey> {
+        let path = self.context.realm_client_key.as_deref().ok_or_else(|| {
+            anyhow!("network.realm_client_key is required for CLI service discovery registration")
+        })?;
+        actr_hyper::RealmClientKey::load_for(Some(path), realm)?
+            .ok_or_else(|| anyhow!("network.realm_client_key is not set"))
+    }
+
+    fn required_realm(&self) -> Result<&str> {
         self.context
-            .realm_secret
+            .realm
             .as_deref()
             .map(str::trim)
-            .filter(|secret| !secret.is_empty())
+            .filter(|realm| !realm.is_empty())
             .ok_or_else(|| {
-                anyhow!("network.realm_secret is required for CLI service discovery registration")
+                anyhow!("network.realm is required for CLI service discovery registration")
             })
     }
 
-    fn build_linked_register_request(&self) -> RegisterRequest {
+    fn build_linked_register_request(&self, realm: &str) -> RegisterRequest {
         RegisterRequest {
             actr_type: self.context.package_actr_type.clone(),
-            realm: self.context.realm,
+            realm: realm.to_string(),
             service_spec: None,
             service: None,
             acl: None,

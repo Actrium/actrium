@@ -164,10 +164,10 @@ fn keychain_publisher_auth_provider_mints_fresh_proof_and_reloads_key() {
     let manifest = b"manifest-bytes";
 
     let auth_a = provider
-        .sign(7, &actr_type, "wasm32-wasip1", manifest)
+        .sign("test@example.com", &actr_type, "wasm32-wasip1", manifest)
         .unwrap();
     let auth_b = provider
-        .sign(7, &actr_type, "wasm32-wasip1", manifest)
+        .sign("test@example.com", &actr_type, "wasm32-wasip1", manifest)
         .unwrap();
 
     // Fresh nonce each call — the property that lets hard rebind avoid
@@ -188,12 +188,12 @@ fn keychain_publisher_auth_provider_mints_fresh_proof_and_reloads_key() {
     let rotated_key = SigningKey::from_bytes(&[0x22u8; 32]);
     write_key(&key_path, [0x22u8; 32]);
     let auth_c = provider
-        .sign(7, &actr_type, "wasm32-wasip1", manifest)
+        .sign("test@example.com", &actr_type, "wasm32-wasip1", manifest)
         .unwrap();
     let manifest_sha256 = hex::encode(Sha256::digest(manifest));
     let payload =
         actr_protocol::build_publisher_register_payload(actr_protocol::PublisherRegisterPayload {
-            realm_id: 7,
+            realm: "test@example.com",
             actr_type: &actr_type,
             target: "wasm32-wasip1",
             manifest_sha256_hex: &manifest_sha256,
@@ -208,7 +208,7 @@ fn keychain_publisher_auth_provider_mints_fresh_proof_and_reloads_key() {
 
     // Corrupting the keychain also proves each call re-reads the file.
     fs::write(&key_path, "not-json").unwrap();
-    let err = provider.sign(7, &actr_type, "wasm32-wasip1", manifest);
+    let err = provider.sign("test@example.com", &actr_type, "wasm32-wasip1", manifest);
     assert!(
         err.is_err(),
         "sign must re-read the keychain and fail when it is corrupt"
@@ -267,11 +267,15 @@ fn keychain_publisher_auth_provider_rejects_cross_publisher_binding() {
 
     // Bound to "acme" → registering an "acme" package succeeds.
     write_bound_key(&key_path, "acme");
-    assert!(provider.sign(7, &acme, "wasm32-wasip1", manifest).is_ok());
+    assert!(
+        provider
+            .sign("test@example.com", &acme, "wasm32-wasip1", manifest)
+            .is_ok()
+    );
 
     // Bound to "acme" → registering a "rival" package is rejected.
     let err = provider
-        .sign(7, &rival, "wasm32-wasip1", manifest)
+        .sign("test@example.com", &rival, "wasm32-wasip1", manifest)
         .unwrap_err();
     let msg = format!("{err}");
     assert!(
@@ -282,7 +286,9 @@ fn keychain_publisher_auth_provider_rejects_cross_publisher_binding() {
     // Unbound keychain → registers any publisher (backward compatible).
     write_unbound_key(&key_path);
     assert!(
-        provider.sign(7, &rival, "wasm32-wasip1", manifest).is_ok(),
+        provider
+            .sign("test@example.com", &rival, "wasm32-wasip1", manifest)
+            .is_ok(),
         "unbound keychain should remain usable"
     );
 }

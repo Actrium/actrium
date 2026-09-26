@@ -21,8 +21,9 @@ use url::Url;
 use crate::commands::discovery::StandaloneDiscoverConfig;
 use crate::commands::{
     BuildCommand, CheckCommand, CompletionCommand, ConfigCommand, DepsArgs, DlqArgs, DocCommand,
-    GenCommand, InitCommand, LogsCommand, PkgArgs, PsCommand, RegistryArgs, RegistryCommand,
-    RestartCommand, RmCommand, RunCommand, StartCommand, StopCommand, VersionCommand,
+    GenCommand, InitCommand, LogsCommand, PkgArgs, PsCommand, RealmArgs, RegistryArgs,
+    RegistryCommand, RestartCommand, RmCommand, RunCommand, StartCommand, StopCommand,
+    VersionCommand,
 };
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ConfigManager, ConfigRequirement,
@@ -40,7 +41,7 @@ use crate::core::{
         Commands are grouped by audience:\n  \
         development:  init / gen / build / check / doc\n  \
         runtime:      run / ps / logs / start / stop / restart / rm\n  \
-        resources:    deps / pkg / registry / dlq\n  \
+        resources:    deps / pkg / registry / dlq / realm\n  \
         meta:         config / version / completion",
     version,
     disable_version_flag = true
@@ -93,6 +94,8 @@ pub enum Commands {
     Registry(RegistryArgs),
     /// Dead Letter Queue inspection and remediation
     Dlq(DlqArgs),
+    /// Realm signing key holder's tool (keys, Realm management requests)
+    Realm(RealmArgs),
 
     // ── meta ──
     /// Manage project configuration
@@ -123,6 +126,7 @@ impl Commands {
             Commands::Pkg(c) => c,
             Commands::Registry(c) => c,
             Commands::Dlq(c) => c,
+            Commands::Realm(c) => c,
             Commands::Config(c) => c,
             Commands::Version(c) => c,
             Commands::Completion(c) => c,
@@ -234,7 +238,7 @@ fn render_result(result: CommandResult) {
 async fn build_container(
     standalone_discover: Option<StandaloneDiscoverConfig>,
 ) -> Result<ServiceContainer> {
-    // ── Standalone mode (--endpoint --realm-id --realm-secret) ──
+    // ── Standalone mode (--endpoint --realm --realm-client-key) ──
     if let Some(cfg) = standalone_discover {
         let mut builder = ContainerBuilder::new();
         builder = builder.config_path(std::path::Path::new("."));
@@ -250,10 +254,8 @@ async fn build_container(
             },
             signaling_url: cfg.endpoint.clone(),
             issuer_endpoint: cfg.endpoint.to_string(),
-            realm: actr_protocol::Realm {
-                realm_id: cfg.realm_id as u32,
-            },
-            realm_secret: Some(cfg.realm_secret),
+            realm: Some(cfg.realm),
+            realm_client_key: Some(cfg.realm_client_key),
         };
 
         container = container
@@ -304,15 +306,15 @@ async fn build_container(
     })?;
 
     let issuer_endpoint = effective_cli.network.issuer_endpoint.clone();
-    let realm_id = effective_cli.network.realm_id.unwrap_or(1);
-    let realm_secret = effective_cli.network.realm_secret.clone();
+    let realm = effective_cli.network.realm.clone();
+    let realm_client_key = effective_cli.network.realm_client_key.clone();
 
     let discovery_context = DiscoveryContext {
         package_actr_type: config.package.actr_type.clone(),
         signaling_url,
         issuer_endpoint,
-        realm: actr_protocol::Realm { realm_id },
-        realm_secret,
+        realm,
+        realm_client_key,
     };
 
     container = container
@@ -368,8 +370,8 @@ fn validate_config_requirement(req: ConfigRequirement) -> Result<()> {
                     message: format!(
                         "No project configuration found (manifest.toml or actr.toml) in {}.\n\
                          Run this command from a project directory, or use \
-                         'actr registry discover --endpoint ... --realm-id ... \
-                         --realm-secret ...' for standalone discovery.",
+                         'actr registry discover --endpoint ... --realm ... \
+                         --realm-client-key ...' for standalone discovery.",
                         cwd.display()
                     ),
                 }

@@ -195,7 +195,7 @@ url = "wss://localhost:8080"
 url = "https://localhost:8080/issuer"
 
 [system.deployment]
-realm_id = 1
+realm = "dev@example.com"
 "#,
     )
     .unwrap();
@@ -219,7 +219,7 @@ url = "wss://localhost:8080"
 url = "https://localhost:8080/issuer"
 
 [system.deployment]
-realm_id = 1
+realm = "dev@example.com"
 "#,
     )
     .unwrap();
@@ -243,7 +243,7 @@ url = "wss://localhost:8080"
 url = "https://localhost:8080/issuer"
 
 [system.deployment]
-realm_id = 1
+realm = "dev@example.com"
 "#,
     )
     .unwrap();
@@ -268,7 +268,7 @@ url = "wss://localhost:8080"
 url = "https://localhost:8080/issuer"
 
 [system.deployment]
-realm_id = 1
+realm = "dev@example.com"
 "#,
     )
     .unwrap();

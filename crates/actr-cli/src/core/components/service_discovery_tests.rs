@@ -1,7 +1,6 @@
 use super::*;
-use actr_protocol::Realm;
 
-fn sample_context(realm_secret: Option<&str>) -> DiscoveryContext {
+fn sample_context(realm_client_key: Option<&str>) -> DiscoveryContext {
     DiscoveryContext {
         package_actr_type: ActrType {
             publisher: "acme".to_string(),
@@ -10,20 +9,15 @@ fn sample_context(realm_secret: Option<&str>) -> DiscoveryContext {
         },
         signaling_url: Url::parse("ws://localhost:8081/signaling/ws").unwrap(),
         issuer_endpoint: "http://localhost:8081/issuer".to_string(),
-        realm: Realm { realm_id: 1001 },
-        realm_secret: realm_secret.map(str::to_string),
+        realm: Some("test@example.com".to_string()),
+        realm_client_key: realm_client_key.map(std::path::PathBuf::from),
     }
 }
 
 fn sample_actor_id() -> ActrId {
     ActrId {
         serial_number: 42,
-        r#type: ActrType {
-            publisher: "acme".to_string(),
-            name: "echo".to_string(),
-            version: "1.0.0".to_string(),
-        },
-        realm: Realm { realm_id: 1001 },
+        realm: "test@example.com".to_string(),
     }
 }
 
@@ -65,25 +59,38 @@ fn build_signaling_request_with_identity_uses_url_query_params() {
 #[test]
 fn cli_discovery_register_request_uses_linked_auth_mode() {
     let discovery = NetworkServiceDiscovery::new(sample_context(Some("rs_test_secret")));
-    let request = discovery.build_linked_register_request();
+    let request = discovery.build_linked_register_request(discovery.required_realm().unwrap());
 
     assert_eq!(request.auth_mode, Some(RegisterAuthMode::Linked as i32));
     assert_eq!(request.manifest_raw, None);
     assert_eq!(request.publisher_signature, None);
     assert_eq!(request.target, None);
     assert_eq!(request.actr_type.name, "cli-client");
-    assert_eq!(request.realm.realm_id, 1001);
+    assert_eq!(request.realm, "test@example.com");
 }
 
 #[test]
-fn cli_discovery_requires_realm_secret() {
-    let missing = NetworkServiceDiscovery::new(sample_context(None));
-    let err = missing.required_realm_secret().unwrap_err();
-    assert!(err.to_string().contains("network.realm_secret is required"));
+fn cli_discovery_requires_realm() {
+    let mut context = sample_context(Some("rs_test_secret"));
+    context.realm = None;
+    let err = NetworkServiceDiscovery::new(context)
+        .required_realm()
+        .unwrap_err();
+    assert!(err.to_string().contains("network.realm is required"));
+}
 
-    let blank = NetworkServiceDiscovery::new(sample_context(Some("   ")));
-    let err = blank.required_realm_secret().unwrap_err();
-    assert!(err.to_string().contains("network.realm_secret is required"));
+#[test]
+fn cli_discovery_requires_a_realm_client_key() {
+    let missing = NetworkServiceDiscovery::new(sample_context(None));
+    let err = missing.required_client_key("test@example.com").unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("network.realm_client_key is required")
+    );
+
+    let absent = NetworkServiceDiscovery::new(sample_context(Some("/nonexistent/key.json")));
+    let err = absent.required_client_key("test@example.com").unwrap_err();
+    assert!(err.to_string().contains("Realm client key"));
 }
 
 #[test]
