@@ -6,7 +6,9 @@
 //! SHA-256(token) in SQLite. Successor tokens are derived deterministically
 //! via HMAC-SHA256 so concurrent requests and retries produce the same token.
 //!
-//! Rotation happens in a single SQLite transaction:
+//! `/renew` prepares a rotation without writing (see
+//! [`prepare_renewal_token_rotation`]); the attempt journal then commits the
+//! successor together with the response:
 //! 1. Look up the unexpired token by `actor_id + token_hash`.
 //! 2. If remaining lifetime > rotation window, return the current token unchanged.
 //! 3. Otherwise derive the successor deterministically and `INSERT OR IGNORE`.
@@ -15,7 +17,7 @@
 //! # Security
 //!
 //! - The database never stores raw tokens.
-//! - Logging must never emit tokens, token hashes, or realm secrets.
+//! - Logging must never emit tokens or token hashes.
 
 use actr_protocol::ActrId;
 use hmac::{Hmac, Mac};
@@ -39,17 +41,11 @@ type HmacSha256 = Hmac<Sha256>;
 /// are analysed in `loran/docs/reissue-grace-threat-model.zh.md`.
 pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400;
 
-/// How long a possession proof stays replayable after it has been consumed by a
-/// successful `/issuer/reissue`.
-///
-/// A reissue derives a deterministic successor from the presented proof; the
-/// existence of that successor row marks the proof as consumed. Retries of the
-/// same attempt (a lost response) inside this window re-derive the same
-/// successor and stay idempotent. Once the window elapses, the original proof is
-/// no longer accepted, so a single leaked proof can no longer be chained
-/// indefinitely to keep taking over the identity — the caller must carry the
-/// successor forward instead.
-pub const REISSUE_PROOF_REPLAY_WINDOW_SECS: i64 = 5 * 60;
+/// How long `/issuer/renew` still accepts a token whose successor already
+/// exists (it was rotated, or consumed by `/issuer/reissue`). Within it the
+/// caller gets that successor back, so a node that lost the response can
+/// recover; afterwards the token is refused, so a leaked copy of it is useless.
+pub const CONSUMED_TOKEN_RENEW_SECS: i64 = 5 * 60;
 
 // -------- public API ---------------------------------------------------------
 
@@ -137,100 +133,16 @@ pub async fn insert_renewal_token(
     Ok(())
 }
 
-/// Persist the deterministic `/reissue` successor, refreshing an already-expired
-/// row for the same token hash instead of leaving it stale.
-///
-/// The successor hash is derived deterministically from the possession proof, so
-/// a lost-response retry re-derives the *same* hash. Three cases:
-///
-/// - No row yet (first attempt): insert with `expires_at`.
-/// - Row exists and is still unexpired (replay inside the successor's lifetime):
-///   left untouched, so the caller observes the expiry recorded on the first
-///   attempt.
-/// - Row exists but has already expired (the first response was lost and the
-///   one-day successor lapsed while the original proof is still inside the
-///   reissue grace): atomically refresh its `expires_at`/`created_at` so the
-///   read-back finds a live row instead of failing with a 500.
-///
-/// A plain `INSERT OR IGNORE` cannot do this: it silently keeps the dead row and
-/// the subsequent unexpired lookup returns `None`. Refreshing is safe because the
-/// token is deterministic — the same proof always maps to this one row, so no
-/// competing binding is ever displaced.
-pub async fn upsert_reissue_successor_token(
-    actor_id: &ActrId,
-    token_hash: &[u8],
-    expires_at: i64,
-) -> Result<(), sqlx::Error> {
-    let pool = platform::storage::db::get_database().get_pool();
-    let now = now_secs();
-
-    sqlx::query(
-        "INSERT INTO issuer_renewal_token (actor_id, token_hash, expires_at, created_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(token_hash) DO UPDATE SET
-             expires_at = excluded.expires_at,
-             created_at = excluded.created_at
-         WHERE issuer_renewal_token.expires_at <= excluded.created_at",
-    )
-    .bind(actor_id.to_string_repr())
-    .bind(token_hash)
-    .bind(expires_at)
-    .bind(now)
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
-/// Row returned by renewal token queries.
-pub struct RenewalTokenRow {
-    #[allow(dead_code)]
-    pub id: i64,
-    pub actor_id: String,
-    pub token_hash: Vec<u8>,
-    pub expires_at: i64,
-}
-
-/// Look up an unexpired token by `actor_id + token_hash`.
-pub async fn find_unexpired_token(
-    actor_id: &ActrId,
-    token_hash: &[u8],
-) -> Result<Option<RenewalTokenRow>, sqlx::Error> {
-    let pool = platform::storage::db::get_database().get_pool();
-    let now = now_secs();
-
-    let row = sqlx::query_as::<_, (i64, String, Vec<u8>, i64)>(
-        "SELECT id, actor_id, token_hash, expires_at
-         FROM issuer_renewal_token
-         WHERE actor_id = ?1 AND token_hash = ?2 AND expires_at > ?3
-         LIMIT 1",
-    )
-    .bind(actor_id.to_string_repr())
-    .bind(token_hash)
-    .bind(now)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(
-        row.map(|(id, actor_id, token_hash, expires_at)| RenewalTokenRow {
-            id,
-            actor_id,
-            token_hash,
-            expires_at,
-        }),
-    )
-}
-
 /// Look up the issuer-recorded binding backing an `/issuer/reissue` possession
 /// proof, returning its recorded `expires_at`.
 ///
-/// Unlike [`find_unexpired_token`], this accepts tokens that expired up to
+/// Unlike `/renew`, this accepts tokens that expired up to
 /// [`REISSUE_BINDING_GRACE_SECS`] ago: the reissue path exists precisely for
 /// nodes whose renewal token can no longer be used for `/renew`.
 ///
-/// The returned expiry is what makes reissue replay-safe: it is a stable
-/// property of the presented proof, so it can seed a deterministic successor
-/// derivation that yields the same token for every retry of the same attempt.
+/// The returned expiry is a stable property of the presented proof; with the
+/// proof it seeds the deterministic successor whose row marks the proof as
+/// consumed.
 pub async fn find_binding_token_expiry(
     actor_id: &ActrId,
     token_hash: &[u8],
@@ -253,121 +165,39 @@ pub async fn find_binding_token_expiry(
     Ok(expires_at)
 }
 
-/// Return the creation time of a stored token row for this actor, regardless of
-/// expiry, if the row exists.
-///
-/// Reissue uses this against the deterministic successor's hash to tell whether
-/// a presented proof has already been consumed: a successor row created more
-/// than [`REISSUE_PROOF_REPLAY_WINDOW_SECS`] ago means the original proof is
-/// spent and must no longer mint further successors.
-pub async fn find_token_created_at(
-    actor_id: &ActrId,
-    token_hash: &[u8],
-) -> Result<Option<i64>, sqlx::Error> {
-    let pool = platform::storage::db::get_database().get_pool();
-
-    let created_at: Option<i64> = sqlx::query_scalar(
-        "SELECT created_at FROM issuer_renewal_token
-         WHERE actor_id = ?1 AND token_hash = ?2
-         LIMIT 1",
-    )
-    .bind(actor_id.to_string_repr())
-    .bind(token_hash)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(created_at)
-}
-
-/// Return the `(created_at, delivered_at)` pair for a successor row, regardless
-/// of expiry, if the row exists.
-///
-/// `delivered_at` is set when the reissue response carrying this successor was
-/// committed to the response cache (P1-8). It distinguishes the two consumption
-/// states that `created_at` alone could not:
-///
-/// - `delivered_at` is `Some`: the proof is spent **and** the response was
-///   delivered and cached. A replay reaching here means the cache expired, so
-///   the proof is fully spent — reject.
-/// - `delivered_at` is `None`: the successor row exists (proof was consumed by
-///   a signing attempt) but the response-cache transaction did not commit — a
-///   lost response. Keep the original [`REISSUE_PROOF_REPLAY_WINDOW_SECS`]
-///   window: a retry inside it re-derives the same successor and stays
-///   idempotent, while a replay past it is treated as a spent proof (stops
-///   chaining a leaked proof). The wider [`REISSUE_BINDING_GRACE_SECS`] check
-///   above only governs whether the proof is still resolvable at all.
-pub async fn find_token_consumption_state(
-    actor_id: &ActrId,
-    token_hash: &[u8],
-) -> Result<Option<(i64, Option<i64>)>, sqlx::Error> {
-    let pool = platform::storage::db::get_database().get_pool();
-
-    let row: Option<(i64, Option<i64>)> = sqlx::query_as(
-        "SELECT created_at, delivered_at FROM issuer_renewal_token
-         WHERE actor_id = ?1 AND token_hash = ?2
-         LIMIT 1",
-    )
-    .bind(actor_id.to_string_repr())
-    .bind(token_hash)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(row)
-}
-
-/// Mark a successor row as delivered — the response carrying it was committed to
-/// the reissue response cache. Called inside the same `BEGIN IMMEDIATE`
-/// transaction that inserts the nonce and caches the encrypted response.
-pub async fn mark_token_delivered(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    actor_id: &ActrId,
-    token_hash: &[u8],
-    now: i64,
-) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
-        "UPDATE issuer_renewal_token SET delivered_at = ?1
-         WHERE actor_id = ?2 AND token_hash = ?3 AND delivered_at IS NULL",
-    )
-    .bind(now)
-    .bind(actor_id.to_string_repr())
-    .bind(token_hash)
-    .execute(&mut **tx)
-    .await?;
-    Ok(result.rows_affected())
-}
-
 /// Return whether an actor identity has been explicitly revoked.
 ///
 /// A hit is terminal: the caller must refuse to renew or reissue credentials for
-/// this `(realm_id, serial_number)` regardless of any renewal token it still
+/// this `(realm, serial_number)` regardless of any renewal token it still
 /// holds.
-pub async fn is_actor_revoked(actor_id: &ActrId) -> Result<bool, sqlx::Error> {
-    let pool = platform::storage::db::get_database().get_pool();
-
+pub async fn is_actor_revoked(
+    conn: &mut sqlx::SqliteConnection,
+    actor_id: &ActrId,
+) -> Result<bool, sqlx::Error> {
     let found: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM revoked_actor
-         WHERE realm_id = ?1 AND serial_number = ?2
+         WHERE realm = ?1 AND serial_number = ?2
          LIMIT 1",
     )
-    .bind(i64::from(actor_id.realm.realm_id))
+    .bind(&actor_id.realm)
     .bind(actor_id.serial_number as i64)
-    .fetch_optional(pool)
+    .fetch_optional(conn)
     .await?;
 
     Ok(found.is_some())
 }
 
 /// Record an actor identity revocation. Idempotent: a repeated call for the same
-/// `(realm_id, serial_number)` keeps the original `revoked_at`/`reason`.
+/// `(realm, serial_number)` keeps the original `revoked_at`/`reason`.
 pub async fn revoke_actor(actor_id: &ActrId, reason: &str) -> Result<(), sqlx::Error> {
     let pool = platform::storage::db::get_database().get_pool();
     let now = now_secs();
 
     sqlx::query(
-        "INSERT OR IGNORE INTO revoked_actor (realm_id, serial_number, revoked_at, reason)
+        "INSERT OR IGNORE INTO revoked_actor (realm, serial_number, revoked_at, reason)
          VALUES (?1, ?2, ?3, ?4)",
     )
-    .bind(i64::from(actor_id.realm.realm_id))
+    .bind(&actor_id.realm)
     .bind(actor_id.serial_number as i64)
     .bind(now)
     .bind(reason)
@@ -435,6 +265,25 @@ pub async fn gc_expired_tokens() -> Result<u64, sqlx::Error> {
     Ok(result.rows_affected())
 }
 
+/// Extend an actor's pending registration metadata to the retention of its
+/// current renewal token, matching what `/issuer/register` stored.
+pub(crate) async fn refresh_pending_registration(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    actor_id: &ActrId,
+    renewal_expires_at: i64,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE pending_registration SET expires_at = ?1
+         WHERE realm = ?2 AND serial_number = ?3",
+    )
+    .bind(renewal_expires_at.saturating_add(REISSUE_BINDING_GRACE_SECS))
+    .bind(&actor_id.realm)
+    .bind(actor_id.serial_number as i64)
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 // -------- rotation logic -----------------------------------------------------
 
 /// Outcome of a renewal token rotation attempt.
@@ -445,117 +294,93 @@ pub enum RotationOutcome {
     Rotated { token: Bytes, expires_at: i64 },
 }
 
-/// Execute the full rotation transaction.
+/// A validated rotation, not yet written. The attempt journal commits it
+/// together with the response (`ControlAttemptStore::complete_renewal`).
+pub(crate) struct PreparedRotation {
+    pub(crate) presented_hash: Vec<u8>,
+    /// The token's successor, stored when `outcome` is `Rotated`; its row
+    /// marks the presented token as consumed.
+    pub(crate) successor_hash: Vec<u8>,
+    pub(crate) outcome: RotationOutcome,
+}
+
+/// Validate the presented token and work out the rotation without writing.
 ///
-/// 1. Verify the old token exists and is unexpired (401 otherwise).
-/// 2. If remaining lifetime > rotation_window_secs, return `Unchanged`.
-/// 3. Otherwise derive successor, `INSERT OR IGNORE` successor hash.
-/// 4. Delete expired tokens, trim to 2 newest.
-/// 5. Return `Rotated` with the successor token and expiry.
-pub async fn rotate_renewal_token(
+/// 1. Verify the token exists and is unexpired (401 otherwise).
+/// 2. If its successor already exists, return that successor, but only within
+///    [`CONSUMED_TOKEN_RENEW_SECS`] of its creation (401 afterwards).
+/// 3. If remaining lifetime > rotation_window_secs, the token stays.
+/// 4. Otherwise derive the successor and its expiry.
+pub(crate) async fn prepare_renewal_token_rotation(
     actor_id: &ActrId,
     old_token: &[u8],
     secret: &[u8],
     rotation_window_secs: u64,
     ttl_secs: u64,
-) -> Result<RotationOutcome, RenewalError> {
-    let old_hash = hash_token(old_token);
+) -> Result<PreparedRotation, RenewalError> {
+    let presented_hash = hash_token(old_token);
     let now = now_secs();
-    let actor_id_repr = actor_id.to_string_repr();
     let pool = platform::storage::db::get_database().get_pool();
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|e| RenewalError::StoreError(format!("begin transaction failed: {e}")))?;
 
-    // 1. Look up the unexpired token inside the transaction.
-    let row = sqlx::query_as::<_, (i64, String, Vec<u8>, i64)>(
-        "SELECT id, actor_id, token_hash, expires_at
-         FROM issuer_renewal_token
+    let current_expires_at: Option<i64> = sqlx::query_scalar(
+        "SELECT expires_at FROM issuer_renewal_token
          WHERE actor_id = ?1 AND token_hash = ?2 AND expires_at > ?3
          LIMIT 1",
     )
-    .bind(&actor_id_repr)
-    .bind(&old_hash)
+    .bind(actor_id.to_string_repr())
+    .bind(&presented_hash)
     .bind(now)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(pool)
     .await
     .map_err(|e| RenewalError::StoreError(format!("token lookup failed: {e}")))?;
 
-    let Some((_, _, _, current_expires_at)) = row else {
-        tx.rollback()
-            .await
-            .map_err(|e| RenewalError::StoreError(format!("rollback failed: {e}")))?;
+    let Some(current_expires_at) = current_expires_at else {
         return Err(RenewalError::TokenRejected);
     };
 
-    // 2. If remaining lifetime > rotation window, return unchanged.
-    let remaining = current_expires_at - now;
-    if remaining > rotation_window_secs as i64 {
-        tx.commit()
-            .await
-            .map_err(|e| RenewalError::StoreError(format!("commit failed: {e}")))?;
-        return Ok(RotationOutcome::Unchanged {
-            token: Bytes::copy_from_slice(old_token),
-            expires_at: current_expires_at,
+    let successor = derive_successor_token(secret, old_token, actor_id, current_expires_at);
+    let successor_hash = hash_token(&successor);
+    let consumed: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT expires_at, created_at FROM issuer_renewal_token
+         WHERE actor_id = ?1 AND token_hash = ?2",
+    )
+    .bind(actor_id.to_string_repr())
+    .bind(&successor_hash)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| RenewalError::StoreError(format!("successor lookup failed: {e}")))?;
+    if let Some((successor_expires, consumed_at)) = consumed {
+        if now - consumed_at > CONSUMED_TOKEN_RENEW_SECS {
+            return Err(RenewalError::TokenRejected);
+        }
+        return Ok(PreparedRotation {
+            presented_hash,
+            successor_hash,
+            outcome: RotationOutcome::Rotated {
+                token: Bytes::from(successor),
+                expires_at: successor_expires,
+            },
         });
     }
 
-    // 3. Derive successor.
-    let successor = derive_successor_token(secret, old_token, actor_id, current_expires_at);
-    let successor_hash = hash_token(&successor);
-    let successor_expires = successor_expires_at(current_expires_at, ttl_secs);
+    if current_expires_at - now > rotation_window_secs as i64 {
+        return Ok(PreparedRotation {
+            presented_hash,
+            successor_hash,
+            outcome: RotationOutcome::Unchanged {
+                token: Bytes::copy_from_slice(old_token),
+                expires_at: current_expires_at,
+            },
+        });
+    }
 
-    // 4. Insert successor hash (INSERT OR IGNORE — idempotent).
-    sqlx::query(
-        "INSERT OR IGNORE INTO issuer_renewal_token (actor_id, token_hash, expires_at, created_at)
-         VALUES (?1, ?2, ?3, ?4)",
-    )
-    .bind(&actor_id_repr)
-    .bind(&successor_hash)
-    .bind(successor_expires)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| RenewalError::StoreError(format!("failed to insert successor: {e}")))?;
-
-    // 5. Cleanup — expired tokens + keep at most 2 newest.
-    sqlx::query("DELETE FROM issuer_renewal_token WHERE actor_id = ?1 AND expires_at <= ?2")
-        .bind(&actor_id_repr)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| RenewalError::StoreError(format!("failed to delete expired tokens: {e}")))?;
-
-    sqlx::query(
-        "DELETE FROM issuer_renewal_token
-         WHERE actor_id = ?1
-           AND id NOT IN (
-               SELECT id FROM issuer_renewal_token
-               WHERE actor_id = ?1
-               ORDER BY expires_at DESC, created_at DESC
-               LIMIT 2
-           )",
-    )
-    .bind(&actor_id_repr)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| RenewalError::StoreError(format!("failed to trim old tokens: {e}")))?;
-
-    tx.commit()
-        .await
-        .map_err(|e| RenewalError::StoreError(format!("commit failed: {e}")))?;
-
-    platform::recording::info!(
-        "Renewal token rotated for actor {}: old_expires={}, new_expires={}",
-        actor_id_repr,
-        current_expires_at,
-        successor_expires
-    );
-
-    Ok(RotationOutcome::Rotated {
-        token: Bytes::from(successor),
-        expires_at: successor_expires,
+    Ok(PreparedRotation {
+        presented_hash,
+        successor_hash,
+        outcome: RotationOutcome::Rotated {
+            token: Bytes::from(successor),
+            expires_at: successor_expires_at(current_expires_at, ttl_secs),
+        },
     })
 }
 
@@ -611,13 +436,8 @@ mod tests {
         let secret = b"test-secret-at-least-32-bytes!";
         let old = b"old-renewal-token-32-bytes-xx";
         let actor_id = ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 42,
-            r#type: actr_protocol::ActrType {
-                publisher: "test".to_string(),
-                name: "actor".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
 
         let s1 = derive_successor_token(secret, old, &actor_id, 1_000_000);
@@ -631,13 +451,8 @@ mod tests {
         let secret = b"test-secret-at-least-32-bytes!";
         let old = b"old-renewal-token-32-bytes-xx";
         let actor_id = ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 42,
-            r#type: actr_protocol::ActrType {
-                publisher: "test".to_string(),
-                name: "actor".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
 
         let s1 = derive_successor_token(secret, old, &actor_id, 1_000_000);

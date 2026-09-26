@@ -11,12 +11,6 @@ pub struct StorageConfig {
     /// Storage backend type.
     pub backend: StorageBackend,
 
-    /// Key lifetime, in seconds.
-    ///
-    /// How long a generated key remains valid; keys older than this are treated
-    /// as expired. A value of 0 means the key never expires.
-    pub key_ttl_seconds: u64,
-
     /// SQLite configuration (required when `backend = "sqlite"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sqlite: Option<SqliteConfig>,
@@ -30,7 +24,6 @@ impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             backend: StorageBackend::Sqlite,
-            key_ttl_seconds: 3600,
             sqlite: Some(SqliteConfig::default()),
             postgres: None,
         }
@@ -125,7 +118,6 @@ mod tests {
     fn test_default_storage_config() {
         let config = StorageConfig::default();
         assert_eq!(config.backend, StorageBackend::Sqlite);
-        assert_eq!(config.key_ttl_seconds, 3600);
         assert!(config.sqlite.is_some());
     }
 
@@ -133,21 +125,18 @@ mod tests {
     fn test_serialize_sqlite_config() {
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
-            key_ttl_seconds: 7200,
             sqlite: Some(SqliteConfig::default()),
             postgres: None,
         };
 
         let toml = toml::to_string(&config).unwrap();
         assert!(toml.contains("backend = \"sqlite\""));
-        assert!(toml.contains("key_ttl_seconds = 7200"));
     }
 
     #[test]
     fn test_deserialize_postgres_config() {
         let toml_str = r#"
             backend = "postgres"
-            key_ttl_seconds = 1800
 
             [postgres]
             host = "localhost"
@@ -160,7 +149,6 @@ mod tests {
 
         let config: StorageConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.backend, StorageBackend::Postgres);
-        assert_eq!(config.key_ttl_seconds, 1800);
 
         let postgres = config.postgres.unwrap();
         assert_eq!(postgres.host, "localhost");
@@ -175,7 +163,6 @@ mod tests {
     fn test_reject_unknown_storage_field() {
         let toml_str = r#"
             backend = "sqlite"
-            key_ttl_seconds = 3600
             unknown_field = "typo"
         "#;
 
@@ -190,7 +177,6 @@ mod tests {
     fn test_reject_unknown_postgres_field() {
         let toml_str = r#"
             backend = "postgres"
-            key_ttl_seconds = 1800
 
             [postgres]
             host = "localhost"

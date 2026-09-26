@@ -28,19 +28,12 @@ pub enum SignerExpose {
 ///
 /// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
 /// The ENABLE_SIGNER bit (bit 4) must be set to enable this service.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SignerServiceConfig {
     /// Storage configuration.
     #[serde(default)]
     pub storage: StorageConfig,
-
-    /// Tolerance period, in seconds.
-    ///
-    /// For a while after a key expires, the private key can still be fetched to
-    /// allow a smooth transition. Default: 3600 (1 hour).
-    #[serde(default = "default_tolerance")]
-    pub tolerance_seconds: u64,
 
     /// KEK (Key Encryption Key) - inline value.
     ///
@@ -92,27 +85,6 @@ pub struct SignerServiceConfig {
     /// Path to the server private key used for mTLS.
     #[serde(default)]
     pub mtls_key: Option<String>,
-}
-
-fn default_tolerance() -> u64 {
-    3600
-}
-
-impl Default for SignerServiceConfig {
-    fn default() -> Self {
-        Self {
-            storage: Default::default(),
-            tolerance_seconds: default_tolerance(),
-            kek: None,
-            kek_env: None,
-            kek_file: None,
-            expose: SignerExpose::default(),
-            require_mtls: false,
-            mtls_ca_cert: None,
-            mtls_cert: None,
-            mtls_key: None,
-        }
-    }
 }
 
 impl SignerServiceConfig {
@@ -181,20 +153,29 @@ mod tests {
         let config = SignerServiceConfig {
             storage: StorageConfig {
                 backend: StorageBackend::Sqlite,
-                key_ttl_seconds: 7200,
                 sqlite: Some(SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
-            tolerance_seconds: 3600,
             ..Default::default()
         };
 
         let toml = toml::to_string(&config).unwrap();
         assert!(!toml.contains("enabled")); // enabled field should not be present
-        assert!(toml.contains("key_ttl_seconds = 7200"));
+        assert!(toml.contains("backend = \"sqlite\""));
+    }
+
+    #[test]
+    fn removed_key_expiry_settings_are_rejected() {
+        assert!(toml::from_str::<SignerServiceConfig>("tolerance_seconds = 3600").is_err());
+        assert!(
+            toml::from_str::<SignerServiceConfig>(
+                "[storage]\nbackend = \"sqlite\"\nkey_ttl_seconds = 3600"
+            )
+            .is_err()
+        );
     }
 
     #[test]

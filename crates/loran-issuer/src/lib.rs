@@ -9,27 +9,11 @@
 //! # Architecture
 //!
 //! ```text
-//! ┌──────────────┐
-//! │   Client     │
-//! └──────┬───────┘
-//!        │ POST /issuer/register (protobuf)
-//!        ▼
-//! ┌──────────────────────────────────────────┐
-//! │  Issuer Service                             │
-//! │  ┌────────────┐      ┌────────────────┐ │
-//! │  │  Handlers  │─────▶│  AIdIssuer     │ │
-//! │  └────────────┘      └────────┬───────┘ │
-//! │                               │         │
-//! │  ┌──────────────────┐  ┌─────▼──────┐  │
-//! │  │ SN Generator     │  │ KeyStorage │  │
-//! │  │ (Snowflake)      │  │ (SQLite)   │  │
-//! │  └──────────────────┘  └────────────┘  │
-//! └──────────────┬───────────────────────────┘
-//!                │ Signer Client
-//!                ▼
-//!         ┌─────────────┐
-//!         │ Signer Service  │ (key generation)
-//!         └─────────────┘
+//! Client ── POST /issuer/register (protobuf) ──▶ Handlers ──▶ AIdIssuer
+//!                                                               │
+//!                              Snowflake serial numbers ◀───────┤
+//!                                                               ▼
+//!                                             Signer (issuer:<realm> keys)
 //! ```
 //!
 //! # Core Flow
@@ -44,12 +28,11 @@
 //! 6. Return `RegisterResponse` with ActrId, access credential, TURN credential,
 //!    and renewal token.
 //!
-//! ## Key Management
+//! ## Signing Keys
 //!
-//! - **Fetch**: On startup, load the cached key from local SQLite; if expired or too close to expiry, fetch from Signer
-//! - **Refresh**: Background task checks every 10 minutes; refreshes keys expiring within 10 minutes
-//! - **Minting deadline**: Never mint with a key at or within 10 seconds of `expires_at`, because signaling drops the key at that instant
-//! - **Tolerance**: Signer key-material retention after expiry is read-only and does not extend the Issuer minting window
+//! Credentials are signed by the Signer with the Realm's current issuer key
+//! (the first is `issuer:<realm>`, created on first use). The keys rotate as
+//! `realm-profile.md` section 6.1 describes and are retired with the Realm.
 //!
 //! # Usage Example
 //!
@@ -78,7 +61,6 @@
 //! - **Renewal token rotation**: renewal tokens are stored as hashes and rotated on use.
 //! - **Encrypted transport**: tokens are encrypted with ECIES; only services holding the private key can decrypt them
 //! - **Serial number uniqueness**: the Snowflake algorithm guarantees global uniqueness in distributed environments
-//! - **Key rotation**: old keys remain verifiable during the tolerance window.
 //!
 //! # Configuration Options
 //!
@@ -86,14 +68,20 @@
 #![deny(clippy::disallowed_macros)]
 
 pub mod handlers;
+mod idempotency;
+pub mod identity;
 pub mod issuer;
+mod membership;
 pub mod ratelimit;
+pub mod realm_management;
+pub mod realm_profile;
 pub mod renewal;
 pub mod signer_client_wrapper;
 mod sn;
-mod storage;
+#[cfg(test)]
+mod test_support;
 
-pub use issuer::{AIdIssuer, IssuerConfig, KeyCacheInfo};
+pub use issuer::{AIdIssuer, IssuerConfig};
 
 use crate::handlers::{IssuerState, create_router};
 use crate::signer_client_wrapper::create_signer_client;
@@ -126,8 +114,8 @@ pub async fn create_issuer_router_with_counters(
 /// Create the Issuer service state (issuer + idempotency store).
 ///
 /// The returned [`IssuerState`] owns the issuer inside an `Arc`; the control
-/// plane can grab `state.issuer` to trigger authenticated key rotation on the
-/// same issuer that backs the public `/issuer` router built from this state.
+/// plane shares `state.issuer`, the same issuer that backs the public
+/// `/issuer` router built from this state.
 pub async fn create_issuer_state(
     config: &IssuerServiceConfig,
     global_config: &platform::config::ActrixConfig,
@@ -135,6 +123,7 @@ pub async fn create_issuer_state(
     counters: Option<Arc<ServiceCounters>>,
 ) -> Result<IssuerState> {
     platform::recording::info!("Creating Issuer state with config");
+    remove_retired_key_store(&global_config.sqlite_path);
 
     // Get Signer client config
     let signer_client_config = config
@@ -165,18 +154,15 @@ pub async fn create_issuer_state(
         );
     }
 
-    let key_storage_file = global_config.sqlite_path.join(ISSUER_KEY_STORAGE_FILE);
-    migrate_legacy_key_storage(&global_config.sqlite_path, &key_storage_file)?;
-
     let issuer_config = IssuerConfig {
         worker_id: config.server.worker_id,
         token_ttl_secs: config.server.token_ttl_secs,
         signaling_heartbeat_interval_secs: config.server.signaling_heartbeat_interval_secs,
-        key_refresh_interval_secs: 3600, // 1 hour
-        key_storage_file,
-        enable_periodic_rotation: false, // disabled by default; can be enabled via config
-        key_rotation_interval_secs: 86400, // 24 hours
         turn_secret: global_config.turn.turn_secret.clone(),
+        provider_id: global_config
+            .authority
+            .provider_id()
+            .map_err(anyhow::Error::msg)?,
         sqlite_path: global_config.sqlite_path.clone(),
         renewal_token_ttl_secs: config.server.renewal_token_ttl_secs,
         renewal_rotation_window_secs: config.server.renewal_rotation_window_secs,
@@ -198,34 +184,25 @@ pub async fn create_issuer_state(
     Ok(state)
 }
 
-/// File name of the issuer signing-key store under `sqlite_path`.
-pub const ISSUER_KEY_STORAGE_FILE: &str = "issuer_keys.db";
-
-/// File name used for the issuer signing-key store before the historical
-/// service name was retired.
-const LEGACY_KEY_STORAGE_FILE: &str = "ais_keys.db";
-
-/// Moves a key store created under the retired file name to its current
-/// name so existing signing keys survive the rename.
-fn migrate_legacy_key_storage(
-    sqlite_path: &std::path::Path,
-    key_storage_file: &std::path::Path,
-) -> anyhow::Result<()> {
-    let legacy = sqlite_path.join(LEGACY_KEY_STORAGE_FILE);
-    if legacy.exists() && !key_storage_file.exists() {
-        std::fs::rename(&legacy, key_storage_file).with_context(|| {
-            format!(
-                "Failed to move legacy issuer key store {} to {}",
-                legacy.display(),
-                key_storage_file.display()
-            )
-        })?;
-        platform::recording::info!(
-            "Moved legacy issuer key store to {}",
-            key_storage_file.display()
-        );
+/// Delete `issuer_keys.db` (earlier `ais_keys.db`), the store of the removed
+/// global Issuer key, if a data directory still has it.
+fn remove_retired_key_store(data_dir: &std::path::Path) {
+    for file in ["issuer_keys.db", "ais_keys.db"]
+        .into_iter()
+        .flat_map(|name| ["", "-wal", "-shm"].map(|suffix| format!("{name}{suffix}")))
+    {
+        let path = data_dir.join(file);
+        match std::fs::remove_file(&path) {
+            Ok(()) => platform::recording::info!(
+                "Removed {}, left by the retired global Issuer key",
+                path.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                platform::recording::warn!("Failed to remove {}: {}", path.display(), error)
+            }
+        }
     }
-    Ok(())
 }
 
 /// Build the public `/issuer` router from an existing [`IssuerState`].
@@ -235,8 +212,23 @@ pub fn create_router_from_state(state: IssuerState) -> Router {
 
 #[cfg(test)]
 mod tests {
-
-    // Note: full integration tests require the Signer service to be running
-    // Only basic unit tests here
-    // Actual testing is done via HTTP endpoints after the main program starts
+    #[test]
+    fn removes_the_retired_key_store() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "issuer_keys.db",
+            "issuer_keys.db-wal",
+            "ais_keys.db",
+            "actrix.db",
+        ] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        super::remove_retired_key_store(dir.path());
+        assert!(!dir.path().join("issuer_keys.db").exists());
+        assert!(!dir.path().join("issuer_keys.db-wal").exists());
+        assert!(!dir.path().join("ais_keys.db").exists());
+        assert!(dir.path().join("actrix.db").exists());
+        // Nothing left to remove is fine.
+        super::remove_retired_key_store(dir.path());
+    }
 }

@@ -50,8 +50,8 @@
 //! use issuer::sn::{SerialNumber, AIdSerialNumberIssuer};
 //!
 //! // Generate a serial number
-//! let sn1 = SerialNumber::sn(1);  // realm_id = 1 (currently unused)
-//! let sn2 = SerialNumber::sn(1);
+//! let sn1 = SerialNumber::sn();
+//! let sn2 = SerialNumber::sn();
 //!
 //! // Serial numbers auto-increment
 //! assert!(sn2.value() > sn1.value());
@@ -62,8 +62,7 @@
 //!
 //! # Notes
 //!
-//! ⚠️ **The realm_id parameter is currently unused**: serial numbers are globally unique and not isolated by realm.
-//! If realm isolation is needed, consider embedding realm_id into the high bits of worker_id.
+//! Serial numbers are globally unique and therefore unique within every Realm.
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -218,11 +217,11 @@ impl TryFrom<u64> for SerialNumber {
 }
 
 pub trait AIdSerialNumberIssuer {
-    fn sn(realm_id: u32) -> SerialNumber;
+    fn sn() -> SerialNumber;
 }
 
 impl AIdSerialNumberIssuer for SerialNumber {
-    fn sn(_realm_id: u32) -> SerialNumber {
+    fn sn() -> SerialNumber {
         let worker_id = configured_worker_id();
 
         // Get current timestamp in milliseconds
@@ -309,9 +308,9 @@ mod tests {
     #[test]
     fn test_serial_number_creation() {
         configure_test_worker();
-        let sn1 = SerialNumber::sn(1);
-        let sn2 = SerialNumber::sn(1);
-        let sn3 = SerialNumber::sn(2);
+        let sn1 = SerialNumber::sn();
+        let sn2 = SerialNumber::sn();
+        let sn3 = SerialNumber::sn();
 
         // Different calls should produce different serial numbers
         assert_ne!(sn1.value(), sn2.value());
@@ -327,12 +326,12 @@ mod tests {
     #[test]
     fn test_monotonic_generation() {
         configure_test_worker();
-        let mut _previous = SerialNumber::sn(1).value();
+        let mut _previous = SerialNumber::sn().value();
 
         // Generate several serial numbers and check they generally increase
         // (allowing for some timestamp variations)
         for _ in 0..100 {
-            let current = SerialNumber::sn(1).value();
+            let current = SerialNumber::sn().value();
             // In Snowflake, newer IDs should generally be larger (timestamp component)
             // But we can't guarantee strict monotonicity due to sequence wraparound
             assert!(current <= SerialNumber::MAX_VALUE);
@@ -346,8 +345,8 @@ mod tests {
         let mut generated = HashSet::new();
 
         // Rapidly generate many serial numbers
-        for i in 0..1000 {
-            let sn = SerialNumber::sn(i % 10); // Different realms
+        for _ in 0..1000 {
+            let sn = SerialNumber::sn();
             assert!(
                 generated.insert(sn.value()),
                 "Duplicate serial number generated: {}",
@@ -362,11 +361,11 @@ mod tests {
     fn test_concurrent_generation() {
         configure_test_worker();
         let handles: Vec<_> = (0..10)
-            .map(|i| {
+            .map(|_| {
                 thread::spawn(move || {
                     let mut local_set = HashSet::new();
-                    for j in 0..100 {
-                        let sn = SerialNumber::sn((i * 100 + j) as u32);
+                    for _ in 0..100 {
+                        let sn = SerialNumber::sn();
                         local_set.insert(sn.value());
                     }
                     local_set
@@ -391,7 +390,7 @@ mod tests {
     #[test]
     fn test_bit_layout_extraction() {
         configure_test_worker();
-        let sn = SerialNumber::sn(42);
+        let sn = SerialNumber::sn();
         let value = sn.value();
 
         // Extract components (reverse of the generation process)

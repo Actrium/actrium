@@ -9,7 +9,7 @@ use crate::{
         NonceRequest, PublishRequest, PublisherCertificate, PublisherRegistryManager,
         lookup_package,
     },
-    model::{ActrPackage, PkgStatus, PublishNonce, Publisher, PublisherChallenge, PublisherStatus},
+    model::{ActrPackage, PkgStatus, PublishNonce, Publisher, PublisherStatus},
 };
 
 #[test]
@@ -62,6 +62,7 @@ async fn setup_test_pool() -> SqlitePool {
             name TEXT NOT NULL UNIQUE,
             public_key TEXT NOT NULL DEFAULT '',
             key_id TEXT NOT NULL DEFAULT '',
+            profile_json TEXT NOT NULL DEFAULT '{}',
             contact TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
             created_at INTEGER NOT NULL,
@@ -69,27 +70,16 @@ async fn setup_test_pool() -> SqlitePool {
             verified_at INTEGER,
             suspended_at INTEGER,
             revoked_at INTEGER,
-            key_expires_at INTEGER
+            key_expires_at INTEGER,
+            next_public_key TEXT,
+            next_key_id TEXT,
+            next_key_expires_at INTEGER,
+            profile_pins TEXT
         )",
     )
     .execute(&pool)
     .await
     .expect("failed to create publisher table");
-
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS publisher_challenge (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            publisher_id INTEGER NOT NULL REFERENCES publisher(id),
-            token TEXT NOT NULL,
-            verify_url TEXT NOT NULL DEFAULT '',
-            expires_at INTEGER NOT NULL,
-            verified_at INTEGER,
-            created_at INTEGER NOT NULL
-        )",
-    )
-    .execute(&pool)
-    .await
-    .expect("failed to create publisher_challenge table");
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS publisher_package (
@@ -152,6 +142,70 @@ async fn setup_test_pool() -> SqlitePool {
 fn valid_public_key() -> String {
     let (_, public_key) = crypto::generate_keypair();
     public_key
+}
+
+/// A pending publisher record, created without registration.
+async fn pending(
+    manager: &PublisherRegistryManager,
+    name: &str,
+) -> Result<(Publisher, ()), PublisherRegistryError> {
+    let name = crate::reserved::canonical_publisher_domain(name)?;
+    Ok((Publisher::create(manager.pool(), &name, None).await?, ()))
+}
+
+fn b64_key(key: &ed25519_dalek::SigningKey) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes())
+}
+
+/// A Publisher Profile of `domain` listing `roots` (signed by the first)
+/// and `packages` as package signing keys.
+fn signed_profile(
+    domain: &str,
+    sequence: u64,
+    roots: &[(&str, &ed25519_dalek::SigningKey, &str)],
+    packages: &[(&ed25519_dalek::SigningKey, &str)],
+) -> actr_protocol::PublisherProfile {
+    let key = |id: String, key: &ed25519_dalek::SigningKey, status: &str| {
+        serde_json::json!({
+            "id": id,
+            "algorithm": "Ed25519",
+            "public_key": b64_key(key),
+            "status": status,
+        })
+    };
+    let now = chrono::Utc::now();
+    let mut document = serde_json::json!({
+        "schema": "actr.publisher/v1",
+        "sequence": sequence,
+        "domain": domain,
+        "profile_signing_keys": roots
+            .iter()
+            .map(|(id, root, status)| key(id.to_string(), root, status))
+            .collect::<Vec<_>>(),
+        "keys": packages
+            .iter()
+            .map(|(package, status)| key(crypto::compute_key_id(package.verifying_key().as_bytes()), package, status))
+            .collect::<Vec<_>>(),
+        "security_contact": format!("mailto:security@{domain}"),
+        "profile_issued_at": (now - chrono::Duration::hours(1)).to_rfc3339(),
+        "profile_expires_at": (now + chrono::Duration::days(30)).to_rfc3339(),
+    });
+    actr_protocol::realm_profile::sign_document(&mut document, roots[0].0, roots[0].1);
+    serde_json::from_value(document).unwrap()
+}
+
+/// Verify `profile` as the `register_publisher` path does and register it.
+async fn register(
+    manager: &PublisherRegistryManager,
+    profile: &actr_protocol::PublisherProfile,
+) -> Result<Publisher, PublisherRegistryError> {
+    let keys = profile
+        .verify(&profile.domain, chrono::Utc::now())
+        .expect("valid Publisher Profile");
+    manager
+        .register_publisher(&profile.domain, profile, &keys)
+        .await
 }
 
 /// Generate a valid nonce + nonce_sig for publish requests in tests.
@@ -468,91 +522,6 @@ async fn test_publisher_delete() {
 
     let found = Publisher::get(&pool, id).await.unwrap();
     assert!(found.is_none());
-}
-
-// ─── model/challenge.rs tests (require DB) ────────────────────────────────────
-
-#[tokio::test]
-async fn test_challenge_create() {
-    let pool = setup_test_pool().await;
-    let record = Publisher::create(&pool, "chco", None).await.unwrap();
-
-    let ch = PublisherChallenge::create(&pool, record.id).await.unwrap();
-
-    assert!(
-        ch.token.starts_with("actrix-verify="),
-        "token should start with 'actrix-verify=', got: {}",
-        ch.token
-    );
-    assert!(ch.verify_url.is_empty());
-    assert!(ch.verified_at.is_none());
-    assert!(ch.expires_at > ch.created_at);
-    assert_eq!(ch.publisher_id, record.id);
-}
-
-#[tokio::test]
-async fn test_challenge_get_active_found() {
-    let pool = setup_test_pool().await;
-    let record = Publisher::create(&pool, "activech", None).await.unwrap();
-    let ch = PublisherChallenge::create(&pool, record.id).await.unwrap();
-
-    let active = PublisherChallenge::get_active(&pool, record.id)
-        .await
-        .unwrap();
-    assert!(active.is_some());
-    assert_eq!(active.unwrap().id, ch.id);
-}
-
-#[tokio::test]
-async fn test_challenge_get_active_none_when_empty() {
-    let pool = setup_test_pool().await;
-    let record = Publisher::create(&pool, "nochco", None).await.unwrap();
-
-    let active = PublisherChallenge::get_active(&pool, record.id)
-        .await
-        .unwrap();
-    assert!(active.is_none());
-}
-
-#[tokio::test]
-async fn test_challenge_mark_verified() {
-    let pool = setup_test_pool().await;
-    let record = Publisher::create(&pool, "verch", None).await.unwrap();
-    let mut ch = PublisherChallenge::create(&pool, record.id).await.unwrap();
-
-    ch.mark_verified(
-        &pool,
-        "https://apps.example.com/.well-known/actr/publisher.json",
-    )
-    .await
-    .unwrap();
-    assert!(ch.verified_at.is_some());
-    assert_eq!(
-        ch.verify_url,
-        "https://apps.example.com/.well-known/actr/publisher.json"
-    );
-
-    let active = PublisherChallenge::get_active(&pool, record.id)
-        .await
-        .unwrap();
-    assert!(
-        active.is_none(),
-        "verified challenge should not appear in get_active"
-    );
-}
-
-#[tokio::test]
-async fn test_challenge_token_unique() {
-    let pool = setup_test_pool().await;
-    let record = Publisher::create(&pool, "tokenco", None).await.unwrap();
-
-    let ch1 = PublisherChallenge::create(&pool, record.id).await.unwrap();
-    let ch2 = PublisherChallenge::create(&pool, record.id).await.unwrap();
-
-    assert_ne!(
-        ch1.token, ch2.token,
-        "each challenge should have a unique token"
-    );
 }
 
 // ─── model/package.rs tests (require DB) ─────────────────────────────────────
@@ -901,35 +870,20 @@ async fn test_lookup_package_revoked() {
 }
 
 #[tokio::test]
-async fn test_manager_apply_formerly_reserved_accepted() {
+async fn test_formerly_reserved_publisher_names_accepted() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
     // Previously reserved names are now accepted
-    let result = manager.apply("acme.example", None).await;
+    let result = pending(&manager, "acme.example").await;
     assert!(result.is_ok());
 }
 
 #[tokio::test]
-async fn test_manager_apply_valid() {
+async fn test_publisher_name_must_be_a_domain() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, challenge) = manager
-        .apply("octocat.example", Some("admin@octocat.dev"))
-        .await
-        .unwrap();
-
-    assert_eq!(record.name, "octocat.example");
-    assert_eq!(record.status, PublisherStatus::Pending);
-    assert!(challenge.token.starts_with("actrix-verify="));
-    assert!(challenge.verify_url.is_empty());
-}
-
-#[tokio::test]
-async fn test_manager_apply_invalid_login() {
-    let pool = setup_test_pool().await;
-    let manager = PublisherRegistryManager::new(pool);
-    // Underscore is not allowed in GitHub logins
-    let result = manager.apply("my_company", None).await;
+    // Underscore is not allowed in a DNS name
+    let result = pending(&manager, "my_company").await;
     assert!(matches!(
         result,
         Err(PublisherRegistryError::InvalidName(_))
@@ -940,7 +894,7 @@ async fn test_manager_apply_invalid_login() {
 async fn test_manager_get_status() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("statusco.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "statusco.example").await.unwrap();
 
     let status = manager.get_status(record.id).await.unwrap();
     assert_eq!(status.name, "statusco.example");
@@ -959,7 +913,7 @@ async fn test_manager_get_status_not_found() {
 async fn test_manager_admin_approve() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("approveco.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "approveco.example").await.unwrap();
 
     let response = manager.admin_approve(record.id, None).await.unwrap();
     assert_eq!(response.certificate.publisher, "approveco.example");
@@ -968,23 +922,10 @@ async fn test_manager_admin_approve() {
 }
 
 #[tokio::test]
-async fn test_active_publisher_rotation_requires_fresh_challenge() {
-    let pool = setup_test_pool().await;
-    let manager = PublisherRegistryManager::new(pool);
-    let (record, initial) = manager.apply("rotate.example.com", None).await.unwrap();
-    manager.admin_approve(record.id, None).await.unwrap();
-
-    let rotation = manager.begin_key_rotation(record.id).await.unwrap();
-    assert_ne!(rotation.token, initial.token);
-    let active = manager.get_challenge(record.id).await.unwrap();
-    assert_eq!(active.id, rotation.id);
-}
-
-#[tokio::test]
 async fn test_manager_admin_suspend_reinstate() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("suspco.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "suspco.example").await.unwrap();
     manager.admin_approve(record.id, None).await.unwrap();
 
     manager.admin_suspend(record.id).await.unwrap();
@@ -1000,7 +941,7 @@ async fn test_manager_admin_suspend_reinstate() {
 async fn test_manager_admin_delete() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("deleteco.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "deleteco.example").await.unwrap();
     let id = record.id;
 
     manager.admin_delete(id).await.unwrap();
@@ -1019,7 +960,7 @@ async fn test_manager_publish_invalid_signature() {
     let pub_b64 = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
 
     let manager = PublisherRegistryManager::new(pool.clone());
-    let (record, _) = manager.apply("sigco.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "sigco.example").await.unwrap();
     manager
         .admin_approve(record.id, Some(&pub_b64))
         .await
@@ -1149,7 +1090,7 @@ async fn test_manager_publish_inactive_publisher() {
 async fn test_manager_resolve_by_name() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("resolveco.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "resolveco.example").await.unwrap();
     manager.admin_approve(record.id, None).await.unwrap();
 
     let info = manager.resolve_by_name("resolveco.example").await.unwrap();
@@ -1161,7 +1102,7 @@ async fn test_manager_resolve_by_name() {
 async fn test_manager_resolve_by_name_not_active() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    manager.apply("pendingres.example", None).await.unwrap();
+    pending(&manager, "pendingres.example").await.unwrap();
 
     let result = manager.resolve_by_name("pendingres.example").await;
     assert!(matches!(
@@ -1231,8 +1172,8 @@ async fn test_manager_admin_list() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
 
-    manager.apply("adminlist1.example", None).await.unwrap();
-    let (publisher2, _) = manager.apply("adminlist2.example", None).await.unwrap();
+    pending(&manager, "adminlist1.example").await.unwrap();
+    let (publisher2, _) = pending(&manager, "adminlist2.example").await.unwrap();
     manager.admin_approve(publisher2.id, None).await.unwrap();
 
     let all = manager.admin_list(None).await.unwrap();
@@ -1350,7 +1291,7 @@ async fn test_manager_admin_approve_with_uploaded_key() {
 
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("uploadco.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "uploadco.example").await.unwrap();
 
     // User generates their own keypair
     let user_key = SigningKey::generate(&mut OsRng);
@@ -1370,7 +1311,7 @@ async fn test_manager_admin_approve_with_uploaded_key() {
 async fn test_manager_admin_approve_with_invalid_key_rejected() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("badkeyco.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "badkeyco.example").await.unwrap();
 
     let result = manager
         .admin_approve(record.id, Some("not-a-valid-key"))
@@ -1393,7 +1334,7 @@ async fn test_manager_admin_approve_with_invalid_key_rejected() {
 async fn test_manager_admin_approve_test_helper_generates_public_key() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("gendefault.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "gendefault.example").await.unwrap();
 
     // The private key exists only inside this test helper and is never returned.
     let response = manager.admin_approve(record.id, None).await.unwrap();
@@ -1409,7 +1350,7 @@ async fn test_manager_uploaded_key_can_publish() {
 
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool);
-    let (record, _) = manager.apply("pubupload.example", None).await.unwrap();
+    let (record, _) = pending(&manager, "pubupload.example").await.unwrap();
 
     // User generates their own keypair and uploads only the public key
     let user_key = SigningKey::generate(&mut OsRng);
@@ -1459,6 +1400,277 @@ async fn test_manager_uploaded_key_can_publish() {
     assert_eq!(pkg.status, PkgStatus::Active);
 }
 
+// ─── register_publisher tests ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn register_publisher_pins_the_first_profile() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let package = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let first = signed_profile("apps.example.com", 1, &roots, &[(&package, "active")]);
+    let record = register(&manager, &first).await.unwrap();
+    assert_eq!(record.status, PublisherStatus::Active);
+    assert_eq!(record.public_key, b64_key(&package));
+    assert_eq!(
+        record.key_id,
+        crypto::compute_key_id(package.verifying_key().as_bytes())
+    );
+    assert_eq!(
+        record.contact.as_deref(),
+        Some("mailto:security@apps.example.com")
+    );
+    let info = manager.resolve_by_name("apps.example.com").await.unwrap();
+    assert_eq!(info.profile.unwrap()["sequence"], 1);
+
+    // Registering the same profile again changes nothing.
+    let again = register(&manager, &first).await.unwrap();
+    assert_eq!(again.profile_json, record.profile_json);
+
+    // A later profile needs a higher sequence.
+    let replay = signed_profile(
+        "apps.example.com",
+        1,
+        &roots,
+        &[(&SigningKey::generate(&mut OsRng), "active")],
+    );
+    assert!(matches!(
+        register(&manager, &replay).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+
+    // It must be signed by a pinned active key.
+    let stranger = SigningKey::generate(&mut OsRng);
+    let forged = signed_profile(
+        "apps.example.com",
+        2,
+        &[("root-1", &stranger, "active")],
+        &[(&package, "active")],
+    );
+    assert!(matches!(
+        register(&manager, &forged).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+    // A new signing key listed without a rotation chain is not pinned, so it
+    // cannot sign the next profile.
+    let unchained = signed_profile(
+        "apps.example.com",
+        2,
+        &[("root-1", &root, "active"), ("root-2", &stranger, "active")],
+        &[(&package, "active")],
+    );
+    register(&manager, &unchained).await.unwrap();
+    let by_unchained = signed_profile(
+        "apps.example.com",
+        3,
+        &[("root-2", &stranger, "active"), ("root-1", &root, "active")],
+        &[(&package, "active")],
+    );
+    assert!(matches!(
+        register(&manager, &by_unchained).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+
+    // At most two active package signing keys.
+    let third = SigningKey::generate(&mut OsRng);
+    let crowded = signed_profile(
+        "apps.example.com",
+        3,
+        &roots,
+        &[
+            (&package, "active"),
+            (&stranger, "active"),
+            (&third, "active"),
+        ],
+    );
+    assert!(
+        crowded
+            .verify("apps.example.com", chrono::Utc::now())
+            .is_err()
+    );
+}
+
+/// Publish `version` of `svc` signed by `key`.
+async fn publish_with(
+    manager: &PublisherRegistryManager,
+    publisher: &Publisher,
+    version: &str,
+    key: &ed25519_dalek::SigningKey,
+) -> Result<ActrPackage, PublisherRegistryError> {
+    use base64::Engine as _;
+    use ed25519_dalek::Signer;
+    let manifest = test_manifest(&publisher.name, "svc", version, "wasm32-wasip1");
+    let signature =
+        base64::engine::general_purpose::STANDARD.encode(key.sign(manifest.as_bytes()).to_bytes());
+    let (nonce, nonce_sig) = make_publish_nonce(
+        manager.pool(),
+        publisher.id,
+        &publisher.name,
+        "svc",
+        version,
+        "wasm32-wasip1",
+        &manifest,
+        &signature,
+        None,
+        key,
+    )
+    .await;
+    manager
+        .publish_package(PublishRequest {
+            publisher: publisher.name.clone(),
+            name: "svc".to_string(),
+            version: version.to_string(),
+            target: "wasm32-wasip1".to_string(),
+            manifest,
+            signature,
+            proto_files: None,
+            nonce: Some(nonce),
+            nonce_sig: Some(nonce_sig),
+        })
+        .await
+}
+
+#[tokio::test]
+async fn two_active_package_keys_overlap_during_rotation() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let old = SigningKey::generate(&mut OsRng);
+    let new = SigningKey::generate(&mut OsRng);
+    let old_id = crypto::compute_key_id(old.verifying_key().as_bytes());
+    let new_id = crypto::compute_key_id(new.verifying_key().as_bytes());
+    register(
+        &manager,
+        &signed_profile("overlap.example", 1, &roots, &[(&old, "active")]),
+    )
+    .await
+    .unwrap();
+
+    // Pre-publish: both keys publish, the old one stays current.
+    let record = register(
+        &manager,
+        &signed_profile(
+            "overlap.example",
+            2,
+            &roots,
+            &[(&new, "active"), (&old, "active")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(record.key_id, old_id);
+    assert_eq!(record.next_key_id.as_deref(), Some(new_id.as_str()));
+    let by_old = publish_with(&manager, &record, "1.0.0", &old)
+        .await
+        .unwrap();
+    assert_eq!(by_old.signing_key_id.as_deref(), Some(old_id.as_str()));
+    let by_new = publish_with(&manager, &record, "1.1.0", &new)
+        .await
+        .unwrap();
+    assert_eq!(by_new.signing_key_id.as_deref(), Some(new_id.as_str()));
+    manager
+        .verify_published_package_signing_key(&by_new)
+        .await
+        .unwrap();
+    let stranger = SigningKey::generate(&mut OsRng);
+    assert!(matches!(
+        publish_with(&manager, &record, "1.2.0", &stranger).await,
+        Err(PublisherRegistryError::Unauthorized)
+    ));
+
+    // Switch: the old key is retired and only verifies what it signed.
+    let record = register(
+        &manager,
+        &signed_profile(
+            "overlap.example",
+            3,
+            &roots,
+            &[(&new, "active"), (&old, "retired")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(record.key_id, new_id);
+    assert_eq!(record.next_key_id, None);
+    assert!(
+        publish_with(&manager, &record, "2.0.0", &old)
+            .await
+            .is_err()
+    );
+    publish_with(&manager, &record, "2.0.0", &new)
+        .await
+        .unwrap();
+    manager
+        .verify_published_package_signing_key(&by_old)
+        .await
+        .unwrap();
+
+    // Removing it revokes it: its packages no longer verify.
+    let record = register(
+        &manager,
+        &signed_profile("overlap.example", 4, &roots, &[(&new, "active")]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(record.key_id, new_id);
+    assert!(matches!(
+        manager.verify_published_package_signing_key(&by_old).await,
+        Err(PublisherRegistryError::KeyRevoked(_))
+    ));
+}
+
+#[tokio::test]
+async fn register_publisher_never_reinstates_a_used_key() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let key_a = SigningKey::generate(&mut OsRng);
+    let key_b = SigningKey::generate(&mut OsRng);
+    let domain = "rollback.example";
+    register(
+        &manager,
+        &signed_profile(domain, 1, &roots, &[(&key_a, "active")]),
+    )
+    .await
+    .unwrap();
+    let record = register(
+        &manager,
+        &signed_profile(
+            domain,
+            2,
+            &roots,
+            &[(&key_a, "retired"), (&key_b, "active")],
+        ),
+    )
+    .await
+    .unwrap();
+    let history = manager.admin_list_keys(record.id).await.unwrap();
+    assert_eq!(history.len(), 1);
+
+    let back = signed_profile(domain, 3, &roots, &[(&key_a, "active")]);
+    assert!(matches!(
+        register(&manager, &back).await,
+        Err(PublisherRegistryError::InvalidRequest(_))
+    ));
+
+    // A suspended publisher accepts no profile.
+    manager.admin_suspend(record.id).await.unwrap();
+    let later = signed_profile(domain, 4, &roots, &[(&key_b, "active")]);
+    assert!(matches!(
+        register(&manager, &later).await,
+        Err(PublisherRegistryError::InvalidStatus(_))
+    ));
+}
+
 // ─── Key rotation + publish/verify tests ─────────────────────────────────────
 
 #[tokio::test]
@@ -1470,14 +1682,20 @@ async fn test_key_rotation_then_publish_with_new_key() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool.clone());
 
-    // Step 1: Apply and approve with initial key (key_A)
-    let (record, _) = manager.apply("rotpub.example", None).await.unwrap();
+    // Step 1: Register a Publisher Profile with the initial key (key_A)
+    let root = SigningKey::generate(&mut OsRng);
     let key_a = SigningKey::generate(&mut OsRng);
-    let pub_a = base64::engine::general_purpose::STANDARD.encode(key_a.verifying_key().to_bytes());
-    manager
-        .admin_approve(record.id, Some(&pub_a))
-        .await
-        .unwrap();
+    let record = register(
+        &manager,
+        &signed_profile(
+            "rotpub.example",
+            1,
+            &[("root-1", &root, "active")],
+            &[(&key_a, "active")],
+        ),
+    )
+    .await
+    .unwrap();
 
     // Step 2: Publish with key_A — should succeed
     let manifest_a = test_manifest("rotpub.example", "svc", "1.0.0", "wasm32-wasip1");
@@ -1512,10 +1730,19 @@ async fn test_key_rotation_then_publish_with_new_key() {
         .unwrap();
     assert_eq!(pkg_a.type_str, "rotpub.example/svc@1.0.0");
 
-    // Step 3: Rotate key → key_B
+    // Step 3: Rotate key → key_B with a later Publisher Profile
     let key_b = SigningKey::generate(&mut OsRng);
-    let pub_b = base64::engine::general_purpose::STANDARD.encode(key_b.verifying_key().to_bytes());
-    manager.renew_key(record.id, &pub_b).await.unwrap();
+    register(
+        &manager,
+        &signed_profile(
+            "rotpub.example",
+            2,
+            &[("root-1", &root, "active")],
+            &[(&key_a, "retired"), (&key_b, "active")],
+        ),
+    )
+    .await
+    .unwrap();
 
     // Step 4: Publish with key_B — should succeed (new version)
     let manifest_b = test_manifest("rotpub.example", "svc", "2.0.0", "wasm32-wasip1");
@@ -1598,21 +1825,33 @@ async fn test_key_rotation_historical_key_resolved() {
     let pool = setup_test_pool().await;
     let manager = PublisherRegistryManager::new(pool.clone());
 
-    // Apply + approve with key_A
-    let (record, _) = manager.apply("histkey.example", None).await.unwrap();
+    // Register key_A, then rotate to key_B
+    let root = SigningKey::generate(&mut OsRng);
     let key_a = SigningKey::generate(&mut OsRng);
     let pub_a = base64::engine::general_purpose::STANDARD.encode(key_a.verifying_key().to_bytes());
-    let resp_a = manager
-        .admin_approve(record.id, Some(&pub_a))
-        .await
-        .unwrap();
-    let key_id_a = resp_a.certificate.key_id.clone();
+    let roots = [("root-1", &root, "active")];
+    let record = register(
+        &manager,
+        &signed_profile("histkey.example", 1, &roots, &[(&key_a, "active")]),
+    )
+    .await
+    .unwrap();
+    let key_id_a = record.key_id.clone();
 
-    // Rotate to key_B
     let key_b = SigningKey::generate(&mut OsRng);
     let pub_b = base64::engine::general_purpose::STANDARD.encode(key_b.verifying_key().to_bytes());
-    let resp_b = manager.renew_key(record.id, &pub_b).await.unwrap();
-    let key_id_b = resp_b.certificate.key_id.clone();
+    let key_id_b = register(
+        &manager,
+        &signed_profile(
+            "histkey.example",
+            2,
+            &roots,
+            &[(&key_a, "retired"), (&key_b, "active")],
+        ),
+    )
+    .await
+    .unwrap()
+    .key_id;
 
     // Resolve current key (key_B)
     let current = manager.resolve_by_name("histkey.example").await.unwrap();
@@ -2191,4 +2430,337 @@ hash = "sha256:abc123"
         matches!(result, Err(PublisherRegistryError::InvalidRequest(ref msg)) if msg.contains("missing required field 'version'")),
         "manifest missing version should be rejected: {result:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_register_publisher_requests_do_not_fail_internally() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    // A file database in WAL mode with several connections, as in production.
+    let dir = tempfile::tempdir().unwrap();
+    let database = platform::storage::db::Database::new(dir.path())
+        .await
+        .unwrap();
+    let manager = std::sync::Arc::new(PublisherRegistryManager::new(database.get_pool().clone()));
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let domain = "race.example";
+    let first = signed_profile(
+        domain,
+        1,
+        &roots,
+        &[(&SigningKey::generate(&mut OsRng), "active")],
+    );
+    let later: Vec<_> = (2..10)
+        .map(|sequence| {
+            signed_profile(
+                domain,
+                sequence,
+                &roots,
+                &[(&SigningKey::generate(&mut OsRng), "active")],
+            )
+        })
+        .collect();
+
+    // The first registration, sent many times at once.
+    let tasks: Vec<_> = (0..8)
+        .map(|_| {
+            let (manager, profile) = (manager.clone(), first.clone());
+            tokio::spawn(async move { register(&manager, &profile).await })
+        })
+        .collect();
+    for task in tasks {
+        task.await
+            .unwrap()
+            .expect("the same first profile registers");
+    }
+
+    // Later profiles at once: each either wins or is refused as not
+    // following the accepted one, never an internal error.
+    let tasks: Vec<_> = later
+        .into_iter()
+        .map(|profile| {
+            let manager = manager.clone();
+            tokio::spawn(async move { register(&manager, &profile).await })
+        })
+        .collect();
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(_)
+            | Err(PublisherRegistryError::VerificationFailed(_))
+            | Err(PublisherRegistryError::InvalidStatus(_)) => {}
+            Err(error) => panic!("unexpected error: {error:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn register_publisher_refuses_a_package_key_outside_its_validity() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let now = chrono::Utc::now();
+    let with_window = |not_before: Option<String>, not_after: Option<String>| {
+        let profile = signed_profile(
+            "window.example",
+            1,
+            &[("root-1", &root, "active")],
+            &[(&SigningKey::generate(&mut OsRng), "active")],
+        );
+        let mut document = serde_json::to_value(&profile).unwrap();
+        document["keys"][0]["not_before"] = not_before.into();
+        document["keys"][0]["not_after"] = not_after.into();
+        actr_protocol::realm_profile::sign_document(&mut document, "root-1", &root);
+        serde_json::from_value::<actr_protocol::PublisherProfile>(document).unwrap()
+    };
+    let at = |offset: chrono::Duration| Some((now + offset).to_rfc3339());
+
+    for (not_before, not_after) in [
+        // Not valid yet.
+        (at(chrono::Duration::days(1)), None),
+        // Already expired.
+        (None, at(-chrono::Duration::days(1))),
+        // Not RFC 3339.
+        (Some("tomorrow".to_string()), None),
+    ] {
+        let profile = with_window(not_before.clone(), not_after.clone());
+        assert!(
+            matches!(
+                register(&manager, &profile).await,
+                Err(PublisherRegistryError::InvalidRequest(_))
+            ),
+            "{not_before:?} {not_after:?}"
+        );
+    }
+    let valid = with_window(
+        at(-chrono::Duration::days(1)),
+        at(chrono::Duration::days(30)),
+    );
+    let record = register(&manager, &valid).await.unwrap();
+    assert!(record.key_expires_at.unwrap() > now.timestamp());
+}
+
+#[tokio::test]
+async fn register_publisher_refuses_a_package_key_that_is_not_a_curve_point() {
+    use base64::Engine as _;
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    // 32 bytes that do not decode to an Ed25519 point.
+    let not_a_point = (0u8..=255)
+        .map(|byte| {
+            let mut bytes = [0u8; 32];
+            bytes[0] = byte;
+            bytes[31] = 0x7f;
+            bytes
+        })
+        .find(|bytes| ed25519_dalek::VerifyingKey::from_bytes(bytes).is_err())
+        .expect("some bytes are not a point");
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let profile = signed_profile(
+        "point.example",
+        1,
+        &[("root-1", &root, "active")],
+        &[(&SigningKey::generate(&mut OsRng), "active")],
+    );
+    let mut document = serde_json::to_value(&profile).unwrap();
+    document["keys"][0]["public_key"] = base64::engine::general_purpose::STANDARD
+        .encode(not_a_point)
+        .into();
+    document["keys"][0]["id"] = actr_protocol::package_key_id(&not_a_point).into();
+    actr_protocol::realm_profile::sign_document(&mut document, "root-1", &root);
+    let profile: actr_protocol::PublisherProfile = serde_json::from_value(document).unwrap();
+    let result = register(&manager, &profile).await;
+    assert!(
+        matches!(result, Err(PublisherRegistryError::InvalidRequest(_))),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn admin_delete_removes_a_publisher_with_publish_nonces_atomically() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    // The production schema, with foreign keys enforced.
+    let dir = tempfile::tempdir().unwrap();
+    let database = platform::storage::db::Database::new(dir.path())
+        .await
+        .unwrap();
+    let manager = PublisherRegistryManager::new(database.get_pool().clone());
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let domain = "delete.example";
+    let (key_a, key_b) = (
+        SigningKey::generate(&mut OsRng),
+        SigningKey::generate(&mut OsRng),
+    );
+    register(
+        &manager,
+        &signed_profile(domain, 1, &roots, &[(&key_a, "active")]),
+    )
+    .await
+    .unwrap();
+    let record = register(
+        &manager,
+        &signed_profile(domain, 2, &roots, &[(&key_b, "active")]),
+    )
+    .await
+    .unwrap();
+    manager.request_nonce(domain).await.unwrap();
+
+    manager.admin_delete(record.id).await.unwrap();
+    assert!(
+        Publisher::get_by_name(manager.pool(), domain)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn register_publisher_stops_at_max_publishers() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await).with_max_publishers(1);
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let key = SigningKey::generate(&mut OsRng);
+    let first = signed_profile("first.example", 1, &roots, &[(&key, "active")]);
+    register(&manager, &first).await.unwrap();
+
+    let second = signed_profile("second.example", 1, &roots, &[(&key, "active")]);
+    assert!(matches!(
+        register(&manager, &second).await,
+        Err(PublisherRegistryError::QuotaExceeded(_))
+    ));
+    // A registered publisher still updates its profile.
+    let update = signed_profile("first.example", 2, &roots, &[(&key, "active")]);
+    register(&manager, &update).await.unwrap();
+}
+
+#[tokio::test]
+async fn the_operator_confirms_a_publisher_identity_change() {
+    use actr_protocol::{KeyPinOutcome, PublisherProfile};
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let domain = "apps.example.com";
+    let (root, package) = (
+        SigningKey::generate(&mut OsRng),
+        SigningKey::generate(&mut OsRng),
+    );
+    let first = signed_profile(
+        domain,
+        3,
+        &[("root-1", &root, "active")],
+        &[(&package, "active")],
+    );
+    register(&manager, &first).await.unwrap();
+
+    // The domain lost its keys and starts over, reusing the id.
+    let (new_root, new_package) = (
+        SigningKey::generate(&mut OsRng),
+        SigningKey::generate(&mut OsRng),
+    );
+    let changed = signed_profile(
+        domain,
+        1,
+        &[("root-1", &new_root, "active")],
+        &[(&new_package, "active")],
+    );
+    assert!(matches!(
+        register(&manager, &changed).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+
+    let digest = |profile: &PublisherProfile| match profile
+        .accept(domain, chrono::Utc::now(), None)
+        .unwrap()
+        .1
+    {
+        KeyPinOutcome::Accepted(pins) => pins.digest,
+        KeyPinOutcome::IdentityChange(_) => unreachable!(),
+    };
+    let confirm = |profile: &PublisherProfile, digest: String| {
+        let keys = profile.verify(domain, chrono::Utc::now()).unwrap();
+        let (manager, profile) = (&manager, profile.clone());
+        async move {
+            manager
+                .confirm_publisher_identity(domain, &profile, &keys, &digest)
+                .await
+        }
+    };
+    // Only the profile the operator reviewed is taken.
+    assert!(matches!(
+        confirm(&changed, digest(&first)).await,
+        Err(PublisherRegistryError::InvalidStatus(_))
+    ));
+    // A profile accepted under the pins needs no confirmation.
+    let later = signed_profile(
+        domain,
+        4,
+        &[("root-1", &root, "active")],
+        &[(&package, "active")],
+    );
+    assert!(matches!(
+        confirm(&later, digest(&later)).await,
+        Err(PublisherRegistryError::InvalidStatus(_))
+    ));
+    // Neither does the stored profile itself, whatever the digest.
+    assert!(matches!(
+        confirm(&first, "not-reviewed".to_string()).await,
+        Err(PublisherRegistryError::InvalidStatus(_))
+    ));
+
+    let record = confirm(&changed, digest(&changed)).await.unwrap();
+    assert_eq!(record.public_key, b64_key(&new_package));
+    // The new keys are the baseline from now on.
+    let next = signed_profile(
+        domain,
+        2,
+        &[("root-1", &new_root, "active")],
+        &[(&new_package, "active")],
+    );
+    register(&manager, &next).await.unwrap();
+    assert!(matches!(
+        register(&manager, &first).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+
+    // Only a registered publisher is confirmed.
+    let unknown = signed_profile(
+        "other.example.com",
+        1,
+        &[("root-1", &root, "active")],
+        &[(&package, "active")],
+    );
+    let keys = unknown
+        .verify("other.example.com", chrono::Utc::now())
+        .unwrap();
+    assert!(matches!(
+        manager
+            .confirm_publisher_identity(
+                "other.example.com",
+                &unknown,
+                &keys,
+                &digest_of(&unknown, "other.example.com")
+            )
+            .await,
+        Err(PublisherRegistryError::InvalidStatus(_) | PublisherRegistryError::NotFound)
+    ));
+}
+
+fn digest_of(profile: &actr_protocol::PublisherProfile, domain: &str) -> String {
+    match profile.accept(domain, chrono::Utc::now(), None).unwrap().1 {
+        actr_protocol::KeyPinOutcome::Accepted(pins) => pins.digest,
+        actr_protocol::KeyPinOutcome::IdentityChange(_) => unreachable!(),
+    }
 }
