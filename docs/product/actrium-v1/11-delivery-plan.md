@@ -87,7 +87,7 @@ Turn this document's product semantics into a cross-repository, testable contrac
 ### Actr must change
 
 1. the Actor long-term key model;
-2. the ActorId text and wire model change to `<serial>.<realm_id>@<domain>`: a verifiable Realm name replaces the numeric realm_id, and the Actor type moves into registration and the credential;
+2. the ActorId text and wire model change to `<serial>.<realm_id>@<domain>`: a verifiable Realm name replaces the numeric realm_id, and the Actor type moves into registration and the credential (done);
 3. two registration paths: create and reclaim ActorId;
 4. persistence of the ActorId and renewal/identity state;
 5. hard re-auth keeps the same ActorId;

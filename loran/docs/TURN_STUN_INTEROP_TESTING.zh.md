@@ -20,6 +20,8 @@ TURN integration test 使用独立的 `turn` client API 连接 Loran server，�
 6. relay port 必须落在配置范围内；
 7. 4,096 个交替 malformed STUN/ChannelData-looking datagram 后，合法 allocation
    必须在 5 秒内成功。
+8. 关闭某 Realm 的 allocation 只关闭该 Realm credential 建立的 allocation
+   （`allocations_of_a_closed_realm_are_closed`）。
 
 STUN server test 在 4,096 个畸形 datagram 持续发送时重试合法 RFC 5389 Binding
 request，要求在 2 秒总窗口内返回正确的 transaction ID 和 XOR-MAPPED-ADDRESS。

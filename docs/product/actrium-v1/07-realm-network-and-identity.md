@@ -76,8 +76,6 @@ Local      = k7m2q9xh@<installation-id>.actr.alt
 - The RealmId of a retired Realm is never reused: the domain owner must not reuse it, and Realm Providers enforce this with Realm Provider tombstones;
 - A domain's Realm signing key is the long-term trust root of every Realm under it.
 
-The numeric `realm_id` in current code is only the Loran-internal database primary key, not the Realm identity. The target contract removes it once the ActorId format migrates, using the full Realm name as the key instead.
-
 ### 2.3 Realm, Publisher and Realm Provider
 
 | | Publisher | Realm | Realm Provider |
@@ -142,7 +140,7 @@ A Realm Profile contains at least:
 - schema (`actr.realm/v1`);
 - `realm.name` (the full Realm name) and a display name;
 - `status`: `active` or `retired`;
-- `package`: the package this instance runs (download address and SHA-256), required when `active`;
+- `package`: the package this instance runs (download address, SHA-256 and Actor type), required when `active`;
 - a monotonic `sequence` and issue time `issued_at` (a Realm Profile does not expire);
 - the issuer URL and Realm issuer keys/key ids (the Actor credential's issuer is the Realm name);
 - the Realm Provider ID, signaling endpoints, STUN/TURN endpoints;
@@ -154,17 +152,17 @@ A Realm Profile uses an RFC 8785 JCS canonical payload with a detached Ed25519 s
 
 Lifecycle:
 
-- Creation and activation: a Realm management request is `POST`ed to the `realm-management` link of the Realm Provider's own authority descriptor (`https://<provider_id>/.well-known/actr`). `create_realm` asks the Realm Provider to create a pending Realm, and the response returns a Realm Profile payload to sign; the Realm signing key holder signs it and submits it with `publish_profile`, whose response is the activation response and returns the Realm admin token once (when the Realm is under the Realm Provider's own domain, the Realm Provider self-signs and activates it internally, and the Realm admin token is returned in the `create_realm` response). The Realm Provider's idempotency key is `(realm, requester)`: a retry by the same requester on its own pending or active Realm returns its state (without a Realm admin token); a different requester hitting a Realm of the same name, or any request hitting a Realm Provider tombstone, is always a conflict; a repeated `publish_profile` returns a conflict, and a lost Realm admin token can only be recovered with `reissue_admin_token`;
+- Creation and activation: a Realm management request is `POST`ed to the `realm-management` link of the Realm Provider's own authority descriptor (`https://<provider_id>/.well-known/actr`). `create_realm` asks the Realm Provider to create a pending Realm, and the response returns a Realm Profile payload to sign; the Realm signing key holder signs it and submits it with `publish_profile`, whose response is the activation response and returns an owner invite once (see 7.4; a Realm under the Realm Provider's own domain is created by that Realm Provider's operator, who self-signs and activates it internally and receives the owner invite at creation). The Realm Provider's idempotency key is `(realm, requester)`: a retry by the same requester on its own pending or active Realm returns its state (without an owner invite); a different requester hitting a Realm of the same name, or any request hitting a Realm Provider tombstone, is always a conflict; a repeated `publish_profile` returns a conflict, and a lost or expired owner invite is reissued with `reissue_owner_invite`;
 - Update: under the same Realm Provider, upgrading the program (`package`), rotating the Realm issuer key, changing endpoints, or changing `display_name` or the join policy all publish a new Realm Profile with a higher Realm Profile sequence;
 - Retirement: retirement has only one path — the Realm signing key holder publishes a retired Realm Profile with `status = retired` (same `provider.id`, higher sequence), which stays valid forever; the Realm Provider learns of it through periodic refresh and writes a Realm Provider tombstone; if the Realm Provider has shut down, the domain owner points the `realms` href at a storage location it controls and publishes the retired Realm Profile there; when the domain itself belongs to a Realm Provider that has shut down, the Realms under it cannot be retired and can only be rebuilt elsewhere;
 - If every Realm signing key is lost and no usable rotation chain exists, no existing Realm under that Realm domain can get a further Realm Profile. The domain owner can only publish a new Realm signing key (clients treat this as an identity change and must reconfirm trust) and rebuild the instances under new RealmIds.
 
-Creation authorization: no domain, no Realm (except the local Realm). The owner of each Realm domain is the Realm signing key holder and may delegate custody of the key to a Realm Provider; creating, activating and reissuing a Realm admin token all require the holder's authorization.
+Creation authorization: no domain, no Realm (except the local Realm). The owner of each Realm domain is the Realm signing key holder and may delegate custody of the key to a Realm Provider; creating, activating and reissuing an owner invite all require the holder's authorization.
 
 Actrium tells the two paths apart by a single decidable condition: comparing normalized A-labels, the Realm domain equals the Realm Provider ID, or ends with `"." + Realm Provider ID` (on a label boundary) — that is "a Realm under a Realm Provider's domain."
 
 - Local Realm: Actrium creates it directly on the local machine, with no Realm management request and no Realm Profile;
-- A Realm under a Realm Provider's domain: that Realm Provider authenticates the requester with a Realm Provider account (OAuth 2.0 authorization code + PKCE; the authorization server entry point is the `href` of the `identity` link in that Realm Provider's own descriptor, i.e. the OAuth authorization server's issuer identifier, RFC 8414; every Realm Provider accepts the fixed public client ID `actr-host`), and the request carries a bearer token; the Realm Provider counts quota per account and binds Realm admin rights to that account, so a new device or a lost client only needs to sign in again. The Realm Provider can link the instances created by one account (it is the signer anyway); instance members never see the account. The confirmation page shows that Realm Provider as the trust root;
+- A Realm under a Realm Provider's domain: in v1 only that Realm Provider's operator creates it (without Realm management requests); the operator hands the owner invite to the user out of band, and after redeeming it in Actrium the user becomes the owner and creates the Service in that Realm. The trust root is shown as that Realm Provider. Self-service creation by users with Realm Provider accounts (OAuth 2.0 + PKCE), with quotas per account, is a later capability;
 - Any other Realm domain: the Realm signing key holder's signing service issues an Actr management envelope (bound to `provider_id`, valid for at most 5 minutes, with a nonce against replay); how the holder authenticates its own members is up to the holder. The confirmation page shows the Realm domain as the trust root.
 
 When a domain owner delegates custody of its Realm signing key to a Realm Provider, nothing in the public documents states this, and Actrium still shows the Realm domain as the trust root; the delegated Realm Provider provides the signing service as the holder. Such custody is invisible to users; this is an accepted limitation.
@@ -173,19 +171,7 @@ A restricted "creation delegation key" issued by a Realm signing key (limited by
 
 ### 3.3 How an ActorId carries a Realm
 
-In the current Actr ActorId, the Realm is only a `u32`:
-
-```text
-2af01@42/notes.example:team-notes:1.4.2
-```
-
-From `42` alone, a new device cannot know:
-
-- Which domain to fetch the Realm Profile and Realm issuer key from;
-- Which signaling cluster to connect to;
-- Whether Realm 42 collides with Realm 42 on another Realm Provider.
-
-Actrium v1 therefore requires the ActorId to carry its Realm name, containing only the Actor serial and the Realm name:
+An ActorId carries its Realm name, containing only the Actor serial and the Realm name:
 
 ```text
 <serial>.<realm_id>@<domain>
@@ -195,7 +181,7 @@ Actrium v1 therefore requires the ActorId to carry its Realm name, containing on
 
 An ActorId is like a process ID: it only answers "which Actor in which Realm." The program identity (the Actor type `publisher/program@version`) is not in the ActorId; it is carried by registration and the Actor credential, and connection ACLs and service discovery use the type from there. A Publisher changing its domain or a program upgrading never changes the ActorId format.
 
-The earlier draft's `2af01@42~dns:team.example/...` (a numeric realm_id plus authority) is withdrawn. An `ActrId` that only contains a `u32` and embeds the type is treated as legacy; importing it requires explicitly supplying the Realm name and rewriting it into the v1 canonical form, never guessing.
+An old `ActrId` that only contains a `u32` and embeds the type is treated as legacy; importing it requires explicitly supplying the Realm name and rewriting it into the v1 canonical form, never guessing.
 
 ## 4. The power boundaries of the signaling server
 
@@ -281,7 +267,7 @@ A local instance's Realm name uses the local pseudo-domain `<installation-id>.ac
 A networked instance's Realm lives under a domain:
 
 - The user or an administrator first trusts the Realm domain (confirms it once and pins its Realm signing key);
-- When the instance is created, Actrium creates a new Realm under that domain; the Realm owner is the instance's creator;
+- When the instance is created, Actrium creates a new Realm under that domain; the instance's creator is the Realm's only owner;
 - Other users join this instance's Realm through a Realm invitation and obtain Realm membership;
 - The Actor runtime uses the Realm Provider named in the Realm Profile, which stays the same for the Realm's lifetime;
 - Updates to the Realm Profile and to `realm_signing_keys` must both verify signatures, the rotation chain, and `sequence`.
@@ -299,7 +285,7 @@ ActorId
 + private key proof
 ```
 
-A Realm client key is the key one member's client installation uses in one Realm: it is generated independently per Realm (how Actrium generates it internally is not specified elsewhere), never reused across Realms, so a single client can be revoked on its own, and different instances cannot correlate the same client through it. The principal/client binding in an Actor credential binds this Realm client key.
+A Realm client key is the key one member's client installation uses in one Realm: it is generated independently per Realm (how Actrium generates it internally is not specified elsewhere), never reused across Realms, so a single client can be revoked on its own, and different instances cannot correlate the same client through it. The principal/client binding in an Actor credential is the member id and the id of this Realm client key.
 
 Credential claims should include:
 
@@ -307,11 +293,11 @@ Credential claims should include:
 - Realm;
 - Actor type;
 - actor public key;
-- principal/client binding;
+- principal/client binding (member id, Realm client key id);
 - issuer/key id;
 - issued/expiry;
 - audience;
-- capability/role;
+- role (owner/editor/viewer, as at issuance);
 - revocation handle.
 
 An optional managed-client attestation separately includes:
@@ -385,23 +371,23 @@ Joining an instance's Realm (once per instance):
 
 1. Obtain the Realm name from a Realm invitation or a Realm link; a Realm invitation may embed the Realm Profile;
 2. Fetch the Realm Profile and verify the Realm signing key signature, `sequence` and `status`;
-3. The client generates a Realm client key specific to this Realm; the principal/client completes the Realm invitation or login required by that Realm's join policy;
-4. The Realm Provider registers that Realm client key, which completes client registration and grants Realm membership; no separate membership credential is issued;
+3. The client generates a Realm client key specific to this Realm and signs the redemption of the Realm invitation with it (the signature is the proof of possession);
+4. In one transaction the Realm Provider consumes the invitation, creates the member (or adds a client to an existing member) as the invitation says, and registers that Realm client key, which completes client registration and grants Realm membership; no separate membership credential is issued;
 5. OS secure storage keeps the Realm client key;
 6. Actrium creates the Realm record.
 
-Afterward, every Actor credential request proves possession of the Realm client key; the Issuer issues only for Realm client keys that are registered and not revoked. Revoking a client revokes its Realm client key registration; already-issued short-lived Actor credentials expire on their own.
+Afterward, every request to register, reissue or renew an Actor credential is signed with the Realm client key to prove possession; the Issuer issues only for Realm client keys that are registered, not revoked, and belong to an active member. The effects of revocation are in 7.4. The protocol is [Actr Realm Membership](../../../actr/protocols/realm-membership.md).
 
 Joining a Realm applies only to that one instance; when a user uses several instances, Actrium performs client registration for each Realm automatically, with a different Realm client key per Realm. Domain-level SSO/directories are a later capability, not part of v1.
 
-Membership and instance authorization are two separate layers: Realm membership only decides whether one can enter the instance's network, i.e. it is the prerequisite for obtaining an Actor credential, connecting to signaling, and performing the Attach handshake; roles and permissions inside the instance (read/write, administration, sharing) are application permissions, decided by the application and session authorization; the Actr runtime decides who can discover and connect to whom by Actor type, which is called the connection ACL. The two are never merged even though they belong to the same instance; obtaining membership grants no application permission.
+Membership and instance authorization are two separate layers: Realm membership only decides whether one can enter the instance's network, i.e. it is the prerequisite for obtaining an Actor credential, connecting to signaling, and performing the Attach handshake; roles and permissions inside the instance (read/write, administration, sharing) are application permissions, decided by the application and session authorization, where the member role (owner/editor/viewer) is kept by the Realm Provider with the member record, written into the Actor credential, and enforced by the Service; the Actr runtime decides who can discover and connect to whom by Actor type, which is called the connection ACL. The two are never merged even though they belong to the same instance; obtaining membership grants no application permission.
 
 ### 7.2 Actor registration
 
 1. The Actr Host generates or reads the Actor's long-term key;
 2. It requests a new ActorId or reclaims an existing ActorId;
-3. The Issuer verifies Realm membership, the Actor type and allowed claims; it additionally verifies platform attestation when a managed runtime is required;
-4. The Issuer issues a short-lived Actor credential carrying the ActorId and the Actor type;
+3. The Issuer verifies that the request is signed by a registered, unrevoked Realm client key (Realm membership), the Actor type and allowed claims; Actors of the instance's program (the publisher and program name of `package.type`, in any version) are registered only from the owner's clients; it additionally verifies platform attestation when a managed runtime is required;
+4. The Issuer issues a short-lived Actor credential carrying the ActorId, the Actor type, the member id, the Realm client key id and the role;
 5. The Actor uses the short-lived ticket to connect to signaling;
 6. Signaling verifies the issuer, audience, ActorId and proof.
 
@@ -413,6 +399,21 @@ Membership and instance authorization are two separate layers: Realm membership 
 4. A challenge/nonce prevents replay;
 5. Front–Service Attach re-verifies the Program digest and the session's application permissions;
 6. Only after success does the Guest capability become available.
+
+### 7.4 Members, roles and revocation
+
+Each networked Realm has exactly one owner: the instance's creator, who holds both the right to manage the Realm's members and the application owner role. A member signs member management requests with its own Realm client key and sends them to the Issuer named by the Realm Profile:
+
+- Invitations: the owner issues new-member invitations (role editor or viewer, with an expiry); a member may issue an "add a client" invitation for itself, and the owner may issue one for any member. Invitations are one-time, expire, can be revoked by their issuer before redemption, travel only out of band, and never go into an `actr://` URI.
+- Client revocation: a member revokes its own clients; the owner may revoke any client.
+- Removing a member: owner only; it also revokes all of that member's Realm client keys.
+- Changing a role: owner only; it changes only application permissions and revokes no key; it takes effect in the member's next Actor credential.
+- Transferring ownership: atomic; the previous owner becomes an editor by default. The owner must transfer before leaving and cannot revoke its own last client.
+- Leaving a Realm: a member removes itself, with the same effect as removal.
+- Updates and retirement: for an instance under the Realm Provider's domain the owner sends `update_realm` and the Realm Provider signs the new or retired Realm Profile; other Realms go through the Realm signing key holder.
+- Owner recovery: when the owner has lost all its clients, the Realm signing key holder (`reissue_owner_invite`) or the Realm Provider's operator issues a new owner invite; redeeming it adds a new client to the owner and revokes all of the owner's previous Realm client keys.
+
+Once a Realm client key is revoked, the Realm Provider immediately refuses its new requests and new Actor credentials, revokes the unused invites it issued, disables every Actor bound to it and closes those Actors' signaling connections and TURN allocations; the same member can reissue with another of its unrevoked keys and the Actor private key to move an Actor over (FR-NET-006), while a removed member cannot; Actor credentials already issued stop working outside the Realm Provider (for example where a Service checks a Front) when they expire (at most 1 hour by default on Loran). A Service treats the Front credential's expiry as the limit of an Attach session and reads the role again when the Front presents a renewed credential.
 
 ## 8. Signaling authentication credentials
 

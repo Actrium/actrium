@@ -77,7 +77,7 @@ Control of a domain only determines the future publishing entry point; it must n
 
 The platform is not responsible for "find the package by program name." A package has only two sources:
 
-- **Opening an instance**: the Realm Profile's `package` gives the download address and SHA-256 ([Actr Realm Profile](../../../actr/protocols/realm-profile.md));
+- **Opening an instance**: the Realm Profile's `package` gives the download address, SHA-256 and Actor type ([Actr Realm Profile](../../../actr/protocols/realm-profile.md));
 - **Creating an instance**: the user selects one from the Program Catalog, the Marketplace, a local file, or a package address. Discovering programs and checking for new versions is the Marketplace's and the Publisher's own channel.
 
 Whatever the source, verification is the same: check the SHA-256, then verify the package signature with the Publisher Profile's package signing key (§8). Where the download address is hosted has no bearing on security.

@@ -39,7 +39,7 @@ Its main value is not drawing fewer layers, but giving each layer exactly one re
 
 But it depends on three foundational capabilities that must be completed first:
 
-1. **A persistent, resolvable ActorId**: a Service must keep the same `ActorId` across restarts, network loss, credential renewal or migration, and the Realm name must be derivable from the ID. Today's Actr hard rebind can change the ID, and the ID only carries a numeric Realm internal to the Realm Provider, so it cannot directly serve as long-term, shareable URL semantics.
+1. **A persistent, resolvable ActorId**: a Service must keep the same `ActorId` across restarts, network loss, credential renewal or migration, and the Realm name must be derivable from the ID. Today's Actr hard rebind can change the ID, so it cannot directly serve as long-term, shareable URL semantics.
 2. **Domain-name Publisher**: Actr's publisher semantics and length limits need to change so that a normalized DNS domain becomes the program publisher's identity.
 3. **A truly closed Front Host**: Actrium must complete package verification before Keel runs, and must constrain the Guest with capabilities, a component allowlist, resource quotas and a fixed sandbox backend; it must not hand a remote URL directly to Keel to load.
 
@@ -139,7 +139,6 @@ This design uses the following public implementations as a feasibility basis, wi
 
 Key verified facts include:
 
-- Actr's current `ActrId` text form is `<serial_hex>@<realm_id>/<publisher>/<program>@<version>`; the target format is `<serial>.<realm_id>@<domain>`: the Realm name replaces the numeric realm_id, and the program type moves into registration and the Actor credential.
 - Actr already supports exact addressing via `Dest::Peer(ActrId)` and discovery by `ActrType`; the two can be cleanly separated.
 - `.actr` already has Ed25519 manifest signatures, SHA-256 file binding and resources; dependency locking is optional depending on the workload/build pipeline.
 - Keel's Host/Guest boundary and allowlisted-module mechanism are suitable for carrying Front, but its `Engine.loadBundle(URL)` is not by itself a trusted distribution system.

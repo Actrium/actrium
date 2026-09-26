@@ -6,7 +6,7 @@
 2. [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md)：规范性架构契约：Realm 对应应用实例，
    以 Realm 名 `<realm_id>@<domain>` 标识，一个实例承载多个 Realm；第 9 节列出与当前代码的差异。
 3. [`THREAT_MODEL_REALM_V1.zh.md`](THREAT_MODEL_REALM_V1.zh.md)：资产、威胁、缓解与发布门槛。
-4. [`CONFIGURATION.md`](CONFIGURATION.zh.md)：单节点生产配置（当前实现单 Realm，目标契约多 Realm）。
+4. [`CONFIGURATION.md`](CONFIGURATION.zh.md)：单节点生产配置，一个实例承载多个 Realm。
 5. [`API.md`](API.zh.md)：公开传输与路由边界。
 
 ## 开发与运维
@@ -35,5 +35,4 @@
 - `development/CLAUDE.md`
 
 当历史文档与 Realm v1 架构、威胁模型或当前代码冲突时，以 v1 文档与代码测试为准。
-当前代码与 v1 架构契约不一致的部分（单 Realm 约束等）以架构契约第 9 节为准，
-描述当前实现的文档会分别标注「当前实现」与「目标契约」。
+当前代码与 v1 架构契约仍不一致的部分集中列在架构契约第 9 节。
