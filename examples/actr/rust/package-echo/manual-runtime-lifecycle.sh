@@ -370,50 +370,25 @@ done
 ACTRIX_DB="$(detect_actrix_db || true)"
 [[ -n "$ACTRIX_DB" && -f "$ACTRIX_DB" ]] || fail "Actrix database not found after startup"
 
-section "🔑 Warm Up Issuer"
+section "🔑 Wait For Signer"
 
-issuer_status() {
-    local body="$1"
-    python3 - <<'PY' "$body"
-import json
-import sys
-
-body = sys.argv[1]
-if not body:
-    print("missing")
-    raise SystemExit(0)
+signer_status() {
+    python3 -c 'import json,sys
 try:
-    print(json.loads(body).get("status", "missing"))
-except json.JSONDecodeError:
-    print("missing")
-PY
-}
-
-admin_login() {
-    # Log into the Admin UI to obtain a JWT for control-plane calls.
-    ACTRIX_ADMIN_TOKEN="$(curl -sf -X POST "http://localhost:8081/admin/api/auth/login" \
-        -H 'Content-Type: application/json' \
-        -d "{\"password\":\"${ACTRIX_ADMIN_PASSWORD:-testpassword123}\"}" 2>/dev/null \
-        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' 2>/dev/null || true)"
-    [[ -n "$ACTRIX_ADMIN_TOKEN" ]]
+    print(json.load(sys.stdin).get("signer_service", "missing"))
+except Exception:
+    print("missing")'
 }
 
 for _ in $(seq 1 60); do
-    CURRENT_KEY_JSON="$(curl -sf "http://localhost:8081/issuer/current-key" 2>/dev/null || true)"
-    if [[ "$(issuer_status "$CURRENT_KEY_JSON")" == "success" ]]; then
+    if [[ "$(curl -sf "http://localhost:8081/issuer/health" 2>/dev/null | signer_status)" == "ok" ]]; then
         break
-    fi
-
-    if [[ -f "$WORKSPACE_ROOT/database/nonce.db" ]] && admin_login; then
-        curl -sf -X POST \
-            -H "Authorization: Bearer ${ACTRIX_ADMIN_TOKEN}" \
-            "http://localhost:8081/admin/api/services/issuer/keys/rotate" >/dev/null 2>&1 || true
     fi
     sleep 1
 done
 
-CURRENT_KEY_JSON="$(curl -sf "http://localhost:8081/issuer/current-key" 2>/dev/null || true)"
-[[ "$(issuer_status "$CURRENT_KEY_JSON")" == "success" ]] || fail "Issuer signing key warmup timed out"
+[[ "$(curl -sf "http://localhost:8081/issuer/health" 2>/dev/null | signer_status)" == "ok" ]] \
+    || fail "Signer did not become ready"
 
 section "📡 Register publisher And Publish Package"
 
@@ -443,8 +418,8 @@ EXPIRES_AT="$((NOW + 86400 * 365))"
 
 sqlite3 "$ACTRIX_DB" <<SQL
 INSERT OR IGNORE INTO realm
-    (id, name, status, enabled, created_at, secret_current)
-VALUES (1001, 'package-echo-realm', 'Active', 1, strftime('%s','now'), '');
+    (name, status, enabled, created_at)
+VALUES ('package-echo@example.com', 'active', 1, strftime('%s','now'));
 
 INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
@@ -462,6 +437,11 @@ UPDATE publisher
        revoked_at     = NULL
  WHERE name = 'actrium';
 SQL
+
+# Join the Realm as its owner; the config names the key file next to it.
+ACTR_CMD="$ACTR_CLI_BIN" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
+    "$ACTRIX_DB" "package-echo@example.com" "http://localhost:8081/issuer" \
+    "$ARTIFACT_DIR/realm-client.json"
 
 "$ACTR_CLI_BIN" pkg publish \
     --package "$ACTR_PACKAGE" \

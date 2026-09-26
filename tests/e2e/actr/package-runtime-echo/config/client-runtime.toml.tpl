@@ -7,8 +7,8 @@ url = "ws://127.0.0.1:8081/signaling/ws"
 url = "http://127.0.0.1:8081/issuer"
 
 [deployment]
-realm_id = __REALM_ID__
-realm_secret = "__REALM_SECRET__"
+realm = "__REALM__"
+realm_client_key = "__REALM_CLIENT_KEY__"
 
 [discovery]
 visible = true
@@ -28,4 +28,4 @@ turn_urls = ["turn:127.0.0.1:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "e2e.actrium.test:EchoService:__ECHO_SERVICE_VERSION__"
+type = "e2e.actrium.test/EchoService@__ECHO_SERVICE_VERSION__"

@@ -100,7 +100,7 @@ The directory is removed on success. Set `KEEP_TMP=1` to preserve it.
    the analogous `ActrNode` client factory in other bindings).
 2. The driver receives from `setup.sh`:
    - `$CLIENT_RUNTIME` — path to the rendered runtime config.
-   - `$SERVICE_TYPE`   — `<publisher>:EchoService:<version>` to discover.
+   - `$SERVICE_TYPE`   — `<publisher>/EchoService@<version>` to discover.
    - `$TEST_MESSAGE`   — payload to echo (positional CLI arg).
 3. Wire a `run_<lang>_driver` function in `run.sh` that invokes the
    driver, asserts the log contains `[Received reply] Echo: $TEST_MESSAGE`,

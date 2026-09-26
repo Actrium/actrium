@@ -9,12 +9,12 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 HTTP_PORT=8081
 ICE_PORT=3478
-REALM_ID=""
+REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="e2e.actrium.test"
 # The client guest is a realm consumer, not a verified publisher: it keeps a
-# non-dotted publisher so its linked (realm-secret) registrations satisfy
-# Issuer-01, which reserves DNS-style names for package identities.
+# non-dotted publisher so its linked registrations satisfy Issuer-01, which
+# reserves DNS-style names for package identities.
 CLIENT_PUBLISHER="e2e-actrium-local"
 CLIENT_GUEST_VERSION="0.1.0"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
@@ -67,7 +67,7 @@ case "$MODE" in
     *) fail "Unknown MODE: $MODE" ;;
 esac
 
-for cmd in cargo curl jq sqlite3 python3 perl rustc lsof; do
+for cmd in cargo curl jq sqlite3 python3 perl rustc lsof timeout; do
     require_cmd "$cmd"
 done
 
@@ -105,7 +105,10 @@ ACTR_CLI_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
-REALM_SECRET=""
+REALM_NAME_PREFIX="package-runtime-echo"
+REALM_OWNER_KEY=""
+REALM_CLIENT_KEY=""
+REALM_CLIENT_MEMBER_ID=""
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 
 cleanup() {
@@ -201,55 +204,22 @@ login_admin() {
     success "Admin API login succeeded"
 }
 
-warmup_issuer_key() {
-    section "🔑 Warming up Issuer signing key"
-    [ -n "${ADMIN_TOKEN:-}" ] || login_admin
-    local current_key_file="$RUN_DIR/issuer-current-key.json"
-    local rotate_file="$RUN_DIR/issuer-rotate-key.json"
+wait_for_signer() {
+    section "🔑 Waiting for Signer"
+    local health_file="$RUN_DIR/issuer-health.json"
     local attempt=0
 
     while [ $attempt -lt 60 ]; do
-        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/issuer/current-key" >"$current_key_file" 2>/dev/null \
-            && [ "$(jq -r '.status // "missing"' "$current_key_file" 2>/dev/null)" = "success" ]; then
-            success "Issuer signing key is ready"
+        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/issuer/health" >"$health_file" 2>/dev/null \
+            && [ "$(jq -r '.signer_service // "missing"' "$health_file" 2>/dev/null)" = "ok" ]; then
+            success "Signer is ready"
             return 0
         fi
-
-        curl -fsS -X POST \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-            "http://127.0.0.1:${HTTP_PORT}/admin/api/services/issuer/keys/rotate" \
-            >"$rotate_file" 2>/dev/null || true
         sleep 1
         attempt=$((attempt + 1))
     done
 
-    fail "Issuer signing key warmup timed out"
-}
-
-ensure_realm() {
-    section "🪪 Creating realm via Admin API"
-    local create_file="$RUN_DIR/realm-create.json"
-    local realm_name="package-runtime-echo-${RUN_ID}"
-    curl -fsS \
-        -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/realms" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d "{\"name\":\"${realm_name}\",\"enabled\":true,\"expires_at\":0}" \
-        >"$create_file"
-
-    REALM_ID="$(json_field "$create_file" '.realm.realm_id')"
-    REALM_SECRET="$(json_field "$create_file" '.realm_secret')"
-
-    [ -n "$REALM_ID" ] || fail "Realm creation returned an empty realm id"
-    [ -n "$REALM_SECRET" ] || fail "Realm creation returned an empty realm secret"
-    # The secret is interpolated into TOML string literals below; URL-safe
-    # base64 stays inside that grammar, so reject anything else before it can
-    # make .actr/config.toml unparseable.
-    case "$REALM_SECRET" in
-        *[!A-Za-z0-9_-]*) fail "realm_secret has characters outside URL-safe base64" ;;
-    esac
-    success "Realm ${REALM_ID} created"
+    fail "Signer did not become ready"
 }
 
 append_workspace_patch() {
@@ -306,6 +276,7 @@ scaffold_service_guest() {
         --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
         --publisher "$PUBLISHER" \
+        --realm "$REALM" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
@@ -399,8 +370,8 @@ version = 1
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
-realm_id = $REALM_ID
-realm_secret = "$REALM_SECRET"
+realm = "$REALM"
+realm_client_key = "$REALM_CLIENT_KEY"
 EOF
     (
         cd "$client_guest_dir"
@@ -517,9 +488,9 @@ render_client_runtime_config() {
     render_template \
         "$SCRIPT_DIR/config/client-runtime.toml.tpl" \
         "$CLIENT_RUNTIME_PATH" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__ECHO_SERVICE_VERSION__=$SERVICE_VERSION" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM_CLIENT_KEY__=$REALM_CLIENT_KEY"
 }
 
 run_client_and_assert() {
@@ -581,6 +552,39 @@ run_client_and_assert() {
     fail "Expected echo reply not found"
 }
 
+# Removing the client's member revokes its Realm client key: the same client
+# host can no longer obtain an Actor credential.
+assert_removed_member_refused() {
+    section "🚫 Removing the client's member"
+    run_actr realm remove-member --key "$REALM_OWNER_KEY" "$REALM_CLIENT_MEMBER_ID" >/dev/null
+    run_actr realm members --key "$REALM_OWNER_KEY" >"$RUN_DIR/members.json"
+    [ "$(jq -r --arg id "$REALM_CLIENT_MEMBER_ID" \
+        '.members[] | select(.member_id == $id) | .status' "$RUN_DIR/members.json")" = "removed" ] ||
+        fail "The client's member is not listed as removed"
+
+    local client_home="$RUN_DIR/home-client-removed"
+    mkdir -p "$client_home"
+    local status=0
+    echo "quit" | \
+        HOME="$client_home" \
+        ECHO_ACTR_VERSION="$SERVICE_VERSION" \
+        CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
+        CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
+        CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
+        CLIENT_GUEST_KEYCHAIN_PATH="$PROVISIONED_KEYCHAIN" \
+        RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
+        timeout "${CLIENT_TIMEOUT_SECONDS:-40}" \
+        "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
+        >"$LOG_DIR/client-removed.log" 2>&1 || status=$?
+
+    if [ "$status" -ne 0 ] && grep -q "client_revoked" "$LOG_DIR/client-removed.log"; then
+        success "The removed member's client was refused a credential"
+        return 0
+    fi
+    cat "$LOG_DIR/client-removed.log" || true
+    fail "The removed member's client was not refused (exit status $status)"
+}
+
 # ============================================================================
 # Runner-signature / Path 2 mode helpers (P0 isolation + assertions)
 # ============================================================================
@@ -640,8 +644,8 @@ render_server_runtime() {
         "$SCRIPT_DIR/config/server-runtime.toml.tpl" \
         "$SERVER_RUNTIME_PATH" \
         "__PACKAGE_PATH__=$SERVICE_PACKAGE" \
-        "__REALM_ID__=$REALM_ID" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM__=$REALM" \
+        "__REALM_CLIENT_KEY__=$REALM_OWNER_KEY"
 }
 
 # Launch actr run fully isolated — independent HOME and --hyper-dir.
@@ -777,6 +781,7 @@ mode_path1_full_echo() {
     build_client_guest_package
     seed_client_registry_state
     run_client_and_assert
+    assert_removed_member_refused
     stop_server
 }
 
@@ -799,7 +804,7 @@ mode_path1_with_keychain() {
 
 mode_path2_happy() {
     section "🧪 MODE=path2-happy (unpublished package + runner proof → Path 2 success)"
-    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
     local env
     env="$(mk_isolated_env "p2h")"
@@ -814,7 +819,7 @@ mode_path2_happy() {
 
 mode_path2_no_proof() {
     section "🧪 MODE=path2-no-proof (unpublished package, no keychain → Path 2 rejection)"
-    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
     local env
     env="$(mk_isolated_env "p2np")"
@@ -835,7 +840,7 @@ mode_path2_no_proof() {
 
 mode_path2_wrong_key() {
     section "🧪 MODE=path2-wrong-key (runner proof signed by unrelated key → rejection)"
-    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
 
     local env
@@ -857,7 +862,7 @@ mode_path2_wrong_key() {
 
 mode_rotation() {
     section "🧪 MODE=rotation (retired key passes, revoked key rejects)"
-    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
 
     # The manifest's signing_key_id (key A) — needed to find the history_id after rotation.
@@ -973,7 +978,7 @@ case "$MODE" in
 esac
 start_actrix
 login_admin
-warmup_issuer_key
+wait_for_signer
 ensure_realm
 provision_publisher_keychain
 scaffold_service_guest

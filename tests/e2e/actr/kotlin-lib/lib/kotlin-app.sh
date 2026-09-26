@@ -222,8 +222,8 @@ url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
-realm_id = ${REALM_ID}
-realm_secret = "${REALM_SECRET}"
+realm = "${REALM}"
+realm_client_key = "${REALM_OWNER_KEY}"
 
 [[trust]]
 kind = "registry"
@@ -295,10 +295,10 @@ check_service_ready() {
     local db_path="$SQLITE_DIR/signaling_cache.db"
     local timeout="${SERVICE_READY_TIMEOUT_SECONDS:-60}"
     if ! wait_for_service_registration \
-        "$db_path" "$REALM_ID" "$PUBLISHER" "$service_actor" "$timeout"; then
+        "$db_path" "$REALM" "$PUBLISHER" "$service_actor" "$timeout"; then
         echo "Service registrations observed before timeout:" >&2
         [ -f "$db_path" ] && sqlite3 "$db_path" \
-            "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status FROM actor_registry;" \
+            "SELECT actor_realm, actor_publisher, actor_device_name, service_name, status FROM actor_registry;" \
             >&2 2>/dev/null || true
         tail -n 120 "$LOG_DIR/server.log" >&2 2>/dev/null || true
         fail "${service_actor} did not register with signaling within ${timeout}s"
@@ -326,6 +326,7 @@ scaffold_kotlin_app() {
             --role app \
             --signaling "$signaling_url" \
             --publisher "$publisher" \
+            --realm "$REALM" \
             --project-name "$project_name" .
     )
     success "Kotlin app scaffolded: $out_dir"
@@ -426,10 +427,12 @@ render_linked_client_config() {
         "__HOST__=${HOST_IP}" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__REALM_ID__=$REALM_ID" \
-        "__REALM_SECRET__=$REALM_SECRET" \
+        "__REALM__=$REALM" \
         "__HYPER_DATA_DIR__=/data/data/${application_id}/files/hyper" \
         "__ACL_TYPE__=$acl_type"
+
+    # The client's Realm client key, next to actr.toml (`realm_client_key`).
+    cp "$REALM_CLIENT_KEY" "$assets_dir/realm-client.json"
 
     # manifest.toml is read by resolveActorType(); copy the (corrected) project manifest.
     cp "$app_dir/manifest.toml" "$assets_dir/manifest.toml"
@@ -523,7 +526,7 @@ capture_kotlin_diagnostics() {
     local db_path="$SQLITE_DIR/signaling_cache.db"
     if [ -f "$db_path" ]; then
         sqlite3 "$db_path" \
-            "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status FROM actor_registry;" \
+            "SELECT actor_realm, actor_publisher, actor_device_name, service_name, status FROM actor_registry;" \
             >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
     for log in "$LOG_DIR"/*.log; do
@@ -537,7 +540,7 @@ sanitize_and_stage_logs() {
     local sanitized="$RUN_DIR/sanitized-logs"
     local staged="$SCRIPT_DIR/.tmp/sanitized-logs"
     mkdir -p "$sanitized"
-    local secrets=("$REALM_SECRET" "$ADMIN_PASSWORD" "${ADMIN_TOKEN:-}")
+    local secrets=("$ADMIN_PASSWORD" "${ADMIN_TOKEN:-}")
     local src="$RUN_DIR/diagnostics"
     [ -d "$src" ] || src="$LOG_DIR"
     while IFS= read -r -d '' f; do

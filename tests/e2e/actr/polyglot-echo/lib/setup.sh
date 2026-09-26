@@ -4,7 +4,7 @@
 # Sourced by run.sh after argument parsing. Drives:
 #   1. Build local actr CLI + mock-actrix.
 #   2. Start mock-actrix on $HTTP_PORT.
-#   3. Generate a fresh publisher keypair and seed it via /admin/publisher-registry.
+#   3. Generate a fresh publisher keypair and seed it via /admin/publisher.
 #   4. Seed the realm via /admin/realms.
 #   5. Scaffold a Rust echo service (cdylib) via `actr init`, build, publish.
 #   6. Render server- and client-runtime configs from templates.
@@ -12,7 +12,7 @@
 #
 # Caller is responsible for:
 #   - Defining: SCRIPT_DIR (run.sh's dir), REPO_ROOT, PUBLISHER, RUN_DIR,
-#     STATE_DIR, LOG_DIR, DIST_DIR, HTTP_PORT, ICE_PORT, REALM_ID.
+#     STATE_DIR, LOG_DIR, DIST_DIR, HTTP_PORT, ICE_PORT, REALM.
 #   - Sourcing lib/common.sh first.
 #
 # After setup.sh completes the following globals are exported:
@@ -24,7 +24,7 @@
 #   SERVER_RUNTIME   — path to the rendered server-runtime.toml
 #   CLIENT_RUNTIME   — path to the rendered client-runtime.toml (per-client
 #                       subdirs reuse this template)
-#   SERVICE_TYPE     — `polyglot:EchoService:<version>` (for client ACL pin)
+#   SERVICE_TYPE     — `polyglot/EchoService@<version>` (for client ACL pin)
 #   MOCK_PID         — pid of the running mock-actrix process
 #   SERVER_PID       — pid of the running `actr run` server process
 
@@ -33,7 +33,7 @@ set -euo pipefail
 # Tunables — caller may override before sourcing.
 : "${HTTP_PORT:=18181}"
 : "${ICE_PORT:=13478}"
-: "${REALM_ID:=4242}"
+: "${REALM:=polyglot-echo@e2e.test}"
 : "${PUBLISHER:=polyglot}"
 
 # Cache directories live under target/ so cargo-cache picks them up.
@@ -118,10 +118,10 @@ seed_realm_and_publisher() {
     section "🪪 Seeding realm + publisher via mock-actrix admin"
     curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/realms" \
         -H 'content-type: application/json' \
-        --data "{\"id\": ${REALM_ID}, \"name\": \"polyglot-echo\"}" >/dev/null
-    success "realm ${REALM_ID} seeded"
+        --data "{\"realm\": \"${REALM}\"}" >/dev/null
+    success "realm ${REALM} seeded"
 
-    curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/publisher-registry" \
+    curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/publisher" \
         -H 'content-type: application/json' \
         --data "{\"name\": \"${PUBLISHER}\", \"pubkey_b64\": \"${PUBLISHER_PUBKEY}\", \"contact\": \"polyglot-echo@local\"}" >/dev/null
     success "publisher ${PUBLISHER} seeded"
@@ -136,6 +136,7 @@ scaffold_service() {
         --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
         --publisher "$PUBLISHER" \
+        --realm "$REALM" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml" "$REPO_ROOT"
@@ -158,7 +159,7 @@ scaffold_service() {
         ' "$TMP_SERVICE_DIR/manifest.toml"
     )"
     [ -n "$SERVICE_VERSION" ] || fail "Unable to detect scaffolded service version"
-    SERVICE_TYPE="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    SERVICE_TYPE="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     success "scaffolded service: ${SERVICE_TYPE}"
 }
 
@@ -190,7 +191,7 @@ render_client_runtime_config() {
         "$CLIENT_RUNTIME" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__SERVICE_TYPE__=$SERVICE_TYPE" \
         "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "client runtime: $CLIENT_RUNTIME"
@@ -207,7 +208,7 @@ render_runtime_configs() {
         "__PACKAGE_PATH__=$SERVICE_PACKAGE" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "server runtime: $SERVER_RUNTIME"
 
@@ -283,7 +284,7 @@ setup_common_prelude() {
     generate_publisher_key
     seed_realm_and_publisher
     SERVICE_VERSION="1.0.0"
-    SERVICE_TYPE="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    SERVICE_TYPE="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
 
     # Set up the service keychain (signing key for `actr build` + publish).
     # Only the cdylib path creates this in scaffold_service today; other
@@ -352,7 +353,7 @@ render_linked_rust_runtime() {
         "$LINKED_RUST_RUNTIME" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "linked-rust server runtime: $LINKED_RUST_RUNTIME"
 }
@@ -482,7 +483,7 @@ start_wasm_rust_server() {
         "__PACKAGE_PATH__=$WASM_RUST_PACKAGE" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "wasm-rust server runtime: $SERVER_RUNTIME"
 
@@ -553,7 +554,7 @@ render_stream_server_runtime() {
         "$STREAM_SERVER_RUNTIME" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "stream server runtime: $STREAM_SERVER_RUNTIME"
 }
