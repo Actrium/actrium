@@ -394,28 +394,9 @@ Admin Web 的 Realms 页与 Publisher Registry 页各有对应的核对与「Acc
 
 ## Schema migration
 
-当前 schema 为 v8（`PRAGMA user_version = 8`）：v3 在 v2 上新增 Issuer 幂等日志表
-`issuer_control_attempt`；v4 以 Realm 名为键（`realm.name` 为主键，其余表以 `realm` 列引用，
-身份登记按 `(realm, serial_number)`）；v5 去掉单 Realm 约束，`realm.status` 改为
-`pending | active | retired`，并新增 `realm_domain`、`realm_profile`、`realm_mgmt_nonce`；v6 删除
-`publisher_challenge`，`publisher.descriptor_json` 改为 `profile_json`（已接受的 Publisher Profile）；v7 删除
-`issuer_reissue_response_cache` 与 `issuer_renewal_token.delivered_at`（由 `issuer_control_attempt` 取代）；
-v8 让 `realm_domain` 保存 key pins（`pins_json`），新增 `realm_issuer_key`（每个 Realm 的 issuer
-key 及轮换状态），`publisher` 新增第二把 `active` 包签名 key 与 `profile_pins`，删除未用的
-`realm.issuer_key_id`。
-运行时只自动初始化空数据库；其他版本拒绝启动。v2 之后的升级都不提供迁移工具，需停机后重建数据库。下面两个历史工具只覆盖到 v2（未版本化库先 v1，再 v2）：
-
-```bash
-python3 scripts/loran/migrate_schema_v1.py /path/to/actrix.db   # 未版本化 → v1
-python3 scripts/loran/migrate_schema_v2.py /path/to/actrix.db   # v1 → v2
-```
-
-两个脚本都先创建备份、在单个排他事务中执行，并支持 `--dry-run`。v1 工具拒绝多 Realm 或
-无法安全映射的旧 publisher 数据；v2 工具改名历史表/列/索引（`mfr*` → `publisher*`、
-`ais*` → `issuer*`、`manufacturer` → `publisher`），并把已存 Actor 类型字符串从
-`publisher:name:version` 改写为 `publisher/program@version`。v2 之后没有自动迁移工具：
-升级到多 Realm schema 需要停机重建数据库，旧 Realm 须由实例运营者显式映射到 Realm 名，
-并由对应 Realm 域名的 Realm 签名 key 签署 Realm Profile 后才能激活。
+当前 schema 为 v9（`PRAGMA user_version = 9`），各版本的表结构变化见
+[架构契约](REALM_V1_ARCHITECTURE.zh.md)第 8 节。运行时只自动初始化空数据库；其他版本（含未版本化的旧库）
+一律拒绝启动，不提供迁移工具，需停机后重建数据库，再重新创建 Realm、登记 publisher 与包。
 
 完整信任边界与发布门槛见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 和

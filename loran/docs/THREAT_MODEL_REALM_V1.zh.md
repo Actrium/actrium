@@ -86,7 +86,7 @@ TLS/mTLS；Management 即使共享 listener 也必须经过独立认证中间件
 | Snowflake 重启/时钟回拨碰撞 | 显式 worker ID；SQLite 永久已签发身份登记以主键拒绝复用并重试 |
 | Actor Registry 注册成功后立即重启丢记录 | Signaling 在 SQLite 写入成功后才完成 Actor Registry 注册；恢复项仅是离线元数据，原 Actor 通过认证重连后才重新进入发现/路由 |
 | Actor Registry 注销成功后重启又复活 | Actor/Actor credential/连接三者匹配；SQLite 原子删除完成后才返回成功，失败时保留连接和内存注册 |
-| 启动时隐式迁移破坏数据 | schema version 严格检查；独立离线脚本、备份、事务、FK/integrity check |
+| 启动时隐式迁移破坏数据 | schema version 严格检查；不做迁移，非当前 schema 拒绝启动，需停机重建 |
 | 热重载丢失连接状态 | signaling runtime 在 router reload 间复用；改变 server/rate 语义的配置要求重启 |
 | 降权失败后继续运行 | privilege drop 失败直接终止启动 |
 

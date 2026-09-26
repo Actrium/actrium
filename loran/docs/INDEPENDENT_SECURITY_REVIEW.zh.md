@@ -33,7 +33,6 @@ Realm Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷�
 5. `TURN_STUN_INTEROP_TESTING.zh.md`
 6. `REALM_V1_ACCEPTANCE_EVIDENCE.zh.md`
 7. `DEPENDENCY_RISK_REGISTER.zh.md`
-8. `scripts/loran/migrate_schema_v1.py`、`scripts/loran/migrate_schema_v2.py`
 
 ## 高风险代码
 

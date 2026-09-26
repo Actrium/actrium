@@ -209,19 +209,8 @@ credential 与 TURN username 的 `provider`，并由 Signaling、TURN 校验。`
 控制是否提供 `/.well-known/actr`（此时域名须与 `bind.http` 一致），`[authority] links`
 是 descriptor 的 Realm 链接前缀（如 `["/i/"]`），默认不输出。
 
-旧 SQLite 必须停机后运行：
-
-```bash
-# 未版本化库：先升到 v1
-python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db --dry-run
-python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db
-# v1 库：升到 v2
-python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db --dry-run
-python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db
-```
-
-v2 之后没有离线迁移工具：升到当前 schema v9 需要停机后重建数据库（见「Realm provision
-与数据」）。
+SQLite schema 不是当前的 v9 时拒绝启动。不提供迁移工具：旧库需停机后重建（见「Realm
+provision 与数据」）。
 
 详见[架构契约](REALM_V1_ARCHITECTURE.zh.md)和
 [威胁模型](THREAT_MODEL_REALM_V1.zh.md)。

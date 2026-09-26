@@ -21,7 +21,7 @@ commit；本文件引用的 PR 状态会继续变化。
 | Actor credential 生命周期 | version、issuer、Realm、Realm Provider、audience、Actor、endpoint 和 expiry 绑定；连接 source 再绑定 | Issuer Signer/Issuer/Signaling negative tests；过期、错 Realm、错 source、错连接回归 | 已自动验证 |
 | Issuer/Rendezvous/Relay/Management 平面 | 逻辑边界分离；v1 all-in-one profile 同进程组合；Issuer Signer 可用 TLS/mTLS 拆出 | 配置组合测试、各 crate 测试、架构文档 | 已自动验证 |
 | Service 注册/注销持久性 | 注册先写 SQLite 再激活；重启恢复项仅是离线元数据；原 Actor 重连后激活；注销先原子删除再成功 | `actor_registry_persists_across_restart`、`service_unregister_success_is_durable_across_restart`、Signaling 单元测试 | 已自动验证 |
-| 不兼容升级 | 旧配置、schema、credential 和客户端不走长期双轨；未知 schema fail closed | `scripts/loran/migrate_schema_v1.py`、`migrate_schema_v2.py` 及其迁移测试；独立必需 CI Gate | 已自动验证 |
+| 不兼容升级 | 旧配置、schema、credential 和客户端不走双轨；非当前 schema 拒绝启动，不提供迁移 | `loran-platform` storage 的 schema 版本测试 | 已自动验证 |
 | TURN/STUN | per-Realm/Realm Provider TURN credential、expiry、bounded cache/backpressure、allocation/permission/relay | UDP interop、畸形包洪泛、cache bound、Chromium relay-only DataChannel fixture | 本机自动验证；外部矩阵待办 |
 | 依赖风险 | Rust 审计无 ignore；Admin UI high/critical 默认 fail closed；唯一 RSC-only 例外绑定版本与静态 SPA 不变量 | `cargo audit`、`pnpm run audit:dependencies`、锁文件和生产 bundle | 已自动验证；例外待独立复核 |
 | 威胁模型与文档 | 资产、信任边界、P0/P1 控制、配置、API、运维和独立评审模板 | 文档索引、CI drift/config tests | 已提交 |
@@ -39,8 +39,6 @@ cargo test -p actrix --test actrix_fullstack
 cargo test -p actrix-signaling
 cargo test -p actrix-turn --test udp_interop -- --test-threads=1
 cargo test -p actrix-stun -- --test-threads=1
-python3 -m unittest scripts/loran/tests/test_migrate_schema_v1.py -v
-python3 -m unittest scripts/loran/tests/test_migrate_schema_v2.py -v
 (cd crates/loran-server/admin/web && pnpm run audit:dependencies && pnpm run build)
 ```
 
