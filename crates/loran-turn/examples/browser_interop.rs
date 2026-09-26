@@ -18,7 +18,7 @@ use turn::{Authenticator, create_turn_server, shutdown_turn_server};
 use uuid::Uuid;
 
 const REALM: &str = "browser-interop.actrix.test";
-const ACTOR_ID: &str = "1@1001/apps.example.com/browser-interop@1.0.0";
+const ACTOR_ID: &str = "1.k7m2q9xh@example.com";
 
 fn scoped_credential(secret: &str) -> (String, String) {
     let expires_at = SystemTime::now()
@@ -27,10 +27,14 @@ fn scoped_credential(secret: &str) -> (String, String) {
         .as_secs()
         + 600;
     let username = format!(
-        "{expires_at}:realm=1001:provider=actrix-official:audience=actr.turn:actor={ACTOR_ID}"
+        "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor={ACTOR_ID}"
     );
-    let mut mac =
-        Hmac::<Sha1>::new_from_slice(secret.as_bytes()).expect("HMAC accepts this secret");
+    let secret = platform::realm::realm_turn_secret(
+        secret.as_bytes(),
+        "k7m2q9xh@example.com",
+        "provider.example",
+    );
+    let mut mac = Hmac::<Sha1>::new_from_slice(&secret).expect("HMAC accepts this secret");
     mac.update(username.as_bytes());
     let password = BASE64_STANDARD.encode(mac.finalize().into_bytes());
     (username, password)
@@ -160,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
     let turn_address = turn_socket.local_addr()?.to_string();
     let secret = format!("browser-interop-{}-{}", Uuid::new_v4(), Uuid::new_v4());
     let (username, password) = scoped_credential(&secret);
-    let authenticator = Arc::new(Authenticator::new(secret)?);
+    let authenticator = Arc::new(Authenticator::new(secret, "provider.example".to_string())?);
     let turn_server = create_turn_server(
         turn_socket,
         "127.0.0.1",

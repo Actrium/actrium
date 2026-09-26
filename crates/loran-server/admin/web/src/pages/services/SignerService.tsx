@@ -74,11 +74,11 @@ function IssuanceDiagram() {
       <rect x={panelX} y="10" width={panelW} height={aPanelH} rx="16" className="sgn-panel" stroke="#c7d2fe" />
       <rect x="26" y="24" width="188" height="24" rx="12" fill="#eef2ff" stroke="#a5b4fc" strokeWidth="1" />
       <text x="120" y="40" textAnchor="middle" className="sgn-chip-title" fill="#4338ca">A · Key Lifecycle</text>
-      <text x="228" y="40" className="sgn-chip-caption">background refresh</text>
+      <text x="228" y="40" className="sgn-chip-caption">one key per Realm</text>
 
       <rect x="36" y={nodeY} width="136" height={nodeH} rx="14" fill="#eef2ff" stroke="#6366f1" strokeWidth="1.6" filter="url(#sgn-shadow)" />
       <text x="104" y={nodeY + 24} textAnchor="middle" className="sgn-node-title" fill="#3730a3">Issuer</text>
-      <text x="104" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#6366f1">refresh controller</text>
+      <text x="104" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#6366f1">per-Realm issuer keys</text>
 
       <rect x="240" y={nodeY} width="154" height={nodeH} rx="14" fill="#fffbeb" stroke="#d97706" strokeWidth="1.6" filter="url(#sgn-shadow)" />
       <text x="317" y={nodeY + 24} textAnchor="middle" className="sgn-node-title" fill="#92400e">Signer</text>
@@ -90,8 +90,8 @@ function IssuanceDiagram() {
       <text x="317" y={storageY + 23} textAnchor="middle" fontSize="7.8" fill="#c2410c">private keys never leave process</text>
 
       <rect x="472" y={nodeY} width="146" height={nodeH} rx="14" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1.3" filter="url(#sgn-shadow)" />
-      <text x="545" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#334155">issuer_keys.db</text>
-      <text x="545" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#64748b">Issuer private verifier cache</text>
+      <text x="545" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#334155">Realm Profile</text>
+      <text x="545" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#64748b">lists it under issuer.keys</text>
 
       <rect x="642" y={nodeY} width="166" height={nodeH} rx="14" fill="#f0fdf4" stroke="#22c55e" strokeWidth="1.3" filter="url(#sgn-shadow)" />
       <text x="725" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#166534">signaling_key_cache.db</text>
@@ -99,23 +99,23 @@ function IssuanceDiagram() {
 
       <line x1="172" y1={nodeY + 24} x2="240" y2={nodeY + 24} stroke="#6366f1" strokeWidth="1.6" markerEnd="url(#sgn-ap)" />
       <rect x="146" y={nodeY - 18} width="120" height="16" rx="8" className="sgn-label-chip" />
-      <text x="206" y={nodeY - 6} textAnchor="middle" className="sgn-arrow-label" fill="#4338ca">GenerateSigningKey RPC</text>
+      <text x="206" y={nodeY - 6} textAnchor="middle" className="sgn-arrow-label" fill="#4338ca">EnsureNamedKey RPC</text>
 
       <line x1="240" y1={nodeY + 42} x2="172" y2={nodeY + 42} stroke="#10b981" strokeWidth="1.5" markerEnd="url(#sgn-ag)" />
       <rect x="142" y={nodeY + 52} width="128" height="16" rx="8" className="sgn-label-chip" />
-      <text x="206" y={nodeY + 64} textAnchor="middle" className="sgn-arrow-label" fill="#059669">key_id + verifier + expiry</text>
+      <text x="206" y={nodeY + 64} textAnchor="middle" className="sgn-arrow-label" fill="#059669">key_id + verifier</text>
 
       <line x1="394" y1={nodeY + 24} x2="472" y2={nodeY + 24} stroke="#94a3b8" strokeWidth="1.4" markerEnd="url(#sgn-ar)" />
       <rect x="373" y={nodeY - 18} width="120" height="16" rx="8" className="sgn-label-chip" />
-      <text x="433" y={nodeY - 6} textAnchor="middle" className="sgn-arrow-label" fill="#64748b">store active verifier</text>
+      <text x="433" y={nodeY - 6} textAnchor="middle" className="sgn-arrow-label" fill="#64748b">publish verifier</text>
 
       <path d={`M 394 ${nodeY + 46} Q 520 ${storageY + 26} 642 ${nodeY + 46}`} fill="none" stroke="#22c55e" strokeWidth="1.4" markerEnd="url(#sgn-ak)" />
       <rect x="444" y={storageY + 12} width="148" height="16" rx="8" className="sgn-label-chip" />
       <text x="518" y={storageY + 24} textAnchor="middle" className="sgn-arrow-label" fill="#16a34a">propagate to shared cache</text>
 
       <rect x="36" y={rotationY} width="828" height="40" rx="12" fill="#fff7ed" stroke="#fed7aa" strokeWidth="1" />
-      <text x="450" y={rotationY + 16} textAnchor="middle" fontSize="9.6" fontWeight="700" fill="#92400e">⟳ Background rotation</text>
-      <text x="450" y={rotationY + 29} textAnchor="middle" className="sgn-detail-text" fill="#b45309">Check every 10 min: rotate on near-expiry, or when periodic interval reached</text>
+      <text x="450" y={rotationY + 16} textAnchor="middle" fontSize="9.6" fontWeight="700" fill="#92400e">Retirement</text>
+      <text x="450" y={rotationY + 29} textAnchor="middle" className="sgn-detail-text" fill="#b45309">Named keys do not expire; retiring a Realm retires issuer:&lt;realm&gt;, which never signs again</text>
 
       {/* ── Sub-panel B: Per-Request Issuance ── */}
       <rect x={panelX} y={bPanelY} width={panelW} height={bPanelH} rx="16" className="sgn-panel" stroke="#a7f3d0" />
@@ -295,77 +295,16 @@ function VerificationDiagram() {
   );
 }
 
-function KeyLifecycleBar({ config }: { config: Record<string, unknown> }) {
-  const ttl = Number(config.key_ttl_seconds ?? 3600);
-  const tolerance = Number(config.tolerance_seconds ?? 300);
-  const totalSpan = ttl + tolerance;
-  const activePercent = Math.max(8, (ttl / totalSpan) * 100);
-  const tolerancePercent = Math.max(8, 100 - activePercent);
-
-  return (
-    <div className="w-full">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-[11.5px] text-slate-500">
-          Total validity = {ttl}s active + {tolerance}s tolerance
-        </p>
-        <span className="max-w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10.5px] font-bold leading-4 text-slate-500 uppercase tracking-tight">
-          cleanup deletes keys only after tolerance
-        </span>
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50">
-        <div className="flex h-12 text-[12.5px] font-bold">
-          <div
-            className="flex items-center justify-center bg-emerald-100 text-emerald-800"
-            style={{ width: `${activePercent}%` }}
-          >
-            Active ({ttl}s)
-          </div>
-          <div
-            className="flex items-center justify-center bg-amber-100 text-amber-800"
-            style={{ width: `${tolerancePercent}%` }}
-          >
-            Tolerance ({tolerance}s)
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 text-[11.5px] text-slate-600 md:grid-cols-3">
-        <div className="rounded-[14px] border border-emerald-100 bg-emerald-50 p-4">
-          <p className="font-bold text-emerald-700">Created → Expires</p>
-          <p className="mt-1.5 leading-relaxed">Active signing window. Signer can sign new payloads, and verifiers accept the key as fresh.</p>
-        </div>
-        <div className="rounded-[14px] border border-amber-100 bg-amber-50 p-4">
-          <p className="font-bold text-amber-700">Expires → Cleanup</p>
-          <p className="mt-1.5 leading-relaxed">Grace period. New signing has moved to a fresher key, but verifiers still accept this key to support late-arriving credentials.</p>
-        </div>
-        <div className="rounded-[14px] border border-slate-200 bg-slate-50 p-4">
-          <p className="font-bold text-slate-700">After cleanup</p>
-          <p className="mt-1.5 leading-relaxed">The key is purged from verifier caches. Any remaining credentials using this key will now fail verification.</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
 export function SignerService() {
   const [data, setData] = useState<ServiceDetail | null>(null);
   const [keys, setKeys] = useState<KeyEntry[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [error, setError] = useState("");
-  const [cleaning, setCleaning] = useState(false);
-  const [cleanupMsg, setCleanupMsg] = useState("");
-  const fallbackConfig: Record<string, unknown> = {
-    key_ttl_seconds: 3600,
-    tolerance_seconds: 86400,
-  };
-
   function buildFallbackDetail(status: ServiceStatus | null): ServiceDetail {
     return {
       enabled: status != null,
       status,
-      config: fallbackConfig,
+      config: null,
     };
   }
 
@@ -411,8 +350,6 @@ export function SignerService() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const diagramConfig = data?.config ?? fallbackConfig;
-
   if (!data && !error) {
     return <div className="text-sm text-gray-500">Loading...</div>;
   }
@@ -449,13 +386,13 @@ export function SignerService() {
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
             <p className="text-sm font-semibold text-gray-700">1. Signing boundary</p>
             <p className="mt-1.5 text-xs text-gray-500">
-              Issuer requests Signer to generate keys and sign payloads. Private Ed25519 keys stay inside Signer's configured storage backend.
+              Issuer asks Signer for each Realm's issuer key and to sign payloads with it. Private Ed25519 keys stay inside Signer's configured storage backend.
             </p>
           </div>
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
             <p className="text-sm font-semibold text-gray-700">2. Verifier distribution</p>
             <p className="mt-1.5 text-xs text-gray-500">
-              Issuer persists the verifier into local <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">issuer_keys.db</code> and shared <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">signaling_key_cache.db</code> so Signaling verifies locally.
+              Issuer persists each Realm's verifier into shared <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">signaling_key_cache.db</code> so Signaling verifies locally.
             </p>
           </div>
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
@@ -471,7 +408,7 @@ export function SignerService() {
         <div className="mt-10">
           <h3 style={sectionTitleStyle}>1. Credential Issuance</h3>
           <p className="mt-1" style={sectionSubtitleStyle}>
-            Issuer refreshes verifier material in the background, then signs each register flow through cluster-private RPC.
+            Issuer gets the Realm's issuer key once, then signs each register flow through cluster-private RPC.
           </p>
           <div className="mt-4 w-full rounded-[24px] border border-blue-100 bg-white p-4 sm:p-6 shadow-[0_8px_30px_rgba(15,23,42,0.04)]">
             <IssuanceDiagram />
@@ -516,23 +453,12 @@ export function SignerService() {
           </div>
         </div>
 
-        {/* ── Section 4: Lifecycle ── */}
-        <div className="mt-10">
-          <h3 style={sectionTitleStyle}>4. Signing Key Lifecycle</h3>
-          <p className="mt-1" style={sectionSubtitleStyle}>
-            Key validity keeps a clear active window followed by a grace period so older credentials can still verify before cleanup.
-          </p>
-          <div className="mt-4 w-full rounded-[24px] border border-indigo-100 bg-white p-4 sm:p-6 shadow-[0_8px_30px_rgba(15,23,42,0.04)]">
-            <KeyLifecycleBar config={diagramConfig} />
-          </div>
-        </div>
-
         {/* ── Key concepts ── */}
         <div className="mt-8 rounded-2xl border border-gray-100 bg-gray-50/50 px-5 py-5">
           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Key concepts</p>
           <ul className="mt-3 space-y-2 text-[12px] text-gray-500 list-disc pl-5">
             <li className="leading-relaxed">
-              <strong className="text-gray-700 font-semibold">Signer boundary</strong> — private Ed25519 keys stay inside Signer's storage backend; Issuer only receives the verifying key, expiry metadata, and signatures.
+              <strong className="text-gray-700 font-semibold">Signer boundary</strong> — private Ed25519 keys stay inside Signer's storage backend; Issuer only receives the verifying key and signatures.
             </li>
             <li className="leading-relaxed">
               <strong className="text-gray-700 font-semibold">Local verification</strong> — Issuer persists verifying keys into shared KeyCache; Signaling verifies AIdCredentials locally by <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">key_id</code> without a Signer round-trip.
@@ -541,7 +467,7 @@ export function SignerService() {
               <strong className="text-gray-700 font-semibold">TURN is separate</strong> — TURN does not use KeyCache or Ed25519; it independently validates the HMAC-SHA1 credential derived from <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">turn_secret</code>.
             </li>
             <li className="leading-relaxed">
-              <strong className="text-gray-700 font-semibold">Lifecycle window</strong> — <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">key_ttl_seconds</code> defines the active window; <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">tolerance_seconds</code> keeps old credentials verifiable until cleanup.
+              <strong className="text-gray-700 font-semibold">Key lifetime</strong> — keys are named and do not expire; rotating a Realm's issuer key or retiring the Realm retires its keys, destroying the private key.
             </li>
           </ul>
         </div>
@@ -553,34 +479,10 @@ export function SignerService() {
 
       {data?.enabled && (
         <CollapsibleCard storageKey="signer_keys" title="Keys">
-        <div className="flex items-center justify-between mb-3">
+        <div className="mb-3">
           <span className="text-xs text-gray-500">
             {keys.length} of {totalCount} total
           </span>
-          <div className="flex items-center gap-2">
-            {cleanupMsg && (
-              <span className="text-xs text-green-600">{cleanupMsg}</span>
-            )}
-            <button
-              onClick={async () => {
-                setCleaning(true);
-                setCleanupMsg("");
-                try {
-                  const r = await api.cleanupSignerKeys();
-                  setCleanupMsg(`Deleted ${r.deleted}, ${r.remaining} remaining`);
-                  fetchData();
-                } catch {
-                  setCleanupMsg("Cleanup failed");
-                } finally {
-                  setCleaning(false);
-                }
-              }}
-              disabled={cleaning}
-              className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-            >
-              {cleaning ? "Cleaning..." : "Cleanup expired"}
-            </button>
-          </div>
         </div>
         {keys.length === 0 ? (
           <p className="text-sm text-gray-500">No keys found</p>
@@ -592,7 +494,6 @@ export function SignerService() {
                   <th className="pb-2 pr-4 font-medium text-gray-500">Key ID</th>
                   <th className="pb-2 pr-4 font-medium text-gray-500">PK Size</th>
                   <th className="pb-2 pr-4 font-medium text-gray-500">Created At</th>
-                  <th className="pb-2 pr-4 font-medium text-gray-500">Expires At</th>
                   <th className="pb-2 font-medium text-gray-500">Status</th>
                 </tr>
               </thead>
@@ -602,25 +503,16 @@ export function SignerService() {
                     <td className="py-2 pr-4 font-mono">{k.key_id}</td>
                     <td className="py-2 pr-4">{k.pk_size} bytes</td>
                     <td className="py-2 pr-4 font-mono text-xs">
-                      {k.created_at ? new Date(k.created_at * 1000).toLocaleString() : "—"}
-                    </td>
-                    <td className="py-2 pr-4 font-mono text-xs">
-                      {k.expires_at === 0
-                        ? "Never"
-                        : new Date(k.expires_at * 1000).toLocaleString()}
+                      {new Date(k.created_at * 1000).toLocaleString()}
                     </td>
                     <td className="py-2">
-                      {k.expires_at === 0 ? (
-                        <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                          Permanent
-                        </span>
-                      ) : k.is_expired ? (
-                        <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                          Expired
+                      {k.retired ? (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                          Retired
                         </span>
                       ) : (
                         <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                          Valid
+                          Active
                         </span>
                       )}
                     </td>

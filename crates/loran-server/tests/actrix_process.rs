@@ -1,6 +1,6 @@
 use actrix_sdk::testing::{
-    self, CreateRealmRequest, CredentialPayload, DeleteRealmRequest, GetNodeInfoRequest,
-    ListRealmsRequest, NodeAdminServiceClient, ShutdownRequest, UpdateRealmRequest,
+    self, CreateRealmRequest, CredentialPayload, GetNodeInfoRequest, ListRealmsRequest,
+    NodeAdminServiceClient, RetireRealmRequest, ShutdownRequest, UpdateRealmRequest,
 };
 use nonce_auth::CredentialBuilder;
 use platform::storage::db::Database;
@@ -139,6 +139,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -189,6 +192,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,otlp"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -243,6 +249,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,signer-kek"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -294,6 +303,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,custom-pid"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -342,6 +354,9 @@ env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,no-pid"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -438,6 +453,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -497,6 +515,9 @@ pid = "{pid}"
 user = "{user}"
 group = "{group}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -548,6 +569,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -597,6 +621,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,http-bind-ip"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -648,6 +675,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,control-grpc"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -706,6 +736,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,all-in-one"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -766,6 +799,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,ice"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -861,6 +897,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,prod-no-https"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -926,6 +965,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,https-missing-tls"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -1360,11 +1402,11 @@ fn build_list_realms_credential(shared_secret: &[u8]) -> testing::NonceCredentia
     testing::nonce_auth::to_proto_credential(credential)
 }
 
-fn build_delete_realm_credential(shared_secret: &[u8], realm_id: u32) -> testing::NonceCredential {
-    let payload = format!("delete_realm:{TEST_CONTROL_NODE_ID}:{realm_id}");
+fn build_retire_realm_credential(shared_secret: &[u8], realm: &str) -> testing::NonceCredential {
+    let payload = format!("retire_realm:{TEST_CONTROL_NODE_ID}:{realm}");
     let credential = CredentialBuilder::new(shared_secret)
         .sign(payload.as_bytes())
-        .expect("build delete realm credential");
+        .expect("build retire realm credential");
     testing::nonce_auth::to_proto_credential(credential)
 }
 
@@ -1496,13 +1538,11 @@ async fn actrix_signer_grpc_health_and_key_lifecycle() {
     let grpc_health = grpc_client.health_check().await.expect("grpc health check");
     assert_eq!(grpc_health, "healthy");
 
-    let (key_id, _public_key, expires_at, tolerance_seconds) = grpc_client
-        .generate_signing_key()
+    let (key_id, public_key) = grpc_client
+        .ensure_named_key("test")
         .await
-        .expect("grpc generate key");
-    assert!(key_id > 0, "generated key_id should be positive");
-    assert!(expires_at > 0, "generated key should have expiration");
-    assert!(tolerance_seconds > 0, "tolerance should be positive");
+        .expect("grpc ensure named key");
+    assert!(key_id > 0, "key_id should be positive");
 
     let signature = grpc_client
         .sign(key_id, b"test-message")
@@ -1510,12 +1550,11 @@ async fn actrix_signer_grpc_health_and_key_lifecycle() {
         .expect("grpc sign with generated key");
     assert_eq!(signature.len(), 64, "Ed25519 signature should be 64 bytes");
 
-    let (_, sign_expires_at, sign_tolerance_seconds) = grpc_client
+    let fetched = grpc_client
         .get_verifying_key(key_id)
         .await
         .expect("grpc get verifying key");
-    assert_eq!(sign_expires_at, expires_at);
-    assert_eq!(sign_tolerance_seconds, tolerance_seconds);
+    assert_eq!(fetched, public_key);
 
     let missing_key_err = grpc_client
         .sign(key_id.saturating_add(1_000_000), b"test")
@@ -1566,13 +1605,13 @@ async fn actrix_signer_grpc_rejects_invalid_shared_secret() {
         .await
         .expect("grpc client should connect before auth checks");
     let err = bad_client
-        .generate_signing_key()
+        .ensure_named_key("test")
         .await
         .expect_err("invalid shared secret should be rejected");
     let err_text = err.to_string();
     assert!(
         err_text.contains("Unauthenticated") || err_text.to_lowercase().contains("authentication"),
-        "expected authentication failure from grpc generate_signing_key, got: {err_text}"
+        "expected authentication failure from grpc ensure_named_key, got: {err_text}"
     );
 
     let admin_health_url = format!("http://127.0.0.1:{port}/admin/health");
@@ -1608,13 +1647,11 @@ async fn actrix_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
         &log_path,
     )
     .await;
-    let (key_id, _public_key, expires_at, tolerance_seconds) = grpc_client
-        .generate_signing_key()
+    let (key_id, public_key) = grpc_client
+        .ensure_named_key("test")
         .await
-        .expect("grpc generate key with kek");
+        .expect("grpc ensure named key with kek");
     assert!(key_id > 0);
-    assert!(expires_at > 0);
-    assert!(tolerance_seconds > 0);
 
     let signature = grpc_client
         .sign(key_id, b"test-message")
@@ -1622,12 +1659,11 @@ async fn actrix_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
         .expect("grpc sign with kek");
     assert_eq!(signature.len(), 64);
 
-    let (_, fetched_expires_at, fetched_tolerance) = grpc_client
+    let fetched = grpc_client
         .get_verifying_key(key_id)
         .await
         .expect("grpc get verifying key with kek");
-    assert_eq!(fetched_expires_at, expires_at);
-    assert_eq!(fetched_tolerance, tolerance_seconds);
+    assert_eq!(fetched, public_key);
 
     graceful_shutdown(child);
 }
@@ -2218,22 +2254,22 @@ async fn actrix_exits_on_incompatible_existing_schema() {
     fs::create_dir_all(&data_dir).expect("create data dir");
 
     // Pre-create a deliberately incompatible schema:
-    // `realm` exists but misses required `name` column, so `idx_realm_name` index creation
-    // will fail on startup.
+    // `actoracl` exists but misses the required `realm` column, so
+    // `idx_actoracl_realm` index creation will fail on startup.
     let db = Database::new(&data_dir)
         .await
         .expect("precreate db with default schema");
-    db.execute("DROP TABLE IF EXISTS realm")
+    db.execute("DROP TABLE IF EXISTS actoracl")
         .await
-        .expect("drop realm table");
+        .expect("drop actoracl table");
     db.execute(
-        "CREATE TABLE realm (
+        "CREATE TABLE actoracl (
             rowid INTEGER PRIMARY KEY AUTOINCREMENT,
             label TEXT NOT NULL
         )",
     )
     .await
-    .expect("create incompatible realm table");
+    .expect("create incompatible actoracl table");
 
     let config_path =
         write_config_with_sqlite_path(tmp.path(), port, &data_dir.display().to_string());
@@ -2250,8 +2286,8 @@ async fn actrix_exits_on_incompatible_existing_schema() {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             let log_lower = log.to_lowercase();
             assert!(
-                log_lower.contains("name")
-                    || log_lower.contains("idx_realm_name")
+                log_lower.contains("realm")
+                    || log_lower.contains("idx_actoracl_realm")
                     || log_lower.contains("database"),
                 "expected schema/index failure hint in logs, got: {log}"
             );
@@ -2591,7 +2627,7 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
         .post(format!("http://127.0.0.1:{port}/admin/api/realms"))
         .bearer_auth(token)
         .json(&serde_json::json!({
-            "name": "ui-created-while-managed",
+            "realm": "ui-created-while-managed@example.com",
             "enabled": true
         }))
         .send()
@@ -2599,12 +2635,53 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
         .expect("admin ui create realm request");
     assert_eq!(create_resp.status(), reqwest::StatusCode::FORBIDDEN);
 
+    // Identity re-confirmation: admin only, and a Realm domain's is a Realm
+    // write.
+    let identity_url = format!("http://127.0.0.1:{port}/admin/api/identity/realm-domains/acme.com");
+    let unauthenticated = http_client
+        .get(&identity_url)
+        .send()
+        .await
+        .expect("unauthenticated identity request");
+    assert_eq!(unauthenticated.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let unpinned = http_client
+        .get(&identity_url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("identity request");
+    assert_eq!(unpinned.status(), reqwest::StatusCode::NOT_FOUND);
+    let confirm = http_client
+        .post(&identity_url)
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "digest": "0" }))
+        .send()
+        .await
+        .expect("identity confirmation");
+    assert_eq!(confirm.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // Owner invites are a Realm write; the member list is admin-only.
+    let realm_url = format!("http://127.0.0.1:{port}/admin/api/realms/test%40example.com");
+    let invite = http_client
+        .post(format!("{realm_url}/owner-invite"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("owner invite request");
+    assert_eq!(invite.status(), reqwest::StatusCode::FORBIDDEN);
+    let members = http_client
+        .get(format!("{realm_url}/members"))
+        .send()
+        .await
+        .expect("unauthenticated members request");
+    assert_eq!(members.status(), reqwest::StatusCode::UNAUTHORIZED);
+
     graceful_shutdown(child);
 }
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete() {
+async fn actrix_control_grpc_managed_realm_crud_by_name_and_retire() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
@@ -2617,47 +2694,57 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
     let endpoint = format!("http://127.0.0.1:{port}");
     let mut client = wait_for_control_grpc(&endpoint, &mut child, &log_path).await;
     let shared_secret = hex::decode(TEST_CONTROL_SHARED_SECRET).expect("decode shared secret");
-    let realm_id = 42_424;
+    let realm = "managed-crud@example.com";
+    let other_realm = "managed-other@acme.com";
 
-    let mut create_req = CreateRealmRequest {
-        realm_id: Some(realm_id),
-        name: "managed-crud".to_string(),
-        enabled: true,
-        credential: dummy_credential(),
-        expires_at: 1_900_000_000,
-        status: Some("Active".to_string()),
-        secret_current_hash: Some("hash-v1".to_string()),
-        secret_previous_hash: None,
-        secret_previous_valid_until: None,
+    let create = |realm: &str| {
+        let mut req = CreateRealmRequest {
+            realm: realm.to_string(),
+            enabled: true,
+            credential: dummy_credential(),
+            expires_at: 1_900_000_000,
+        };
+        req.credential = build_signed_credential(&shared_secret, &req);
+        req
     };
-    create_req.credential = build_signed_credential(&shared_secret, &create_req);
     let created = client
-        .create_realm(create_req)
+        .create_realm(create(realm))
         .await
         .expect("managed CreateRealm")
         .into_inner();
     assert!(created.success, "{:?}", created.error_message);
     let created_realm = created.realm.expect("created realm info");
-    assert_eq!(created_realm.realm_id, realm_id);
-    assert_eq!(created_realm.name, "managed-crud");
+    assert_eq!(created_realm.realm, realm);
+    assert_eq!(created_realm.status, "active");
+    // A new Realm's owner invite comes back once.
+    let invite = created.owner_invite.expect("owner invite");
     assert_eq!(
-        created_realm
-            .secret_rotation_state
-            .unwrap()
-            .current_hash_preview,
-        "hash-v1"
+        actr_protocol::realm_membership::RealmInvite::decode(&invite)
+            .expect("owner invite text")
+            .realm,
+        realm
     );
+    let again = client
+        .create_realm(create(realm))
+        .await
+        .expect("repeated managed CreateRealm")
+        .into_inner();
+    assert!(again.success, "{:?}", again.error_message);
+    assert_eq!(again.owner_invite, None);
+
+    // One instance hosts many Realms.
+    let other = client
+        .create_realm(create(other_realm))
+        .await
+        .expect("second managed CreateRealm")
+        .into_inner();
+    assert!(other.success, "{:?}", other.error_message);
 
     let mut update_req = UpdateRealmRequest {
-        realm_id,
-        name: Some("managed-crud-updated".to_string()),
+        realm: realm.to_string(),
         enabled: Some(false),
         credential: dummy_credential(),
-        status: Some("Suspended".to_string()),
         expires_at: Some(1_900_000_001),
-        secret_current_hash: Some("hash-v2".to_string()),
-        secret_previous_hash: Some("hash-v1".to_string()),
-        secret_previous_valid_until: Some(1_800_000_000),
     };
     update_req.credential = build_signed_credential(&shared_secret, &update_req);
     let updated = client
@@ -2667,20 +2754,20 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
         .into_inner();
     assert!(updated.success, "{:?}", updated.error_message);
     let updated_realm = updated.realm.expect("updated realm info");
-    assert_eq!(updated_realm.realm_id, realm_id);
-    assert_eq!(updated_realm.name, "managed-crud-updated");
-    assert!(!updated_realm.enabled);
-    assert_eq!(updated_realm.status, "Suspended");
+    assert_eq!(updated_realm.realm, realm);
+    assert!(!updated_realm.enabled, "enabled = false suspends the Realm");
+    assert_eq!(updated_realm.status, "active");
 
-    let deleted = client
-        .delete_realm(DeleteRealmRequest {
-            realm_id,
-            credential: build_delete_realm_credential(&shared_secret, realm_id),
+    let retired = client
+        .retire_realm(RetireRealmRequest {
+            realm: realm.to_string(),
+            credential: build_retire_realm_credential(&shared_secret, realm),
         })
         .await
-        .expect("managed DeleteRealm")
+        .expect("managed RetireRealm")
         .into_inner();
-    assert!(deleted.success, "{:?}", deleted.error_message);
+    assert!(retired.success, "{:?}", retired.error_message);
+    assert_eq!(retired.realm.expect("retired realm info").status, "retired");
 
     let listed = client
         .list_realms(ListRealmsRequest {
@@ -2689,15 +2776,24 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
             credential: build_list_realms_credential(&shared_secret),
         })
         .await
-        .expect("ListRealms after soft delete")
+        .expect("ListRealms after retire")
         .into_inner();
-    let realm = listed
+    let listed_realm = listed
         .realms
         .iter()
-        .find(|realm| realm.realm_id == realm_id)
-        .expect("soft-deleted realm should remain listed");
-    assert!(!realm.enabled);
-    assert_eq!(realm.status, "Inactive");
+        .find(|info| info.realm == realm)
+        .expect("retired realm should remain listed");
+    assert!(!listed_realm.enabled);
+    assert_eq!(listed_realm.status, "retired");
+    assert!(listed.realms.iter().any(|info| info.realm == other_realm));
+
+    // A retired Realm is never updated or recreated.
+    let recreated = client
+        .create_realm(create(realm))
+        .await
+        .expect("CreateRealm on retired name")
+        .into_inner();
+    assert!(!recreated.success, "retired Realm name must not be reused");
 
     graceful_shutdown(child);
 }

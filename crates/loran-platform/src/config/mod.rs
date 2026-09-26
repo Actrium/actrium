@@ -9,6 +9,7 @@ pub mod config_store;
 pub mod control;
 pub mod issuer;
 pub mod packages;
+pub mod realm;
 pub mod registry;
 pub mod resolver;
 pub mod services;
@@ -22,6 +23,7 @@ pub use crate::config::bind::BindConfig;
 pub use crate::config::control::{AdminUiConfig, ControlConfig, ControlHead};
 pub use crate::config::issuer::IssuerServiceConfig;
 pub use crate::config::packages::PackagesConfig;
+pub use crate::config::realm::RealmConfig;
 pub use crate::config::services::ServicesConfig;
 pub use crate::config::signaling::SignalingConfig;
 pub use crate::config::turn::TurnConfig;
@@ -271,6 +273,10 @@ pub struct ActrixConfig {
     /// Public Actr authority discovery.
     #[serde(default)]
     pub authority: AuthorityConfig,
+
+    /// Realm hosting limits.
+    #[serde(default)]
+    pub realm: RealmConfig,
 
     /// TURN service-specific configuration
     ///
@@ -595,6 +601,7 @@ impl Default for ActrixConfig {
             pid: Some("logs/actrix.pid".to_string()),
             bind: BindConfig::default(),
             authority: AuthorityConfig::default(),
+            realm: RealmConfig::default(),
             turn: TurnConfig::default(),
             location_tag: "default-location".to_string(),
             control: ControlConfig::default(),
@@ -939,6 +946,16 @@ impl ActrixConfig {
         // Realm/provider secret is required whenever either Issuer or TURN runs.
         if self.is_turn_enabled() || self.is_issuer_enabled() {
             validate_secret_hygiene("turn.turn_secret", &self.turn.turn_secret, 32, &mut errors);
+        }
+
+        // Issuer, Signaling and TURN bind credentials to the Realm Provider ID.
+        if (self.is_issuer_enabled()
+            || self.is_signaling_enabled()
+            || self.is_turn_enabled()
+            || self.authority.uri.is_some())
+            && let Err(error) = self.authority.provider_id()
+        {
+            errors.push(error);
         }
 
         // Validate SQLite path
@@ -1783,14 +1800,12 @@ mod tests {
         config.services.signer = Some(SignerServiceConfig {
             storage: ::signer::storage::StorageConfig {
                 backend: ::signer::storage::StorageBackend::Sqlite,
-                key_ttl_seconds: 3600,
                 sqlite: Some(::signer::storage::SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
-            tolerance_seconds: 3600,
             ..Default::default()
         });
 
@@ -1853,6 +1868,13 @@ mod tests {
             dependencies: issuer::IssuerDependencies::default(),
         });
 
+        let errors = config.validate().unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.contains("authority.uri")),
+            "{errors:?}"
+        );
+
+        config.authority.uri = Some("actr://provider.example".to_string());
         let result = config.validate();
         assert!(result.is_ok());
     }

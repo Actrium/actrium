@@ -37,6 +37,9 @@ hex = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "test-util"] }
 uuid = { workspace = true, features = ["v4"] }
+tempfile = { workspace = true }
+ed25519-dalek = { workspace = true }
+sqlx = { workspace = true }
 
 [lib]
 name = "turn"

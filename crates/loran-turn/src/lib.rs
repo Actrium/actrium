@@ -6,11 +6,13 @@
 // TURN server implementation modules
 mod authenticator;
 pub mod error;
+mod inactive_realms;
 mod relay_filter;
 
 // Re-export types for convenience
 pub use authenticator::Authenticator;
 pub use error::{ErrorSeverity, TurnError};
+pub use inactive_realms::{InactiveRealms, WatchGuard};
 pub use relay_filter::is_forbidden_relay_peer;
 
 use std::net::IpAddr;
@@ -118,6 +120,50 @@ pub async fn create_turn_server(
 
     platform::recording::info!("TURN server created successfully (includes STUN functionality)");
     Ok(server)
+}
+
+/// The Realm and Actor (text form) of a scoped TURN username
+/// (`<expires>:realm=<realm>:provider=…:actor=<actor_id>`)
+fn username_scope(username: &str) -> Option<(&str, &str)> {
+    let (_, scoped) = username.split_once(":realm=")?;
+    let (realm, rest) = scoped.split_once(":provider=")?;
+    let (_, actor) = rest.split_once(":actor=")?;
+    Some((realm, actor))
+}
+
+/// Close the allocations whose credential belongs to a Realm and Actor
+/// that `closed(realm, actor)` selects; returns how many usernames were
+/// closed. Credentials are refused once a Realm is not served or an Actor
+/// is disabled; this also ends the allocations they already have.
+pub async fn close_allocations(
+    server: &Server,
+    closed: impl Fn(&str, &str) -> bool,
+) -> error::Result<usize> {
+    let infos =
+        server
+            .get_allocations_info(None)
+            .await
+            .map_err(|e| TurnError::AllocationFailed {
+                reason: format!("list allocations: {e}"),
+            })?;
+    let mut usernames: Vec<String> = infos
+        .into_values()
+        .map(|info| info.username)
+        .filter(|username| {
+            username_scope(username).is_some_and(|(realm, actor)| closed(realm, actor))
+        })
+        .collect();
+    usernames.sort();
+    usernames.dedup();
+    for username in &usernames {
+        server
+            .delete_allocations_by_username(username.clone())
+            .await
+            .map_err(|e| TurnError::AllocationFailed {
+                reason: format!("close allocations: {e}"),
+            })?;
+    }
+    Ok(usernames.len())
 }
 
 // Shutdown the TURN server

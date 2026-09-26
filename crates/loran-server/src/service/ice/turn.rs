@@ -86,11 +86,21 @@ impl IceService for TurnService {
 
         self.socket = Some(socket.clone());
 
-        // Create TURN server
+        // Create TURN server. Credentials of Realms that are not served are
+        // refused.
         let realm = self.config.turn.realm.clone();
+        let inactive_realms = turn::InactiveRealms::default();
+        let _realm_watch = inactive_realms.watch().await;
         let auth_handler = Arc::new(
-            turn::Authenticator::new(self.config.turn.turn_secret.clone())
-                .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?,
+            turn::Authenticator::new(
+                self.config.turn.turn_secret.clone(),
+                self.config
+                    .authority
+                    .provider_id()
+                    .map_err(anyhow::Error::msg)?,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?
+            .with_inactive_realms(inactive_realms.clone()),
         );
         let relay_port_range = self
             .config
@@ -134,9 +144,37 @@ impl IceService for TurnService {
             }
         };
 
+        // A Realm that stops being served, or a disabled Actor, loses its
+        // allocations too, not only their refreshes.
+        let turn_server = Arc::new(turn_server);
+        let closer = {
+            let server = turn_server.clone();
+            tokio::spawn(async move {
+                loop {
+                    inactive_realms.deactivated().await;
+                    match turn::close_allocations(&server, |realm, actor| {
+                        inactive_realms.contains(realm) || inactive_realms.contains_actor(actor)
+                    })
+                    .await
+                    {
+                        Ok(0) => {}
+                        Ok(closed) => platform::recording::info!(
+                            "Closed the TURN allocations of {} credentials of inactive Realms or Actors",
+                            closed
+                        ),
+                        Err(e) => platform::recording::warn!(
+                            "Failed to close TURN allocations of inactive Realms or Actors: {}",
+                            e
+                        ),
+                    }
+                }
+            })
+        };
+
         // Wait for shutdown signal
         let _ = shutdown_rx.recv().await;
         platform::recording::info!("TURN service received shutdown signal");
+        closer.abort();
 
         // Shut down TURN server
         if let Err(e) = turn::shutdown_turn_server(&turn_server).await {

@@ -21,10 +21,14 @@ fn scoped_credential() -> (String, String) {
         .as_secs()
         + 300;
     let username = format!(
-        "{expires_at}:realm=1001:provider=actrix-official:audience=actr.turn:actor=1@1001/apps.example.com/echo@1.0.0"
+        "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com"
     );
-    let mut mac =
-        Hmac::<Sha1>::new_from_slice(TURN_SECRET.as_bytes()).expect("HMAC accepts this secret");
+    let secret = platform::realm::realm_turn_secret(
+        TURN_SECRET.as_bytes(),
+        "k7m2q9xh@example.com",
+        "provider.example",
+    );
+    let mut mac = Hmac::<Sha1>::new_from_slice(&secret).expect("HMAC accepts this secret");
     mac.update(username.as_bytes());
     let password = BASE64_STANDARD.encode(mac.finalize().into_bytes());
     (username, password)
@@ -33,7 +37,10 @@ fn scoped_credential() -> (String, String) {
 async fn start_turn_server() -> anyhow::Result<(turn_crate::server::Server, String)> {
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
     let address = socket.local_addr()?.to_string();
-    let authenticator = Arc::new(Authenticator::new(TURN_SECRET.to_string())?);
+    let authenticator = Arc::new(Authenticator::new(
+        TURN_SECRET.to_string(),
+        "provider.example".to_string(),
+    )?);
     let server = create_turn_server(
         socket,
         "127.0.0.1",
@@ -117,6 +124,31 @@ async fn malformed_udp_burst_does_not_starve_a_valid_allocation() -> anyhow::Res
     let client = turn_client(&server_address).await?;
     let relay = timeout(Duration::from_secs(5), client.allocate()).await??;
     assert!((49_152..=65_535).contains(&relay.local_addr()?.port()));
+
+    relay.close().await?;
+    client.close().await?;
+    shutdown_turn_server(&server).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn allocations_of_a_closed_realm_or_actor_are_closed() -> anyhow::Result<()> {
+    let (server, server_address) = start_turn_server().await?;
+    let client = turn_client(&server_address).await?;
+    let relay = timeout(Duration::from_secs(3), client.allocate()).await??;
+    assert_eq!(server.get_allocations_info(None).await?.len(), 1);
+
+    let closed = turn::close_allocations(&server, |realm, actor| {
+        realm == "other@example.com" || actor == "2.k7m2q9xh@example.com"
+    })
+    .await?;
+    assert_eq!(closed, 0);
+    assert_eq!(server.get_allocations_info(None).await?.len(), 1);
+
+    let closed =
+        turn::close_allocations(&server, |_, actor| actor == "1.k7m2q9xh@example.com").await?;
+    assert_eq!(closed, 1);
+    assert!(server.get_allocations_info(None).await?.is_empty());
 
     relay.close().await?;
     client.close().await?;

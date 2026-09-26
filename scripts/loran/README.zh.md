@@ -188,3 +188,5 @@ python3 scripts/loran/migrate_schema_v2.py /path/to/actrix.db
 
 工具会先写出 `actrix.db.pre-v2.<时间戳>.bak` 备份，再在单个排他事务内完成迁移。
 
+schema v3 新增 `issuer_control_attempt` 表，不提供 v2 → v3 迁移工具；v2 及更早的库需停机后重建。
+

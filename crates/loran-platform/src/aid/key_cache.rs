@@ -1,7 +1,8 @@
 //! Issuer signing public key cache
 //!
 //! Provides a local SQLite cache for the verifier, avoiding repeated retrieval of Ed25519 public keys from Issuer registration responses.
-//! Cache entries are indexed by key_id, storing the corresponding Ed25519 verifying key (32 bytes) and expiration time.
+//! Each Realm has its own issuer key, so entries are indexed by `(realm, key_id)`: a key is
+//! only ever looked up for the Realm it belongs to.
 
 use crate::aid::credential::error::AidError;
 use base64::prelude::*;
@@ -15,8 +16,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Issuer signing public key cache manager
 ///
-/// Caches Issuer Ed25519 verifying keys, indexed by key_id.
-/// Used by signaling and other services to look up the corresponding public key by key_id when verifying AIdCredential.
+/// Caches Issuer Ed25519 verifying keys, indexed by `(realm, key_id)`.
+/// Used by signaling and other services to look up a Realm's public key by key_id when verifying AIdCredential.
 #[derive(Debug, Clone)]
 pub struct KeyCache {
     pool: SqlitePool,
@@ -58,14 +59,34 @@ impl KeyCache {
 
     /// Initialize cache database tables
     async fn init_tables(&self) -> Result<(), AidError> {
+        // An older cache keyed keys by key_id alone. It is only a cache, so drop
+        // it; the Issuer writes each Realm's key again when it next signs.
+        let has_realm: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM pragma_table_info('key_cache') WHERE name = 'realm'")
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| {
+                    AidError::DecodeFailure(format!("failed to inspect key_cache table: {e}"))
+                })?;
+        if has_realm.is_none() {
+            sqlx::query("DROP TABLE IF EXISTS key_cache")
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    AidError::DecodeFailure(format!("failed to drop old key_cache table: {e}"))
+                })?;
+        }
+
         // key_cache table: stores Ed25519 verifying key (base64-encoded, 32 bytes) and expiration time
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS key_cache (
-                key_id     INTEGER PRIMARY KEY,
+                realm      TEXT NOT NULL,
+                key_id     INTEGER NOT NULL,
                 pubkey     TEXT NOT NULL,
                 cached_at  INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL
+                expires_at INTEGER NOT NULL,
+                PRIMARY KEY (realm, key_id)
             )
             "#,
         )
@@ -84,11 +105,12 @@ impl KeyCache {
         Ok(())
     }
 
-    /// Get the Ed25519 verifying key from the cache
+    /// Get `realm`'s Ed25519 verifying key `key_id` from the cache
     ///
     /// Returns `(VerifyingKey, expires_at)`; returns `None` if the cache entry does not exist or has expired.
     pub async fn get_cached_key(
         &self,
+        realm: &str,
         key_id: u32,
     ) -> Result<Option<(VerifyingKey, u64)>, AidError> {
         self.maybe_cleanup().await;
@@ -98,18 +120,21 @@ impl KeyCache {
             .unwrap_or_default()
             .as_secs();
 
-        let result = sqlx::query("SELECT pubkey, expires_at FROM key_cache WHERE key_id = ?1")
-            .bind(key_id as i64)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| {
-                crate::recording::error!(
-                    "Failed to query Issuer public key cache: key_id={}, {}",
-                    key_id,
-                    e
-                );
-                AidError::DecodeFailure(format!("key cache query error: {e}"))
-            })?;
+        let result = sqlx::query(
+            "SELECT pubkey, expires_at FROM key_cache WHERE realm = ?1 AND key_id = ?2",
+        )
+        .bind(realm)
+        .bind(key_id as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            crate::recording::error!(
+                "Failed to query Issuer public key cache: key_id={}, {}",
+                key_id,
+                e
+            );
+            AidError::DecodeFailure(format!("key cache query error: {e}"))
+        })?;
 
         match result {
             Some(row) => {
@@ -126,7 +151,8 @@ impl KeyCache {
                         "Issuer public key cache expired, deleting: key_id={}",
                         key_id
                     );
-                    let _ = sqlx::query("DELETE FROM key_cache WHERE key_id = ?1")
+                    let _ = sqlx::query("DELETE FROM key_cache WHERE realm = ?1 AND key_id = ?2")
+                        .bind(realm)
                         .bind(key_id as i64)
                         .execute(&self.pool)
                         .await;
@@ -159,11 +185,12 @@ impl KeyCache {
         }
     }
 
-    /// Write the Ed25519 verifying key to the cache
+    /// Write `realm`'s Ed25519 verifying key to the cache
     ///
     /// `expires_at` is a Unix second timestamp; pass 0 to indicate never expires.
     pub async fn cache_key(
         &self,
+        realm: &str,
         key_id: u32,
         verifying_key: &VerifyingKey,
         expires_at: u64,
@@ -176,8 +203,10 @@ impl KeyCache {
         let pubkey_b64 = BASE64_STANDARD.encode(verifying_key.as_bytes());
 
         sqlx::query(
-            "REPLACE INTO key_cache (key_id, pubkey, cached_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
+            "REPLACE INTO key_cache (realm, key_id, pubkey, cached_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
         )
+        .bind(realm)
         .bind(key_id as i64)
         .bind(&pubkey_b64)
         .bind(now as i64)
@@ -266,6 +295,8 @@ mod tests {
     use rand::rngs::OsRng;
     use tempfile::tempdir;
 
+    const REALM: &str = "k7m2q9xh@example.com";
+
     fn generate_test_key() -> VerifyingKey {
         let signing_key = SigningKey::generate(&mut OsRng);
         signing_key.verifying_key()
@@ -293,16 +324,64 @@ mod tests {
             + 3600;
 
         cache
-            .cache_key(1, &verifying_key, expires_at)
+            .cache_key(REALM, 1, &verifying_key, expires_at)
             .await
             .unwrap();
         assert_eq!(cache.get_cached_key_count().await.unwrap(), 1);
 
-        let cached = cache.get_cached_key(1).await.unwrap();
+        let cached = cache.get_cached_key(REALM, 1).await.unwrap();
         assert!(cached.is_some());
         let (retrieved_key, retrieved_expires) = cached.unwrap();
         assert_eq!(verifying_key.as_bytes(), retrieved_key.as_bytes());
         assert_eq!(expires_at, retrieved_expires);
+    }
+
+    #[tokio::test]
+    async fn keys_are_looked_up_only_in_their_realm() {
+        let temp_dir = tempdir().unwrap();
+        let cache = KeyCache::new(temp_dir.path().join("test.db"))
+            .await
+            .unwrap();
+
+        cache
+            .cache_key(REALM, 1, &generate_test_key(), 0)
+            .await
+            .unwrap();
+        assert!(cache.get_cached_key(REALM, 1).await.unwrap().is_some());
+        assert!(
+            cache
+                .get_cached_key("other@example.com", 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_old_cache_keyed_by_key_id_alone_is_replaced() {
+        let temp_dir = tempdir().unwrap();
+        let path = temp_dir.path().join("test.db");
+        {
+            let cache = KeyCache::new(&path).await.unwrap();
+            sqlx::query("DROP TABLE key_cache")
+                .execute(&cache.pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "CREATE TABLE key_cache (key_id INTEGER PRIMARY KEY, pubkey TEXT NOT NULL, \
+                 cached_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
+            )
+            .execute(&cache.pool)
+            .await
+            .unwrap();
+        }
+
+        let cache = KeyCache::new(&path).await.unwrap();
+        cache
+            .cache_key(REALM, 1, &generate_test_key(), 0)
+            .await
+            .unwrap();
+        assert!(cache.get_cached_key(REALM, 1).await.unwrap().is_some());
     }
 
     #[tokio::test]
@@ -321,11 +400,11 @@ mod tests {
             .saturating_sub(1);
 
         cache
-            .cache_key(1, &verifying_key, expires_at)
+            .cache_key(REALM, 1, &verifying_key, expires_at)
             .await
             .unwrap();
         // Expired entry should return None
-        let cached = cache.get_cached_key(1).await.unwrap();
+        let cached = cache.get_cached_key(REALM, 1).await.unwrap();
         assert!(cached.is_none());
     }
 
@@ -344,7 +423,7 @@ mod tests {
             .saturating_sub(1);
 
         cache
-            .cache_key(1, &verifying_key, expired_at)
+            .cache_key(REALM, 1, &verifying_key, expired_at)
             .await
             .unwrap();
         assert_eq!(cache.get_cached_key_count().await.unwrap(), 1);

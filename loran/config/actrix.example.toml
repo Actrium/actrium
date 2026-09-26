@@ -43,11 +43,22 @@ location_tag = "single-node"
 # Generate: openssl rand -hex 32
 actrix_shared_key = "<generate-with-openssl-rand-hex-32>"
 
-# Public Actr authority discovery. Production mode requires TLS. This URI is
-# actr://<domain> without a port, and must match the bind.http domain.
+# Public Actr authority. The URI is actr://<domain> without a port; its domain
+# is the Realm Provider ID, required when Issuer, Signaling or TURN is enabled.
+# `enabled` serves /.well-known/actr (production requires TLS; the domain must
+# match bind.http). `links` lists Realm link path prefixes, e.g. ["/i/"].
 [authority]
 enabled = false
-# uri = "actr://localhost"
+uri = "actr://realm.example.com"
+# links = ["/i/"]
+
+# Realm hosting limits. One Loran instance hosts many Realms.
+[realm]
+# max_realms = 1              # pending + active Realms; unset = no limit
+# max_publishers = 1000       # publishers register_publisher may register
+# max_members_per_realm = 1000      # active members of a Realm
+# max_clients_per_member = 20       # unrevoked Realm client keys of a member
+# max_open_invites_per_realm = 100  # unused, unexpired invites of a Realm
 
 # Recording pipeline (logging + tracing)
 [recording]
@@ -154,7 +165,7 @@ relay_port_range = "49152-65535"
 
 # TURN realm
 realm = "actrix.example.com"
-# REQUIRED: stable per-Realm secret. Rotating it invalidates outstanding TURN
+# REQUIRED: stable TURN secret. Rotating it invalidates outstanding TURN
 # credentials, so rotate through an explicit maintenance procedure.
 # Must be independent from every other secret in this file (no reuse).
 # Generate: openssl rand -base64 48
@@ -169,14 +180,12 @@ turn_secret = "<generate-distinct-turn-secret-openssl-rand-base64-48>"
 # Service enablement is controlled by the bitmask (enable field)
 # Set ENABLE_SIGNER bit (16) in the enable field to enable this service
 [services.signer]
-tolerance_seconds = 3600
 # Required in production. The environment value must be 32 random bytes
 # encoded as 64 hex characters or 44-character Base64.
 kek_env = "ACTRIX_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 

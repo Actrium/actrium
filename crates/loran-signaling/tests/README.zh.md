@@ -61,7 +61,7 @@
 SignalingEnvelope {
     flow: PeerToSignaling(RegisterRequest {
         actr_type: ActrType { publisher, name, version },
-        realm: Realm { realm_id },
+        realm,  // Realm 名
         service_spec: Option,
         acl: Option,
     })
