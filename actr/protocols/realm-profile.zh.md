@@ -21,7 +21,8 @@ Realm 在整个生命周期内只由一个 Realm Provider 服务。Realm Provide
 Realm 并迁移应用数据，旧 Realm 退役。
 
 本文不定义 Realm Provider 提供的 signaling、identity 或 ICE 协议，不定义 Actor credential
-格式，也不定义应用实例内部的 Realm membership 与应用权限。
+格式，也不定义应用实例内部的应用权限。Realm membership（成员、Realm 邀请与 Realm 客户端 key）见
+[Actr Realm Membership](realm-membership.zh.md)。
 
 本文中的大写关键词 **MUST**、**MUST NOT**、**SHOULD**、**SHOULD NOT** 和 **MAY**
 按 BCP 14 解释。
@@ -96,12 +97,13 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
   },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>"
+    "sha256": "<64 hex>",
+    "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
-      { "id": "issuer-2026-2", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
+      { "id": "7", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
     ]
   },
   "provider": {
@@ -136,8 +138,9 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `realm.status` | `active` 或 `retired`。 |
 | `package.href` | 该实例所运行包的 HTTPS 下载地址，可以在任何位置。 |
 | `package.sha256` | 该包全部字节的 SHA-256（小写十六进制）。 |
+| `package.type` | 该包 manifest 声明的 Actor 类型 `publisher/program@version`，即该实例 Service 的类型。 |
 | `issuer.url` | Issuer 的注册与验证端点。 |
-| `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥。 |
+| `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥，1 至 3 项（第 6.1 节）。 |
 | `provider.id` | Realm Provider ID：Realm Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
 | `provider.signaling` | signaling 端点。共享同一 `control_plane_id` 的条目是同一 Realm Provider control plane 的副本或故障切换入口，不是 federation。 |
 | `provider.ice` | STUN 与 TURN 端点。TURN 条目标明短期 TURN credential 的 `credential_audience`。 |
@@ -175,15 +178,15 @@ Provider 不是信任根。
 ## 6. 使用 Realm
 
 Actr Host 以不带 credential 的 HTTPS GET 下载 `package.href`，**MUST** 核对
-`package.sha256`，并按 [Actor Package](actor-package.zh.md) 验证包签名；任一失败即不运行。
-包 manifest 声明的 Actor 类型即该实例的程序：实例的 Service 是本 Realm 内 Actor 类型与之
+`package.sha256`，并按 [Actor Package](actor-package.zh.md) 验证包签名，包 manifest 声明的 Actor 类型
+**MUST** 等于 `package.type`；任一失败即不运行。该类型即该实例的程序：实例的 Service 是本 Realm 内 Actor 类型与之
 相同的那个 Actor，恰好一个；零个或多于一个都是错误。
 
 Actr Host 只通过已接受 Realm Profile 指定的 Issuer 和 Realm Provider 访问 Realm。该 Realm
-的 Actor credential 以该 Realm 名为 issuer，用 `issuer.keys` 中的 Realm issuer key 验证。
+的 Actor credential 以该 Realm 名为 issuer，用 `issuer.keys` 中的 Realm issuer key 验证（第 6.1 节）。
 Realm membership 指客户端已在该 Realm 注册其 Realm 客户端 key 且未被撤销；它决定客户端能否
-进入该实例的网络，Issuer 只向已注册且未撤销的 Realm 客户端 key 签发 Actor credential。实例内
-的应用权限由应用决定，不属于本文范围。
+进入该实例的网络，Issuer 只向已注册且未撤销的 Realm 客户端 key 签发 Actor credential（[Actr Realm
+Membership](realm-membership.zh.md)）。实例内的应用权限由应用决定，不属于本文范围。
 
 Actr Host **SHOULD** 在与 Realm 建立会话时刷新该域名的 `realm_signing_keys` member，并从
 `realms` 位置刷新 Realm Profile，保持连接期间至少每 24 小时刷新一次。Realm Provider
@@ -201,6 +204,35 @@ Profile 验证失败时，Actr Host 忽略它、保留已接受的并报告失�
 无法取得时，Actr Host **MUST** 报错。任何情况下 Actr Host 都 **MUST NOT** 使用已接受
 Realm Profile 指定之外的任何 Realm Provider，包括 authority descriptor 中列出的 service。
 
+### 6.1 Realm issuer key
+
+`issuer.keys` 列出 1 至 3 把 Realm issuer key，每把有 `id`、`algorithm`（`Ed25519`）、base64
+`public_key` 与 `status`。Actor credential 头部带 32 位无符号整数 `key_id`，`id` **MUST** 是该
+整数的十进制形式，不带前导零，例如 `"7"`。`id` 在该 Realm 的全部历史中只对应一个公钥，
+**MUST NOT** 复用。
+
+验证 Actor credential 时，验证者取 credential 所属 Realm 的已接受 Realm Profile，在其
+`issuer.keys` 中找 `id` 与 `key_id` 相符的 key（`active` 或 `retired` 均可），用它验签并检查
+有效期；**MUST NOT** 使用其他 Realm 的 key。找不到时，验证者 **SHOULD** 刷新该 Realm Profile
+后再判，同一 Realm 每 60 秒至多刷新一次；仍找不到即拒绝。
+
+Issuer 只用 `active` key 签发，同一时刻只用一把。`retired` key 不再签发，它签发且未过期的
+credential 仍然有效。从 `issuer.keys` 移除某把 key 即吊销它：它签发的 credential 立即失效，
+Actor 需重新取得 credential。
+
+轮换按「先发布、再使用、后移除」进行，每一步都是一份 sequence 更高的 Realm Profile：
+
+1. **预发布。** 加入新 key（`active`），Issuer 继续用旧 key 签发。
+2. **切换。** 列出新 key 的 Realm Profile 被接受至少 24 小时后（第 6 节的刷新间隔），Issuer 改用
+   新 key；此后的 Realm Profile 把旧 key 标为 `retired`。
+3. **移除。** 旧 key 签发的最后一个 credential 过期再过 5 分钟（容许时钟偏差）后，Realm Profile
+   可以不再列出旧 key。
+
+Realm Provider **SHOULD** 每 90 天轮换一次。key 泄露时跳过等待，立即发布移除它的 Realm
+Profile。对 Realm Provider 域名下的 Realm，Realm Provider 自行签署这些 Realm Profile；对其他
+Realm，Realm Provider 在 `draft_profile` 响应（第 8 节）中给出含新 key 的草案，由 Realm 签名
+key 持有方签署后以 `publish_profile` 提交。持有方发布之前，Realm Provider 继续使用旧 key。
+
 ## 7. 生命周期
 
 ### 7.1 创建
@@ -211,37 +243,31 @@ Realm Provider 由 Actr Host、用户或 key 持有方的策略选定。每一�
 1. 向选定的 Realm Provider 发送 `create_realm` 请求（第 8 节）。Realm Provider 创建
    pending Realm，准备其 Realm issuer key 与端点，并返回未签名的首个 Realm Profile。
 2. Realm 签名 key 持有方签署该 Realm Profile，以 `publish_profile` 请求提交。Realm
-   Provider 验证（第 5 节）后激活 Realm，并在这次响应中一次性返回 Realm 管理 token。若 `realms` 位置由该 Realm Provider 提供，它此后对外提供该 Realm Profile；否则
+   Provider 验证（第 5 节）后激活 Realm，并在这次响应中一次性返回 owner 邀请（Actr Realm Membership
+   第 5 节）。若 `realms` 位置由该 Realm Provider 提供，它此后对外提供该 Realm Profile；否则
    由域名所有者发布到 `realms` 位置。
 
-对 Realm Provider 域名下的 Realm，Realm Profile 由该 Realm Provider 自己签署，创建时无需
-`publish_profile` 请求（第 7.3 节）。未按时激活的 pending Realm 过期后被清除。
+对 Realm Provider 域名下的 Realm，Realm Profile 由该 Realm Provider 自己签署，不经 Realm 管理请求
+（第 7.3 节）。未按时激活的 pending Realm 过期后被清除。
 
 ### 7.2 更新
 
 sequence 更高的 Realm Profile 可以更改 `package`（升级程序）、Realm issuer key、Realm
 Provider 端点、`display_name` 与 `policy`，**MUST NOT** 更改 `provider.id`。
 
-新 Realm Profile 同样以 `publish_profile` 提交给 Realm Provider；`realms` 位置不在 Realm
-Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域名下的 Realm，请求只携带要改的
-`package`、`display_name` 或 `policy`，由 Realm Provider 生成并签署新 Realm Profile。
+新 Realm Profile 同样以 `publish_profile` 提交给 Realm Provider（持有方可先用 `draft_profile`
+取得含 Realm Provider 当前 issuer 与端点的草案）；`realms` 位置不在 Realm
+Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域名下的 Realm，由 Realm Provider 按 owner 的
+`update_realm` 请求（Actr Realm Membership 第 4 节）更改 `package` 或 `display_name` 并签署新 Realm Profile。
 
 ### 7.3 由 key 持有方授权
 
-创建、发布 Realm Profile 以及重新签发 Realm 管理 token，都须经 Realm 签名 key 持有方授权。版本 1
-不定义创建委派 key。Actr Host 按第 2.1 节的规则选择路径：
+创建、发布 Realm Profile 以及重新签发 owner 邀请，都须经 Realm 签名 key 持有方授权。版本 1
+不定义创建委派 key。Actr Host 按第 2.1 节的规则区分：
 
-- **Realm Provider 域名下的 Realm。** Realm Provider 以 Realm Provider 账号认证请求方。
-  Actr Host 使用 OAuth 2.0 授权码流程加 PKCE（RFC 6749、RFC 7636）。该 Realm Provider
-  自身 authority descriptor（`https://<Realm Provider ID>/.well-known/actr`）中 `identity`
-  service link 的 `href` 即 OAuth 授权服务器标识（issuer identifier，RFC 8414），授权服务器元数据位于其 RFC 8414 well-known 位置。授权服务器
-  **MUST** 接受固定的公共 client ID `actr-host`（无 client secret），redirect 按 RFC 8252
-  使用 loopback 或私有 URI scheme；Actr Host 请求 scope `realm_management`。Actr Host 以
-  access token 作为 bearer token（RFC 6750）发送 `create_realm` 与 `reissue_admin_token`，
-  不使用信封签名；Realm Provider 自己签署 Realm Profile，并在 `create_realm` 响应中返回
-  Realm 管理 token。丢失该响应的 Actr Host 用 `reissue_admin_token` 取回。配额与 Realm 管理
-  权（包括重新签发 Realm 管理 token）绑定到 Realm Provider 账号，用户换机或丢失设备后只需
-  重新登录。账号注册、登录方式与防滥用措施由 Realm Provider 决定。
+- **Realm Provider 域名下的 Realm。** Realm Provider 就是持有方。版本 1 中这类 Realm 只由 Realm
+  Provider 的运营者创建，不经 Realm 管理请求，此后由 owner 以 membership 请求更新或退役；运营者在创建时得到 owner 邀请，经带外渠道交给
+  用户（Actr Realm Membership 第 5 节）。由用户以 Realm Provider 账号自助创建属于后续工作（第 10 节）。
 - **其他 Realm。** 每个 Realm 管理请求都是由 `active` Realm 签名 key 签名的 Actr 管理信封
   （第 8 节），由 Realm 签名 key 持有方的签名服务签发；持有方可以是域名所有者，也可以是其
   委托代持的 Realm Provider。签名服务如何认证所代签的人，不在本文范围内。
@@ -252,7 +278,8 @@ Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域�
 Realm Provider tombstone 并停止服务该 Realm。该 Realm 名永不复用。退役 Realm Profile 保持
 相同的 `provider.id`，且 sequence 更高。若该 Realm 的 Realm Provider 已停服，域名所有者把
 `realms` link 改指自己控制的位置，并在那里发布退役 Realm Profile。属于 Realm Provider 的
-域名随其一起消失：其中的 Realm 无法退役，只能在别处重新创建。
+域名随其一起消失：其中的 Realm 无法退役，只能在别处重新创建。Realm Provider 域名下的 Realm 由 Realm Provider
+按 owner 的 `update_realm` 请求发布退役 Realm Profile。
 
 ### 7.5 Realm 签名 key 丢失
 
@@ -270,13 +297,12 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 | `op` | 用途 |
 | --- | --- |
 | `create_realm` | 创建 pending Realm，返回其未签名的首个 Realm Profile（其中 `package` 取自请求）。 |
-| `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 Realm 管理 token；之后提交 sequence 更高的版本即更新（含退役）。 |
-| `reissue_admin_token` | 签发新的 Realm 管理 token，并使旧 token 失效。 |
+| `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 owner 邀请（`owner_invite`）；之后提交 sequence 更高的版本即更新（含退役）。 |
+| `reissue_owner_invite` | 签发新的 owner 邀请（响应 `owner_invite`），并使该 Realm 此前未用的 owner 邀请失效；用于 owner 丢失全部客户端时的恢复（Actr Realm Membership 第 5 节）。 |
+| `draft_profile` | 只用于 Realm Provider 域名以外的 Realm：返回下一份未签名的 Realm Profile 草案。其 sequence 为已接受值加一，`package`、`display_name`、`policy` 取自已接受的 Realm Profile，`issuer` 与 `provider` 为 Realm Provider 的当前值（含轮换中的 Realm issuer key，第 6.1 节）。不改变 Realm。 |
 
-对 Realm Provider 域名下的 Realm（第 2.1 节），请求携带下述 payload（含 `provider_id`、
-`nonce` 与有效期）但不带签名，由 Realm Provider 账号的 bearer access token 授权（第 7.3
-节）。对其他 Realm，每个请求都是 Actr 管理信封：下述 payload 加上该 Realm 域名一把
-`active` Realm 签名 key 的签名。
+Realm 管理请求只用于 Realm Provider 域名以外的 Realm（第 7.3 节）。每个请求都是 Actr 管理信封：
+下述 payload 加上该 Realm 域名一把 `active` Realm 签名 key 的签名。
 
 `create_realm` 请求的 payload 为：
 
@@ -284,7 +310,7 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
-  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>" },
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>", "type": "notes.example/team-notes@1.4.2" },
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",
@@ -294,9 +320,8 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 ```
 
 其他操作使用同一信封与各自的 `op` 和字段。`requester` 可选：key 持有方的签名服务把它设为
-所代签者的不透明标识。bearer 请求中 Realm Provider **MUST** 忽略 `requester`，以 Realm
-Provider 账号为请求方。其他规范 **MAY** 以自己的 `op` 复用 Actr 管理信封，例如 Actr
-Authority Discovery 第 4.5 节用它登记 publisher。
+所代签者的不透明标识。其他规范 **MAY** 以自己的 `op` 复用 Actr 管理信封，例如 Actr
+Authority Discovery 第 4.5 节用它登记 publisher，Actr Realm Membership 用它签 membership 请求。
 
 - payload 按 RFC 8785 JCS 规范化，附 detached Ed25519 签名及其 `key_id`。
 - `provider_id` **MUST** 等于接收方的 Realm Provider ID，使请求无法重放到其他 Realm
@@ -305,11 +330,10 @@ Authority Discovery 第 4.5 节用它登记 publisher。
   请求。
 - Realm Provider 记录每个 `nonce` 直到请求过期，并拒绝重复使用。nonce 只防字节级重放。
 - `create_realm` 以 Realm Provider 幂等键 `(realm, 请求方)` 保证幂等。请求方为
-  `requester` 字段（缺省为空）；bearer 请求时为 Realm Provider 账号。同一
-  请求方对自己的 pending 或 active Realm 的重复请求返回该 Realm 的状态，不返回 Realm 管理
-  token；指向其他请求方的 Realm 或已退役 Realm 的请求，一律返回冲突。
+  `requester` 字段（缺省为空）。同一请求方对自己的 pending 或 active Realm 的重复请求返回该
+  Realm 的状态，不返回 owner 邀请；指向其他请求方的 Realm 或已退役 Realm 的请求，一律返回冲突。
 - 对已 active 的 Realm，`publish_profile` 只接受 sequence 更高的 Realm Profile，且不再返回
-  Realm 管理 token。Realm 管理 token 丢失只能用 `reissue_admin_token` 取回。
+  owner 邀请。首次激活的响应丢失或 owner 邀请过期时，用 `reissue_owner_invite` 重新签发。
 
 接受签名请求前，Realm Provider 按与 Actr Host 相同的规则，通过 Actr Authority Discovery
 验证签名用的 Realm 签名 key。由于这次抓取发生在验签之前，Realm Provider **MUST** 按来源
@@ -338,25 +362,23 @@ Authority Discovery 第 4.5 节用它登记 publisher。
   失效。这是域名所有者信任边界内接受的后果：「Realm 名永不复用」是对所有者的要求，Actr Host
   只能对由仍列出的 key 签名的 Realm Profile 强制执行。Realm Provider tombstone 不受影响。
 - Actr Host 在每个 Realm 使用独立的 Realm 客户端 key，Realm 之间无法据 key 关联同一客户端。
-  对 Realm Provider 域名下的 Realm，该 Realm Provider 能关联同一 Realm Provider 账号创建的
-  Realm（它本就为这些 Realm 签名）；Realm 成员看不到账号。key 持有方的签名服务同理。
+  Realm Provider 与 key 持有方的签名服务知道自己为谁创建了哪些 Realm（它们本就为这些 Realm
+  签名）；Realm 成员看不到这一点。
 
 ## 10. 待完成工作
 
 - 为 `actr.realm/v1` 与 Realm 管理请求定义机器可读的 JSON Schema 与签名 test vector；
-- 定义限定 RealmId 前缀与有效期的创建委派 key。
+- 定义限定 RealmId 前缀与有效期的创建委派 key；
+- Realm Provider 域名下由用户以 Realm Provider 账号（例如 OAuth 2.0 授权码 + PKCE）自助创建与
+  管理 Realm，并按账号计配额。
 
 ## 11. 参考资料
 
 - [Actr URI](uri.zh.md)
 - [Actr Authority Discovery](authority-discovery.zh.md)
+- [Actr Realm Membership](realm-membership.zh.md)
 - [RFC 3339：Date and Time on the Internet: Timestamps](https://www.rfc-editor.org/rfc/rfc3339.html)
 - [RFC 4648：The Base16, Base32, and Base64 Data Encodings](https://www.rfc-editor.org/rfc/rfc4648.html)
-- [RFC 6749：The OAuth 2.0 Authorization Framework](https://www.rfc-editor.org/rfc/rfc6749.html)
-- [RFC 6750：The OAuth 2.0 Authorization Framework: Bearer Token Usage](https://www.rfc-editor.org/rfc/rfc6750.html)
-- [RFC 7636：Proof Key for Code Exchange by OAuth Public Clients](https://www.rfc-editor.org/rfc/rfc7636.html)
 - [RFC 8032：Edwards-Curve Digital Signature Algorithm (EdDSA)](https://www.rfc-editor.org/rfc/rfc8032.html)
-- [RFC 8252：OAuth 2.0 for Native Apps](https://www.rfc-editor.org/rfc/rfc8252.html)
-- [RFC 8414：OAuth 2.0 Authorization Server Metadata](https://www.rfc-editor.org/rfc/rfc8414.html)
 - [RFC 8785：JSON Canonicalization Scheme (JCS)](https://www.rfc-editor.org/rfc/rfc8785.html)
 - [RFC 9476：The .alt Special-Use Top-Level Domain](https://www.rfc-editor.org/rfc/rfc9476.html)

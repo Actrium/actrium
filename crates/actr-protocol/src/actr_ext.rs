@@ -8,10 +8,10 @@
 //! | Type     | Format                                        | Example                      |
 //! |----------|-----------------------------------------------|------------------------------|
 //! | Program identity | `publisher/program@version` | `apps.example.com/echo@1.0.0` |
-//! | ActrId | `<serial_hex>@<realm_id>/<program_identity>` | `1a2b3c@101/apps.example.com/echo@1.0.0` |
+//! | ActrId | `<serial_hex>.<realm_id>@<domain>` | `2af01.k7m2q9xh@acme.com` |
 
-use crate::{ActrId, ActrType, Realm, name::Name};
-use std::str::FromStr;
+use crate::uri::{ActrUri, ActrUriError};
+use crate::{ActrId, ActrType, name::Name};
 use thiserror::Error;
 
 fn validate_actor_namespace(value: &str) -> Result<(), ActrIdError> {
@@ -74,9 +74,7 @@ pub const MAX_ACTR_VERSION_BYTES: usize = 64;
 #[derive(Error, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ActrIdError {
-    #[error(
-        "Invalid Actor ID format: '{0}'. Expected: <serial_hex>@<realm_id>/<publisher>/<program>@<version>"
-    )]
+    #[error("Invalid Actor ID format: '{0}'. Expected: <serial_hex>.<realm_id>@<domain>")]
     InvalidFormat(String),
 
     #[error("Invalid component in actor identity: {0}")]
@@ -87,7 +85,7 @@ pub enum ActrIdError {
 }
 
 impl ActrType {
-    /// Canonical program identity used by registries and `actr://` URLs:
+    /// Canonical program identity used by registries:
     /// `publisher/program@version`.
     pub fn to_program_identity(&self) -> String {
         format!("{}/{}@{}", self.publisher, self.name, self.version)
@@ -95,22 +93,6 @@ impl ActrType {
 
     /// Parse the canonical `publisher/program@version` registry identity.
     pub fn from_program_identity(value: &str) -> Result<Self, ActrIdError> {
-        Self::parse_program_identity(value, true)
-    }
-
-    /// Parse the type embedded in an Actor ID.
-    ///
-    /// Published packages use a DNS Publisher and should enter through
-    /// `from_program_identity`. Linked/local workloads may use a non-DNS
-    /// namespace, but keep the same unambiguous slash/at-sign syntax.
-    fn from_actor_identity(value: &str) -> Result<Self, ActrIdError> {
-        Self::parse_program_identity(value, false)
-    }
-
-    fn parse_program_identity(
-        value: &str,
-        require_dns_publisher: bool,
-    ) -> Result<Self, ActrIdError> {
         let (publisher, program_version) = value
             .split_once('/')
             .ok_or_else(|| ActrIdError::InvalidTypeFormat(value.to_string()))?;
@@ -122,7 +104,7 @@ impl ActrType {
         }
         validate_actor_namespace(publisher)?;
         if publisher != publisher.to_ascii_lowercase()
-            || (require_dns_publisher && !publisher.contains('.'))
+            || !publisher.contains('.')
             || publisher.split('.').any(|label| {
                 label.is_empty()
                     || label.len() > 63
@@ -219,8 +201,7 @@ impl ActrType {
 /// must be ASCII alphanumeric; interior characters are limited to ASCII
 /// alphanumeric plus `.` `_` `-` `+`. This forbids the protocol separators
 /// `:` `@` `/` as well as `\`, whitespace, and control characters, so a valid
-/// version can never corrupt the `publisher/program@version` or
-/// `<serial>@<realm>/<type>` string forms.
+/// version can never corrupt the `publisher/program@version` string form.
 fn validate_version(version: &str) -> Result<(), ActrIdError> {
     if version.is_empty() {
         return Err(ActrIdError::InvalidComponent(
@@ -257,43 +238,91 @@ impl std::fmt::Display for ActrType {
     }
 }
 
+/// Largest Actor serial: serials are at most 54 bits.
+const MAX_ACTOR_SERIAL: u64 = (1 << 54) - 1;
+
+/// Formats an ActorId `<serial_hex>.<realm_id>@<domain>` from a Realm name and
+/// an Actor serial.
+pub fn format_actor_id(realm: &str, serial_number: u64) -> String {
+    format!("{serial_number:x}.{realm}")
+}
+
+/// Parses an ActorId `<serial_hex>.<realm_id>@<domain>` into its Realm name and
+/// Actor serial.
+///
+/// The serial is lowercase hexadecimal without leading zeros and at most 54
+/// bits, so the text form is canonical. The legacy
+/// `<serial_hex>@<realm_id>/<type>` form is rejected.
+pub fn parse_actor_id(s: &str) -> Result<(String, u64), ActrIdError> {
+    let expected = "expected <serial_hex>.<realm_id>@<domain>";
+    let (local, _) = s
+        .split_once('@')
+        .ok_or_else(|| ActrIdError::InvalidFormat(format!("{s} ({expected})")))?;
+    if s[local.len() + 1..].starts_with(|c: char| c.is_ascii_digit()) && s.contains('/') {
+        return Err(ActrIdError::InvalidFormat(format!(
+            "{s} (the numeric <serial_hex>@<realm_id>/<type> form is no longer supported; {expected})"
+        )));
+    }
+    let (serial, realm) = s
+        .split_once('.')
+        .filter(|(serial, _)| !serial.contains('@'))
+        .ok_or_else(|| ActrIdError::InvalidFormat(format!("{s} ({expected})")))?;
+    let serial_number = (!serial.is_empty()
+        && serial.len() <= 14
+        && (serial == "0" || !serial.starts_with('0'))
+        && serial
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+    .then(|| u64::from_str_radix(serial, 16).ok())
+    .flatten()
+    .filter(|serial| *serial <= MAX_ACTOR_SERIAL)
+    .ok_or_else(|| ActrIdError::InvalidComponent(format!("Invalid Actor serial: {serial}")))?;
+    crate::uri::parse_realm_name(realm)
+        .map_err(|error| ActrIdError::InvalidComponent(error.to_string()))?;
+    Ok((realm.to_string(), serial_number))
+}
+
 impl ActrId {
-    /// Convert to `"<serial_hex>@<realm_id>/<publisher>/<program>@<version>"`.
+    /// Convert to `"<serial_hex>.<realm_id>@<domain>"`.
     pub fn to_string_repr(&self) -> String {
-        format!(
-            "{:x}@{}/{}",
-            self.serial_number,
-            self.realm.realm_id,
-            self.r#type.to_program_identity()
-        )
+        format_actor_id(&self.realm, self.serial_number)
     }
 
-    /// Parse from string representation.
+    /// Parse from `"<serial_hex>.<realm_id>@<domain>"`; see [`parse_actor_id`].
     pub fn from_string_repr(s: &str) -> Result<Self, ActrIdError> {
-        // Format: "<serial_hex>@<realm_id>/<actr_type>"
-        let (serial_part, rest) = s
-            .split_once('@')
-            .ok_or_else(|| ActrIdError::InvalidFormat("Missing '@' separator".to_string()))?;
-
-        let serial_number = u64::from_str_radix(serial_part, 16).map_err(|_| {
-            ActrIdError::InvalidComponent(format!("Invalid serial number hex: {serial_part}"))
-        })?;
-
-        let (realm_part, type_part) = rest
-            .split_once('/')
-            .ok_or_else(|| ActrIdError::InvalidFormat("Missing '/' separator".to_string()))?;
-
-        let realm_id = u32::from_str(realm_part).map_err(|_| {
-            ActrIdError::InvalidComponent(format!("Invalid realm ID: {realm_part}"))
-        })?;
-
-        let actr_type = ActrType::from_actor_identity(type_part)?;
-
+        let (realm, serial_number) = parse_actor_id(s)?;
         Ok(ActrId {
-            realm: Realm { realm_id },
+            realm,
             serial_number,
-            r#type: actr_type,
         })
+    }
+
+    /// RealmId part of the Realm name.
+    pub fn realm_id(&self) -> &str {
+        self.realm
+            .split_once('@')
+            .map_or("", |(realm_id, _)| realm_id)
+    }
+
+    /// Domain part of the Realm name.
+    pub fn domain(&self) -> &str {
+        self.realm.split_once('@').map_or("", |(_, domain)| domain)
+    }
+
+    /// Actor link `actr://<domain>/<serial_hex>.<realm_id>`.
+    pub fn to_uri(&self) -> Result<ActrUri, ActrUriError> {
+        format!(
+            "actr://{}/{:x}.{}",
+            self.domain(),
+            self.serial_number,
+            self.realm_id()
+        )
+        .parse()
+    }
+
+    /// The Actor named by an Actor link, if the URI names one.
+    pub fn from_uri(uri: &ActrUri) -> Option<Self> {
+        Self::from_string_repr(&uri.actor_id()?).ok()
     }
 }
 
@@ -308,26 +337,76 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_actor_id_roundtrip_with_version() {
+    fn test_actor_id_roundtrip() {
         let original = ActrId {
-            realm: Realm { realm_id: 101 },
-            serial_number: 0x1a2b3c,
-            r#type: ActrType {
-                publisher: "apps.example.com".to_string(),
-                name: "echo-service".to_string(),
-                version: "1.0.0".to_string(),
-            },
+            realm: "k7m2q9xh@acme.com".to_string(),
+            serial_number: 0x2af01,
         };
-
         let s = original.to_string_repr();
-        assert_eq!(s, "1a2b3c@101/apps.example.com/echo-service@1.0.0");
+        assert_eq!(s, "2af01.k7m2q9xh@acme.com");
+        assert_eq!(original.to_string(), s);
+        assert_eq!(ActrId::from_string_repr(&s).unwrap(), original);
+        assert_eq!(original.realm_id(), "k7m2q9xh");
+        assert_eq!(original.domain(), "acme.com");
 
-        let parsed = ActrId::from_string_repr(&s).unwrap();
-        assert_eq!(parsed.realm.realm_id, original.realm.realm_id);
-        assert_eq!(parsed.serial_number, original.serial_number);
-        assert_eq!(parsed.r#type.publisher, original.r#type.publisher);
-        assert_eq!(parsed.r#type.name, original.r#type.name);
-        assert_eq!(parsed.r#type.version, original.r#type.version);
+        let uri = original.to_uri().unwrap();
+        assert_eq!(uri.to_string(), "actr://acme.com/2af01.k7m2q9xh");
+        assert_eq!(ActrId::from_uri(&uri), Some(original));
+        assert_eq!(
+            ActrId::from_uri(&"actr://acme.com/k7m2q9xh".parse().unwrap()),
+            None
+        );
+    }
+
+    #[test]
+    fn actor_id_text_vectors() {
+        assert_eq!(
+            format_actor_id("k7m2q9xh@acme.com", 0x2af01),
+            "2af01.k7m2q9xh@acme.com"
+        );
+        assert_eq!(
+            parse_actor_id("2af01.k7m2q9xh@acme.com").unwrap(),
+            ("k7m2q9xh@acme.com".to_string(), 0x2af01)
+        );
+        let local = "h3x8p2wq@abcdefghijklmnopqrstuvwxyz.actr.alt";
+        assert_eq!(
+            parse_actor_id(&format!("0.{local}")).unwrap(),
+            (local.to_string(), 0)
+        );
+        assert_eq!(
+            parse_actor_id("3fffffffffffff.k7m2q9xh@acme.com")
+                .unwrap()
+                .1,
+            (1 << 54) - 1
+        );
+    }
+
+    #[test]
+    fn actor_id_text_rejects_invalid() {
+        for value in [
+            "k7m2q9xh@acme.com",
+            "2af01k7m2q9xh",
+            ".k7m2q9xh@acme.com",
+            "2af01.@acme.com",
+            "2AF01.k7m2q9xh@acme.com",
+            "0x2af01.k7m2q9xh@acme.com",
+            "-2af01.k7m2q9xh@acme.com",
+            "+2af01.k7m2q9xh@acme.com",
+            "02af01.k7m2q9xh@acme.com",
+            "40000000000000.k7m2q9xh@acme.com",
+            "2af01.K7m2q9xh@acme.com",
+            "2af01.k7m2q9xh@ACME.com",
+            "2af01.k7m2q9xh@acme.com@acme.com",
+            "2af01.k7m.q9xh@acme.com",
+            "2af01.k7m2q9xh@acme.com/x",
+        ] {
+            assert!(parse_actor_id(value).is_err(), "{value}");
+        }
+        let legacy = parse_actor_id("1a2b3c@101/apps.example.com/echo@1.0.0");
+        assert!(
+            matches!(&legacy, Err(ActrIdError::InvalidFormat(message)) if message.contains("no longer supported")),
+            "{legacy:?}"
+        );
     }
 
     #[test]
@@ -353,55 +432,6 @@ mod tests {
                 "{invalid}"
             );
         }
-    }
-
-    #[test]
-    fn actor_id_allows_host_managed_linked_namespace() {
-        let linked = ActrId {
-            realm: Realm { realm_id: 7 },
-            serial_number: 42,
-            r#type: ActrType {
-                publisher: "local".to_string(),
-                name: "scratchpad".to_string(),
-                version: "1".to_string(),
-            },
-        };
-        let encoded = linked.to_string_repr();
-        assert_eq!(encoded, "2a@7/local/scratchpad@1");
-        assert_eq!(ActrId::from_string_repr(&encoded).unwrap(), linked);
-        assert!(
-            ActrType::from_program_identity("local/scratchpad@1").is_err(),
-            "a non-DNS linked namespace must not become a Registry Publisher"
-        );
-    }
-
-    #[test]
-    fn test_actor_id_roundtrip_without_version_errors() {
-        // Parsing a string without version should now return an error
-        let result = ActrId::from_string_repr("1a2b3c@101/apps.example.com/echo-service");
-        assert!(
-            matches!(result, Err(ActrIdError::InvalidTypeFormat(_))),
-            "Expected InvalidTypeFormat error, got: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_invalid_actor_id_format() {
-        assert!(matches!(
-            ActrId::from_string_repr("invalid-string"),
-            Err(ActrIdError::InvalidFormat(_))
-        ));
-        // Missing '/' between realm and type
-        assert!(matches!(
-            ActrId::from_string_repr("123@101"),
-            Err(ActrIdError::InvalidFormat(_))
-        ));
-        // Invalid hex serial
-        assert!(matches!(
-            ActrId::from_string_repr("xyz@101/apps.example.com/echo@1.0.0"),
-            Err(ActrIdError::InvalidComponent(_))
-        ));
     }
 
     #[test]

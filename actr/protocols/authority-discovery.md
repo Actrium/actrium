@@ -137,7 +137,7 @@ Version 1 defines these core relations:
 | Relation | Purpose |
 | --- | --- |
 | `signaling` | Establish Actor connectivity and exchange session negotiation messages. |
-| `identity` | Resolve identities, keys, and authentication metadata. When this authority acts as a Realm Provider, its `href` is also the OAuth 2.0 authorization server identifier (issuer identifier, RFC 8414) for Realm Provider account sign-in ([Actr Realm Profile](realm-profile.md), Section 7.3). |
+| `identity` | Resolve identities, keys, and authentication metadata. |
 | `discovery` | After an Actor starts, discover available Actor instances by dependency, contract, and capability. |
 | `ice-config` | Obtain ICE server configuration and, after authorization, short-lived TURN credentials as defined by [Actr ICE Configuration](ice-configuration.md). |
 | `contracts` | Obtain public Actor contract and interface descriptions. |
@@ -180,46 +180,87 @@ root of every Realm named under the domain:
 }
 ```
 
-- `sequence` is a non-negative integer that increases with every change to the
-  member.
-- `keys` lists the Realm signing keys. Each key has a unique `id`, `algorithm`
-  (version 1 defines only `Ed25519`), a base64 `public_key`, and `status`. An
-  `active` key signs; a `retired` key no longer signs, but signatures it made
-  earlier, such as on existing Realm Profiles, stay valid. Because signatures
-  carry no trusted time, `retired` gives no security guarantee; revoking a key
-  requires removing it. Removing a key from
-  `keys` revokes it: nothing it signed is accepted any longer, so a domain
-  owner removes a key that may be compromised and re-signs the affected
-  Profiles. At least one key **MUST** be `active`.
-- `rotations` lists the Realm signing key rotation chain. In each entry, the key named by `from`
-  signs the JCS form of
+- `sequence` is a non-negative integer no greater than 2<sup>53</sup> − 1 (the
+  largest integer JCS represents exactly; the same holds for rotation entry
+  `sequence`s) that increases with every change to the member.
+- `keys` lists the Realm signing keys, at most 8. Each key has an `id`,
+  `algorithm` (version 1 defines only `Ed25519`), a base64 `public_key`, and
+  `status`. An `id` names one public key for the whole history of the domain
+  and **MUST NOT** be reused. An `active` key signs; a `retired` key no longer
+  signs, but signatures it made earlier, such as on existing Realm Profiles,
+  stay valid, and it never becomes `active` again. Because signatures carry no
+  trusted time, `retired` gives no security guarantee; revoking a key requires
+  removing it. Removing a key from `keys` revokes it: nothing it signed is
+  accepted any longer, so a domain owner removes a key that may be compromised
+  and re-signs the affected Profiles. At least one key **MUST** be `active`.
+- `rotations` lists the Realm signing key rotation chain, at most 8 entries. In
+  each entry, the key named by `from` signs the JCS form of
   `{"from": ..., "to": ..., "public_key": ..., "sequence": ...}`, where
   `public_key` is that of the `to` key in `keys` and `sequence` is the member
-  `sequence` that introduced it, and
-  `signature` carries that detached signature.
+  `sequence` that introduced it, and `signature` carries that detached
+  signature.
 - `signature` is a detached Ed25519 signature by an `active` key over the
   RFC 8785 JCS canonical form of the member with `signature` removed. It
   covers `sequence`.
 
 The first acceptance of a domain's Realm signing keys relies on HTTPS (Web PKI)
-or on a key pinned by enterprise policy. After that, a client or Realm Provider that
-has pinned the domain treats every key it has ever accepted as pinned, and:
+or on a key pinned by enterprise policy. After that, a client or Realm Provider
+keeps, for the domain, every key it has ever accepted (`id`, public key, and
+last state: `active`, `retired`, or removed) and the accepted member
+`sequence`. It processes a newly fetched member in this order:
 
-- **MUST** reject a member whose `signature` does not verify;
-- **MUST** ignore Realm signing key rotation entries whose `from` key is not in the current
-  `keys`; such entries do not invalidate the member, and a verifiable chain is
-  required only for keys not yet accepted;
-- **MUST** accept a key it has not yet accepted only through a valid rotation
-  chain from a pinned key, where each new rotation entry carries a `sequence`
-  higher than the accepted member `sequence`;
-- **MUST** reject a member or new rotation entry signed by a key that a
-  previously accepted member already marked `retired` or had removed;
-- **MUST** reject a member signed through the pinned chain whose `sequence` is
-  lower than the accepted value;
-- **MUST** treat a member whose signing key does not chain to a pinned key as
-  an identity change: it performs no `sequence` comparison, requires the user
-  or operator to confirm trust again, and after confirmation uses the new
-  member's `sequence` as its baseline.
+1. `signature` **MUST** verify with the `active` key of the same `id` in the
+   member's `keys`; otherwise the member is rejected.
+2. A kept `id` that appears in `keys` **MUST** have the kept public key; a key
+   kept as `retired` must not appear as `active`; a removed key must not appear
+   again. Otherwise the member is rejected.
+3. For each rotation entry whose `from` and `to` are both in `keys`, its
+   signature is verified with the `from` public key; a failure rejects the
+   whole member. Entries whose `from` or `to` is not in `keys` are ignored and
+   do not invalidate the member.
+4. The trusted keys are the kept, not removed keys still listed in `keys`, plus
+   the not yet kept keys that rotation entries introduce from a trusted key. A
+   rotation entry that introduces a new key **MUST** carry a `sequence` higher
+   than the accepted member `sequence`, and its `from` must not be kept as
+   `retired`.
+5. If the signing key is trusted and not kept as `retired`: a `sequence` lower
+   than the accepted value is rejected, and an equal one requires content
+   identical to the accepted member; otherwise the member is accepted, new keys
+   are kept, every key's latest state is recorded, and keys no longer listed
+   are recorded as removed.
+6. If the signing key is not trusted, the member is an identity change: no
+   `sequence` comparison is made, the user or operator must confirm trust
+   again, and after confirmation the kept keys are cleared and the new member
+   becomes the baseline.
+
+A rejected member is ignored and the accepted state is unchanged.
+[`realm-signing-keys-rotation.json`](../../contracts/actr/test-vectors/realm-signing-keys-rotation.json)
+gives keys generated from fixed seeds, JCS strings, signatures, and the
+expected result of each case.
+
+#### 4.4.1 Rotation
+
+A domain owner replaces an old key `old` with a new key `new` in three steps:
+
+1. **Pre-publish.** Publish a member with `sequence` plus one: add `new`
+   (`active`) to `keys`, add an `old` → `new` entry signed by `old` with this
+   `sequence` to `rotations`, and still sign the member with `old`. Clients
+   that pinned `old` accept `new` through it.
+2. **Switch.** At least 24 hours later (the client refresh interval, see
+   [Actr Realm Profile](realm-profile.md), Section 6), publish a member signed
+   by `new` with `old` set to `retired`. From then on Realm Profiles and
+   management envelopes are signed only with `new`, and existing Realm
+   Profiles are re-signed with it.
+3. **Remove.** Keep `old` listed as `retired` for at least 365 days so that
+   clients that were offline for a long time can still follow the chain; then
+   publish a member without `old` and without the entries whose `from` is
+   `old`. A client that refreshes only after that treats the change as an
+   identity change.
+
+A compromised key is removed at once, without waiting. A domain **SHOULD**
+also list a spare `active` key kept offline: after the working key is
+compromised, the spare key signs a new member that introduces a new key, and
+clients see no identity change.
 
 The member **MUST NOT** list the Realms named under the domain, so that Realm names
 cannot be enumerated from the descriptor.
@@ -242,12 +283,17 @@ descriptor level:
   and verified by its own signature, independently of the HTTPS channel;
 - HTTPS (or an enterprise pin) provides only the first-contact binding between
   the domain and the publisher's keys;
-- after the first Publisher Profile is accepted, sequence and rotation checks follow the
-  Actor Package specification, not the descriptor's HTTP caching.
+- after the first Publisher Profile is accepted, its `profile_signing_keys`
+  and optional `rotations` follow Section 4.4: the same format, limits,
+  acceptance rules, and rotation steps, with the Publisher Profile `sequence`
+  as the member `sequence`, independently of the descriptor's HTTP caching;
+  package signing keys follow [Actor Package](actor-package.zh.md) (Chinese
+  only), Section 6.8.
 
 A Realm Provider that registers publishers does so through a
 `register_publisher` request in the Actr management envelope of
-[Actr Realm Profile](realm-profile.md), Section 8, signed by an active
+[Actr Realm Profile](realm-profile.md), Section 8, with a `publisher` member
+(the normalized Publisher ID) in place of `realm`, signed by an active
 Publisher Profile signing key, not through a challenge placed in the public
 descriptor.
 
@@ -358,8 +404,6 @@ This initial draft deliberately leaves the following work open:
 - decide whether service ordering, priority, or failover metadata is needed;
 - specify the `actr.publisher/v1` Publisher Profile format in the Actor
   Package specification;
-- define the rotation-chain payload of `realm_signing_keys` in a machine-readable
-  schema and add signing test vectors;
 - define delegated Realm-creation keys, which version 1 does not provide;
 - add interoperability fixtures and negative test cases;
 - establish the durable public specification URL and project contact used by

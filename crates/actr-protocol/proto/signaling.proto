@@ -133,6 +133,9 @@ message ActrRelay {
   // server delivery disposition. Legacy senders omit it; legacy servers
   // safely ignore it.
   optional RelayDeliveryContext delivery_context = 4;
+  // Actor type of `source`. Signaling overwrites it from the verified
+  // credential claims before forwarding; the sender's value is ignored.
+  optional actr.ActrType source_type = 5;
 
   oneof payload {
     webrtc.IceCandidate ice_candidate = 10;

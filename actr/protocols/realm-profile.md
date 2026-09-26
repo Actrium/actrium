@@ -28,8 +28,10 @@ creating a new Realm there and migrating application data; the old Realm is
 retired.
 
 This document does not define the signaling, identity, or ICE protocols a
-Realm Provider exposes, the Actor credential format, or Realm membership and
-application permissions inside an application instance.
+Realm Provider exposes, the Actor credential format, or application
+permissions inside an application instance. Realm membership (members, Realm
+invites, and Realm client keys) is defined in
+[Actr Realm Membership](realm-membership.md).
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 to be interpreted as described by BCP 14 when they appear in uppercase.
@@ -120,12 +122,13 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
   },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>"
+    "sha256": "<64 hex>",
+    "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
-      { "id": "issuer-2026-2", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
+      { "id": "7", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
     ]
   },
   "provider": {
@@ -160,8 +163,9 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `realm.status` | `active` or `retired`. |
 | `package.href` | HTTPS download address of the package the instance runs; it may be anywhere. |
 | `package.sha256` | SHA-256 of all bytes of that package, in lowercase hexadecimal. |
+| `package.type` | The Actor type `publisher/program@version` declared by that package's manifest, that is, the type of the instance's Service. |
 | `issuer.url` | Registration and verification endpoint of the Issuer. |
-| `issuer.keys` | Realm issuer public keys used to verify Actor credentials. |
+| `issuer.keys` | Realm issuer public keys used to verify Actor credentials, 1 to 3 entries (Section 6.1). |
 | `provider.id` | Realm Provider ID: the Realm Provider's canonical DNS authority. It never changes during the Realm's life. |
 | `provider.signaling` | Signaling endpoints. Entries sharing a `control_plane_id` are replicas or failover entries of one Realm Provider control plane, not a federation. |
 | `provider.ice` | STUN and TURN endpoints. TURN entries name the `credential_audience` for short-lived TURN credentials. |
@@ -206,19 +210,20 @@ it, an Actr Host **MUST** stop using the Realm.
 
 An Actr Host downloads `package.href` with an HTTPS GET that carries no
 credentials, **MUST** check `package.sha256`, and verifies the package
-signature as in [Actor Package](actor-package.zh.md) (Chinese only); if any
-check fails, it does not run the package. The Actor type declared in the
-package manifest is the instance's program: the instance's Service is the one
+signature as in [Actor Package](actor-package.zh.md) (Chinese only); the
+Actor type declared in the package manifest **MUST** equal `package.type`. If
+any check fails, it does not run the package. That type is the instance's
+program: the instance's Service is the one
 Actor in this Realm with that Actor type; finding none or more than one is an
 error.
 
 An Actr Host reaches a Realm only through the Issuer and Realm Provider named
 by its accepted Realm Profile. Actor credentials for the Realm name the Realm
-as their issuer and are verified with the Realm issuer keys in `issuer.keys`.
+as their issuer and are verified with the Realm issuer keys in `issuer.keys` (Section 6.1).
 Realm membership means that a client has registered its Realm client key in
 the Realm and has not been revoked; it admits the client to the instance's
 network, and the Issuer issues Actor credentials only to registered,
-unrevoked Realm client keys; application
+unrevoked Realm client keys ([Actr Realm Membership](realm-membership.md)); application
 permissions inside the instance are decided by the application, not by this
 document.
 
@@ -247,6 +252,46 @@ Actr Host **MUST** report an error. In every case the Actr Host **MUST NOT**
 use any Realm Provider other than the one named by the accepted Realm Profile,
 including services listed in the authority descriptor.
 
+### 6.1 Realm issuer keys
+
+`issuer.keys` lists 1 to 3 Realm issuer keys, each with an `id`, `algorithm`
+(`Ed25519`), a base64 `public_key`, and `status`. An Actor credential header
+carries an unsigned 32-bit integer `key_id`; `id` **MUST** be that integer in
+decimal without leading zeros, for example `"7"`. An `id` names one public key
+for the whole history of the Realm and **MUST NOT** be reused.
+
+To verify an Actor credential, a verifier takes the accepted Realm Profile of
+the credential's Realm, finds the key in its `issuer.keys` whose `id` matches
+`key_id` (`active` or `retired`), verifies the signature with it, and checks
+the validity period; it **MUST NOT** use keys of another Realm. When no key
+matches, the verifier **SHOULD** refresh that Realm Profile and try again, at
+most once every 60 seconds per Realm; if there is still no match, it rejects
+the credential.
+
+The Issuer signs only with an `active` key, and with one key at a time. A
+`retired` key no longer signs; unexpired credentials it signed stay valid.
+Removing a key from `issuer.keys` revokes it: the credentials it signed stop
+being valid at once, and Actors must obtain new ones.
+
+Rotation follows "publish, then use, then remove", each step being a Realm
+Profile with a higher sequence:
+
+1. **Pre-publish.** Add the new key (`active`); the Issuer keeps signing with
+   the old key.
+2. **Switch.** At least 24 hours after the Realm Profile that lists the new key
+   is accepted (the refresh interval of Section 6), the Issuer signs with the
+   new key; later Realm Profiles mark the old key `retired`.
+3. **Remove.** Five minutes (allowing for clock skew) after the last credential
+   signed by the old key expires, Realm Profiles may stop listing the old key.
+
+A Realm Provider **SHOULD** rotate every 90 days. A compromised key is removed
+at once, without waiting, by publishing a Realm Profile without it. For a Realm
+under the Realm Provider's domain, the Realm Provider signs these Realm
+Profiles itself; for any other Realm, the Realm Provider returns a draft with
+the new key in its `draft_profile` response (Section 8), which the Realm
+signing key holder signs and submits with `publish_profile`. Until the holder
+publishes it, the Realm Provider keeps using the old key.
+
 ## 7. Lifecycle
 
 ### 7.1 Creation
@@ -260,14 +305,13 @@ Provider. Every step is authorized by the Realm signing key holder
    and endpoints, and returns the unsigned first Realm Profile.
 2. The Realm signing key holder signs that Realm Profile and submits it with
    a `publish_profile` request. The Realm Provider verifies it (Section 5),
-   activates the Realm, and returns the Realm admin token once, in that
-   response. If the Realm Provider serves the `realms`
+   activates the Realm, and returns an owner invite once, in that response
+   (Actr Realm Membership, Section 5). If the Realm Provider serves the `realms`
    location, it serves the Realm Profile from then on; otherwise the domain
    owner publishes it there.
 
 For a Realm under the Realm Provider's domain, the Realm Provider signs the
-Realm Profile itself, so no `publish_profile` request is needed at creation
-(Section 7.3). A
+Realm Profile itself, without Realm management requests (Section 7.3). A
 pending Realm that is not activated in time expires and is removed.
 
 ### 7.2 Updates
@@ -278,37 +322,27 @@ the Realm issuer keys, the Realm Provider's endpoints, `display_name`, and
 `provider.id`.
 
 A new Realm Profile is likewise submitted to the Realm Provider with
-`publish_profile`; if the `realms` location is not at the Realm Provider, the
+`publish_profile` (the holder may first obtain a draft with the Realm
+Provider's current issuer and endpoints through `draft_profile`); if the `realms` location is not at the Realm Provider, the
 holder also publishes it there. For a Realm under the Realm Provider's domain,
-the request carries only the `package`, `display_name`, or `policy` to change,
-and the Realm Provider builds and signs the new Realm Profile.
+the Realm Provider changes `package` or `display_name` at the owner's
+`update_realm` request (Actr Realm Membership, Section 4) and signs the new
+Realm Profile.
 
 ### 7.3 Authorization by the key holder
 
-Creating a Realm, publishing its Realm Profile, and reissuing its Realm admin token require
-the authorization of the Realm signing key holder. Version 1 defines no
-delegated creation keys. The Actr Host picks the path with the rule of
-Section 2.1:
+Creating a Realm, publishing its Realm Profile, and reissuing its owner invite
+require the authorization of the Realm signing key holder. Version 1 defines
+no delegated creation keys. The Actr Host tells the cases apart with the rule
+of Section 2.1:
 
-- **A Realm under the Realm Provider's domain.** The Realm Provider
-  authenticates the requester by a Realm Provider account. The Actr Host uses
-  the OAuth 2.0 authorization code flow with PKCE (RFC 6749, RFC 7636). The
-  `href` of the `identity` service link in the Realm Provider's own authority
-  descriptor (`https://<Realm Provider ID>/.well-known/actr`) is the OAuth
-  authorization server identifier (issuer identifier, RFC 8414); the authorization server metadata is at its RFC 8414 well-known
-  location. The authorization server **MUST** accept the fixed public client
-  ID `actr-host` without a client secret, with redirects per RFC 8252
-  (loopback or private-use URI scheme); the Actr Host requests scope
-  `realm_management`. The Actr Host sends `create_realm` and
-  `reissue_admin_token` with the access token as a bearer token (RFC 6750)
-  instead of an envelope signature; the Realm Provider signs the Realm Profile
-  itself and returns the Realm admin token in the `create_realm` response. An
-  Actr Host that lost that response recovers the token with
-  `reissue_admin_token`. Quotas and the Realm's admin rights, including
-  reissuing its Realm admin token, are bound to the Realm Provider account, so
-  a user who changes or loses a device only signs in again. Account
-  registration, sign-in methods, and abuse controls are up to the Realm
-  Provider.
+- **A Realm under the Realm Provider's domain.** The Realm Provider is the
+  holder. In version 1 only the Realm Provider's operator creates these Realms,
+  without Realm management requests, and the owner then updates or retires
+  them with membership requests; the operator receives the
+  owner invite at creation and hands it to the user out of band (Actr Realm
+  Membership, Section 5). Self-service creation by users with Realm Provider
+  accounts is future work (Section 10).
 - **Any other Realm.** Each Realm management request is an Actr management
   envelope signed by an active Realm signing key (Section 8), obtained from
   the signing service of the Realm signing key holder, whether that is the
@@ -324,7 +358,9 @@ Profile keeps the same `provider.id` and has a higher sequence. If the Realm's
 Realm Provider has shut down, the domain owner points the `realms` link at a
 location it controls and publishes the retired Realm Profile there. A domain
 owned by a Realm Provider disappears with it: its Realms cannot be retired
-and can only be recreated elsewhere.
+and can only be recreated elsewhere. For a Realm under the Realm Provider's
+domain, the Realm Provider publishes the retired Realm Profile at the owner's
+`update_realm` request.
 
 ### 7.5 Realm signing key loss
 
@@ -345,15 +381,14 @@ Discovery, Section 4.3):
 | `op` | Purpose |
 | --- | --- |
 | `create_realm` | Create a pending Realm and return its unsigned first Realm Profile (its `package` taken from the request). |
-| `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries the Realm admin token once; later submissions with a higher sequence are updates (including retirement). |
-| `reissue_admin_token` | Issue a new Realm admin token and invalidate the old one. |
+| `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries an owner invite (`owner_invite`) once; later submissions with a higher sequence are updates (including retirement). |
+| `reissue_owner_invite` | Issue a new owner invite (response `owner_invite`) and invalidate the Realm's earlier unused owner invites; used to recover when the owner has lost all its clients (Actr Realm Membership, Section 5). |
+| `draft_profile` | Only for Realms outside the Realm Provider's domain: return the next unsigned Realm Profile draft. Its sequence is the accepted one plus one; `package`, `display_name`, and `policy` come from the accepted Realm Profile, and `issuer` and `provider` are the Realm Provider's current values (including a Realm issuer key being rotated in, Section 6.1). It does not change the Realm. |
 
-For a Realm under the Realm Provider's domain (Section 2.1), requests carry
-the payload below, including `provider_id`, `nonce`, and validity, without a
-signature, and are authorized by the Realm Provider account's bearer access
-token (Section 7.3). For any other Realm, each request is an Actr management
-envelope: the payload below plus a signature by an active Realm signing key of
-the Realm domain.
+Realm management requests are used only for Realms outside the Realm
+Provider's domain (Section 7.3). Each request is an Actr management envelope:
+the payload below plus a signature by an active Realm signing key of the Realm
+domain.
 
 The payload of a `create_realm` request is:
 
@@ -361,7 +396,7 @@ The payload of a `create_realm` request is:
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
-  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>" },
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>", "type": "notes.example/team-notes@1.4.2" },
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",
@@ -372,11 +407,10 @@ The payload of a `create_realm` request is:
 
 Other operations use the same envelope with their own `op` and fields.
 `requester` is optional: a key holder's signing service sets it to an opaque
-identifier of the person it signs for. In bearer requests the Realm Provider
-**MUST** ignore `requester` and uses the Realm Provider account as the
-requester. Other specifications **MAY** reuse the
+identifier of the person it signs for. Other specifications **MAY** reuse the
 Actr management envelope with their own `op` values; for example, Actr
-Authority Discovery, Section 4.5, uses it to register a publisher.
+Authority Discovery, Section 4.5, uses it to register a publisher, and Actr
+Realm Membership uses it for membership requests.
 
 - The payload is canonicalized with RFC 8785 JCS and accompanied by a detached
   Ed25519 signature and its `key_id`.
@@ -388,13 +422,14 @@ Authority Discovery, Section 4.5, uses it to register a publisher.
   reuse. The nonce prevents only byte-level replay.
 - `create_realm` is idempotent on the Realm Provider idempotency key
   `(realm, requester)`, where the requester is the `requester` field (absent
-  means empty) or, for bearer requests, the Realm Provider account. A repeated request from the same requester for its own
-  pending or active Realm returns the Realm's state, without a Realm admin
-  token. A request that names a Realm of another requester, or a retired
-  Realm, fails with a conflict.
+  means empty). A repeated request from the same requester for its own
+  pending or active Realm returns the Realm's state, without an owner invite.
+  A request that names a Realm of another requester, or a retired Realm,
+  fails with a conflict.
 - For an active Realm, `publish_profile` accepts only a higher-sequence Realm
-  Profile and no longer returns a Realm admin token. A lost Realm admin token
-  is recovered only with `reissue_admin_token`.
+  Profile and no longer returns an owner invite. If the first activation
+  response is lost or the owner invite expires, `reissue_owner_invite` issues
+  a new one.
 
 Before accepting a signed request, a Realm Provider verifies the Realm signing
 key through Actr Authority Discovery under the same rules as Actr Hosts.
@@ -437,28 +472,26 @@ quotas per Realm domain and per Realm.
   Realm Profiles signed by still-listed keys. Realm Provider tombstones are
   unaffected.
 - Actr Hosts use a distinct Realm client key in each Realm, so Realms cannot
-  correlate a client by its key. For Realms under its domain, a Realm
-  Provider can link the Realms created by one Realm Provider account, which it
-  already signs for; Realm members do not see the account. The same holds for a key
-  holder's signing service.
+  correlate a client by its key. A Realm Provider and a key holder's signing
+  service know which Realms they created for whom, since they sign for them;
+  Realm members do not see this.
 
 ## 10. Open work
 
 - Define machine-readable JSON Schemas for `actr.realm/v1` and Realm
   management requests, with signing test vectors.
 - Define delegated creation keys with scoped RealmId prefixes and lifetimes.
+- Let users create and manage Realms under a Realm Provider's domain
+  themselves with Realm Provider accounts (for example OAuth 2.0 authorization
+  code with PKCE), with quotas per account.
 
 ## 11. References
 
 - [Actr URI](uri.md)
 - [Actr Authority Discovery](authority-discovery.md)
+- [Actr Realm Membership](realm-membership.md)
 - [RFC 3339: Date and Time on the Internet: Timestamps](https://www.rfc-editor.org/rfc/rfc3339.html)
 - [RFC 4648: The Base16, Base32, and Base64 Data Encodings](https://www.rfc-editor.org/rfc/rfc4648.html)
-- [RFC 6749: The OAuth 2.0 Authorization Framework](https://www.rfc-editor.org/rfc/rfc6749.html)
-- [RFC 6750: The OAuth 2.0 Authorization Framework: Bearer Token Usage](https://www.rfc-editor.org/rfc/rfc6750.html)
-- [RFC 7636: Proof Key for Code Exchange by OAuth Public Clients](https://www.rfc-editor.org/rfc/rfc7636.html)
 - [RFC 8032: Edwards-Curve Digital Signature Algorithm (EdDSA)](https://www.rfc-editor.org/rfc/rfc8032.html)
-- [RFC 8252: OAuth 2.0 for Native Apps](https://www.rfc-editor.org/rfc/rfc8252.html)
-- [RFC 8414: OAuth 2.0 Authorization Server Metadata](https://www.rfc-editor.org/rfc/rfc8414.html)
 - [RFC 8785: JSON Canonicalization Scheme (JCS)](https://www.rfc-editor.org/rfc/rfc8785.html)
 - [RFC 9476: The .alt Special-Use Top-Level Domain](https://www.rfc-editor.org/rfc/rfc9476.html)

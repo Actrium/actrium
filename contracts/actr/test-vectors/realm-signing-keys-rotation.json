@@ -1,0 +1,442 @@
+{
+  "description": "Test vectors for realm_signing_keys rotation (actr/protocols/authority-discovery.md section 4.4). Keys are Ed25519 from the listed 32-byte seeds (RFC 8032). 'jcs' is the RFC 8785 form of the member without 'signature', which 'signature.value' signs. 'pinned' names the member a client accepted before (a list: members accepted in that order), or null for first accept over HTTPS. Results: accept, reject (member ignored, accepted state kept), identity_change (re-confirm trust). 'pinned_after' lists the kept keys that are not removed, and 'sequence' the accepted member sequence, after an accept.",
+  "domain": "acme.example",
+  "keys": {
+    "rs-a": {
+      "seed": "0101010101010101010101010101010101010101010101010101010101010101",
+      "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+    },
+    "rs-b": {
+      "seed": "0202020202020202020202020202020202020202020202020202020202020202",
+      "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q="
+    },
+    "rs-x": {
+      "seed": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+      "public_key": "2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw="
+    }
+  },
+  "rotation_payloads": {
+    "rs-a->rs-b": "{\"from\":\"rs-a\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"sequence\":2,\"to\":\"rs-b\"}",
+    "rs-a->rs-x": "{\"from\":\"rs-a\",\"public_key\":\"2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=\",\"sequence\":5,\"to\":\"rs-x\"}",
+    "rs-b->rs-x": "{\"from\":\"rs-b\",\"public_key\":\"2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=\",\"sequence\":4,\"to\":\"rs-x\"}"
+  },
+  "members": {
+    "m1": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"active\"}],\"sequence\":1}",
+      "member": {
+        "sequence": 1,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "srqr147D4MEh4ZaUk2nTH/Gq6PNZt4+UdKQbSEXxRNnAzyzO0EO3L2dRJsICebI3kv64MGsgYICgExy3D67qDw=="
+        }
+      }
+    },
+    "m2": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"}],\"rotations\":[{\"from\":\"rs-a\",\"sequence\":2,\"signature\":\"ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ==\",\"to\":\"rs-b\"}],\"sequence\":2}",
+      "member": {
+        "sequence": 2,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "active"
+          },
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-a",
+            "to": "rs-b",
+            "sequence": 2,
+            "signature": "ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "OHQedaw6th8CWM0S/eHWT9cQW8XEQZiwPkVl0Gx5g4WWA1C3iE0AV41encYee2UegjpoC2VmQ0uxmxOi+PQ5Aw=="
+        }
+      }
+    },
+    "m3": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"retired\"}],\"rotations\":[{\"from\":\"rs-a\",\"sequence\":2,\"signature\":\"ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ==\",\"to\":\"rs-b\"}],\"sequence\":3}",
+      "member": {
+        "sequence": 3,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          },
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "retired"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-a",
+            "to": "rs-b",
+            "sequence": 2,
+            "signature": "ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "gLJbiTEMN+bRx3zs8IpO9okKPg5xlwZ3U6C14BfCLQKIR2F13dYH01Cy88eRTEB1eKQ3I+g+oRxPmFjqNvAuCg=="
+        }
+      }
+    },
+    "m4": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"}],\"sequence\":4}",
+      "member": {
+        "sequence": 4,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "5YYj0A057VhtFitLVwn2ApQ8KQnO8e2Ic34m8WP1jnyaYPQV3hfVhvt0J4HU4txrTC2JUgO2FLoduGMRJaX6DA=="
+        }
+      }
+    },
+    "bad_rotation": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"retired\"}],\"rotations\":[{\"from\":\"rs-a\",\"sequence\":2,\"signature\":\"LIAazuRMI8+TpjJrxMX3e1V2r4L/QeqHqorBNIchXqIWxTVN6Ru/yCG+4txVHaeoYqq3cQIhUzZxYxW2dlThAg==\",\"to\":\"rs-b\"}],\"sequence\":3}",
+      "member": {
+        "sequence": 3,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          },
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "retired"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-a",
+            "to": "rs-b",
+            "sequence": 2,
+            "signature": "LIAazuRMI8+TpjJrxMX3e1V2r4L/QeqHqorBNIchXqIWxTVN6Ru/yCG+4txVHaeoYqq3cQIhUzZxYxW2dlThAg=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "JsNGct5TZ+Ev+X/sFARr3TPFI45AZs9DOAINEHXkfsTk+Iz2dwHlAxswTpwnOP28bM4Cl5BV+7rZh6WfDF0pDg=="
+        }
+      }
+    },
+    "retired_signer": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-x\",\"public_key\":\"2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=\",\"status\":\"active\"}],\"rotations\":[{\"from\":\"rs-a\",\"sequence\":5,\"signature\":\"dmDO6YpNyXJuoZYJ+TbTUv/4Jh8QBqL9360b99nMKNRsQKj1xNbvmjgBWGjNcjdypFeMvUAw47Tb0y+LW5SlDg==\",\"to\":\"rs-x\"}],\"sequence\":5}",
+      "member": {
+        "sequence": 5,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "active"
+          },
+          {
+            "id": "rs-x",
+            "algorithm": "Ed25519",
+            "public_key": "2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=",
+            "status": "active"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-a",
+            "to": "rs-x",
+            "sequence": 5,
+            "signature": "dmDO6YpNyXJuoZYJ+TbTUv/4Jh8QBqL9360b99nMKNRsQKj1xNbvmjgBWGjNcjdypFeMvUAw47Tb0y+LW5SlDg=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "LnF+vHKMHMIML5qJIozPmgw1EBnu8pQLRq+yA61lcHnS31Fe0DfiDhLTtRkCLPS4iVeMsy1t7Kn/+LZWdavwDQ=="
+        }
+      }
+    },
+    "swapped_key": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=\",\"status\":\"active\"}],\"sequence\":5}",
+      "member": {
+        "sequence": 5,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "Pg72p3ogHQDK+5ICf3Vy1TbE+IeNzXIksTTczr7Hb9GR4ubpGzgal+HvzTvBSYEOfL+AgYA1Sv4PqqAi79qHDg=="
+        }
+      }
+    },
+    "reactivated": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"active\"}],\"sequence\":4}",
+      "member": {
+        "sequence": 4,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          },
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "QAgIxUQ/ljLdFvwk98T5QR8l/BHREQtxO3WJWL4490lFEXO91PxlQr+URKw8+o/V4V3c0SfcH6jjrcEbtO0WCA=="
+        }
+      }
+    },
+    "removed_reappears": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"retired\"}],\"sequence\":5}",
+      "member": {
+        "sequence": 5,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          },
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "retired"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "kxY8aL0B6WImpajYyRxXIIS7+3YlRa2CS9vTvpR/BD1PP7+dmpA5znzm8pJaBtsXMllX6/xBZageb1plAONqAQ=="
+        }
+      }
+    },
+    "same_sequence_other_content": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"}],\"sequence\":3}",
+      "member": {
+        "sequence": 3,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "kIz4hzKw9pULG5bt/eGFquVaY7phL0UoRNzSyYKAvpZkHakGH7Dq5v9yq61u6C3UBLHYW5Gfgq1ZewwKlApbDg=="
+        }
+      }
+    },
+    "stale_rotation": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-x\",\"public_key\":\"2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"retired\"}],\"rotations\":[{\"from\":\"rs-b\",\"sequence\":4,\"signature\":\"i5cVlPePY7qJ7EkWT3IRYesM4SA0hnFO9WjYZzOYDD9QHlXoTMWtxoQu1L+Cxcj9GlT+h0/M5bjhEjtBoYSiCQ==\",\"to\":\"rs-x\"}],\"sequence\":5}",
+      "member": {
+        "sequence": 5,
+        "keys": [
+          {
+            "id": "rs-x",
+            "algorithm": "Ed25519",
+            "public_key": "2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=",
+            "status": "active"
+          },
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "retired"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-b",
+            "to": "rs-x",
+            "sequence": 4,
+            "signature": "i5cVlPePY7qJ7EkWT3IRYesM4SA0hnFO9WjYZzOYDD9QHlXoTMWtxoQu1L+Cxcj9GlT+h0/M5bjhEjtBoYSiCQ=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-x",
+          "algorithm": "Ed25519",
+          "value": "n4HtTAUKdKEc35X+KH9iR/08vsV3qqBW5yAtyZstAsN4zME18S4bMiE4Lj1vmK1DogLXOUSngCVKZLkJNFiHDg=="
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "first accept pins rs-a",
+      "pinned": null,
+      "member": "m1",
+      "result": "accept",
+      "sequence": 1,
+      "pinned_after": [
+        "rs-a"
+      ]
+    },
+    {
+      "name": "pre-publish rs-b, signed by pinned rs-a",
+      "pinned": "m1",
+      "member": "m2",
+      "result": "accept",
+      "sequence": 2,
+      "pinned_after": [
+        "rs-a",
+        "rs-b"
+      ]
+    },
+    {
+      "name": "switch to rs-b after seeing the pre-publish",
+      "pinned": "m2",
+      "member": "m3",
+      "result": "accept",
+      "sequence": 3,
+      "pinned_after": [
+        "rs-a",
+        "rs-b"
+      ]
+    },
+    {
+      "name": "client that missed sequence 2 follows rotation rs-a -> rs-b",
+      "pinned": "m1",
+      "member": "m3",
+      "result": "accept",
+      "sequence": 3,
+      "pinned_after": [
+        "rs-a",
+        "rs-b"
+      ]
+    },
+    {
+      "name": "remove retired rs-a",
+      "pinned": "m3",
+      "member": "m4",
+      "result": "accept",
+      "sequence": 4,
+      "pinned_after": [
+        "rs-b"
+      ]
+    },
+    {
+      "name": "client pinned only to rs-a cannot follow once rs-a is removed",
+      "pinned": "m1",
+      "member": "m4",
+      "result": "identity_change"
+    },
+    {
+      "name": "rollback to a lower sequence",
+      "pinned": "m3",
+      "member": "m2",
+      "result": "reject"
+    },
+    {
+      "name": "rotation with an invalid signature",
+      "pinned": "m1",
+      "member": "bad_rotation",
+      "result": "reject"
+    },
+    {
+      "name": "retired key signs a new member and rotation",
+      "pinned": "m3",
+      "member": "retired_signer",
+      "result": "reject"
+    },
+    {
+      "name": "pinned id listed with another public key",
+      "pinned": "m1",
+      "member": "swapped_key",
+      "result": "reject"
+    },
+    {
+      "name": "retired rs-a listed as active again",
+      "pinned": "m3",
+      "member": "reactivated",
+      "result": "reject"
+    },
+    {
+      "name": "removed rs-a listed again",
+      "pinned": [
+        "m3",
+        "m4"
+      ],
+      "member": "removed_reappears",
+      "result": "reject"
+    },
+    {
+      "name": "same sequence with different content",
+      "pinned": "m3",
+      "member": "same_sequence_other_content",
+      "result": "reject"
+    },
+    {
+      "name": "rotation rs-b -> rs-x at sequence 4 introduces rs-x for a client pinned at sequence 3",
+      "pinned": "m3",
+      "member": "stale_rotation",
+      "result": "accept",
+      "sequence": 5,
+      "pinned_after": [
+        "rs-b",
+        "rs-x"
+      ]
+    },
+    {
+      "name": "the same rotation is stale for a client pinned at sequence 4 and introduces nothing",
+      "pinned": [
+        "m3",
+        "m4"
+      ],
+      "member": "stale_rotation",
+      "result": "identity_change"
+    }
+  ]
+}

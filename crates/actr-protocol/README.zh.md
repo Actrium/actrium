@@ -52,51 +52,36 @@ graph TD
 
 #### a) Actor ID 扩展 (`actr_ext.rs`)
 
-为 `ActrId` 提供了字符串表示的互相转换能力，当前格式为：`<serial_hex>@<realm_id>/<publisher>/<program>@<version>`（`realm_id` 为数值，旧的 `:` 形式会被拒绝）。
-目标 ActorId 格式为 `<serial>.<realm_id>@<domain>`，不含程序类型，见 `actr/protocols/uri.zh.md` §5。
+为 `ActrId` 提供了字符串表示的互相转换能力，格式为 ActorId `<serial_hex>.<realm_id>@<domain>`（见 `actr/protocols/uri.zh.md` §5.2）。`ActrId` 只含 Realm 名与 Actor serial，Actor 类型由 Actor credential 携带。旧的 `<serial_hex>@<realm_id>/<type>` 形式会被拒绝。
 
 ```rust
-use actr_protocol::{ActrId, ActrType, Realm};
+use actr_protocol::ActrId;
 
-// 示例
 let id = ActrId {
-    realm: Realm { realm_id: 101 },
-    serial_number: 0x1a2b3c,
-    r#type: ActrType {
-        publisher: "acme".to_string(),
-        name: "echo-service".to_string(),
-        version: "1.0.0".to_string(),
-    },
+    realm: "k7m2q9xh@example.com".to_string(),
+    serial_number: 0x2af01,
 };
 
 let id_str = id.to_string_repr();
-assert_eq!(id_str, "1a2b3c@101/acme/echo-service@1.0.0");
+assert_eq!(id_str, "2af01.k7m2q9xh@example.com");
 
 let parsed_id = ActrId::from_string_repr(&id_str).unwrap();
-assert_eq!(id.serial_number, parsed_id.serial_number);
+assert_eq!(id, parsed_id);
 ```
 
 #### b) URI 解析 (`uri.rs`)
 
-规范中 `actr://` 指向 Realm 或其中的 Actor：`actr://<domain>/<realm_id>[/path]` 或 `actr://<domain>/<serial>.<realm_id>[/path]`，见 `actr/protocols/uri.zh.md`。
-当前 `ActrUri` 实现仍按 `actr://<authority>/<target>` 解析、规范化和构建：authority 为 `host[:port]`，target 作为不透明路径保留，不解释其中的 RealmId。
+`actr://` 指向 Realm 或其中的 Actor：`actr://<domain>/<realm_id>[/path]` 或 `actr://<domain>/<serial>.<realm_id>[/path]`，见 `actr/protocols/uri.zh.md`。`parse_realm_name` 校验 Realm 名 `<realm_id>@<domain>`。
 
 ```rust
-use actr_protocol::uri::{ActrUri, ActrUriBuilder};
+use actr_protocol::uri::{ActrUri, parse_realm_name};
 
-// 从字符串解析
-let uri = "actr://acme.com/k7m2q9xh".parse::<ActrUri>().unwrap();
-assert_eq!(uri.authority(), "acme.com");
-assert_eq!(uri.target(), Some("k7m2q9xh"));
-assert_eq!(uri.discovery_url(), "https://acme.com/.well-known/actr");
+let uri = "actr://example.com/k7m2q9xh".parse::<ActrUri>().unwrap();
+assert_eq!(uri.domain(), "example.com");
+assert_eq!(uri.realm_name().as_deref(), Some("k7m2q9xh@example.com"));
+assert_eq!(uri.discovery_url().as_deref(), Some("https://example.com/.well-known/actr"));
 
-// 使用构建器创建
-let uri = ActrUriBuilder::new()
-    .authority("acme.com")
-    .target("k7m2q9xh")
-    .build()
-    .unwrap();
-assert_eq!(uri.to_string(), "actr://acme.com/k7m2q9xh");
+assert!(parse_realm_name("k7m2q9xh@example.com").is_ok());
 ```
 
 #### c) 错误处理 (`error.rs`)

@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let full_attr = format!("{base_attr}{attr_suffix}");
 
-    for type_name in ["ActrId", "ActrType", "Realm"] {
+    for type_name in ["ActrId", "ActrType"] {
         config.type_attribute(type_name, &full_attr);
     }
 
