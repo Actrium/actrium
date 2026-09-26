@@ -7,8 +7,9 @@ url = "ws://localhost:8081/signaling/ws"
 url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 33554434
-realm_secret = "rs_AclExampleSecret123456"
+realm = "acl-demo@example.com"
+# Written by `actr realm join` (the start script runs it).
+realm_client_key = "realm-client.json"
 
 [discovery]
 visible = true

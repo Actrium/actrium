@@ -150,6 +150,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
     --role service \
     --signaling ws://localhost:8081/signaling/ws \
     --publisher actrium \
+    --realm package-echo@example.com \
     "$TMP_ECHO_ACTR_DIR"
 
 if [[ -e "$TMP_ECHO_ACTR_DIR/src/generated" ]]; then

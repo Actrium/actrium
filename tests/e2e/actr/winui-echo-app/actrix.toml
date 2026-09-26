@@ -11,6 +11,9 @@ head = "admin_ui"
 [control.admin_ui]
 password = "e2e-test-password"
 
+[authority]
+uri = "actr://localhost"
+
 [bind.http]
 domain_name = "127.0.0.1"
 advertised_ip = "127.0.0.1"

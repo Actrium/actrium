@@ -138,13 +138,9 @@ if [ ! -f "$ACTRIX_DB" ]; then
     exit 1
 fi
 
-REALM_ID=$(grep -E '^\s*realm_id\s*=' "$SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
-REALM_SECRET=$(grep -E '^\s*realm_secret\s*=' "$SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
-if [ -z "$REALM_ID" ]; then REALM_ID=33554434; fi
-if [ -z "$REALM_SECRET" ]; then echo -e "${RED}❌ Could not parse realm_secret from $SERVER_DIR/actr.toml${NC}"; exit 1; fi
+REALM=$(grep -E '^\s*realm\s*=' "$SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
+if [ -z "$REALM" ]; then REALM=acl-demo@example.com; fi
 
-SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
-echo "   realm_id=$REALM_ID secret_hash=${SECRET_HASH:0:16}..."
 
 sqlite3 "$ACTRIX_DB" <<EOF
 INSERT OR REPLACE INTO publisher (name, public_key, status, created_at, verified_at) VALUES ('acme', '', 'verified', strftime('%s','now'), strftime('%s','now'));
@@ -157,15 +153,22 @@ INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version
 INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
   SELECT id, 'acme', 'blocked-greeter-client', '1.0.0', 'acme/blocked-greeter-client@1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
   ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
-INSERT OR REPLACE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES ($REALM_ID, 'ACL Demo Realm', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');
-DELETE FROM actoracl WHERE realm_id = $REALM_ID;
-INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, $REALM_ID, 'acme/allowed-greeter-client@1.0.0', 'acme:greeter.GreeterService:1.0.0', 1);
-INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, $REALM_ID, 'acme:greeter.GreeterService:1.0.0', 'acme/allowed-greeter-client@1.0.0', 1);
+INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));
+DELETE FROM actoracl WHERE realm = '$REALM';
+INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+VALUES ('$REALM', '$REALM', 'acme/allowed-greeter-client@1.0.0', 'acme:greeter.GreeterService:1.0.0', 1);
+INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+VALUES ('$REALM', '$REALM', 'acme:greeter.GreeterService:1.0.0', 'acme/allowed-greeter-client@1.0.0', 1);
 EOF
 
 echo -e "${GREEN}✅ Realm and ACL setup completed${NC}"
+
+# Join the Realm: each actr.toml names its key file (`realm_client_key`).
+ACTR_CMD="${ACTR_GEN_CMD:-actr}" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
+    "$ACTRIX_DB" "$REALM" "http://localhost:8081/issuer" \
+    "$SERVER_DIR/realm-client.json" "$ALLOWED_CLIENT_DIR/realm-client.json" "$BLOCKED_CLIENT_DIR/realm-client.json"
+echo -e "${GREEN}✅ Joined Realm $REALM${NC}"
+
 
 # Step 2: Generate code
 echo ""

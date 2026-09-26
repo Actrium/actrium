@@ -67,8 +67,9 @@ ACTRIX_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
-REALM_ID=""
-REALM_SECRET=""
+REALM=""
+REALM_OWNER_KEY=""
+REALM_CLIENT_KEY=""
 
 trap kotlin_cleanup EXIT INT TERM
 
@@ -80,6 +81,7 @@ scaffold_echo_service() {
         -l rust --template echo --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
         --publisher "$PUBLISHER" \
+        --realm "$REALM" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
@@ -200,7 +202,7 @@ build_local_actr_cli
 build_local_actrix
 start_actrix
 login_admin
-warmup_issuer_key
+wait_for_signer
 ensure_realm
 provision_publisher_keychain
 

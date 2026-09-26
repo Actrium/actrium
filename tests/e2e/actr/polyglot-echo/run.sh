@@ -18,7 +18,7 @@
 # Honoured environment variables:
 #   HTTP_PORT    Override mock-actrix port (default 18181).
 #   ICE_PORT     Override STUN/TURN port advertised in configs (default 13478).
-#   REALM_ID     Override the seeded realm id (default 4242).
+#   REALM        Override the seeded Realm name (default polyglot-echo@e2e.test).
 #   KEEP_TMP=1   Preserve $RUN_DIR (mock + server logs, runtime configs).
 #   RUST_LOG     Forwards to the server + Rust driver.
 
@@ -140,7 +140,7 @@ section "🧪 polyglot-echo (--server $SERVER --client $CLIENT --scenario $SCENA
 echo "Run dir:     $RUN_DIR"
 echo "HTTP port:   $HTTP_PORT"
 echo "ICE port:    $ICE_PORT"
-echo "Realm:       $REALM_ID"
+echo "Realm:       $REALM"
 echo "Message:     $TEST_MESSAGE"
 echo "Server:      $SERVER"
 echo "Scenario:    $SCENARIO"

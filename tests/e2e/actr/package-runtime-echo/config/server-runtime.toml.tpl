@@ -10,8 +10,8 @@ url = "ws://127.0.0.1:8081/signaling/ws"
 url = "http://127.0.0.1:8081/issuer"
 
 [deployment]
-realm_id = __REALM_ID__
-realm_secret = "__REALM_SECRET__"
+realm = "__REALM__"
+realm_client_key = "__REALM_CLIENT_KEY__"
 
 [[trust]]
 # RegistryTrust fetches publisher pubkeys at {endpoint}/publisher-registry/{name}/verifying_key,

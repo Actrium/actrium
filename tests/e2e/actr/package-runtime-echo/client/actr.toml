@@ -7,7 +7,7 @@ url = "ws://127.0.0.1:8081/signaling/ws"
 url = "http://127.0.0.1:8081/issuer"
 
 [deployment]
-realm_id = 1001
+realm = "package-runtime-echo@e2e.test"
 
 [discovery]
 visible = true

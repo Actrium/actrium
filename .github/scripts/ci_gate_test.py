@@ -718,7 +718,7 @@ def _create_actor_registry(db_path: Path) -> None:
         connection.execute(
             """
             CREATE TABLE actor_registry (
-                actor_realm_id INTEGER NOT NULL,
+                actor_realm TEXT NOT NULL,
                 actor_publisher TEXT NOT NULL,
                 actor_device_name TEXT NOT NULL,
                 service_name TEXT NOT NULL,
@@ -734,7 +734,7 @@ def _run_service_readiness(db_path: Path, timeout: str = "0") -> subprocess.Comp
         [
             "bash",
             "-c",
-            'source "$1"; wait_for_service_registration "$2" 1001 actrium EchoService "$3"',
+            'source "$1"; wait_for_service_registration "$2" e2e@e2e.test actrium EchoService "$3"',
             "bash",
             str(SWIFT_E2E_READINESS),
             str(db_path),
@@ -758,11 +758,11 @@ def test_service_readiness_rejects_missing_or_unrelated_registration() -> None:
             connection.execute(
                 """
                 INSERT INTO actor_registry
-                    (actor_realm_id, actor_publisher, actor_device_name,
+                    (actor_realm, actor_publisher, actor_device_name,
                      service_name, status, last_heartbeat_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (1001, "actrium", "OtherService", "actrium:OtherService", "Available", 1),
+                ("e2e@e2e.test", "actrium", "OtherService", "actrium:OtherService", "Available", 1),
             )
 
         unrelated = _run_service_readiness(db_path)
@@ -871,7 +871,7 @@ def test_swift_datastream_e2e_builds_custom_proto_flow_from_empty() -> None:
     main_flow = run_sh.split("# ──── Main ────", 1)[1]
     assert main_flow.index("run_server_host") < main_flow.index("build_datastream_app")
     assert main_flow.index("check_service_ready") < main_flow.index("build_datastream_app")
-    assert "__PUBLISHER__:DuplexStreamService:1.0.0" in actr_toml
+    assert "__PUBLISHER__/DuplexStreamService@1.0.0" in actr_toml
     assert 'ActrType(publisher: publisher, name: "DataStreamApp", version: "0.1.0")' in actr_service
     assert 'let expectedLines = (1...count).map { "received: echo: hello \\($0)" }' in actr_service
 
@@ -887,10 +887,10 @@ def test_service_readiness_waits_for_exact_registration() -> None:
                 sleep 0.2
                 sqlite3 "$2" \
                     "INSERT INTO actor_registry VALUES \
-                    (1001, 'actrium', 'EchoService', 'actrium:EchoService', 'Available', 1);"
+                    ('e2e@e2e.test', 'actrium', 'EchoService', 'actrium:EchoService', 'Available', 1);"
             ) &
             SERVICE_READY_POLL_INTERVAL_SECONDS=0.1 \
-                wait_for_service_registration "$2" 1001 actrium EchoService 2
+                wait_for_service_registration "$2" e2e@e2e.test actrium EchoService 2
         """
         result = subprocess.run(
             ["bash", "-c", script, "bash", str(SWIFT_E2E_READINESS), str(db_path)],
