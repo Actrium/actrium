@@ -369,6 +369,25 @@ SHA-256，并拒绝缺失、重复、摘要不匹配或未在 manifest 声明的
 `manifest.sig` 是对 Package 中原始 `manifest.toml` bytes 的 Ed25519 signature，使用原始
 64-byte encoding。
 
+`key-id` 为 `actr-pub-` 加该公钥原始 32 字节 SHA-256 的前 16 个小写十六进制字符。Publisher
+Profile `keys` 中每把包签名 key 的 `id` **MUST** 按同一规则由其 `public_key` 算出，因此
+`key-id` 与 Publisher Profile 中的 key 一一对应。Actr Host 按 `key-id` 在已接受 Publisher
+Profile 的 `keys` 中找 key（`active` 或 `retired` 均可）验证 `manifest.sig`；找不到时
+**SHOULD** 刷新 Publisher Profile 后再判，同一 publisher 每 60 秒至多一次。
+
+发布者只用 `active` key 签新包。`retired` key 不再签包，它签过的包仍可验证。从 `keys` 移除
+某把 key 即吊销它：它签过的包都不再被接受。`keys` 最多 8 项，其中 `active` 至多 2 项，以便
+轮换时重叠：
+
+1. **预发布。** 发布 `sequence` 更高、加入新 key（`active`）的 Publisher Profile，继续用旧 key
+   签包。
+2. **切换。** 至少 24 小时后改用新 key 签包，并在下一份 Publisher Profile 中把旧 key 标为
+   `retired`。
+3. **移除。** 只在 key 泄露，或确认它签过的包都不再需要验证时，才从 `keys` 移除。
+
+Publisher Profile 签名 key（`profile_signing_keys`）的轮换另按
+[Actr Authority Discovery](authority-discovery.zh.md) 第 4.4、4.5 节进行。
+
 ## 7. Workload Profile
 
 ### 7.1 Profile 的职责

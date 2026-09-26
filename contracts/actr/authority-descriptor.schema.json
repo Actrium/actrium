@@ -31,7 +31,7 @@
       "$ref": "#/$defs/realm_signing_keys"
     },
     "publisher": {
-      "description": "Optional signed Publisher Profile carried inline (snake_case, schema actr.publisher/v1). Its full format is left to the Actor Package specification; it is verified by its own signature. 'domain' must equal the authority host.",
+      "description": "Optional signed Publisher Profile carried inline (snake_case, schema actr.publisher/v1), verified by its own signature. 'domain' must equal the authority host. profile_signing_keys and rotations follow the rules of realm_signing_keys; package signing key ids are actr-pub-<first 16 hex of SHA-256(public key)>.",
       "type": "object",
       "required": [
         "schema",
@@ -45,6 +45,69 @@
         "domain": {
           "type": "string",
           "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "profile_signing_keys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/signing_key"
+          }
+        },
+        "rotations": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/key_rotation"
+          }
+        },
+        "keys": {
+          "description": "Package signing keys; at most 2 are active.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "algorithm",
+              "public_key",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^actr-pub-[0-9a-f]{16}$"
+              },
+              "algorithm": {
+                "const": "Ed25519"
+              },
+              "public_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "not_before": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "not_after": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "retired"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
         },
         "signature": {
           "$ref": "#/$defs/detached_signature"
@@ -137,71 +200,22 @@
       "properties": {
         "sequence": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "keys": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 8,
           "items": {
-            "type": "object",
-            "required": [
-              "id",
-              "algorithm",
-              "public_key",
-              "status"
-            ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "algorithm": {
-                "const": "Ed25519"
-              },
-              "public_key": {
-                "type": "string",
-                "minLength": 1
-              },
-              "status": {
-                "enum": [
-                  "active",
-                  "retired"
-                ]
-              }
-            },
-            "additionalProperties": true
+            "$ref": "#/$defs/signing_key"
           }
         },
         "rotations": {
           "type": "array",
+          "maxItems": 8,
           "items": {
-            "type": "object",
-            "required": [
-              "from",
-              "to",
-              "sequence",
-              "signature"
-            ],
-            "properties": {
-              "from": {
-                "type": "string",
-                "minLength": 1
-              },
-              "to": {
-                "type": "string",
-                "minLength": 1
-              },
-              "sequence": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "signature": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "additionalProperties": true,
-            "description": "Signed by the 'from' key over the JCS form of {from, to, public_key, sequence}, where public_key is that of the 'to' entry in keys."
+            "$ref": "#/$defs/key_rotation"
           }
         },
         "signature": {
@@ -209,6 +223,66 @@
         }
       },
       "additionalProperties": true
+    },
+    "signing_key": {
+      "type": "object",
+      "required": [
+        "id",
+        "algorithm",
+        "public_key",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "algorithm": {
+          "const": "Ed25519"
+        },
+        "public_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        }
+      },
+      "additionalProperties": true,
+      "description": "An id names one public key for the domain's whole history and is never reused. A retired key never becomes active again; removing a key revokes it."
+    },
+    "key_rotation": {
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "sequence",
+        "signature"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true,
+      "description": "Signed by the 'from' key over the JCS form of {from, to, public_key, sequence}, where public_key is that of the 'to' entry in keys and sequence is the member sequence that introduced 'to'. Entries whose 'from' or 'to' is not in keys are ignored."
     }
   }
 }

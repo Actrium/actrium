@@ -7,7 +7,7 @@ url = "ws://localhost:8081/signaling/ws"
 url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 1001
+realm = "demo@example.com"
 
 # Package signature trust anchors. One entry = a single provider;
 # multiple entries are tried in order (first match wins).

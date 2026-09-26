@@ -124,7 +124,7 @@ request 时使用的 authority 一致。redirect 不改变此绑定关系。
 | Relation | 用途 |
 | --- | --- |
 | `signaling` | 建立 Actor 连通性并交换 session negotiation 消息。 |
-| `identity` | 解析 identity、key 和 authentication metadata。该 authority 作为 Realm Provider 时，其 `href` 也是 Realm Provider 账号登录所用的 OAuth 2.0 授权服务器标识（issuer identifier，RFC 8414）（[Actr Realm Profile](realm-profile.zh.md) 第 7.3 节）。 |
+| `identity` | 解析 identity、key 和 authentication metadata。 |
 | `discovery` | Actor 启动后，按依赖、contract 和 capability 发现可用的 Actor instance。 |
 | `ice-config` | 按 [Actr ICE Configuration](ice-configuration.zh.md) 获取 ICE server 配置，并在授权后取得短期 TURN credential。 |
 | `contracts` | 获取公开的 Actor contract 和 interface description。 |
@@ -164,14 +164,15 @@ link 在内的任何其他 Realm Provider。
 }
 ```
 
-- `sequence` 是非负整数，该 member 每次变更都递增。
-- `keys` 列出 Realm 签名 key。每个 key 有唯一 `id`、`algorithm`（版本 1 只定义 `Ed25519`）、
-  base64 `public_key` 与 `status`。`active` key 用于签名；`retired` key 不再签名，但它
-  此前所做的签名（如已有 Realm Profile 上的）仍然有效。由于签名不带可信时间，`retired`
-  不提供安全保证；吊销 key 必须将其移除。从 `keys` 中移除某个 key 即吊销
-  它：它签过的任何内容都不再被接受，因此域名所有者应移除可能泄露的 key，并重签受影响
-  的 Profile。至少一个 key **MUST** 为 `active`。
-- `rotations` 是 Realm 签名 key 轮换链。每一项由 `from` 指向的 key 对
+- `sequence` 是不超过 2<sup>53</sup> − 1 的非负整数（JCS 能精确表示的最大整数，轮换项的 `sequence`
+  同样），该 member 每次变更都递增。
+- `keys` 列出 Realm 签名 key，最多 8 项。每个 key 有 `id`、`algorithm`（版本 1 只定义 `Ed25519`）、
+  base64 `public_key` 与 `status`。`id` 在该域名的全部历史中只对应一个公钥，**MUST NOT** 复用。
+  `active` key 用于签名；`retired` key 不再签名，但它此前所做的签名（如已有 Realm Profile 上的）
+  仍然有效，且不得重新变回 `active`。由于签名不带可信时间，`retired` 不提供安全保证；吊销 key
+  必须将其移除。从 `keys` 中移除某个 key 即吊销它：它签过的任何内容都不再被接受，因此域名所有者
+  应移除可能泄露的 key，并重签受影响的 Profile。至少一个 key **MUST** 为 `active`。
+- `rotations` 是 Realm 签名 key 轮换链，最多 8 项。每一项由 `from` 指向的 key 对
   `{"from": ..., "to": ..., "public_key": ..., "sequence": ...}` 的 JCS 形式签名，
   其中 `public_key` 取自 `keys` 中 `to` 对应的 key，`sequence` 是引入它的那次 member
   `sequence`；`signature` 为该 detached 签名。
@@ -179,17 +180,42 @@ link 在内的任何其他 Realm Provider。
   规范化结果所做的 detached Ed25519 签名，覆盖 `sequence`。
 
 首次接受某域名的 Realm 签名 key 依赖 HTTPS（Web PKI）或企业策略预置的 key pin。此后，
-已固定该域名的客户端或 Realm Provider 把曾接受过的每个 key 都视为已固定，并且：
+客户端或 Realm Provider 为该域名保存曾接受过的每个 key（`id`、公钥与最后状态：`active`、
+`retired` 或已移除）以及已接受的 member `sequence`。对新取得的 member，按以下顺序处理：
 
-- **MUST** 拒绝 `signature` 验证失败的 member；
-- **MUST** 忽略 `from` 不在当前 `keys` 中的 Realm 签名 key 轮换项；这类轮换项不使 member 无效，只有尚未
-  接受的 key 才需要可验证的链；
-- **MUST** 只通过从已固定 key 出发的有效轮换链接受尚未接受的 key，且每个新轮换项的
-  `sequence` 高于已接受的 member `sequence`；
-- **MUST** 拒绝由此前已接受的 member 中已标为 `retired` 或已移除的 key 签名的 member 或新轮换项；
-- **MUST** 拒绝经已固定链签名、但 `sequence` 低于已接受值的 member；
-- **MUST** 把签名 key 无法链接到已固定 key 的 member 视为身份变化：不做 `sequence`
-  比较，要求用户或运营者重新确认信任，确认后以新 member 的 `sequence` 为基线。
+1. `signature` 必须用该 member `keys` 中同 `id` 的 `active` key 验证通过，否则拒绝。
+2. 已保存的 `id` 出现在 `keys` 中时，公钥 **MUST** 与保存的相同；已保存为 `retired` 的 key
+   不得以 `active` 出现；已移除的 key 不得再出现。违反即拒绝。
+3. 对 `from` 与 `to` 都在 `keys` 中的每个轮换项，用 `from` 的公钥验证其签名，失败即拒绝整个
+   member。`from` 或 `to` 不在 `keys` 中的轮换项忽略，不使 member 无效。
+4. 可信 key 为：已保存、未移除且仍列在 `keys` 中的 key，加上经轮换项从可信 key 引入的尚未保存的
+   key。引入新 key 的轮换项 **MUST** 满足：`sequence` 高于已接受的 member `sequence`，且 `from`
+   未被保存为 `retired`。
+5. 签名 key 是可信 key 且未被保存为 `retired` 时：`sequence` 低于已接受值即拒绝，等于时内容必须
+   与已接受的 member 完全相同；否则接受，保存新 key 与各 key 的最新状态，不再列出的记为已移除。
+6. 签名 key 不是可信 key 时，视为身份变化：不做 `sequence` 比较，要求用户或运营者重新确认信任，
+   确认后清空已保存的 key，以新 member 为基线。
+
+被拒绝的 member 被忽略，已接受的状态不变。
+[`realm-signing-keys-rotation.json`](../../contracts/actr/test-vectors/realm-signing-keys-rotation.json)
+给出以固定种子生成的 key、JCS 串、签名与各情形的预期结果。
+
+#### 4.4.1 轮换
+
+域名所有者按以下步骤把旧 key `old` 换成新 key `new`：
+
+1. **预发布。** 发布 `sequence` 加一的 member：`keys` 加入 `new`（`active`），`rotations` 加入由
+   `old` 签名、`sequence` 为本次 `sequence` 的 `old` → `new` 项，member 仍由 `old` 签名。已固定
+   `old` 的客户端据此接受 `new`。
+2. **切换。** 至少 24 小时后（客户端刷新间隔，见 [Actr Realm Profile](realm-profile.zh.md)
+   第 6 节），发布由 `new` 签名、`old` 改为 `retired` 的 member。此后 Realm Profile 与管理信封
+   只用 `new` 签名，并用 `new` 重签现有 Realm Profile。
+3. **移除。** `old` 以 `retired` 继续列出至少 365 天，使长期离线的客户端仍能沿轮换链跟上；之后
+   发布不再列出 `old` 及以它为 `from` 的轮换项的 member。超过这一期限才刷新的客户端按身份变化
+   处理。
+
+key 泄露时跳过等待，立即移除它。域名 **SHOULD** 另列一把离线保存的备用 `active` key：工作 key
+泄露后，用备用 key 签新 member 并引入新 key，客户端不会遇到身份变化。
 
 该 member **MUST NOT** 列出以该域名命名的 Realm，避免从 descriptor 枚举 Realm 名。
 
@@ -206,12 +232,15 @@ Publisher Profile 使用 snake_case member 名与 `"schema": "actr.publisher/v1"
 - `domain` **MUST** 等于 `authority` 的 host；
 - Publisher Profile 由 `active` 的 Publisher Profile 签名 key 签名，只凭自身签名验证，与 HTTPS 通道无关；
 - HTTPS（或企业 pin）只提供域名与 publisher key 之间的首次绑定；
-- 接受首个 Publisher Profile 后，sequence 与轮换校验按 Actor Package 规范执行，不受 descriptor
-  的 HTTP 缓存语义影响。
+- 接受首个 Publisher Profile 后，其 `profile_signing_keys` 与可选的 `rotations` 按第 4.4 节
+  处理：格式、上限、接受规则与轮换步骤都相同，以 Publisher Profile 的 `sequence` 作为 member
+  `sequence`，不受 descriptor 的 HTTP 缓存语义影响；包签名 key 见
+  [Actor Package](actor-package.zh.md) 第 6.8 节。
 
 登记 publisher 的 Realm Provider 使用 `register_publisher` 请求：采用
-[Actr Realm Profile](realm-profile.zh.md) 第 8 节的 Actr 管理信封，由 `active` 的
-Publisher Profile 签名 key 签名，而不是在公开 descriptor 中放置 challenge。
+[Actr Realm Profile](realm-profile.zh.md) 第 8 节的 Actr 管理信封，以 `publisher` member
+（规范化 Publisher ID）取代 `realm`，由 `active` 的 Publisher Profile 签名 key 签名，而不是
+在公开 descriptor 中放置 challenge。
 
 ### 4.6 `links`
 
@@ -304,7 +333,6 @@ Related information: none
 - 定义各 service protocol 及其允许使用的 URI scheme；
 - 决定是否需要 service ordering、priority 或 failover metadata；
 - 在 Actor Package 规范中定义 `actr.publisher/v1` Publisher Profile 格式；
-- 为 `realm_signing_keys` 的轮换链 payload 定义机器可读 schema，并增加签名 test vector；
 - 定义受限的 Realm 创建委派 key（版本 1 不提供）；
 - 增加 interoperability fixture 和 negative test case；
 - 确立 IANA 登记使用的长期公开规范地址和项目联系人。
