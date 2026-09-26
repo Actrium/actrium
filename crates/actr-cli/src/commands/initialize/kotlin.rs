@@ -87,6 +87,7 @@ impl KotlinInitializer {
             ),
             ("{{SIGNALING_HOST}}".to_string(), signaling_host),
             ("{{PUBLISHER}}".to_string(), context.publisher.clone()),
+            ("{{REALM}}".to_string(), context.realm.clone()),
         ];
 
         let fixtures_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
@@ -203,6 +204,7 @@ impl KotlinInitializer {
             ),
             ("{{SIGNALING_HOST}}".to_string(), signaling_host),
             ("{{PUBLISHER}}".to_string(), context.publisher.clone()),
+            ("{{REALM}}".to_string(), context.realm.clone()),
         ];
 
         let fixtures_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");

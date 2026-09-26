@@ -97,8 +97,9 @@ pub struct TemplateContext {
     #[serde(rename = "ACTR_LOCAL_PATH")]
     pub actr_local_path: Option<String>,
 
-    #[serde(rename = "REALM_ID")]
-    pub realm_id: u64,
+    /// Realm name (`<realm_id>@<domain>`) written to `[deployment] realm`.
+    #[serde(rename = "REALM")]
+    pub realm: String,
     #[serde(rename = "STUN_URLS")]
     pub stun_urls: String,
     #[serde(rename = "TURN_URLS")]
@@ -131,7 +132,7 @@ impl TemplateContext {
             actr_swift_version: DEFAULT_ACTR_SWIFT_VERSION.to_string(),
             actr_workload_version: DEFAULT_ACTR_WORKLOAD_VERSION.to_string(),
             actr_local_path: resolve_actr_swift_local_path(),
-            realm_id: 2368266035,
+            realm: String::new(),
             stun_urls: r#"["stun:actrix1.develenv.com:3478"]"#.to_string(),
             turn_urls: r#"["turn:actrix1.develenv.com:3478"]"#.to_string(),
             is_service,

@@ -22,6 +22,7 @@ impl ProjectInitializer for TypeScriptInitializer {
             is_service,
         );
         template_context.is_both = context.is_both;
+        template_context.realm = context.realm.clone();
 
         template.generate(&context.project_dir, &template_context)?;
 

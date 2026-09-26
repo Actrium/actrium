@@ -22,7 +22,7 @@ turn_urls = ["turn:{{SIGNALING_HOST}}:3478"]
 force_relay = true
 
 [system.deployment]
-realm_id = 2368266035
+realm = "{{REALM}}"
 
 [system.discovery]
 visible = false

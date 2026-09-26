@@ -162,7 +162,13 @@ fn config_local_scope_round_trips_values_and_validates() {
     let home = isolated_home(tmp.path());
 
     let set = run_actr(
-        &["config", "--local", "set", "network.realm_id", "4242"],
+        &[
+            "config",
+            "--local",
+            "set",
+            "network.realm",
+            "dev@example.com",
+        ],
         tmp.path(),
         &home,
     );
@@ -171,15 +177,18 @@ fn config_local_scope_round_trips_values_and_validates() {
 
     let config_path = tmp.path().join(".actr/config.toml");
     let saved = fs::read_to_string(&config_path).expect("read local config");
-    assert!(saved.contains("realm_id = 4242"), "saved config:\n{saved}");
+    assert!(
+        saved.contains("realm = \"dev@example.com\""),
+        "saved config:\n{saved}"
+    );
 
     let get = run_actr(
-        &["config", "--local", "get", "network.realm_id"],
+        &["config", "--local", "get", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_success(&get, "config local get");
-    assert_eq!(clean_stdout(&get).trim(), "4242");
+    assert_eq!(clean_stdout(&get).trim(), "\"dev@example.com\"");
 
     let show = run_actr(
         &["config", "--local", "show", "--format", "json"],
@@ -189,26 +198,26 @@ fn config_local_scope_round_trips_values_and_validates() {
     assert_success(&show, "config local show json");
     let show_json: serde_json::Value =
         serde_json::from_str(clean_stdout(&show).trim()).expect("show output should be JSON");
-    assert_eq!(show_json["network"]["realm_id"], 4242);
+    assert_eq!(show_json["network"]["realm"], "dev@example.com");
 
     let test = run_actr(&["config", "--local", "test"], tmp.path(), &home);
     assert_success(&test, "config local test");
     assert!(clean_stdout(&test).contains("Local config syntax and schema are valid"));
 
     let unset = run_actr(
-        &["config", "--local", "unset", "network.realm_id"],
+        &["config", "--local", "unset", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_success(&unset, "config local unset");
 
     let get_missing = run_actr(
-        &["config", "--local", "get", "network.realm_id"],
+        &["config", "--local", "get", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_failure(&get_missing, "config local get after unset");
-    assert!(stderr(&get_missing).contains("Configuration key 'network.realm_id' not found"));
+    assert!(stderr(&get_missing).contains("Configuration key 'network.realm' not found"));
 }
 
 #[test]
@@ -218,7 +227,13 @@ fn config_global_scope_round_trips_and_list_shows_effective_values() {
 
     // Set a value in the global scope (writes to ~/.actr/config.toml).
     let set = run_actr(
-        &["config", "--global", "set", "network.realm_id", "8372"],
+        &[
+            "config",
+            "--global",
+            "set",
+            "network.realm",
+            "qa@example.com",
+        ],
         tmp.path(),
         &home,
     );
@@ -226,32 +241,32 @@ fn config_global_scope_round_trips_and_list_shows_effective_values() {
     let global_config = home.join(".actr/config.toml");
     assert!(global_config.exists(), "global config should be written");
     let saved = fs::read_to_string(&global_config).expect("read global config");
-    assert!(saved.contains("realm_id"), "global config:\n{saved}");
+    assert!(saved.contains("realm"), "global config:\n{saved}");
 
     let get = run_actr(
-        &["config", "--global", "get", "network.realm_id"],
+        &["config", "--global", "get", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_success(&get, "config global get");
-    assert!(clean_stdout(&get).contains("8372"));
+    assert!(clean_stdout(&get).contains("qa@example.com"));
 
     // list shows effective (merged) config.
     let list = run_actr(&["config", "list"], tmp.path(), &home);
     assert_success(&list, "config list");
     let list_out = clean_stdout(&list);
-    assert!(list_out.contains("network.realm_id"), "list: {list_out}");
+    assert!(list_out.contains("network.realm"), "list: {list_out}");
     assert!(list_out.contains("publisher.name"), "list: {list_out}");
 
     let global_unset = run_actr(
-        &["config", "--global", "unset", "network.realm_id"],
+        &["config", "--global", "unset", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_success(&global_unset, "config global unset");
 
     let get_missing = run_actr(
-        &["config", "--global", "get", "network.realm_id"],
+        &["config", "--global", "get", "network.realm"],
         tmp.path(),
         &home,
     );
@@ -393,12 +408,12 @@ fn config_rejects_unknown_keys_and_bad_values() {
     assert!(stderr(&bad_bool).contains("expects a boolean"));
 
     let bad_int = run_actr(
-        &["config", "--local", "set", "network.realm_id", "abc"],
+        &["config", "--local", "set", "network.realm", "4242"],
         tmp.path(),
         &home,
     );
-    assert_failure(&bad_int, "config bad int");
-    assert!(stderr(&bad_int).contains("expects a positive integer"));
+    assert_failure(&bad_int, "config bad realm");
+    assert!(stderr(&bad_int).contains("expects a Realm name"));
 }
 
 #[test]
@@ -604,6 +619,8 @@ fn init_rust_echo_service_produces_expected_files() {
             "service",
             "--signaling",
             "ws://localhost:8080",
+            "--realm",
+            "dev@example.com",
             "--publisher",
             "test-org",
             "--language",
@@ -1664,9 +1681,22 @@ fn standalone_discover_skips_project_config_requirement() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
 
-    // Standalone discover (--endpoint --realm-id --realm-secret) must bypass
+    // Standalone discover (--endpoint --realm --realm-client-key) must bypass
     // the project-config requirement even in an empty directory. It fails on
     // network unreachability (localhost:1), not on missing configuration.
+    let key_path = tmp.path().join("realm-client.json");
+    let key_file = actr_protocol::realm_membership::RealmClientKeyFile::new(
+        "dev@example.com",
+        "localhost:1",
+        "http://localhost:1",
+        &ed25519_dalek::SigningKey::from_bytes(&[1; 32]),
+    );
+    std::fs::write(&key_path, serde_json::to_string(&key_file).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let output = run_actr(
         &[
             "registry",
@@ -1674,10 +1704,10 @@ fn standalone_discover_skips_project_config_requirement() {
             "--list-only",
             "--endpoint",
             "http://localhost:1",
-            "--realm-id",
-            "1",
-            "--realm-secret",
-            "secret",
+            "--realm",
+            "dev@example.com",
+            "--realm-client-key",
+            key_path.to_str().unwrap(),
         ],
         tmp.path(),
         &home,

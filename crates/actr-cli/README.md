@@ -4,12 +4,12 @@ Command-line tool for Actor-RTC projects. Handles project scaffolding, codegen,
 packaging (`.actr`), signing, installation of service dependencies, and runtime
 instance management.
 
-## Quick reference (19 top-level subcommands)
+## Quick reference (20 top-level subcommands)
 
 ```
 Development (flat, 5):  actr init | gen | build | check | doc
 Runtime (flat, 7):      actr run | ps | logs | start | stop | restart | rm
-Resources (grouped, 4): actr deps | pkg | registry | dlq
+Resources (grouped, 5): actr deps | pkg | registry | dlq | realm
 Meta (3):               actr config | version | completion
 ```
 
@@ -44,6 +44,8 @@ Groups are named after **what the subcommand operates on**:
 - `pkg` — a local `.actr` package file (sign, verify, keygen)
 - `registry` — the remote registry / Issuer (discover, publish, fingerprint)
 - `dlq` — the Dead Letter Queue
+- `realm` — a Realm signing key (keygen, and signed Realm management requests),
+  and a member's Realm client key (join, invite, members, …)
 
 **Do not** group by workflow phase (`build`, `release`, `ops`, etc.) — those
 names rot as the workflow evolves.

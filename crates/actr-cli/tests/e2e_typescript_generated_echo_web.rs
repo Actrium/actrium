@@ -11,7 +11,7 @@ use std::process::{Command, Output};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use actr_cli::test_support::{LOCAL_E2E_REALM_ID, LoggedProcess, MockSignaling, assert_success};
+use actr_cli::test_support::{LOCAL_E2E_REALM, LoggedProcess, MockSignaling, assert_success};
 use tempfile::TempDir;
 
 const SERVICE_PACKAGE: &str = "acme-EchoService-0.1.0-wasm32-wasip2.actr";
@@ -265,7 +265,7 @@ url = "{}"
 url = "{}/issuer"
 
 [deployment]
-realm_id = {}
+realm = "{}"
 
 [discovery]
 visible = true
@@ -293,7 +293,7 @@ pubkey_b64 = "{public_key}"
         package_path.display(),
         mock.signaling_ws_url,
         mock_http_url(mock),
-        LOCAL_E2E_REALM_ID,
+        LOCAL_E2E_REALM,
     );
     fs::write(path, content).expect("failed to write runtime config");
 }

@@ -131,6 +131,8 @@ fn typescript_echo_e2e_service_and_app() {
             "both",
             "--signaling",
             &actrix.signaling_ws_url,
+            "--realm",
+            "dev@example.com",
             "--publisher",
             &publisher,
             "e2e-ts",

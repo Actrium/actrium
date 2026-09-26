@@ -256,7 +256,7 @@
             <dt>Signaling</dt>
             <dd id="sigUrl">—</dd>
             <dt>Realm</dt>
-            <dd id="realmId">—</dd>
+            <dd id="realm">—</dd>
             <dt>Service</dt>
             <dd id="serviceName">—</dd>
         </dl>
@@ -907,13 +907,13 @@
                 document.getElementById('actrType').textContent = cfg.package.full_type || '—';
                 document.getElementById('role').textContent = 'Actor (symmetric)';
                 document.getElementById('sigUrl').textContent = cfg.signaling_url || '—';
-                document.getElementById('realmId').textContent = cfg.realm_id || '—';
+                document.getElementById('realm').textContent = cfg.realm || '—';
                 document.getElementById('serviceName').textContent = cfg.package.full_type ? ('echo.' + cfg.package.actr_name || cfg.package.name || cfg.package.full_type) : '—';
 
                 const swRuntimeConfig = {
                     issuer_endpoint: cfg.issuer_endpoint,
                     signaling_url: cfg.signaling_url,
-                    realm_id: cfg.realm_id,
+                    realm: cfg.realm,
                     client_actr_type: cfg.package.full_type,
                     service_fingerprint: '',
                     acl_allow_types: cfg.acl_allow_types || [],

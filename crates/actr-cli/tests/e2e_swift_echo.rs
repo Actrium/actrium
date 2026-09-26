@@ -182,15 +182,15 @@ fn write_linked_runtime_config(project_dir: &Path) {
         .as_str()
         .expect("manifest system.issuer_endpoint.url")
         .to_string();
-    let realm_id = parsed["system"]["deployment"]["realm_id"]
-        .as_integer()
-        .expect("manifest system.deployment.realm_id");
+    let realm = parsed["system"]["deployment"]["realm"]
+        .as_str()
+        .expect("manifest system.deployment.realm");
     let runtime_root = project_dir.join(".actr-e2e-runtime");
     let data_dir = runtime_root.join("hyper");
     fs::create_dir_all(&data_dir).expect("create linked runtime data dir");
 
     let config = format!(
-        "edition = 1\n\n[signaling]\nurl = \"{signaling_url}\"\n\n[issuer_endpoint]\nurl = \"{issuer_url}\"\n\n[deployment]\nrealm_id = {realm_id}\n\n[hyper]\ndata_dir = \"{}\"\n\n[hyper.trust]\nkind = \"dev_only\"\n",
+        "edition = 1\n\n[signaling]\nurl = \"{signaling_url}\"\n\n[issuer_endpoint]\nurl = \"{issuer_url}\"\n\n[deployment]\nrealm = \"{realm}\"\n\n[hyper]\ndata_dir = \"{}\"\n\n[hyper.trust]\nkind = \"dev_only\"\n",
         data_dir.display(),
     );
 
@@ -297,6 +297,8 @@ fn swift_echo_e2e_service_and_app() {
             "both",
             "--signaling",
             &signaling_base,
+            "--realm",
+            "dev@example.com",
             "--publisher",
             "swift-e2e",
             "e2e-swift",

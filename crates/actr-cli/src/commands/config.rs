@@ -31,8 +31,8 @@ const KNOWN_KEYS: &[&str] = &[
     "ui.non_interactive",
     "network.signaling_url",
     "network.issuer_endpoint",
-    "network.realm_id",
-    "network.realm_secret",
+    "network.realm",
+    "network.realm_client_key",
     "storage.hyper_data_dir",
 ];
 
@@ -286,11 +286,11 @@ impl ConfigCommand {
             "network.issuer_endpoint" => {
                 config.network.issuer_endpoint = Some(value_to_string(&parsed_value)?);
             }
-            "network.realm_id" => {
-                config.network.realm_id = Some(value_to_u32(&parsed_value, key)?);
+            "network.realm" => {
+                config.network.realm = Some(value_to_realm(&parsed_value, key)?);
             }
-            "network.realm_secret" => {
-                config.network.realm_secret = Some(value_to_string(&parsed_value)?);
+            "network.realm_client_key" => {
+                config.network.realm_client_key = Some(value_to_string(&parsed_value)?);
             }
             "storage.hyper_data_dir" => {
                 config.storage.hyper_data_dir = Some(value_to_string(&parsed_value)?);
@@ -371,14 +371,14 @@ impl ConfigCommand {
                 config.network.issuer_endpoint = None;
                 had
             }
-            "network.realm_id" => {
-                let had = config.network.realm_id.is_some();
-                config.network.realm_id = None;
+            "network.realm" => {
+                let had = config.network.realm.is_some();
+                config.network.realm = None;
                 had
             }
-            "network.realm_secret" => {
-                let had = config.network.realm_secret.is_some();
-                config.network.realm_secret = None;
+            "network.realm_client_key" => {
+                let had = config.network.realm_client_key.is_some();
+                config.network.realm_client_key = None;
                 had
             }
             "storage.hyper_data_dir" => {
@@ -498,20 +498,16 @@ impl ConfigCommand {
                 effective.network.issuer_endpoint
             ),
             format!(
-                "network.realm_id = {}",
-                effective
-                    .network
-                    .realm_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "<not set>".to_string())
+                "network.realm = {}",
+                effective.network.realm.as_deref().unwrap_or("<not set>")
             ),
             format!(
-                "network.realm_secret = {}",
+                "network.realm_client_key = {}",
                 effective
                     .network
-                    .realm_secret
+                    .realm_client_key
                     .as_deref()
-                    .unwrap_or("<not set>")
+                    .map_or("<not set>".into(), |path| path.display().to_string())
             ),
             format!(
                 "storage.hyper_data_dir = {}",
@@ -645,11 +641,12 @@ fn value_to_bool(v: &Value, key: &str) -> Result<bool> {
     }
 }
 
-fn value_to_u32(v: &Value, key: &str) -> Result<u32> {
-    // Accept both numbers and strings (e.g., `1001` or `"1001"`).
+/// Convert a TOML Value to a Realm name (`<realm_id>@<domain>`).
+fn value_to_realm(v: &Value, key: &str) -> Result<String> {
     let s = value_to_string(v)?;
-    s.parse::<u32>()
-        .map_err(|_| anyhow::anyhow!("Key '{}' expects a positive integer, got '{}'", key, s))
+    actr_protocol::uri::parse_realm_name(&s)
+        .map_err(|e| anyhow::anyhow!("Key '{}' expects a Realm name, got '{}': {}", key, s, e))?;
+    Ok(s)
 }
 
 #[cfg(test)]
