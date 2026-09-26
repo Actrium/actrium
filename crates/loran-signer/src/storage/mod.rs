@@ -74,9 +74,7 @@ impl KeyStorage {
                     .sqlite
                     .as_ref()
                     .ok_or_else(|| SignerError::Config("Missing SQLite config".into()))?;
-                let backend =
-                    SqliteBackend::new(cfg, config.key_ttl_seconds, encryptor, db_path.as_ref())
-                        .await?;
+                let backend = SqliteBackend::new(cfg, encryptor, db_path.as_ref()).await?;
                 Ok(Self::Sqlite(Box::new(backend)))
             }
 
@@ -86,7 +84,7 @@ impl KeyStorage {
                     .postgres
                     .as_ref()
                     .ok_or_else(|| SignerError::Config("Missing PostgreSQL config".into()))?;
-                let backend = PostgresBackend::new(cfg, config.key_ttl_seconds, encryptor).await?;
+                let backend = PostgresBackend::new(cfg, encryptor).await?;
                 Ok(Self::Postgres(Box::new(backend)))
             }
 
@@ -97,13 +95,23 @@ impl KeyStorage {
         }
     }
 
-    /// Generate and store a new Ed25519 signing key pair
-    pub async fn generate_and_store_key(&self) -> SignerResult<KeyPair> {
+    /// Return the key named `name`, generating it if missing
+    pub async fn ensure_named_key(&self, name: &str) -> SignerResult<KeyPair> {
         match self {
-            Self::Sqlite(b) => b.generate_and_store_key().await,
+            Self::Sqlite(b) => b.ensure_named_key(name).await,
 
             #[cfg(feature = "backend-postgres")]
-            Self::Postgres(b) => b.generate_and_store_key().await,
+            Self::Postgres(b) => b.ensure_named_key(name).await,
+        }
+    }
+
+    /// Retire the named key; it never signs again
+    pub async fn retire_named_key(&self, name: &str) -> SignerResult<u32> {
+        match self {
+            Self::Sqlite(b) => b.retire_named_key(name).await,
+
+            #[cfg(feature = "backend-postgres")]
+            Self::Postgres(b) => b.retire_named_key(name).await,
         }
     }
 
@@ -149,16 +157,6 @@ impl KeyStorage {
         }
     }
 
-    /// Clean up expired keys (only deletes those beyond the tolerance window)
-    pub async fn cleanup_expired_keys(&self, tolerance_seconds: u64) -> SignerResult<u32> {
-        match self {
-            Self::Sqlite(b) => b.cleanup_expired_keys(tolerance_seconds).await,
-
-            #[cfg(feature = "backend-postgres")]
-            Self::Postgres(b) => b.cleanup_expired_keys(tolerance_seconds).await,
-        }
-    }
-
     /// Get the backend type name
     pub fn backend_name(&self) -> &'static str {
         match self {
@@ -180,7 +178,6 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
-            key_ttl_seconds: 3600,
             sqlite: Some(SqliteConfig::default()),
             postgres: None,
         };
@@ -195,7 +192,7 @@ mod tests {
         assert_eq!(storage.backend_name(), "SQLite");
 
         // Test basic operations
-        let key_pair = storage.generate_and_store_key().await.unwrap();
+        let key_pair = storage.ensure_named_key("test").await.unwrap();
         assert!(key_pair.key_id > 0);
 
         let public_key = storage.get_public_key(key_pair.key_id).await.unwrap();
@@ -206,7 +203,6 @@ mod tests {
     async fn test_missing_backend_config() {
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
-            key_ttl_seconds: 3600,
             sqlite: None, // missing config
             postgres: None,
         };

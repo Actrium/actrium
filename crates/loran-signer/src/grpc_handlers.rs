@@ -1,6 +1,10 @@
 //! Signer gRPC service implementation
 
-use crate::{error::SignerError, storage::KeyStorage, types::sign_request_payload};
+use crate::{
+    error::SignerError,
+    storage::KeyStorage,
+    types::{ensure_named_key_payload, retire_named_key_payload, sign_request_payload},
+};
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -16,7 +20,6 @@ pub struct SignerGrpcService {
     pub storage: KeyStorage,
     pub nonce_storage: Arc<dyn NonceStorage + Send + Sync>,
     pub psk: String,
-    pub tolerance_seconds: u64,
 }
 
 impl SignerGrpcService {
@@ -25,13 +28,11 @@ impl SignerGrpcService {
         storage: KeyStorage,
         nonce_storage: N,
         psk: String,
-        tolerance_seconds: u64,
     ) -> Self {
         Self {
             storage,
             nonce_storage: Arc::new(nonce_storage),
             psk,
-            tolerance_seconds,
         }
     }
 
@@ -72,50 +73,6 @@ impl SignerGrpcService {
 
 #[tonic::async_trait]
 impl Signer for SignerGrpcService {
-    /// Generate a new Ed25519 signing key pair
-    async fn generate_signing_key(
-        &self,
-        request: Request<GenerateSigningKeyRequest>,
-    ) -> Result<Response<GenerateSigningKeyResponse>, Status> {
-        crate::recording::info!("Received gRPC GenerateSigningKey request");
-
-        let req = request.into_inner();
-
-        let request_data = "generate_signing_key";
-        self.verify_credential(&req.credential, request_data)
-            .await
-            .map_err(Status::from)?;
-
-        // Generate the Ed25519 key pair (the private key stays in the backend)
-        let key_pair = self
-            .storage
-            .generate_and_store_key()
-            .await
-            .map_err(Status::from)?;
-
-        // Fetch the key record to obtain the expiry time
-        let key_record = self
-            .storage
-            .get_key_record(key_pair.key_id)
-            .await
-            .map_err(Status::from)?
-            .ok_or_else(|| Status::internal("internal error"))?;
-
-        crate::recording::info!(
-            "Generated Ed25519 signing key with key_id: {}",
-            key_pair.key_id
-        );
-
-        let response = GenerateSigningKeyResponse {
-            key_id: key_pair.key_id,
-            verifying_key: key_pair.verifying_key,
-            expires_at: key_record.expires_at,
-            tolerance_seconds: self.tolerance_seconds,
-        };
-
-        Ok(Response::new(response))
-    }
-
     /// Sign a message with the given key using Ed25519
     async fn sign(&self, request: Request<SignRequest>) -> Result<Response<SignResponse>, Status> {
         let req = request.into_inner();
@@ -128,39 +85,6 @@ impl Signer for SignerGrpcService {
         self.verify_credential(&req.credential, &request_data)
             .await
             .map_err(Status::from)?;
-
-        // A key that has passed `expires_at` must not mint anything.
-        //
-        // Verifier caches drop verifying keys at
-        // `expires_at` with no tolerance, so a signature created now would be
-        // a born-invalid credential that fails every handshake with 401.
-        // The tolerance window below only keeps key
-        // material readable for `get_verifying_key` and cleanup; it never
-        // extends the signing window.
-        let key_record = self
-            .storage
-            .get_key_record(key_id)
-            .await
-            .map_err(Status::from)?
-            .ok_or_else(|| Status::not_found("not found"))?;
-
-        if key_record.expires_at > 0 {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-
-            if crate::key_expired_for_signing(key_record.expires_at, now) {
-                crate::recording::warn!(
-                    "Key {} has expired; refusing to sign (expired_at={})",
-                    key_id,
-                    key_record.expires_at
-                );
-                return Err(Status::failed_precondition(format!(
-                    "Key {key_id} has expired; rotate before signing"
-                )));
-            }
-        }
 
         // Sign inside the backend; the private key never leaves the Signer
         let signature = self
@@ -199,26 +123,63 @@ impl Signer for SignerGrpcService {
             .map_err(Status::from)?
             .ok_or_else(|| Status::not_found("not found"))?;
 
-        // Check whether the key is past its tolerance period
-        if key_record.expires_at > 0 {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            if key_record.expires_at + self.tolerance_seconds < now {
-                crate::recording::warn!("Key {} has expired beyond tolerance period", key_id);
-                return Err(Status::not_found("not found"));
-            }
-        }
-
         crate::recording::debug!("Returning verifying key for key_id: {key_id}");
 
         Ok(Response::new(GetVerifyingKeyResponse {
             key_id,
             verifying_key: key_record.public_key,
-            expires_at: key_record.expires_at,
-            tolerance_seconds: self.tolerance_seconds,
         }))
+    }
+
+    /// Return the key with the given name, generating it if missing
+    async fn ensure_named_key(
+        &self,
+        request: Request<EnsureNamedKeyRequest>,
+    ) -> Result<Response<EnsureNamedKeyResponse>, Status> {
+        let req = request.into_inner();
+        self.verify_credential(&req.credential, &ensure_named_key_payload(&req.name))
+            .await
+            .map_err(Status::from)?;
+        if req.name.is_empty() {
+            return Err(Status::invalid_argument("key name is empty"));
+        }
+
+        let key_pair = self
+            .storage
+            .ensure_named_key(&req.name)
+            .await
+            .map_err(Status::from)?;
+        crate::recording::info!(
+            "Named key '{}' resolved to key_id: {}",
+            req.name,
+            key_pair.key_id
+        );
+
+        Ok(Response::new(EnsureNamedKeyResponse {
+            key_id: key_pair.key_id,
+            verifying_key: key_pair.verifying_key,
+        }))
+    }
+
+    /// Retire the named key; it never signs again
+    async fn retire_named_key(
+        &self,
+        request: Request<RetireNamedKeyRequest>,
+    ) -> Result<Response<RetireNamedKeyResponse>, Status> {
+        let req = request.into_inner();
+        self.verify_credential(&req.credential, &retire_named_key_payload(&req.name))
+            .await
+            .map_err(Status::from)?;
+        if req.name.is_empty() {
+            return Err(Status::invalid_argument("key name is empty"));
+        }
+
+        let key_id = self
+            .storage
+            .retire_named_key(&req.name)
+            .await
+            .map_err(Status::from)?;
+        Ok(Response::new(RetireNamedKeyResponse { key_id }))
     }
 
     /// Health check
@@ -256,8 +217,7 @@ pub fn create_grpc_service<N: NonceStorage + Send + Sync + 'static>(
     storage: KeyStorage,
     nonce_storage: N,
     psk: String,
-    tolerance_seconds: u64,
 ) -> SignerServer<SignerGrpcService> {
-    let service = SignerGrpcService::new(storage, nonce_storage, psk, tolerance_seconds);
+    let service = SignerGrpcService::new(storage, nonce_storage, psk);
     SignerServer::new(service)
 }

@@ -5,24 +5,22 @@ use actrix_proto::NodeAdminService;
 use actrix_proto::{
     ConfigOverrideEntry as ProtoConfigOverrideEntry, ConfigType, CreateRealmRequest,
     CreateRealmResponse, DeleteConfigOverrideRequest, DeleteConfigOverrideResponse,
-    DeleteRealmRequest, DeleteRealmResponse, GetConfigRequest, GetConfigResponse,
-    GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest, GetRealmResponse,
-    ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse,
-    RealmInfo, RotateIssuerSigningKeyRequest, RotateIssuerSigningKeyResponse, ServiceStatus,
+    GetConfigRequest, GetConfigResponse, GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest,
+    GetRealmResponse, ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest,
+    ListRealmsResponse, RealmInfo, RetireRealmRequest, RetireRealmResponse, ServiceStatus,
     SetConfigOverrideRequest, SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse,
     SystemMetrics, UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest,
     UpdateRealmResponse,
 };
 use chrono::Utc;
+use issuer::realm_profile::{ProfileChange, ProfileError, RealmProfiles};
 use platform::ServiceCollector;
 use platform::config::ActrixConfig;
 use platform::config::config_store::{ConfigOverride, ConfigOverrideStore};
 use platform::config::registry;
 use platform::config::resolver::{self, ResolvedField};
-use platform::realm::{
-    DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS, hash_realm_secret, rotate_realm_secret,
-};
-use platform::realm::{Realm, RealmStatus};
+use platform::realm::membership::{self, BY_OPERATOR, IssuedInvite};
+use platform::realm::{Realm, RealmError, RealmProfileRecord, RealmStatus};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -36,6 +34,8 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
+/// A created Realm: the response and its owner invite, returned once.
+pub type CreatedRealm = (CreateRealmResponse, Option<IssuedInvite>);
 type MetricsFuture = Pin<Box<dyn Future<Output = AdminResult<SystemMetrics>> + Send>>;
 type MetricsProvider = Arc<dyn Fn() -> MetricsFuture + Send + Sync>;
 type ShutdownFuture = Pin<Box<dyn Future<Output = AdminResult<()>> + Send>>;
@@ -85,6 +85,9 @@ pub struct AdminApiService {
     /// Shared issuer (present when Issuer is enabled on this node). The same
     /// Arc backs the public /issuer router, so rotation here affects live traffic.
     aid_issuer: Option<Arc<issuer::AIdIssuer>>,
+    /// Signs Realm Profiles when this Loran is the Realm Provider for its own
+    /// domain.
+    realm_profiles: Option<Arc<RealmProfiles>>,
 }
 
 impl AdminApiService {
@@ -112,6 +115,7 @@ impl AdminApiService {
             toml_content: None,
             config_path: None,
             aid_issuer: None,
+            realm_profiles: None,
         })
     }
 
@@ -187,6 +191,19 @@ impl AdminApiService {
     }
 
     /// Get the override store reference.
+    /// Attach the Realm Profile signer of this Realm Provider.
+    pub fn with_realm_profiles(mut self, profiles: Arc<RealmProfiles>) -> Self {
+        self.realm_profiles = Some(profiles);
+        self
+    }
+
+    /// Realm Profiles of `realm`'s domain are signed here.
+    fn signs_profiles_for(&self, realm: &str) -> Option<&Arc<RealmProfiles>> {
+        self.realm_profiles
+            .as_ref()
+            .filter(|profiles| profiles.holds_key_for(realm))
+    }
+
     pub fn override_store(&self) -> Option<&Arc<ConfigOverrideStore>> {
         self.override_store.as_ref()
     }
@@ -198,12 +215,12 @@ impl AdminApiService {
         }
     }
 
-    async fn load_realm(&self, realm_id: u32) -> GrpcResult<Realm> {
-        let realm = Realm::get(realm_id)
+    async fn load_realm(&self, realm: &str) -> GrpcResult<Realm> {
+        let found = Realm::get(realm)
             .await
             .map_err(|e| Status::internal(format!("Failed to load realm: {e}")))?;
 
-        realm.ok_or_else(|| Status::not_found(format!("Realm not found: {realm_id}")))
+        found.ok_or_else(|| Status::not_found(format!("Realm not found: {realm}")))
     }
 
     async fn collect_metrics(&self) -> GrpcResult<SystemMetrics> {
@@ -439,8 +456,6 @@ impl AdminApiService {
             "signer" => cfg.services.signer.as_ref().map(|k| {
                 serde_json::json!({
                     "storage_backend": format!("{:?}", k.storage.backend),
-                    "key_ttl_seconds": k.storage.key_ttl_seconds,
-                    "tolerance_seconds": k.tolerance_seconds,
                 })
             }),
             _ => None,
@@ -605,13 +620,9 @@ impl AdminApiService {
             .await
             .map_err(|e| Status::internal(format!("DB pool error: {e}")))?;
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let rows = sqlx::query_as::<_, (i64, i32, i64, i64)>(
-            "SELECT key_id, length(public_key) as pk_size, created_at, expires_at FROM keys ORDER BY created_at DESC LIMIT 5",
+        let rows = sqlx::query_as::<_, (i64, i32, i64, bool)>(
+            "SELECT key_id, length(public_key) as pk_size, created_at, secret_key = '' AS retired \
+             FROM keys ORDER BY created_at DESC LIMIT 5",
         )
         .fetch_all(&pool)
         .await
@@ -625,143 +636,15 @@ impl AdminApiService {
 
         let keys = rows
             .iter()
-            .map(|(key_id, pk_size, created_at, expires_at)| {
-                let is_expired = *expires_at > 0 && *expires_at < now;
-                KeyInfo {
-                    key_id: *key_id,
-                    pk_size: *pk_size,
-                    created_at: Some(*created_at),
-                    fetched_at: None,
-                    expires_at: *expires_at,
-                    tolerance_seconds: None,
-                    is_expired,
-                }
+            .map(|(key_id, pk_size, created_at, retired)| KeyInfo {
+                key_id: *key_id,
+                pk_size: *pk_size,
+                created_at: *created_at,
+                retired: *retired,
             })
             .collect();
 
         Ok(SignerKeysResult { keys, total_count })
-    }
-
-    /// Cleanup expired Signer keys.
-    pub async fn cleanup_signer_keys_direct(&self) -> GrpcResult<SignerCleanupResult> {
-        let cfg = self.require_running_config()?;
-        let db_path = cfg.sqlite_path.join("signer_keys.db");
-        if !db_path.exists() {
-            return Ok(SignerCleanupResult {
-                deleted: 0,
-                remaining: 0,
-                tolerance_seconds: 0,
-            });
-        }
-
-        let url = format!("sqlite:{}", db_path.display());
-        let options = SqliteConnectOptions::from_str(&url)
-            .map_err(|e| Status::internal(format!("DB connect error: {e}")))?;
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .map_err(|e| Status::internal(format!("DB pool error: {e}")))?;
-
-        let tolerance = cfg
-            .services
-            .signer
-            .as_ref()
-            .map(|k| k.tolerance_seconds)
-            .unwrap_or(3600);
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let cutoff = now - tolerance as i64;
-
-        let result = sqlx::query("DELETE FROM keys WHERE expires_at > 0 AND expires_at < ?")
-            .bind(cutoff)
-            .execute(&pool)
-            .await
-            .map_err(|e| Status::internal(format!("Cleanup error: {e}")))?;
-
-        let remaining = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM keys")
-            .fetch_one(&pool)
-            .await
-            .map(|r| r.0)
-            .unwrap_or(0);
-
-        Ok(SignerCleanupResult {
-            deleted: result.rows_affected(),
-            remaining,
-            tolerance_seconds: tolerance,
-        })
-    }
-
-    /// Query Issuer keys from the SQLite database.
-    pub async fn get_issuer_keys_direct(&self) -> GrpcResult<Vec<KeyInfo>> {
-        let cfg = self.require_running_config()?;
-        let db_path = cfg.sqlite_path.join(issuer::ISSUER_KEY_STORAGE_FILE);
-        if !db_path.exists() {
-            return Ok(vec![]);
-        }
-
-        let url = format!("sqlite:{}?mode=ro", db_path.display());
-        let options = SqliteConnectOptions::from_str(&url)
-            .map_err(|e| Status::internal(format!("DB connect error: {e}")))?
-            .read_only(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .map_err(|e| Status::internal(format!("DB pool error: {e}")))?;
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let row = sqlx::query_as::<_, (i64, i32, i64, i64, i64)>(
-            "SELECT key_id, length(public_key) as pk_size, fetched_at, expires_at, tolerance_seconds FROM current_key WHERE id = 1",
-        )
-        .fetch_optional(&pool)
-        .await
-        .map_err(|e| Status::internal(format!("Query error: {e}")))?;
-
-        match row {
-            Some((key_id, pk_size, fetched_at, expires_at, tolerance_seconds)) => {
-                let is_expired = expires_at > 0 && expires_at < now;
-                Ok(vec![KeyInfo {
-                    key_id,
-                    pk_size,
-                    created_at: None,
-                    fetched_at: Some(fetched_at),
-                    expires_at,
-                    tolerance_seconds: Some(tolerance_seconds),
-                    is_expired,
-                }])
-            }
-            None => Ok(vec![]),
-        }
-    }
-
-    /// Rotate the Issuer signing key through the shared issuer.
-    ///
-    /// Requires the issuer to be attached via [`AdminApiService::with_aid_issuer`];
-    /// otherwise the node does not run Issuer and rotation is meaningless.
-    pub async fn rotate_issuer_signing_key_direct(&self) -> GrpcResult<u32> {
-        let issuer = self
-            .aid_issuer
-            .as_ref()
-            .ok_or_else(|| Status::failed_precondition("Issuer is not enabled on this node"))?;
-
-        platform::recording::info!("Issuer signing key rotation requested via control plane");
-        let new_key_id = issuer
-            .rotate_key()
-            .await
-            .map_err(|e| Status::internal(format!("Issuer key rotation failed: {e}")))?;
-        platform::recording::info!(
-            "Issuer signing key rotation completed, new key_id: {}",
-            new_key_id
-        );
-        Ok(new_key_id)
     }
 
     /// Get node info including metrics and service statuses.
@@ -805,79 +688,135 @@ impl AdminApiService {
         })
     }
 
+    fn realm_config(&self) -> platform::config::RealmConfig {
+        self.running_config
+            .as_ref()
+            .map(|config| config.realm.clone())
+            .unwrap_or_default()
+    }
+
+    fn max_realms(&self) -> Option<u32> {
+        self.realm_config().max_realms
+    }
+
     async fn create_local_realm_internal(
         &self,
         req: CreateRealmRequest,
-        expose_plain_secret: bool,
-    ) -> GrpcResult<(CreateRealmResponse, Option<String>)> {
-        platform::recording::info!("Create local realm request received: name={}", req.name);
+        profile: ProfileChange,
+    ) -> GrpcResult<CreatedRealm> {
+        platform::recording::info!("Create local realm request received: realm={}", req.realm);
+        let failed = |message: String| {
+            Ok((
+                CreateRealmResponse {
+                    success: false,
+                    error_message: Some(message),
+                    realm: None,
+                    owner_invite: None,
+                },
+                None,
+            ))
+        };
 
-        // Generate secret at creation time
-        let plain_secret = platform::realm::secret::generate_realm_secret();
-        let secret_hash = hash_realm_secret(&plain_secret);
-
-        let mut realm = match Realm::create(req.name.clone(), secret_hash).await {
-            Ok(r) => r,
-            Err(err) => {
-                return Ok((
-                    CreateRealmResponse {
-                        success: false,
-                        error_message: Some(format!("Failed to create realm: {err}")),
-                        realm: None,
-                    },
-                    None,
+        // A Realm under a domain whose Realm signing key Loran holds starts
+        // pending and becomes active with its first Loran-signed Profile.
+        let signer = self.signs_profiles_for(&req.realm);
+        match signer {
+            Some(profiles) => {
+                if profile.package.is_none() {
+                    return failed(format!(
+                        "Realms under {} need package {{href, sha256}} for their Realm Profile",
+                        profiles.provider_id()
+                    ));
+                }
+                if profiles.signing_keys().is_none() {
+                    return Err(Status::unavailable("Realm signing key is not ready"));
+                }
+            }
+            // Other domains' key holders create their Realms with Realm
+            // management requests.
+            None if self.realm_profiles.is_some() => {
+                return failed(format!(
+                    "this Realm Provider creates Realms only under {}",
+                    self.realm_profiles
+                        .as_ref()
+                        .map(|profiles| profiles.provider_id())
+                        .unwrap_or_default()
                 ));
+            }
+            None if profile.package.is_some() || profile.display_name.is_some() => {
+                return failed(
+                    "package and display_name belong to a Loran-signed Realm Profile, \
+                     which only Realms under the Provider domain have"
+                        .to_string(),
+                );
+            }
+            None => {}
+        }
+
+        let realm = Realm {
+            name: req.realm,
+            status: if signer.is_some() {
+                RealmStatus::Pending
+            } else {
+                RealmStatus::Active
+            },
+            enabled: req.enabled,
+            expires_at: (req.expires_at > 0).then_some(req.expires_at),
+            // Removed if the process stops before the first Profile is signed.
+            pending_expires_at: signer.is_some().then(|| {
+                chrono::Utc::now().timestamp() as u64 + self.realm_config().pending_ttl_secs()
+            }),
+            ..Default::default()
+        };
+
+        let mut realm = match realm.insert(self.max_realms()).await {
+            Ok(r) => r,
+            Err(err) => return failed(format!("Failed to create realm: {err}")),
+        };
+        if let Some(profiles) = signer {
+            realm = match profiles.issue(&realm.name, profile).await {
+                Ok(realm) => realm,
+                Err(err) => {
+                    // Never served, so the name is free again.
+                    if let Err(discard) = Realm::discard_pending(&realm.name).await {
+                        platform::recording::warn!(
+                            "Pending realm {} not discarded: {discard}",
+                            realm.name
+                        );
+                    }
+                    return failed(format!("Realm Profile not signed: {err}"));
+                }
+            };
+        }
+        // A Realm created active gets its issuer key now; the others got it
+        // with their first Realm Profile draft. Issuance creates a missing one.
+        if signer.is_none()
+            && let Some(issuer) = &self.aid_issuer
+            && let Err(err) = issuer.realm_key(&realm.name).await
+        {
+            platform::recording::warn!("Realm {} has no issuer key yet: {err}", realm.name);
+        }
+
+        // The owner invite comes back with the creation, once; the operator
+        // hands it to the owner.
+        let owner_invite = match membership::issue_owner_invite(&realm.name, BY_OPERATOR).await {
+            Ok(invite) => Some(invite),
+            Err(err) => {
+                platform::recording::warn!("Realm {} has no owner invite: {err}", realm.name);
+                None
             }
         };
 
-        // Apply optional fields
-        realm.enabled = req.enabled;
-        if req.expires_at > 0 {
-            realm.expires_at = Some(req.expires_at);
-        }
-        if let Some(status) = req.status.as_deref() {
-            match parse_realm_status(status) {
-                Ok(status) => realm.status = status,
-                Err(err) => {
-                    return Ok((
-                        CreateRealmResponse {
-                            success: false,
-                            error_message: Some(err),
-                            realm: None,
-                        },
-                        None,
-                    ));
-                }
-            }
-        }
-        if let Err(err) = realm.save().await {
-            // Rollback
-            let _ = Realm::delete(realm.id).await;
-            return Ok((
-                CreateRealmResponse {
-                    success: false,
-                    error_message: Some(format!("Failed to save realm settings: {err}")),
-                    realm: None,
-                },
-                None,
-            ));
-        }
-
-        platform::recording::info!("Realm created: id={}, name={}", realm.id, realm.name);
-
-        let realm_info = realm_to_proto(&realm);
+        platform::recording::info!("Realm created: {}", realm.name);
 
         Ok((
             CreateRealmResponse {
                 success: true,
                 error_message: None,
-                realm: Some(realm_info),
+                realm: Some(realm_to_proto(&realm)),
+                owner_invite: owner_invite.as_ref().map(|invite| invite.invite.clone()),
             },
-            if expose_plain_secret {
-                Some(plain_secret)
-            } else {
-                None
-            },
+            owner_invite,
         ))
     }
 
@@ -885,78 +824,77 @@ impl AdminApiService {
         &self,
         req: CreateRealmRequest,
     ) -> GrpcResult<CreateRealmResponse> {
-        let Some(realm_id) = req.realm_id else {
-            return Ok(CreateRealmResponse {
-                success: false,
-                error_message: Some("realm_id is required for managed CreateRealm".to_string()),
-                realm: None,
-            });
-        };
-        let Some(secret_current) = req.secret_current_hash else {
+        platform::recording::info!("Create managed realm request received: realm={}", req.realm);
+
+        // As Realm Provider, Loran creates Realms only under its Provider
+        // domain, with a Realm Profile package that this request lacks.
+        if self.realm_profiles.is_some() && Realm::get(&req.realm).await.ok().flatten().is_none() {
             return Ok(CreateRealmResponse {
                 success: false,
                 error_message: Some(
-                    "secret_current_hash is required for managed CreateRealm".to_string(),
+                    "a new Realm needs a Realm Profile: create Realms under the Provider \
+                     domain through the admin API; other domains use Realm management requests"
+                        .to_string(),
                 ),
                 realm: None,
+                owner_invite: None,
             });
-        };
-
-        let status = match req.status.as_deref() {
-            Some(status) => match parse_realm_status(status) {
-                Ok(status) => status,
-                Err(err) => {
-                    return Ok(CreateRealmResponse {
-                        success: false,
-                        error_message: Some(err),
-                        realm: None,
-                    });
-                }
-            },
-            None => RealmStatus::Active,
-        };
-        let secret_previous =
-            build_secret_previous(req.secret_previous_hash, req.secret_previous_valid_until);
-
-        platform::recording::info!(
-            "Create managed realm request received: id={}, name={}",
-            realm_id,
-            req.name
-        );
+        }
 
         match Realm::upsert_managed(
-            realm_id,
-            req.name,
-            status,
+            req.realm,
             req.enabled,
             (req.expires_at > 0).then_some(req.expires_at),
-            secret_current,
-            secret_previous,
+            self.max_realms(),
         )
         .await
         {
-            Ok(realm) => Ok(CreateRealmResponse {
-                success: true,
-                error_message: None,
-                realm: Some(realm_to_proto(&realm)),
-            }),
+            Ok((realm, created)) => {
+                // A new Realm's owner invite comes back once.
+                let owner_invite = if created {
+                    match membership::issue_owner_invite(&realm.name, BY_OPERATOR).await {
+                        Ok(invite) => Some(invite.invite),
+                        Err(err) => {
+                            platform::recording::warn!(
+                                "Realm {} has no owner invite: {err}",
+                                realm.name
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                Ok(CreateRealmResponse {
+                    success: true,
+                    error_message: None,
+                    realm: Some(realm_to_proto(&realm)),
+                    owner_invite,
+                })
+            }
             Err(err) => Ok(CreateRealmResponse {
                 success: false,
                 error_message: Some(format!("Failed to upsert managed realm: {err}")),
                 realm: None,
+                owner_invite: None,
             }),
         }
     }
 
-    /// Create a realm and return the plaintext realm secret once.
-    pub async fn create_realm_with_secret_direct(
+    /// Create a realm and return its owner invite once.
+    ///
+    /// `profile` carries the package and display name of the first Realm
+    /// Profile, required and allowed only for Realms under the Provider
+    /// domain. As Realm Provider, Loran creates no Realm elsewhere.
+    pub async fn create_realm_with_invite_direct(
         &self,
         req: CreateRealmRequest,
-    ) -> GrpcResult<(CreateRealmResponse, Option<String>)> {
-        self.create_local_realm_internal(req, true).await
+        profile: ProfileChange,
+    ) -> GrpcResult<CreatedRealm> {
+        self.create_local_realm_internal(req, profile).await
     }
 
-    /// Create a realm (gRPC path, does not expose plaintext secret in response).
+    /// Create or update a superv-managed realm (gRPC path).
     pub async fn create_realm_direct(
         &self,
         req: CreateRealmRequest,
@@ -964,11 +902,11 @@ impl AdminApiService {
         self.create_managed_realm_internal(req).await
     }
 
-    /// Get a single realm by ID.
-    pub async fn get_realm_direct(&self, realm_id: u32) -> GrpcResult<GetRealmResponse> {
-        platform::recording::debug!("GetRealm request received: realm_id={}", realm_id);
+    /// Get a single realm by name.
+    pub async fn get_realm_direct(&self, realm: &str) -> GrpcResult<GetRealmResponse> {
+        platform::recording::debug!("GetRealm request received: realm={}", realm);
 
-        match self.load_realm(realm_id).await {
+        match self.load_realm(realm).await {
             Ok(realm) => Ok(GetRealmResponse {
                 success: true,
                 error_message: None,
@@ -988,7 +926,7 @@ impl AdminApiService {
         &self,
         req: UpdateRealmRequest,
     ) -> GrpcResult<UpdateRealmResponse> {
-        let mut realm = match self.load_realm(req.realm_id).await {
+        let mut realm = match self.load_realm(&req.realm).await {
             Ok(r) => r,
             Err(status) if status.code() == tonic::Code::NotFound => {
                 return Ok(UpdateRealmResponse {
@@ -1000,42 +938,12 @@ impl AdminApiService {
             Err(e) => return Err(e),
         };
 
-        if let Some(name) = req.name {
-            realm.name = name;
-        }
         if let Some(enabled) = req.enabled {
             realm.enabled = enabled;
-        }
-        if let Some(status) = req.status.as_deref() {
-            match parse_realm_status(status) {
-                Ok(status) => realm.status = status,
-                Err(err) => {
-                    return Ok(UpdateRealmResponse {
-                        success: false,
-                        error_message: Some(err),
-                        realm: None,
-                    });
-                }
-            }
         }
         if let Some(expires_at) = req.expires_at {
             realm.expires_at = (expires_at > 0).then_some(expires_at);
         }
-        if let Some(secret_current_hash) = req.secret_current_hash {
-            if secret_current_hash.trim().is_empty() {
-                return Ok(UpdateRealmResponse {
-                    success: false,
-                    error_message: Some("secret_current_hash must not be empty".to_string()),
-                    realm: None,
-                });
-            }
-            realm.secret_current = secret_current_hash;
-        }
-        if req.secret_previous_hash.is_some() || req.secret_previous_valid_until.is_some() {
-            realm.secret_previous =
-                build_secret_previous(req.secret_previous_hash, req.secret_previous_valid_until);
-        }
-
         if let Err(err) = realm.save().await {
             return Ok(UpdateRealmResponse {
                 success: false,
@@ -1051,39 +959,113 @@ impl AdminApiService {
         })
     }
 
-    /// Delete a realm by ID.
-    pub async fn delete_realm_direct(&self, realm_id: u32) -> GrpcResult<DeleteRealmResponse> {
-        match Realm::soft_delete(realm_id).await {
-            Ok(true) => Ok(DeleteRealmResponse {
+    /// Retire a realm by name. The retired record stays as a tombstone.
+    ///
+    /// Under the Provider domain Loran signs the retired Realm Profile. A
+    /// Realm with a Profile signed by another domain's key holder retires
+    /// only when that holder publishes a retired Profile; the operator can
+    /// suspend it instead.
+    pub async fn retire_realm_direct(&self, realm: &str) -> GrpcResult<RetireRealmResponse> {
+        platform::recording::info!("RetireRealm request received: realm={}", realm);
+        let retired = match self.signs_profiles_for(realm) {
+            Some(profiles) => profiles
+                .issue(
+                    realm,
+                    ProfileChange {
+                        retire: true,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|err| match err {
+                    ProfileError::Realm(err) => err,
+                    err => RealmError::ValidationError(err.to_string()),
+                }),
+            None => match RealmProfileRecord::get(realm).await {
+                Ok(Some(_)) => Err(RealmError::ValidationError(
+                    "only the Realm signing key holder retires this Realm, by publishing a \
+                     retired Realm Profile; suspend it instead"
+                        .to_string(),
+                )),
+                Ok(None) => Realm::retire(realm).await,
+                Err(err) => Err(err),
+            },
+        };
+        match retired {
+            Ok(realm) => Ok(RetireRealmResponse {
                 success: true,
                 error_message: None,
+                realm: Some(realm_to_proto(&realm)),
             }),
-            Ok(false) => Ok(DeleteRealmResponse {
+            Err(RealmError::NotFound) => {
+                Err(Status::not_found(format!("Realm not found: {realm}")))
+            }
+            Err(err) => Ok(RetireRealmResponse {
                 success: false,
-                error_message: Some("Realm not found".to_string()),
-            }),
-            Err(err) => Ok(DeleteRealmResponse {
-                success: false,
-                error_message: Some(format!("Failed to delete realm: {err}")),
+                error_message: Some(format!("Failed to retire realm: {err}")),
+                realm: None,
             }),
         }
     }
 
-    /// Rotate realm secret and return plaintext once.
-    pub async fn rotate_realm_secret_direct(
-        &self,
-        realm_id: u32,
-    ) -> GrpcResult<RealmSecretRotationResult> {
-        let rotated = rotate_realm_secret(realm_id, Some(DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS))
+    /// Issue a new owner invite for an active Realm (owner recovery),
+    /// revoking its unused owner invites. Only for Realms under the Provider
+    /// domain and Realms without a Realm Profile; the Realm signing key
+    /// holder recovers the others (`FailedPrecondition`).
+    pub async fn issue_owner_invite_direct(&self, realm: &str) -> GrpcResult<IssuedInvite> {
+        let has_profile = RealmProfileRecord::get(realm)
             .await
-            .map_err(|e| Status::internal(format!("Failed to rotate realm secret: {e}")))?;
+            .map_err(|e| Status::internal(format!("Failed to load Realm Profile: {e}")))?
+            .is_some();
+        if has_profile && self.signs_profiles_for(realm).is_none() {
+            return Err(Status::failed_precondition(
+                "the Realm signing key holder issues this Realm's owner invites",
+            ));
+        }
+        membership::issue_owner_invite(realm, BY_OPERATOR)
+            .await
+            .map_err(|err| match err.code {
+                membership::Code::NotFound => Status::not_found(err.message),
+                membership::Code::Conflict => Status::invalid_argument(err.message),
+                _ => Status::internal(format!("Failed to issue an owner invite: {err}")),
+            })
+    }
 
-        Ok(RealmSecretRotationResult {
-            realm_id,
-            realm_secret: rotated.new_secret,
-            previous_valid_until: rotated.previous_valid_until,
-            grace_seconds: DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS,
-        })
+    /// Members, clients and open invites of `realm`, read-only.
+    pub async fn list_realm_members_direct(&self, realm: &str) -> GrpcResult<JsonValue> {
+        self.load_realm(realm).await?;
+        membership::list_members(realm, None)
+            .await
+            .map_err(|err| Status::internal(format!("Failed to list members: {err}")))
+    }
+
+    /// Start rotating `realm`'s issuer key (`realm-profile.md` section 6.1);
+    /// returns the new key id. Only when this Loran is a Realm Provider.
+    pub async fn rotate_realm_issuer_key_direct(&self, realm: &str) -> GrpcResult<u32> {
+        let Some(profiles) = &self.realm_profiles else {
+            return Err(Status::failed_precondition(
+                "this Loran is not a Realm Provider",
+            ));
+        };
+        profiles
+            .rotate_issuer_key(realm)
+            .await
+            .map_err(|err| match err {
+                ProfileError::Realm(RealmError::NotFound) => {
+                    Status::not_found(format!("Realm not found: {realm}"))
+                }
+                ProfileError::Realm(RealmError::Conflict(message))
+                | ProfileError::Invalid(message) => Status::invalid_argument(message),
+                err => Status::internal(format!("Failed to rotate the issuer key: {err}")),
+            })
+    }
+
+    /// The accepted Realm Profile document of `realm`, as signed.
+    pub async fn get_realm_profile_direct(&self, realm: &str) -> GrpcResult<Option<String>> {
+        RealmProfileRecord::get(realm)
+            .await
+            .map(|record| record.map(|record| record.document))
+            .map_err(|e| Status::internal(format!("Failed to load Realm Profile: {e}")))
     }
 
     /// Get a config value.
@@ -1200,29 +1182,14 @@ pub struct ConfigFileContent {
     pub path: String,
 }
 
-/// Key info (shared by Signer and Issuer).
+/// A Signer key.
 #[derive(Debug, Clone, Serialize)]
 pub struct KeyInfo {
     pub key_id: i64,
     pub pk_size: i32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fetched_at: Option<i64>,
-    pub expires_at: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tolerance_seconds: Option<i64>,
-    pub is_expired: bool,
-}
-
-/// Realm secret rotation result (the plaintext secret is returned only once).
-#[derive(Debug, Clone, Serialize)]
-pub struct RealmSecretRotationResult {
-    pub realm_id: u32,
-    pub realm_secret: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub previous_valid_until: Option<u64>,
-    pub grace_seconds: u64,
+    pub created_at: i64,
+    /// The private key is destroyed; the key never signs again.
+    pub retired: bool,
 }
 
 /// Signer keys query result.
@@ -1230,14 +1197,6 @@ pub struct RealmSecretRotationResult {
 pub struct SignerKeysResult {
     pub keys: Vec<KeyInfo>,
     pub total_count: i64,
-}
-
-/// Signer cleanup result.
-#[derive(Debug, Clone, Serialize)]
-pub struct SignerCleanupResult {
-    pub deleted: u64,
-    pub remaining: i64,
-    pub tolerance_seconds: u64,
 }
 
 /// Map service name string to the ResourceType integer used in ServiceStatus.type
@@ -1248,21 +1207,6 @@ fn service_name_to_type_id(name: &str) -> Option<i32> {
         "signaling" => Some(3),
         "issuer" => Some(4),
         "signer" => Some(5),
-        _ => None,
-    }
-}
-
-fn parse_realm_status(value: &str) -> std::result::Result<RealmStatus, String> {
-    RealmStatus::from_str(value).map_err(|_| {
-        format!("Invalid realm status '{value}' (expected Active, Inactive, Suspended)")
-    })
-}
-
-fn build_secret_previous(hash: Option<String>, valid_until: Option<u64>) -> Option<(String, u64)> {
-    match (hash, valid_until) {
-        (Some(hash), Some(valid_until)) if !hash.trim().is_empty() && valid_until > 0 => {
-            Some((hash, valid_until))
-        }
         _ => None,
     }
 }
@@ -1463,7 +1407,7 @@ impl NodeAdminService for AdminApiService {
         request: Request<GetRealmRequest>,
     ) -> GrpcResult<Response<GetRealmResponse>> {
         let req = request.into_inner();
-        self.get_realm_direct(req.realm_id).await.map(Response::new)
+        self.get_realm_direct(&req.realm).await.map(Response::new)
     }
 
     async fn update_realm(
@@ -1475,12 +1419,12 @@ impl NodeAdminService for AdminApiService {
             .map(Response::new)
     }
 
-    async fn delete_realm(
+    async fn retire_realm(
         &self,
-        request: Request<DeleteRealmRequest>,
-    ) -> GrpcResult<Response<DeleteRealmResponse>> {
+        request: Request<RetireRealmRequest>,
+    ) -> GrpcResult<Response<RetireRealmResponse>> {
         let req = request.into_inner();
-        self.delete_realm_direct(req.realm_id)
+        self.retire_realm_direct(&req.realm)
             .await
             .map(Response::new)
     }
@@ -1575,43 +1519,5 @@ impl NodeAdminService for AdminApiService {
                 deleted: false,
             })),
         }
-    }
-
-    async fn rotate_issuer_signing_key(
-        &self,
-        _request: Request<RotateIssuerSigningKeyRequest>,
-    ) -> GrpcResult<Response<RotateIssuerSigningKeyResponse>> {
-        self.rotate_issuer_signing_key_direct()
-            .await
-            .map(|new_key_id| {
-                Response::new(RotateIssuerSigningKeyResponse {
-                    success: true,
-                    error_message: None,
-                    new_key_id: Some(new_key_id),
-                })
-            })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn rotate_issuer_signing_key_without_issuer_fails_precondition() {
-        let service = AdminApiService::new(
-            "node-1",
-            "node-1",
-            "local",
-            "0.9.0",
-            ServiceCollector::new(),
-        )
-        .expect("create admin api service");
-
-        let status = service
-            .rotate_issuer_signing_key_direct()
-            .await
-            .expect_err("rotation without an attached issuer must fail");
-        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
     }
 }

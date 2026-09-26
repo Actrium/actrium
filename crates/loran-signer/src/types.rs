@@ -18,6 +18,16 @@ pub fn sign_request_payload(key_id: u32, message: &[u8]) -> String {
     )
 }
 
+/// Build the nonce-auth payload for an EnsureNamedKey request.
+pub fn ensure_named_key_payload(name: &str) -> String {
+    format!("{SIGN_REQUEST_AUTH_VERSION}:ensure_named_key:{name}")
+}
+
+/// Build the nonce-auth payload for a RetireNamedKey request.
+pub fn retire_named_key_payload(name: &str) -> String {
+    format!("{SIGN_REQUEST_AUTH_VERSION}:retire_named_key:{name}")
+}
+
 /// Key pair structure (internal use, stores public key reference)
 #[derive(Debug, Clone)]
 pub struct KeyPair {
@@ -25,26 +35,6 @@ pub struct KeyPair {
     pub key_id: u32,
     /// Verifying public key (Base64-encoded Ed25519 verifying key, 32 bytes)
     pub verifying_key: String,
-}
-
-/// Generate signing key request
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GenerateSigningKeyRequest {
-    /// nonce-auth credential
-    pub credential: NonceCredential,
-}
-
-/// Generate signing key response
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GenerateSigningKeyResponse {
-    /// Generated key ID
-    pub key_id: u32,
-    /// Verifying public key (Base64-encoded Ed25519 verifying key, 32 bytes)
-    pub verifying_key: String,
-    /// Expiry time (Unix timestamp)
-    pub expires_at: u64,
-    /// Tolerance window (seconds)
-    pub tolerance_seconds: u64,
 }
 
 /// Sign request
@@ -74,15 +64,6 @@ pub struct KeyRecord {
     pub public_key: String,
     /// Creation timestamp
     pub created_at: u64,
-    /// Expiry time (Unix timestamp)
-    pub expires_at: u64,
-}
-
-impl GenerateSigningKeyRequest {
-    /// Get the request data used for verification
-    pub fn request_payload(&self) -> String {
-        "generate_signing_key".to_string()
-    }
 }
 
 impl SignRequest {

@@ -88,17 +88,6 @@ impl SignerClientWrapper {
         }
     }
 
-    /// Request a new Ed25519 signing key from the Signer; returns (key_id, verifying_key_bytes[32], expires_at, tolerance_secs).
-    /// The private key is retained on the Signer server.
-    pub async fn generate_signing_key(
-        &self,
-    ) -> Result<(u32, [u8; 32], u64, u64), signer::SignerError> {
-        self.call_with_rebuild("generate_signing_key", false, |client| {
-            Box::pin(client.generate_signing_key())
-        })
-        .await
-    }
-
     /// Sign a message with the Ed25519 key in the Signer; returns a 64-byte signature.
     /// The private key never leaves the Signer service.
     pub async fn sign(&self, key_id: u32, message: &[u8]) -> Result<Vec<u8>, signer::SignerError> {
@@ -111,15 +100,25 @@ impl SignerClientWrapper {
         .await
     }
 
-    /// Get the verifying public key for the specified key_id
-    ///
-    /// Returns (verifying_key_bytes [u8;32], expires_at, tolerance_seconds)
-    pub async fn get_verifying_key(
+    /// Return the key named `name`, generating it if missing;
+    /// returns (key_id, verifying_key_bytes[32]). Idempotent, so it retries.
+    pub async fn ensure_named_key(
         &self,
-        key_id: u32,
-    ) -> Result<([u8; 32], u64, u64), signer::SignerError> {
-        self.call_with_rebuild("get_verifying_key", true, |client| {
-            Box::pin(client.get_verifying_key(key_id))
+        name: &str,
+    ) -> Result<(u32, [u8; 32]), signer::SignerError> {
+        self.call_with_rebuild("ensure_named_key", true, move |client| {
+            let name = name.to_string();
+            Box::pin(async move { client.ensure_named_key(&name).await })
+        })
+        .await
+    }
+
+    /// Retire the key named `name` so it never signs again; returns its
+    /// key id. Idempotent, so it retries.
+    pub async fn retire_named_key(&self, name: &str) -> Result<u32, signer::SignerError> {
+        self.call_with_rebuild("retire_named_key", true, move |client| {
+            let name = name.to_string();
+            Box::pin(async move { client.retire_named_key(&name).await })
         })
         .await
     }

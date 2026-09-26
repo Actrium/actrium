@@ -157,7 +157,7 @@ impl PublisherKeyHistory {
     /// publisher key. A key that was rotated away from (retired) or emergency
     /// revoked must never become the current key again.
     pub async fn key_id_ever_used(
-        pool: &SqlitePool,
+        executor: impl sqlx::SqliteExecutor<'_>,
         publisher_id: i64,
         key_id: &str,
     ) -> Result<bool, PublisherRegistryError> {
@@ -166,7 +166,7 @@ impl PublisherKeyHistory {
         )
         .bind(publisher_id)
         .bind(key_id)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await?;
         Ok(found.is_some())
     }

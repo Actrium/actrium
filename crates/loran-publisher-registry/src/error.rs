@@ -24,14 +24,10 @@ pub enum PublisherRegistryError {
     InvalidStatus(String),
     #[error("verification failed: {0}")]
     VerificationFailed(String),
-    #[error("challenge expired or not found")]
-    ChallengeNotFound,
     #[error("invalid signature")]
     InvalidSignature,
     #[error("package already published, revoke first")]
     PackageAlreadyPublished,
-    #[error("publisher discovery error: {0}")]
-    PublisherDiscovery(String),
     #[error("crypto error: {0}")]
     Crypto(String),
     #[error("unauthorized")]
@@ -40,6 +36,8 @@ pub enum PublisherRegistryError {
     CertificateExpired,
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+    #[error("quota exceeded: {0}")]
+    QuotaExceeded(String),
 }
 
 impl IntoResponse for PublisherRegistryError {
@@ -61,15 +59,14 @@ impl IntoResponse for PublisherRegistryError {
             PublisherRegistryError::InvalidSignature | PublisherRegistryError::Unauthorized => {
                 (StatusCode::UNAUTHORIZED, self.to_string())
             }
-            PublisherRegistryError::VerificationFailed(_)
-            | PublisherRegistryError::ChallengeNotFound => {
+            PublisherRegistryError::VerificationFailed(_) => {
                 (StatusCode::BAD_REQUEST, self.to_string())
-            }
-            PublisherRegistryError::PublisherDiscovery(_) => {
-                (StatusCode::BAD_GATEWAY, self.to_string())
             }
             PublisherRegistryError::KeyRevoked(_) | PublisherRegistryError::CertificateExpired => {
                 (StatusCode::FORBIDDEN, self.to_string())
+            }
+            PublisherRegistryError::QuotaExceeded(_) => {
+                (StatusCode::TOO_MANY_REQUESTS, self.to_string())
             }
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,

@@ -1,14 +1,15 @@
 use actrix_proto::{
     admin::v1::NonceCredential,
     signer::v1::{
-        GenerateSigningKeyRequest, HealthCheckRequest, SignRequest, signer_client::SignerClient,
+        EnsureNamedKeyRequest, HealthCheckRequest, SignRequest, signer_client::SignerClient,
     },
 };
 use base64::Engine as _;
 use nonce_auth::{CredentialBuilder, storage::MemoryStorage};
 use signer::{
     GrpcClient, GrpcClientConfig, KeyEncryptor, KeyStorage, SignerError, SignerServiceConfig,
-    create_grpc_service, types::sign_request_payload,
+    create_grpc_service,
+    types::{ensure_named_key_payload, sign_request_payload},
 };
 use tempfile::TempDir;
 use tokio::{
@@ -37,15 +38,10 @@ impl Drop for GrpcTestServer {
     }
 }
 
-async fn start_grpc_server(
-    psk: &str,
-    key_ttl_seconds: u64,
-    tolerance_seconds: u64,
-) -> GrpcTestServer {
+async fn start_grpc_server(psk: &str) -> GrpcTestServer {
     let temp_dir = tempfile::tempdir().expect("create temp dir");
 
-    let mut config = SignerServiceConfig::default();
-    config.storage.key_ttl_seconds = key_ttl_seconds;
+    let config = SignerServiceConfig::default();
 
     let storage = KeyStorage::from_config(
         &config.storage,
@@ -55,12 +51,7 @@ async fn start_grpc_server(
     .await
     .expect("create key storage");
 
-    let grpc_service = create_grpc_service(
-        storage,
-        MemoryStorage::new(),
-        psk.to_string(),
-        tolerance_seconds,
-    );
+    let grpc_service = create_grpc_service(storage, MemoryStorage::new(), psk.to_string());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -130,7 +121,7 @@ fn sign_credential_with_timestamp(psk: &str, payload: &str, ts: u64) -> NonceCre
 #[tokio::test]
 async fn test_grpc_health_and_key_lifecycle() {
     let psk = "test-signer-grpc-psk";
-    let server = start_grpc_server(psk, 3600, 3600).await;
+    let server = start_grpc_server(psk).await;
     let mut client = connect_client(&server.endpoint).await;
 
     let health_before = client
@@ -145,14 +136,14 @@ async fn test_grpc_health_and_key_lifecycle() {
     assert_eq!(health_before.key_count, 0);
 
     let generated = client
-        .generate_signing_key(GenerateSigningKeyRequest {
-            credential: sign_credential(psk, "generate_signing_key"),
+        .ensure_named_key(EnsureNamedKeyRequest {
+            name: "test".to_string(),
+            credential: sign_credential(psk, &ensure_named_key_payload("test")),
         })
         .await
-        .expect("generate signing key")
+        .expect("ensure named key")
         .into_inner();
     assert!(generated.key_id > 0);
-    assert!(generated.expires_at > 0);
 
     // verifying key must be 32-byte Ed25519 public key
     let vk_bytes = base64::engine::general_purpose::STANDARD
@@ -199,31 +190,33 @@ async fn test_grpc_health_and_key_lifecycle() {
 }
 
 #[tokio::test]
-async fn test_grpc_generate_rejects_invalid_signature() {
+async fn test_grpc_ensure_named_key_rejects_invalid_signature() {
     let psk = "test-signer-grpc-psk";
-    let server = start_grpc_server(psk, 3600, 3600).await;
+    let server = start_grpc_server(psk).await;
     let mut client = connect_client(&server.endpoint).await;
 
     let err = client
-        .generate_signing_key(GenerateSigningKeyRequest {
-            credential: sign_credential(psk, "not-generate-signing-key"),
+        .ensure_named_key(EnsureNamedKeyRequest {
+            name: "test".to_string(),
+            credential: sign_credential(psk, &ensure_named_key_payload("other")),
         })
         .await
-        .expect_err("generate should fail for invalid payload signature");
+        .expect_err("a credential for another name must be rejected");
     assert_eq!(err.code(), Code::Unauthenticated);
 }
 
 #[tokio::test]
 async fn test_grpc_sign_authentication_binds_exact_message() {
     let psk = "test-ks-grpc-psk";
-    let server = start_grpc_server(psk, 3600, 3600).await;
+    let server = start_grpc_server(psk).await;
     let mut client = connect_client(&server.endpoint).await;
     let generated = client
-        .generate_signing_key(GenerateSigningKeyRequest {
-            credential: sign_credential(psk, "generate_signing_key"),
+        .ensure_named_key(EnsureNamedKeyRequest {
+            name: "test".to_string(),
+            credential: sign_credential(psk, &ensure_named_key_payload("test")),
         })
         .await
-        .expect("generate signing key")
+        .expect("ensure named key")
         .into_inner();
 
     let approved_message = b"approved";
@@ -243,21 +236,25 @@ async fn test_grpc_sign_authentication_binds_exact_message() {
 }
 
 #[tokio::test]
-async fn test_grpc_generate_rejects_replay_nonce() {
+async fn test_grpc_rejects_replay_nonce() {
     let psk = "test-signer-grpc-psk";
-    let server = start_grpc_server(psk, 3600, 3600).await;
+    let server = start_grpc_server(psk).await;
     let mut client = connect_client(&server.endpoint).await;
 
-    let credential = sign_credential(psk, "generate_signing_key");
+    let credential = sign_credential(psk, &ensure_named_key_payload("test"));
     client
-        .generate_signing_key(GenerateSigningKeyRequest {
+        .ensure_named_key(EnsureNamedKeyRequest {
+            name: "test".to_string(),
             credential: credential.clone(),
         })
         .await
         .expect("first request should succeed");
 
     let replay_err = client
-        .generate_signing_key(GenerateSigningKeyRequest { credential })
+        .ensure_named_key(EnsureNamedKeyRequest {
+            name: "test".to_string(),
+            credential,
+        })
         .await
         .expect_err("replayed nonce should be rejected");
     assert_eq!(replay_err.code(), Code::Unauthenticated);
@@ -266,7 +263,7 @@ async fn test_grpc_generate_rejects_replay_nonce() {
 #[tokio::test]
 async fn test_grpc_sign_nonexistent_key_returns_not_found() {
     let psk = "test-signer-grpc-psk";
-    let server = start_grpc_server(psk, 3600, 3600).await;
+    let server = start_grpc_server(psk).await;
     let mut client = connect_client(&server.endpoint).await;
 
     let missing_key_id = 9_999_999_u32;
@@ -285,12 +282,12 @@ async fn test_grpc_sign_nonexistent_key_returns_not_found() {
 #[tokio::test]
 async fn test_grpc_rejects_stale_timestamp() {
     let psk = "test-signer-grpc-psk";
-    let server = start_grpc_server(psk, 3600, 3600).await;
+    let server = start_grpc_server(psk).await;
     let mut client = connect_client(&server.endpoint).await;
 
     let err = client
-        .generate_signing_key(GenerateSigningKeyRequest {
-            credential: sign_credential_with_timestamp(psk, "generate_signing_key", 0),
+        .health_check(HealthCheckRequest {
+            credential: sign_credential_with_timestamp(psk, "health_check", 0),
         })
         .await
         .expect_err("stale timestamp should be rejected");
@@ -298,37 +295,9 @@ async fn test_grpc_rejects_stale_timestamp() {
 }
 
 #[tokio::test]
-async fn test_grpc_sign_expired_key_returns_failed_precondition() {
-    let psk = "test-signer-grpc-psk";
-    let server = start_grpc_server(psk, 1, 0).await;
-    let mut client = connect_client(&server.endpoint).await;
-
-    let generated = client
-        .generate_signing_key(GenerateSigningKeyRequest {
-            credential: sign_credential(psk, "generate_signing_key"),
-        })
-        .await
-        .expect("generate signing key")
-        .into_inner();
-
-    sleep(Duration::from_secs(2)).await;
-
-    let message = b"test";
-    let err = client
-        .sign(SignRequest {
-            key_id: generated.key_id,
-            message: message.to_vec(),
-            credential: sign_credential(psk, &sign_request_payload(generated.key_id, message)),
-        })
-        .await
-        .expect_err("expired key should be unavailable");
-    assert_eq!(err.code(), Code::FailedPrecondition);
-}
-
-#[tokio::test]
 async fn test_signer_grpc_client_end_to_end() {
     let psk = "test-signer-grpc-psk";
-    let server = start_grpc_server(psk, 3600, 90).await;
+    let server = start_grpc_server(psk).await;
 
     let mut client = GrpcClient::new(&GrpcClientConfig {
         endpoint: server.endpoint.clone(),
@@ -346,16 +315,18 @@ async fn test_signer_grpc_client_end_to_end() {
     let status = client.health_check().await.expect("health check");
     assert_eq!(status, "healthy");
 
-    let (key_id, verifying_key_bytes, expires_at, tolerance_seconds) = client
-        .generate_signing_key()
+    let (key_id, verifying_key_bytes) = client
+        .ensure_named_key("test")
         .await
-        .expect("generate signing key");
+        .expect("ensure named key");
     assert!(key_id > 0);
-    assert!(expires_at > 0);
-    assert_eq!(tolerance_seconds, 90);
-
-    // verifying key should be valid 32-byte Ed25519 key
-    assert_eq!(verifying_key_bytes.len(), 32);
+    assert_eq!(
+        client
+            .get_verifying_key(key_id)
+            .await
+            .expect("verifying key"),
+        verifying_key_bytes
+    );
 
     // sign a message
     let message = b"end-to-end test message";
@@ -375,7 +346,7 @@ async fn test_signer_grpc_client_end_to_end() {
 
 #[tokio::test]
 async fn test_signer_grpc_client_rejects_wrong_shared_secret() {
-    let server = start_grpc_server("correct-secret", 3600, 60).await;
+    let server = start_grpc_server("correct-secret").await;
 
     let mut client = GrpcClient::new(&GrpcClientConfig {
         endpoint: server.endpoint.clone(),
@@ -391,7 +362,7 @@ async fn test_signer_grpc_client_rejects_wrong_shared_secret() {
     .expect("create grpc client");
 
     let err = client
-        .generate_signing_key()
+        .ensure_named_key("test")
         .await
         .expect_err("wrong shared secret should fail");
     match err {

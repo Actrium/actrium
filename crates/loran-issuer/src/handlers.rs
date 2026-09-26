@@ -1,6 +1,14 @@
 //! Issuer (Actor Identity Service) HTTP Handler
 
-use crate::{issuer::AIdIssuer, ratelimit::ip_rate_limiter};
+use crate::{
+    idempotency::{
+        AttemptError, AttemptLease, ClaimOutcome, ControlAttemptStore, Operation,
+        register_ok_response_expiry,
+    },
+    issuer::{AIdIssuer, ReissuePreparation},
+    ratelimit::ip_rate_limiter,
+};
+use actr_protocol::realm_membership::{CLIENT_PROOF_HEADER, ClientProof, ProofOp, Role};
 use actr_protocol::{
     ErrorResponse, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
     RenewCredentialRequest, RenewCredentialResponse, register_response, renew_credential_response,
@@ -9,15 +17,17 @@ use axum::{
     Router,
     body::Bytes,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{
+        HeaderMap, HeaderValue, StatusCode,
+        header::{CONTENT_TYPE, RETRY_AFTER},
+    },
     response::{IntoResponse, Json, Response},
     routing::post,
 };
 use platform::aid::AidError;
 use platform::monitoring::ServiceCounters;
-use platform::realm::{
-    REALM_SECRET_HEADER, Realm as RealmEntity, RealmSecretCheck, acl::ActorAcl, verify_realm_secret,
-};
+use platform::realm::membership::{self, Limits, Signer};
+use platform::realm::{Realm as RealmEntity, RealmProfileRecord, acl::ActorAcl};
 use prost::Message;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -26,26 +36,46 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct IssuerState {
     pub issuer: Arc<AIdIssuer>,
+    idempotency: Arc<ControlAttemptStore>,
     /// Service-level counters for metrics collection.
     pub counters: Option<Arc<ServiceCounters>>,
+    /// Membership limits (`[realm]`).
+    pub(crate) limits: Limits,
+    /// Signs Realm Profiles for `update_realm` when this Loran is a Realm
+    /// Provider.
+    pub(crate) profiles: Option<Arc<crate::realm_profile::RealmProfiles>>,
 }
 
 impl IssuerState {
     pub fn new(issuer: AIdIssuer) -> Self {
-        Self {
-            issuer: Arc::new(issuer),
-            counters: None,
-        }
+        Self::from_shared_issuer(Arc::new(issuer))
     }
 
     /// Build state around an issuer that is already shared with another
-    /// consumer (e.g. the control plane holding `Arc<AIdIssuer>` for
-    /// authenticated key rotation).
+    /// consumer (e.g. the control plane holding `Arc<AIdIssuer>`).
     pub fn from_shared_issuer(issuer: Arc<AIdIssuer>) -> Self {
+        let idempotency = Arc::new(ControlAttemptStore::new(
+            &issuer.config.renewal_token_secret,
+        ));
         Self {
             issuer,
+            idempotency,
             counters: None,
+            limits: Limits::from(&platform::config::RealmConfig::default()),
+            profiles: None,
         }
+    }
+
+    /// Membership limits and, when this Loran is a Realm Provider, the Realm
+    /// Profiles `update_realm` signs.
+    pub fn with_membership(
+        mut self,
+        config: &platform::config::RealmConfig,
+        profiles: Option<Arc<crate::realm_profile::RealmProfiles>>,
+    ) -> Self {
+        self.limits = Limits::from(config);
+        self.profiles = profiles;
+        self
     }
 
     pub fn with_counters(mut self, counters: Arc<ServiceCounters>) -> Self {
@@ -63,9 +93,8 @@ pub fn create_router(state: IssuerState) -> Router {
         .route("/register", post(register_actr))
         .route("/renew", post(renew_credential))
         .route("/reissue", post(reissue_credential))
+        .route("/membership", post(crate::membership::post_membership))
         .route("/health", axum::routing::get(health_check))
-        .route("/current-key", axum::routing::get(get_current_key))
-        .route("/signing-pubkey", axum::routing::get(get_signing_pubkey))
         .layer(ip_rate_limiter())
         .with_state(state)
 }
@@ -76,7 +105,7 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     let start = std::time::Instant::now();
 
     // Decode the protobuf request
-    let request = match RegisterRequest::decode(body) {
+    let request = match RegisterRequest::decode(body.clone()) {
         Ok(req) => req,
         Err(err) => {
             platform::recording::error!("Failed to decode protobuf request: {}", err);
@@ -91,10 +120,9 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     };
 
     platform::recording::debug!(
-        "Received register request for realm {}, type {}:{}",
-        request.realm.realm_id,
-        request.actr_type.publisher,
-        request.actr_type.name
+        "Received register request for realm {}, type {}",
+        request.realm,
+        request.actr_type.to_string_repr()
     );
 
     // Validate the identity fields before minting an ActrId or deriving ACL keys.
@@ -112,8 +140,29 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         return encode_result(error_result);
     }
 
+    if let Err(message) = check_acl_source_realms(&request) {
+        return encode_result(RegisterResponse {
+            result: Some(register_response::Result::Error(ErrorResponse {
+                code: 400,
+                message,
+            })),
+        });
+    }
+
+    // Authenticate before saying anything about the Realm.
+    let signer =
+        match authenticate_client(&state, &headers, ProofOp::Register, &request.realm, &body).await
+        {
+            Ok(signer) => signer,
+            Err(error) => {
+                return encode_result(RegisterResponse {
+                    result: Some(register_response::Result::Error(error)),
+                });
+            }
+        };
+
     // Validate that the Realm exists, is in a healthy state, and has not expired
-    if let Err(validation_err) = RealmEntity::validate_realm(request.realm.realm_id).await {
+    if let Err(validation_err) = RealmEntity::validate_realm(&request.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
         let error_result = RegisterResponse {
             result: Some(register_response::Result::Error(ErrorResponse {
@@ -124,161 +173,36 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         return encode_result(error_result);
     }
 
-    // Registration is fail-closed: every provisioned Realm must have a secret.
-    let provided_secret = headers
-        .get(REALM_SECRET_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-
-    let realm_secret_check =
-        match verify_realm_secret(request.realm.realm_id, provided_secret).await {
-            Ok(check @ RealmSecretCheck::ValidCurrent)
-            | Ok(check @ RealmSecretCheck::ValidPrevious) => check,
-            Ok(RealmSecretCheck::NotConfigured) => {
-                let error_result = RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Realm is not provisioned with a registration secret".to_string(),
-                    })),
-                };
-                return encode_result(error_result);
-            }
-            Ok(RealmSecretCheck::MissingRequired) => {
-                let error_result = RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Realm secret required".to_string(),
-                    })),
-                };
-                return encode_result(error_result);
-            }
-            Ok(RealmSecretCheck::Invalid) => {
-                let error_result = RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Invalid realm secret".to_string(),
-                    })),
-                };
-                return encode_result(error_result);
-            }
-            Err(e) => {
-                platform::recording::error!(
-                    "Failed to verify realm secret for realm {}: {}",
-                    request.realm.realm_id,
-                    e
-                );
-                let error_result = RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 500,
-                        message: "Internal error while verifying realm secret".to_string(),
-                    })),
-                };
-                return encode_result(error_result);
-            }
-        };
+    if let Err(error) = check_service_owner(&request, &signer).await {
+        return encode_result(RegisterResponse {
+            result: Some(register_response::Result::Error(error)),
+        });
+    }
 
     // Invoke the issuer to issue a credential
-    let result = match state
-        .issuer
-        .issue_credential_with_realm_secret_check(&request, Some(realm_secret_check))
-        .await
-    {
+    let result = match state.issuer.issue_credential(&request, &signer).await {
         Ok(response) => {
             if let Some(register_response::Result::Success(ref register_ok)) = response.result {
                 platform::recording::debug!(
-                    "Successfully registered ActrId: realm={}, serial_number={}, type={}:{}",
-                    register_ok.actr_id.realm.realm_id,
-                    register_ok.actr_id.serial_number,
-                    register_ok.actr_id.r#type.publisher,
-                    register_ok.actr_id.r#type.name
+                    "Successfully registered ActrId: {}, type={}",
+                    register_ok.actr_id,
+                    request.actr_type.to_string_repr()
                 );
 
-                // Persist ACL rules to database
-                if let Some(ref acl) = request.acl {
-                    use actr_protocol::acl_rule::SourceRealm;
-
-                    let realm_id = register_ok.actr_id.realm.realm_id;
-                    let t = &register_ok.actr_id.r#type;
-                    let my_type = t.to_string_repr();
-
-                    let mut replacement = Vec::with_capacity(acl.rules.len());
-                    for rule in &acl.rules {
-                        let allow =
-                            rule.permission == actr_protocol::acl_rule::Permission::Allow as i32;
-                        let ft = &rule.from_type;
-                        let from_type = ft.to_string_repr();
-                        let source_realm_id = match &rule.source_realm {
-                            Some(SourceRealm::AnyRealm(_)) => None,
-                            Some(SourceRealm::RealmId(id)) => Some(*id),
-                            None => Some(realm_id), // fallback: treat missing as self-realm
-                        };
-
-                        replacement.push(ActorAcl::new_with_source_realm(
-                            realm_id,
-                            source_realm_id,
-                            from_type,
-                            my_type.clone(),
-                            allow,
-                        ));
+                // ACL policy and pending signaling metadata commit together.
+                if let Err((code, message)) =
+                    persist_registration_state(&request, register_ok, &signer).await
+                {
+                    if let Some(ref ctr) = state.counters {
+                        ctr.record_request(false, start.elapsed().as_secs_f64() * 1000.0)
+                            .await;
                     }
-
-                    if let Err(error) =
-                        ActorAcl::replace_for_target(realm_id, &my_type, &replacement).await
-                    {
-                        platform::recording::error!(
-                            "Failed to atomically persist ACL rules for {}: {}",
-                            my_type,
-                            error
-                        );
-                        return encode_result(RegisterResponse {
-                            result: Some(register_response::Result::Error(ErrorResponse {
-                                code: 500,
-                                message: "Failed to persist registration policy".to_string(),
-                            })),
-                        });
-                    }
-                }
-
-                // Store pending registration (service_spec) for signaling to pick up
-                if request.service_spec.is_some() || request.ws_address.is_some() {
-                    let serial = register_ok.actr_id.serial_number;
-                    let realm = register_ok.actr_id.realm.realm_id;
-                    let spec_blob = request
-                        .service_spec
-                        .as_ref()
-                        .map(prost::Message::encode_to_vec);
-                    let ws_address = request.ws_address.clone();
-                    let db = platform::storage::db::get_database();
-                    let pool = db.get_pool();
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs() as i64;
-                    if let Err(error) = sqlx::query(
-                        "INSERT OR REPLACE INTO pending_registration \
-                         (realm_id, serial_number, service_spec_blob, ws_address, created_at) \
-                         VALUES (?, ?, ?, ?, ?)",
-                    )
-                    .bind(realm as i64)
-                    .bind(serial as i64)
-                    .bind(spec_blob)
-                    .bind(ws_address)
-                    .bind(now)
-                    .execute(pool)
-                    .await
-                    {
-                        platform::recording::error!(
-                            "Failed to persist pending registration metadata: {}",
-                            error
-                        );
-                        return encode_result(RegisterResponse {
-                            result: Some(register_response::Result::Error(ErrorResponse {
-                                code: 500,
-                                message: "Failed to persist registration metadata".to_string(),
-                            })),
-                        });
-                    }
+                    return encode_result(RegisterResponse {
+                        result: Some(register_response::Result::Error(ErrorResponse {
+                            code,
+                            message,
+                        })),
+                    });
                 }
             }
             if let Some(ref ctr) = state.counters {
@@ -304,131 +228,427 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     encode_result(result)
 }
 
+fn membership_error(code: &str, message: impl std::fmt::Display) -> ErrorResponse {
+    let status = match code {
+        "invalid_request" => 400,
+        "unavailable" => 503,
+        _ => 403,
+    };
+    ErrorResponse {
+        code: status,
+        message: format!("{code}: {message}"),
+    }
+}
+
+fn from_membership(error: membership::MembershipError) -> ErrorResponse {
+    membership_error(error.code.as_str(), error.message)
+}
+
+/// The Realm Provider ID a request for `realm` may name: this Realm
+/// Provider's, or for a Realm without a Realm Profile (served by a Loran
+/// that is no Realm Provider) the authority of the Issuer URL, the request's
+/// `Host`.
+pub(crate) async fn expected_provider_id(
+    state: &IssuerState,
+    realm: &str,
+    claimed: &str,
+    headers: &HeaderMap,
+) -> String {
+    let own = &state.issuer.config.provider_id;
+    if claimed == own {
+        return own.clone();
+    }
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_ascii_lowercase);
+    if host.as_deref() == Some(claimed) && matches!(RealmProfileRecord::get(realm).await, Ok(None))
+    {
+        return claimed.to_string();
+    }
+    own.clone()
+}
+
+/// Check the `x-actr-client-proof` of a request for `op` on `realm` with
+/// `body` (`realm-membership.md` section 6): the proof itself, then that its
+/// Realm client key is registered, unrevoked and of an active member. Runs
+/// before anything about the Realm is revealed.
+async fn authenticate_client(
+    state: &IssuerState,
+    headers: &HeaderMap,
+    op: ProofOp,
+    realm: &str,
+    body: &[u8],
+) -> Result<Signer, ErrorResponse> {
+    let invalid = |message: &dyn std::fmt::Display| membership_error("invalid_request", message);
+    let header = headers
+        .get(CLIENT_PROOF_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| invalid(&format!("missing {CLIENT_PROOF_HEADER}")))?;
+    let proof = ClientProof::parse_header(header).map_err(|e| invalid(&e))?;
+    let provider = expected_provider_id(state, realm, &proof.provider_id, headers).await;
+    proof
+        .check(op, realm, &provider, body, chrono::Utc::now())
+        .map_err(|e| invalid(&e))?;
+    let unknown = || membership_error("client_unknown", "the Realm client key is not registered");
+    let key = membership::client_key(realm, proof.signer_key_id())
+        .await
+        .map_err(from_membership)?
+        .ok_or_else(unknown)?;
+    proof.verify(&key.public_key).map_err(|_| unknown())?;
+    let signer = membership::authenticate(key)
+        .await
+        .map_err(from_membership)?;
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&proof.expires_at)
+        .map_err(|e| invalid(&e))?
+        .timestamp();
+    match platform::realm::management::use_nonce(&proof.nonce, expires_at).await {
+        Ok(true) => Ok(signer),
+        Ok(false) => Err(invalid(&"nonce was already used")),
+        Err(error) => Err(membership_error("unavailable", error)),
+    }
+}
+
+/// Only the owner registers the Realm's Service: an Actor whose publisher
+/// and program are those of the Realm Profile `package.type`, any version.
+async fn check_service_owner(
+    request: &RegisterRequest,
+    signer: &Signer,
+) -> Result<(), ErrorResponse> {
+    if signer.role == Role::Owner {
+        return Ok(());
+    }
+    let record = RealmProfileRecord::get(&request.realm)
+        .await
+        .map_err(|error| membership_error("unavailable", error))?;
+    let service = record
+        .and_then(|record| serde_json::from_str::<Value>(&record.document).ok())
+        .and_then(|profile| profile["package"]["type"].as_str().map(str::to_string))
+        .and_then(|text| actr_protocol::ActrType::from_program_identity(&text).ok());
+    match service {
+        Some(service)
+            if service.publisher == request.actr_type.publisher
+                && service.name == request.actr_type.name =>
+        {
+            Err(membership_error(
+                "service_owner_only",
+                "only the Realm owner registers the Realm's Service",
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The actor must be bound to `signer`'s member (reissue) or to exactly its
+/// key (renew).
+async fn check_binding(
+    actor_id: &actr_protocol::ActrId,
+    signer: &Signer,
+    same_key: bool,
+) -> Result<(), ErrorResponse> {
+    let mut conn = platform::storage::db::get_database()
+        .get_pool()
+        .acquire()
+        .await
+        .map_err(|error| membership_error("unavailable", error))?;
+    let binding = membership::actor_binding_on(&mut conn, actor_id)
+        .await
+        .map_err(|error| membership_error("unavailable", error))?;
+    let bound = binding.is_some_and(|binding| {
+        binding.member_id == signer.member_id
+            && (!same_key || binding.client_key_id == signer.key_id)
+    });
+    if !bound {
+        return Err(membership_error(
+            "client_unknown",
+            "the Actor is not bound to this Realm client key",
+        ));
+    }
+    Ok(())
+}
+
+/// Connection ACLs of version 1 act only within the Actor's own Realm: a
+/// rule's `source_realm` may be unset, `any_realm` (which matches only the
+/// own Realm) or the Actor's own Realm name. A rule naming another Realm, or
+/// a malformed Realm name, is rejected.
+fn check_acl_source_realms(request: &RegisterRequest) -> Result<(), String> {
+    use actr_protocol::acl_rule::SourceRealm;
+
+    let rules = request.acl.iter().flat_map(|acl| &acl.rules);
+    for rule in rules {
+        if let Some(SourceRealm::Realm(name)) = &rule.source_realm {
+            actr_protocol::uri::parse_realm_name(name)
+                .map_err(|error| format!("Invalid ACL source_realm: {error}"))?;
+            if *name != request.realm {
+                return Err(format!(
+                    "ACL source_realm {name} is another Realm; cross-Realm rules are not supported"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Persist the registration's ACL policy and pending signaling metadata in
+/// one transaction, and drop pending rows whose retention has passed.
+///
+/// Nothing is kept when the Realm retired after the request was
+/// authenticated: retirement removes these rows, and a registration that
+/// raced it must not bring them back.
+///
+/// On failure returns the client-facing error code and message.
+async fn persist_registration_state(
+    request: &RegisterRequest,
+    register_ok: &register_response::RegisterOk,
+    signer: &Signer,
+) -> Result<(), (u32, String)> {
+    let state_error = || (500, "Failed to persist registration state".to_string());
+
+    let pool = platform::storage::db::get_database().get_pool();
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.map_err(|error| {
+        platform::recording::error!("Failed to begin registration transaction: {}", error);
+        state_error()
+    })?;
+
+    // A revocation that committed after the proof was checked stops the
+    // registration; one that commits later disables the Actor recorded here.
+    if let Err(error) = membership::check_key_on(&mut tx, &signer.realm, &signer.key_id).await {
+        return Err((error.code.status().into(), error.to_string()));
+    }
+
+    if let Some(ref acl) = request.acl {
+        use actr_protocol::acl_rule::SourceRealm;
+
+        let realm = &register_ok.actr_id.realm;
+        let my_type = request.actr_type.to_string_repr();
+
+        let replacement = acl
+            .rules
+            .iter()
+            .map(|rule| {
+                let allow = rule.permission == actr_protocol::acl_rule::Permission::Allow as i32;
+                let source_realm = match &rule.source_realm {
+                    Some(SourceRealm::AnyRealm(_)) => None,
+                    Some(SourceRealm::Realm(name)) => Some(name.clone()),
+                    None => Some(realm.clone()), // fallback: treat missing as self-realm
+                };
+                ActorAcl::new_with_source_realm(
+                    realm.clone(),
+                    source_realm,
+                    rule.from_type.to_string_repr(),
+                    my_type.clone(),
+                    allow,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        ActorAcl::replace_for_target_in_transaction(&mut tx, realm, &my_type, &replacement)
+            .await
+            .map_err(|error| {
+                platform::recording::error!(
+                    "Failed to atomically persist ACL rules for {}: {}",
+                    my_type,
+                    error
+                );
+                (500, "Failed to persist registration policy".to_string())
+            })?;
+    }
+
+    let now = crate::renewal::now_secs();
+
+    // Store pending registration (service_spec) for signaling to pick up.
+    // It is kept as long as the renewal-token binding that /reissue accepts.
+    if request.service_spec.is_some() || request.ws_address.is_some() {
+        let spec_blob = request
+            .service_spec
+            .as_ref()
+            .map(prost::Message::encode_to_vec);
+        let expires_at = register_ok
+            .renewal_token_expires_at
+            .map(|timestamp| timestamp.seconds)
+            .unwrap_or(now)
+            .saturating_add(crate::renewal::REISSUE_BINDING_GRACE_SECS);
+        sqlx::query(
+            "INSERT OR REPLACE INTO pending_registration \
+             (realm, serial_number, service_spec_blob, ws_address, created_at, expires_at) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&register_ok.actr_id.realm)
+        .bind(register_ok.actr_id.serial_number as i64)
+        .bind(spec_blob)
+        .bind(request.ws_address.clone())
+        .bind(now)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            platform::recording::error!(
+                "Failed to persist pending registration metadata: {}",
+                error
+            );
+            (500, "Failed to persist registration metadata".to_string())
+        })?;
+    }
+
+    sqlx::query(
+        "DELETE FROM pending_registration WHERE expires_at IS NOT NULL AND expires_at <= ?",
+    )
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        platform::recording::error!(
+            "Failed to clean expired pending registration metadata: {}",
+            error
+        );
+        (500, "Failed to persist registration metadata".to_string())
+    })?;
+
+    // Checked after the writes above, which hold the write lock: a
+    // retirement either committed before them and shows here, or commits
+    // after this transaction and removes its rows.
+    let retired: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM realm WHERE name = ? AND status = 'retired')",
+    )
+    .bind(&register_ok.actr_id.realm)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| {
+        platform::recording::error!("Failed to read Realm state: {}", error);
+        state_error()
+    })?;
+    if retired {
+        return Err((403, "Realm is retired".to_string()));
+    }
+
+    tx.commit().await.map_err(|error| {
+        platform::recording::error!("Failed to commit registration state: {}", error);
+        state_error()
+    })
+}
+
 /// POST /issuer/reissue — re-authenticate and issue credentials for an existing
 /// stable ActrId without allocating a new serial number.
+///
+/// Outcomes travel in the `RegisterResponse` body with HTTP 200, except the
+/// attempt contract (`409`, `410`, `425`, see [`crate::idempotency`]).
 async fn reissue_credential(
     State(state): State<IssuerState>,
     headers: HeaderMap,
     body: Bytes,
-) -> Bytes {
+) -> Response {
     let start = std::time::Instant::now();
-    let request = match ReissueCredentialRequest::decode(body) {
+    let request = match ReissueCredentialRequest::decode(body.clone()) {
         Ok(request) => request,
         Err(err) => {
             platform::recording::error!("Failed to decode ReissueCredentialRequest: {}", err);
-            return encode_result(RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 400,
-                    message: format!("Invalid protobuf: {err}"),
-                })),
-            });
+            return register_error(400, format!("Invalid protobuf: {err}"));
         }
     };
 
     // Validate the identity fields before any signing path (same guard as /register).
     if let Err(err) = request.registration.actr_type.validate() {
-        return encode_result(RegisterResponse {
-            result: Some(register_response::Result::Error(ErrorResponse {
-                code: 400,
-                message: format!("Invalid actor identity: {err}"),
-            })),
-        });
+        return register_error(400, format!("Invalid actor identity: {err}"));
     }
 
     let registration = &request.registration;
-    if let Err(validation_err) = RealmEntity::validate_realm(registration.realm.realm_id).await {
-        let (code, message) = RealmEntity::map_validation_error(validation_err);
-        return encode_result(RegisterResponse {
-            result: Some(register_response::Result::Error(ErrorResponse {
-                code,
-                message: format!("Realm validation failed: {message}"),
-            })),
-        });
-    }
+    // Authenticate before saying anything about the Realm or the attempt.
+    let signer = match authenticate_client(
+        &state,
+        &headers,
+        ProofOp::Reissue,
+        &registration.realm,
+        &body,
+    )
+    .await
+    {
+        Ok(signer) => signer,
+        Err(error) => return register_error(error.code, error.message),
+    };
 
-    let provided_secret = headers
-        .get(REALM_SECRET_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let realm_secret_check =
-        match verify_realm_secret(registration.realm.realm_id, provided_secret).await {
-            Ok(check @ RealmSecretCheck::ValidCurrent)
-            | Ok(check @ RealmSecretCheck::ValidPrevious) => check,
-            Ok(RealmSecretCheck::NotConfigured) => {
-                return encode_result(RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Realm is not provisioned with a registration secret".to_string(),
-                    })),
-                });
-            }
-            Ok(RealmSecretCheck::MissingRequired) => {
-                return encode_result(RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Realm secret required".to_string(),
-                    })),
-                });
-            }
-            Ok(RealmSecretCheck::Invalid) => {
-                return encode_result(RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Invalid realm secret".to_string(),
-                    })),
-                });
-            }
-            Err(err) => {
-                platform::recording::error!(
-                    "Failed to verify realm secret for credential reissue in realm {}: {}",
-                    registration.realm.realm_id,
-                    err
-                );
-                return encode_result(RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 500,
-                        message: "Internal error while verifying realm secret".to_string(),
-                    })),
-                });
-            }
-        };
-
-    // Replay only an exact previously authenticated package reissue request.
-    // The issuer binds the cache key to the signatures and renewal proof too.
-    if let Some(cached) = state
-        .issuer
-        .lookup_reissue_cache(
+    let lease = match state
+        .idempotency
+        .claim(
+            Operation::Reissue,
+            &request.attempt_id,
             &request.actr_id,
-            registration,
-            request.renewal_proof.as_deref(),
+            &body,
         )
         .await
     {
-        let succeeded = matches!(&cached.result, Some(register_response::Result::Success(_)));
-        if let Some(ref counters) = state.counters {
-            counters
-                .record_request(succeeded, start.elapsed().as_secs_f64() * 1000.0)
-                .await;
+        Ok(ClaimOutcome::Acquired(lease)) => lease,
+        Ok(ClaimOutcome::Replay(cached)) => {
+            let issued = matches!(
+                RegisterResponse::decode(cached.body.as_slice()),
+                Ok(RegisterResponse {
+                    result: Some(register_response::Result::Success(_))
+                })
+            );
+            if issued {
+                if let Err(error) = check_binding(&request.actr_id, &signer, false).await {
+                    return register_error(error.code, error.message);
+                }
+                if let Err(err) = state
+                    .issuer
+                    .recheck_before_replay(&request.actr_id, &signer)
+                    .await
+                {
+                    let (code, message) = aid_error_to_response(err);
+                    return register_error(code, message);
+                }
+            }
+            return protobuf_response(cached.status, cached.body);
         }
-        platform::recording::info!(
-            "Credential reissue replayed from response cache for actor {}",
-            request.actr_id.to_string_repr()
-        );
-        return encode_result(cached);
+        Err(error) => {
+            return attempt_error_response(error, register_error_body);
+        }
+    };
+
+    if let Err(validation_err) = RealmEntity::validate_realm(&registration.realm).await {
+        let (code, message) = RealmEntity::map_validation_error(validation_err);
+        let body = register_error_body(code, format!("Realm validation failed: {message}"));
+        return complete_attempt(&state, &lease, StatusCode::OK, body, register_error_body).await;
     }
 
-    let result = state
+    let preparation = state
         .issuer
-        .reissue_credential_with_realm_secret_check(
+        .prepare_reissue(
             &request.actr_id,
             registration,
             request.renewal_proof.as_deref(),
-            Some(realm_secret_check),
+            &signer,
         )
         .await;
 
-    let succeeded = matches!(&result.result, Some(register_response::Result::Success(_)));
+    let (response, succeeded) = match preparation {
+        ReissuePreparation::Ready(prepared) => match state
+            .idempotency
+            .complete_reissue(&lease, &request.actr_id, *prepared)
+            .await
+        {
+            Ok(cached) => (protobuf_response(cached.status, cached.body), true),
+            Err(AttemptError::Refused(err)) => {
+                release_attempt(&state, &lease).await;
+                let (code, message) = aid_error_to_response(err);
+                (register_error(code, message), false)
+            }
+            Err(error) => {
+                release_attempt(&state, &lease).await;
+                (attempt_error_response(error, register_error_body), false)
+            }
+        },
+        ReissuePreparation::Rejected(response) => {
+            let body = response.encode_to_vec();
+            let response =
+                complete_attempt(&state, &lease, StatusCode::OK, body, register_error_body).await;
+            (response, false)
+        }
+        ReissuePreparation::Retryable(response) => {
+            release_attempt(&state, &lease).await;
+            (protobuf_response(200, response.encode_to_vec()), false)
+        }
+    };
+
     if let Some(ref counters) = state.counters {
         counters
             .record_request(succeeded, start.elapsed().as_secs_f64() * 1000.0)
@@ -439,79 +659,101 @@ async fn reissue_credential(
             "Credential reissued for actor {}",
             request.actr_id.to_string_repr()
         );
+        // The Actor may have moved to this key from a revoked one.
+        platform::realm::changes::announce_actor(&request.actr_id);
     }
-
-    encode_result(result)
+    response
 }
 
 /// POST /issuer/renew — renew credentials for an existing ActrId
 ///
 /// Processing flow:
-/// 1. Decode and validate `RenewCredentialRequest`.
-/// 2. Validate realm state.
-/// 3. Validate and rotate renewal token in a transaction.
-/// 4. Re-issue access and TURN credentials for the original ActrId.
-/// 5. Attach the transaction result renewal token and expiry.
-async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Response {
+/// 1. Decode `RenewCredentialRequest` and claim its attempt.
+/// 2. Validate the token length.
+/// 3. Validate the renewal token (read-only) and prepare its rotation.
+/// 4. Check the Realm state; an unauthenticated caller never learns it.
+/// 5. Re-issue access and TURN credentials for the original ActrId.
+/// 6. Commit the rotation together with the response, rechecking the actor.
+async fn renew_credential(
+    State(state): State<IssuerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     let start = std::time::Instant::now();
 
-    // 1. Decode protobuf request.
-    let request = match RenewCredentialRequest::decode(body) {
+    // 1. Decode protobuf request and claim the attempt.
+    let request = match RenewCredentialRequest::decode(body.clone()) {
         Ok(req) => req,
         Err(err) => {
             platform::recording::error!("Failed to decode RenewCredentialRequest: {}", err);
-            return encode_renew_result(
-                StatusCode::BAD_REQUEST,
-                RenewCredentialResponse {
-                    result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                        code: 400,
-                        message: format!("Invalid protobuf: {err}"),
-                    })),
-                },
+            return renew_error(400, format!("Invalid protobuf: {err}"));
+        }
+    };
+    let actor_id = &request.actr_id;
+
+    // The client proof is checked before the renewal token.
+    let signer =
+        match authenticate_client(&state, &headers, ProofOp::Renew, &actor_id.realm, &body).await {
+            Ok(signer) => signer,
+            Err(error) => return renew_error(error.code, error.message),
+        };
+
+    let lease = match state
+        .idempotency
+        .claim(Operation::Renew, &request.attempt_id, actor_id, &body)
+        .await
+    {
+        Ok(ClaimOutcome::Acquired(lease)) => lease,
+        Ok(ClaimOutcome::Replay(cached)) => {
+            // Only a stored credential is rechecked; a stored rejection is
+            // replayed as is, so it tells nothing new about the actor.
+            let issued = matches!(
+                RenewCredentialResponse::decode(cached.body.as_slice()),
+                Ok(RenewCredentialResponse {
+                    result: Some(renew_credential_response::Result::Success(_))
+                })
             );
+            if issued {
+                if let Err(error) = check_binding(actor_id, &signer, true).await {
+                    return renew_error(error.code, error.message);
+                }
+                if let Err(err) = state.issuer.recheck_before_replay(actor_id, &signer).await {
+                    let (code, message) = aid_error_to_response(err);
+                    return renew_error(code, message);
+                }
+            }
+            return protobuf_response(cached.status, cached.body);
+        }
+        Err(error) => {
+            return attempt_error_response(error, renew_error_body);
         }
     };
 
-    // Validate token length (32 bytes expected).
+    // 2. Validate token length (32 bytes expected).
     if request.renewal_token.len() != 32 {
         platform::recording::warn!(
             "Renewal token has invalid length: {} bytes",
             request.renewal_token.len()
         );
-        return encode_renew_result(
+        let body = renew_error_body(400, "Invalid renewal token length".to_string());
+        return complete_attempt(
+            &state,
+            &lease,
             StatusCode::BAD_REQUEST,
-            RenewCredentialResponse {
-                result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                    code: 400,
-                    message: "Invalid renewal token length".to_string(),
-                })),
-            },
-        );
+            body,
+            renew_error_body,
+        )
+        .await;
     }
 
-    let actor_id = &request.actr_id;
     platform::recording::debug!(
         "Received renewal request for actor {}",
         actor_id.to_string_repr()
     );
 
-    // 2. Validate realm state.
-    if let Err(validation_err) = RealmEntity::validate_realm(actor_id.realm.realm_id).await {
-        let (code, message) = RealmEntity::map_validation_error(validation_err);
-        return encode_renew_result(
-            status_for_error_code(code),
-            RenewCredentialResponse {
-                result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                    code,
-                    message: format!("Realm validation failed: {message}"),
-                })),
-            },
-        );
-    }
-
-    // 3. Validate and rotate renewal token in one transaction.
+    // 3. Validate the token and prepare its rotation; nothing is written yet.
     let issuer = &state.issuer;
-    let renewal_outcome = match crate::renewal::rotate_renewal_token(
+    let prepared = match crate::renewal::prepare_renewal_token_rotation(
         actor_id,
         &request.renewal_token,
         &issuer.config.renewal_token_secret,
@@ -520,21 +762,21 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
     )
     .await
     {
-        Ok(outcome) => outcome,
+        Ok(prepared) => prepared,
         Err(crate::renewal::RenewalError::TokenRejected) => {
             platform::recording::warn!(
                 "Renewal token rejected for actor {}",
                 actor_id.to_string_repr()
             );
-            return encode_renew_result(
+            let body = renew_error_body(401, "Renewal token invalid or expired".into());
+            return complete_attempt(
+                &state,
+                &lease,
                 StatusCode::UNAUTHORIZED,
-                RenewCredentialResponse {
-                    result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                        code: 401,
-                        message: "Renewal token invalid or expired".to_string(),
-                    })),
-                },
-            );
+                body,
+                renew_error_body,
+            )
+            .await;
         }
         Err(crate::renewal::RenewalError::StoreError(msg)) => {
             platform::recording::error!(
@@ -542,43 +784,36 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
                 actor_id.to_string_repr(),
                 msg
             );
-            return encode_renew_result(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                RenewCredentialResponse {
-                    result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                        code: 500,
-                        message: "Internal renewal store error".to_string(),
-                    })),
-                },
-            );
+            release_attempt(&state, &lease).await;
+            return renew_error(500, "Internal renewal store error".to_string());
         }
     };
 
-    // 4. Re-issue access and TURN credentials for the original ActrId.
-    // /renew does not carry the package target in its request, so look up the
-    // target persisted at registration time to enable per-target revocation
-    // recheck. A NULL target (legacy row) degrades to type-only matching.
-    let renew_target: Option<String> = match sqlx::query_scalar::<_, Option<String>>(
-        "SELECT target FROM issued_actor_identity WHERE realm_id = ? AND serial_number = ?",
-    )
-    .bind(i64::from(actor_id.realm.realm_id))
-    .bind(actor_id.serial_number as i64)
-    .fetch_one(platform::storage::db::get_database().get_pool())
-    .await
-    {
-        Ok(target) => target,
-        Err(err) => {
-            platform::recording::warn!(
-                "Failed to look up target for actor {}: {}",
-                actor_id.to_string_repr(),
-                err
-            );
-            None
-        }
-    };
+    // Only the key the Actor is bound to renews it.
+    if let Err(error) = check_binding(actor_id, &signer, true).await {
+        release_attempt(&state, &lease).await;
+        return renew_error(error.code, error.message);
+    }
 
+    // 4. Only an authenticated caller learns the Realm state.
+    if let Err(validation_err) = RealmEntity::validate_realm(&actor_id.realm).await {
+        let (code, message) = RealmEntity::map_validation_error(validation_err);
+        let body = renew_error_body(code, format!("Realm validation failed: {message}"));
+        return complete_attempt(
+            &state,
+            &lease,
+            status_for_error_code(code),
+            body,
+            renew_error_body,
+        )
+        .await;
+    }
+
+    // 5. Re-issue access and TURN credentials for the original ActrId. /renew
+    // carries no package target, so recheck the one recorded for the actor.
+    let target = AIdIssuer::issued_target(actor_id).await;
     let mut register_ok = match issuer
-        .issue_credential_for_actor(actor_id, renew_target.as_deref())
+        .issue_credential_for_actor(actor_id, target.as_deref(), &signer)
         .await
     {
         Ok(ok) => ok,
@@ -588,39 +823,55 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
                 actor_id.to_string_repr(),
                 err
             );
+            release_attempt(&state, &lease).await;
             let (code, message) = aid_error_to_response(err);
-            return encode_renew_result(
-                status_for_error_code(code),
-                RenewCredentialResponse {
-                    result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                        code,
-                        message,
-                    })),
-                },
-            );
+            return renew_error(code, message);
         }
     };
 
-    // 5. Attach renewal token and expiry.
-    let (token, expires_at) = match renewal_outcome {
-        crate::renewal::RotationOutcome::Unchanged { token, expires_at } => (
-            token,
-            Some(prost_types::Timestamp {
-                seconds: expires_at,
-                nanos: 0,
-            }),
-        ),
-        crate::renewal::RotationOutcome::Rotated { token, expires_at } => (
-            token,
-            Some(prost_types::Timestamp {
-                seconds: expires_at,
-                nanos: 0,
-            }),
-        ),
+    // 6. Attach the renewal token and commit it with the response.
+    let (token, expires_at) = match &prepared.outcome {
+        crate::renewal::RotationOutcome::Unchanged { token, expires_at }
+        | crate::renewal::RotationOutcome::Rotated { token, expires_at } => {
+            (token.clone(), *expires_at)
+        }
     };
-
     register_ok.renewal_token = Some(token);
-    register_ok.renewal_token_expires_at = expires_at;
+    register_ok.renewal_token_expires_at = Some(prost_types::Timestamp {
+        seconds: expires_at,
+        nanos: 0,
+    });
+
+    let response_expires_at = register_ok_response_expiry(&register_ok);
+    let body = RenewCredentialResponse {
+        result: Some(renew_credential_response::Result::Success(register_ok)),
+    }
+    .encode_to_vec();
+    if let Err(error) = state
+        .idempotency
+        .complete_renewal(
+            &lease,
+            actor_id,
+            target.as_deref(),
+            &prepared,
+            &body,
+            response_expires_at,
+            &signer,
+        )
+        .await
+    {
+        platform::recording::warn!(
+            "Failed to commit credential renewal for actor {}: {}",
+            actor_id.to_string_repr(),
+            error
+        );
+        release_attempt(&state, &lease).await;
+        if let AttemptError::Refused(err) = error {
+            let (code, message) = aid_error_to_response(err);
+            return renew_error(code, message);
+        }
+        return attempt_error_response(error, renew_error_body);
+    }
 
     if let Some(ref ctr) = state.counters {
         ctr.record_request(true, start.elapsed().as_secs_f64() * 1000.0)
@@ -629,20 +880,13 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
 
     platform::recording::info!("Credential renewed for actor {}", actor_id.to_string_repr());
 
-    encode_renew_result(
-        StatusCode::OK,
-        RenewCredentialResponse {
-            result: Some(renew_credential_response::Result::Success(register_ok)),
-        },
-    )
+    protobuf_response(StatusCode::OK.as_u16(), body)
 }
 
 /// Health check endpoint
 ///
-/// Performs the following checks:
-/// 1. Whether the database connection is healthy
-/// 2. Whether the Signer service is reachable
-/// 3. Whether the key cache is valid
+/// Checks the database and the Signer, which signs every credential with
+/// the Realm's issuer key, and reports how many Realm issuer keys are loaded.
 async fn health_check(State(state): State<IssuerState>) -> Json<Value> {
     let mut checks = json!({
         "service": "issuer",
@@ -671,72 +915,9 @@ async fn health_check(State(state): State<IssuerState>) -> Json<Value> {
         }
     };
     checks["signer_service"] = json!(signer_status);
-
-    // Check key cache status
-    let cache_status = match state.issuer.check_key_cache_health().await {
-        Ok(info) => json!({"status": "ok", "key_id": info.key_id, "expires_in": info.expires_in}),
-        Err(e) => {
-            platform::recording::error!("Key cache health check failed: {}", e);
-            checks["status"] = json!("degraded");
-            json!({"status": "failed", "error": e.to_string()})
-        }
-    };
-    checks["key_cache"] = cache_status;
+    checks["realm_keys"] = json!(state.issuer.realm_key_count().await);
 
     Json(checks)
-}
-
-/// Get the current key status (id, expiry, minting usability)
-///
-/// For monitoring and debugging. Reports `status: "expired"` once the key
-/// can no longer mint credentials: the endpoint used to
-/// keep answering `success` for an expired key, hiding an ongoing outage
-/// while every signaling handshake failed with 401.
-async fn get_current_key(State(state): State<IssuerState>) -> Json<Value> {
-    match state.issuer.get_current_key_status().await {
-        Ok(status) => {
-            let status_word = if status.usable { "success" } else { "expired" };
-            Json(json!({
-                "status": status_word,
-                "key_id": status.key_id,
-                "expires_at": status.expires_at,
-                "expires_in": status.expires_in,
-                "expired": !status.usable
-            }))
-        }
-        Err(e) => {
-            platform::recording::error!("Failed to get current key: {}", e);
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to get key: {}", e)
-            }))
-        }
-    }
-}
-
-/// Returns the current Issuer signing public key (key_id + base64 pubkey)
-///
-/// Allows the signaling server or other services to pull the public key on demand for credential
-/// signature verification when the key cache misses.
-async fn get_signing_pubkey(State(state): State<IssuerState>) -> Json<Value> {
-    match state.issuer.get_current_signing_pubkey().await {
-        Ok((key_id, pubkey_bytes)) => {
-            use base64::Engine as _;
-            let pubkey_b64 = base64::engine::general_purpose::STANDARD.encode(&pubkey_bytes);
-            Json(json!({
-                "status": "success",
-                "key_id": key_id,
-                "pubkey": pubkey_b64
-            }))
-        }
-        Err(e) => {
-            platform::recording::error!("Failed to get signing pubkey: {}", e);
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to get signing pubkey: {}", e)
-            }))
-        }
-    }
 }
 
 /// Encode a RegisterResponse as protobuf bytes
@@ -758,25 +939,146 @@ fn encode_result(result: RegisterResponse) -> Bytes {
     Bytes::from(buf)
 }
 
-/// Encode a RenewCredentialResponse as protobuf bytes and set the matching HTTP status.
-fn encode_renew_result(status: StatusCode, result: RenewCredentialResponse) -> Response {
-    let mut buf = Vec::new();
-    let body = if let Err(err) = result.encode(&mut buf) {
-        platform::recording::error!("Failed to encode RenewCredentialResponse: {}", err);
-        let error_result = RenewCredentialResponse {
-            result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                code: 500,
-                message: format!("Failed to encode response: {err}"),
-            })),
-        };
-        let mut fallback_buf = Vec::new();
-        let _ = error_result.encode(&mut fallback_buf);
-        Bytes::from(fallback_buf)
-    } else {
-        Bytes::from(buf)
-    };
+fn protobuf_response(status: u16, body: Vec<u8>) -> Response {
+    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (
+        status,
+        [(CONTENT_TYPE, "application/x-protobuf")],
+        Bytes::from(body),
+    )
+        .into_response()
+}
 
-    (status, [("content-type", "application/x-protobuf")], body).into_response()
+fn register_error_body(code: u32, message: String) -> Vec<u8> {
+    RegisterResponse {
+        result: Some(register_response::Result::Error(ErrorResponse {
+            code,
+            message,
+        })),
+    }
+    .encode_to_vec()
+}
+
+fn renew_error_body(code: u32, message: String) -> Vec<u8> {
+    RenewCredentialResponse {
+        result: Some(renew_credential_response::Result::Error(ErrorResponse {
+            code,
+            message,
+        })),
+    }
+    .encode_to_vec()
+}
+
+/// `/reissue` reports errors in the body with HTTP 200.
+fn register_error(code: u32, message: String) -> Response {
+    protobuf_response(200, register_error_body(code, message))
+}
+
+/// `/renew` reports errors in the body and as the HTTP status.
+fn renew_error(code: u32, message: String) -> Response {
+    protobuf_response(
+        status_for_error_code(code).as_u16(),
+        renew_error_body(code, message),
+    )
+}
+
+/// How long a rejection stays the answer to its attempt.
+const REJECTED_ATTEMPT_RESPONSE_TTL_SECS: i64 = 5 * 60;
+
+/// Keep a stable rejection as the attempt's response and return it.
+/// `error_body` builds the route's error message should that fail.
+async fn complete_attempt(
+    state: &IssuerState,
+    lease: &AttemptLease,
+    status: StatusCode,
+    body: Vec<u8>,
+    error_body: fn(u32, String) -> Vec<u8>,
+) -> Response {
+    let expires_at = crate::renewal::now_secs().saturating_add(REJECTED_ATTEMPT_RESPONSE_TTL_SECS);
+    match state
+        .idempotency
+        .complete_response(lease, status.as_u16(), &body, expires_at)
+        .await
+    {
+        Ok(()) => protobuf_response(status.as_u16(), body),
+        Err(error) => {
+            release_attempt(state, lease).await;
+            attempt_error_response(error, error_body)
+        }
+    }
+}
+
+/// Let the same attempt be retried after a failure that changed nothing.
+async fn release_attempt(state: &IssuerState, lease: &AttemptLease) {
+    if let Err(error) = state.idempotency.release(lease).await {
+        platform::recording::warn!("Failed to release control attempt: {}", error);
+    }
+}
+
+/// Map an attempt failure to its HTTP status, with the error in a body built
+/// by `error_body` (the route's response message).
+fn attempt_error_response(error: AttemptError, error_body: fn(u32, String) -> Vec<u8>) -> Response {
+    let (status, message, retry_after_secs) = match &error {
+        AttemptError::InvalidAttemptId => (
+            StatusCode::BAD_REQUEST,
+            "attempt_id must contain exactly 16 UUID bytes",
+            None,
+        ),
+        AttemptError::Conflict => (
+            StatusCode::CONFLICT,
+            "attempt_id was already used with a different request",
+            None,
+        ),
+        AttemptError::Expired => (
+            StatusCode::GONE,
+            "idempotency result retention has expired; start a new attempt",
+            None,
+        ),
+        AttemptError::InProgress { retry_after_secs } => (
+            StatusCode::TOO_EARLY,
+            "the same control-plane attempt is still in progress",
+            Some(*retry_after_secs),
+        ),
+        AttemptError::LeaseLost => (
+            StatusCode::TOO_EARLY,
+            "the same control-plane attempt is still in progress",
+            Some(1),
+        ),
+        AttemptError::TokenRejected => (
+            StatusCode::UNAUTHORIZED,
+            "renewal token invalid or expired",
+            None,
+        ),
+        AttemptError::PossessionNotProven => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "actor identity possession not proven",
+            None,
+        ),
+        AttemptError::PublisherNonceRejected => (
+            StatusCode::FORBIDDEN,
+            "publisher authorization nonce already consumed",
+            None,
+        ),
+        AttemptError::Refused(_) => (StatusCode::FORBIDDEN, "credential refused", None),
+        AttemptError::Store(_) | AttemptError::Crypto(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal control-attempt store error",
+            None,
+        ),
+    };
+    if status.is_server_error() {
+        platform::recording::error!("Control-attempt failure: {}", error);
+    }
+    let mut response = protobuf_response(
+        status.as_u16(),
+        error_body(u32::from(status.as_u16()), message.to_string()),
+    );
+    if let Some(seconds) = retry_after_secs
+        && let Ok(value) = HeaderValue::from_str(&seconds.to_string())
+    {
+        response.headers_mut().insert(RETRY_AFTER, value);
+    }
+    response
 }
 
 fn status_for_error_code(code: u32) -> StatusCode {
@@ -807,16 +1109,12 @@ fn aid_error_to_response(err: AidError) -> (u32, String) {
         AidError::RealmError(_) => 403, // Forbidden
         AidError::PublisherNotVerified => 403,
         AidError::PackageRevoked => 403,
+        AidError::Membership(_) => 403,
 
         // Server errors (5xx)
         AidError::GenerationFailed(msg) => {
             // If the Signer is unavailable, return 503 (Service Unavailable)
-            // A lost race with an expired Signer key is also retryable: rotation
-            // may have produced a usable key by the next request.
-            if msg.contains("Signer unavailable")
-                || msg.contains("Signer service")
-                || msg.contains("has expired")
-            {
+            if msg.contains("Signer unavailable") || msg.contains("Signer service") {
                 503
             } else {
                 500
@@ -843,7 +1141,7 @@ fn aid_error_to_error_response(err: AidError) -> ErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{AIdCredential, ActrType, Realm, RegisterAuthMode};
+    use actr_protocol::{AIdCredential, ActrType, RegisterAuthMode};
     use prost::bytes::Bytes as ProstBytes;
 
     #[test]
@@ -855,7 +1153,7 @@ mod tests {
             version: "1.0.0".to_string(),
         };
 
-        let realm = Realm { realm_id: 12345 };
+        let realm = "k7m2q9xh@example.com".to_string();
 
         let request = RegisterRequest {
             actr_type,
@@ -879,9 +1177,110 @@ mod tests {
 
         // Decode
         let decoded_request = RegisterRequest::decode(buf.as_slice()).unwrap();
-        assert_eq!(decoded_request.realm.realm_id, 12345);
+        assert_eq!(decoded_request.realm, "k7m2q9xh@example.com");
         assert_eq!(decoded_request.actr_type.publisher, "apple");
         assert_eq!(decoded_request.actr_type.name, "iPhone15");
+    }
+
+    #[tokio::test]
+    async fn registration_state_is_not_kept_for_a_realm_retired_meanwhile() {
+        use actr_protocol::{AclRule, acl_rule::Permission};
+
+        crate::idempotency::tests::setup_db().await;
+        let realm = "raced@example.com";
+        RealmEntity::create(realm.to_string()).await.unwrap();
+        let signer = crate::test_support::owner_of(realm, 1).await;
+        // The request was authenticated; then the Realm retires.
+        RealmEntity::retire(realm).await.unwrap();
+
+        let actr_type = ActrType {
+            publisher: "acme".to_string(),
+            name: "worker".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        let request = RegisterRequest {
+            actr_type: actr_type.clone(),
+            realm: realm.to_string(),
+            acl: Some(actr_protocol::Acl {
+                rules: vec![AclRule {
+                    permission: Permission::Allow as i32,
+                    from_type: actr_type,
+                    source_realm: None,
+                }],
+            }),
+            ws_address: Some("ws://127.0.0.1:1".to_string()),
+            ..Default::default()
+        };
+        let register_ok = register_response::RegisterOk {
+            actr_id: actr_protocol::ActrId {
+                realm: realm.to_string(),
+                serial_number: 7,
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            persist_registration_state(&request, &register_ok, &signer).await,
+            Err((403, "Realm is retired".to_string()))
+        );
+        let pool = platform::storage::db::get_database().get_pool();
+        for table in ["actoracl", "pending_registration"] {
+            let rows: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE realm = ?"))
+                    .bind(realm)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap();
+            assert_eq!(rows, 0, "{table}");
+        }
+    }
+
+    #[test]
+    fn acl_rules_may_not_name_another_realm() {
+        use actr_protocol::acl_rule::{Permission, SourceRealm};
+
+        let request = |source_realm: Option<SourceRealm>| RegisterRequest {
+            actr_type: ActrType {
+                publisher: "test".to_string(),
+                name: "actor".to_string(),
+                version: "1.0.0".to_string(),
+            },
+            realm: "k7m2q9xh@example.com".to_string(),
+            acl: Some(actr_protocol::Acl {
+                rules: vec![actr_protocol::AclRule {
+                    permission: Permission::Allow as i32,
+                    from_type: ActrType {
+                        publisher: "test".to_string(),
+                        name: "client".to_string(),
+                        version: "1.0.0".to_string(),
+                    },
+                    source_realm,
+                }],
+            }),
+            ..Default::default()
+        };
+
+        for accepted in [
+            None,
+            Some(SourceRealm::AnyRealm(true)),
+            Some(SourceRealm::Realm("k7m2q9xh@example.com".to_string())),
+        ] {
+            assert!(check_acl_source_realms(&request(accepted)).is_ok());
+        }
+        assert!(check_acl_source_realms(&RegisterRequest::default()).is_ok());
+        for rejected in [
+            "p3n8w2rt@example.com",
+            "k7m2q9xh@other.example",
+            "K7M2Q9XH@example.com",
+            "not a realm",
+            "",
+        ] {
+            assert!(
+                check_acl_source_realms(&request(Some(SourceRealm::Realm(rejected.to_string()))))
+                    .is_err(),
+                "{rejected:?} must be rejected"
+            );
+        }
     }
 
     #[test]
@@ -893,7 +1292,7 @@ mod tests {
                 name: "actor".to_string(),
                 version: "1.0.0".to_string(),
             },
-            realm: Realm { realm_id: 456 },
+            realm: "test@example.com".to_string(),
             service: None,
             service_spec: None,
             acl: None,
@@ -912,7 +1311,7 @@ mod tests {
         request.encode(&mut buf).unwrap();
         let decoded_request = RegisterRequest::decode(buf.as_slice()).unwrap();
 
-        assert_eq!(decoded_request.realm.realm_id, 456);
+        assert_eq!(decoded_request.realm, "test@example.com");
         assert_eq!(decoded_request.actr_type.publisher, "test");
         assert_eq!(decoded_request.actr_type.name, "actor");
     }
@@ -925,13 +1324,8 @@ mod tests {
         // Test a successful RegisterResponse
         let register_ok = RegisterOk {
             actr_id: ActrId {
-                realm: Realm { realm_id: 1 },
+                realm: "test@example.com".to_string(),
                 serial_number: 123456,
-                r#type: ActrType {
-                    publisher: "test".to_string(),
-                    name: "actor".to_string(),
-                    version: "1.0.0".to_string(),
-                },
             },
             credential: AIdCredential {
                 key_id: 42,
@@ -961,7 +1355,7 @@ mod tests {
 
         assert!(decoded_response.result.is_some());
         if let Some(register_response::Result::Success(resp)) = decoded_response.result {
-            assert_eq!(resp.actr_id.realm.realm_id, 1);
+            assert_eq!(resp.actr_id.realm, "test@example.com");
             assert_eq!(resp.actr_id.serial_number, 123456);
             assert_eq!(resp.credential.key_id, 42);
             assert_eq!(resp.signaling_heartbeat_interval_secs, 30);

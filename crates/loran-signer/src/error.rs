@@ -35,15 +35,9 @@ pub enum SignerError {
     #[error("Key not found: key_id={0}")]
     KeyNotFound(u32),
 
-    /// The key exists but has passed its `expires_at`, so signing is refused
-    ///
-    /// Verifier caches drop verifying keys at
-    /// `expires_at` without any tolerance, so a signature minted afterwards
-    /// would produce a credential that fails every handshake. The tolerance
-    /// window only keeps key material
-    /// around for reads; it never extends the signing window.
-    #[error("Signing key expired: key_id={0}")]
-    KeyExpired(u32),
+    /// The named key was retired: its private key is gone and it never signs
+    #[error("Signing key retired: key_id={0}")]
+    KeyRetired(u32),
 
     /// Resource not found
     #[error("Not found: {0}")]
@@ -94,7 +88,7 @@ impl IntoResponse for SignerError {
                 // Do not leak the concrete key_id in production
                 (StatusCode::NOT_FOUND, "Resource not found".to_string())
             }
-            SignerError::KeyExpired(_) => (StatusCode::GONE, "Signing key expired".to_string()),
+            SignerError::KeyRetired(_) => (StatusCode::GONE, "Signing key retired".to_string()),
             SignerError::Database(_) | SignerError::Internal(_) | SignerError::Crypto(_) => {
                 // Never expose internal error details to the client
                 crate::recording::error!("Internal error: {:?}", self);
@@ -145,6 +139,10 @@ impl From<SignerError> for tonic::Status {
             SignerError::KeyNotFound(_) | SignerError::NotFound(_) => {
                 crate::recording::debug!("gRPC resource not found: {err:?}");
                 tonic::Status::not_found("not found")
+            }
+            SignerError::KeyRetired(_) => {
+                crate::recording::warn!("gRPC sign refused: {err:?}");
+                tonic::Status::failed_precondition("key retired")
             }
             _ => {
                 crate::recording::error!("gRPC internal error: {err:?}");
