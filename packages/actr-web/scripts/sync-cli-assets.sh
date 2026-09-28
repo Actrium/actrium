@@ -120,3 +120,5 @@ fi
 echo
 echo "Sync complete. Rebuild the actr binary so include_bytes! picks up the new content:"
 echo "  cargo build -p actr-cli --bin actr"
+
+# ci smoke: no functional change

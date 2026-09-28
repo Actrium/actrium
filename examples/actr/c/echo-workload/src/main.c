@@ -201,3 +201,5 @@ exports_actr_workload_workload_on_data_chunk_callback(
     actr_workload_guest_v2_event_t *event) {
     return callback_exit(event);
 }
+
+/* ci smoke: no functional change */

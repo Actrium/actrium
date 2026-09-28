@@ -254,3 +254,5 @@ fun realm(id: UInt): Realm = Realm(realmId = id)
 
 /** Create a Realm from an Int. */
 fun realm(id: Int): Realm = Realm(realmId = id.toUInt())
+
+// ci smoke: no functional change

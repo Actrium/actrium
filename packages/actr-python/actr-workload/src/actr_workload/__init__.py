@@ -44,3 +44,5 @@ __all__ = [
     "repo_wit",
     "resolved_wit_path",
 ]
+
+# ci smoke: no functional change

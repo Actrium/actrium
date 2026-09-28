@@ -191,3 +191,5 @@ async fn main() -> Result<()> {
     actr_ref.wait_for_shutdown().await;
     Ok(())
 }
+
+// ci smoke: no functional change

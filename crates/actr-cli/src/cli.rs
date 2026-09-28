@@ -407,3 +407,5 @@ fn validate_config_requirement(req: ConfigRequirement) -> Result<()> {
 #[cfg(test)]
 #[path = "cli_tests.rs"]
 mod tests;
+
+// ci smoke: no functional change
