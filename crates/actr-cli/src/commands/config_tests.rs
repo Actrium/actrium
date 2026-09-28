@@ -159,3 +159,26 @@ fn merge_values_overlays_tables_and_scalars() {
         Some(&Value::Integer(1))
     );
 }
+
+#[test]
+fn parses_multi_section_document_and_reads_nested_values() {
+    let value = parse_toml_document_value(
+        r#"
+[network]
+realm_id = 42
+
+[ui]
+format = "table"
+"#,
+        ".actr/config.toml",
+    )
+    .expect("config TOML should parse");
+
+    assert_eq!(
+        ConfigCommand::get_nested_value(&value, "ui.format"),
+        Some(&Value::String("table".to_string()))
+    );
+    assert!(ConfigCommand::get_nested_value(&value, "network.realm_id").is_some());
+    // A string leaf cannot be traversed further.
+    assert!(ConfigCommand::get_nested_value(&value, "ui.format.nested").is_none());
+}
