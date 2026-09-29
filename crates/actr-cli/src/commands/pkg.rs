@@ -462,7 +462,7 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
     println!("  manifest:  {} (signed content)", manifest_path.display());
     println!("  sig file:  {} (64 bytes raw Ed25519)", sig_path.display());
     println!("  key_id:    {}", key_id);
-    println!("  actr_type: {}:{}:{}", publisher, name, version);
+    println!("  actr_type: {}/{}@{}", publisher, name, version);
     println!("  target:    {}", args.target);
 
     Ok(())

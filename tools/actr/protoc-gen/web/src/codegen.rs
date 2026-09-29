@@ -110,7 +110,7 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     for dep in &req.dependencies {
         if let Some(ref at) = dep.actr_type {
             dep_entries.push(format!(
-                "  '{}': {{ actr_type: '{}:{}:{}' }},",
+                "  '{}': {{ actr_type: '{}/{}@{}' }},",
                 dep.alias, at.publisher, at.name, at.version
             ));
         } else {
@@ -1804,5 +1804,54 @@ mod tests {
                 .any(|file| file == "actr-gen-meta.json")
         );
         assert!(metadata["remote_services"][0].get("actr_type").is_none());
+    }
+
+    #[test]
+    fn actr_config_dependency_entry_uses_slash_at_actr_type_form() {
+        let req = WebCodegenRequest {
+            config_path: PathBuf::from("actr.toml"),
+            output_dir: PathBuf::from("src/generated"),
+            project_root: PathBuf::from("."),
+            overwrite_user_code: false,
+            package_name: "demo".to_string(),
+            publisher: "acme".to_string(),
+            actr_name: "demo".to_string(),
+            version: "0.1.0".to_string(),
+            description: String::new(),
+            authors: vec![],
+            license: String::new(),
+            tags: vec![],
+            signaling_url: "wss://signal.example.com".to_string(),
+            realm_id: 1,
+            visible_in_discovery: false,
+            issuer_endpoint: String::new(),
+            force_relay: false,
+            dependencies: vec![crate::request::DependencyInfo {
+                alias: "echo".to_string(),
+                actr_type: Some(crate::request::ActrTypeInfo {
+                    publisher: "acme".to_string(),
+                    name: "echo".to_string(),
+                    version: "1.0.0".to_string(),
+                }),
+            }],
+            stun_urls: vec![],
+            turn_urls: vec![],
+            observability: crate::request::ObservabilityInfo {
+                filter_level: "info".to_string(),
+                tracing_enabled: false,
+                tracing_endpoint: String::new(),
+                tracing_service_name: String::new(),
+            },
+            raw_toml: String::new(),
+            local_services: vec![],
+            remote_services: vec![],
+            files: vec![],
+            dispatch_spec_path: None,
+            dispatch_spec_hash: None,
+        };
+
+        let content = gen_actr_config(&req).unwrap();
+        assert!(content.contains("actr_type: 'acme/echo@1.0.0'"));
+        assert!(!content.contains("acme:echo:1.0.0"));
     }
 }
