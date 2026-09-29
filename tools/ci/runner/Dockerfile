@@ -197,8 +197,14 @@ ENV PATH="/home/runner/.cargo/bin:${PATH}" \
 #   wasm-pack        v0.15.0
 #   wasm-component-ld v0.5.30
 #   wasm-tools       v1.258.0
+#   sccache          v0.18.0
 # GITHUB_PROXY can prefix the github.com URLs in regions where release
 # downloads are slow.
+#
+# sccache is pinned to 0.18.0 instead of the 0.10.0 of the wasm-tools era:
+# 0.10.0 cannot start its daemon against the fleet's MinIO 2025-07 S3
+# endpoint, which used to force every runner Pod to download 0.18.0 during
+# startup. Installing it here removes that per-Pod download.
 RUN set -eux; \
     install_binary() { \
         local name="$1" url="$2" sha="$3"; \
@@ -226,10 +232,34 @@ RUN set -eux; \
         "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.258.0/wasm-tools-1.258.0-${tools_arch}.tar.gz" \
         b52d14eb74a4852cc249369bd4480c2b2fdd876145f41db51ff52269ded240ce; \
     install_binary sccache \
-        "https://github.com/mozilla/sccache/releases/download/v0.10.0/sccache-v0.10.0-x86_64-unknown-linux-musl.tar.gz" \
-        1fbb35e135660d04a2d5e42b59c7874d39b3deb17de56330b25b713ec59f849b; \
+        "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz" \
+        45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89; \
     wasm-pack --version; wasm-component-ld --version; wasm-tools --version; \
     sccache --version
+
+# wasm-opt (Binaryen version_117). wasm-pack resolves wasm-opt through a code
+# path (ureq) that ignores HTTP(S)_PROXY, so a job-time download of this
+# tarball is unreliable on the fleet's proxied egress; it is therefore baked
+# in. The archive ships a directory tree rather than a single binary, so it is
+# extracted whole and wasm-opt is symlinked onto PATH.
+# Pinned by sha256; the fleet is x86_64-only, and an unpinned arm64 checksum
+# would be worse than failing loudly, so only amd64 is wired up.
+ARG BINARYEN_VERSION=version_117
+RUN set -eux; \
+    case "$TARGETARCH" in \
+        amd64) binaryen_arch=x86_64-linux ;; \
+        *) echo "no pinned binaryen checksum for arch: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    archive=/tmp/binaryen.tar.gz; \
+    url="https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-${binaryen_arch}.tar.gz"; \
+    if [ -n "${GITHUB_PROXY}" ]; then url="${GITHUB_PROXY%/}/${url}"; fi; \
+    curl --fail --location --retry 3 --retry-all-errors -o "$archive" "$url"; \
+    echo "3dc677006555b355ea2da5e82602065a161d5e83eaefd3f759afa00b96e83212  $archive" | sha256sum --check --status; \
+    mkdir -p /home/runner/binaryen; \
+    tar --extract --gzip --file "$archive" --strip-components=1 --directory /home/runner/binaryen; \
+    ln -sf /home/runner/binaryen/bin/wasm-opt /home/runner/.cargo/bin/wasm-opt; \
+    rm -f "$archive"; \
+    wasm-opt --version
 
 # protoc — the CI uses arduino/setup-protoc@v3 with vars.PROTOC_VERSION.
 # We pin to a release from the protobuf repo and drop it on PATH.
@@ -464,7 +494,28 @@ ENV RUNNER_MANUALLY_TRAP_SIG=1 \
 # e.g. crates/actr-cli/tests/typescript_gen_scenarios.rs runs `npm install`) depend on
 # that. Put the toolcache bins on PATH so this image matches. setup-*
 # steps still hit the toolcache for version resolution as usual.
-ENV PATH="/opt/hostedtoolcache/node/${NODE_VERSION}/x64/bin:/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64/bin:${PATH}"
+#
+# The Python toolcache bin comes first because the system python3 in this
+# image is 3.10 while CI scripts (for example the e2e/package-runtime-echo
+# script, which uses the stdlib tomllib module) require 3.11+. This replaces
+# the `export PATH` the deployment used to run in its startup script.
+ENV PATH="/opt/hostedtoolcache/Python/${PY311}/x64/bin:/opt/hostedtoolcache/node/${NODE_VERSION}/x64/bin:/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64/bin:${PATH}"
+
+# Container entrypoint: runtime-only preparation (pre-start sccache) followed
+# by the runner agent. The script also forwards an explicit command, so
+# `docker run <image> <cmd>` and the `container:` workflow mode keep working.
+USER root
+COPY entrypoint.sh /usr/local/bin/runner-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/runner-entrypoint.sh
+USER runner
+
+# Actions cache integration. The fleet serves Actions file caches from an
+# in-cluster v1 cache server, so the worker is patched to keep job cache
+# traffic off the hosted v2 results endpoint. The patch is a byte-level
+# rename of one UTF-16LE literal and asserts that it applied exactly once;
+# see patch-runner-dll.py and README.md ("Actions cache integration").
+COPY --chown=runner:runner patch-runner-dll.py /tmp/patch-runner-dll.py
+RUN python3 /tmp/patch-runner-dll.py && rm -f /tmp/patch-runner-dll.py
 
 # Sanity-check the toolchain is on PATH at build time; a missing binary
 # fails the build instead of failing a CI job later.
@@ -473,11 +524,20 @@ RUN set -eux; \
     protoc --version; git --version; jq --version; sqlite3 --version; \
     python3 --version; pip3 --version; lsb_release -d; \
     node --version; npm --version; java -version; \
-    sccache --version; mold --version; \
+    sccache --version; mold --version; wasm-opt --version; \
     rustup run nightly rustc --version; \
     rustup component list --installed | grep -qE 'llvm-tools'; \
     rustup target list --installed | grep -q wasm32-unknown-unknown; \
     rustup target list --installed | grep -q wasm32-wasip2; \
+    \
+    # sccache must be the pinned 0.18.0: the fleet's MinIO endpoint rejects a
+    # 0.10.0 daemon startup, and such a regression only surfaces at job time.
+    sccache --version | grep -q 'sccache 0.18.0'; \
+    # tomllib is the 3.11+ stdlib module the e2e/package-runtime-echo script
+    # needs, so python3 on PATH must be the toolcache interpreter.
+    python3 -c 'import tomllib'; \
+    # Fail the build if the Actions cache worker patch silently did not apply.
+    python3 -c "from pathlib import Path; d = Path('/home/runner/actions-runner/bin/Runner.Worker.dll').read_bytes(); assert d.count('ACTIONS_RESULTS_URL'.encode('utf-16-le')) == 0, 'cache patch missing'; assert d.count('ACTIONS_RESULTS_ORL'.encode('utf-16-le')) == 1, 'cache patch malformed'; print('cache patch verified')"; \
     \
     # toolcache: every entry setup-* should find must exist WITH its
     # .complete marker, else the action silently re-downloads at job time.
@@ -501,9 +561,11 @@ RUN set -eux; \
     test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/com.pinterest.ktlint/ktlint-cli/${KTLINT_VERSION}"; \
     test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/org.jlleitschuh.gradle/ktlint-gradle/${KTLINT_GRADLE_VERSION}"
 
-# The runner agent is registered at container start (ARC injects the JIT
-# config via env, or config.sh runs manually); no ENTRYPOINT here so both
-# ARC and `container:` workflow modes can drive it.
+# The runner agent is registered at container start: ARC injects the JIT
+# config via ACTIONS_RUNNER_INPUT_JITCONFIG and run.sh consumes it. The
+# entrypoint additionally tolerates an explicit command, so the standalone
+# `container:` workflow mode can still drive the image directly.
+ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]
 LABEL org.opencontainers.image.title="actrium-runner" \
       org.opencontainers.image.description="Actrium self-hosted GitHub Actions runner (Linux)" \
       org.opencontainers.image.source="https://github.com/Actrium/actrium" \

@@ -1,0 +1,118 @@
+# vi: set ft=dockerfile:
+#
+# Incremental rebuild of the cache-enabled Actrium runner image.
+#
+# Why this file exists
+# --------------------
+# `Dockerfile` is the canonical, self-contained definition: it starts from
+# `ubuntu:22.04` and installs the whole toolchain. Building it requires Docker
+# Hub access and re-resolves every apt/tool download, so on the internal build
+# host it is not usable (Docker Hub is unreachable) and it would also pull
+# newer apt packages than the ones the running fleet was built with - an
+# unintended toolchain upgrade.
+#
+# Production image updates are therefore layered on top of the currently
+# published image, which keeps every inherited layer byte-identical and only
+# adds the bootstrap changes. This is the same shape the previously published
+# cache-enabled tag was built with (its history shows COPY/RUN of the DLL
+# patch as the top two layers).
+#
+# Keep the steps below in sync with the final stage of `Dockerfile`: both must
+# produce the same additions (wasm-opt, sccache, toolcache PATH, cache patch,
+# entrypoint).
+#
+# Build (from the repository root). The internal build host reaches github.com
+# only through the corporate HTTP proxy, which is passed as the predefined
+# proxy build argument (curl inside the build honours it):
+#   docker build \
+#     -f tools/ci/runner/Dockerfile.incremental \
+#     --build-arg HTTP_PROXY=http://calm.util.zlibs.com:8128 \
+#     --build-arg HTTPS_PROXY=http://calm.util.zlibs.com:8128 \
+#     -t harbor.zlibs.com/platform/actrium-runner:<tag> \
+#     tools/ci/runner/
+#
+# GITHUB_PROXY stays supported for prefix-style GitHub mirrors (same semantics
+# as the canonical Dockerfile); it is NOT an HTTP proxy, so do not point it at
+# an HTTP proxy endpoint.
+#
+# The base is pinned by digest. It is the plain (non-cache) tag, so the cache
+# patch is applied by this build rather than inherited, which keeps the whole
+# chain reproducible:
+#   harbor.zlibs.com/platform/actrium-runner:20260901
+#   -> sha256:5d90ceb14253b8a08d4ffea6ddce7efe6e2e80a8179d99f8ef145ef48fdd3d3c
+FROM harbor.zlibs.com/platform/actrium-runner@sha256:5d90ceb14253b8a08d4ffea6ddce7efe6e2e80a8179d99f8ef145ef48fdd3d3c
+
+# Optional GitHub release proxy prefix. The internal build network reaches
+# github.com only through the corporate proxy, so builds pass this explicitly.
+ARG GITHUB_PROXY=
+ARG BINARYEN_VERSION=version_117
+ARG PY311=3.11.16
+
+USER root
+
+# sccache 0.18.0 replaces the 0.10.0 shipped in the base image: 0.10.0 cannot
+# start its daemon against the fleet's MinIO 2025-07 S3 endpoint. Installing
+# it at the same path overwrites the old binary, so no duplicate is kept.
+# Pinned by sha256; a tampered upstream release fails the build loudly.
+RUN set -eux; \
+    archive=/tmp/sccache.tar.gz; \
+    url="https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz"; \
+    if [ -n "${GITHUB_PROXY}" ]; then url="${GITHUB_PROXY%/}/${url}"; fi; \
+    curl --fail --location --retry 3 --retry-all-errors -o "$archive" "$url"; \
+    echo "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89  $archive" | sha256sum --check --status; \
+    dir="$(mktemp -d)"; \
+    tar --extract --gzip --file "$archive" --strip-components=1 --directory "$dir"; \
+    install --mode=0755 --owner=runner --group=runner "$dir/sccache" /home/runner/.cargo/bin/sccache; \
+    rm -rf "$archive" "$dir"; \
+    runuser -u runner -- /home/runner/.cargo/bin/sccache --version
+
+# wasm-opt (Binaryen version_117). wasm-pack resolves wasm-opt through a code
+# path (ureq) that ignores HTTP(S)_PROXY, so a job-time download is
+# unreliable; it is baked in instead. The archive ships a directory tree, so
+# it is extracted whole and wasm-opt is symlinked onto PATH.
+RUN set -eux; \
+    archive=/tmp/binaryen.tar.gz; \
+    url="https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz"; \
+    if [ -n "${GITHUB_PROXY}" ]; then url="${GITHUB_PROXY%/}/${url}"; fi; \
+    curl --fail --location --retry 3 --retry-all-errors -o "$archive" "$url"; \
+    echo "3dc677006555b355ea2da5e82602065a161d5e83eaefd3f759afa00b96e83212  $archive" | sha256sum --check --status; \
+    mkdir -p /home/runner/binaryen; \
+    tar --extract --gzip --file "$archive" --strip-components=1 --directory /home/runner/binaryen; \
+    ln -sf /home/runner/binaryen/bin/wasm-opt /home/runner/.cargo/bin/wasm-opt; \
+    chown -R runner:runner /home/runner/binaryen; \
+    rm -f "$archive"; \
+    runuser -u runner -- env PATH="/home/runner/.cargo/bin:$PATH" wasm-opt --version
+
+# Container entrypoint: runtime-only preparation (pre-start sccache) followed
+# by the runner agent. An explicit command is forwarded, so `docker run
+# <image> <cmd>` and the `container:` workflow mode keep working.
+COPY entrypoint.sh /usr/local/bin/runner-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/runner-entrypoint.sh
+
+# Actions cache integration: patch the worker so job cache traffic stays on
+# the fleet's in-cluster v1 cache server instead of the hosted v2 results
+# endpoint. Applied here (not inherited) so the cache-enabled image is
+# reproducible from the plain base.
+COPY --chown=runner:runner patch-runner-dll.py /tmp/patch-runner-dll.py
+RUN runuser -u runner -- python3 /tmp/patch-runner-dll.py && rm -f /tmp/patch-runner-dll.py
+
+# The Python toolcache bin goes first: the base image's system python3 is
+# 3.10, while CI scripts (for example the e2e/package-runtime-echo script,
+# which imports the stdlib tomllib module) require 3.11+. This replaces the
+# `export PATH` the deployment used to run in its startup script.
+ENV PATH="/opt/hostedtoolcache/Python/${PY311}/x64/bin:${PATH}"
+
+USER runner
+
+# Fail the build - not a CI job - when the bootstrap is incomplete.
+RUN set -eux; \
+    sccache --version | grep -q 'sccache 0.18.0'; \
+    wasm-opt --version; \
+    python3 --version; \
+    python3 -c 'import tomllib'; \
+    test "$(id -u)" = "1001"; \
+    test -x /usr/local/bin/runner-entrypoint.sh; \
+    sh -n /usr/local/bin/runner-entrypoint.sh; \
+    python3 -c "from pathlib import Path; d = Path('/home/runner/actions-runner/bin/Runner.Worker.dll').read_bytes(); assert d.count('ACTIONS_RESULTS_URL'.encode('utf-16-le')) == 0, 'cache patch missing'; assert d.count('ACTIONS_RESULTS_ORL'.encode('utf-16-le')) == 1, 'cache patch malformed'; print('cache patch verified')"
+
+ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]
