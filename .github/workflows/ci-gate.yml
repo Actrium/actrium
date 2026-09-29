@@ -145,7 +145,7 @@ jobs:
     name: E2E Package Runtime
     needs: determine
     if: needs.determine.outputs.e2e_package_runtime == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -299,7 +299,7 @@ jobs:
     name: Test (Rust, ${{ matrix.shard }})
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
@@ -1055,7 +1055,7 @@ jobs:
     name: WebRTC
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     env:
