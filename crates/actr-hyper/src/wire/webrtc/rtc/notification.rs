@@ -25,7 +25,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::wire::webrtc::rtc::status::RtcPeerSnapshot;
 
-type HookProjectionState = Arc<Mutex<HashMap<ActrId, (Option<WebRtcPeerStatus>, bool)>>>;
+/// Per-peer projection memory: the previously observed status, the previous
+/// sendability, and the Connected-epoch latch (see
+/// [`apply_connected_epoch_latch`]).
+type HookProjectionState = Arc<Mutex<HashMap<ActrId, (Option<WebRtcPeerStatus>, bool, bool)>>>;
 
 /// A snapshot observer. Called on the node-owned projection task (never on the
 /// controller), and panics are caught and logged rather than propagated.
@@ -189,6 +192,39 @@ pub(crate) fn project_legacy_hooks(
     out
 }
 
+/// S6-6c: legacy `WebRtcConnected`/`WebRtcDisconnected` hooks must alternate.
+///
+/// The sendable edge is not always epoch-clean: a renegotiation or a brief
+/// transport wobble can drop and regain sendability while the public status
+/// stays away from `Idle`/`Recovering`, so no disconnect is projected in
+/// between. Re-firing `WebRtcConnected` for such an intra-epoch flap makes
+/// mobile clients observe a duplicate `connected` edge (P14 regression).
+/// The latch suppresses a repeated `WebRtcConnected` until a
+/// `WebRtcDisconnected` has been projected for the peer.
+pub(crate) fn apply_connected_epoch_latch(
+    events: Vec<crate::wire::webrtc::HookEvent>,
+    connected_latched: bool,
+) -> (Vec<crate::wire::webrtc::HookEvent>, bool) {
+    use crate::wire::webrtc::HookEvent;
+
+    let mut latched = connected_latched;
+    let mut out = Vec::with_capacity(events.len());
+    for event in events {
+        match &event {
+            HookEvent::WebRtcConnected { .. } => {
+                if latched {
+                    continue;
+                }
+                latched = true;
+            }
+            HookEvent::WebRtcDisconnected { .. } => latched = false,
+            _ => {}
+        }
+        out.push(event);
+    }
+    (out, latched)
+}
+
 /// W5/B3: snapshot→hook projection for the RTC backend.
 ///
 /// S6-6b: fully transition-driven. The projection consumes the Manager's
@@ -237,12 +273,16 @@ async fn run_hook_projection_with_callback(
             let mut states = observer_state
                 .lock()
                 .expect("RTC hook projection state lock");
-            let state = states.entry(snap.peer.clone()).or_insert((None, false));
+            let state = states
+                .entry(snap.peer.clone())
+                .or_insert((None, false, false));
             let mut events = vec![HookEvent::WebRtcStateChanged {
                 state: snap.to_public(),
             }];
-            events.extend(project_legacy_hooks(state.0, state.1, &snap));
-            *state = (Some(snap.status), snap.sendable);
+            let (legacy, latched) =
+                apply_connected_epoch_latch(project_legacy_hooks(state.0, state.1, &snap), state.2);
+            events.extend(legacy);
+            *state = (Some(snap.status), snap.sendable, latched);
             events
         };
         let cb = cb.clone();
