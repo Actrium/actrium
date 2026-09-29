@@ -38,7 +38,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -80,10 +80,10 @@ jobs:
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm Component Model toolchain
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          cargo install wasm-component-ld --version 0.5.26 --locked --force
+          cargo install wasm-tools --version 1.253.0 --locked --force
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - uses: Swatinem/rust-cache@v2
         with:
           # Distinct from package-runtime-echo's cache: the polyglot scenario
@@ -214,7 +214,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -257,10 +257,10 @@ jobs:
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm Component Model toolchain
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          cargo install wasm-component-ld --version 0.5.26 --locked --force
+          cargo install wasm-tools --version 1.253.0 --locked --force
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Install web binding root deps (puppeteer)
         working-directory: packages/actr-web
@@ -318,7 +318,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -402,7 +402,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -490,11 +490,11 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - name: Install wasm Component Model toolchain
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          cargo install wasm-component-ld --version 0.5.26 --locked --force
+          cargo install wasm-tools --version 1.253.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -564,10 +564,10 @@ jobs:
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm Component Model toolchain
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          cargo install wasm-component-ld --version 0.5.26 --locked --force
+          cargo install wasm-tools --version 1.253.0 --locked --force
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -644,7 +644,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - name: Install uniffi-bindgen
         run: cargo install uniffi --version 0.31.1 --locked --features cli --bin uniffi-bindgen
       - uses: Swatinem/rust-cache@v2
