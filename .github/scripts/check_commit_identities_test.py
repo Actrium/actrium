@@ -64,7 +64,34 @@ class CommitIdentityTest(unittest.TestCase):
         self.assertEqual(identity_check.validate_identity(allowed), [])
         self.assertEqual(len(identity_check.validate_identity(exposed)), 1)
 
-    def test_github_service_identity_is_limited_to_merge_commits(self) -> None:
+    def test_swift_manifest_filenames_in_messages(self) -> None:
+        messages = (
+            ("ships swift-tools-version 6.2 plus a Package@swift-6.1.swift fallback.", 0),
+            ("Use `packages/example/Package@swift-6.swift`.", 0),
+            ("Use Package@swift-6.1.2.swift and Package@swift-6.2.swift", 0),
+            ("Package@swift-6.1.swift; Signed-off-by: Peer <dev@example.com>", 1),
+            ("Contact dev@swift-6.1.swift", 1),
+            ("Contact Package@swift-6.1.swift.example.com", 1),
+            ("Contact Package@swift-latest.swift", 1),
+        )
+        for message, expected_errors in messages:
+            with self.subTest(message=message):
+                commit = identity_check.CommitIdentity(
+                    sha="d" * 40,
+                    author_name="Developer",
+                    author_email="developer@users.noreply.github.com",
+                    committer_name="Developer",
+                    committer_email="developer@users.noreply.github.com",
+                    parent_count=1,
+                    message=message,
+                )
+                self.assertEqual(len(identity_check.validate_identity(commit)), expected_errors)
+
+        self.assertFalse(
+            identity_check.is_allowed_identity("Developer", "Package@swift-6.1.swift")
+        )
+
+    def test_github_service_identity_does_not_require_multiple_parents(self) -> None:
         base = dict(
             sha="c" * 40,
             author_name="Developer",
@@ -74,15 +101,60 @@ class CommitIdentityTest(unittest.TestCase):
             message="Merge pull request #1",
         )
         merge = identity_check.CommitIdentity(parent_count=2, **base)
-        ordinary = identity_check.CommitIdentity(parent_count=1, **base)
+        squash = identity_check.CommitIdentity(
+            parent_count=1,
+            **{**base, "message": "chore(release): basic train v0.10.0"},
+        )
         wrong_name = identity_check.CommitIdentity(
             parent_count=2,
             **{**base, "committer_name": "Developer"},
         )
+        wrong_email = identity_check.CommitIdentity(
+            parent_count=1,
+            **{**base, "committer_email": "noreply@example.com"},
+        )
 
         self.assertEqual(identity_check.validate_identity(merge), [])
-        self.assertEqual(len(identity_check.validate_identity(ordinary)), 1)
+        self.assertEqual(identity_check.validate_identity(squash), [])
         self.assertEqual(len(identity_check.validate_identity(wrong_name)), 1)
+        self.assertEqual(len(identity_check.validate_identity(wrong_email)), 1)
+
+    def test_single_parent_github_service_committer_passes_end_to_end(self) -> None:
+        # Regression test for #216: a squash merge carries the GitHub service
+        # committer on a single-parent commit, with or without a PR suffix or
+        # release prefix in the subject.
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            base_sha = self._commit(
+                repo,
+                "101+developer@users.noreply.github.com",
+                "base",
+            )
+            squash_sha = self._commit(
+                repo,
+                "101+developer@users.noreply.github.com",
+                "chore(release): basic train v0.10.0",
+                committer_name="GitHub",
+                committer_email="noreply@github.com",
+            )
+            pr_suffixed_sha = self._commit(
+                repo,
+                "101+developer@users.noreply.github.com",
+                "fix(ci): stabilize protocol audits (#202)",
+                committer_name="GitHub",
+                committer_email="noreply@github.com",
+            )
+
+            commits = identity_check.commit_range(repo, base_sha, pr_suffixed_sha)
+            self.assertEqual(commits, [squash_sha, pr_suffixed_sha])
+            for sha in commits:
+                self.assertEqual(
+                    identity_check.validate_identity(
+                        identity_check.read_identity(repo, sha)
+                    ),
+                    [],
+                )
 
     def test_only_commits_after_base_are_checked(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -170,14 +242,20 @@ class CommitIdentityTest(unittest.TestCase):
             self.assertEqual(identity_check.commit_range(checker, old_sha, new_sha), [new_sha])
 
     @staticmethod
-    def _commit(repo: Path, email: str, message: str) -> str:
+    def _commit(
+        repo: Path,
+        email: str,
+        message: str,
+        committer_name: str = "Developer",
+        committer_email: str = "",
+    ) -> str:
         env = os.environ.copy()
         env.update(
             {
                 "GIT_AUTHOR_NAME": "Developer",
                 "GIT_AUTHOR_EMAIL": email,
-                "GIT_COMMITTER_NAME": "Developer",
-                "GIT_COMMITTER_EMAIL": email,
+                "GIT_COMMITTER_NAME": committer_name,
+                "GIT_COMMITTER_EMAIL": committer_email or email,
             }
         )
         subprocess.run(

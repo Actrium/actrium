@@ -145,14 +145,14 @@ jobs:
     name: E2E Package Runtime
     needs: determine
     if: needs.determine.outputs.e2e_package_runtime == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 45
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown
       - name: Install Linux e2e dependencies
@@ -160,7 +160,10 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update
           sudo apt-get install -y jq sqlite3 lsof perl
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -168,6 +171,8 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.15.0 --locked --force
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Run package runtime echo e2e (PR gate, MODE=path1)
@@ -182,6 +187,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
@@ -213,6 +220,15 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile
+          # the wasm_actor_fixture Component under --all-features.
+          targets: wasm32-wasip2
+          # rustfmt + clippy are not in the minimal profile; this job runs
+          # `cargo fmt --check` and clippy with -D warnings.
+          components: rustfmt,clippy
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: OTel payload-logging guard
@@ -283,7 +299,7 @@ jobs:
     name: Test (Rust, ${{ matrix.shard }})
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
@@ -306,6 +322,10 @@ jobs:
       # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
       # compiling the fixture tests out.
       ACTR_REQUIRE_WASM_FIXTURE: "1"
+      # Fail the bindable-address probe instead of skipping: the mobile
+      # recovery tests must not go green on a runner where their rebind
+      # evidence never executed.
+      ACTR_REQUIRE_NON_LOOPBACK_IPV4: "1"
       # ~2.7k test binaries with debug info blow the runner's ~14 GB SSD and
       # slow linking; CI failures do not need local-variable debug info.
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -314,16 +334,22 @@ jobs:
       # workspace size. Covers rustc invocations across shards/jobs.
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
-      # nextest filterset selecting the realtime shard's binaries; the rest
-      # shard runs `not(...)`. Keep in sync with the shard rationale above.
+      # nextest filterset selecting the realtime shard's binaries and the
+      # in-crate connection-governance suites; the rest shard runs `not(...)`.
+      # Keep in sync with the shard rationale above.
       REALTIME_BINARIES: >-
         binary(mobile_rtc_pair_contract)
         | binary(mobile_rtc_multi_peer)
+        | (package(actr-hyper) and test(/^connection_governance_matrix::/))
+        | (package(actr-hyper) and test(/^connection_governance_production::/))
+        | (package(actr-hyper) and test(/^connection_governance_inflight::/))
+        | binary(recovery_attempt_timer)
         | binary(webrtc_large_mobile_recovery)
         | binary(mobile_full_disconnect_recovery)
         | binary(mobile_network_event_scenarios)
         | binary(ice_restart)
         | binary(ice_restart_with_signaling_disruption)
+        | binary(ice_restart_unilateral_outage)
         | binary(webrtc_large_data_transfer)
         | binary(webrtc_initial_connection_timeout)
         | binary(media_loopback)
@@ -336,12 +362,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile the
           # wasm_actor_fixture Component under --all-features (wasm-engine).
           targets: wasm32-wasip2,wasm32-unknown-unknown
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
@@ -771,7 +800,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
@@ -817,14 +846,10 @@ jobs:
           ACTR_XCFRAMEWORK_TARGETS: macos
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
-          ACTR_BINDINGS_PATH=dist/ActrBindings \
-          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           ./build-xcframework.sh
       - name: Build Swift bindings package
         working-directory: packages/actr-swift
         run: |
-          ACTR_BINDINGS_PATH=dist/ActrBindings \
-          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           swift build
       - name: Pre-build mock-actrix
         run: cargo build -p actr-mock-actrix --bin mock-actrix
@@ -903,6 +928,25 @@ jobs:
         run: bash build.sh
       - name: crates/actr-cli/assets sync drift gate
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --check --skip-sw-host
+
+      - name: Run web-sdk unit tests (vitest)
+        working-directory: packages/actr-web
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+          pnpm install --frozen-lockfile
+          # Build the SDK (and its @actrium/actr-dom dependency, whose
+          # type declarations the SDK build consumes) so the test asserts
+          # the published dist service-worker bytes, not just the sources.
+          pnpm --filter @actrium/actr-dom run build
+          pnpm --filter @actrium/actr-web run build
+          # `pnpm exec` fails when the filter matches no project, so a
+          # removed/renamed web-sdk cannot silently turn this into a green
+          # no-op; `vitest run` fails when no test files are found.
+          pnpm --filter @actrium/actr-web exec vitest run
 
   c_go_workloads:
     name: C and Go Workloads
@@ -1000,11 +1044,11 @@ jobs:
           --ignored
           --nocapture
 
-  webrtc_v020:
-    name: WebRTC v0.20
+  webrtc:
+    name: WebRTC
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     env:
@@ -1013,10 +1057,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
+          components: clippy
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
@@ -1028,18 +1076,17 @@ jobs:
           save-if: "false"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
-      # Gate the parallel webrtc-rs v0.20 migration path (the `webrtc-v020`
-      # optional feature), which is otherwise not exercised by CI.
-      - name: Check (webrtc-v020)
-        run: cargo check -p actr-hyper --features webrtc-v020 --all-targets
-      - name: Clippy (webrtc-v020, deny warnings)
-        run: cargo clippy -p actr-hyper --all-targets --features webrtc-v020 -- -D warnings
+      # Exercise the native RTC implementation in a dedicated job.
+      - name: Check (WebRTC)
+        run: cargo check -p actr-hyper --all-targets
+      - name: Clippy (WebRTC, deny warnings)
+        run: cargo clippy -p actr-hyper --all-targets -- -D warnings
       # nextest (not bare cargo test): the real-PC suites in this filter hit
       # CI-load handshake-timing flakes, and libtest would fail the whole job
       # on the first one without retries or running the rest. nextest picks up
       # the .config/nextest.toml retry overrides and --no-fail-fast semantics.
-      - name: Test (webrtc-v020)
-        run: cargo nextest run -p actr-hyper --features webrtc-v020 -E 'test(/^wire::webrtc::v020/)' --no-fail-fast
+      - name: Test (WebRTC)
+        run: cargo nextest run -p actr-hyper -E 'test(/^wire::webrtc::rtc/)' --no-fail-fast
 
   cjk:
     name: Language Policy
@@ -1058,7 +1105,9 @@ jobs:
       - name: Check default-language content and portable paths
         run: python .github/scripts/check_cjk.py
       - name: Reject retired package protocol identifiers
-        run: scripts/actrium/check-retired-protocol-names.sh
+        run: |
+          python3 scripts/actrium/check_retired_protocol_names_test.py
+          scripts/actrium/check-retired-protocol-names.sh
 
   csharp:
     name: C#
@@ -1087,7 +1136,7 @@ jobs:
       - web
       - c_go_workloads
       - test
-      - webrtc_v020
+      - webrtc
       - cjk
     env:
       MODE: ${{ needs.determine.outputs.mode }}
@@ -1108,7 +1157,7 @@ jobs:
       E2E_RUST_RESULT: ${{ needs.e2e_rust.result }}
       E2E_PACKAGE_RUNTIME_RESULT: ${{ needs.e2e_package_runtime.result }}
       TEST_RESULT: ${{ needs.test.result }}
-      WEBRTC_V020_RESULT: ${{ needs.webrtc_v020.result }}
+      WEBRTC_RESULT: ${{ needs.webrtc.result }}
       CJK_RESULT: ${{ needs.cjk.result }}
     steps:
       - name: Summarize gate
@@ -1134,7 +1183,7 @@ jobs:
               "e2e_rust": os.environ["E2E_RUST_RESULT"],
               "e2e_package_runtime": os.environ["E2E_PACKAGE_RUNTIME_RESULT"],
               "test": os.environ["TEST_RESULT"],
-              "webrtc_v020": os.environ["WEBRTC_V020_RESULT"],
+              "webrtc": os.environ["WEBRTC_RESULT"],
               "cjk": os.environ["CJK_RESULT"],
           }
 

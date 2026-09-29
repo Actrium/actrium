@@ -127,7 +127,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown
 
@@ -366,7 +366,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown
 
@@ -532,7 +532,7 @@ jobs:
           node-version: "24"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: ${{ matrix.target }}
 
@@ -748,7 +748,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
 
@@ -909,7 +909,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: aarch64-linux-android,x86_64-linux-android
 

@@ -52,8 +52,8 @@
 //! │           (Channel Management)                      │  HostTransport
 //! │                                                     │  PeerTransport
 //! ├─────────────────────────────────────────────────────┤
-//! │  Layer 0: Wire                                      │  WebRtcGate
-//! │           (Physical Connections)                     │  WebRtcCoordinator
+//! │  Layer 0: Wire                                      │  RtcPeerController
+//! │           (Physical Connections)                     │  RtcConnectionManager
 //! │                                                     │  SignalingClient
 //! └─────────────────────────────────────────────────────┘
 //! ```
@@ -2149,3 +2149,26 @@ async fn load_or_create_instance_uid_local(data_dir: &std::path::Path) -> HyperR
 #[cfg(all(not(target_arch = "wasm32"), test))]
 #[path = "lib_tests.rs"]
 mod tests;
+
+// The connection-governance suites exercise private production seams (for
+// example, physical-session retirement) and therefore run as in-crate tests.
+// Keeping their sources under `tests/support` avoids exposing those controls
+// through the feature-selectable `test_support` module.
+#[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+extern crate self as actr_hyper;
+
+#[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+#[path = "../tests/support/governance.rs"]
+mod connection_governance_support;
+
+#[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+#[path = "../tests/support/connection_governance_matrix.rs"]
+mod connection_governance_matrix;
+
+#[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+#[path = "../tests/support/connection_governance_production.rs"]
+mod connection_governance_production;
+
+#[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+#[path = "../tests/support/connection_governance_inflight.rs"]
+mod connection_governance_inflight;

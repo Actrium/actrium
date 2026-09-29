@@ -10,7 +10,7 @@ set -euo pipefail
 #   ./scripts/package-binary.sh v0.1.0
 #
 # Prerequisites:
-# - Run ./build-xcframework.sh first to generate ActrFFI.xcframework
+# - Run ./build-xcframework.sh first to generate dist/ActrFFI.xcframework
 # - swift (for `swift package compute-checksum`)
 # - python3 (for deterministic ZIP creation)
 
@@ -25,7 +25,7 @@ resolve_root_path() {
 }
 
 DIST_DIR="$(resolve_root_path "${ACTR_DIST_DIR:-dist}")"
-FRAMEWORK_DIR="$(resolve_root_path "${ACTR_BINARY_PATH:-ActrFFI.xcframework}")"
+FRAMEWORK_DIR="$(resolve_root_path "${ACTR_BINARY_PATH:-dist/ActrFFI.xcframework}")"
 ZIP_PATH="${DIST_DIR}/ActrFFI.xcframework.zip"
 RELEASE_REPOSITORY="${ACTR_RELEASE_REPOSITORY:-Actrium/actr-swift-package-sync}"
 

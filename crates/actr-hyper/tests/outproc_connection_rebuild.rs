@@ -1,6 +1,6 @@
 //! PeerGate connection establishment, teardown, and rebuild integration tests.
 //!
-//! All scenarios use the production webrtc-rs v0.20 layering and real
+//! All scenarios use the production webrtc-rs layering and real
 //! WebSocket signaling. No synthetic 0.14 `ConnectionEvent` is injected.
 
 use std::time::Duration;
@@ -62,12 +62,18 @@ async fn test_connection_rebuild_after_failure() {
 
     // Preserve the legacy trigger: a failed PeerConnection callback, followed
     // by the network-online retry hint. The compatibility seam publishes the
-    // v0.20 `PeerConnectionStateChanged(Failed)` fact through the exact mailbox
+    // RTC `PeerConnectionStateChanged(Failed)` fact through the exact mailbox
     // used by `PeerConnectionEventHandler`.
     assert_eq!(
         harness.peer(100).rtc.fail_peer(&target).await.unwrap(),
         old_generation
     );
+    harness
+        .peer(100)
+        .rtc
+        .wait_state(&target, Duration::from_secs(5), |state| !state.sendable)
+        .await
+        .expect("failed callback must invalidate the old sendable snapshot");
     harness.peer(100).retry_failed().await;
     harness
         .wait_for_ice_restart_count(1, Duration::from_secs(20))
@@ -85,7 +91,7 @@ async fn test_connection_rebuild_after_failure() {
         .await;
     assert_eq!(
         recovered.pc_generation, old_generation,
-        "Failed without an address change uses same-generation soft recovery"
+        "an Offerer soft recovery should keep the existing PeerConnection generation"
     );
     rpc(&harness, "rebuild-probe").await;
     harness.shutdown().await;

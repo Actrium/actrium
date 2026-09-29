@@ -12,7 +12,9 @@ use super::Dest; // Re-exported from actr-framework
 use super::dest_transport::DestTransport;
 use super::error::{NetworkError, NetworkResult};
 use super::lane::{DeliveryProgress, DeliveryProgressCell};
+use super::route_table::PayloadTypeExt;
 use super::wire_handle::{WireHandle, WireIdentity};
+use super::wire_pool::ReadySet;
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -21,7 +23,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock, watch};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -114,6 +116,7 @@ enum DestState {
 /// immediately.
 struct ConnectionCreatorGuard {
     transports: Arc<RwLock<HashMap<Dest, DestState>>>,
+    transports_revision: watch::Sender<u64>,
     dest: Dest,
     flight: Arc<ConnectionFlight>,
     armed: bool,
@@ -122,11 +125,13 @@ struct ConnectionCreatorGuard {
 impl ConnectionCreatorGuard {
     fn new(
         transports: Arc<RwLock<HashMap<Dest, DestState>>>,
+        transports_revision: watch::Sender<u64>,
         dest: Dest,
         flight: Arc<ConnectionFlight>,
     ) -> Self {
         Self {
             transports,
+            transports_revision,
             dest,
             flight,
             armed: true,
@@ -148,6 +153,7 @@ impl Drop for ConnectionCreatorGuard {
         let transports = Arc::clone(&self.transports);
         let dest = self.dest.clone();
         let flight = Arc::clone(&self.flight);
+        let revision = self.transports_revision.clone();
         tokio::spawn(async move {
             let mut transports = transports.write().await;
             let owns_flight = matches!(
@@ -156,6 +162,7 @@ impl Drop for ConnectionCreatorGuard {
             );
             if owns_flight {
                 transports.remove(&dest);
+                revision.send_modify(|rev| *rev += 1);
             }
             drop(transports);
             flight.completion.notify_waiters();
@@ -234,6 +241,7 @@ pub(crate) struct DestTransportRef {
 pub(crate) struct PeerSendAttempt<T> {
     pub(crate) result: NetworkResult<T>,
     pub(crate) progress: DeliveryProgress,
+    pub(crate) proven_pre_send: bool,
 }
 
 impl DestTransportRef {
@@ -284,9 +292,25 @@ pub struct PeerTransport {
     /// Wire builder (used to create Wire handles for new DestTransport)
     conn_factory: Arc<dyn WireBuilder>,
 
+    /// Generation counter bumped on every destination lifecycle transition
+    /// (`Connecting -> Connected`, including fallback materializations).
+    /// Readiness waiters that hold no per-destination ready-set yet (the
+    /// destination did not exist when they parked) subscribe to this so a
+    /// fallback that becomes ready wakes them instead of parking until the
+    /// operation deadline.
+    dest_state_epoch: watch::Sender<u64>,
+
     #[allow(unused)]
     /// todo: Set of peers currently being closed (to reject new connection attempts) ,closed requests will be cleaned up in event listener
+    #[allow(unused)]
     closing_peers: Arc<RwLock<HashSet<Dest>>>,
+
+    /// Revision of the `transports` map, bumped inside every mutation.
+    /// `wait_until_route_ready` subscribers that found no destination
+    /// ready-set watch this instead of parking forever, so a later
+    /// materialization (another path committing a `DestTransport`) wakes
+    /// them to re-run the lookup.
+    transports_revision: watch::Sender<u64>,
 
     #[cfg(test)]
     dest_transport_creation_barrier: OnceLock<Arc<tokio::sync::Barrier>>,
@@ -295,6 +319,20 @@ pub struct PeerTransport {
 }
 
 impl PeerTransport {
+    /// Subscribe to the `transports`-map revision. Every insert, commit, or
+    /// removal increments it; readiness waiters use it as the wake source for
+    /// destination materialization itself.
+    pub(crate) fn watch_transports_revision(&self) -> watch::Receiver<u64> {
+        self.transports_revision.subscribe()
+    }
+
+    /// Wake destination-materialization waiters. Call inside the same
+    /// critical section as the map mutation.
+    fn bump_transports_revision(&self) {
+        self.transports_revision
+            .send_modify(|revision| *revision += 1);
+    }
+
     /// Create new PeerTransport
     ///
     /// # Arguments
@@ -305,12 +343,29 @@ impl PeerTransport {
             local_id,
             transports: Arc::new(RwLock::new(HashMap::new())),
             conn_factory,
+            dest_state_epoch: watch::channel(0).0,
             closing_peers: Arc::new(RwLock::new(HashSet::new())),
+            transports_revision: watch::channel(0).0,
             #[cfg(test)]
             dest_transport_creation_barrier: OnceLock::new(),
             #[cfg(test)]
             final_commit_barrier: OnceLock::new(),
         }
+    }
+
+    /// Subscribe to destination materialization transitions. A Connected
+    /// `DestTransport` bumps this watch; flight insertion and cancellation or
+    /// removal bump `watch_transports_revision()` instead. Callers waiting for
+    /// a destination to become usable must subscribe to both watches and
+    /// re-run their lookup after either one changes.
+    pub(crate) fn watch_dest_state(&self) -> watch::Receiver<u64> {
+        self.dest_state_epoch.subscribe()
+    }
+
+    /// Announce that `dest` has become `Connected`.
+    fn announce_dest_connected(&self) {
+        self.dest_state_epoch
+            .send_modify(|generation| *generation += 1);
     }
 
     #[cfg(test)]
@@ -363,6 +418,54 @@ impl PeerTransport {
         self.transports.read().await.contains_key(dest)
     }
 
+    /// Whether an already-materialized destination currently has a non-WebRTC
+    /// fallback route that can carry `payload_type`.  WebRTC is deliberately
+    /// excluded: its `ReadySet` entry reflects the physical wire, while the
+    /// RTC controller separately owns peer sendability and may be in
+    /// `Recovering` even when the physical WebRTC wire is still marked ready.
+    /// This is a read-only check used by the readiness waiter; it never creates
+    /// a connection or a lane.
+    pub(crate) async fn has_ready_fallback_connection_for_payload(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+    ) -> bool {
+        let transport = {
+            let transports = self.transports.read().await;
+            match transports.get(dest) {
+                Some(DestState::Connected(transport)) => Some(Arc::clone(transport)),
+                _ => None,
+            }
+        };
+        let Some(transport) = transport else {
+            return false;
+        };
+        let ready = transport.watch_ready().borrow().clone();
+        // The fallback question is "could a plain (non-WebRTC) lane of this
+        // payload ride the already-ready WebSocket". WebSocket readiness is
+        // per-transport, not per-lane, so the per-lane term only decides
+        // whether the payload can use non-WebRTC lanes at all.
+        let can_use_plain_lane = payload_type
+            .data_lane_types()
+            .iter()
+            .any(|lane| !lane.needs_webrtc());
+        can_use_plain_lane && ready.contains(&super::wire_pool::ConnType::WebSocket)
+    }
+
+    /// Subscribe to the ready-set of an already-materialized destination.
+    /// `None` means the first send still needs to create its destination
+    /// transport, so the caller should wait on the other authoritative hints.
+    pub(crate) async fn watch_ready_for(&self, dest: &Dest) -> Option<watch::Receiver<ReadySet>> {
+        let transport = {
+            let transports = self.transports.read().await;
+            match transports.get(dest) {
+                Some(DestState::Connected(transport)) => Some(Arc::clone(transport)),
+                _ => None,
+            }
+        }?;
+        Some(transport.watch_ready())
+    }
+
     /// Get or create DestTransport for specified Dest
     ///
     /// # Arguments
@@ -410,6 +513,7 @@ impl PeerTransport {
                         }
                         let flight = Arc::new(ConnectionFlight::new());
                         transports.insert(dest.clone(), DestState::Connecting(Arc::clone(&flight)));
+                        self.bump_transports_revision();
                         tracing::debug!("Started connection flight for: {:?}", dest);
                         (flight, true)
                     }
@@ -452,6 +556,7 @@ impl PeerTransport {
             tracing::info!("Creating new connection for: {:?}", dest);
             let mut creator_guard = ConnectionCreatorGuard::new(
                 Arc::clone(&self.transports),
+                self.transports_revision.clone(),
                 dest.clone(),
                 Arc::clone(&flight),
             );
@@ -563,7 +668,9 @@ impl PeerTransport {
                     let transport = Arc::clone(transport_guard.transport());
                     tracing::info!("Connection established: {:?}", dest);
                     transports.insert(dest.clone(), DestState::Connected(Arc::clone(&transport)));
+                    self.bump_transports_revision();
                     drop(transports);
+                    self.announce_dest_connected();
                     self.spawn_ready_monitor(dest.clone(), Arc::clone(&transport));
                     transport_guard.disarm();
                     creator_guard.disarm();
@@ -573,6 +680,7 @@ impl PeerTransport {
                 Err(e) => {
                     tracing::error!("Connection failed: {:?}: {}", dest, e);
                     transports.remove(dest);
+                    self.bump_transports_revision();
                     drop(transports);
                     creator_guard.disarm();
                     flight.completion.notify_waiters();
@@ -635,6 +743,7 @@ impl PeerTransport {
                 return PeerSendAttempt {
                     result: Err(error),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: true,
                 };
             }
         };
@@ -651,6 +760,7 @@ impl PeerTransport {
             .send_with_progress(payload_type, data, progress_sink)
             .await;
         let progress = attempt.progress;
+        let proven_pre_send = attempt.proven_pre_send;
         match attempt.result {
             Ok(wire_identity) => {
                 let sent = DestTransportRef::new(&transport, wire_identity);
@@ -660,11 +770,13 @@ impl PeerTransport {
                 PeerSendAttempt {
                     result: Ok(sent),
                     progress,
+                    proven_pre_send: false,
                 }
             }
             Err(error) => PeerSendAttempt {
                 result: Err(error),
                 progress,
+                proven_pre_send,
             },
         }
     }
@@ -705,12 +817,14 @@ impl PeerTransport {
                 return PeerSendAttempt {
                     result: Ok(None),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: false,
                 };
             }
             Err(error) => {
                 return PeerSendAttempt {
                     result: Err(error),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: true,
                 };
             }
         };
@@ -725,6 +839,7 @@ impl PeerTransport {
             .send_with_progress(payload_type, data, progress_sink)
             .await;
         let progress = attempt.progress;
+        let proven_pre_send = attempt.proven_pre_send;
         match attempt.result {
             Ok(wire_identity) => {
                 let sent = DestTransportRef::new(&transport, wire_identity);
@@ -734,11 +849,13 @@ impl PeerTransport {
                 PeerSendAttempt {
                     result: Ok(Some(sent)),
                     progress,
+                    proven_pre_send: false,
                 }
             }
             Err(error) => PeerSendAttempt {
                 result: Err(error),
                 progress,
+                proven_pre_send,
             },
         }
     }
@@ -771,6 +888,7 @@ impl PeerTransport {
                     }
                     let flight = Arc::new(ConnectionFlight::new());
                     transports.insert(dest.clone(), DestState::Connecting(Arc::clone(&flight)));
+                    self.bump_transports_revision();
                     flight
                 }
             }
@@ -778,6 +896,7 @@ impl PeerTransport {
 
         let mut creator_guard = ConnectionCreatorGuard::new(
             Arc::clone(&self.transports),
+            self.transports_revision.clone(),
             dest.clone(),
             Arc::clone(&flight),
         );
@@ -861,7 +980,9 @@ impl PeerTransport {
             Ok(Some(mut transport_guard)) => {
                 let transport = Arc::clone(transport_guard.transport());
                 transports.insert(dest.clone(), DestState::Connected(Arc::clone(&transport)));
+                self.bump_transports_revision();
                 drop(transports);
+                self.announce_dest_connected();
                 self.spawn_ready_monitor(dest.clone(), Arc::clone(&transport));
                 transport_guard.disarm();
                 creator_guard.disarm();
@@ -870,6 +991,7 @@ impl PeerTransport {
             }
             Ok(None) => {
                 transports.remove(dest);
+                self.bump_transports_revision();
                 drop(transports);
                 creator_guard.disarm();
                 flight.completion.notify_waiters();
@@ -877,67 +999,13 @@ impl PeerTransport {
             }
             Err(error) => {
                 transports.remove(dest);
+                self.bump_transports_revision();
                 drop(transports);
                 creator_guard.disarm();
                 flight.completion.notify_waiters();
                 Err(error)
             }
         }
-    }
-
-    /// Session-guarded close of only the WebRTC connection for the specified
-    /// Dest, leaving the WebSocket connection (if any) alive.
-    ///
-    /// Close **only** the WebRTC connection for `dest` when its session still
-    /// matches `(peer_id, session_id)`, leaving the WebSocket fallback lane
-    /// (and any in-flight RPC responses it carries) intact.
-    ///
-    /// Returns `Ok(true)` when the WebRTC connection was actually closed.
-    /// Returns `Ok(false)` when the event is stale (identity mismatch) or the
-    /// transport state has already changed — in that case **no** pending
-    /// requests should be cleaned, and the peer should be removed from
-    /// `closing_peers` immediately.
-    ///
-    /// Called by the legacy WebRTC connection-closed path so outbound
-    /// WebSocket response-reader tasks are not inadvertently terminated when a
-    /// WebRTC peer disconnects. The v0.20 backend does not call this method,
-    /// but preserving it keeps the non-v0.20 transport contract intact.
-    #[allow(dead_code)]
-    pub(crate) async fn close_webrtc_transport_if_session(
-        &self,
-        dest: &Dest,
-        peer_id: &ActrId,
-        session_id: u64,
-    ) -> NetworkResult<bool> {
-        let transport = {
-            let transports = self.transports.read().await;
-            match transports.get(dest) {
-                Some(DestState::Connected(transport)) => Some(Arc::clone(transport)),
-                _ => None,
-            }
-        };
-
-        let Some(transport) = transport else {
-            tracing::debug!(
-                "Stale WebRTC-only close event for {:?} (session {} absent)",
-                dest,
-                session_id
-            );
-            return Ok(false);
-        };
-        if !transport.matches_webrtc_session(peer_id, session_id).await {
-            tracing::debug!(
-                "Stale WebRTC-only close event for {:?} (session {} mismatch)",
-                dest,
-                session_id
-            );
-            return Ok(false);
-        }
-
-        transport
-            .close_connection(super::wire_pool::ConnType::WebRTC)
-            .await?;
-        Ok(true)
     }
 
     /// Close DestTransport for specified Dest (full teardown, including WebSocket).
@@ -954,7 +1022,9 @@ impl PeerTransport {
         // stale transport it produced.
         let current_state = {
             let mut transports = self.transports.write().await;
-            transports.remove(dest)
+            let removed = transports.remove(dest);
+            self.bump_transports_revision();
+            removed
         };
 
         let close_result = match current_state {
@@ -1055,7 +1125,7 @@ impl PeerTransport {
         self.closing_peers.write().await.insert(dest.clone());
         let detached = {
             let mut transports = self.transports.write().await;
-            match transports.get(dest) {
+            let detached = match transports.get(dest) {
                 Some(DestState::Connected(current)) if Arc::ptr_eq(current, &transport) => {
                     match transports.remove(dest) {
                         Some(DestState::Connected(current)) => Some(current),
@@ -1063,7 +1133,11 @@ impl PeerTransport {
                     }
                 }
                 _ => None,
+            };
+            if detached.is_some() {
+                self.bump_transports_revision();
             }
+            detached
         };
         let Some(detached) = detached else {
             self.closing_peers.write().await.remove(dest);
@@ -1116,7 +1190,7 @@ impl PeerTransport {
 
         let transport = {
             let mut transports = self.transports.write().await;
-            match transports.get(dest) {
+            let removed = match transports.get(dest) {
                 Some(DestState::Connected(transport))
                     if Arc::ptr_eq(transport, &sent_transport) =>
                 {
@@ -1126,7 +1200,11 @@ impl PeerTransport {
                     }
                 }
                 _ => None,
+            };
+            if removed.is_some() {
+                self.bump_transports_revision();
             }
+            removed
         };
 
         let Some(transport) = transport else {
@@ -1151,7 +1229,9 @@ impl PeerTransport {
         let states = {
             let mut transports = self.transports.write().await;
             tracing::info!("Closing all DestTransports (count: {})", transports.len());
-            transports.drain().collect::<Vec<_>>()
+            let states = transports.drain().collect::<Vec<_>>();
+            self.bump_transports_revision();
+            states
         };
 
         for (dest, state) in states {
@@ -1206,6 +1286,11 @@ impl PeerTransport {
     /// all fail before any one of them has ever reached `Ready`.
     fn spawn_ready_monitor(&self, dest: Dest, transport: Arc<DestTransport>) {
         let transports = Arc::clone(&self.transports);
+        // Share the revision sender so the teardown removal below wakes
+        // destination-less readiness waiters exactly like every other map
+        // mutation; a closed ready-watch receiver alone is not an
+        // authoritative edge a parked send can re-evaluate on.
+        let revision = self.transports_revision.clone();
         tokio::spawn(async move {
             let mut rx = transport.watch_ready();
 
@@ -1221,6 +1306,7 @@ impl PeerTransport {
                     );
                     if matched {
                         map.remove(&dest);
+                        revision.send_modify(|rev| *rev += 1);
                         drop(map);
 
                         tracing::warn!(

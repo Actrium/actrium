@@ -13,6 +13,7 @@ use crate::{HostAbiFn, InvocationContext};
 use actr_framework::guest::dynclib_abi::InitPayloadV1;
 use actr_pack::PackageManifest;
 use actr_protocol::{AIdCredential, ActrId};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 mod actrix_services;
@@ -27,14 +28,17 @@ pub use crate::transport::{
     WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
     install_webrtc_fragment_send_hook_for_test,
 };
+pub use crate::wire::webrtc::rtc::address::TestLocalAddressProvider;
+pub use crate::wire::webrtc::rtc::fault::{
+    DirectedSignalingFaultMetrics, DirectedSignalingFaultRegistry, SignalingFaultRule,
+    SignalingMessageClass, SignalingTraceEvent,
+};
+pub use crate::wire::webrtc::rtc::recovery::{
+    ICE_RESTART_ATTEMPT_TIMEOUT, REMOTE_REQUEST_WAKE_GRACE,
+};
 pub use crate::wire::webrtc::test_runtime::{
     DirectedRtcFaultHandle, DirectedRtcFaultMetrics, DirectedRtcFaultRegistry, LinkDirection,
     PacketRule,
-};
-pub use crate::wire::webrtc::v020::address::TestLocalAddressProvider;
-pub use crate::wire::webrtc::v020::fault::{
-    DirectedSignalingFaultMetrics, DirectedSignalingFaultRegistry, SignalingFaultRule,
-    SignalingMessageClass, SignalingTraceEvent,
 };
 pub use actrix_services::ActrixTestServices;
 pub use mobile_rtc_pair::{
@@ -53,6 +57,48 @@ pub fn install_test_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
+/// Return a currently assigned, bindable IPv4 address that is distinct from
+/// loopback. Address-change integration tests use it as the replacement
+/// interface so the Runtime seam can observe the actual soft-rebind socket.
+/// Pick a currently bindable non-loopback IPv4 interface address, or `None`
+/// on hosts without one (loopback-only CI runners) so tests can skip.
+///
+/// The bind probe is only a pre-filter: the interface can still disappear
+/// before the driver binds, so the loop-based runtime observation
+/// (`wait_rtc_bound_address`) is the evidence — this probe never is.
+///
+/// `ACTR_REQUIRE_NON_LOOPBACK_IPV4` turns an empty probe into a panic: CI
+/// sets it so a runner without a routable interface fails loudly instead of
+/// silently skipping the rebind-evidence tests.
+pub fn bindable_non_loopback_ipv4() -> Option<IpAddr> {
+    let found = if_addrs::get_if_addrs()
+        .expect("test requires local interface enumeration")
+        .into_iter()
+        .filter_map(|interface| match interface.ip() {
+            IpAddr::V4(address)
+                if !address.is_loopback()
+                    && !address.is_unspecified()
+                    && !address.is_multicast()
+                    && !address.is_link_local() =>
+            {
+                Some(address)
+            }
+            _ => None,
+        })
+        .find_map(|address| {
+            std::net::UdpSocket::bind(SocketAddr::new(IpAddr::V4(address), 0))
+                .ok()
+                .map(|_| IpAddr::V4(address))
+        });
+    if found.is_none() && std::env::var_os("ACTR_REQUIRE_NON_LOOPBACK_IPV4").is_some() {
+        panic!(
+            "ACTR_REQUIRE_NON_LOOPBACK_IPV4 is set but this host has no bindable \
+             non-loopback IPv4 interface"
+        );
+    }
+    found
+}
+
 /// Create a credential state backed by the supplied test credential.
 pub fn create_credential_state_for_test(
     credential: AIdCredential,
@@ -62,7 +108,7 @@ pub fn create_credential_state_for_test(
 
 /// Compatibility namespace for integration tests that import the elementary
 /// helpers through `test_support::utils`. RTC construction lives in
-/// [`TestHarness`] so every integration topology uses the v0.20 stack.
+/// [`TestHarness`] so every integration topology uses the RTC stack.
 pub mod utils {
     pub use super::{
         create_credential_state_for_test, dummy_credential, install_test_crypto_provider,
@@ -192,14 +238,14 @@ pub fn spawn_gated_network_event_supervisor(
     spawn_network_event_supervisor_with_channel(processor, fact_sink, channel)
 }
 
-/// Spawn the gated lifecycle reconciler with the same v0.20 recovery feed as
+/// Spawn the gated lifecycle reconciler with the same RTC recovery feed as
 /// `Node::start()` and expose its policy status stream.
 ///
 /// `processor` must not publish `RtcNetworkEvent` itself. Use
 /// [`TestPeer::production_network_processor`], not the compatibility
 /// [`RtcAwareNetworkEventProcessor`], so each accepted platform fact reaches
 /// the manager supervisor exactly once.
-pub fn spawn_gated_v020_network_event_supervisor(
+pub fn spawn_gated_rtc_network_event_supervisor(
     processor: Arc<dyn crate::lifecycle::NetworkEventProcessor>,
     rtc: &TestRtcControl,
 ) -> (
@@ -217,7 +263,7 @@ pub fn spawn_gated_v020_network_event_supervisor(
     let (status_tx, status_rx) =
         tokio::sync::watch::channel(crate::lifecycle::SupervisorStatus::default());
     let task = tokio::spawn(
-        crate::lifecycle::run_network_event_reconciler_with_channel_and_v020_recovery_and_status(
+        crate::lifecycle::run_network_event_reconciler_with_channel_and_rtc_recovery_and_status(
             event_rx,
             channel,
             processor,

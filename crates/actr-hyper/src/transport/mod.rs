@@ -49,13 +49,11 @@ pub use lane::{
     WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
     install_webrtc_fragment_send_hook_for_test,
 };
-// Fragment codec: shared between 0.14 WebRtcDataLane and v0.20 V020DataLane
-// so both produce byte-identical wire format on the DataChannel. Only
-// re-exported when the v0.20 feature is active — 0.14 uses them internally
-// within `lane.rs` and does not need the re-export.
-#[cfg(feature = "webrtc-v020")]
+// Fragment codec for the RTC DataLane's DataChannel wire format. It lives in
+// the transport layer because both the send boundary and the inbound lane
+// pump use the same framing and reassembly rules.
 pub(crate) use lane::{
-    DC_MAX_PAYLOAD_SIZE, FRAGMENT_HEADER_SIZE, ReassemblyBuffer, ReassemblyLimits,
+    DC_MAX_PAYLOAD_SIZE, FRAGMENT_HEADER_SIZE, REASSEMBLY_TTL, ReassemblyBuffer, ReassemblyLimits,
     decode_fragment_header, encode_fragment_header,
 };
 pub(crate) use route_table::{PayloadTypeExt, RetryPolicy};
@@ -140,6 +138,26 @@ impl RpcDeadline {
     /// sending work during the one final poll of an already-expired timeout.
     pub(crate) fn ensure_remaining(self) -> actr_protocol::ActorResult<()> {
         if tokio::time::Instant::now() >= self.0 {
+            Err(actr_protocol::ActrError::TimedOut)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Guard an admission point that must keep at least `min` of budget after
+    /// admission.  Committing work (pending registration + send) with less
+    /// than `min` remaining guarantees the operation fails mid-flight while
+    /// its bytes may already be delivered — refuse before anything is
+    /// committed so the caller may retry with a fresh budget.
+    pub(crate) fn ensure_min_remaining(
+        self,
+        min: std::time::Duration,
+    ) -> actr_protocol::ActorResult<()> {
+        if self
+            .0
+            .saturating_duration_since(tokio::time::Instant::now())
+            < min
+        {
             Err(actr_protocol::ActrError::TimedOut)
         } else {
             Ok(())

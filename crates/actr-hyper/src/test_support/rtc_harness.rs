@@ -1,13 +1,13 @@
-//! Integration harness for the webrtc-rs v0.20 architecture.
+//! Integration harness for the webrtc-rs architecture.
 //!
 //! Every peer uses the same production boundaries as a node:
 //! `PeerGate -> PeerTransport -> DefaultWireBuilder -> RtcConnectionManager ->
 //! RtcPeerController -> PeerConnectionSession`. Signaling runs through the
 //! production WebSocket adapter. The optional packet gate is injected at the
-//! v0.20 runtime/socket layer, so network tests do not depend on the removed
+//! RTC runtime/socket layer, so network tests do not depend on the removed
 //! 0.14 coordinator or callback adapter.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -31,21 +31,21 @@ use crate::outbound::{PeerGate, PendingRequestsMap};
 use crate::transport::{
     DefaultWireBuilder, DefaultWireBuilderConfig, PayloadTypeExt, PeerTransport,
 };
-use crate::wire::webrtc::v020::address::{
+use crate::wire::webrtc::rtc::address::{
     DesktopLocalAddressProvider, LocalAddressProvider, TestLocalAddressProvider,
 };
-use crate::wire::webrtc::v020::factory::PeerConnectionFactory;
-use crate::wire::webrtc::v020::fault::DirectedSignalingTransport;
-use crate::wire::webrtc::v020::inbound::{InboundMessage, InboundRouter};
-use crate::wire::webrtc::v020::manager::RtcConnectionManager;
-use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
-use crate::wire::webrtc::v020::runtime::RtcRuntimeConfig;
-use crate::wire::webrtc::v020::signaling::SharedLocalId;
-use crate::wire::webrtc::v020::signaling::router::SignalingRouter;
-use crate::wire::webrtc::v020::signaling::ws_transport::V020SignalingTransport;
+use crate::wire::webrtc::rtc::factory::PeerConnectionFactory;
+use crate::wire::webrtc::rtc::fault::DirectedSignalingTransport;
+use crate::wire::webrtc::rtc::inbound::{InboundMessage, InboundRouter};
+use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
+use crate::wire::webrtc::rtc::recovery::RtcNetworkEvent;
+use crate::wire::webrtc::rtc::runtime::RtcRuntimeConfig;
+use crate::wire::webrtc::rtc::signaling::SharedLocalId;
+use crate::wire::webrtc::rtc::signaling::router::SignalingRouter;
+use crate::wire::webrtc::rtc::signaling::ws_transport::RtcSignalingTransport;
 use crate::wire::webrtc::{SignalingClient, WebSocketSignalingClient};
 
-/// Test-facing control plane over one node's v0.20 manager.
+/// Test-facing control plane over one node's RTC manager.
 #[derive(Clone)]
 pub struct TestRtcControl {
     manager: Arc<RtcConnectionManager>,
@@ -151,7 +151,7 @@ impl TestEvidenceTimeline {
         &self,
         endpoint: ActrId,
         peer: ActrId,
-        event: &crate::wire::webrtc::v020::events::PeerDriverEvent,
+        event: &crate::wire::webrtc::rtc::events::PeerDriverEvent,
     ) {
         self.events
             .lock()
@@ -179,7 +179,7 @@ impl TestEvidenceTimeline {
 
     pub fn render_with_signaling(
         &self,
-        signaling: &crate::wire::webrtc::v020::fault::DirectedSignalingFaultRegistry,
+        signaling: &crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
     ) -> String {
         let mut rows = self
             .events()
@@ -240,14 +240,14 @@ impl TestEvidenceTimeline {
 pub struct TestEvidenceFailureGuard {
     label: String,
     timeline: TestEvidenceTimeline,
-    signaling: crate::wire::webrtc::v020::fault::DirectedSignalingFaultRegistry,
+    signaling: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
 }
 
 impl TestEvidenceFailureGuard {
     pub fn new(
         label: impl Into<String>,
         timeline: TestEvidenceTimeline,
-        signaling: crate::wire::webrtc::v020::fault::DirectedSignalingFaultRegistry,
+        signaling: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
     ) -> Self {
         Self {
             label: label.into(),
@@ -421,6 +421,56 @@ impl TestRtcHookRecorder {
 }
 
 impl TestRtcControl {
+    /// Observe and fault the manager of a fully started production Node.
+    #[cfg(test)]
+    pub(crate) fn for_node(node: &crate::ActrRef) -> Self {
+        Self {
+            manager: node
+                .shared
+                .rtc_manager
+                .clone()
+                .expect("RTC-enabled fixture node"),
+        }
+    }
+
+    /// Hold the concrete channel so tests can prove reuse rather than merely
+    /// comparing lane counts. This does not change readiness or controller state.
+    #[cfg(test)]
+    pub(crate) async fn lane_probe(&self, peer: &ActrId, payload: PayloadType) -> TestLaneProbe {
+        let controller = self
+            .manager
+            .get_controller(peer)
+            .await
+            .expect("fixture controller");
+        let generation = controller.snapshot().pc_generation;
+        let lane = crate::wire::webrtc::rtc::status::LaneKind::from_payload_type(payload)
+            .expect("DataChannel payload");
+        let handle = controller
+            .lane_handle(generation, lane)
+            .expect("fixture lane");
+        TestLaneProbe {
+            channel: handle.channel().clone(),
+        }
+    }
+
+    /// Close physical resources without removing their logical Controller,
+    /// then deliver its terminal driver fact. This models S4 explicitly;
+    /// it does not pretend the test merely changed a network interface.
+    #[cfg(test)]
+    pub(crate) async fn retire_physical_session(&self, peer: &ActrId) -> u64 {
+        let handle = self
+            .manager
+            .get_controller(peer)
+            .await
+            .expect("fixture controller");
+        let generation = handle.snapshot().pc_generation;
+        handle.force_close_sessions().await;
+        handle.inject_peer_connection_state_for_test(
+            webrtc::peer_connection::RTCPeerConnectionState::Closed,
+        );
+        generation
+    }
+
     fn new(manager: Arc<RtcConnectionManager>) -> Self {
         Self { manager }
     }
@@ -449,28 +499,11 @@ impl TestRtcControl {
         peer: &ActrId,
         timeout: Duration,
     ) -> actr_framework::WebRtcPeerState {
-        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
-            let mut peer_set = self.manager.subscribe_peers();
-            loop {
-                if let Some(mut rx) = self.subscribe(peer).await {
-                    loop {
-                        let state = rx.borrow().clone();
-                        if state.sendable {
-                            return state;
-                        }
-                        if rx.changed().await.is_err() {
-                            break;
-                        }
-                    }
-                }
-                peer_set
-                    .changed()
-                    .await
-                    .expect("manager peer registry watch closed");
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("peer {peer} did not become sendable within {timeout:?}"))
+        self.wait_state_diagnosed(peer, timeout, |state| state.sendable)
+            .await
+            .unwrap_or_else(|diagnostics| {
+                panic!("peer {peer} did not become sendable within {timeout:?}: {diagnostics}")
+            })
     }
 
     /// Await a snapshot satisfying a test predicate. The latest snapshot is
@@ -484,14 +517,111 @@ impl TestRtcControl {
     where
         F: Fn(&actr_framework::WebRtcPeerState) -> bool,
     {
-        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
-            let mut peer_set = self.manager.subscribe_peers();
-            loop {
-                if let Some(mut rx) = self.subscribe(peer).await {
+        self.wait_state_diagnosed(peer, timeout, predicate)
+            .await
+            .ok()
+    }
+
+    /// Like `wait_state`, but retain bounded observations for failure reports.
+    /// Capture evidence inside the original deadline: diagnosing a timeout
+    /// must not wait for another manager lock or a controller response.
+    pub(crate) async fn wait_state_diagnosed<F>(
+        &self,
+        peer: &ActrId,
+        timeout: Duration,
+        predicate: F,
+    ) -> Result<actr_framework::WebRtcPeerState, String>
+    where
+        F: Fn(&actr_framework::WebRtcPeerState) -> bool,
+    {
+        const OBSERVATION_LIMIT: usize = 8;
+        let started = tokio::time::Instant::now();
+        let mut observations = VecDeque::with_capacity(OBSERVATION_LIMIT);
+        let mut phase = "looking up controller";
+        let result =
+            crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
+                let mut peer_set = self.manager.subscribe_peers();
+                loop {
+                    phase = "looking up controller";
+                    // Keep watching a closing controller's public state, as the
+                    // pre-diagnostics `subscribe` path did. Only an active
+                    // controller exposes the internal snapshot.
+                    let (mut rx, controller) = match self.manager.get_controller(peer).await {
+                        Some(controller) => (controller.subscribe_public(), Some(controller)),
+                        None => match self.manager.subscribe_public(peer).await {
+                            Some(rx) => (rx, None),
+                            None => {
+                                phase = "waiting for peer registry change";
+                                peer_set
+                                    .changed()
+                                    .await
+                                    .expect("manager peer registry watch closed");
+                                continue;
+                            }
+                        },
+                    };
                     loop {
                         let state = rx.borrow().clone();
                         if predicate(&state) {
                             return state;
+                        }
+                        if observations.len() == OBSERVATION_LIMIT {
+                            observations.pop_front();
+                        }
+                        // The public predicate remains the oracle. The internal
+                        // snapshot adds role, ICE generation and overflow counters;
+                        // it may be newer, so report both revisions explicitly.
+                        observations.push_back((
+                            started.elapsed(),
+                            state,
+                            controller.as_ref().map(|c| c.snapshot()),
+                        ));
+                        phase = "waiting for public state change";
+                        if rx.changed().await.is_err() {
+                            break;
+                        }
+                    }
+                    phase = "waiting for peer registry change";
+                    peer_set
+                        .changed()
+                        .await
+                        .expect("manager peer registry watch closed");
+                }
+            })
+            .await;
+        result.map_err(|_| {
+            format!(
+                "peer={peer}, budget={timeout:?}, phase={phase}, recent observations \
+                 (elapsed, public state, controller snapshot; oldest first)={observations:#?}"
+            )
+        })
+    }
+
+    pub async fn generation(&self, peer: &ActrId) -> Option<u64> {
+        self.state(peer).await.map(|state| state.pc_generation)
+    }
+
+    pub async fn ice_generation(&self, peer: &ActrId) -> Option<u64> {
+        self.manager
+            .get_snapshot(peer)
+            .await
+            .map(|state| state.ice_generation)
+    }
+
+    pub async fn wait_ice_generation(
+        &self,
+        peer: &ActrId,
+        exclusive_minimum: u64,
+        timeout: Duration,
+    ) -> Option<u64> {
+        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
+            let mut peer_set = self.manager.subscribe_peers();
+            loop {
+                if let Some(mut rx) = self.manager.subscribe(peer).await {
+                    loop {
+                        let state = rx.borrow().clone();
+                        if state.ice_generation > exclusive_minimum {
+                            return state.ice_generation;
                         }
                         if rx.changed().await.is_err() {
                             break;
@@ -508,10 +638,6 @@ impl TestRtcControl {
         .ok()
     }
 
-    pub async fn generation(&self, peer: &ActrId) -> Option<u64> {
-        self.state(peer).await.map(|state| state.pc_generation)
-    }
-
     pub async fn is_sendable(&self, peer: &ActrId) -> bool {
         self.state(peer).await.is_some_and(|state| state.sendable)
     }
@@ -519,9 +645,9 @@ impl TestRtcControl {
     pub async fn role(&self, peer: &ActrId) -> Option<TestRtcRole> {
         let role = self.manager.get_snapshot(peer).await?.role;
         Some(match role {
-            crate::wire::webrtc::v020::peer::state::Role::Undetermined => TestRtcRole::Undetermined,
-            crate::wire::webrtc::v020::peer::state::Role::Offerer => TestRtcRole::Offerer,
-            crate::wire::webrtc::v020::peer::state::Role::Answerer => TestRtcRole::Answerer,
+            crate::wire::webrtc::rtc::peer::state::Role::Undetermined => TestRtcRole::Undetermined,
+            crate::wire::webrtc::rtc::peer::state::Role::Offerer => TestRtcRole::Offerer,
+            crate::wire::webrtc::rtc::peer::state::Role::Answerer => TestRtcRole::Answerer,
         })
     }
 
@@ -541,7 +667,7 @@ impl TestRtcControl {
         self.publish(RtcNetworkEvent::ForceReconnect)
     }
 
-    /// Inject a v0.20 `PeerConnectionStateChanged(Failed)` fact through the
+    /// Inject a RTC `PeerConnectionStateChanged(Failed)` fact through the
     /// controller's real event-handler mailbox.
     pub async fn fail_peer(&self, peer: &ActrId) -> Result<u64, String> {
         let handle = self
@@ -582,7 +708,7 @@ impl TestRtcControl {
     }
 
     /// Close one concrete DataChannel through the generation-owned lane
-    /// registry.  This test-only seam exercises the real v0.20 `close()` ->
+    /// registry.  This test-only seam exercises the real RTC `close()` ->
     /// `DataChannel::poll()` -> Controller recovery path without injecting a
     /// synthetic callback.
     pub async fn close_lane(
@@ -590,7 +716,7 @@ impl TestRtcControl {
         peer: &ActrId,
         payload_type: PayloadType,
     ) -> Result<u64, String> {
-        let lane = crate::wire::webrtc::v020::status::LaneKind::from_payload_type(payload_type)
+        let lane = crate::wire::webrtc::rtc::status::LaneKind::from_payload_type(payload_type)
             .ok_or_else(|| format!("{payload_type:?} is not a DataChannel lane"))?;
         let handle = self
             .manager
@@ -654,13 +780,13 @@ impl TestRtcControl {
                 .into_iter()
                 .map(|peer| {
                     let role = match peer.snapshot.role {
-                        crate::wire::webrtc::v020::peer::state::Role::Undetermined => {
+                        crate::wire::webrtc::rtc::peer::state::Role::Undetermined => {
                             TestRtcRole::Undetermined
                         }
-                        crate::wire::webrtc::v020::peer::state::Role::Offerer => {
+                        crate::wire::webrtc::rtc::peer::state::Role::Offerer => {
                             TestRtcRole::Offerer
                         }
-                        crate::wire::webrtc::v020::peer::state::Role::Answerer => {
+                        crate::wire::webrtc::rtc::peer::state::Role::Answerer => {
                             TestRtcRole::Answerer
                         }
                     };
@@ -679,8 +805,28 @@ impl TestRtcControl {
 
     pub(crate) fn recovery_supervisor(
         &self,
-    ) -> Arc<crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor> {
+    ) -> Arc<crate::wire::webrtc::rtc::recovery::RtcRecoverySupervisor> {
         self.manager.supervisor().clone()
+    }
+}
+
+/// A physical-channel observation token; holding it never grants sendability.
+#[cfg(test)]
+pub(crate) struct TestLaneProbe {
+    channel: Arc<dyn crate::wire::webrtc::rtc::peer::adapter::LaneDataChannel>,
+}
+
+#[cfg(test)]
+impl TestLaneProbe {
+    pub(crate) fn same_channel(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.channel, &other.channel)
+    }
+
+    pub(crate) async fn is_open(&self) -> bool {
+        matches!(
+            self.channel.ready_state().await,
+            Ok(webrtc::data_channel::RTCDataChannelState::Open)
+        )
     }
 }
 
@@ -822,7 +968,7 @@ pub struct TestPeer {
     inbound_rx: tokio::sync::Mutex<
         mpsc::Receiver<(
             InboundMessage,
-            crate::wire::webrtc::v020::inbound::InboundLease,
+            crate::wire::webrtc::rtc::inbound::InboundLease,
         )>,
     >,
     router_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -844,7 +990,7 @@ impl TestPeer {
             .unwrap_or(0)
     }
 
-    /// Wait for a request to cross the real v0.20 inbound lane and reach the
+    /// Wait for a request to cross the real RTC inbound lane and reach the
     /// remote business dispatcher. This replaces scheduler polling in in-flight
     /// tests and also supplies a duplicate-execution oracle.
     pub async fn wait_request_count(
@@ -884,7 +1030,7 @@ impl TestPeer {
 
     /// Production signaling/transport effects without any test-only RTC fact
     /// publication. Pair this processor with
-    /// `spawn_gated_v020_network_event_supervisor`; using the RTC-aware
+    /// `spawn_gated_rtc_network_event_supervisor`; using the RTC-aware
     /// compatibility processor there would publish every accepted fact twice.
     pub fn production_network_processor(&self) -> Arc<dyn NetworkEventProcessor> {
         Arc::new(DefaultNetworkEventProcessor::new_with_peer_transport(
@@ -936,7 +1082,7 @@ impl TestPeer {
         tokio::spawn(std::future::pending())
     }
 
-    /// Receive the next non-RPC inbound payload recorded by the v0.20 router.
+    /// Receive the next non-RPC inbound payload recorded by the RTC router.
     pub async fn receive_payload(&self) -> Option<(ActrId, PayloadType, bytes::Bytes)> {
         let (msg, _lease) = self.inbound_rx.lock().await.recv().await?;
         Some((msg.peer, msg.lane.to_payload_type(), msg.payload))
@@ -970,20 +1116,21 @@ impl TestPeer {
     }
 }
 
-/// Multi-peer harness using real WebSocket signaling and real v0.20 peer
+/// Multi-peer harness using real WebSocket signaling and real RTC peer
 /// connections. With `with_vnet`, UDP loss is injected below the builder-owned
-/// sockets through the v0.20 runtime.
+/// sockets through the RTC runtime.
 pub struct TestHarness {
     pub server: TestSignalingServer,
     pub vnet: Option<VNetPair>,
     pub rtc_faults: crate::wire::webrtc::test_runtime::DirectedRtcFaultRegistry,
-    pub signaling_faults: crate::wire::webrtc::v020::fault::DirectedSignalingFaultRegistry,
+    pub signaling_faults: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
     pub evidence: TestEvidenceTimeline,
-    // The production-Actrix pair/multi-peer matrix needs the directed v0.20
+    // The production-Actrix pair/multi-peer matrix needs the directed RTC
     // fault and observation seams. Keep them out of the legacy VNet harness so
     // its historical recovery cases retain their original Runtime, signaling,
     // address-provider, and scheduling path.
-    v020_matrix_instrumentation: bool,
+    rtc_matrix_instrumentation: bool,
+    wildcard_rebind_addresses: bool,
     address_providers: HashMap<u64, Arc<TestLocalAddressProvider>>,
     peers: HashMap<u64, TestPeer>,
     bg_tasks: Vec<tokio::task::JoinHandle<()>>,
@@ -1010,7 +1157,8 @@ impl TestHarness {
             rtc_faults: Default::default(),
             signaling_faults: Default::default(),
             evidence: Default::default(),
-            v020_matrix_instrumentation: false,
+            rtc_matrix_instrumentation: false,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1028,7 +1176,8 @@ impl TestHarness {
             rtc_faults: Default::default(),
             signaling_faults: Default::default(),
             evidence: Default::default(),
-            v020_matrix_instrumentation: false,
+            rtc_matrix_instrumentation: false,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1047,7 +1196,8 @@ impl TestHarness {
             rtc_faults: Default::default(),
             signaling_faults: Default::default(),
             evidence: Default::default(),
-            v020_matrix_instrumentation: true,
+            rtc_matrix_instrumentation: true,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1065,11 +1215,24 @@ impl TestHarness {
             rtc_faults: Default::default(),
             signaling_faults: Default::default(),
             evidence: Default::default(),
-            v020_matrix_instrumentation: true,
+            rtc_matrix_instrumentation: true,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
         }
+    }
+
+    /// External-signaling RTC fixture that switches the test provider to
+    /// wildcard bind inputs after its first synthetic address change. This
+    /// keeps the initial pair deterministic while exercising webrtc-rs's live
+    /// interface expansion on an ICE-restart rebind.
+    pub async fn with_external_signaling_and_wildcard_rebind(
+        signaling_url: impl Into<String>,
+    ) -> Self {
+        let mut harness = Self::with_external_signaling(signaling_url).await;
+        harness.wildcard_rebind_addresses = true;
+        harness
     }
 
     pub async fn add_peer(&mut self, serial: u64) {
@@ -1100,7 +1263,7 @@ impl TestHarness {
             .await;
     }
 
-    /// Add a peer whose production v0.20 sessions dispatch remote media into
+    /// Add a peer whose production RTC sessions dispatch remote media into
     /// the supplied node-level registry. This is the T3 media fixture: it uses
     /// the same manager, controller, effect runner, track poll pump, and
     /// `MediaFrameRegistry` wiring as a real node.
@@ -1128,10 +1291,15 @@ impl TestHarness {
     ) {
         assert!(!self.peers.contains_key(&serial), "duplicate peer {serial}");
         let id = make_actor_id(serial);
-        let mutable_address_provider = Arc::new(TestLocalAddressProvider::new(vec![IpAddr::V4(
-            Ipv4Addr::LOCALHOST,
-        )]));
-        let address_provider: Arc<dyn LocalAddressProvider> = if self.v020_matrix_instrumentation {
+        let initial_addresses = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
+        let mutable_address_provider = if self.wildcard_rebind_addresses {
+            Arc::new(TestLocalAddressProvider::new_with_wildcard_rebind(
+                initial_addresses,
+            ))
+        } else {
+            Arc::new(TestLocalAddressProvider::new(initial_addresses))
+        };
+        let address_provider: Arc<dyn LocalAddressProvider> = if self.rtc_matrix_instrumentation {
             mutable_address_provider.clone()
         } else {
             Arc::new(DesktopLocalAddressProvider::with_override(vec![
@@ -1161,7 +1329,7 @@ impl TestHarness {
             address_provider,
             rtc_configuration,
         );
-        let factory = if self.v020_matrix_instrumentation {
+        let factory = if self.rtc_matrix_instrumentation {
             factory.with_directed_faults(id.clone(), self.rtc_faults.clone())
         } else {
             factory
@@ -1177,7 +1345,7 @@ impl TestHarness {
         })));
         let (signaling_tx, signaling_rx) = mpsc::channel(128);
         let manager = RtcConnectionManager::with_inbound(factory, signaling_tx, router);
-        let manager = if self.v020_matrix_instrumentation {
+        let manager = if self.rtc_matrix_instrumentation {
             let local_id = id.clone();
             let handler_evidence = self.evidence.clone();
             manager.with_driver_event_observer_for_test(Arc::new(move |peer, event| {
@@ -1194,15 +1362,15 @@ impl TestHarness {
         // synthetic signaling generation and open the RTC recovery gate
         // (dea7ff08 convention, shared with the interop spawners). Tests
         // that exercise supervisor-owned gating spawn their own reconciler
-        // (see `spawn_gated_v020_network_event_supervisor` / the
+        // (see `spawn_gated_rtc_network_event_supervisor` / the
         // `recovery_vnet_supervisor` wiring); its first projection overrides
         // this synthetic value.
         manager.supervisor().set_signaling_generation(Some(0));
         let hook_shutdown = tokio_util::sync::CancellationToken::new();
-        let (hooks, hook_task) = if self.v020_matrix_instrumentation {
+        let (hooks, hook_task) = if self.rtc_matrix_instrumentation {
             let hooks = TestRtcHookRecorder::with_evidence(id.clone(), self.evidence.clone());
             let task = tokio::spawn(
-                crate::wire::webrtc::v020::notification::run_recording_hook_projection(
+                crate::wire::webrtc::rtc::notification::run_recording_hook_projection(
                     manager.clone(),
                     hooks.callback(),
                     hook_shutdown.clone(),
@@ -1218,13 +1386,10 @@ impl TestHarness {
             shared_local_id.clone(),
         ));
         manager.set_signaling_dispatch_chains(signaling_router.dispatch_chains());
-        let ws_transport = V020SignalingTransport::new(
-            signaling_client.clone(),
-            shared_local_id,
-            credential_state,
-        );
+        let ws_transport =
+            RtcSignalingTransport::new(signaling_client.clone(), shared_local_id, credential_state);
         let router_for_task = signaling_router.clone();
-        let router_task = if self.v020_matrix_instrumentation {
+        let router_task = if self.rtc_matrix_instrumentation {
             let ws_transport = DirectedSignalingTransport::new(
                 Arc::new(ws_transport),
                 id.clone(),
@@ -1242,14 +1407,13 @@ impl TestHarness {
         let pending: PendingRequestsMap =
             std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
         let wire_config = DefaultWireBuilderConfig {
-            enable_webrtc: true,
             enable_websocket: false,
             pending_requests: Some(pending.clone()),
             ..Default::default()
         };
-        let wire_builder = DefaultWireBuilder::new(wire_config).with_v020_manager(manager.clone());
+        let wire_builder = DefaultWireBuilder::new(wire_config).with_rtc_manager(manager.clone());
         let transport_manager = Arc::new(PeerTransport::new(id.clone(), Arc::new(wire_builder)));
-        let gate = Arc::new(PeerGate::with_v020_manager(
+        let gate = Arc::new(PeerGate::with_rtc_manager(
             transport_manager.clone(),
             manager.clone(),
             pending,
@@ -1311,7 +1475,7 @@ impl TestHarness {
                         request_changed_for_dispatcher.notify_one();
                         // Some recovery tests intentionally leave a request
                         // pending so controller teardown must release it.  The
-                        // request still traverses the real v0.20 data plane;
+                        // request still traverses the real RTC data plane;
                         // only the business responder is suppressed.
                         if envelope.route_key == "test.no_response" {
                             continue;
@@ -1341,7 +1505,7 @@ impl TestHarness {
             }
         });
         self.bg_tasks.push(dispatcher_task);
-        if self.v020_matrix_instrumentation {
+        if self.rtc_matrix_instrumentation {
             self.address_providers
                 .insert(serial, mutable_address_provider);
         }
@@ -1395,13 +1559,6 @@ impl TestHarness {
             .set_addresses(addresses)
     }
 
-    pub(crate) fn address_provider(&self, serial: u64) -> Arc<TestLocalAddressProvider> {
-        self.address_providers
-            .get(&serial)
-            .unwrap_or_else(|| panic!("peer {serial} address provider not found"))
-            .clone()
-    }
-
     /// Remove and fully shut down one independent endpoint while leaving the
     /// other endpoints and the externally owned Actrix services alive. This is
     /// the process-restart seam used by the mobile pair contract.
@@ -1425,6 +1582,22 @@ impl TestHarness {
         self.peer(from).rtc.wait_sendable(&target, timeout).await;
         let source = self.peer(from).id.clone();
         self.peer(to).rtc.wait_sendable(&source, timeout).await;
+    }
+
+    /// Wait until the production signaling handler has completed the
+    /// actor-registration phase for this peer. The WebSocket client reports
+    /// connected after the handshake, while the server registers the
+    /// `actor_id -> client_id` index inside its upgrade task. A Ping/Pong is
+    /// processed only after that registration code, so it provides an
+    /// event-driven readiness barrier for pair tests.
+    pub async fn wait_for_signaling_registration(&self, serial: u64, timeout: Duration) {
+        self.peer(serial)
+            .signaling_client
+            .probe_alive(timeout)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("peer {serial} signaling registration did not become ready: {error}")
+            });
     }
 
     pub fn simulate_disconnect(&self) {

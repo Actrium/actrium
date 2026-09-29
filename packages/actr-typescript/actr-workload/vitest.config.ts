@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
-      'actr:workload/host@0.6.0': fileURLToPath(
+      'actr:workload/host@0.7.0': fileURLToPath(
         new URL('./test/host-imports.ts', import.meta.url),
       ),
     },

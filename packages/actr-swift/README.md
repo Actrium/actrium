@@ -64,18 +64,21 @@ Targets that need the SDK should depend on `Actr`.
 
 ### Local development without a published binary
 
-For source-tree validation, use a locally built XCFramework that matches the
-checked-out Swift bindings. A bare `swift build` or `swift test` in the monorepo
-will fail fast unless a local binary exists. External SwiftPM consumers should
+For source-tree validation, generate the bindings and XCFramework together from
+the current checkout. Both are ignored build artifacts under `dist/`; generated
+bindings are not committed in the monorepo. Swift commands fail fast when
+required artifacts are missing. External SwiftPM consumers should
 depend on the published `actr-swift` package instead of this monorepo package.
 
-Set an environment override to point the package at a locally built XCFramework:
+Build the artifacts, then use the package defaults:
 
 ```bash
-ACTR_BINARY_PATH=ActrFFI.xcframework swift build
+./build-xcframework.sh
+swift build
 ```
 
-To build fresh bindings/binaries without dirtying the git worktree, point outputs to an ignored directory:
+For custom output locations, pass both overrides to the build script and Swift
+commands. For example, the following explicitly selects the default locations:
 
 ```bash
 ACTR_BINDINGS_PATH=dist/ActrBindings ACTR_BINARY_PATH=dist/ActrFFI.xcframework ./build-xcframework.sh
@@ -88,9 +91,11 @@ ACTR_BINDINGS_PATH=dist/ActrBindings ACTR_BINARY_PATH=dist/ActrFFI.xcframework s
 ACTR_BINDINGS_PATH=dist/ActrBindings ACTR_BINARY_PATH=dist/ActrFFI.xcframework swift test
 ```
 
-`Package.swift` also auto-detects `dist/ActrFFI.xcframework` when it exists, but
-passing both environment variables keeps generated bindings and the binary
-artifact paired during local validation.
+Rebuild both artifacts after changing the Rust FFI or switching revisions.
+The package does not fall back to root-level bindings or binaries. Keep any
+generated-code adjustments in `build-xcframework.sh` so regeneration preserves
+them. The published package-sync repository still commits generated bindings
+alongside its manifest referencing the matching released binary.
 
 ## Build (maintainers)
 
@@ -105,7 +110,8 @@ Steps:
 ./build-xcframework.sh
 ```
 
-This generates Swift bindings and the multi-platform XCFramework at `ActrFFI.xcframework/`.
+This generates Swift bindings at `dist/ActrBindings/` and the multi-platform
+XCFramework at `dist/ActrFFI.xcframework/`.
 
 ## Package for release
 
@@ -132,7 +138,7 @@ and publishing releases.
 ## Project Structure
 
 - `../../crates/actr-ffi/`: Rust FFI crate used to build the XCFramework and generate UniFFI bindings
-- `ActrBindings/`: UniFFI-generated Swift bindings (Swift + headers/modulemap)
+- `dist/ActrBindings/`: UniFFI-generated Swift bindings (ignored)
 - `build-xcframework.sh`: Build script
 - `scripts/package-binary.sh`: Zip + checksum helper for Release assets
 - `dist/`: Local release artifacts (ignored)

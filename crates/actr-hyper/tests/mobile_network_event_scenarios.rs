@@ -711,7 +711,7 @@ fn parse_mobile_jsonl_events(jsonl: &str) -> Vec<NetworkEvent> {
 }
 
 fn spawn_rpc_router(_name: &str) -> tokio::task::JoinHandle<()> {
-    // `TestHarness` owns the sole v0.20 InboundRouter consumer and already
+    // `TestHarness` owns the sole RTC InboundRouter consumer and already
     // performs request/response dispatch. Keep a cancellable task only for the
     // app-kill/restart orchestration exercised by these scenarios.
     tokio::spawn(std::future::pending())
@@ -776,11 +776,19 @@ async fn expect_request_ok(
             }
             Ok(Ok(Err(err))) => {
                 let msg = err.to_string();
+                // Anchored to the exact variant Display prefix, not a bare
+                // substring.
+                let delivery_uncertain = msg.starts_with("delivery uncertain for operation");
                 assert!(
                     msg.contains("connection not ready")
                         || (msg.contains("Request timeout") || msg.contains("timed out"))
                         || msg.contains("timed out")
-                        || msg.contains("Connection"),
+                        || msg.contains("Connection")
+                        // This helper retries with a fresh request ID. A
+                        // DeliveryUncertain result terminates only the
+                        // submitted attempt and is safe here for the
+                        // idempotent echo workload.
+                        || delivery_uncertain,
                     "unexpected retry error while waiting for recovery: {msg}"
                 );
                 msg
@@ -895,6 +903,11 @@ fn is_expected_bounded_send_error(message: &str) -> bool {
     .any(|needle| message.contains(needle))
 }
 
+fn is_expected_inflight_send_error(message: &str) -> bool {
+    is_expected_bounded_send_error(message)
+        || message.starts_with("delivery uncertain for operation")
+}
+
 async fn send_data_chunk_bounded(
     harness: &TestHarness,
     from_serial: u64,
@@ -910,12 +923,14 @@ async fn send_data_chunk_bounded(
         metadata: Vec::new(),
         timestamp_ms: Some(0),
     };
+    let operation_id = format!("{}#{}", stream.stream_id, stream.sequence);
     let payload = bytes::Bytes::from(stream.encode_to_vec());
     let send = harness.peer(from_serial).gate.send_data_chunk(
         &target_id,
         PayloadType::StreamReliable,
         &stream.stream_id,
         payload,
+        &operation_id,
     );
 
     let result = tokio::time::timeout(timeout, send)
@@ -925,7 +940,7 @@ async fn send_data_chunk_bounded(
     if let Err(err) = result {
         let msg = err.to_string();
         assert!(
-            is_expected_bounded_send_error(&msg),
+            is_expected_inflight_send_error(&msg),
             "{stream_id} DataChunk failed with unexpected error: {msg}"
         );
     }

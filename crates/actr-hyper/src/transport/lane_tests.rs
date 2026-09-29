@@ -10,6 +10,7 @@ async fn websocket_without_a_sink_is_proven_not_attempted() {
         .send_with_progress(Bytes::from_static(b"payload"))
         .await;
     assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
+    assert!(attempt.proven_pre_send);
     assert!(matches!(
         attempt.result,
         Err(NetworkError::WebSocketClosed(_))
@@ -43,6 +44,7 @@ struct DefaultProgressLane {
 #[derive(Debug, Clone, Copy)]
 enum DefaultProgressMode {
     ClosedLike,
+    ChannelClosed,
     SecureNotReady,
     Generic,
     Ok,
@@ -55,6 +57,9 @@ impl DataLane for DefaultProgressLane {
             DefaultProgressMode::ClosedLike => Err(NetworkError::DataChannelClosed(
                 "closed before write".into(),
             )),
+            DefaultProgressMode::ChannelClosed => {
+                Err(NetworkError::ChannelClosed("channel closed".into()))
+            }
             DefaultProgressMode::SecureNotReady => Err(NetworkError::SecureChannelNotReady(
                 "secure gate not ready before write".into(),
             )),
@@ -69,13 +74,28 @@ impl DataLane for DefaultProgressLane {
 }
 
 #[tokio::test]
-async fn default_send_with_progress_preserves_recovery_for_pre_send_errors() {
-    // Closed-like and secure-not-ready errors are raised by the default lane
-    // before a concrete write, so DestTransport may invalidate/reselect the
-    // route. Only an unclassified error remains conservatively Unknown.
-    for mode in [
-        DefaultProgressMode::ClosedLike,
-        DefaultProgressMode::SecureNotReady,
+async fn default_send_with_progress_classifies_by_error_shape() {
+    // The trait default serves lanes that only implement `send` and is
+    // fail-safe: such a lane cannot prove where a closed-like error
+    // happened relative to the wire, so closed-like errors are
+    // conservatively Unknown — auto-replaying a send that may have
+    // partially entered a transport would duplicate the payload.
+    // SecureChannelNotReady stays NotAttempted: it is a pre-send gate by
+    // construction. Adapters with a proven pre-send state check override
+    // `send_with_progress` to report NotAttempted (see the WebSocket tests
+    // above, the RTC lane, and ClosedLikePreSendLane in
+    // dest_transport_tests).
+    for (mode, expected) in [
+        (DefaultProgressMode::ClosedLike, DeliveryProgress::Unknown),
+        (
+            DefaultProgressMode::ChannelClosed,
+            DeliveryProgress::Unknown,
+        ),
+        (
+            DefaultProgressMode::SecureNotReady,
+            DeliveryProgress::NotAttempted,
+        ),
+        (DefaultProgressMode::Generic, DeliveryProgress::Unknown),
     ] {
         let lane = DefaultProgressLane { mode };
         let attempt = lane
@@ -86,20 +106,15 @@ async fn default_send_with_progress_preserves_recovery_for_pre_send_errors() {
             "{mode:?} should surface the send error"
         );
         assert_eq!(
-            attempt.progress,
-            DeliveryProgress::NotAttempted,
-            "{mode:?} must remain retryable under the default contract"
+            attempt.progress, expected,
+            "{mode:?} must classify as {expected:?} under the default contract"
+        );
+        assert_eq!(
+            attempt.proven_pre_send,
+            matches!(mode, DefaultProgressMode::SecureNotReady),
+            "{mode:?} must carry proof only for structural pre-send failures"
         );
     }
-
-    let lane = DefaultProgressLane {
-        mode: DefaultProgressMode::Generic,
-    };
-    let attempt = lane
-        .send_with_progress(Bytes::from_static(b"payload"))
-        .await;
-    assert!(attempt.result.is_err());
-    assert_eq!(attempt.progress, DeliveryProgress::Unknown);
 
     let lane = DefaultProgressLane {
         mode: DefaultProgressMode::Ok,

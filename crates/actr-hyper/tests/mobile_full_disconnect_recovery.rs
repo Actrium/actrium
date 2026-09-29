@@ -1,8 +1,8 @@
-//! Mobile full-disconnect recovery through the webrtc-rs v0.20 architecture.
+//! Mobile full-disconnect recovery through the webrtc-rs architecture.
 //!
 //! The mobile endpoint is exercised as both offerer and answerer. Temporary
-//! loss must use soft recovery and preserve `pc_generation`; an interface
-//! change must use hard recovery and publish a newer generation. Readiness is
+//! loss and interface changes use soft recovery and preserve `pc_generation`;
+//! explicit force-reconnect remains the hard-recovery path. Readiness is
 //! asserted exclusively through the controller's authoritative snapshot.
 
 use std::time::Duration;
@@ -118,7 +118,7 @@ async fn test_mobile_half_open_15s_semantics_recovers_with_ice_restart() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_mobile_half_open_65s_semantics_rebuilds_webrtc() {
+async fn test_mobile_interface_change_recovers_with_ice_restart() {
     install_test_crypto_provider();
 
     for case in ROLE_CASES {
@@ -131,12 +131,24 @@ async fn test_mobile_half_open_65s_semantics_rebuilds_webrtc() {
             .generation(&server_id)
             .await
             .expect("initial mobile generation");
+        let old_mobile_ice_generation = harness
+            .peer(case.mobile_serial)
+            .rtc
+            .ice_generation(&server_id)
+            .await
+            .expect("initial mobile ICE generation");
         let old_server_generation = harness
             .peer(case.server_serial)
             .rtc
             .generation(&mobile_id)
             .await
             .expect("initial server generation");
+        let old_server_ice_generation = harness
+            .peer(case.server_serial)
+            .rtc
+            .ice_generation(&mobile_id)
+            .await
+            .expect("initial server ICE generation");
 
         let vnet = harness.vnet.as_ref().expect("VNet harness");
         vnet.block_network();
@@ -144,9 +156,9 @@ async fn test_mobile_half_open_65s_semantics_rebuilds_webrtc() {
         harness.peer(case.mobile_serial).rtc.network_unavailable();
         harness.peer(case.server_serial).rtc.network_unavailable();
 
-        // A changed local interface is the RFC hard-recovery trigger. Both
-        // endpoints receive the same platform fact, as they would after a
-        // mobile Wi-Fi/cellular transition.
+        // Both endpoints receive the same platform fact, as they would after
+        // a mobile Wi-Fi/cellular transition. The controller keeps the
+        // current PeerConnection and invokes ICE rebind/re-gather in place.
         vnet.unblock_network();
         harness.server.resume_forwarding();
         harness.peer(case.mobile_serial).rtc.local_address_changed();
@@ -154,33 +166,69 @@ async fn test_mobile_half_open_65s_semantics_rebuilds_webrtc() {
         harness.peer(case.mobile_serial).rtc.network_available();
         harness.peer(case.server_serial).rtc.network_available();
 
-        // Event delivery is asynchronous. Waiting for `sendable` alone could
-        // observe the still-connected old generation before the hard-recovery
-        // facts reach the controller, so require both generation replacement
-        // and restored readiness.
-        let mobile_state = harness
+        // Event delivery is asynchronous; wait for the authoritative sendable
+        // edge and assert that the physical PC generation is reused.
+        harness
             .peer(case.mobile_serial)
             .rtc
-            .wait_state(&server_id, WAIT, |state| {
-                state.sendable && state.pc_generation > old_mobile_generation
-            })
+            .wait_state(&server_id, WAIT, |state| !state.sendable)
             .await
-            .expect("mobile should rebuild and become sendable");
+            .expect("mobile should enter soft recovery");
         harness
             .peer(case.server_serial)
             .rtc
-            .wait_state(&mobile_id, WAIT, |state| {
-                state.sendable && state.pc_generation > old_server_generation
-            })
+            .wait_state(&mobile_id, WAIT, |state| !state.sendable)
             .await
-            .expect("server should rebuild and become sendable");
+            .expect("server should enter soft recovery");
+        let mobile_state = harness
+            .peer(case.mobile_serial)
+            .rtc
+            .wait_sendable(&server_id, WAIT)
+            .await;
+        harness
+            .peer(case.server_serial)
+            .rtc
+            .wait_sendable(&mobile_id, WAIT)
+            .await;
 
         assert!(
-            mobile_state.pc_generation > old_mobile_generation,
-            "{} interface change must rebuild the PeerConnection",
+            mobile_state.pc_generation == old_mobile_generation,
+            "{} interface change must use same-generation ICE recovery",
             case.name
         );
-        assert_rpc_both_directions(&harness, case, "hard_recovery").await;
+        let mobile_ice_generation = harness
+            .peer(case.mobile_serial)
+            .rtc
+            .wait_ice_generation(&server_id, old_mobile_ice_generation, WAIT)
+            .await
+            .expect("mobile ICE generation after soft recovery");
+        assert!(
+            mobile_ice_generation > old_mobile_ice_generation,
+            "{} interface change must advance the mobile ICE generation",
+            case.name
+        );
+        let server_state = harness
+            .peer(case.server_serial)
+            .rtc
+            .wait_sendable(&mobile_id, WAIT)
+            .await;
+        assert_eq!(
+            server_state.pc_generation, old_server_generation,
+            "{} remote generation must also remain stable",
+            case.name
+        );
+        let server_ice_generation = harness
+            .peer(case.server_serial)
+            .rtc
+            .wait_ice_generation(&mobile_id, old_server_ice_generation, WAIT)
+            .await
+            .expect("server ICE generation after soft recovery");
+        assert!(
+            server_ice_generation > old_server_ice_generation,
+            "{} interface change must advance the server ICE generation",
+            case.name
+        );
+        assert_rpc_both_directions(&harness, case, "address_change_soft_recovery").await;
         harness.shutdown().await;
     }
 }

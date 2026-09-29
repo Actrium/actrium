@@ -30,15 +30,18 @@ def _job(workflow: str, name: str, next_name: str) -> str:
     return workflow[job_start:next_job_start]
 
 
-def test_gate_aggregates_webrtc_v020_domain() -> None:
+def test_gate_aggregates_webrtc_domain() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     # `gate` is the workflow's final job, so slice from its key to EOF.
     gate = workflow[workflow.index("  gate:\n"):]
-    # The v0.20 domain must stay in the gate's needs list and in the Python
-    # summary dict; dropping either would detach the v0.20 migration from the
+    # The RTC domain must stay in the gate's needs list and in the Python
+    # summary dict; dropping either would detach the RTC implementation from the
     # gating decision without failing any other structure pin.
-    assert "webrtc_v020" in gate
-    assert "WEBRTC_V020_RESULT" in gate
+    assert "      - webrtc\n" in gate
+    assert 'WEBRTC_RESULT: ${{ needs.webrtc.result }}' in gate
+    assert '"webrtc": os.environ["WEBRTC_RESULT"]' in gate
+    rtc_job = _job(workflow, "webrtc", "cjk")
+    assert "test(/^wire::webrtc::rtc/)" in rtc_job
 
 
 def test_gate_enforces_anonymous_commit_identities() -> None:
@@ -470,7 +473,8 @@ def test_release_train_supports_generic_maintenance_branches() -> None:
     assert "ref: main" not in workflow
     assert "--branch main" not in workflow
     assert "--latest=false" in workflow
-    assert "--notes-start-tag" in workflow
+    assert '--from-release-commit' in workflow
+    assert 'scripts/actr/generate-changelog.py' in workflow
     assert "needs.context.result == 'success'" in workflow
 
     assert "^release-([0-9]+)\\.([0-9]+)$" in release_script
@@ -497,7 +501,7 @@ def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
     assert "Actrium/actrix" not in workflow
     assert "actions: read" not in workflow
 
-    assert "runs-on: ubuntu-latest-m" in pkg_job
+    assert "runs-on: [self-hosted, Linux, X64]" in pkg_job
     assert "runs-on: macos-arm64-larger" in swift_job
 
 
@@ -758,15 +762,25 @@ def test_swift_e2e_covers_short_and_long_background_recovery() -> None:
     assert "await sendRecoveryEcho(\"\\(input)-foreground-\\(cycle)\")" in content_view
 
 
-def test_swift_e2e_retries_bounded_connection_not_ready() -> None:
+def test_swift_e2e_delegates_recovery_to_framework() -> None:
     service = (ROOT / "tests/e2e/actr/swift-echo-app/EchoApp/ActrService.swift").read_text(
         encoding="utf-8"
     )
+    content_view = (ROOT / "tests/e2e/actr/swift-echo-app/EchoApp/ContentView.swift").read_text(
+        encoding="utf-8"
+    )
 
-    assert "func sendEchoWhenReady" in service
-    assert ".ConnectionNotReady(info)" in service
-    assert "clock.now < deadline" in service
-    assert "ACTR_E2E_RETRY:ConnectionNotReady" in service
+    assert "func sendEcho(_ input: String)" in service
+    # The removed retry helper must not be CALLED. A regex tolerates
+    # whitespace/comments between the identifier and its argument list, so
+    # formatting or line wrapping cannot produce a false pass/fail.
+    import re
+
+    assert not re.search(r"sendEchoWhenReady\s*\(", service), (
+        "application-side readiness retry leaked"
+    )
+    assert "Call owns route readiness and transport retry" in content_view
+    assert "ACTR_E2E_RETRY:ConnectionNotReady" not in service
 
 
 def _create_service_registry(db_path: Path) -> None:
@@ -959,7 +973,7 @@ def test_service_readiness_waits_for_exact_registration() -> None:
 
 
 if __name__ == "__main__":
-    test_gate_aggregates_webrtc_v020_domain()
+    test_gate_aggregates_webrtc_domain()
     test_gate_enforces_anonymous_commit_identities()
     test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm()
     test_rust_test_gate_restores_cache_before_installing_tools()
@@ -996,7 +1010,7 @@ if __name__ == "__main__":
     test_run_sh_uses_correct_signaling_cache_table()
     test_swift_e2e_only_shuts_down_its_selected_simulator()
     test_swift_e2e_covers_short_and_long_background_recovery()
-    test_swift_e2e_retries_bounded_connection_not_ready()
+    test_swift_e2e_delegates_recovery_to_framework()
     test_service_readiness_rejects_missing_or_unrelated_registration()
     test_service_readiness_waits_for_exact_registration()
     test_nightly_e2e_includes_swift_datastream()

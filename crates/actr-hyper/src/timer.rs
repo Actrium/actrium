@@ -61,6 +61,7 @@ pub(crate) struct TimerDefinition {
 macro_rules! timer_inventory {
     (
         $(
+            $(#[$entry_attr:meta])*
             $symbol:ident => {
                 id: $id:literal,
                 owner: $owner:literal,
@@ -85,6 +86,7 @@ macro_rules! timer_inventory {
                 Duration::from_millis(100);
 
             $(
+                $(#[$entry_attr])*
                 #[allow(dead_code)] // Some entries are feature-gated in production.
                 pub(crate) const $symbol: TimerDefinition = TimerDefinition {
                     symbol: stringify!($symbol),
@@ -102,7 +104,8 @@ macro_rules! timer_inventory {
             )+
 
             #[allow(dead_code)] // Read by audit tests and external inventory tooling.
-            pub(crate) const ALL: &[TimerDefinition] = &[$($symbol),+];
+            pub(crate) const ALL: &[TimerDefinition] =
+                &[$($(#[$entry_attr])* $symbol),+];
         }
     };
 }
@@ -326,6 +329,13 @@ timer_inventory! {
         expiry: "release pending RPC response waits without closing the destination transport",
         reset: "each distinct sendability falling edge", external: false
     },
+    #[cfg(test)]
+    PEER_TEST_EVENT_DELAY => {
+        id: "outbound.peer.test_event_delay", owner: "peer_gate tests", category: ProtocolSchedule,
+        duration: "test-chosen delay", arm: "a test schedules a projection/readiness event",
+        success: "delay elapses and the scheduled event fires", interrupt: "test cancellation",
+        expiry: "fire the scheduled test event", reset: "each scheduled event", external: false
+    },
     PEER_TRANSPORT_CREATE => {
         id: "transport.peer.create", owner: "peer_transport", category: FailureDeadline,
         duration: "one absolute ConnectionFlight deadline", arm: "transport flight is created",
@@ -374,6 +384,13 @@ timer_inventory! {
         success: "state event plus authoritative ready check", interrupt: "event stream close",
         expiry: "return no sendable session", reset: "new send wait only", external: false
     },
+    WEBRTC_PEER_INBOUND_ADMISSION => {
+        id: "webrtc.coordinator.peer_inbound_admission", owner: "webrtc_coordinator", category: FailureDeadline,
+        duration: "INBOUND_ADMISSION_WAIT (one lane/generation grace window)",
+        arm: "first inbound message from a generation sees no admitted sendable generation",
+        success: "exact generation becomes sendable", interrupt: "session cancellation or gate stream close",
+        expiry: "drop the inbound message and release the lane pump", reset: "new lane/generation admission window", external: false
+    },
     WEBRTC_PEER_RECOVERY_DEADLINE => {
         id: "webrtc.coordinator.peer_recovery_deadline", owner: "peer_recovery", category: FailureDeadline,
         duration: "NETWORK_RECOVERY_TIMEOUT (the authoritative total recovery budget)", arm: "an exact peer session enters Recovering",
@@ -384,9 +401,9 @@ timer_inventory! {
     },
     WEBRTC_ICE_RESTART_WAIT => {
         id: "webrtc.coordinator.ice_restart_wait", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "per-attempt restart timeout", arm: "ICE restart attempt awaits committed connected state",
+        duration: "REMOTE_REQUEST_WAKE_GRACE (500ms) or ICE_RESTART_ATTEMPT_TIMEOUT (10s)", arm: "ICE restart attempt awaits committed connected state; an attempt-1 remote wake may arm the short grace",
         success: "state event plus authoritative state", interrupt: "restart wake or session replacement",
-        expiry: "classify attempt timeout", reset: "new restart attempt", external: false
+        expiry: "classify grace or attempt timeout", reset: "new restart attempt or matching Answer", external: false
     },
     SIGNALING_CONNECT => {
         id: "signaling.connect", owner: "signaling_client", category: FailureDeadline,
@@ -397,7 +414,7 @@ timer_inventory! {
     SIGNALING_INBOUND_RETRY_BACKOFF => {
         id: "signaling.inbound.retry_backoff", owner: "signaling_router", category: FailureBackoff,
         duration: "bounded exponential backoff, 50ms doubling to a 1s cap",
-        arm: "the sole v0.20 signaling consumer observes the inbound queue close or a receive error",
+        arm: "the sole RTC signaling consumer observes the inbound queue close or a receive error",
         success: "backoff deadline", interrupt: "router shutdown",
         expiry: "retry receive on the (possibly replaced) inbound queue",
         reset: "a received envelope", external: false
@@ -945,19 +962,19 @@ mod tests {
             ),
             (
                 "wire/webrtc/test_runtime.rs",
-                "webrtc v0.20 Runtime methods require std::time::Instant; this adapter forwards that upstream clock contract and never makes an Actr lifecycle decision",
+                "webrtc Runtime methods require std::time::Instant; this adapter forwards that upstream clock contract and never makes an Actr lifecycle decision",
             ),
             (
-                "wire/webrtc/v020/fault.rs",
-                "the instrumented webrtc v0.20 Runtime must preserve upstream std::time::Instant method signatures; PolicyClock owns Actr recovery deadlines",
+                "wire/webrtc/rtc/fault.rs",
+                "the instrumented webrtc Runtime must preserve upstream std::time::Instant method signatures; PolicyClock owns Actr recovery deadlines",
             ),
             (
-                "wire/webrtc/v020/media.rs",
+                "wire/webrtc/rtc/media.rs",
                 "the test-only RtpSender mock implements the upstream get_stats(std::time::Instant) signature and never gates lifecycle state",
             ),
             (
-                "wire/webrtc/v020/peer/effects.rs",
-                "webrtc v0.20 get_stats() requires a std::time::Instant report stamp; the report is observation-only and never gates sendability or recovery",
+                "wire/webrtc/rtc/peer/effects.rs",
+                "webrtc get_stats() requires a std::time::Instant report stamp; the report is observation-only and never gates sendability or recovery",
             ),
         ];
 

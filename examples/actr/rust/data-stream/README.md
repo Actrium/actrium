@@ -9,7 +9,7 @@ The DataChunk API provides a Fast Path for streaming non-media data (file transf
 **Key Concepts:**
 - **DataChunk**: Protocol buffer message for streaming data chunks
 - **Stream ID**: Identifies a specific data stream (e.g., "file-transfer")
-- **Sequence Number**: Ensures ordered delivery of chunks
+- **Sequence Number**: Receiver-side reassembly key — chunks of one stream are dispatched in send order, but gaps are possible (`StreamLatencyFirst` drops under pressure, reconnects can lose in-flight reliable chunks), so reassemble and detect gaps by sequence rather than assuming contiguous arrival
 - **Fast Path**: Bypasses RPC envelope for lower latency
 
 ## Architecture
@@ -154,6 +154,25 @@ let dest = Dest::Peer(receiver_id);
 ctx.send_data_chunk(&dest, chunk).await?;
 ```
 
+`StreamReliable` waits for a usable WebRTC/WebSocket route inside the
+framework and consumes one bounded send deadline. Do not retain the chunk for a
+connection Hook or replay it from a fallback timer. A successful call means the
+local transport accepted the chunk; it does not acknowledge remote processing.
+If the result is an uncertain-delivery error, stop automatic replay and resolve
+the outcome with an application ACK, checksum, or idempotency key.
+
+The returned future is cancellable. Dropping it releases the framework's
+readiness waiter and does not leave an offline payload queue behind:
+
+```rust
+let shutdown = tokio_util::sync::CancellationToken::new();
+let send = ctx.send_data_chunk(&dest, chunk);
+tokio::select! {
+    result = send => result?,
+    _ = shutdown.cancelled() => return Ok(()),
+}
+```
+
 ### Receiver Side
 
 ```rust
@@ -168,6 +187,27 @@ ctx.register_stream("file-transfer".to_string(), |chunk: DataChunk, sender_id: A
 // Unregister when done
 ctx.unregister_stream("file-transfer").await?;
 ```
+
+### Receiver-side rules
+
+Callbacks for one stream run **serially, run-to-completion**: the previous
+chunk's callback future fully resolves before the next chunk's callback
+starts, strictly in arrival order. Different streams run on independent
+workers. Two consequences:
+
+1. **Never wait for a later chunk inside a callback.** A callback that blocks
+   until a later chunk of the same stream arrives self-deadlocks — that
+   chunk's callback is queued behind the blocked one, so neither makes
+   progress. An end-of-stream handler polling for stragglers is the classic
+   trigger. Finalize **outside** the stream callback instead: a separate RPC
+   the sender invokes after the last chunk (this example's `EndTransfer`, see
+   `receiver/src/file_transfer_service.rs`), or a detached task watching
+   shared reassembly state.
+2. **Reassemble by `sequence`.** Same-stream chunks are dispatched in send
+   order, but gaps are possible: `StreamLatencyFirst` drops chunks under
+   pressure, and a reconnect can lose in-flight reliable chunks. Use
+   `DataChunk.sequence` as the authoritative order key and detect gaps
+   explicitly instead of assuming contiguous arrival.
 
 ## Use Cases
 

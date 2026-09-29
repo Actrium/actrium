@@ -10,7 +10,7 @@ import {
   sendDataChunk as hostSendDataChunk,
   tell as hostTell,
   unregisterStream as hostUnregisterStream,
-} from 'actr:workload/host@0.6.0';
+} from 'actr:workload/host@0.7.0';
 
 export type PayloadBytes = Uint8Array | ArrayBuffer | ArrayLike<number>;
 
@@ -87,6 +87,28 @@ export type WebRtcPeerStatus =
   | { tag: 'connected' }
   | { tag: 'recovering' };
 
+export interface WebRtcPeerState {
+  peer: ActrId;
+  pcGeneration: bigint;
+  revision: bigint;
+  status: WebRtcPeerStatus;
+  sendable: boolean;
+  networkPath: { tag: 'unknown' | 'direct' | 'relayed' };
+  relayed?: boolean;
+  unavailableReason?: {
+    tag:
+      | 'connection-not-ready'
+      | 'peer-connection-build-failed'
+      | 'negotiation-failed'
+      | 'ice-restart-failed'
+      | 'peer-connection-rebuild-failed'
+      | 'unsupported-rtc-capability'
+      | 'rtc-resource-limit-exceeded'
+      | 'recovery-exhausted'
+      | 'closed';
+  };
+}
+
 export interface ErrorEvent {
   source: ActrError;
   category: ErrorCategory;
@@ -123,7 +145,8 @@ export type ActrError =
     }
   | { tag: 'decode-failure'; val: string }
   | { tag: 'not-implemented'; val: string }
-  | { tag: 'internal'; val: string };
+  | { tag: 'internal'; val: string }
+  | { tag: 'delivery-uncertain'; val: { operationId: string; cause: string } };
 
 type WitActrId = Omit<ActrId, 'serialNumber'> & {
   serialNumber: bigint;
@@ -183,6 +206,49 @@ export interface Workload {
   onReady?(ctx?: InvocationCtx): void | Promise<void>;
   onStop?(ctx?: InvocationCtx): void | Promise<void>;
   onError?(event: ErrorEvent, ctx?: InvocationCtx): void | Promise<void>;
+  onSignalingConnecting?(ctx?: InvocationCtx): void | Promise<void>;
+  onSignalingConnected?(ctx?: InvocationCtx): void | Promise<void>;
+  onSignalingDisconnected?(ctx?: InvocationCtx): void | Promise<void>;
+  onWebsocketConnecting?(
+    event: PeerEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onWebsocketConnected?(
+    event: PeerEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onWebsocketDisconnected?(
+    event: PeerEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onWebrtcConnecting?(
+    event: PeerEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onWebrtcConnected?(
+    event: PeerEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onWebrtcDisconnected?(
+    event: PeerEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onWebrtcStateChanged?(
+    event: WebRtcPeerState,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onCredentialRenewed?(
+    event: CredentialEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onCredentialExpiring?(
+    event: CredentialEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
+  onMailboxBackpressure?(
+    event: BackpressureEvent,
+    ctx?: InvocationCtx,
+  ): void | Promise<void>;
   onDataChunk?(
     chunk: DataChunk,
     sender: ActrId,

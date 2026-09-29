@@ -1,6 +1,6 @@
 //! Production-equivalent two-endpoint mobile RTC integration harness.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use actr_protocol::{ActrId, DataChunk, PayloadType, RpcEnvelope};
@@ -56,18 +56,18 @@ pub struct MobileEventDriver {
     shutdown: tokio_util::sync::CancellationToken,
     task: tokio::task::JoinHandle<()>,
     status: watch::Receiver<SupervisorStatus>,
-    address_shutdown: tokio_util::sync::CancellationToken,
-    address_task: tokio::task::JoinHandle<()>,
 }
 
 impl MobileEventDriver {
-    /// Attach the production gated lifecycle reconciler, v0.20 recovery feed,
-    /// and address monitor to one endpoint in any integration topology.
+    /// Attach the production gated lifecycle reconciler and RTC recovery
+    /// feed to one endpoint in any integration topology. Mobile tests submit
+    /// native network-path events explicitly; address polling is intentionally
+    /// not part of the mobile production path.
     pub fn spawn(harness: &TestHarness, serial: u64) -> Self {
         let peer = harness.peer(serial);
         let processor = peer.production_network_processor();
         let (handle, facts, shutdown, task, status) =
-            super::spawn_gated_v020_network_event_supervisor(processor, &peer.rtc);
+            super::spawn_gated_rtc_network_event_supervisor(processor, &peer.rtc);
         // Wire the signaling client's generation facts into this supervisor
         // and seed a live generation (the `recovery_vnet_supervisor` wiring).
         // The harness client connects eagerly at `add_peer`, before this sink
@@ -78,12 +78,6 @@ impl MobileEventDriver {
         peer.signaling_client
             .set_supervisor_fact_sink(facts.clone());
         facts.signaling_generation_committed(1, crate::lifecycle::SignalingFactOrigin::External);
-        let address_shutdown = tokio_util::sync::CancellationToken::new();
-        let address_task = crate::wire::webrtc::v020::recovery::spawn_address_monitor(
-            harness.address_provider(serial),
-            peer.rtc.recovery_supervisor(),
-            address_shutdown.clone(),
-        );
         Self {
             endpoint: peer.id.clone(),
             evidence: harness.evidence.clone(),
@@ -91,8 +85,6 @@ impl MobileEventDriver {
             shutdown,
             task,
             status,
-            address_shutdown,
-            address_task,
         }
     }
 
@@ -205,14 +197,12 @@ impl MobileEventDriver {
 
     pub async fn shutdown(self) {
         self.shutdown.cancel();
-        self.address_shutdown.cancel();
         let _ = self.task.await;
-        let _ = self.address_task.await;
     }
 }
 
 /// Two independent Actr endpoints connected through production Actrix
-/// Signaling/STUN/TURN and real webrtc-rs v0.20 PeerConnections.
+/// Signaling/STUN/TURN and real webrtc-rs PeerConnections.
 pub struct MobileRtcPairHarness {
     services: ActrixTestServices,
     harness: TestHarness,
@@ -225,6 +215,21 @@ pub struct MobileRtcPairHarness {
 
 impl MobileRtcPairHarness {
     pub async fn new(a_serial: u64, b_serial: u64) -> Self {
+        Self::new_with_address_mode(a_serial, b_serial, false).await
+    }
+
+    /// Build a pair whose first bind is deterministic and whose next address
+    /// change makes the test provider return dual-stack wildcards. The real
+    /// webrtc-rs driver then expands those wildcards during ICE-restart rebind.
+    pub async fn new_with_wildcard_rebind(a_serial: u64, b_serial: u64) -> Self {
+        Self::new_with_address_mode(a_serial, b_serial, true).await
+    }
+
+    async fn new_with_address_mode(
+        a_serial: u64,
+        b_serial: u64,
+        wildcard_rebind_addresses: bool,
+    ) -> Self {
         assert_ne!(
             a_serial, b_serial,
             "pair endpoints require distinct identities"
@@ -232,7 +237,11 @@ impl MobileRtcPairHarness {
         let services = ActrixTestServices::start()
             .await
             .expect("Actrix Signaling/STUN/TURN services must start");
-        let mut harness = TestHarness::with_external_signaling(services.signaling_url()).await;
+        let mut harness = if wildcard_rebind_addresses {
+            TestHarness::with_external_signaling_and_wildcard_rebind(services.signaling_url()).await
+        } else {
+            TestHarness::with_external_signaling(services.signaling_url()).await
+        };
         let a_id = make_actor_id(a_serial);
         let b_id = make_actor_id(b_serial);
         harness
@@ -248,6 +257,16 @@ impl MobileRtcPairHarness {
                 services.rtc_configuration(&b_id, false),
                 services.aid_credential(&b_id),
             )
+            .await;
+        // `connect_to_with_identity()` returns after the WebSocket handshake,
+        // but the Actrix upgrade task registers the actor asynchronously.
+        // Wait for both Ping/Pong barriers before any RoleNegotiation can
+        // address the peer through actor_id_index.
+        harness
+            .wait_for_signaling_registration(a_serial, Duration::from_secs(5))
+            .await;
+        harness
+            .wait_for_signaling_registration(b_serial, Duration::from_secs(5))
             .await;
 
         let a_mobile = Some(MobileEventDriver::spawn(&harness, a_serial));
@@ -353,15 +372,43 @@ impl MobileRtcPairHarness {
             self.harness
                 .peer(self.a_serial)
                 .rtc
-                .wait_state(&b_id, timeout, |state| state.sendable),
+                .wait_state_diagnosed(&b_id, timeout, |state| state.sendable),
             self.harness
                 .peer(self.b_serial)
                 .rtc
-                .wait_state(&a_id, timeout, |state| state.sendable),
+                .wait_state_diagnosed(&a_id, timeout, |state| state.sendable),
         );
+        let (a_to_b, b_to_a) = match (a_to_b, b_to_a) {
+            (Ok(a_to_b), Ok(b_to_a)) => (a_to_b, b_to_a),
+            (a_to_b, b_to_a) => {
+                // A succeeded direction only needs a compact summary; the failing
+                // side carries the full diagnostics.
+                let compact = |state: actr_framework::WebRtcPeerState| {
+                    format!(
+                        "sendable={} status={:?} pc_generation={} revision={} \
+                         network_path={:?} unavailable_reason={:?}",
+                        state.sendable,
+                        state.status,
+                        state.pc_generation,
+                        state.revision,
+                        state.network_path,
+                        state.unavailable_reason,
+                    )
+                };
+                let a_to_b = a_to_b.map(compact).unwrap_or_else(|d| d);
+                let b_to_a = b_to_a.map(compact).unwrap_or_else(|d| d);
+                let trace = self.signaling_trace();
+                let recent = &trace[trace.len().saturating_sub(32)..];
+                panic!(
+                    "pair did not become sendable within {timeout:?}: \
+                     A->B={a_to_b}; B->A={b_to_a}; \
+                     recent signaling (oldest first)={recent:#?}"
+                );
+            }
+        };
         let snapshot = PairSnapshot {
-            a_to_b: a_to_b.expect("A did not become sendable to B"),
-            b_to_a: b_to_a.expect("B did not become sendable to A"),
+            a_to_b,
+            b_to_a,
             role_a: self
                 .harness
                 .peer(self.a_serial)
@@ -597,6 +644,7 @@ impl MobileRtcPairHarness {
             metadata: Vec::new(),
             timestamp_ms: Some(0),
         };
+        let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
         self.harness
             .peer(self.serial(from))
             .gate
@@ -605,6 +653,7 @@ impl MobileRtcPairHarness {
                 PayloadType::StreamReliable,
                 stream_id,
                 bytes::Bytes::from(chunk.encode_to_vec()),
+                &operation_id,
             )
             .await
             .expect("pair DataChunk send");
@@ -644,7 +693,7 @@ impl MobileRtcPairHarness {
     }
 
     /// Start a DataChunk send without waiting for its remote observation so a
-    /// test can interrupt a concrete fragmented send at the v0.20 lane seam.
+    /// test can interrupt a concrete fragmented send at the RTC lane seam.
     pub fn spawn_data_chunk(
         &self,
         from: PairEndpoint,
@@ -659,6 +708,8 @@ impl MobileRtcPairHarness {
             metadata: Vec::new(),
             timestamp_ms: Some(0),
         };
+        let operation_id =
+            crate::outbound::data_chunk_operation_id(&chunk.stream_id, chunk.sequence);
         let gate = self.harness.peer(self.serial(from)).gate.clone();
         let target = self.id(to);
         let stream_id = stream_id.to_owned();
@@ -668,6 +719,7 @@ impl MobileRtcPairHarness {
                 PayloadType::StreamReliable,
                 &stream_id,
                 bytes::Bytes::from(chunk.encode_to_vec()),
+                &operation_id,
             )
             .await
         })
@@ -758,7 +810,7 @@ impl MobileRtcPairHarness {
     }
 
     /// Wait until the configured physical link fault is observed on either
-    /// endpoint's generation-scoped v0.20 Runtime wrapper.
+    /// endpoint's generation-scoped RTC Runtime wrapper.
     pub async fn wait_rtc_fault_hit(
         &self,
         timeout: Duration,
@@ -835,6 +887,64 @@ impl MobileRtcPairHarness {
             .handle(&local, &remote, generation)
             .expect("active generation fault handle")
             .bind_addresses()
+    }
+
+    /// Actual local socket addresses observed at the Runtime boundary for the
+    /// endpoint's current generation. Includes same-generation ICE-restart
+    /// rebinds, unlike [`Self::rtc_bind_addresses`].
+    pub async fn rtc_bound_addresses(&self, endpoint: PairEndpoint) -> Vec<SocketAddr> {
+        let snapshot = self
+            .snapshot()
+            .await
+            .expect("bound-address evidence requires an established pair");
+        let (local, remote, generation) = match endpoint {
+            PairEndpoint::A => (
+                self.id(PairEndpoint::A),
+                self.id(PairEndpoint::B),
+                snapshot.a_to_b.pc_generation,
+            ),
+            PairEndpoint::B => (
+                self.id(PairEndpoint::B),
+                self.id(PairEndpoint::A),
+                snapshot.b_to_a.pc_generation,
+            ),
+        };
+        self.harness
+            .rtc_faults
+            .handle(&local, &remote, generation)
+            .expect("active generation fault handle")
+            .bound_socket_addresses()
+    }
+
+    pub async fn wait_rtc_bound_address(
+        &self,
+        endpoint: PairEndpoint,
+        baseline: usize,
+        expected_ip: IpAddr,
+        timeout: Duration,
+    ) -> Option<SocketAddr> {
+        let snapshot = self
+            .snapshot()
+            .await
+            .expect("bound-address evidence requires an established pair");
+        let (local, remote, generation) = match endpoint {
+            PairEndpoint::A => (
+                self.id(PairEndpoint::A),
+                self.id(PairEndpoint::B),
+                snapshot.a_to_b.pc_generation,
+            ),
+            PairEndpoint::B => (
+                self.id(PairEndpoint::B),
+                self.id(PairEndpoint::A),
+                snapshot.b_to_a.pc_generation,
+            ),
+        };
+        self.harness
+            .rtc_faults
+            .handle(&local, &remote, generation)
+            .expect("active generation fault handle")
+            .wait_for_bound_address(baseline, expected_ip, timeout)
+            .await
     }
 
     pub fn rtc_fault_scope_count(&self) -> usize {

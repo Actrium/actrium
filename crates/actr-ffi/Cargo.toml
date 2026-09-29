@@ -53,14 +53,7 @@ actr-mock-actrix = { workspace = true }
 tempfile.workspace = true
 
 [features]
-# actr-hyper's only backend is webrtc-v020 (the 0.14 stack is removed), so
-# the RTC status/observation FFI is part of the supported surface and enabled
-# by default. Without this, mobile builds exposed get/list_rtc_peer_statuses
-# as compile-correct stubs that always reported "no RTC support" (a dependency
-# feature cannot enable this crate's own cfg gate).
-default = ["webrtc-v020"]
+# RTC status and observation APIs are always available.
+default = []
 opentelemetry = []
 macos-oslog = ["tracing-oslog"]
-# v0.20 WebRTC backend status/observation APIs (Stage 6). Forwards to
-# actr-hyper's backend feature.
-webrtc-v020 = ["actr-hyper/webrtc-v020"]

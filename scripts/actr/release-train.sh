@@ -2208,6 +2208,7 @@ stage_publish_cli_binaries() {
   local args=(publish --tag "$FINAL_TAG" --assets "$staging" --state-file "$STATE_FILE" --replace --create-release)
   [[ "$DRY_RUN" == true ]] && args+=(--dry-run)
   RELEASE_SHA="$RELEASE_SHA" PRE_RELEASE="$PRE_RELEASE" PACKAGE_SYNC_OWNER="$PACKAGE_SYNC_OWNER" \
+    RELEASE_BRANCH="$RELEASE_BRANCH" ACTR_REPO_ROOT="$WORK_REPO_ROOT" \
     scripts/actr/release-actr-cli.sh "${args[@]}"
 
   log_info "Stage publish-cli-binaries complete"

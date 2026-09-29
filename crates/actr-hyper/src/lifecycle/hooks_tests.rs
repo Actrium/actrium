@@ -538,8 +538,8 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
     let cb = build_hook_callback(Some(observer), ctx_builder);
 
     cb(HookEvent::DataChunkDeliveryUncertain {
-        stream_id: "mobile-upload".to_string(),
-        session_id: 99,
+        operation_id: crate::outbound::data_stream_operation_id("mobile-upload"),
+        session_id: Some(99),
         reason: "data channel closed".to_string(),
     })
     .await;
@@ -551,12 +551,49 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
 
     assert_eq!(event.category, ErrorCategory::DataChunkDeliveryUncertain);
     assert!(matches!(
-        event.source,
-        ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "mobile-upload"
+        &event.source,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "mobile-upload#stream"
+                && cause == "data stream delivery uncertain: data channel closed"
     ));
-    assert!(event.context.contains("stream_id=mobile-upload"));
+    assert!(event.context.contains("operation_id=mobile-upload#stream"));
     assert!(event.context.contains("session_id=99"));
     assert!(event.context.contains("reason=data channel closed"));
+
+    // The synchronous PeerGate classifier emits `session_id: None` (session
+    // unknown or not applicable): the observer context must render
+    // `session_id=unknown` rather than a misleading 0, and the cause stays
+    // reason-driven.
+    let (tx_none, mut rx_none) = mpsc::unbounded_channel();
+    let observer_none: WorkloadHookObserverRef = Arc::new(ErrorRecorder { tx: tx_none });
+    let ctx_none = test_runtime_context();
+    let ctx_builder_none: HookContextBuilder = Arc::new(move || {
+        let ctx_none = ctx_none.clone();
+        Box::pin(async move { Some(ctx_none) })
+    });
+    let cb_none = build_hook_callback(Some(observer_none), ctx_builder_none);
+
+    cb_none(HookEvent::DataChunkDeliveryUncertain {
+        operation_id: crate::outbound::data_chunk_operation_id("peer-chat", 3),
+        session_id: None,
+        reason: "synchronous send classification: ambiguous partial write".to_string(),
+    })
+    .await;
+
+    let event_none = tokio::time::timeout(std::time::Duration::from_secs(1), rx_none.recv())
+        .await
+        .expect("on_error was not called for the session-less event")
+        .expect("error recorder dropped");
+
+    assert!(matches!(
+        &event_none.source,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "peer-chat#3"
+                && cause
+                    == "data stream delivery uncertain: synchronous send classification: ambiguous partial write"
+    ));
+    assert!(event_none.context.contains("session_id=unknown"));
+    assert!(event_none.context.contains("operation_id=peer-chat#3"));
 }
 
 // ── chain_observers + ChainedHookObserver delivery ──────────────────────
@@ -1006,8 +1043,8 @@ fn log_hook_event_covers_all_variants() {
         status: WebRtcPeerStatus::Idle,
     });
     log_hook_event(&HookEvent::DataChunkDeliveryUncertain {
-        stream_id: "s".into(),
-        session_id: 1,
+        operation_id: "s".into(),
+        session_id: Some(1),
         reason: "r".into(),
     });
     log_hook_event(&HookEvent::WebSocketConnectStart {
@@ -1043,4 +1080,136 @@ fn extract_panic_info_handles_str_string_and_unknown() {
 
     let s = extract_panic_info(Box::new(42u64) as Box<dyn std::any::Any + Send>);
     assert_eq!(s, "<non-string panic>");
+}
+
+/// End-to-end coverage for the synchronous uncertain-delivery hook path: a
+/// `PeerGate` data-chunk send that classifies as `DeliveryUncertain` must
+/// reach `WorkloadHookObserver::on_error` through the same
+/// `build_hook_callback` the node installs via `set_hook_callback`, with the
+/// caller-visible `stream_id#sequence` operation id on both the returned
+/// error and the hook event.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn peer_gate_uncertain_send_reaches_on_error_through_installed_hook() {
+    use crate::outbound::PeerGate;
+    use crate::transport::{
+        ConnType, DataLane, DeliveryProgress, NetworkError, NetworkResult, PeerTransport,
+        SendAttemptResult, WireBuilder, WireHandle,
+    };
+    use actr_framework::Bytes;
+    use actr_protocol::PayloadType;
+
+    #[derive(Debug)]
+    struct UncertainLane;
+
+    #[async_trait::async_trait]
+    impl DataLane for UncertainLane {
+        async fn send_with_progress(&self, _data: Bytes) -> SendAttemptResult {
+            SendAttemptResult::failed(
+                NetworkError::SendError("ambiguous partial write".into()),
+                DeliveryProgress::Unknown,
+            )
+        }
+
+        fn lane_type(&self) -> &'static str {
+            "uncertain-test"
+        }
+    }
+
+    #[derive(Debug)]
+    struct UncertainWire {
+        lane: std::sync::Arc<UncertainLane>,
+    }
+
+    #[async_trait::async_trait]
+    impl WireHandle for UncertainWire {
+        fn connection_type(&self) -> ConnType {
+            ConnType::WebSocket
+        }
+
+        fn priority(&self) -> u8 {
+            1
+        }
+
+        async fn connect(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            true
+        }
+
+        async fn close(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        async fn get_lane(
+            &self,
+            _payload_type: PayloadType,
+        ) -> NetworkResult<std::sync::Arc<dyn DataLane>> {
+            Ok(self.lane.clone())
+        }
+    }
+
+    struct UncertainWireBuilder {
+        wire: std::sync::Arc<UncertainWire>,
+    }
+
+    #[async_trait::async_trait]
+    impl WireBuilder for UncertainWireBuilder {
+        async fn create_connections(
+            &self,
+            _dest: &crate::transport::Dest,
+        ) -> NetworkResult<Vec<std::sync::Arc<dyn WireHandle>>> {
+            Ok(vec![self.wire.clone()])
+        }
+    }
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let observer: WorkloadHookObserverRef = Arc::new(ErrorRecorder { tx });
+    let ctx = test_runtime_context();
+    let ctx_builder: HookContextBuilder = Arc::new(move || {
+        let ctx = ctx.clone();
+        Box::pin(async move { Some(ctx) })
+    });
+
+    let gate = PeerGate::for_test(std::sync::Arc::new(PeerTransport::new(
+        test_actr_id(1),
+        std::sync::Arc::new(UncertainWireBuilder {
+            wire: std::sync::Arc::new(UncertainWire {
+                lane: std::sync::Arc::new(UncertainLane),
+            }),
+        }),
+    )));
+    gate.set_hook_callback(build_hook_callback(Some(observer), ctx_builder));
+
+    let err = gate
+        .send_data_chunk(
+            &test_actr_id(2),
+            PayloadType::StreamReliable,
+            "hook-stream",
+            Bytes::from_static(b"chunk"),
+            "hook-stream#7",
+        )
+        .await
+        .expect_err("ambiguous lane send must fail");
+
+    assert!(
+        matches!(&err, ActrError::DeliveryUncertain { operation_id, .. }
+            if operation_id == "hook-stream#7"),
+        "got {err:?}"
+    );
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        .await
+        .expect("on_error was not called for the uncertain send")
+        .expect("error recorder dropped");
+
+    assert_eq!(event.category, ErrorCategory::DataChunkDeliveryUncertain);
+    assert!(
+        matches!(&event.source, ActrError::DeliveryUncertain { operation_id, .. }
+            if operation_id == "hook-stream#7"),
+        "hook event must reconcile on the caller-visible operation id: {:?}",
+        event.source
+    );
+    assert!(event.context.contains("operation_id=hook-stream#7"));
 }

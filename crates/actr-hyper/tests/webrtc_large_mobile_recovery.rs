@@ -5,8 +5,8 @@
 //! network and app-lifecycle interruptions.
 //!
 //! The scenario matrix, relative timing, role cases, directions, and outcome
-//! assertions are retained from the pre-v0.20 suite. Only the construction and
-//! fault-injection seams use the v0.20 manager/controller/event-handler stack.
+//! assertions are retained from the pre-RTC suite. Only the construction and
+//! fault-injection seams use the RTC manager/controller/event-handler stack.
 
 use actr_framework::Bytes;
 use actr_hyper::lifecycle::{
@@ -15,7 +15,7 @@ use actr_hyper::lifecycle::{
     ReconnectReason, process_network_event_batch, select_network_recovery_action,
 };
 use actr_hyper::test_support::{
-    TestHarness, WebRtcFragmentSendEvent, WebRtcFragmentSendHook,
+    TestHarness, TestRtcRole, WebRtcFragmentSendEvent, WebRtcFragmentSendHook,
     install_webrtc_fragment_send_hook_for_test, spawn_network_event_supervisor,
 };
 use actr_protocol::prost::Message as _;
@@ -141,6 +141,15 @@ async fn setup_mobile_to_server_with_serials(
     harness
 }
 
+/// Start a fresh physical connection from the stable Offerer. The Answerer is
+/// intentionally passive and only consumes the resulting ordinary Offer.
+async fn reconnect_from_offerer(harness: &TestHarness, offerer_serial: u64, answerer_serial: u64) {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let answerer = harness.peer(answerer_serial).id.clone();
+    harness.peer(offerer_serial).rtc.close_peer(&answerer).await;
+    harness.peer(offerer_serial).rtc.connect(answerer).await;
+}
+
 fn spawn_large_request(
     harness: &TestHarness,
     from_serial: u64,
@@ -242,7 +251,7 @@ async fn expect_large_request_eventually_ok_between(
             }
             Ok(Ok(Err(error))) => {
                 assert!(
-                    is_expected_bounded_transport_failure(&error.to_string()),
+                    is_expected_bounded_transport_failure(&error),
                     "{request_id} got unexpected retry error: {error}"
                 );
             }
@@ -265,8 +274,20 @@ async fn assert_pending_empty(harness: &TestHarness, serial: u64, label: &str) {
     );
 }
 
-fn is_expected_bounded_transport_failure(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
+fn is_expected_bounded_transport_failure(error: &ActrError) -> bool {
+    // DeliveryUncertain is a terminal result for the original operation, but
+    // it is an expected bounded outcome for these in-flight recovery tests.
+    // The retry helpers below always create a fresh request ID; they never
+    // replay the uncertain operation automatically.
+    if matches!(error, ActrError::DeliveryUncertain { .. }) {
+        return true;
+    }
+
+    // Keep the legacy text checks for transport errors whose public mapping is
+    // intentionally coarse (for example, a closed DataChannel becomes an
+    // Unavailable message). The new uncertain outcome is matched structurally
+    // above so it cannot be confused with a generic substring.
+    let message = error.to_string().to_ascii_lowercase();
     [
         "connection",
         "request timeout",
@@ -347,9 +368,9 @@ async fn expect_bounded_failure(
     handle: tokio::task::JoinHandle<actr_protocol::ActorResult<Bytes>>,
     label: &str,
     timeout: Duration,
-) -> String {
+) -> ActrError {
     match tokio::time::timeout(timeout, handle).await {
-        Ok(Ok(Err(error))) => error.to_string(),
+        Ok(Ok(Err(error))) => error,
         Ok(Ok(Ok(response))) => {
             panic!(
                 "{label} unexpectedly succeeded with {} bytes",
@@ -371,7 +392,7 @@ async fn expect_bounded_completion(
     match tokio::time::timeout(timeout, handle).await {
         Ok(Ok(Ok(response))) => assert_payload_integrity(label, &response, data, expected_hash),
         Ok(Ok(Err(error))) => assert!(
-            is_expected_bounded_transport_failure(&error.to_string()),
+            is_expected_bounded_transport_failure(&error),
             "{label} got unexpected bounded failure: {error}"
         ),
         Ok(Err(error)) => panic!("{label} task panicked: {error}"),
@@ -464,6 +485,10 @@ async fn inflight_short_offline_recovers_original_request(case: RoleCase) {
             .await
             .expect("short offline request hung")
             .expect("short offline request task panicked")
+            // This case deliberately verifies that a short outage preserves
+            // the original request. DeliveryUncertain would mean the route
+            // generation was invalidated, so it must remain a contract failure
+            // here rather than being converted into an implicit retry.
             .expect("short offline request should recover");
         assert_payload_integrity(&request_id, &response, &data, &hash);
         assert_pending_empty(&harness, direction.from_serial, &request_id).await;
@@ -504,7 +529,7 @@ async fn inflight_network_type_switch_recovers_or_retries_once(case: RoleCase) {
             .expect("network type switch request task panicked");
         match result {
             Ok(response) => assert_payload_integrity(&request_id, &response, &data, &hash),
-            Err(ActrError::TimedOut) => {
+            Err(ActrError::TimedOut | ActrError::DeliveryUncertain { .. }) => {
                 let retry_id = format!("{request_id}_retry");
                 expect_large_request_ok_between(
                     &harness,
@@ -547,7 +572,10 @@ async fn inflight_long_offline_fails_bounded_then_retries(case: RoleCase) {
         process_mobile_events(&harness, case, vec![offline_event(1)]).await;
         let error = expect_bounded_failure(request, &request_id, Duration::from_secs(5)).await;
         assert!(
-            error.contains("Request timeout") || error.contains("timed out"),
+            matches!(
+                &error,
+                ActrError::TimedOut | ActrError::DeliveryUncertain { .. }
+            ),
             "long offline should time out the in-flight request, got: {error}"
         );
         assert_pending_empty(&harness, direction.from_serial, &request_id).await;
@@ -704,12 +732,14 @@ async fn mobile_data_chunk_channel_close_reports_delivery_uncertain(case: RoleCa
         let gate = harness.peer(direction.from_serial).gate.clone();
         let target_for_send = target_id.clone();
         let stream_id = stream.stream_id.clone();
+        let operation_id = format!("{stream_id}#{}", stream.sequence);
         let send = tokio::spawn(async move {
             gate.send_data_chunk(
                 &target_for_send,
                 PayloadType::StreamReliable,
                 &stream_id,
                 payload,
+                &operation_id,
             )
             .await
         });
@@ -769,12 +799,14 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
         let gate = harness.peer(direction.from_serial).gate.clone();
         let target_for_send = target_id.clone();
         let stream_id = stream.stream_id.clone();
+        let operation_id = format!("{stream_id}#{}", stream.sequence);
         let send = tokio::spawn(async move {
             gate.send_data_chunk(
                 &target_for_send,
                 PayloadType::StreamReliable,
                 &stream_id,
                 payload,
+                &operation_id,
             )
             .await
         });
@@ -789,13 +821,13 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
             .expect("in-flight DataChunk task should not panic");
         if let Err(error) = send_result {
             assert!(
-                is_expected_bounded_transport_failure(&error.to_string()),
+                is_expected_bounded_transport_failure(&error),
                 "unexpected in-flight DataChunk failure: {error}"
             );
         } else {
             // SCTP acceptance is not delivery confirmation. Preserve the old
             // terminal give-up branch by explicitly closing the recovering
-            // v0.20 controller generation.
+            // RTC controller generation.
             harness
                 .peer(direction.from_serial)
                 .rtc
@@ -840,6 +872,18 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
     for case in ROLE_CASES {
         let harness =
             setup_mobile_to_server_with_serials(case.mobile_serial, case.server_serial).await;
+        let target = harness.peer(case.server_serial).id.clone();
+        let mobile_role = harness
+            .peer(case.mobile_serial)
+            .rtc
+            .role(&target)
+            .await
+            .expect("mobile controller role must be available after connect");
+        let (offerer_serial, answerer_serial) = if mobile_role == TestRtcRole::Offerer {
+            (case.mobile_serial, case.server_serial)
+        } else {
+            (case.server_serial, case.mobile_serial)
+        };
         let (data, hash) = generate_test_data(LARGE_PAYLOAD_SIZE);
         let processor: Arc<dyn NetworkEventProcessor> =
             harness.peer(case.mobile_serial).network_processor();
@@ -859,13 +903,13 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
             data.clone(),
             5_000,
         );
-        let target = harness.peer(case.server_serial).id.clone();
         let stream_id = format!("{}-mobile-event-storm-concurrent-stream", case.name);
         let stream = harness.peer(case.mobile_serial).gate.send_data_chunk(
             &target,
             PayloadType::StreamReliable,
             &stream_id,
             Bytes::from(vec![0x42; LARGE_PAYLOAD_SIZE]),
+            &stream_id,
         );
         let (storm_result, call_result, stream_result) =
             tokio::time::timeout(Duration::from_secs(25), async {
@@ -876,22 +920,18 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
         storm_result.expect("mobile event storm task should not panic");
         match call_result.expect("call task must not panic") {
             Ok(response) => assert_payload_integrity(&call_id, &response, &data, &hash),
-            Err(error) => assert!(is_expected_bounded_transport_failure(&error.to_string())),
+            Err(error) => assert!(is_expected_bounded_transport_failure(&error)),
         }
         if let Err(error) = stream_result {
-            assert!(is_expected_bounded_transport_failure(&error.to_string()));
+            assert!(is_expected_bounded_transport_failure(&error));
         }
         assert_pending_empty(&harness, case.mobile_serial, &call_id).await;
 
-        // v0.20 deliberately makes business sends fail fast while a peer is
+        // RTC deliberately makes business sends fail fast while a peer is
         // not sendable. The legacy gate waited for dial-on-demand internally,
         // so adapt that boundary through the new controller API before keeping
         // the original single post-storm business retry assertion.
-        harness
-            .peer(case.mobile_serial)
-            .rtc
-            .connect(target.clone())
-            .await;
+        reconnect_from_offerer(&harness, offerer_serial, answerer_serial).await;
         harness
             .peer(case.mobile_serial)
             .rtc
@@ -900,7 +940,7 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
 
         let (retry_data, retry_hash) = generate_test_data(LARGE_PAYLOAD_SIZE);
         // Preserve the legacy post-storm contract: one fresh request must
-        // establish/rebuild the v0.20 peer controller and succeed.
+        // establish/rebuild the RTC peer controller and succeed.
         expect_large_request_ok_between(
             &harness,
             case.mobile_serial,

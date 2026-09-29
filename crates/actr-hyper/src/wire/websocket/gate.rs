@@ -4,13 +4,13 @@
 //! performs Ed25519 credential verification for each connection (if `WsAuthContext` is configured),
 //! then routes messages by PayloadType to Mailbox or DataChunkRegistry upon successful verification.
 //!
-//! # Design comparison with WebRtcGate
+//! # Design comparison with RTC inbound dispatch
 //!
-//! | Concern | WebRtcGate | WebSocketGate |
+//! | Concern | RTC inbound dispatch | WebSocketGate |
 //! |---------|-----------|---------------|
 //! | Transport | WebRTC DataChannel | WebSocket (TCP) |
 //! | Sender auth | actrix signaling verifies credential | Local Ed25519 verification (AisKeyCache) |
-//! | Message aggregation | `WebRtcCoordinator.receive_message()` | Per-connection `DataLane` reading |
+//! | Message aggregation | Session lane pumps → `InboundRouter` | Per-connection `DataLane` reading |
 
 use super::connection::WebSocketConnection;
 use super::server::InboundWsConn;

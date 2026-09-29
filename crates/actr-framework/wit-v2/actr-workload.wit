@@ -9,7 +9,7 @@
 //
 // `actr:workload@0.5.0` extends the lane-aware 0.4.0 contract with the
 // unified WebRTC peer-state export (`on-webrtc-state-changed`) carried by
-// the v0.20 RTC backend. Adding a required guest export is a contract break
+// the RTC implementation. Adding a required guest export is a contract break
 // for already-compiled packages, hence the version bump; the host rejects
 // pre-0.5.0 worlds at load with an actionable rebuild hint.
 //
@@ -60,7 +60,7 @@
 // stdlib-ish names during binding generation (e.g. `actr-error` rather
 // than bare `error`, which clashes with `wasi:io/error`).
 
-package actr:workload@0.6.0;
+package actr:workload@0.7.0;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared value types
@@ -217,12 +217,24 @@ interface types {
         decode-failure(string),
         not-implemented(string),
         internal(string),
+        // RFC-0507: the framework cannot prove whether the send entered the
+        // transport; terminal for generic retry. Carries the caller-visible
+        // operation id so binding consumers can correlate with their own
+        // idempotency records. Appended (not interleaved) to keep the
+        // discriminant order of the closed 0.6.0 variant stable.
+        delivery-uncertain(delivery-uncertain-payload),
     }
 
     // Payload for the `dependency-not-found` arm.
     record dependency-not-found-payload {
         service-name: string,
         message: string,
+    }
+
+    // Payload for the `delivery-uncertain` arm.
+    record delivery-uncertain-payload {
+        operation-id: string,
+        cause: string,
     }
 
     // Send preflight failure payload. The operation did not enter transport.
@@ -437,7 +449,7 @@ interface workload {
 
     // ── Transport: WebRTC unified state (1, infallible, 0.5.0) ───────────
 
-    // Unified per-peer state hook fed by the v0.20 RTC backend: carries the
+    // Unified per-peer state hook fed by the RTC implementation: carries the
     // full `webrtc-peer-state` snapshot on every transition, subsuming the
     // connecting/connected/disconnected triple for state-machine consumers.
     on-webrtc-state-changed: async func(event: webrtc-peer-state, ctx: invocation-ctx);

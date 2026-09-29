@@ -104,7 +104,7 @@ async fn role_negotiation_timeout_is_shorter_than_initial_connection_budget() {
 
     assert!(
         result.is_some(),
-        "expected the v0.20 controller snapshot to expose role-negotiation failure"
+        "expected the RTC controller snapshot to expose role-negotiation failure"
     );
     assert!(
         elapsed >= Duration::from_secs(4),

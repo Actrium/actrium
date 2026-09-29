@@ -20,7 +20,9 @@
 //! session `SecureCell`.
 
 use super::error::{NetworkError, NetworkResult};
-use super::lane::{DataLane, DeliveryProgress, SendAttemptResult};
+#[cfg(test)]
+use super::lane::DeliveryProgress;
+use super::lane::{DataLane, SendAttemptResult};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::Arc;
@@ -290,8 +292,14 @@ impl DataLane for SecureDataLane {
     }
 
     async fn send_with_progress(&self, data: Bytes) -> SendAttemptResult {
+        // The gate check is provably pre-send (it inspects session state
+        // before touching `inner`), so gate failures stay `NotAttempted`:
+        // the bounded readiness-wait → lane re-acquisition self-heal trip is
+        // safe because nothing entered a transport. A permanently rotated
+        // epoch wastes at most that one bounded trip before the lane is
+        // re-wrapped on the current epoch or its wire is evicted.
         if let Err(error) = self.gate() {
-            return SendAttemptResult::failed(error, DeliveryProgress::NotAttempted);
+            return SendAttemptResult::failed_pre_send(error);
         }
         self.inner.send_with_progress(data).await
     }

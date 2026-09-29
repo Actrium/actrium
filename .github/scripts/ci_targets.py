@@ -36,7 +36,10 @@ FULL_TRIGGER_PATTERNS = (
     "rustfmt.toml",
     "clippy.toml",
     "deny.toml",
+    "CHANGELOG.md",
     "scripts/actr/release-train.sh",
+    "scripts/actr/generate-changelog.py",
+    "scripts/actr/merge-release-pr.py",
 )
 
 CSHARP_CORE_DEPENDENCY_PREFIXES = (

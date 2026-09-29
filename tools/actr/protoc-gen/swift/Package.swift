@@ -11,7 +11,7 @@ let package = Package(
         .executable(name: "protoc-gen-actrframework-swift", targets: ["framework-codegen-swift"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-protobuf.git", exact: "1.32.0"),
+        .package(url: "https://github.com/apple/swift-protobuf.git", exact: "1.38.1"),
     ],
     targets: [
         .executableTarget(

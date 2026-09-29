@@ -109,7 +109,9 @@ struct ContentView: View {
 
         defer { isSending = false }
         do {
-            output = try await actrService.sendEchoWhenReady(message)
+            // Call owns route readiness and transport retry; the UI does not
+            // replay the request from a connection Hook or fallback timer.
+            output = try await actrService.sendEcho(message)
             emitE2EResult(output)
         } catch {
             output = "Echo failed: \(error)"

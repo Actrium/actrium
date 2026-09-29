@@ -941,6 +941,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_func_actr_error_requires_dlq(
     ): Short
+    external fun uniffi_actr_checksum_func_actr_error_throw_for_test(
+    ): Short
     external fun uniffi_actr_checksum_func_set_log_callback(
     ): Short
     external fun uniffi_actr_checksum_func_resolve_manifest_dependency(
@@ -1253,9 +1255,11 @@ external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByVal
 ): Byte
 external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
-external fun uniffi_actr_fn_func_set_log_callback(`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_actr_error_throw_for_test(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_actr_fn_func_set_log_callback(`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_actr_fn_func_resolve_manifest_dependency(`manifestPath`: RustBuffer.ByValue,`dependencyAlias`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1389,6 +1393,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_actr_error_requires_dlq() != 62057.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_func_actr_error_throw_for_test() != 53545.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_set_log_callback() != 22627.toShort()) {
@@ -2627,9 +2634,8 @@ public interface ActrRefWrapperInterface {
     suspend fun `discover`(`targetType`: ActrType, `count`: kotlin.UInt): List<ActrId>
     
     /**
-     * Query one peer's current WebRTC state (v0.20 backend). Returns `None`
-     * when the peer has no controller, the node runs the 0.14 backend, or
-     * the build does not enable `webrtc-v020`.
+     * Query one peer's current WebRTC state. Returns `None`
+     * when the peer has no controller or RTC has not been initialized.
      */
     suspend fun `getRtcPeerStatus`(`peer`: ActrId): WebRtcPeerStateBridge?
     
@@ -2639,8 +2645,7 @@ public interface ActrRefWrapperInterface {
     fun `isShuttingDown`(): kotlin.Boolean
     
     /**
-     * List every current peer's WebRTC state (v0.20 backend; empty on 0.14
-     * or when the build does not enable `webrtc-v020`).
+     * List every current peer's WebRTC state; empty when no peers are registered.
      */
     suspend fun `listRtcPeerStatuses`(): List<WebRtcPeerStateBridge>
     
@@ -2659,11 +2664,10 @@ public interface ActrRefWrapperInterface {
     fun `shutdown`()
     
     /**
-     * Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+     * Subscribe to one peer's WebRTC state changes. The
      * listener immediately receives the current state (initial replay).
      * Dropping the returned subscription stops delivery. Returns `None` when
-     * the peer has no controller, the node runs the 0.14 backend, or the
-     * build does not enable `webrtc-v020`.
+     * the peer has no controller or RTC has not been initialized.
      */
     suspend fun `subscribeRtcPeerStatus`(`peer`: ActrId, `listener`: RtcPeerStateListener): RtcPeerStateSubscription?
     
@@ -2845,9 +2849,8 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
 
     
     /**
-     * Query one peer's current WebRTC state (v0.20 backend). Returns `None`
-     * when the peer has no controller, the node runs the 0.14 backend, or
-     * the build does not enable `webrtc-v020`.
+     * Query one peer's current WebRTC state. Returns `None`
+     * when the peer has no controller or RTC has not been initialized.
      */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `getRtcPeerStatus`(`peer`: ActrId) : WebRtcPeerStateBridge? {
@@ -2886,8 +2889,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
 
     
     /**
-     * List every current peer's WebRTC state (v0.20 backend; empty on 0.14
-     * or when the build does not enable `webrtc-v020`).
+     * List every current peer's WebRTC state; empty when no peers are registered.
      */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `listRtcPeerStatuses`() : List<WebRtcPeerStateBridge> {
@@ -2953,11 +2955,10 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
 
     
     /**
-     * Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+     * Subscribe to one peer's WebRTC state changes. The
      * listener immediately receives the current state (initial replay).
      * Dropping the returned subscription stops delivery. Returns `None` when
-     * the peer has no controller, the node runs the 0.14 backend, or the
-     * build does not enable `webrtc-v020`.
+     * the peer has no controller or RTC has not been initialized.
      */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `subscribeRtcPeerStatus`(`peer`: ActrId, `listener`: RtcPeerStateListener) : RtcPeerStateSubscription? {
@@ -4899,7 +4900,7 @@ public object FfiConverterTypeOpusEncoder: FfiConverter<OpusEncoder, Long> {
 
 
 /**
- * A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+ * A live WebRTC peer-status subscription. Dropping
  * it aborts the delivery task.
  */
 public interface RtcPeerStateSubscriptionInterface {
@@ -4908,7 +4909,7 @@ public interface RtcPeerStateSubscriptionInterface {
 }
 
 /**
- * A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+ * A live WebRTC peer-status subscription. Dropping
  * it aborts the delivery task.
  */
 open class RtcPeerStateSubscription: Disposable, AutoCloseable, RtcPeerStateSubscriptionInterface
@@ -6068,7 +6069,7 @@ public object FfiConverterTypeRpcEnvelopeBridge: FfiConverterRustBuffer<RpcEnvel
 
 
 /**
- * FFI-shaped unified WebRTC peer state (Stage 6, v0.20 backend). Carried by
+ * FFI-shaped unified WebRTC peer state. Carried by
  * `WebRtcObserverBridge::on_state_changed` and the `ActrRefWrapper` status
  * query/list/subscribe APIs. `revision` is monotonic per peer (dedup key).
  */
@@ -7035,8 +7036,8 @@ public object FfiConverterTypeReconnectReason: FfiConverterRustBuffer<ReconnectR
 
 
 /**
- * Whether the selected ICE candidate pair is direct or relayed (v0.20
- * backend, Stage 6). Mirrors `actr_framework::WebRtcNetworkPath`.
+ * Whether the selected ICE candidate pair is direct or relayed. Mirrors
+ *  `actr_framework::WebRtcNetworkPath`.
  */
 
 enum class WebRtcNetworkPathBridge {
@@ -7119,8 +7120,8 @@ public object FfiConverterTypeWebRtcPeerStatusBridge: FfiConverterRustBuffer<Web
 
 
 /**
- * Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, v0.20
- * backend). Mirrors `actr_framework::WebRtcUnavailableReason`.
+ * Stable, FFI-safe reason a WebRTC peer is unavailable. Mirrors
+ *  `actr_framework::WebRtcUnavailableReason`.
  */
 
 enum class WebRtcUnavailableReasonBridge {
@@ -7621,7 +7622,7 @@ public object FfiConverterTypeMediaTrackCallback: FfiConverterCallbackInterface<
 
 
 /**
- * Listener for per-peer WebRTC state updates (Stage 6, v0.20 backend).
+ * Listener for per-peer WebRTC state updates.
  */
 public interface RtcPeerStateListener {
     
@@ -7868,7 +7869,7 @@ public interface WebRtcObserverBridge {
     suspend fun `onDisconnected`(`ctx`: ContextBridge, `event`: PeerEventBridge)
     
     /**
-     * Unified per-revision state hook (Stage 6, v0.20 backend). Fires on
+     * Unified per-revision state hook. Fires on
      * every snapshot revision; a late-registered workload receives the
      * current state on the first projection pass.
      */
@@ -9135,12 +9136,25 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_requires_dlq(
-    
+
         FfiConverterTypeActrError.lower(`err`),_status)
 }
     )
     }
-    
+
+
+        /**
+         * Test hook: fail with `err` so the error-buffer reader is exercised
+         * against the real Rust UniFFI writer — the discriminant, field order,
+         * and integer widths crossing the boundary are exactly the ones a
+         * production throw produces.
+         */ @Throws(ActrException::class) fun `actrErrorThrowForTest`(`err`: ActrException)
+        =
+    uniffiRustCallWithError(ActrException) { _status ->
+    UniffiLib.uniffi_actr_fn_func_actr_error_throw_for_test(
+
+        FfiConverterTypeActrError.lower(`err`),_status)
+}
 
         /**
          * Set or clear the global log callback.

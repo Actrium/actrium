@@ -68,7 +68,7 @@ type RemoteServiceMetadata = {
   methods: MethodMetadata[];
 };
 
-const VERSION = "0.10.0-alpha.4";
+const VERSION = "0.10.5";
 
 const plugin = createEcmaScriptPlugin<PluginParams>({
   name: "protoc-gen-actrframework-typescript",
@@ -131,7 +131,7 @@ function generateTypeScript(schema: Schema<PluginParams>): void {
       }
       requestCompanionNames.add(entry.requestCompanionName);
     }
-    generateClientFile(schema, file, remoteMethods);
+    generateClientFile(schema, file, remoteMethods, dispatchSpec);
     generatedFiles.push(`${normalizeProtoFileKey(file.name)}_client.ts`);
   }
 
@@ -620,6 +620,7 @@ function generateClientFile(
   schema: Schema<PluginParams>,
   file: DescFile,
   analyzedMethods: AnalyzedMethod[],
+  dispatchSpec: DispatchSpec,
 ): void {
   const generated = schema.generateFile(
     `${normalizeProtoFileKey(file.name)}_client.ts`,
@@ -649,6 +650,26 @@ function generateClientFile(
     generated.print(
       "  routeKey: ",
       generated.string(routeKeyForMethod(entry.method)),
+      ",",
+    );
+    const route = dispatchSpec.routes.find(
+      (route) => route.route_key === routeKeyForMethod(entry.method),
+    );
+    if (!route) {
+      throw new Error(
+        `Missing DispatchSpec route for ${routeKeyForMethod(entry.method)}`,
+      );
+    }
+    const lanes = [
+      "RpcReliable",
+      "RpcSignal",
+      "StreamReliable",
+      "StreamLatencyFirst",
+      "MediaRtp",
+    ];
+    generated.print(
+      "  payloadType: ",
+      String(lanes.indexOf(payloadTypeVariantFor(route.payload_type))),
       ",",
     );
     generated.print(

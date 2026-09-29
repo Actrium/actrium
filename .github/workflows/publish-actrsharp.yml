@@ -100,7 +100,7 @@ jobs:
           $tag = "v$env:ACTR_VERSION"
           $release = $null
           for ($i = 0; $i -lt 30; $i++) {
-            $releaseJson = gh release view $tag --repo Actrium/actr `
+            $releaseJson = gh release view $tag --repo $env:GITHUB_REPOSITORY `
               --json tagName,name,url 2>$null
             if ($LASTEXITCODE -eq 0) {
               $release = $releaseJson | ConvertFrom-Json
@@ -212,14 +212,16 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          PACKAGE_EXISTS: ${{ steps.package.outputs.exists }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
           $tag = "v$env:ACTR_VERSION"
           $assetName = "ActrSharp.$env:ACTR_VERSION.snupkg"
           $localAsset = "artifacts/$assetName"
+          $packageAlreadyExists = $env:PACKAGE_EXISTS -eq "true"
           $release = $null
           for ($i = 0; $i -lt 30; $i++) {
-            $releaseJson = gh release view $tag --repo Actrium/actr --json assets 2>$null
+            $releaseJson = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets 2>$null
             if ($LASTEXITCODE -eq 0) {
               $release = $releaseJson | ConvertFrom-Json
               break
@@ -234,9 +236,20 @@ jobs:
             exit 0
           }
 
+          if ($packageAlreadyExists) {
+            # NuGet symbol packages are not byte-for-byte reproducible across
+            # build environments. The package version and release tag have
+            # already been validated, so an existing symbol asset is enough
+            # to make this recovery run idempotent; do not compare hashes from
+            # a fresh rebuild with the previously uploaded asset.
+            "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "Existing $assetName found for an already published package; reusing it."
+            exit 0
+          }
+
           $downloadDir = Join-Path $env:RUNNER_TEMP "actrsharp-existing-symbols"
           New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
-          gh release download $tag --repo Actrium/actr --pattern $assetName --dir $downloadDir
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $assetName --dir $downloadDir
           if ($LASTEXITCODE -ne 0) { throw "Unable to download existing $assetName." }
           $localHash = (Get-FileHash $localAsset -Algorithm SHA256).Hash
           $remoteHash = (Get-FileHash (Join-Path $downloadDir $assetName) -Algorithm SHA256).Hash
@@ -271,7 +284,7 @@ jobs:
           $tag = "v$env:ACTR_VERSION"
           $assetName = "ActrSharp.$env:ACTR_VERSION.snupkg"
           $localAsset = "artifacts/$assetName"
-          gh release upload $tag $localAsset --repo Actrium/actr
+          gh release upload $tag $localAsset --repo $env:GITHUB_REPOSITORY
           if ($LASTEXITCODE -ne 0) { throw "Failed to upload $assetName to $tag." }
           "created=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Uploaded $assetName to GitHub Release $tag."

@@ -313,9 +313,10 @@ Wi-Fi/蜂窝切换测试必须同时提供：
 3. 旧地址上的数据路径失效；
 4. replacement PC 从新地址重新 bind/gather candidate。
 
-只调用 `local_address_changed()` 而不改变 Factory 可见的地址，最多能证明策略选择，
-不能证明 v0.20 新 PC 实际使用了新接口。真实 bind/address 行为在 T4/T5 验证，T3
-至少要使用可替换的测试地址 provider 验证构建输入确实变化。
+只调用 `local_address_changed()` 而不改变 Factory 可见的地址，最多能证明 Soft
+Recovery 策略选择，不能证明 v0.20 ICE restart 实际重新 bind/gather 了新接口。
+真实 bind/address 行为在 T4/T5 验证，T3 至少要使用可替换的测试地址 provider
+和 Runtime socket observation，验证 Soft rebind 实际消费了变化后的地址集合。
 
 ---
 
@@ -817,8 +818,8 @@ T1 穷举精确边界，T3 用 pairwise 组合覆盖交互，nightly/T5 补完�
 | P02 | 短后台、链路暂失效 | A lifecycle；A 相关 UDP 双向短黑洞 | Soft | A 触发，B 从 driver 感知；原 PC；双方最终 ready |
 | P03 | 长后台 | A: Foreground(duration≥配置阈值；60s 为代表值)；旧 socket 标记不可信 | Hard | 不直接 force；双方 replacement；旧 session 退出 |
 | P04 | 短离线、地址不变 | A: Unavailable→Available；UDP/可选信令短断 | Soft | 只给 A 平台事实；双方原 generation；无 restart storm |
-| P05 | Wi-Fi→蜂窝 | A snapshot + A 地址集合变化 + 旧路径失效 | Hard | 新 PC 从新地址 bind；双方 generation 增长；双向业务 |
-| P06 | 蜂窝→Wi-Fi、无 offline callback | A: Available→Available + 地址变化 | Hard | 不依赖 Unavailable；B 通过协商切换到 replacement |
+| P05 | Wi-Fi→蜂窝 | A snapshot + A 地址集合变化 + 旧路径失效 | Soft→Hard（失败时） | 优先同代 ICE restart；失败时新 PC 从新地址 bind；双方最终恢复双向业务 |
+| P06 | 蜂窝→Wi-Fi、无 offline callback | A: Available→Available + 地址变化 | Soft | 不依赖 Unavailable；双方优先复用原 generation，失败时升级 replacement |
 | P07 | 飞行模式/完全离线 | A: Unavailable；A 相关 UDP/信令双向断开 | Soft→Hard/Exhausted 后恢复 | B 无平台事件；两端请求有界；恢复后 PairUsable |
 | P08 | 远端先检测 | 先断链；B 先收到 ICE/PC failed；A callback 后到 | Soft 或 Hard | B 的恢复动作有效；A 迟到事件不重复启动恢复 |
 | P09 | A 为 answerer 并先检测 | 只让 B 初连；故障首先被 A 发现 | Soft | A 发 restart request，B 作为 offerer 发 restart offer |
@@ -867,9 +868,10 @@ A→B、B→A: 新 RPC 成功
 关键点：只向 A 发送 Background/Foreground；B 的恢复参与由 WebRTC driver 和信令
 触发。允许 B 比 A 早或晚进入 Recovering，但最终必须回到同一可用 pair。
 
-### 7.5 P03/P05：Hard Recovery 是双端 replacement
+### 7.5 P03：Hard Recovery 是双端 replacement
 
-触发端完成新 PC build 不代表用例通过。必须验证：
+P03，以及显式 `ForceReconnect` 或 Soft Recovery 失败后的升级路径，触发端完成新
+PC build 不代表用例通过。必须验证：
 
 1. A 创建新 Handler、Session、PeerConnection；
 2. 由当前有效 offerer 发出新 offer；
@@ -880,10 +882,13 @@ A→B、B→A: 新 RPC 成功
 7. 旧 PC、lane、candidate 和 callback 不再承载或影响业务；
 8. 恢复后两个业务方向都落在 replacement 上。
 
-如果 A 当前是 answerer，A 在构建 pending replacement 后必须向 Actrix 发送
-`RoleNegotiation`。Actrix 重发稳定角色分配，B 收到重复的 offerer assignment 后构建
-replacement 并发送 fresh offer；A 将 offer 应用到 pending generation。不能由 A、B
-各自独立创建一条 replacement，也不能让 A 只 build 后被动等待。
+如果 A 当前是 answerer，当前 v0.20 协议保持 Answerer 被动：由稳定 Offerer 发出新
+普通 offer，A 在收到 offer 后创建或切换 replacement。此路径不要求 Answerer 发送
+`RoleNegotiation`，也不能由 A、B 各自独立创建一条 replacement。
+
+P05 的首次地址变化不属于本节的 Hard 路径：先验证同一 PC 上的 ICE restart、
+`pc_generation` 不变且 `ice_generation` 前进；只有 restart 失败并升级时，才套用
+本节的 replacement 断言。
 
 ### 7.6 P08：B 先检测，A 平台 callback 后到
 
@@ -977,7 +982,8 @@ A 的 Background/Foreground 或本地地址切换是 node 级事实，应广播�
 Controller，但不能向 B/C/D 镜像平台事件：
 
 - A-B、A-C、A-D 可以因实际链路情况不同分别 Noop、Soft、Hard 或 Exhausted；
-- `LocalAddressChanged` 通常要求 A 的所有 active PC 使用新地址重建；
+- `LocalAddressChanged` 通常要求 A 的所有 active PC 在原 generation 上执行 ICE
+  restart；restart 失败时再由各 Peer 独立升级为 Hard Recovery；
 - 每条连接的协商、generation、成功/失败和 Hook 必须独立；
 - 同时恢复由各 Peer 独立推进，不能因节点级信号量形成跨 Peer 阻塞；
 - 一个 peer 的 slow/partitioned signaling 不能饿死其他 peer。
@@ -987,7 +993,7 @@ Controller，但不能向 B/C/D 镜像平台事件：
 | ID | 场景 | 必须证明 |
 | --- | --- | --- |
 | MP01 | 仅 A-B UDP 单向/双向故障 | A-C/A-D 全程 PairUsable，generation 不变 |
-| MP02 | A 地址变化 | 三条 link 分别 replacement，无状态或 candidate 串线 |
+| MP02 | A 地址变化 | 三条 link 分别执行同代 ICE restart，`pc_generation` 不变，无状态或 candidate 串线 |
 | MP03 | 三条 link 同时恢复 | Peer 独立性、总 deadline 和最终收敛 |
 | MP04 | A-B 信令持续 partition | C/D 恢复和业务不被 B 阻塞 |
 | MP05 | recovery 中 `close_peer(B)` | B 不能复活，C/D 不受影响 |
@@ -1083,7 +1089,7 @@ netns/netem、规模和 2–8 小时长稳环境。这些必须在对应 CI/设�
 - P00：A/B 分别作为唯一初连发起者；
 - P02：A 单侧短后台 + 双向临时黑洞；
 - P04：A 单侧 offline/online + Soft Recovery；
-- P05：A 地址变化 + Hard Recovery；
+- P05：A 地址变化 + Soft Recovery（失败时升级 Hard）；
 - P08：B 先检测、A callback 后到；
 - P09：A answerer 发起 restart request；
 - P10：simultaneous recovery/glare；

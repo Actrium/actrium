@@ -469,7 +469,8 @@ NetworkMonitor.create(
 
 ### ActrException
 
-Sealed class with 11 variants mirroring `actr_protocol::ActrError`.
+Sealed class with 12 protocol variants mirroring `actr_protocol::ActrError`,
+plus the binding-local `Config` variant.
 
 | Variant | Description |
 |---------|-------------|
@@ -483,6 +484,7 @@ Sealed class with 11 variants mirroring `actr_protocol::ActrError`.
 | `DecodeFailure(msg)` | Payload deserialization failed |
 | `NotImplemented(msg)` | Feature not implemented |
 | `Internal(msg)` | Internal runtime error |
+| `DeliveryUncertain(operationId, causeDetail)` | The send may have entered the transport; do not retry automatically |
 | `Config(msg)` | Configuration error |
 
 **Extension properties:**
@@ -492,13 +494,18 @@ Sealed class with 11 variants mirroring `actr_protocol::ActrError`.
 | `userMessage: String` | Human-readable error description |
 | `isTimeout: Boolean` | True for `TimedOut` |
 | `isConnectionError: Boolean` | True for `Unavailable` |
-| `isRecoverable: Boolean` | True if `ErrorKind.TRANSIENT` (worth retrying) |
+| `isRecoverable: Boolean` | True if `ErrorKind.TRANSIENT`; retry only when the operation is explicitly idempotent |
 | `kind: ErrorKind` | Fault domain: `TRANSIENT`, `CLIENT`, `INTERNAL`, or `CORRUPT` |
 | `requiresDlq: Boolean` | True if `ErrorKind.CORRUPT` (route to dead-letter queue) |
 
 ---
 
 ### Retry Utilities
+
+`ActrRef.call`, `tell`, and `sendDataChunk` already consume the framework's
+readiness and transport retry budgets. Do not wrap those operations in a
+second `withRetry` loop. Use `withRetry` only for an explicitly idempotent
+operation outside the ACTR transport, and provide an explicit predicate.
 
 ```kotlin
 data class RetryConfig(
@@ -508,7 +515,7 @@ data class RetryConfig(
     val factor: Double = 2.0,
 )
 
-// Retry with exponential backoff
+// Retry an external idempotent operation with an explicit predicate
 suspend fun <T> withRetry(
     maxAttempts: Int = 3,
     initialDelayMs: Long = 1000,

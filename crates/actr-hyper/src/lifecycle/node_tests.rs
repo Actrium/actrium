@@ -1164,6 +1164,219 @@ fn build_response_envelope_pins_zero_timeout_per_contract() {
     assert!(err_env.error.is_some());
 }
 
+struct ResponsePathSessionOps;
+
+#[async_trait::async_trait]
+impl crate::wire::webrtc::rtc::peer::effects::SessionOps for ResponsePathSessionOps {
+    async fn create_offer(
+        &self,
+    ) -> Result<webrtc::peer_connection::RTCSessionDescription, webrtc::error::Error> {
+        let mut description = webrtc::peer_connection::RTCSessionDescription::default();
+        description.sdp_type = webrtc::peer_connection::RTCSdpType::Offer;
+        Ok(description)
+    }
+
+    async fn create_answer(
+        &self,
+    ) -> Result<webrtc::peer_connection::RTCSessionDescription, webrtc::error::Error> {
+        let mut description = webrtc::peer_connection::RTCSessionDescription::default();
+        description.sdp_type = webrtc::peer_connection::RTCSdpType::Answer;
+        Ok(description)
+    }
+
+    async fn set_local_description(
+        &self,
+        _description: webrtc::peer_connection::RTCSessionDescription,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn set_remote_description(
+        &self,
+        _description: webrtc::peer_connection::RTCSessionDescription,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn add_ice_candidate(
+        &self,
+        _candidate: webrtc::peer_connection::RTCIceCandidateInit,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn restart_ice(&self) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn set_configuration(
+        &self,
+        _config: webrtc::peer_connection::RTCConfiguration,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn create_data_channel(
+        &self,
+        label: &str,
+        _init: webrtc::data_channel::RTCDataChannelInit,
+    ) -> Result<
+        Arc<dyn crate::wire::webrtc::rtc::peer::adapter::LaneDataChannel>,
+        webrtc::error::Error,
+    > {
+        Ok(crate::wire::webrtc::rtc::peer::effects::test_support::fake_data_channel(label))
+    }
+
+    async fn add_track(
+        &self,
+        _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
+    ) -> Result<Arc<dyn crate::wire::webrtc::rtc::peer::adapter::ActrRtpSender>, webrtc::error::Error>
+    {
+        Err(webrtc::error::Error::Other(
+            "response-path test has no media".into(),
+        ))
+    }
+
+    async fn remove_track(
+        &self,
+        _sender: &Arc<dyn crate::wire::webrtc::rtc::peer::adapter::ActrRtpSender>,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn get_senders(
+        &self,
+    ) -> Vec<Arc<dyn crate::wire::webrtc::rtc::peer::adapter::ActrRtpSender>> {
+        Vec::new()
+    }
+
+    async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
+        Default::default()
+    }
+
+    async fn close(&self) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+}
+
+struct ResponsePathSessionFactory;
+
+#[async_trait::async_trait]
+impl crate::wire::webrtc::rtc::peer::effects::SessionFactory for ResponsePathSessionFactory {
+    async fn build(
+        &self,
+        _handler: Arc<crate::wire::webrtc::rtc::event_handler::WebRtcEventHandler>,
+    ) -> Result<Arc<dyn crate::wire::webrtc::rtc::peer::effects::SessionOps>, webrtc::error::Error>
+    {
+        Ok(Arc::new(ResponsePathSessionOps))
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
+    use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
+
+    let (signaling_tx, mut signaling_rx) = tokio::sync::mpsc::channel(16);
+    let manager = Arc::new(
+        RtcConnectionManager::new(Arc::new(ResponsePathSessionFactory), signaling_tx)
+            .with_policy_clock_for_test(Arc::new(
+                crate::wire::webrtc::rtc::peer::policy_clock::ManualPolicyClock::default(),
+            )),
+    );
+    manager.supervisor().set_signaling_generation(Some(0));
+
+    let caller = ActrId {
+        realm: actr_protocol::Realm { realm_id: 1 },
+        serial_number: 9001,
+        r#type: ActrType {
+            manufacturer: "test".to_string(),
+            name: "response-path".to_string(),
+            version: "1.0.0".to_string(),
+        },
+    };
+    let handle = manager.ensure_controller(caller.clone()).await;
+    handle.connect().await.expect("connect command");
+    handle
+        .apply_role_assignment(true)
+        .await
+        .expect("role assignment command");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let dispatch = signaling_rx
+                .recv()
+                .await
+                .expect("controller signaling channel open");
+            if matches!(
+                dispatch.message,
+                crate::wire::webrtc::rtc::peer::reducer::SignalingMessage::Offer { .. }
+            ) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("response-path test session did not publish its Offer");
+
+    let mut snapshots = handle.subscribe();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if snapshots.borrow().pc_generation > 0 {
+                break;
+            }
+            snapshots
+                .changed()
+                .await
+                .expect("controller snapshot channel open");
+        }
+    })
+    .await
+    .expect("response-path test session did not build");
+    assert!(!handle.snapshot().sendable);
+    assert_eq!(handle.snapshot().ice_generation, 0);
+
+    let route = Some(manager.clone());
+    let send = tokio::spawn(async move {
+        send_envelope_to_caller(
+            &None,
+            &route,
+            &caller,
+            RpcEnvelope {
+                request_id: "response-timeout-hint".to_string(),
+                route_key: "test.Response".to_string(),
+                ..Default::default()
+            },
+            "response-timeout-hint",
+            "test.Response",
+        )
+        .await;
+    });
+
+    // Let the production response path enter its sendability wait, then drive
+    // the audited ten-second deadline without making the unit test sleep.
+    tokio::task::yield_now().await;
+    tokio::time::advance(CALLER_SENDABLE_WAIT).await;
+    send.await.expect("response send task must not panic");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let snapshot = handle.snapshot();
+            if snapshot.ice_generation > 0 {
+                break;
+            }
+            snapshots
+                .changed()
+                .await
+                .expect("controller snapshot channel open");
+        }
+    })
+    .await
+    .expect("response timeout must submit a recovery hint that starts Soft Recovery");
+
+    assert_eq!(handle.snapshot().ice_generation, 1);
+    manager.close_all().await;
+}
+
 // ── handle_incoming TELL dedup semantics ────────────────────────────────
 //
 // These tests build a real `Inner` (in-memory mailbox, unreachable
@@ -2184,10 +2397,9 @@ async fn plain_node_surface_keeps_headless_profile_ungated() {
         .expect("plain node reconciler should shut down cleanly");
 }
 
-// ── S7A-1: W6 v020 config fail-fast ────────────────────────────────────────
+// ── S7A-1: W6 rtc config fail-fast ────────────────────────────────────────
 
-#[cfg(feature = "webrtc-v020")]
-mod v020_config_guard {
+mod rtc_config_guard {
     use actr_config::{IceServer, WebRtcConfig};
 
     fn config_with_url(url: &str) -> WebRtcConfig {
@@ -2203,14 +2415,14 @@ mod v020_config_guard {
     #[test]
     fn turns_tls_url_is_a_hard_error() {
         let err =
-            super::super::validate_v020_config(&config_with_url("turns:turn.example.com:5349"))
+            super::super::validate_rtc_config(&config_with_url("turns:turn.example.com:5349"))
                 .expect_err("turns: must fail fast");
         assert!(err.to_string().contains("issue #848"), "got: {err}");
     }
 
     #[test]
     fn turn_tcp_transport_is_a_hard_error() {
-        let err = super::super::validate_v020_config(&config_with_url(
+        let err = super::super::validate_rtc_config(&config_with_url(
             "turn:turn.example.com:3478?transport=tcp",
         ))
         .expect_err("transport=tcp must fail fast");
@@ -2221,7 +2433,7 @@ mod v020_config_guard {
     fn udp_mux_port_is_a_hard_error() {
         let mut config = WebRtcConfig::default();
         config.advanced.ice_udp_mux_port = Some(5000);
-        let err = super::super::validate_v020_config(&config)
+        let err = super::super::validate_rtc_config(&config)
             .expect_err("ice_udp_mux_port must fail fast");
         assert!(err.to_string().contains("ice_udp_mux_port"), "got: {err}");
     }
@@ -2231,7 +2443,7 @@ mod v020_config_guard {
         let mut config = WebRtcConfig::default();
         config.advanced.udp_ports = Some((40_000, 40_100));
         let err =
-            super::super::validate_v020_config(&config).expect_err("UDP port range must fail fast");
+            super::super::validate_rtc_config(&config).expect_err("UDP port range must fail fast");
         assert!(err.to_string().contains("port ranges"), "got: {err}");
     }
 
@@ -2242,7 +2454,7 @@ mod v020_config_guard {
             urls: vec!["stun:stun.example.com:3478".to_string()],
             ..Default::default()
         });
-        super::super::validate_v020_config(&config).expect("UDP TURN/STUN is supported");
+        super::super::validate_rtc_config(&config).expect("UDP TURN/STUN is supported");
     }
 }
 
@@ -2433,4 +2645,84 @@ async fn claimed_scope_reaches_guest_and_bounds_child_deadlines() {
         child.token().is_cancelled(),
         "child scopes must sit under the root cancellation token"
     );
+}
+
+#[test]
+fn delivery_uncertain_wire_code_round_trips_typed_fields() {
+    use super::*;
+    let original = ActrError::DeliveryUncertain {
+        // Both fields contain the legacy delimiter and the previous typed
+        // encoding's record separator; the length-prefixed encoding must
+        // preserve them verbatim.
+        operation_id: "upload: \u{001e}part 3".to_string(),
+        cause: "ambiguous partial write: \u{001e}stream stalled".to_string(),
+    };
+    let code = protocol_error_to_code(&original);
+    assert_eq!(code, 10012, "DeliveryUncertain owns a dedicated wire code");
+    let encoded = encode_delivery_uncertain_for_wire(&original);
+    let round_tripped = wire_code_to_actr_error(code, encoded);
+    assert!(
+        matches!(
+            &round_tripped,
+            ActrError::DeliveryUncertain { operation_id, cause }
+                if operation_id == "upload: \u{001e}part 3"
+                    && cause == "ambiguous partial write: \u{001e}stream stalled"
+        ),
+        "the typed encoding must round-trip ids and causes containing ': ': {round_tripped:?}"
+    );
+}
+
+#[test]
+fn delivery_uncertain_wire_code_legacy_display_falls_back() {
+    use super::*;
+    // A peer built before the typed encoding sends the Display form.
+    let legacy = wire_code_to_actr_error(
+        10012,
+        "delivery uncertain for operation stream-1#4: write may have entered transport".to_string(),
+    );
+    assert!(matches!(
+        &legacy,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "stream-1#4" && cause == "write may have entered transport"
+    ));
+    // A malformed/unknown-shaped message keeps the variant with a
+    // placeholder id instead of collapsing to Internal.
+    let malformed = wire_code_to_actr_error(10012, "garbage".to_string());
+    assert!(matches!(
+        &malformed,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "unknown" && cause == "garbage"
+    ));
+    // Non-DeliveryUncertain codes still bypass the parser entirely.
+    assert!(matches!(
+        wire_code_to_actr_error(10010, "bug".to_string()),
+        ActrError::Internal(_)
+    ));
+}
+
+#[test]
+fn delivery_uncertain_wire_code_rejects_ambiguous_legacy_separator_payload() {
+    use super::*;
+    let malformed =
+        wire_code_to_actr_error(10012, "operation\u{001e}cause\u{001e}tail".to_string());
+    assert!(matches!(
+        &malformed,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "unknown" && cause == "operation\u{001e}cause\u{001e}tail"
+    ));
+}
+
+#[test]
+fn delivery_uncertain_wire_code_does_not_reinterpret_malformed_v1_payload() {
+    use super::*;
+    let malformed = wire_code_to_actr_error(
+        10012,
+        "delivery-uncertain-v1:3:3:ab\u{001e}tail".to_string(),
+    );
+    assert!(matches!(
+        &malformed,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "unknown"
+                && cause == "delivery-uncertain-v1:3:3:ab\u{001e}tail"
+    ));
 }

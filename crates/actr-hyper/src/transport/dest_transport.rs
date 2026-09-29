@@ -5,7 +5,9 @@
 
 use super::Dest; // Re-exported from actr-framework
 use super::error::{NetworkError, NetworkResult};
-use super::lane::{DeliveryProgress, DeliveryProgressCell, record_delivery_progress};
+use super::lane::{
+    DeliveryProgress, DeliveryProgressCell, mark_delivery_write_in_flight, record_delivery_progress,
+};
 use super::route_table::{DataLaneType, PayloadTypeExt};
 use super::wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity};
 use super::wire_pool::{ConnType, ReadySet, RetryConfig, WirePool};
@@ -31,6 +33,7 @@ pub(crate) struct DestTransport {
 pub(crate) struct DestSendAttempt {
     pub(crate) result: NetworkResult<Option<WireIdentity>>,
     pub(crate) progress: DeliveryProgress,
+    pub(crate) proven_pre_send: bool,
 }
 
 impl DestSendAttempt {
@@ -38,13 +41,27 @@ impl DestSendAttempt {
         Self {
             result: Ok(identity),
             progress: DeliveryProgress::SubmittedLocally,
+            proven_pre_send: false,
         }
     }
 
     fn failed(error: NetworkError, progress: DeliveryProgress) -> Self {
+        Self::failed_with_proof(error, progress, false)
+    }
+
+    fn failed_pre_send(error: NetworkError) -> Self {
+        Self::failed_with_proof(error, DeliveryProgress::NotAttempted, true)
+    }
+
+    fn failed_with_proof(
+        error: NetworkError,
+        progress: DeliveryProgress,
+        proven_pre_send: bool,
+    ) -> Self {
         Self {
             result: Err(error),
             progress,
+            proven_pre_send: proven_pre_send && progress == DeliveryProgress::NotAttempted,
         }
     }
 }
@@ -172,10 +189,12 @@ impl DestTransport {
     /// - If connection available, send immediately
     /// - If not, wait for connection status change (via watch channel)
     /// - WirePool already handles priority, only need to try DataLane Types in order
-    /// - Stale self-heal: when `get_lane()` returns a closed-like error, the
-    ///   current WebRTC wire may be stale. We conditionally mark it Failed
-    ///   (only if it still carries the same identity) so the outer loop can
-    ///   wait for a new connection or fallback instead of spinning forever.
+    /// - Stale self-heal: when lane acquisition or a concrete send fails before
+    ///   submission, the current wire may be stale. We conditionally mark it
+    ///   Failed (only if it still carries the same identity) so the outer loop
+    ///   can wait for a new connection or fallback instead of spinning
+    ///   forever. An ambiguous send is returned immediately and is never
+    ///   replayed here.
     #[cfg_attr(
         feature = "opentelemetry",
         tracing::instrument(skip_all, name = "DestTransport.send")
@@ -254,6 +273,20 @@ impl DestTransport {
                     // Use original payload_type to create DataLane
                     match conn.get_lane(payload_type).await {
                         Ok(lane) => {
+                            // A physical wire can remain in WirePool's
+                            // ready-set while its concrete lane is no longer
+                            // sendable (for example, RTC controller
+                            // recovery).  Do not select that stale candidate;
+                            // continue to the next payload-capable route so a
+                            // ready WebSocket fallback can carry the send.
+                            if !lane.is_healthy() {
+                                tracing::debug!(
+                                    "🔍 {:?} lane on {:?} is not healthy, trying next route",
+                                    payload_type,
+                                    conn_type
+                                );
+                                continue;
+                            }
                             tracing::info!(
                                 "📡 [channel={:?}] {:?} ({} bytes)",
                                 conn_type,
@@ -263,7 +296,7 @@ impl DestTransport {
                             // Convert to Bytes (zero-copy)
                             let payload = bytes::Bytes::copy_from_slice(data);
                             if let Some(cell) = progress_sink {
-                                record_delivery_progress(cell, DeliveryProgress::Unknown);
+                                mark_delivery_write_in_flight(cell);
                             }
                             let attempt = lane.send_with_progress(payload.clone()).await;
                             let progress = attempt.progress;
@@ -294,17 +327,25 @@ impl DestTransport {
                             if progress == DeliveryProgress::Unknown {
                                 return match attempt.result {
                                     Ok(()) => DestSendAttempt::submitted(wire_identity),
-                                    Err(error) => DestSendAttempt::failed(error, progress),
+                                    Err(error) => DestSendAttempt::failed_with_proof(
+                                        error,
+                                        progress,
+                                        attempt.proven_pre_send,
+                                    ),
                                 };
                             }
 
                             // If the lane went stale after selection, drop the
                             // cached lane and retry once before surfacing the
-                            // error. Transport-agnostic: a closed-like error
-                            // means the underlying wire (WebRTC *or* WebSocket)
-                            // is no longer sendable and should be self-healed.
+                            // error. This self-heal applies only to proven
+                            // `NotAttempted` failures (ambiguous `Unknown`
+                            // attempts returned above): a closed-like error on
+                            // that path means the underlying wire (WebRTC *or*
+                            // WebSocket) is no longer sendable and nothing
+                            // entered a transport, so evicting the lane and
+                            // re-dialing cannot duplicate a payload.
                             if let Err(e) = attempt.result.as_ref() {
-                                if e.is_closed_like() {
+                                if e.is_closed_like() && attempt.proven_pre_send {
                                     tracing::warn!(
                                         "♻️ lane closed-like error for {:?} ({:?}), invalidating lane and retrying once: {}",
                                         payload_type,
@@ -315,10 +356,7 @@ impl DestTransport {
                                     match conn.get_lane(payload_type).await {
                                         Ok(new_lane) => {
                                             if let Some(cell) = progress_sink {
-                                                record_delivery_progress(
-                                                    cell,
-                                                    DeliveryProgress::Unknown,
-                                                );
+                                                mark_delivery_write_in_flight(cell);
                                             }
                                             let retry = new_lane.send_with_progress(payload).await;
                                             let retry_progress = retry.progress;
@@ -339,9 +377,16 @@ impl DestTransport {
                                                     if retry_progress
                                                         == DeliveryProgress::Unknown =>
                                                 {
-                                                    DestSendAttempt::failed(error, retry_progress)
+                                                    DestSendAttempt::failed_with_proof(
+                                                        error,
+                                                        retry_progress,
+                                                        retry.proven_pre_send,
+                                                    )
                                                 }
-                                                Err(error) if error.is_closed_like() => {
+                                                Err(error)
+                                                    if error.is_closed_like()
+                                                        && retry.proven_pre_send =>
+                                                {
                                                     self.evict_closed_like_connection(
                                                         &conn,
                                                         conn_type,
@@ -351,9 +396,11 @@ impl DestTransport {
                                                     .await;
                                                     continue 'send;
                                                 }
-                                                Err(error) => {
-                                                    DestSendAttempt::failed(error, retry_progress)
-                                                }
+                                                Err(error) => DestSendAttempt::failed_with_proof(
+                                                    error,
+                                                    retry_progress,
+                                                    retry.proven_pre_send,
+                                                ),
                                             };
                                         }
                                         Err(retry_err) => {
@@ -377,10 +424,7 @@ impl DestTransport {
                                                 .await;
                                                 continue 'send;
                                             }
-                                            return DestSendAttempt::failed(
-                                                retry_err,
-                                                DeliveryProgress::NotAttempted,
-                                            );
+                                            return DestSendAttempt::failed_pre_send(retry_err);
                                         }
                                     }
                                 }
@@ -402,7 +446,11 @@ impl DestTransport {
 
                             return match attempt.result {
                                 Ok(()) => DestSendAttempt::submitted(wire_identity),
-                                Err(error) => DestSendAttempt::failed(error, progress),
+                                Err(error) => DestSendAttempt::failed_with_proof(
+                                    error,
+                                    progress,
+                                    attempt.proven_pre_send,
+                                ),
                             };
                         }
                         Err(e) => {
@@ -441,10 +489,9 @@ impl DestTransport {
             tracing::info!("⏳ Waiting for connection status...");
 
             if self.conn_mgr.is_closed() {
-                return DestSendAttempt::failed(
-                    NetworkError::ChannelClosed("connection manager closed".into()),
-                    DeliveryProgress::NotAttempted,
-                );
+                return DestSendAttempt::failed_pre_send(NetworkError::ChannelClosed(
+                    "connection manager closed".into(),
+                ));
             }
 
             if !self
@@ -462,10 +509,9 @@ impl DestTransport {
 
             // Event-driven wait!
             if conn_watcher.changed().await.is_err() {
-                return DestSendAttempt::failed(
-                    NetworkError::ChannelClosed("connection manager closed".into()),
-                    DeliveryProgress::NotAttempted,
-                );
+                return DestSendAttempt::failed_pre_send(NetworkError::ChannelClosed(
+                    "connection manager closed".into(),
+                ));
             }
 
             tracing::debug!("🔔 Connection status updated, retrying...");

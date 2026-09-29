@@ -1,5 +1,6 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use std::sync::Mutex;
 
 use crate::types::{ActrId, ActrType, PayloadType};
 use actr_config::ConfigParser;
@@ -34,7 +35,7 @@ impl MessageDispatcher for TypeScriptBindingDispatcher {
 
 #[napi]
 pub struct ActrNode {
-    inner: Option<Node<Registered>>,
+    inner: Mutex<Option<Node<Registered>>>,
 }
 
 #[napi]
@@ -68,25 +69,19 @@ impl ActrNode {
             .map_err(crate::error::hyper_error_to_napi)?;
 
         Ok(ActrNode {
-            inner: Some(registered),
+            inner: Mutex::new(Some(registered)),
         })
     }
     /// Start the node and return ActrRef.
     ///
     /// One-shot: consumes the internal Hyper handle. A second call resolves
-    /// with `Node already started`.
-    ///
-    /// # Safety
-    ///
-    /// The `unsafe` marker is imposed by napi-rs for async methods that take
-    /// `&mut self`; it is a plumbing requirement of the FFI layer and is not
-    /// surfaced to JavaScript callers, who always invoke this method through
-    /// the generated wrapper. There is no memory-safety contract for Rust
-    /// callers to uphold beyond the usual `&mut self` aliasing rules.
+    /// with `Node already started`, including concurrent callers.
     #[napi]
-    pub async unsafe fn start(&mut self) -> Result<ActrRef> {
+    pub async fn start(&self) -> Result<ActrRef> {
         let hyper = self
             .inner
+            .lock()
+            .map_err(|_| Error::from_reason("Node state lock poisoned"))?
             .take()
             .ok_or_else(|| Error::from_reason("Node already started"))?;
 
@@ -146,7 +141,7 @@ impl ActrRef {
         request_payload: Buffer,
         timeout_ms: i64,
     ) -> Result<Buffer> {
-        let target_id: actr_protocol::ActrId = target.into();
+        let target_id: actr_protocol::ActrId = target.try_into()?;
         let proto_payload_type: actr_protocol::PayloadType = payload_type.into();
         let ctx = self.inner.app_context().await;
         let response = ctx
@@ -172,7 +167,7 @@ impl ActrRef {
         payload_type: PayloadType,
         message_payload: Buffer,
     ) -> Result<()> {
-        let target_id: actr_protocol::ActrId = target.into();
+        let target_id: actr_protocol::ActrId = target.try_into()?;
         let proto_payload_type: actr_protocol::PayloadType = payload_type.into();
         let ctx = self.inner.app_context().await;
         ctx.tell_raw(
@@ -203,5 +198,31 @@ impl ActrRef {
     #[napi]
     pub fn is_shutting_down(&self) -> bool {
         self.inner.is_shutting_down()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_start_on_consumed_node_returns_errors() {
+        let node = Arc::new(ActrNode {
+            inner: Mutex::new(None),
+        });
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            let node = Arc::clone(&node);
+            tasks.push(tokio::spawn(async move {
+                match node.start().await {
+                    Err(error) => assert_eq!(error.reason, "Node already started"),
+                    Ok(_) => panic!("consumed node must not start again"),
+                }
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap();
+        }
     }
 }

@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
@@ -42,14 +42,10 @@ jobs:
           ACTR_BUILD_PROFILE: debug
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
-          ACTR_BINDINGS_PATH=dist/ActrBindings \
-          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           ./build-xcframework.sh
       - name: Build Swift bindings package
         working-directory: packages/actr-swift
         run: |
-          ACTR_BINDINGS_PATH=dist/ActrBindings \
-          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           swift build
       - name: Test Swift bindings package
         working-directory: packages/actr-swift

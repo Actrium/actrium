@@ -88,6 +88,10 @@ fn assert_actr_success(out: &Output, context: &str) {
     );
 }
 
+fn compact_rust_code(code: &str) -> String {
+    code.split_whitespace().collect()
+}
+
 fn init_rust_echo_app(parent: &std::path::Path, name: &str) -> std::path::PathBuf {
     let out = run_actr(
         &[
@@ -763,12 +767,13 @@ fn rust_gen_two_local_services_same_rpc_name() {
     // The generated adapter forwards each prefixed route to the
     // protobuf-named business method on the matching service field.
     let adapter = std::fs::read_to_string(dir.join("src/generated/actr_handler.rs")).unwrap();
+    let compact_adapter = compact_rust_code(&adapter);
     assert!(
-        adapter.contains("self.ask_service.ask"),
+        compact_adapter.contains("self.ask_service.ask"),
         "adapter forwards AskService::ask:\n{adapter}"
     );
     assert!(
-        adapter.contains("self.chat_service.ask"),
+        compact_adapter.contains("self.chat_service.ask"),
         "adapter forwards ChatService::ask:\n{adapter}"
     );
 

@@ -101,43 +101,69 @@ export const workload = {
   },
 
   async onSignalingConnecting(ctx) {
-    await withInvocationCtx(ctx, async () => {});
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onSignalingConnecting?.(ctx);
+    });
   },
   async onSignalingConnected(ctx) {
-    await withInvocationCtx(ctx, async () => {});
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onSignalingConnected?.(ctx);
+    });
   },
   async onSignalingDisconnected(ctx) {
-    await withInvocationCtx(ctx, async () => {});
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onSignalingDisconnected?.(ctx);
+    });
   },
-  async onWebsocketConnecting(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onWebsocketConnecting(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onWebsocketConnecting?.(event, ctx);
+    });
   },
-  async onWebsocketConnected(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onWebsocketConnected(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onWebsocketConnected?.(event, ctx);
+    });
   },
-  async onWebsocketDisconnected(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onWebsocketDisconnected(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onWebsocketDisconnected?.(event, ctx);
+    });
   },
-  async onWebrtcConnecting(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onWebrtcConnecting(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onWebrtcConnecting?.(event, ctx);
+    });
   },
-  async onWebrtcConnected(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onWebrtcConnected(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onWebrtcConnected?.(event, ctx);
+    });
   },
-  async onWebrtcDisconnected(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onWebrtcDisconnected(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onWebrtcDisconnected?.(event, ctx);
+    });
   },
-  async onWebrtcStateChanged(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onWebrtcStateChanged(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onWebrtcStateChanged?.(event, ctx);
+    });
   },
-  async onCredentialRenewed(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onCredentialRenewed(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onCredentialRenewed?.(event, ctx);
+    });
   },
-  async onCredentialExpiring(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onCredentialExpiring(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onCredentialExpiring?.(event, ctx);
+    });
   },
-  async onMailboxBackpressure(_event, ctx) {
-    await withInvocationCtx(ctx, async () => {});
+  async onMailboxBackpressure(event, ctx) {
+    await withInvocationCtx(ctx, async () => {
+      await activeWorkload().onMailboxBackpressure?.(event, ctx);
+    });
   },
 };
 `;
@@ -171,7 +197,7 @@ export async function componentize(
       format: 'esm',
       platform: 'node',
       target: 'es2022',
-      external: ['actr:workload/host@0.6.0'],
+      external: ['actr:workload/host@0.7.0'],
       absWorkingDir: projectDir,
       sourcemap: false,
       logLevel: 'silent',

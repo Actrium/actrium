@@ -1,7 +1,7 @@
 //! WASM workload execution engine (feature = "wasm-engine").
 //!
 //! Backed by the wasmtime 46 Component Model + wit-bindgen against the
-//! `actr:workload@0.6.0` async world; see `crates/actr-framework/wit-v2/actr-workload.wit`
+//! `actr:workload@0.7.0` async world; see `crates/actr-framework/wit-v2/actr-workload.wit`
 //! for the contract. The 0.1.0 synchronous world is retired.
 
 pub(crate) mod component_bindings_v2;
