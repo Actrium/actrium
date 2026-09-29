@@ -1,162 +1,128 @@
-# Actrium Runner Image (Linux)
+# Actrium Linux CI Runner
 
-Self-hosted GitHub Actions runner image for the Actrium Linux CI fleet.
-Bundles the GitHub Actions runner agent, the Rust toolchain, protoc, and
-the wasm tools the CI workflows need, so a job starts without spending
-minutes on `apt-get install` / `rustup` every run.
+This directory contains the Linux runner image sources and ARC fleet manifest.
+The image prepares pinned tools before jobs start. The fleet manifest provides
+per-job workspaces and isolates Cargo source extraction between Pods.
 
-## When to use this image
+## External environment configuration
 
-| Mode | How | Notes |
-|---|---|---|
-| ARC (gha-runner-scale-set) | ARC starts a Pod from this image per queued job; the agent self-registers via injected JIT config | Recommended for k8s-hosted runners; see "ARC mode" below |
-| Workflow `container:` | `jobs.<id>.container: ghcr.io/actrium/runner:<tag>` | Lighter weight, no operator needed |
-| Standalone runner agent | Run `./config.sh` inside a container from this image | Closest to a directly installed agent on a host |
+Provision these resources in the runner namespace before applying the manifest:
 
-## Build
+- ConfigMap `runner-env`: compiler settings, proxy configuration, Cargo download
+  settings, and cache configuration.
+- Secret `sccache-s3`: only `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+- The GitHub App Secret referenced by `githubConfigSecret` in the manifest.
 
-Build context is this directory (`tools/ci/runner/`):
+The runner imports the first two resources through `envFrom`. Their values are
+managed outside this repository; do not commit the populated ConfigMap or Secret.
+The namespace, image, scheduling, and storage fields remain in the fleet manifest.
 
-```bash
-docker build -t actrium-runner:dev -f tools/ci/runner/Dockerfile tools/ci/runner/
-```
+The ConfigMap supplies the following keys:
 
-All versions are pinned with `ARG`; override at build time to upgrade
-(e.g. `--build-arg RUNNER_VERSION=2.337.0`). Optional `APT_MIRROR` /
-`GITHUB_PROXY` / `RUSTUP_DIST_SERVER` build args redirect downloads to
-mirrors where the defaults are slow — see the Dockerfile header.
+| Purpose | Keys |
+|---|---|
+| Compiler | `RUSTFLAGS`, `RUSTC_WRAPPER`, `CARGO_INCREMENTAL` |
+| Proxy | `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, `https_proxy`, `NO_PROXY`, `no_proxy` |
+| Cargo downloads | `CARGO_NET_RETRY`, `CARGO_HTTP_TIMEOUT` |
+| Compilation cache | `SCCACHE_CACHE_SIZE`, `SCCACHE_CACHE_DIR`, `SCCACHE_ENDPOINT`, `SCCACHE_BUCKET`, `SCCACHE_REGION`, `SCCACHE_S3_USE_SSL`, `SCCACHE_IDLE_TIMEOUT` |
+| Actions cache | `ACTIONS_RESULTS_URL` |
 
-## Pinned versions
+`envFrom` imports every key in a referenced resource. Keep the Secret restricted
+to the two required cache credential keys, and do not duplicate those keys in the
+ConfigMap. A missing required resource prevents the runner container from starting.
+Environment updates affect new Pods; existing Pods require replacement.
 
-| Component | Version | Notes |
-|---|---|---|
-| Ubuntu | 22.04 | `ubuntu:22.04` base |
-| GitHub Actions runner agent | 2.336.0 | actions/runner release |
-| Rust toolchain | stable + nightly | nightly for `ci-coverage` `coverage-web-wasm` |
-| Rust components | clippy, rustfmt, rust-src, llvm-tools-preview | |
-| Rust targets | wasm32-unknown-unknown, wasm32-wasip2 | Android targets NOT included — `kotlin-echo-app-e2e` needs JDK/Android SDK/KVM and stays on GitHub-hosted runners |
-| protoc | 29.3 | matches `vars.PROTOC_VERSION` |
-| wasm-pack / wasm-component-ld / wasm-tools | 0.15.0 / 0.5.26 / 1.253.0 | sha256-pinned; sha values match `ci-gate.yml`, so a tampered upstream release fails the build loudly |
-| hosted toolcache | Python 3.11.16 / 3.13.15, Node 24.19.0, Temurin JDK 17.0.20+8 | `RUNNER_TOOL_CACHE=/opt/hostedtoolcache`; `setup-*` steps resolve locally, zero download |
-| Android SDK | cmdline-tools 12266719 (16.0), platforms;android-34, build-tools;34.0.0/35.0.0, platform-tools | `ANDROID_SDK_ROOT=/usr/local/lib/android/sdk`; cmdline-tools version matches `setup-android`'s default so it does not re-download |
-| Gradle user home | Gradle 9.2.1 distribution + KtLint 1.5.0 / ktlint-gradle 12.1.2 dependencies | `GRADLE_USER_HOME=/home/runner/.gradle`; matches the `packages/actr-kotlin` wrapper and plugin pins, removes per-job tool downloads |
+External storage removes configuration values from the manifest. Credentials
+injected into the runner container remain accessible to code executing there.
+Use only trusted build code on that fleet, or keep storage credentials behind a
+separate cache service when stronger credential isolation is required.
 
-`rust_msrv` jobs still pin `dtolnay/rust-toolchain@1.95.0` (historical
-toolchain, not preinstalled). Installed apt packages mirror the
-`apt-get install` steps across `.github/workflows/ci-*.yml` — see the
-`base` stage of the Dockerfile for the authoritative list.
+## Image contents
 
-## User
+The image includes the GitHub Actions agent, Rust and WebAssembly tools, hosted
+Python/Node/Java toolcaches, sccache, Binaryen, and zstd. Both image build paths
+verify pinned versions and artifact checksums.
 
-Jobs run as `runner` (uid 1001) with passwordless sudo, matching the
-GitHub Actions convention. Trade-off: any job code (e.g. from fork PRs)
-runs as passwordless root inside the pod. One-job-per-pod under ARC
-contains but does not eliminate the blast radius.
+| Tool | Version |
+|---|---|
+| wasm-bindgen and wasm-bindgen-test-runner | `0.2.126` |
+| wasm-pack | `0.15.0` |
+| wasm-component-ld | `0.5.26` |
+| wasm-tools | `1.253.0` |
+| Binaryen | `version_117` |
+| sccache | `0.18.0` |
+| zstd | `1.5.7` |
 
-## ARC mode (gha-runner-scale-set)
+The installer pins must match the workflows and the web workspace lockfile.
+The zstd installer also provides `zstdmt`, `unzstd`, and `zstdcat` for Actions Cache.
 
-`autoscaling-runner-set.yaml` deploys this image as an
-`AutoscalingRunnerSet` (the current, maintained ARC generation; the
-legacy `actions.summerwind.dev` RunnerDeployment is deprecated). Each
-queued job gets its own ephemeral Pod: the controller injects the JIT
-runner config as `ACTIONS_RUNNER_INPUT_JITCONFIG`, the stock agent
-`run.sh` consumes it, and the Pod is reaped when the job ends.
+`entrypoint.sh` pre-starts sccache and then executes the runner agent as PID 1.
+An explicit container command is forwarded. Startup performs no tool downloads.
 
-### Prerequisites (out of band, need cluster admin / org admin)
+## Build and publish
 
-1. **ARC controller** (once per cluster):
-   ```bash
-   ARC_VERSION=0.14.2
+`Dockerfile` builds the complete toolchain from the base operating system.
+`Dockerfile.incremental` requires a previously published plain runner image,
+pinned by digest, through `RUNNER_BASE_IMAGE`. It preserves the inherited
+layers and adds the same tool, entrypoint, and cache-worker changes.
 
-   helm upgrade --install arc \
-     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-     --version "${ARC_VERSION}" \
-     -n arc-systems --create-namespace
-   ```
-   Pin the version: the `app.kubernetes.io/version` label in
-   `autoscaling-runner-set.yaml` must match the installed chart version, or
-   the controller will delete the scale set on reconcile. When upgrading,
-   update `ARC_VERSION` here and the label in the manifest in the same PR.
-   Verify with `helm list -n arc-systems --filter '^arc$'`.
-2. **GitHub App** (preferred) or PAT with organization runner
-   permissions. The App's ID, Installation ID, and private key go into a
-   secret (below).
-3. **Image pushed** to a registry the cluster can pull from
-   (`ghcr.io/actrium/runner` by default; internal deployments may
-   substitute a private registry). See "Build and push the image".
-
-### Create the GitHub App secret
-
-In the same namespace as the scale set:
+Supply image references and any network configuration from the build environment:
 
 ```bash
-kubectl create namespace arc-runners
-kubectl -n arc-runners create secret generic actrium-arc-github-app \
-  --from-literal=github_app_id=<APP_ID> \
-  --from-literal=github_app_installation_id=<INSTALLATION_ID> \
-  --from-file=github_app_private_key=app-private-key.pem
+docker build -t actrium-runner:dev \
+  -f tools/ci/runner/Dockerfile tools/ci/runner/
+
+docker buildx build \
+  -f tools/ci/runner/Dockerfile.incremental \
+  --build-arg RUNNER_BASE_IMAGE \
+  --build-arg HTTP_PROXY --build-arg HTTPS_PROXY \
+  --provenance=false --load \
+  -t "$RUNNER_IMAGE" tools/ci/runner/
+
+docker push "$RUNNER_IMAGE"
 ```
 
-Use `--from-file` for the private key (not `--from-literal="$(cat ...)"`)
-so the PEM survives byte-for-byte.
+Set `RUNNER_BASE_IMAGE` to an immutable image reference before the incremental
+build. `GITHUB_PROXY`, when used, is a release-URL prefix rather than an HTTP proxy.
+Use configured registry authentication and never print credentials in build logs.
 
-### Build and push the image
+Keep both Dockerfiles synchronized. Do not overwrite a deployed tag; verify a new
+image can be pulled from the fleet before changing the manifest.
 
-```bash
-docker build -t ghcr.io/actrium/runner:latest -f tools/ci/runner/Dockerfile tools/ci/runner/
-docker push ghcr.io/actrium/runner:latest
-```
+## Cache and build reuse
 
-**Visibility matters:** a GHCR package linked to a private repo defaults
-to private, and pods fail with `ImagePullBackOff` unless you make the
-package public or create a pull secret and uncomment `imagePullSecrets`
-in `autoscaling-runner-set.yaml`:
+Cargo archives and the registry index share node-local storage. Each Pod extracts
+sources into its own `registry/src` volume to avoid concurrent unpack-marker races.
 
-```bash
-kubectl -n arc-runners create secret docker-registry ghcr-pull \
-  --docker-server=ghcr.io --docker-username=<user> \
-  --docker-password=<read:packages PAT>
-```
+Rust compilation uses sccache. Actions file caches use a v2 cache service selected
+by `ACTIONS_RESULTS_URL`. The worker patch renames the single UTF-16LE literal to
+`ACTIONS_RESULTS_ORL`, preserving the configured endpoint. Both builds assert that
+the patch applied exactly once; revalidate it when upgrading the runner agent.
 
-Internal clusters can redirect the image to a private registry by editing
-`image:` (and `imagePullSecrets`) at apply time; keep the manifests here
-registry-neutral.
+CI Gate generates Web runtime artifacts once. Rust, MSRV, both test shards,
+Package Runtime, and Kotlin Codegen consume `cli-web-runtime`; Web consumes the
+full `sw-host-runtime` output. Only the rest shard saves the shared dependency
+cache. Fleet jobs preserve preinstalled tools; hosted binary cache keys include
+the required versions.
 
-### Apply the manifest
+The rest shard compiles one workspace feature graph and reuses nextest metadata
+for inventory and execution. Its RFC-0507 acceptance test must be selected exactly
+once and keeps its zero-retry override. Doctests remain a separate gate.
 
-```bash
-kubectl apply -f tools/ci/runner/autoscaling-runner-set.yaml
-kubectl -n arc-runners get autoscalingrunnerset,ephemeralrunner -w
-```
+Windows verification uploads the DLL exercised by its harness. Portable packaging
+reuses that artifact and verifies that the DLL inside the zip has the same SHA-256.
 
-Note: the manifest carries `app.kubernetes.io/version` matching the
-installed controller chart. The controller deletes scale sets whose
-version label is missing or outside its major.minor — after a controller
-upgrade, bump the label in the same PR.
+## Deploy, verify, and roll back
 
-The scale set registers runners with the scale-set name (`actrium-linux`)
-plus the labels in `runnerScaleSetLabels` (`self-hosted`, `Linux`,
-`X64`), matching the `runs-on: [self-hosted, Linux, X64]` selectors once
-the routing change (PR #557) lands. Until then the runners simply see no
-jobs — expected, not a misconfiguration.
+1. Confirm that the externally managed ConfigMap and Secrets exist and contain the
+   required keys. Avoid commands that display credential values.
+2. Confirm that no jobs are assigned before rolling the runner template.
+3. Run a server-side dry run, then apply the reviewed fleet manifest using the
+   operator's configured cluster context.
+4. Check that new runners become ready, register, and complete a CI job. Verify
+   successful Rust and Actions cache restores/saves.
 
-## Windows runners
-
-Not covered. Windows containers add version-coupling and size overhead
-without proportional benefit; Windows runners stay on their existing
-directly-installed host setup.
-
-## Updating this image
-
-1. Bump the relevant `ARG` default in `Dockerfile`.
-2. If a CI workflow gains an `apt-get install` dependency, add it to the
-   `base` stage in the same PR.
-3. If a wasm tool version changes in `ci-gate.yml`, update both the URL
-   and the sha256 in the `toolchain` stage.
-4. Rebuild and push.
-
-## Verification
-
-The final stage sanity-checks the toolchain (`rustc`, `cargo`,
-`rustfmt`, `clippy`, `protoc`, `nightly`, `llvm-tools`, wasm targets) at
-build time, so a missing binary fails the build instead of a CI job.
+Capture the existing fleet configuration before a rollout. Restore that snapshot
+for rollback, including the corresponding externally managed environment values.
+Do not change capacity, scheduling, or storage as part of a configuration-only
+rollout. Coordinate Pod replacement after updating environment resources.
