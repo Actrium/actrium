@@ -520,7 +520,7 @@ impl WasmHost {
     /// guidance up to the `.actr` loader.
     ///
     /// A second class of legacy input is a package built by an old SDK
-    /// (wit-bindgen <= 0.57 with the async-lift ABI). wasmtime 46 rejects
+    /// (wit-bindgen <= 0.57 with the async-lift ABI). wasmtime rejects
     /// the `async` canonical option on a synchronous WIT function type, so
     /// those binaries fail here; we map that to an actionable rebuild hint.
     pub fn compile(wasm_bytes: &[u8]) -> WasmResult<Self> {
@@ -544,7 +544,7 @@ impl WasmHost {
             if raw.contains("`async` canonical option requires an async function type") {
                 return WasmError::LoadFailed(format!(
                     "this .actr package was built by an old SDK (wit-bindgen \
-                     <= 0.57 async-lift ABI), which wasmtime 46 rejects per \
+                     <= 0.57 async-lift ABI), which wasmtime rejects per \
                      the Component Model spec. Rebuild it with the current SDK, \
                      which emits the supported actr:workload@0.7.0 async-world \
                      ABI. wasmtime reported: {raw}"
