@@ -28,6 +28,311 @@
 # making progress toward its bounded assertion timeout.
 slow-timeout = { period = "60s", terminate-after = 5 }
 
+# RFC-0507 safety acceptance inventory. Match exact test IDs, including
+# lib tests, before any broader override (first matching retries wins).
+# Covers deadlines, progress, route/owner no-replay, pending cleanup,
+# waiter limits, secure pre-send gates, RTC adapters and mobile recovery.
+# Keep new/renamed acceptance tests and RFC-0507 in sync with this inventory.
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^transport::tests::rpc_deadline_is_shared_across_stages$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^transport::lane::tests::websocket_without_a_sink_is_proven_not_attempted$/) |
+    test(/^transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable$/) |
+    test(/^transport::lane::tests::default_send_with_progress_classifies_by_error_shape$/) |
+    test(/^transport::lane::tests::test_encode_decode_fragment_header_single$/) |
+    test(/^transport::lane::tests::test_encode_decode_fragment_header_multi$/) |
+    test(/^transport::lane::tests::test_decode_too_short_returns_error$/) |
+    test(/^transport::lane::tests::test_reassembly_single_fragment$/) |
+    test(/^transport::lane::tests::test_reassembly_two_fragments_in_order$/) |
+    test(/^transport::lane::tests::test_reassembly_two_fragments_out_of_order$/) |
+    test(/^transport::lane::tests::test_reassembly_multiple_messages_interleaved$/) |
+    test(/^transport::lane::tests::test_fragment_count_small_message$/) |
+    test(/^transport::lane::tests::test_fragment_count_one_byte_over$/) |
+    test(/^transport::lane::tests::test_fragment_count_200kb$/) |
+    test(/^transport::lane::tests::test_roundtrip_small_message$/) |
+    test(/^transport::lane::tests::test_roundtrip_exactly_max_payload$/) |
+    test(/^transport::lane::tests::test_roundtrip_one_byte_over_max_payload$/) |
+    test(/^transport::lane::tests::test_roundtrip_200kb_message$/) |
+    test(/^transport::lane::tests::test_mpsc_lane$/) |
+    test(/^transport::lane::tests::test_mpsc_lane_clone$/) |
+    test(/^transport::lane::tests::test_mpsc_lane_with_shared_rx$/) |
+    test(/^transport::lane::tests::test_lane_type_name$/) |
+    test(/^transport::lane::tests::try_insert_rejects_invalid_index$/) |
+    test(/^transport::lane::tests::try_insert_rejects_too_many_fragments$/) |
+    test(/^transport::lane::tests::try_insert_rejects_inconsistent_total$/) |
+    test(/^transport::lane::tests::try_insert_evicts_oldest_when_message_budget_is_full$/) |
+    test(/^transport::lane::tests::try_insert_rejects_message_too_large$/) |
+    test(/^transport::lane::tests::try_insert_evicts_other_partial_when_byte_budget_is_full$/) |
+    test(/^transport::lane::tests::try_insert_duplicate_fragment_consumes_no_budget$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^transport::dest_transport::tests::retry_get_lane_closed_after_send_closed_falls_back_to_websocket$/) |
+    test(/^transport::dest_transport::tests::send_returns_when_only_webrtc_candidate_exhausted$/) |
+    test(/^transport::dest_transport::tests::send_falls_back_to_websocket_when_webrtc_fails$/) |
+    test(/^transport::dest_transport::tests::send_falls_back_when_webrtc_lane_is_not_healthy$/) |
+    test(/^transport::dest_transport::tests::stale_webrtc_ready_candidate_does_not_wait_forever$/) |
+    test(/^transport::dest_transport::tests::non_established_webrtc_candidate_is_evicted$/) |
+    test(/^transport::dest_transport::tests::generic_error_with_closed_text_does_not_trigger_stale_self_heal$/) |
+    test(/^transport::dest_transport::tests::has_healthy_connection_false_when_no_connections$/) |
+    test(/^transport::dest_transport::tests::rekey_not_ready_does_not_evict_wire_and_send_recovers$/) |
+    test(/^transport::dest_transport::tests::secure_not_ready_precedes_unknown_delivery_classification$/) |
+    test(/^transport::dest_transport::tests::uncertain_first_lane_suppresses_fallback_replay$/) |
+    test(/^transport::dest_transport::tests::not_attempted_first_lane_still_falls_back$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^transport::correlation::tests::guard_drop_removes_entry$/) |
+    test(/^transport::correlation::tests::complete_before_drop_wins$/) |
+    test(/^transport::correlation::tests::cancelled_recv_empties_map$/) |
+    test(/^transport::correlation::tests::recv_resolves_on_complete$/) |
+    test(/^transport::correlation::tests::orphan_complete_returns_orphan$/) |
+    test(/^transport::correlation::tests::duplicate_register_overwrites_previous_entry$/) |
+    test(/^transport::correlation::tests::fail_submitted_where_keeps_awaiting_send_entries$/) |
+    test(/^transport::correlation::tests::complete_from_envelope_resolves_pending$/) |
+    test(/^transport::correlation::tests::complete_from_envelope_orphan_computes_peer$/) |
+    test(/^transport::correlation::tests::into_receiver_detaches_guard_and_keeps_entry$/) |
+    test(/^transport::correlation::tests::envelope_response_to_result_maps_all_cases$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^transport::secure_channel::tests::secure_lane_preserves_inner_uncertain_progress$/) |
+    test(/^transport::secure_channel::tests::secure_gate_failure_is_proven_not_attempted$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^outbound::peer_gate::tests::data_chunk_operation_id_distinguishes_sequences$/) |
+    test(/^outbound::peer_gate::tests::data_stream_operation_id_never_collides_with_chunk_keys$/) |
+    test(/^outbound::peer_gate::tests::stamp_envelope_direction_overwrites_missing_and_mismatched_values$/) |
+    test(/^outbound::peer_gate::tests::blocked_projection_times_out_before_pending_registration_or_build$/) |
+    test(/^outbound::peer_gate::tests::request_deadline_covers_preflight_wait$/) |
+    test(/^outbound::peer_gate::tests::existing_only_without_transport_fails_without_build_or_retry$/) |
+    test(/^outbound::peer_gate::tests::blocked_projection_rejects_media_operations_before_coordinator_access$/) |
+    test(/^outbound::peer_gate::tests::existing_only_media_ops_fail_fast_without_a_session$/) |
+    test(/^outbound::peer_gate::tests::normal_projection_builds_but_existing_only_reuses_the_commit$/) |
+    test(/^outbound::peer_gate::tests::recovery_exhaustion_event_retires_cached_transport_and_pending_rpc$/) |
+    test(/^outbound::peer_gate::tests::policy_tightening_between_preflight_and_send_prevents_build$/) |
+    test(/^outbound::peer_gate::tests::admitted_existing_only_operation_cannot_upgrade_after_policy_relaxes$/) |
+    test(/^outbound::peer_gate::tests::one_shot_send_refused_below_min_slice_boundary$/) |
+    test(/^outbound::peer_gate::tests::request_admits_usable_residual_budget_after_route_wait$/) |
+    test(/^outbound::peer_gate::tests::reliable_route_wait_rechecks_projection_after_wake$/) |
+    test(/^outbound::peer_gate::tests::route_waiter_submits_one_business_recovery_hint_per_waiter$/) |
+    test(/^outbound::peer_gate::tests::generation_invalidation_keeps_unsubmitted_rpc_and_fails_matching_submitted_rpc$/) |
+    test(/^outbound::peer_gate::tests::submitted_call_without_response_is_delivery_uncertain$/) |
+    test(/^outbound::peer_gate::tests::waiter_budget_enforces_peer_cap_and_releases_raii$/) |
+    test(/^outbound::peer_gate::tests::waiter_budget_enforces_global_cap$/) |
+    test(/^outbound::peer_gate::tests::waiter_budget_reserves_per_class_capacity$/) |
+    test(/^outbound::peer_gate::tests::waiter_budget_enforces_byte_ceilings$/) |
+    test(/^outbound::peer_gate::tests::route_waiter_exhaustion_fails_fast_from_public_send_path$/) |
+    test(/^outbound::peer_gate::tests::route_waiter_wakes_on_destination_materialization_signal$/) |
+    test(/^outbound::peer_gate::tests::tell_waiter_retains_full_envelope_bytes$/) |
+    test(/^outbound::peer_gate::tests::tell_waits_for_route_then_submits_once$/) |
+    test(/^outbound::peer_gate::tests::stream_reliable_waits_for_route_before_sending$/) |
+    test(/^outbound::peer_gate::tests::send_message_with_type_reports_uncertain_before_reliable_retry_backoff$/) |
+    test(/^outbound::peer_gate::tests::tell_submits_at_most_once_when_delivery_is_uncertain$/) |
+    test(/^outbound::peer_gate::tests::tell_timeout_mid_write_is_delivery_uncertain$/) |
+    test(/^outbound::peer_gate::tests::send_data_chunk_timeout_mid_write_is_delivery_uncertain$/) |
+    test(/^outbound::peer_gate::tests::send_data_chunk_timeout_before_write_is_timed_out$/) |
+    test(/^outbound::peer_gate::tests::dropping_send_request_future_removes_pending_entry$/) |
+    test(/^outbound::peer_gate::tests::non_sendable_controller_with_ready_websocket_fallback_admits$/) |
+    test(/^outbound::peer_gate::tests::transports_revision_wakes_on_every_materialization_transition$/) |
+    test(/^outbound::peer_gate::tests::at_most_once_survives_an_unsafe_reattempt_after_unknown$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^outbound::peer_gate::websocket_tests::live_websocket_partial_write_is_uncertain_without_replay$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^wire::webrtc::rtc::data_lane::tests::rtc_fragment_header_matches_014_wire_format$/) |
+    test(/^wire::webrtc::rtc::data_lane::tests::rtc_multi_fragment_reassembly_matches_original$/) |
+    test(/^wire::webrtc::rtc::data_lane::tests::closed_channel_bridge_keeps_data_channel_closed_identity$/) |
+    test(/^wire::webrtc::rtc::data_lane::tests::payload_type_maps_to_all_four_lanes$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^wire::webrtc::rtc::peer::send::tests::closed_data_channel_keeps_a_terminal_error_identity$/) |
+    test(/^wire::webrtc::rtc::peer::send::tests::send_attempt_preserves_delivery_progress$/) |
+    test(/^wire::webrtc::rtc::peer::send::tests::every_non_uncertain_error_is_a_proven_pre_send_failure$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^wire::webrtc::rtc::peer::send_tests::send_on_rpc_reliable_writes_to_the_channel$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::send_before_sendable_is_connection_not_ready$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::try_send_on_latency_first_lazily_creates_the_lane$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::first_latency_first_send_waits_for_the_lane_open_event$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::try_send_on_full_buffer_is_buffer_full_error$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::send_after_close_is_connection_not_ready$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::send_writes_through$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::send_above_shared_message_limit_fails_message_too_large$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::close_with_outstanding_bytes_reports_delivery_uncertain$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::close_with_no_outstanding_is_terminal_channel_closed$/) |
+    test(/^wire::webrtc::rtc::peer::send_tests::explicit_close_closes_each_data_channel_before_the_pc$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and binary(retry_core_mechanics) and (
+    test(/^retry_attempt_matrix_matches_payload_type_policy$/) |
+    test(/^proven_pre_send_error_kinds_retry_once_preserve_request_id_and_reuse_transport$/) |
+    test(/^ambiguous_retryable_error_kinds_fail_closed_without_replay$/) |
+    test(/^non_retryable_error_kinds_do_not_retry$/) |
+    test(/^slow_connection_creation_is_singleflight_and_does_not_duplicate_messages$/) |
+    test(/^ambiguous_delivery_returns_uncertain_without_retry_for_serialized_send_and_tell$/) |
+    test(/^in_flight_duplicate_waits_for_original_result_and_times_out_without_completion$/) |
+    test(/^request_timeout_then_late_old_response_does_not_complete_new_request$/) |
+    test(/^ambiguous_delivery_does_not_retry_while_handler_is_in_flight$/) |
+    test(/^concurrent_duplicate_delivery_dedups_under_slow_handler$/) |
+    test(/^mobile_event_batch_during_ambiguous_send_does_not_retry$/) |
+    test(/^continuous_requests_during_mobile_event_storm_complete_without_pending_leak$/) |
+    test(/^create_transport_cancelled_by_close_action_does_not_leave_stale_dest$/) |
+    test(/^cleanup_during_inflight_rpc_is_bounded_and_next_rpc_is_clean$/) |
+    test(/^timeout_cleanup_without_wire_identity_does_not_close_replacement_transport$/) |
+    test(/^request_timeout_does_not_close_replaced_webrtc_session$/) |
+    test(/^unrecoverable_rpc_send_failure_clears_pending_without_waiting_for_deadline$/) |
+    test(/^peer_data_chunk_rejects_non_stream_payload_type_before_transport$/) |
+    test(/^unrecoverable_data_chunk_send_failure_is_explicit_and_bounded$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and binary(webrtc_large_mobile_recovery) and (
+    test(/^mobile_event_storm_during_call_and_data_chunk_does_not_hang$/) |
+    test(/^test_mobile_large_message_baseline_after_recovery$/) |
+    test(/^test_mobile_inflight_network_type_switch_recovers_or_retries_once$/) |
+    test(/^test_mobile_inflight_short_offline_recovers_original_request$/) |
+    test(/^test_mobile_inflight_long_offline_fails_bounded_then_retries$/) |
+    test(/^test_mobile_inflight_short_background_survives_foreground_restore$/) |
+    test(/^test_mobile_inflight_long_background_is_bounded_and_retries$/) |
+    test(/^test_mobile_data_chunk_channel_close_reports_delivery_uncertain$/) |
+    test(/^test_mobile_inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and binary(mobile_network_event_scenarios) and (
+    test(/^test_android_documented_network_scenarios$/) |
+    test(/^test_ios_documented_network_scenarios$/) |
+    test(/^test_android_documented_scenarios_through_responsive_supervisor$/) |
+    test(/^test_ios_documented_scenarios_through_responsive_supervisor$/) |
+    test(/^test_mobile_replay_cases_select_expected_actions$/) |
+    test(/^test_mobile_jsonl_replay_maps_real_log_shape_to_recovery_actions$/) |
+    test(/^test_mobile_app_kill_cleanup_then_restart_online_recovers_bidirectional_server_send$/) |
+    test(/^test_mobile_app_kill_restart_offline_bounds_server_send_until_online_restore$/) |
+    test(/^test_complex_mobile_event_storms_with_real_network_outage$/) |
+    test(/^test_mobile_network_event_handle_storm_then_call_and_data_chunk_are_bounded$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and binary(mobile_rtc_pair_contract) and (
+    test(/^p00_a_is_only_connect_initiator_and_pair_is_bidirectionally_usable$/) |
+    test(/^p00_b_is_only_connect_initiator_and_a_is_real_answerer$/) |
+    test(/^p00_connect_initiator_can_be_answerer_under_actrix_arbitration$/) |
+    test(/^p01_a_only_short_background_uses_production_feed_and_soft_recovers$/) |
+    test(/^p02_a_only_lifecycle_with_bidirectional_link_blackhole_soft_recovers$/) |
+    test(/^p03_a_only_long_background_preserves_duration_and_hard_rebuilds_pair$/) |
+    test(/^p04_a_only_offline_online_with_real_link_loss_soft_recovers_both_ends$/) |
+    test(/^p05_a_native_path_change_soft_recovers_and_rebinds_without_mirroring_platform_fact_to_b$/) |
+    test(/^p06_available_to_available_address_change_soft_recovers_without_offline_callback$/) |
+    test(/^p07_complete_offline_requests_are_bounded_and_pair_recovers_bidirectionally$/) |
+    test(/^p08_b_detects_failure_before_a_platform_callback_without_duplicate_recovery$/) |
+    test(/^p09_a_answerer_requests_the_real_offerer_to_restart$/) |
+    test(/^p10_simultaneous_endpoint_recovery_converges_to_one_active_pair$/) |
+    test(/^p11_signaling_partition_does_not_kill_an_established_data_plane$/) |
+    test(/^p12_dropped_soft_restart_offer_retries_on_the_same_peer_connection$/) |
+    test(/^p13_callback_storm_and_stale_monitor_epoch_do_not_regress_pair_state$/) |
+    test(/^p14_a_to_b_inflight_rpc_is_bounded$/) |
+    test(/^p14_b_to_a_inflight_rpc_is_bounded$/) |
+    test(/^p15_a_to_b_inflight_fragmented_message_is_bounded$/) |
+    test(/^p15_b_to_a_inflight_fragmented_message_is_bounded$/) |
+    test(/^p16_cleanup_then_endpoint_restart_rejects_old_handle_and_builds_a_new_pair$/) |
+    test(/^p17_unknown_path_probe_does_not_replace_a_healthy_pair$/) |
+    test(/^p18_active_close_removes_old_pair_and_explicit_connect_rebuilds_it$/) |
+    test(/^p19_independent_endpoint_events_converge_without_creating_a_second_pair$/) |
+    test(/^p20_screen_cycle_without_platform_fact_keeps_pair_usable$/)
+)
+'''
+retries = 0
+
+[[profile.default.overrides]]
+filter = '''
+package(actr-hyper) and kind(lib) and (
+    test(/^wire::webrtc::rtc::wiring_tests::production_wiring_rpc_round_trip_through_rtc_transport$/) |
+    test(/^wire::webrtc::rtc::wiring_tests::production_wiring_lazy_connect_is_driven_by_wire_pool$/) |
+    test(/^wire::webrtc::rtc::wiring_tests::sender_as_offerer_retries_failed_pc_builds_then_delivers_message$/) |
+    test(/^wire::webrtc::rtc::wiring_tests::sender_as_answerer_retries_failed_pc_builds_then_delivers_message$/) |
+    test(/^wire::webrtc::rtc::wiring_tests::production_wiring_data_chunk_through_rtc_transport$/) |
+    test(/^wire::webrtc::rtc::wiring_tests::production_wiring_multi_fragment_round_trip$/) |
+    test(/^wire::webrtc::rtc::interop_tests::multi_peer_connect_isolated_and_close_one_keeps_others$/) |
+    test(/^wire::webrtc::rtc::interop_tests::close_peer_tears_down_controller_and_allows_reconnect$/) |
+    test(/^wire::webrtc::rtc::interop_tests::all_four_lanes_send_business_data_over_real_pcs$/) |
+    test(/^wire::webrtc::rtc::validation_tests::rtc_datachannel_backpressure_basics$/) |
+    test(/^wire::webrtc::rtc::validation_tests::event_handler_tags_generation_and_forwards_facts$/) |
+    test(/^wire::webrtc::rtc::validation_tests::mergeable_state_events_coalesce_to_latest_value$/) |
+    test(/^wire::webrtc::rtc::validation_tests::mergeable_state_is_isolated_per_generation$/) |
+    test(/^wire::webrtc::rtc::validation_tests::structural_overflow_is_attributed_to_its_generation$/)
+)
+'''
+retries = 0
+
+# Terminal public error classification and stale-route stream acceptance.
+[[profile.default.overrides]]
+filter = 'package(actr-protocol) and test(/^error::tests::delivery_uncertain_is_terminal_for_generic_retry$/)'
+retries = 0
+
+[[profile.default.overrides]]
+filter = 'package(actr-hyper) and binary(outproc_stale_transport_stream) and test(/^test_real_disconnect_stream_send_recovers_and_stale_close_is_ignored$/)'
+retries = 0
+
 # The RTC mobile pair contract is deliberately deterministic and is the PR
 # recovery gate. A retry would hide exactly the race/storm regressions this
 # suite is intended to expose. Keep this before the general integration-test

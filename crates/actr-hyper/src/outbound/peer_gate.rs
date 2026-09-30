@@ -4140,3 +4140,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "peer_gate_websocket_tests.rs"]
+mod websocket_tests;
