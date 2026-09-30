@@ -722,12 +722,24 @@ baseline coverage is split by responsibility:
 - `outbound::peer_gate::tests::submitted_call_without_response_is_delivery_uncertain`
   covers the submitted-Call/no-Response terminal result.
 
-A live failing-WebSocket-sink test that binds the adapter write to the route
-and operation owner is a follow-up deliverable tracked in
-[#243](https://github.com/Actrium/actrium/issues/243). Until that test lands,
-the RFC does not claim that the pure mapping test alone proves the physical
-submission invariant; the existing DestTransport and operation-owner tests are
-the named no-replay gates for this baseline.
+`outbound::peer_gate::websocket_tests::live_websocket_partial_write_is_uncertain_without_replay`
+binds the real WebSocket sink to `WebSocketDataLane`, `DestTransport`, and
+`PeerGate` for Call, Tell, and StreamReliable. A controlled I/O implementation
+accepts one byte of an encoded WebSocket frame and then returns `BrokenPipe`.
+The same attempt must report `Unknown` without pre-send proof and terminate
+with non-retryable `DeliveryUncertain`, preserving the operation ID and leaving
+no pending Call. It asserts one sink submission, one lane call, one partial
+write failure, and zero fallback submissions; I/O polls are counted separately
+from message submissions.
+
+The test covers the ordinary WebSocket route and a routing fixture that places
+the real WebSocket lane in the first route slot with a ready successful fallback.
+The latter makes fallback suppression observable without changing production
+route ordering. Wire discovery is mocked; framing, sink flushing, lane sending,
+route recovery, and operation-owner handling use production implementations.
+Each case has a two-second operation deadline and a five-second outer timeout.
+This is the live no-replay acceptance gate for
+[#243](https://github.com/Actrium/actrium/issues/243).
 
 ### PR-0507-3: Route recovery, retry boundaries, and stale lanes
 
@@ -924,8 +936,8 @@ The submitted-Call safety case is
 `outbound::peer_gate::tests::submitted_call_without_response_is_delivery_uncertain`.
 The pure WebSocket classification test
 `transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable`
-is unit coverage, not physical-submission proof. A live failing-sink gate is
-tracked separately in [#243](https://github.com/Actrium/actrium/issues/243).
+is unit coverage, not physical-submission proof. The live failing-sink gate is
+`outbound::peer_gate::websocket_tests::live_websocket_partial_write_is_uncertain_without_replay`.
 These named tests are merge-gate tests, not optional diagnostics. The
 serial-handler acceptance also includes an `M1 -> recovering peer B` /
 `M2 -> healthy peer C` case proving that M1's readiness wait retains the
@@ -951,11 +963,12 @@ The merge gate is the Rust `test` job in
 `.github/workflows/ci-gate.yml`. Its `realtime` `REALTIME_BINARIES` filter
 must continue to include `webrtc_large_mobile_recovery`,
 `mobile_network_event_scenarios`, and `mobile_rtc_pair_contract`.
-The `rest` shard is not globally retry-free: `retry_core_mechanics` is an
-integration target selected by that shard and inherits the `kind(test)`
-`retries = 2` override. The selected WebRTC v0.20 real-PC lib modules also
-have an explicit `retries = 2` override and run in the dedicated
-`webrtc_v020` job. The realtime command is:
+The `rest` shard is not globally retry-free. Safety-critical tests, including
+`retry_core_mechanics`, have exact `retries = 0` overrides before the broad
+integration and RTC real-PC retry rules. Other tests retain their existing
+retry policy. The live WebSocket test also runs in a dedicated step of the
+`rest` shard with `--no-tests=fail`, so a missing or renamed test fails the gate.
+The realtime command is:
 
 ```text
 cargo nextest run --workspace --all-features --no-fail-fast -E "$REALTIME_BINARIES"
@@ -963,14 +976,15 @@ cargo nextest run --workspace --all-features --no-fail-fast -E "$REALTIME_BINARI
 
 Before any RFC-0507 implementation is marked complete, every safety-critical
 acceptance test MUST have an explicit `retries = 0` override in
-`.config/nextest.toml`, placed before the broad `kind(test)` and WebRTC v0.20
-overrides and matched by its exact nextest test ID. The migration baseline does
-not claim that all of these exact overrides already exist; the implementation
-follow-up, including the live sink gate and its retry-free selectors, is
-tracked in [#243](https://github.com/Actrium/actrium/issues/243). The required
-filters include:
+`.config/nextest.toml`, placed before the broad `kind(test)` and RTC real-PC
+overrides and matched by its exact nextest test ID. The RFC-0507 inventory in
+that file covers deadlines, delivery progress, route/owner no-replay, pending
+cleanup, waiter capacity, secure pre-send gates, RTC send adapters, and the
+mobile interruption/recovery acceptance suites. Add or rename selectors when
+changing acceptance tests. The required filters include:
 
 ```text
+package(actr-hyper) and test(/^outbound::peer_gate::websocket_tests::live_websocket_partial_write_is_uncertain_without_replay$/)
 package(actr-hyper) and test(/^transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable$/)
 package(actr-hyper) and test(/^transport::dest_transport::tests::uncertain_first_lane_suppresses_fallback_replay$/)
 binary(retry_core_mechanics) and test(/^ambiguous_retryable_error_kinds_fail_closed_without_replay$/)
@@ -978,7 +992,7 @@ package(actr-hyper) and test(/^outbound::peer_gate::tests::submitted_call_withou
 ```
 
 Any RFC-0507 acceptance test placed in an integration target such as
-`retry_core_mechanics`, and any real-PC WebRTC v0.20 acceptance test, must
+`retry_core_mechanics`, and any real-PC RTC acceptance test, must
 likewise be listed with an exact `binary(...) and test(...)` filter and
 `retries = 0`; no safety test may rely on the `rest` label, the default
 `kind(lib)` behavior, or a binary-wide retry policy.
