@@ -161,11 +161,12 @@ rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 
 # === WASM Runtime ===
-# Pinned to 46.0.3 for Component Model host execution. 46 requires rustc >=
-# 1.94 (workspace MSRV is 1.95, so satisfied) and carries the fix for
-# GHSA-4ch3-9j33-3pmj, so do NOT drop back to 46.0.0. 46.0.3 additionally
-# carries the fixes for RUSTSEC-2026-0190, RUSTSEC-2026-0223,
-# RUSTSEC-2026-0268, and RUSTSEC-2026-0269.
+# Pinned to 48.0.3 for Component Model host execution. 48 requires rustc >=
+# 1.95 (workspace MSRV is 1.95, so exactly satisfied). 48.0.3 carries the
+# fixes for RUSTSEC-2026-0314 and RUSTSEC-2026-0316 (guests can panic the
+# host via filesystem datetime overflow), on top of the older chain
+# (GHSA-4ch3-9j33-3pmj, RUSTSEC-2026-0190/0223/0268/0269). Do NOT revert to
+# 46.x: 46.0.3 itself is affected by the two 09-24 advisories.
 #
 # The `async` feature powers the host-side wasmtime fibers we rely on
 # (`instantiate_async` / `call_async`); `component-model-async` stays enabled
@@ -173,21 +174,23 @@ rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 # synchronous WIT world with a `&mut Store` serial dispatch here).
 #
 # NB (M3): guest components are now lifted *synchronously* (wit-bindgen 0.58
-# with `async: true` removed). wasmtime 46's embedded wasmparser rejects the
-# async canonical option on sync WIT function types, so pre-46 async-lift
-# `.actr` binaries no longer load; WasmHost::compile maps that error to a
-# rebuild-with-current-SDK diagnostic.
+# with `async: true` removed). wasmtime's embedded wasmparser rejects the
+# async canonical option on sync WIT function types (unchanged in 48 —
+# crates/actr-hyper/tests/legacy_package_rejection.rs gates this), so old
+# async-lift `.actr` binaries no longer load; WasmHost::compile maps that
+# error to a rebuild-with-current-SDK diagnostic.
 #
-# `default-features = false` keeps the feature set minimal: 46's new default
-# `gc-copying` / `wit-parser` features are not pulled in and are not needed.
-wasmtime = { version = "=46.0.3", default-features = false, features = [
+# `default-features = false` keeps the feature set minimal: 48's default
+# additions (gc-*, wat, profiling, parallel-compilation, pooling-allocator,
+# wit-parser, ...) are not pulled in and are not needed.
+wasmtime = { version = "=48.0.3", default-features = false, features = [
     "runtime",
     "cranelift",
     "component-model",
     "component-model-async",
     "async",
 ] }
-wasmtime-wasi = "=46.0.3"
+wasmtime-wasi = "=48.0.3"
 
 # === Networking ===
 tokio-tungstenite = { version = "0.28.0", features = [
