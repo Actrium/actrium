@@ -68,9 +68,11 @@ final class ActroReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegat
         print("🌐 [Native] Force Pointing Metro URL: \(url?.absoluteString ?? "nil")")
         return url
         #else
-        // Release offline bundle
-        // Note: Don't scream. main.jsbundle, avoids the RN Default bundling The name of the product is changed. Xcode "Multiple commands produce …/main.jsbundle"
-        return Bundle.main.url(forResource: "actr", withExtension: "jsbundle")
+        // Release offline bundle. Not "main.jsbundle": that collides with the
+        // RN default product and Xcode errors "Multiple commands produce …".
+        // The name must match the --bundle-output file name produced by
+        // ios/Scripts/* (guarded by scripts/actrium/check-ios-jsbundle-name.sh).
+        return Bundle.main.url(forResource: "runtime", withExtension: "jsbundle")
         #endif
     }
 
