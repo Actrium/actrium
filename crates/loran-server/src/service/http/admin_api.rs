@@ -708,32 +708,39 @@ async fn get_metrics_timeseries(
 // ── SPA static files ───────────────────────────────────────────
 
 #[cfg(feature = "admin-ui")]
-#[derive(rust_embed::RustEmbed)]
-#[folder = "$OUT_DIR/admin-web/dist"]
-struct AdminAssets;
+mod admin_assets {
+    include!(concat!(env!("OUT_DIR"), "/admin_assets.rs"));
+
+    pub fn get(path: &str) -> Option<&'static [u8]> {
+        ADMIN_ASSETS
+            .iter()
+            .find(|(name, _)| *name == path)
+            .map(|(_, data)| *data)
+    }
+}
 
 #[cfg(feature = "admin-ui")]
 async fn serve_spa(uri: axum::http::Uri) -> impl IntoResponse {
     let path = uri.path().strip_prefix("/admin/").unwrap_or(uri.path());
     let path = if path.is_empty() { "index.html" } else { path };
 
-    match AdminAssets::get(path) {
-        Some(content) => {
-            let mime = content.metadata.mimetype();
+    match admin_assets::get(path) {
+        Some(data) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
             (
                 StatusCode::OK,
-                [(header::CONTENT_TYPE, mime)],
-                content.data.into_owned(),
+                [(header::CONTENT_TYPE, mime.essence_str().to_owned())],
+                data.to_vec(),
             )
                 .into_response()
         }
         None => {
             // SPA fallback: serve index.html for client-side routing
-            match AdminAssets::get("index.html") {
-                Some(content) => (
+            match admin_assets::get("index.html") {
+                Some(data) => (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "text/html")],
-                    content.data.into_owned(),
+                    data.to_vec(),
                 )
                     .into_response(),
                 None => (StatusCode::NOT_FOUND, "Admin UI not found").into_response(),

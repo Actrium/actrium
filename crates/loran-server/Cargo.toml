@@ -9,7 +9,7 @@ description = "Collection of WebRTC auxiliary servers including Signaling, STUN 
 
 [features]
 default = ["admin-ui"]
-admin-ui = ["dep:rust-embed"]
+admin-ui = ["dep:mime_guess"]
 opentelemetry = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
@@ -87,7 +87,7 @@ prometheus = "0.14"
 lazy_static = "1.4"
 jsonwebtoken = "9"
 subtle = "2"
-rust-embed = { version = "8", features = ["mime-guess", "debug-embed", "interpolate-folder-path"], optional = true }
+mime_guess = { version = "2", optional = true }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
 
 # OpenTelemetry dependencies (optional, enabled by feature)
