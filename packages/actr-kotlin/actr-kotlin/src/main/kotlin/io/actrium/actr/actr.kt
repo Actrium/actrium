@@ -1438,7 +1438,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_register_media_track() != 43039.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_register_stream() != 56804.toShort()) {
+    if (lib.uniffi_actr_checksum_method_contextbridge_register_stream() != 32659.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_remove_media_track() != 43937.toShort()) {
