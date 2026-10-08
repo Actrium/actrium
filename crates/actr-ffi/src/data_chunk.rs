@@ -11,7 +11,8 @@
 //!   wrappers must close deterministically.
 //! - Concurrent sink `send()` calls are serialized in bridge-acceptance order.
 //! - Sink `close()` stops accepting new sends, waits for already accepted
-//!   sends to finish, and is idempotent. Calls after close return
+//!   sends to finish, sends the in-band `end_of_stream` marker, and is
+//!   idempotent. Calls after close return
 //!   [`ActrError::InvalidArgument`].
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -214,6 +215,7 @@ mod tests {
             payload: vec![sequence as u8].into(),
             metadata: vec![],
             timestamp_ms: None,
+            end_of_stream: None,
         }
         .into()
     }
@@ -269,6 +271,7 @@ mod tests {
                     payload: vec![].into(),
                     metadata: vec![],
                     timestamp_ms: None,
+                    end_of_stream: None,
                 },
                 sender: Default::default(),
             }))
@@ -320,7 +323,8 @@ mod tests {
         first.await.unwrap();
         queued.await.unwrap();
         repeated.await.unwrap();
-        assert_eq!(*sent.lock().unwrap(), vec![1, 2]);
+        // Chunks 1 and 2 plus the close-time end-of-stream marker (seq 3).
+        assert_eq!(*sent.lock().unwrap(), vec![1, 2, 3]);
         bridge.close().await.unwrap();
     }
 
@@ -348,6 +352,7 @@ mod tests {
 
         let mut seen = sent.lock().unwrap().clone();
         seen.sort_unstable();
-        assert_eq!(seen, vec![0, 1, 2, 3]);
+        // Chunks 0..=3 plus the close-time end-of-stream marker (seq 4).
+        assert_eq!(seen, vec![0, 1, 2, 3, 4]);
     }
 }

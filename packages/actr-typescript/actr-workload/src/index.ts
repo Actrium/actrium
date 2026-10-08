@@ -51,6 +51,13 @@ export interface DataChunk {
   payload: PayloadBytes;
   metadata?: MetadataEntry[];
   timestampMs?: bigint | number;
+  /**
+   * Graceful stream-end marker: a sink sends it on close; the receiving
+   * stream yields everything before it, then ends. Never surfaced to
+   * consumers as data. Can be lost on StreamLatencyFirst lanes, so back
+   * completion with an application-level timeout there.
+   */
+  endOfStream?: boolean;
 }
 
 export type Dest = 'host' | 'workload' | { peer: ActrId };
@@ -353,6 +360,7 @@ function toWitDataChunk(chunk: DataChunk): WitDataChunk {
     metadata: chunk.metadata ?? [],
     timestampMs:
       chunk.timestampMs === undefined ? undefined : BigInt(chunk.timestampMs),
+    endOfStream: chunk.endOfStream,
   };
 }
 
@@ -527,6 +535,13 @@ class BoundedQueue<T> {
  * unregisters immediately, drops buffered items, and wakes pending readers;
  * the iterator's `return()` (e.g. `break` out of `for await`) closes too.
  *
+ * Graceful end: when the peer's sink closes it sends an in-band
+ * `endOfStream` marker; the iterator yields every chunk queued before it,
+ * then returns `done` (the marker itself is never yielded). On
+ * StreamLatencyFirst lanes the marker can be dropped like any other chunk,
+ * so applications on lossy lanes should still back completion with a
+ * timeout.
+ *
  * Host-side teardown note: the subscription-time ctx token is retired once
  * the subscribing invocation returns, and calling a host import with a
  * retired token traps the store. `close()` therefore only calls
@@ -581,7 +596,14 @@ export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
           if (item.done) {
             return { done: true, value: undefined };
           }
-          return { done: false, value: item.value as DataChunkEvent };
+          const event = item.value as DataChunkEvent;
+          if (event.chunk.endOfStream === true) {
+            // Graceful end: FIFO delivery means every data chunk was already
+            // yielded; unwrap the marker into termination (never surfaced).
+            await this.close();
+            return { done: true, value: undefined };
+          }
+          return { done: false, value: event };
         } finally {
           pending = false;
         }
@@ -599,11 +621,16 @@ export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
 /**
  * Outbound DataChunk sink bound to one destination, stream ID, and lane.
  * Sends are serialized in acceptance order; `close()` stops accepting new
- * sends, waits for accepted sends to finish, and is idempotent.
+ * sends, waits for accepted sends to finish, sends the in-band
+ * `endOfStream` marker (sequence one past the last chunk), and is
+ * idempotent. A `send()` after close — or after an application-sent end
+ * marker — throws.
  */
 export class DataChunkSink {
   private closed = false;
   private tail: Promise<void> = Promise.resolve();
+  private lastSequence?: bigint;
+  private endMarkerSent = false;
 
   constructor(
     private readonly target: Dest,
@@ -616,12 +643,21 @@ export class DataChunkSink {
     if (this.closed) {
       throw new Error('DataChunkSink is closed');
     }
+    if (this.endMarkerSent) {
+      throw new Error('endOfStream marker already sent for this stream');
+    }
     if (chunk.streamId !== this.streamId) {
       // Never silently rewrite the wire item.
       throw new Error(
         `chunk streamId '${chunk.streamId}' does not match sink streamId '${this.streamId}'`,
       );
     }
+    if (chunk.endOfStream === true) {
+      // The application ended the stream explicitly; close() will not send
+      // a duplicate marker.
+      this.endMarkerSent = true;
+    }
+    this.lastSequence = BigInt(chunk.sequence);
     const send = this.tail.then(() =>
       hostSendDataChunk(
         resolveCtxToken(this.ctx),
@@ -638,6 +674,31 @@ export class DataChunkSink {
   async close(): Promise<void> {
     this.closed = true;
     await this.tail;
+    if (this.endMarkerSent) {
+      return;
+    }
+    this.endMarkerSent = true;
+    // The marker rides the same lane so it travels behind every data chunk
+    // in FIFO order. A host import traps on a retired ctx token, so the
+    // marker is sent only inside a live invocation; otherwise the peer
+    // observes the end via its own timeout/abort path.
+    const liveCtx = getCurrentInvocationCtx();
+    if (!liveCtx) {
+      return;
+    }
+    const marker: DataChunk = {
+      streamId: this.streamId,
+      sequence: this.lastSequence === undefined ? 0n : this.lastSequence + 1n,
+      payload: new Uint8Array(0),
+      metadata: [],
+      endOfStream: true,
+    };
+    await hostSendDataChunk(
+      resolveCtxToken(liveCtx),
+      toWitDest(this.target),
+      toWitDataChunk(marker),
+      { tag: this.payloadType } satisfies WitPayloadType,
+    ).then(() => undefined);
   }
 }
 

@@ -493,7 +493,7 @@ if grep -q "Received chunk" "$LOG_DIR/data-stream-receiver.log"; then
     echo "✅ Validated:"
     echo "   • RPC handshake (StartTransfer/EndTransfer)"
     echo "   • DataChunk fast path transmission"
-    echo "   • register_stream/unregister_stream callbacks"
+    echo "   • data_chunks/data_chunk_sink stream handles with in-band end-of-stream"
     echo "   • Real protobuf encode/decode"
     echo "   • Real distributed Actor communication"
     echo "   • Using loran as signaling server"

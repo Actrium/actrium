@@ -596,6 +596,124 @@ describe('@actrium/actr-workload', () => {
     ).toEqual([1n, 2n]);
   });
 
+  it('sink close sends an in-band end-of-stream marker inside a live invocation', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(31n);
+
+    await runtime.withInvocationCtx(ctx, async () => {
+      const sink = await runtime.dataChunkSink(
+        'host',
+        'stream-1',
+        runtime.PayloadType.StreamReliable,
+        ctx,
+      );
+      await sink.send(testChunk({ sequence: 5n }));
+      await sink.close();
+    });
+
+    const chunks = host.hostCalls.sendDataChunk.map((call) => call.chunk);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0].sequence).toBe(5n);
+    expect(chunks[0].endOfStream).toBeUndefined();
+    expect(chunks[1].endOfStream).toBe(true);
+    expect(chunks[1].sequence).toBe(6n);
+    expect(chunks[1].payload).toHaveLength(0);
+  });
+
+  it('sink close outside a live invocation skips the marker', async () => {
+    const { host, runtime } = await loadRuntime();
+    const sink = await runtime.dataChunkSink(
+      'host',
+      'stream-1',
+      runtime.PayloadType.StreamReliable,
+      testInvocationCtx(32n),
+    );
+
+    await sink.send(testChunk({ sequence: 1n }));
+    await sink.close();
+
+    expect(
+      host.hostCalls.sendDataChunk.map((call) => call.chunk.sequence),
+    ).toEqual([1n]);
+  });
+
+  it('an application-sent end marker suppresses the close-time marker', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(34n);
+
+    await runtime.withInvocationCtx(ctx, async () => {
+      const sink = await runtime.dataChunkSink(
+        'host',
+        'stream-1',
+        runtime.PayloadType.StreamReliable,
+        ctx,
+      );
+      await sink.send(
+        testChunk({
+          sequence: 9n,
+          endOfStream: true,
+          payload: new Uint8Array(0),
+        }),
+      );
+      await sink.close();
+    });
+
+    const calls = host.hostCalls.sendDataChunk;
+    expect(calls).toHaveLength(1);
+    expect(calls[0].chunk.endOfStream).toBe(true);
+  });
+
+  it('rejects sends after an end-of-stream marker', async () => {
+    const { runtime } = await loadRuntime();
+    const sink = await runtime.dataChunkSink(
+      'host',
+      'stream-1',
+      runtime.PayloadType.StreamReliable,
+      testInvocationCtx(35n),
+    );
+
+    await sink.send(
+      testChunk({ endOfStream: true, payload: new Uint8Array(0) }),
+    );
+    await expect(sink.send(testChunk())).rejects.toThrow(
+      'endOfStream marker already sent',
+    );
+  });
+
+  it('stream ends on an in-band marker without yielding it', async () => {
+    const { runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(33n);
+    const stream = await runtime.dataChunks('stream-1', undefined, ctx);
+    const iterator = stream[Symbol.asyncIterator]();
+    const sender = testActorId();
+
+    await runtime.__dispatchDataChunk(testChunk({ sequence: 1n }), sender, ctx);
+    await runtime.__dispatchDataChunk(testChunk({ sequence: 2n }), sender, ctx);
+    await runtime.__dispatchDataChunk(
+      testChunk({
+        sequence: 3n,
+        endOfStream: true,
+        payload: new Uint8Array(0),
+      }),
+      sender,
+      ctx,
+    );
+
+    const first = await iterator.next();
+    const second = await iterator.next();
+    expect(first.done).toBe(false);
+    expect(second.done).toBe(false);
+    if (!first.done && !second.done) {
+      expect(first.value.chunk.sequence).toBe(1n);
+      expect(second.value.chunk.sequence).toBe(2n);
+    }
+    expect(await iterator.next()).toEqual({ done: true, value: undefined });
+    // The marker-driven end unregisters the subscription.
+    await expect(
+      runtime.dataChunks('stream-1', undefined, ctx),
+    ).resolves.toBeDefined();
+  });
+
   it('ActrContext exposes stream-first adapters', async () => {
     const { host, runtime } = await loadRuntime();
     const ctx = new runtime.ActrContext(testInvocationCtx(96n));

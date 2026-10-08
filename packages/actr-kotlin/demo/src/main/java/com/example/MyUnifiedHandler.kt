@@ -108,6 +108,7 @@ class MyUnifiedHandler : ActrDispatchHandler {
                             payload = message.toByteArray(Charsets.UTF_8),
                             metadata = emptyList(),
                             timestampMs = System.currentTimeMillis(),
+                            endOfStream = null,
                         )
 
                     Log.i(TAG, "client sending $i/$messageCount: $message")

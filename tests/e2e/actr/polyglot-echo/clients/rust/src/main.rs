@@ -379,6 +379,7 @@ async fn scenario_bidi(
             payload: Bytes::from(payload),
             metadata: vec![],
             timestamp_ms: None,
+            end_of_stream: None,
         };
         sink.send(chunk)
             .await

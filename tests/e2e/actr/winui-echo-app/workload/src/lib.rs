@@ -190,6 +190,7 @@ pub extern "C" fn actr_fixture_host_bridge_trigger() -> i32 {
             },
         ],
         timestamp_ms: Some(HOST_BRIDGE_TIMESTAMP_MS),
+        end_of_stream: None,
     };
     if !actr_cabi::forward_chunk_to_host(&chunk, &sender) {
         return FIXTURE_ERROR;

@@ -182,6 +182,7 @@ async fn send_stream(harness: &TestHarness, from: u64, to: u64, stream_id: &str)
         payload: bytes::Bytes::from_static(b"stream-payload"),
         metadata: Vec::new(),
         timestamp_ms: Some(0),
+        end_of_stream: None,
     };
     let operation_id = format!("{stream_id}#{}", chunk.sequence);
     harness

@@ -110,6 +110,7 @@ fn chunk(timestamp_ms: Option<i64>) -> DataChunk {
             value: "application/octet-stream".to_string(),
         }],
         timestamp_ms,
+        end_of_stream: None,
     }
 }
 

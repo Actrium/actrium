@@ -630,6 +630,51 @@ async fn register_and_unregister_stream_roundtrip() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn data_chunks_stream_ends_on_inband_end_marker() {
+    use actr_framework::Context as _;
+    use futures_util::StreamExt as _;
+
+    let (ctx, _wl) = harness().await;
+    let mut stream = ctx
+        .data_chunks("marker-stream".to_string(), Default::default())
+        .await
+        .expect("data_chunks subscription");
+
+    let registry = ctx.data_chunk_registry_for_test();
+    let chunk = |sequence: u64, end: bool| actr_protocol::DataChunk {
+        stream_id: "marker-stream".into(),
+        sequence,
+        end_of_stream: end.then_some(true),
+        ..Default::default()
+    };
+    for sequence in [1, 2] {
+        registry
+            .invoke_for_test(chunk(sequence, false), ActrId::default())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    registry
+        .invoke_for_test(chunk(3, true), ActrId::default())
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Data chunks are yielded in order; the marker ends the stream without
+    // being yielded itself.
+    assert_eq!(stream.next().await.unwrap().unwrap().chunk.sequence, 1);
+    assert_eq!(stream.next().await.unwrap().unwrap().chunk.sequence, 2);
+    assert!(stream.next().await.is_none());
+    assert!(stream.ended_by_marker());
+
+    // The graceful end unregistered the subscription synchronously, so a
+    // fresh subscription with the same stream ID is accepted.
+    ctx.data_chunks("marker-stream".to_string(), Default::default())
+        .await
+        .expect("re-subscribe after graceful end");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn node_teardown_releases_data_chunk_registry_without_cycle() {
     let (ctx, wl) = harness().await;
     let registry = ctx.data_chunk_registry_for_test();

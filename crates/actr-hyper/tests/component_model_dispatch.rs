@@ -170,6 +170,7 @@ fn captured_context_chunk() -> DataChunk {
         payload: Vec::new().into(),
         metadata: Vec::new(),
         timestamp_ms: None,
+        end_of_stream: None,
     }
 }
 

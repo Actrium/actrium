@@ -50,7 +50,10 @@ pub struct StreamMetadataEntry {
 }
 
 /// Stream-chunk sink signature. `chunk_flags` bit 0 (`0x01`) indicates that
-/// `timestamp_ms` is set; other bits are reserved and must be ignored.
+/// `timestamp_ms` is set; bit 1 (`0x02`) indicates the graceful end-of-stream
+/// marker synthesized when the peer's sink closes — payload is empty and
+/// `sequence` is one past the last delivered chunk (0 when none); other bits
+/// are reserved and must be ignored.
 /// All pointers are valid only for the duration of the callback.
 pub type StreamSinkCallback = unsafe extern "C" fn(
     stream_id_ptr: *const u8,
@@ -250,6 +253,12 @@ pub fn set_reverse_sink(
 /// annotated the chunk with `timestamp_ms`.
 pub const ACTR_CHUNK_FLAG_HAS_TIMESTAMP: u8 = 0x01;
 
+/// `ACTR_CHUNK_FLAG_END_OF_STREAM`: `chunk_flags` bit set on the synthesized
+/// graceful-end notification fired when the peer's sink closed the stream.
+/// Never combined with a payload; a chunk carrying this bit is a control
+/// marker, not data.
+pub const ACTR_CHUNK_FLAG_END_OF_STREAM: u8 = 0x02;
+
 /// Forward one inbound chunk to the registered host stream sink.
 ///
 /// Returns `true` when a sink was registered (the callback was fired),
@@ -284,11 +293,14 @@ pub fn forward_chunk_to_host(chunk: &DataChunk, sender: &ActrId) -> bool {
         .collect();
     let sender_repr = sender.to_string_repr();
     let sender_bytes = sender_repr.as_bytes();
-    let flags = if chunk.timestamp_ms.is_some() {
+    let mut flags = if chunk.timestamp_ms.is_some() {
         ACTR_CHUNK_FLAG_HAS_TIMESTAMP
     } else {
         0
     };
+    if chunk.end_of_stream == Some(true) {
+        flags |= ACTR_CHUNK_FLAG_END_OF_STREAM;
+    }
     let timestamp_ms = chunk.timestamp_ms.unwrap_or(0);
 
     // SAFETY: the sink contract requires the host callback to treat every
@@ -455,5 +467,6 @@ mod tests {
     #[test]
     fn chunk_flag_bit_is_stable() {
         assert_eq!(ACTR_CHUNK_FLAG_HAS_TIMESTAMP, 0x01);
+        assert_eq!(ACTR_CHUNK_FLAG_END_OF_STREAM, 0x02);
     }
 }

@@ -14,6 +14,7 @@ fn chunk_seq(stream_id: &str, sequence: u64) -> DataChunk {
         payload: Default::default(),
         metadata: vec![],
         timestamp_ms: None,
+        end_of_stream: None,
     }
 }
 
@@ -752,5 +753,42 @@ async fn reregistered_stream_only_receives_chunks_dispatched_after_registration(
     assert_eq!(probe_b.wait_done().await, 3);
 
     assert_eq!(probe_a.completions(), vec![1]);
+    assert_eq!(probe_b.completions(), vec![3]);
+}
+
+/// A chunk queued before unregister drains to the PREVIOUS consumer only;
+/// the replacement subscription never sees it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chunk_queued_before_unregister_never_reaches_replacement() {
+    let reg = DataChunkRegistry::with_capacity(8);
+    let (cb_a, h_a, mut probe_a) = Harness::new();
+    let (cb_b, _h_b, mut probe_b) = Harness::new();
+
+    reg.register("s1".into(), cb_a).unwrap();
+    // Gate chunk 1 so chunk 2 stays queued behind it when unregister lands.
+    let gate1 = h_a.gate(1);
+    reg.dispatch(chunk_seq("s1", 1), ActrId::default(), RELIABLE)
+        .await;
+    assert_eq!(probe_a.wait_started().await, 1);
+    reg.dispatch(chunk_seq("s1", 2), ActrId::default(), RELIABLE)
+        .await;
+
+    reg.unregister("s1");
+    reg.register("s1".into(), cb_b).unwrap();
+    // Release the gate BEFORE dispatching chunk 3: re-registration makes new
+    // dispatches wait for the previous worker's drain ("drain first"), so
+    // dispatching while the gate is held would self-deadlock this test.
+    gate1.send(()).unwrap();
+    reg.dispatch(chunk_seq("s1", 3), ActrId::default(), RELIABLE)
+        .await;
+
+    // The gated chunk and the chunk queued behind it both drain to the old
+    // consumer; the replacement only receives what was dispatched after it
+    // registered.
+    assert_eq!(probe_a.wait_done().await, 1);
+    assert_eq!(probe_a.wait_done().await, 2);
+    assert_eq!(probe_b.wait_done().await, 3);
+
+    assert_eq!(probe_a.completions(), vec![1, 2]);
     assert_eq!(probe_b.completions(), vec![3]);
 }

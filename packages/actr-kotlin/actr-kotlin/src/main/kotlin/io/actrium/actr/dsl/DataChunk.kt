@@ -58,7 +58,8 @@ fun DataChunkStreamBridge.asFlow(): Flow<DataChunkEvent> = flow {
 /**
  * Ergonomic wrapper over the opaque sink bridge. Sends are serialized by the
  * bridge in acceptance order; [close] stops accepting new sends, waits for
- * accepted sends to finish, and is idempotent.
+ * accepted sends to finish, sends the in-band end-of-stream marker so the
+ * peer's stream completes, and is idempotent.
  */
 class DataChunkSink internal constructor(
     private val bridge: DataChunkSinkBridge,

@@ -1418,7 +1418,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_data_chunk_sink() != 27523.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_data_chunks() != 31270.toShort()) {
+    if (lib.uniffi_actr_checksum_method_contextbridge_data_chunks() != 34463.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_discover() != 38410.toShort()) {
@@ -3213,6 +3213,11 @@ public interface ContextBridgeInterface {
      * Returns an opaque pull handle; `None` capacity selects the default.
      * Only one active subscription is allowed per stream ID within one
      * actor/context instance.
+     *
+     * Delivery is FIFO per stream. Reassemble and detect gaps by
+     * `DataChunk.sequence` — chunks are delivered in send order, but
+     * `StreamLatencyFirst` drops under pressure and reconnects can lose
+     * in-flight chunks.
      */
     suspend fun `dataChunks`(`streamId`: kotlin.String, `capacity`: kotlin.UInt?): DataChunkStreamBridge
     
@@ -3527,6 +3532,11 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
      * Returns an opaque pull handle; `None` capacity selects the default.
      * Only one active subscription is allowed per stream ID within one
      * actor/context instance.
+     *
+     * Delivery is FIFO per stream. Reassemble and detect gaps by
+     * `DataChunk.sequence` — chunks are delivered in send order, but
+     * `StreamLatencyFirst` drops under pressure and reconnects can lose
+     * in-flight chunks.
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
@@ -6142,6 +6152,14 @@ data class DataChunk (
      * Optional timestamp in milliseconds
      */
     var `timestampMs`: kotlin.Long?
+    , 
+    /**
+     * Graceful stream-end marker: the sink sends it on close, the receiving
+     * stream yields everything before it, then ends. Never surfaced as data.
+     * Can be lost on `StreamLatencyFirst` lanes, so back completion with an
+     * application-level timeout there.
+     */
+    var `endOfStream`: kotlin.Boolean?
     
 ){
     
@@ -6163,6 +6181,7 @@ public object FfiConverterTypeDataChunk: FfiConverterRustBuffer<DataChunk> {
             FfiConverterByteArray.read(buf),
             FfiConverterSequenceTypeMetadataEntry.read(buf),
             FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalBoolean.read(buf),
         )
     }
 
@@ -6171,7 +6190,8 @@ public object FfiConverterTypeDataChunk: FfiConverterRustBuffer<DataChunk> {
             FfiConverterULong.allocationSize(value.`sequence`) +
             FfiConverterByteArray.allocationSize(value.`payload`) +
             FfiConverterSequenceTypeMetadataEntry.allocationSize(value.`metadata`) +
-            FfiConverterOptionalLong.allocationSize(value.`timestampMs`)
+            FfiConverterOptionalLong.allocationSize(value.`timestampMs`) +
+            FfiConverterOptionalBoolean.allocationSize(value.`endOfStream`)
     )
 
     override fun write(value: DataChunk, buf: ByteBuffer) {
@@ -6180,6 +6200,7 @@ public object FfiConverterTypeDataChunk: FfiConverterRustBuffer<DataChunk> {
             FfiConverterByteArray.write(value.`payload`, buf)
             FfiConverterSequenceTypeMetadataEntry.write(value.`metadata`, buf)
             FfiConverterOptionalLong.write(value.`timestampMs`, buf)
+            FfiConverterOptionalBoolean.write(value.`endOfStream`, buf)
     }
 }
 
@@ -6929,9 +6950,11 @@ sealed class ActrException: kotlin.Exception() {
      * The field is named `cause_detail` rather than `cause`: Kotlin
      * `Throwable.cause` would clash with a generated `cause` property
      * (uniffi.toml `[bindings.kotlin.rename]` does not reach fields, so the
-     * rename must happen here). Field names do not affect the UniFFI wire
-     * format (variants serialize as ordinal + positional fields), so this
-     * is not an ABI change.
+     * rename must happen here). The generated Kotlin *and* Swift bindings
+     * both expose the new name; the handwritten Swift `Actr` module maps it
+     * back to `cause`, so the public Swift API is unchanged. Field names do
+     * not affect the UniFFI wire format (variants serialize as ordinal +
+     * positional fields), so this is not an ABI change.
      */
     class DeliveryUncertain(
         

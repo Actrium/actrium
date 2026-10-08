@@ -204,6 +204,7 @@ fn data_chunk_from_wit(chunk: wit::DataChunk) -> DataChunk {
             })
             .collect(),
         timestamp_ms: chunk.timestamp_ms,
+        end_of_stream: chunk.end_of_stream,
     }
 }
 

@@ -643,6 +643,7 @@ impl MobileRtcPairHarness {
             payload: payload.clone(),
             metadata: Vec::new(),
             timestamp_ms: Some(0),
+            end_of_stream: None,
         };
         let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
         self.harness
@@ -707,6 +708,7 @@ impl MobileRtcPairHarness {
             payload,
             metadata: Vec::new(),
             timestamp_ms: Some(0),
+            end_of_stream: None,
         };
         let operation_id =
             crate::outbound::data_chunk_operation_id(&chunk.stream_id, chunk.sequence);

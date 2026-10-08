@@ -766,6 +766,7 @@ async fn mobile_data_chunk_channel_close_reports_delivery_uncertain(case: RoleCa
             payload: Bytes::from(vec![0x5a; LARGE_PAYLOAD_SIZE]),
             metadata: Vec::new(),
             timestamp_ms: Some(0),
+            end_of_stream: None,
         };
         let payload = Bytes::from(stream.encode_to_vec());
         let (hook_guard, event_rx, release_send) = pause_next_multifragment_send_after(1);
@@ -833,6 +834,7 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
             payload: Bytes::from(vec![0x33; LARGE_PAYLOAD_SIZE]),
             metadata: Vec::new(),
             timestamp_ms: Some(0),
+            end_of_stream: None,
         };
         let payload = Bytes::from(stream.encode_to_vec());
         let (hook_guard, event_rx, release_send) = pause_next_multifragment_send_after(1);

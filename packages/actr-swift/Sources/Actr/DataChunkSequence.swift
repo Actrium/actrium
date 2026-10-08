@@ -18,6 +18,12 @@ public struct DataChunkEvent: Sendable {
 /// continuation-driven second buffer, so queue capacity stays the single
 /// bound configured at subscription time.
 ///
+/// Graceful end: when the peer's sink closes it sends an in-band
+/// end-of-stream marker; the sequence yields every chunk queued before it,
+/// then ends (`nil`). On latency-first lanes the marker can be dropped like
+/// any other chunk, so back completion with an application-level timeout
+/// there.
+///
 /// The sequence is single-consumer: iterating it twice throws
 /// `ActrError.InvalidArgument` on the second iterator's first `next()`.
 /// `close()` (called on cancellation or explicit termination) closes the

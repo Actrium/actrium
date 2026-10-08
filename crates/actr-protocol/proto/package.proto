@@ -96,6 +96,17 @@ message DataChunk {
     // per-app string conventions. Not a precedent — any other application
     // annotation belongs in `metadata`.
     optional int64 timestamp_ms = 5;
+
+    // Graceful stream-end marker (FIN analogue). Sent by the sink on close:
+    // the receiving stream yields every chunk queued before it, then ends.
+    // A marker carries no payload; receivers must not surface it as data.
+    // Sender-side close/drop without a marker, or receiver-side close/drop,
+    // remains an abort that may discard buffered chunks.
+    //
+    // On StreamLatencyFirst lanes the marker itself can be dropped like any
+    // other chunk, so receivers on lossy lanes should still back stream
+    // completion with an application-level timeout.
+    optional bool end_of_stream = 6;
 }
 
 // NOTE: MediaFrame is NOT needed as a protobuf message.

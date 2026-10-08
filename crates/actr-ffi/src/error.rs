@@ -139,9 +139,11 @@ pub enum ActrError {
     /// The field is named `cause_detail` rather than `cause`: Kotlin
     /// `Throwable.cause` would clash with a generated `cause` property
     /// (uniffi.toml `[bindings.kotlin.rename]` does not reach fields, so the
-    /// rename must happen here). Field names do not affect the UniFFI wire
-    /// format (variants serialize as ordinal + positional fields), so this
-    /// is not an ABI change.
+    /// rename must happen here). The generated Kotlin *and* Swift bindings
+    /// both expose the new name; the handwritten Swift `Actr` module maps it
+    /// back to `cause`, so the public Swift API is unchanged. Field names do
+    /// not affect the UniFFI wire format (variants serialize as ordinal +
+    /// positional fields), so this is not an ABI change.
     #[error("delivery uncertain for operation {operation_id}: {cause_detail}")]
     DeliveryUncertain {
         operation_id: String,

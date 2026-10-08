@@ -8,7 +8,13 @@ Release notes are published on the
 ### Breaking: stream-first DataChunk APIs (#86)
 
 The callback-first DataChunk APIs are replaced by stream-first ones across
-all SDK surfaces. `DataChunk` (the wire item) is unchanged.
+all SDK surfaces. `DataChunk` (the wire item) gains an optional
+`end_of_stream` field: a sink sends the in-band marker on `close`, and the
+receiving stream yields every chunk queued before it, then ends (`None` /
+completion / `nil`, per language). On `StreamLatencyFirst` lanes the marker
+can be dropped like any other chunk, so applications on lossy lanes should
+still back stream completion with a timeout. Receiver-side close/drop stays
+an abort that discards buffered chunks.
 
 - **Rust**: `Context::register_stream` / `unregister_stream` /
   `send_data_chunk` are removed. Use `Context::data_chunks(stream_id,
@@ -41,7 +47,10 @@ Behavior changes to note:
   intentional cancellation exception to the graceful internal
   unregister/drain behavior.
 - The FFI `ActrError::DeliveryUncertain` field `cause` is renamed
-  `cause_detail` (Kotlin `Throwable.cause` clash); wire format unchanged.
+  `cause_detail` (Kotlin `Throwable.cause` would clash with the generated
+  property). The rename shows up in the generated Kotlin *and* Swift
+  bindings; the handwritten Swift `Actr` module maps it back to `cause`, so
+  the public Swift API is unchanged. Wire format unchanged.
 - On `wasm32-wasip2`, guest code only runs while an invocation is active:
   stream consumers must be polled inside active invocations (or spawned with
   `wit_bindgen::spawn_local` on the serial host path); the WIT

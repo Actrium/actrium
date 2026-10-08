@@ -748,6 +748,7 @@ async fn start_stream_round_trip<C: Context>(
             value: label,
         }],
         timestamp_ms: Some(now_millis()),
+        end_of_stream: None,
     })
     .await?;
     sink.close().await?;

@@ -159,6 +159,7 @@ async fn handle_start_server_stream<C: RtContext>(
                 payload: Bytes::from(payload),
                 metadata: vec![],
                 timestamp_ms: None,
+                end_of_stream: None,
             };
             if let Err(e) = sink.send(chunk).await {
                 warn!(seq, error = ?e, "server-stream: sink send failed");
@@ -223,12 +224,16 @@ async fn handle_setup_bidi<C: RtContext>(
                 payload: chunk.payload,
                 metadata: vec![],
                 timestamp_ms: None,
+                end_of_stream: None,
             };
             if let Err(e) = reply_sink.send(echo_chunk).await {
                 warn!(seq, error = ?e, "bidi: echo failed");
                 break;
             }
         }
+        // The inbound stream ended (graceful marker or teardown): closing the
+        // reply sink forwards the end-of-stream marker to the client.
+        let _ = reply_sink.close().await;
         incoming.close().await;
     });
 

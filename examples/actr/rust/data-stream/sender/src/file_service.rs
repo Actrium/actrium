@@ -96,6 +96,7 @@ impl LocalFileServiceHandler for MyFileService {
                 payload: chunk.clone().into(),
                 metadata: vec![],
                 timestamp_ms: Some(chrono::Utc::now().timestamp_millis()),
+                end_of_stream: None,
             };
 
             sink.send(data_chunk).await?;

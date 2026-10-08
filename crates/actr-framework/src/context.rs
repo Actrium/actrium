@@ -1,6 +1,6 @@
 //! Context trait - Execution context interface for actors
 
-use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType};
+use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, PayloadType};
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 
@@ -215,12 +215,19 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     ///
     /// # Ordering and reassembly
     ///
-    /// [`DataChunk::sequence`] is the authoritative reassembly key. Same-stream
+    /// [`DataChunk::sequence`][crate::DataChunk] is the authoritative reassembly key. Same-stream
     /// chunks are delivered in send order per payload-type lane (do not mix
     /// payload types within one stream), but chunks can still be missing:
     /// [`PayloadType::StreamLatencyFirst`] drops under pressure, and a
     /// reconnect can lose in-flight reliable chunks. Reassemble and detect
     /// gaps by `sequence`; do not assume contiguous arrival.
+    ///
+    /// # Stream end
+    ///
+    /// A peer's sink close sends an in-band [`DataChunk::end_of_stream`][crate::DataChunk]
+    /// marker; the stream yields every chunk queued before it, then ends. On
+    /// `StreamLatencyFirst` lanes the marker can be dropped, so back
+    /// completion with an application-level timeout there.
     ///
     /// # Parameters
     ///
@@ -250,7 +257,9 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     /// `payload_type` must be [`PayloadType::StreamReliable`] (ordered reliable
     /// delivery, default) or [`PayloadType::StreamLatencyFirst`] (low-latency
     /// partial-reliable); anything else returns [`ActrError::InvalidArgument`].
-    /// Every sent chunk's `stream_id` must equal `stream_id`.
+    /// Every sent chunk's `stream_id` must equal `stream_id`. Closing the sink
+    /// sends an in-band [`DataChunk::end_of_stream`][crate::DataChunk] marker
+    /// after the last chunk, so the peer's stream ends after draining.
     ///
     /// # Parameters
     ///

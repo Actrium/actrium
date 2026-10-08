@@ -133,6 +133,13 @@ impl StreamCloser {
 /// actor/context instance; creating a duplicate is rejected by the runtime
 /// with [`ActrError::InvalidArgument`].
 ///
+/// Graceful end: when the peer's sink closes it sends an in-band
+/// `end_of_stream` marker. The stream yields every chunk queued before the
+/// marker, then ends (the marker itself is never yielded). On
+/// [`PayloadType::StreamLatencyFirst`] lanes the marker can be dropped like
+/// any other chunk, so applications on lossy lanes should still back stream
+/// completion with a timeout.
+///
 /// Cancellation: dropping the stream or calling [`DataChunkStream::close`]
 /// unregisters immediately, discards buffered items, and wakes pending
 /// readers. This is an intentional cancellation exception to the graceful
@@ -140,6 +147,7 @@ impl StreamCloser {
 pub struct DataChunkStream {
     rx: Option<mpsc::Receiver<ActorResult<DataChunkEvent>>>,
     closer: Option<StreamCloser>,
+    ended_by_marker: bool,
 }
 
 impl DataChunkStream {
@@ -151,6 +159,7 @@ impl DataChunkStream {
         Self {
             rx: Some(rx),
             closer: Some(closer),
+            ended_by_marker: false,
         }
     }
 
@@ -164,15 +173,43 @@ impl DataChunkStream {
             closer.wait_async().await;
         }
     }
+
+    /// Whether the stream ended because the peer's graceful `end_of_stream`
+    /// marker was received, as opposed to cancellation or runtime teardown.
+    /// Boundaries that cannot observe `None` completion (e.g. callback-based
+    /// FFI sinks) use this to surface a definitive stream end.
+    pub fn ended_by_marker(&self) -> bool {
+        self.ended_by_marker
+    }
+
+    /// Synchronous teardown shared by graceful end and drop: unregister
+    /// locally and wake pending readers. Async cleanup cannot run from a
+    /// poll/drop context, so backends must tolerate it being skipped.
+    fn teardown_sync(&mut self) {
+        self.rx = None;
+        if let Some(mut closer) = self.closer.take() {
+            closer.cancel_sync();
+        }
+    }
 }
 
 impl futures_core::Stream for DataChunkStream {
     type Item = ActorResult<DataChunkEvent>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
-        match self.rx.as_mut() {
-            Some(rx) => Pin::new(rx).poll_next(cx),
-            None => Poll::Ready(None),
+        let Some(rx) = self.rx.as_mut() else {
+            return Poll::Ready(None);
+        };
+        match Pin::new(rx).poll_next(cx) {
+            Poll::Ready(Some(Ok(event))) if event.chunk.end_of_stream == Some(true) => {
+                // Graceful end: the marker travels in FIFO order behind every
+                // data chunk, so all prior items were already yielded. Unwrap
+                // the marker into stream termination instead of yielding it.
+                self.ended_by_marker = true;
+                self.teardown_sync();
+                Poll::Ready(None)
+            }
+            other => other,
         }
     }
 }
@@ -181,9 +218,8 @@ impl Drop for DataChunkStream {
     fn drop(&mut self) {
         // Best-effort cancellation only: synchronous unregister runs, any
         // async cleanup is abandoned (backends must tolerate that).
-        if let Some(mut closer) = self.closer.take() {
-            closer.cancel_sync();
-        }
+        // Idempotent: a no-op after close() or a graceful end.
+        self.teardown_sync();
     }
 }
 
@@ -196,14 +232,19 @@ impl Drop for DataChunkStream {
 /// item.
 ///
 /// Implements [`futures_sink::Sink`]: `poll_ready` reflects the previous
-/// in-flight send, `poll_flush` waits for it, and `poll_close` flushes before
-/// closing. `start_send` after close returns [`ActrError::InvalidArgument`].
+/// in-flight send, `poll_flush` waits for it, and `poll_close` flushes, then
+/// sends an in-band `end_of_stream` marker (sequence = last chunk's + 1) so
+/// the receiving stream ends after draining. `start_send` after close — or
+/// after an application-sent end marker — returns
+/// [`ActrError::InvalidArgument`].
 pub struct DataChunkSink {
     stream_id: String,
     payload_type: PayloadType,
     send_fn: SendDataChunkFn,
     in_flight: Option<MaybeSendBoxFuture<'static, ActorResult<()>>>,
     pending: Option<DataChunk>,
+    last_sequence: Option<u64>,
+    end_marker_sent: bool,
     closed: bool,
 }
 
@@ -228,6 +269,8 @@ impl DataChunkSink {
             send_fn,
             in_flight: None,
             pending: None,
+            last_sequence: None,
+            end_marker_sent: false,
             closed: false,
         })
     }
@@ -240,6 +283,22 @@ impl DataChunkSink {
     /// Lane fixed at sink creation.
     pub fn payload_type(&self) -> PayloadType {
         self.payload_type
+    }
+
+    /// Build the graceful end marker for this stream: empty payload, sequence
+    /// one past the last sent chunk (0 when nothing was sent).
+    fn end_marker(&self) -> DataChunk {
+        DataChunk {
+            stream_id: self.stream_id.clone(),
+            sequence: self
+                .last_sequence
+                .map(|sequence| sequence.saturating_add(1))
+                .unwrap_or(0),
+            payload: Default::default(),
+            metadata: Vec::new(),
+            timestamp_ms: None,
+            end_of_stream: Some(true),
+        }
     }
 
     fn poll_in_flight(&mut self, cx: &mut TaskContext<'_>) -> Poll<ActorResult<()>> {
@@ -278,12 +337,23 @@ impl futures_sink::Sink<DataChunk> for DataChunkSink {
         if self.closed {
             return Err(ActrError::InvalidArgument("DataChunkSink is closed".into()));
         }
+        if self.end_marker_sent {
+            return Err(ActrError::InvalidArgument(
+                "end_of_stream marker already sent for this stream".into(),
+            ));
+        }
         if item.stream_id != self.stream_id {
             return Err(ActrError::InvalidArgument(format!(
                 "chunk stream_id '{}' does not match sink stream_id '{}'",
                 item.stream_id, self.stream_id
             )));
         }
+        if item.end_of_stream == Some(true) {
+            // The application ended the stream explicitly; poll_close will
+            // not send a duplicate marker.
+            self.end_marker_sent = true;
+        }
+        self.last_sequence = Some(item.sequence);
         self.pending = Some(item);
         Ok(())
     }
@@ -298,6 +368,18 @@ impl futures_sink::Sink<DataChunk> for DataChunkSink {
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<ActorResult<()>> {
         match self.as_mut().poll_flush(cx) {
+            Poll::Ready(Ok(())) => {}
+            other => return other,
+        }
+        if !self.end_marker_sent {
+            // Send the graceful end marker on the same lane so it travels
+            // behind every data chunk in FIFO order.
+            let marker = self.end_marker();
+            let fut = (self.send_fn)(marker);
+            self.in_flight = Some(fut);
+            self.end_marker_sent = true;
+        }
+        match self.poll_in_flight(cx) {
             Poll::Ready(Ok(())) => {
                 self.closed = true;
                 Poll::Ready(Ok(()))
@@ -319,6 +401,7 @@ mod tests {
             payload: vec![sequence as u8].into(),
             metadata: vec![],
             timestamp_ms: None,
+            end_of_stream: None,
         }
     }
 
@@ -368,7 +451,58 @@ mod tests {
         ));
         let sent = sent.lock().unwrap();
         let seqs: Vec<u64> = sent.iter().map(|c| c.sequence).collect();
-        assert_eq!(seqs, vec![1, 2]);
+        // Close appends the graceful end marker after the data chunks.
+        assert_eq!(seqs, vec![1, 2, 3]);
+        assert_eq!(sent[2].end_of_stream, Some(true));
+        assert!(sent[2].payload.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sink_close_without_chunks_sends_marker_sequence_zero() {
+        let (send_fn, sent) = ok_send_fn();
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        sink.close().await.unwrap();
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].sequence, 0);
+        assert_eq!(sent[0].end_of_stream, Some(true));
+    }
+
+    #[tokio::test]
+    async fn sink_close_is_idempotent_and_sends_one_marker() {
+        let (send_fn, sent) = ok_send_fn();
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        sink.send(test_chunk("s", 7)).await.unwrap();
+        sink.close().await.unwrap();
+        sink.close().await.unwrap();
+        let sent = sent.lock().unwrap();
+        let markers = sent
+            .iter()
+            .filter(|c| c.end_of_stream == Some(true))
+            .count();
+        assert_eq!(markers, 1);
+    }
+
+    #[tokio::test]
+    async fn sink_honors_application_sent_marker() {
+        let (send_fn, sent) = ok_send_fn();
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        let mut marker = test_chunk("s", 5);
+        marker.end_of_stream = Some(true);
+        sink.send(marker).await.unwrap();
+        // No data after an end marker.
+        assert!(matches!(
+            sink.start_send_unpin(test_chunk("s", 6)),
+            Err(ActrError::InvalidArgument(_))
+        ));
+        // Close must not send a second marker.
+        sink.close().await.unwrap();
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].sequence, 5);
     }
 
     #[tokio::test]
@@ -411,6 +545,75 @@ mod tests {
         let event = stream.next().await.unwrap().unwrap();
         assert_eq!(event.chunk.sequence, 7);
         assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stream_ends_on_marker_without_yielding_it() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let cancelled = std::sync::Arc::new(AtomicBool::new(false));
+        let c = cancelled.clone();
+        let (mut tx, rx) = mpsc::channel(4);
+        let mut stream = DataChunkStream::from_parts(
+            rx,
+            StreamCloser::new(Box::new(move || {
+                c.store(true, Ordering::SeqCst);
+            })),
+        );
+        let sender = ActrId {
+            serial_number: 1,
+            ..Default::default()
+        };
+        tx.send(Ok(DataChunkEvent {
+            chunk: test_chunk("s", 1),
+            sender: sender.clone(),
+        }))
+        .await
+        .unwrap();
+        tx.send(Ok(DataChunkEvent {
+            chunk: test_chunk("s", 2),
+            sender: sender.clone(),
+        }))
+        .await
+        .unwrap();
+        let mut marker = test_chunk("s", 3);
+        marker.end_of_stream = Some(true);
+        tx.send(Ok(DataChunkEvent {
+            chunk: marker,
+            sender: sender.clone(),
+        }))
+        .await
+        .unwrap();
+
+        // Data chunks before the marker are yielded in order; the marker
+        // itself terminates the stream without being yielded.
+        assert_eq!(stream.next().await.unwrap().unwrap().chunk.sequence, 1);
+        assert_eq!(stream.next().await.unwrap().unwrap().chunk.sequence, 2);
+        assert!(!stream.ended_by_marker());
+        assert!(stream.next().await.is_none());
+        // Graceful end unregisters synchronously, and the stream stays ended.
+        assert!(stream.ended_by_marker());
+        assert!(cancelled.load(Ordering::SeqCst));
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stream_channel_close_is_not_graceful_end() {
+        let (mut tx, rx) = mpsc::channel(4);
+        let mut stream = DataChunkStream::from_parts(rx, StreamCloser::new(Box::new(|| {})));
+        let sender = ActrId {
+            serial_number: 1,
+            ..Default::default()
+        };
+        tx.send(Ok(DataChunkEvent {
+            chunk: test_chunk("s", 1),
+            sender,
+        }))
+        .await
+        .unwrap();
+        drop(tx);
+        assert!(stream.next().await.is_some());
+        assert!(stream.next().await.is_none());
+        assert!(!stream.ended_by_marker());
     }
 
     #[tokio::test]

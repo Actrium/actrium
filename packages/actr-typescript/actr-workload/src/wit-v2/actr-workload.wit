@@ -125,6 +125,11 @@ interface types {
         payload: list<u8>,
         metadata: list<metadata-entry>,
         timestamp-ms: option<s64>,
+        // Graceful stream-end marker (FIN analogue): the sink sends it on
+        // close; the receiving stream yields everything before it, then ends.
+        // Never surfaced as data. Can be lost on stream-latency-first lanes,
+        // so back completion with a timeout there.
+        end-of-stream: option<bool>,
     }
 
     variant payload-type {

@@ -191,6 +191,7 @@ async fn test_real_disconnect_stream_send_recovers_and_stale_close_is_ignored() 
         payload: bytes::Bytes::from_static(b"stream-payload"),
         metadata: Vec::new(),
         timestamp_ms: Some(0),
+        end_of_stream: None,
     };
     let operation_id = format!("{}#{}", stream.stream_id, stream.sequence);
     let payload = bytes::Bytes::from(stream.encode_to_vec());

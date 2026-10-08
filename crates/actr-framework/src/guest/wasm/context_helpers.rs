@@ -73,6 +73,7 @@ pub(crate) fn data_chunk_to_wit(chunk: DataChunk) -> wit_types::DataChunk {
             })
             .collect(),
         timestamp_ms: chunk.timestamp_ms,
+        end_of_stream: chunk.end_of_stream,
     }
 }
 
@@ -90,5 +91,6 @@ pub(crate) fn data_chunk_from_wit(chunk: wit_types::DataChunk) -> DataChunk {
             })
             .collect(),
         timestamp_ms: chunk.timestamp_ms,
+        end_of_stream: chunk.end_of_stream,
     }
 }

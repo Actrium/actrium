@@ -227,6 +227,7 @@ impl MessageDispatcher for DoubleDispatcher {
                         payload: Vec::new().into(),
                         metadata: Vec::new(),
                         timestamp_ms: None,
+                        end_of_stream: None,
                     })
                     .await;
                 match result {

@@ -3,8 +3,9 @@ import ActrBindings
 /// Outbound DataChunk sink bound to one destination, stream ID, and lane.
 ///
 /// Sends are serialized by the bridge in acceptance order. `close()` stops
-/// accepting new sends, waits for accepted sends to finish, and is
-/// idempotent; sending after close throws `ActrError.InvalidArgument`.
+/// accepting new sends, waits for accepted sends to finish, sends the in-band
+/// end-of-stream marker so the peer's stream completes, and is idempotent;
+/// sending after close throws `ActrError.InvalidArgument`.
 /// Every chunk's `streamId` must equal the sink's stream ID.
 public final class DataChunkSink: Sendable {
     private let bridge: ActrBindings.DataChunkSinkBridge

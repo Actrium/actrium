@@ -561,6 +561,7 @@ fn proto_data_chunk_to_wit(chunk: DataChunk) -> WitDataChunk {
             })
             .collect(),
         timestamp_ms: chunk.timestamp_ms,
+        end_of_stream: chunk.end_of_stream,
     }
 }
 
@@ -673,6 +674,7 @@ fn wit_data_chunk_to_proto(chunk: WitDataChunk) -> DataChunk {
             })
             .collect(),
         timestamp_ms: chunk.timestamp_ms,
+        end_of_stream: chunk.end_of_stream,
     }
 }
 

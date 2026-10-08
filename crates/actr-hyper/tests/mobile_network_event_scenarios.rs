@@ -925,6 +925,7 @@ async fn send_data_chunk_bounded(
         payload: bytes::Bytes::from_static(b"mobile-event-storm-stream-payload"),
         metadata: Vec::new(),
         timestamp_ms: Some(0),
+        end_of_stream: None,
     };
     let operation_id = format!("{}#{}", stream.stream_id, stream.sequence);
     let payload = bytes::Bytes::from(stream.encode_to_vec());
