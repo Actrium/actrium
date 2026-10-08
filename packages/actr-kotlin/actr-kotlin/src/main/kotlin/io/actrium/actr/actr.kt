@@ -6184,13 +6184,39 @@ public object FfiConverterTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebR
  * discriminants remain stable; Config is a binding-local pre-protocol error.
  */
 sealed class ActrException: kotlin.Exception() {
+    // Keep exception inspection safe before native loading or after linkage failure.
+    internal fun displayMessage(nativeMessage: (ActrException) -> String = ::actrErrorMessage): String {
+        try {
+            return nativeMessage(this)
+        } catch (_: LinkageError) {
+            // Includes UnsatisfiedLinkError, ExceptionInInitializerError and
+            // NoClassDefFoundError on subsequent access to a failed initializer.
+            return when (this) {
+                is Unavailable -> "unavailable: $msg"
+                is ConnectionNotReady -> "connection not ready: " +
+                    (info.retryAfterMs?.let { "retry after ${it}ms" } ?: "no retry hint")
+                is TimedOut -> "timed out"
+                is NotFound -> "not found: $msg"
+                is PermissionDenied -> "permission denied: $msg"
+                is InvalidArgument -> "invalid argument: $msg"
+                is UnknownRoute -> "unknown route: $msg"
+                is DependencyNotFound -> "dependency '$serviceName' not found: $detail"
+                is DecodeFailure -> "decode failure: $msg"
+                is NotImplemented -> "not implemented: $msg"
+                is Internal -> "internal error: $msg"
+                is Config -> "config: $msg"
+                is DeliveryUncertain -> "delivery uncertain for operation $operationId: $causeDetail"
+            }
+        }
+    }
+
     
     class Unavailable(
         
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class ConnectionNotReady(
@@ -6198,13 +6224,13 @@ sealed class ActrException: kotlin.Exception() {
         val `info`: ConnectionNotReadyInfo
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class TimedOut(
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class NotFound(
@@ -6212,7 +6238,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class PermissionDenied(
@@ -6220,7 +6246,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class InvalidArgument(
@@ -6228,7 +6254,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class UnknownRoute(
@@ -6236,7 +6262,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class DependencyNotFound(
@@ -6246,7 +6272,7 @@ sealed class ActrException: kotlin.Exception() {
         val `detail`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class DecodeFailure(
@@ -6254,7 +6280,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class NotImplemented(
@@ -6262,7 +6288,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     class Internal(
@@ -6270,7 +6296,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
     /**
@@ -6285,7 +6311,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
 
     /** The operation may have entered the transport; generic retry is unsafe. */
@@ -6296,7 +6322,7 @@ sealed class ActrException: kotlin.Exception() {
         val causeDetail: kotlin.String
         ) : ActrException() {
         override val message
-            get() = actrErrorMessage(this)
+            get() = displayMessage()
     }
     
 

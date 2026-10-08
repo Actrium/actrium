@@ -26,13 +26,16 @@ class PatchErrorMessagesTests(unittest.TestCase):
 
     def test_regeneration_restores_message_getters(self):
         for language, path, patched, generated in (
-            ("kotlin", KOTLIN, "get() = actrErrorMessage(this)", 'get() = "msg=${ `msg` }"'),
+            ("kotlin", KOTLIN, "get() = displayMessage()", 'get() = "msg=${ `msg` }"'),
             ("swift", SWIFT, "actrErrorMessage(err: self)", "String(reflecting: self)"),
         ):
             with self.subTest(language=language):
                 source = path.read_text()
                 self.assertIn(patched, source)
-                self.assertEqual(MODULE.patch(source.replace(patched, generated), language), source)
+                regenerated = source.replace(MODULE.KOTLIN_MESSAGE_HELPER, "").replace(
+                    patched, generated
+                )
+                self.assertEqual(MODULE.patch(regenerated, language), source)
 
     def test_missing_export_and_template_drift_fail_closed(self):
         for language, path in (("kotlin", KOTLIN), ("swift", SWIFT)):
@@ -43,7 +46,7 @@ class PatchErrorMessagesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.patch(source.replace("class TimedOut(", "class FutureVariant("), "kotlin")
         with self.assertRaises(ValueError):
-            MODULE.patch(source.replace("get() = actrErrorMessage(this)", "get() = null", 1), "kotlin")
+            MODULE.patch(source.replace("get() = displayMessage()", "get() = null", 1), "kotlin")
 
     def test_regeneration_preserves_delivery_uncertain_field_name(self):
         source = KOTLIN.read_text()
@@ -51,6 +54,25 @@ class PatchErrorMessagesTests(unittest.TestCase):
             "value.causeDetail", "value.`cause`"
         )
         self.assertEqual(MODULE.patch(generated, "kotlin"), source)
+
+    def test_kotlin_native_only_getters_gain_fallback(self):
+        source = KOTLIN.read_text()
+        native_only = source.replace(MODULE.KOTLIN_MESSAGE_HELPER, "").replace(
+            "get() = displayMessage()", "get() = actrErrorMessage(this)"
+        )
+        self.assertEqual(MODULE.patch(native_only, "kotlin"), source)
+
+    def test_kotlin_fallback_drift_fails_closed(self):
+        source = KOTLIN.read_text()
+        with self.assertRaises(ValueError):
+            MODULE.patch(source.replace("catch (_: LinkageError)", "catch (_: Exception)"), "kotlin")
+
+    def test_kotlin_fallback_covers_every_variant(self):
+        for variant in MODULE.VARIANTS:
+            with self.subTest(variant=variant):
+                self.assertIn(f"is {variant} ->", MODULE.KOTLIN_MESSAGE_HELPER)
+        self.assertIn("retry after ${it}ms", MODULE.KOTLIN_MESSAGE_HELPER)
+        self.assertIn("no retry hint", MODULE.KOTLIN_MESSAGE_HELPER)
 
     def test_swift_variant_drift_fails_closed(self):
         source = SWIFT.read_text()
@@ -63,7 +85,7 @@ class PatchErrorMessagesTests(unittest.TestCase):
 
     def test_getter_expression_suffix_fails_closed(self):
         for language, path, getter in (
-            ("kotlin", KOTLIN, "get() = actrErrorMessage(this)"),
+            ("kotlin", KOTLIN, "get() = displayMessage()"),
             ("swift", SWIFT, "actrErrorMessage(err: self)"),
         ):
             with self.subTest(language=language), self.assertRaises(ValueError):
@@ -74,7 +96,7 @@ class PatchErrorMessagesTests(unittest.TestCase):
         for expression in ('"msg".trim() + "suffix"', '"prefix" + "suffix"'):
             with self.subTest(expression=expression), self.assertRaises(ValueError):
                 MODULE.patch(source.replace(
-                    "get() = actrErrorMessage(this)", f"get() = {expression}", 1
+                    "get() = displayMessage()", f"get() = {expression}", 1
                 ), "kotlin")
 
     def test_swift_prefixed_getter_fails_closed(self):
@@ -87,7 +109,7 @@ class PatchErrorMessagesTests(unittest.TestCase):
 
     def test_multiline_getter_continuation_fails_closed(self):
         for language, path, getter in (
-            ("kotlin", KOTLIN, "get() = actrErrorMessage(this)"),
+            ("kotlin", KOTLIN, "get() = displayMessage()"),
             ("swift", SWIFT, "actrErrorMessage(err: self)"),
         ):
             with self.subTest(language=language), self.assertRaises(ValueError):
@@ -97,7 +119,7 @@ class PatchErrorMessagesTests(unittest.TestCase):
 
     def test_commented_getter_fails_closed(self):
         for language, path, getter in (
-            ("kotlin", KOTLIN, "get() = actrErrorMessage(this)"),
+            ("kotlin", KOTLIN, "get() = displayMessage()"),
             ("swift", SWIFT, "actrErrorMessage(err: self)"),
         ):
             with self.subTest(language=language), self.assertRaises(ValueError):

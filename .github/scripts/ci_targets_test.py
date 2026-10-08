@@ -7,6 +7,34 @@ import ci_targets
 
 
 class CiTargetsTest(unittest.TestCase):
+    def test_committed_kotlin_binding_runs_native_checksum_and_kotlin_checks(self) -> None:
+        path = "packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/actr.kt"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["kotlin_binding"])
+        self.assertTrue(targets["release_related"])
+        self.assertFalse(targets["swift_binding"])
+        self.assertIn(f"binding_checksums:{path}", reasons)
+        self.assertIn(f"kotlin:{path}", reasons)
+
+    def test_checksum_checker_runs_native_checksum_gate(self) -> None:
+        path = "scripts/actr/check-binding-checksums.py"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["release_related"])
+        self.assertFalse(targets["kotlin_binding"])
+        self.assertIn(f"binding_checksums:{path}", reasons)
+
+    def test_other_kotlin_sources_keep_sdk_only_checks(self) -> None:
+        path = "packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/dsl/Manifest.kt"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["kotlin_binding"])
+        self.assertFalse(targets["rust_core"])
+        self.assertIn(f"kotlin:{path}", reasons)
+
     def test_error_message_generation_changes_check_both_sdks(self) -> None:
         for path in (
             "scripts/actr/patch-error-messages.py",

@@ -257,11 +257,36 @@ mod tests {
             msg.contains(r#""retry_after_ms":5880"#),
             "retry_after_ms: {msg}"
         );
+        assert!(
+            msg.contains(r#""message":"connection not ready: retry after 5880ms""#),
+            "message: {msg}"
+        );
         assert!(!msg.contains("peer"), "peer should not leak: {msg}");
         assert!(
             !msg.contains("session_id"),
             "session_id should not leak: {msg}"
         );
         assert!(!msg.contains("delivery"), "delivery should not leak: {msg}");
+    }
+
+    #[test]
+    fn connection_not_ready_without_hint_preserves_null_metadata() {
+        let err = actr_error_to_napi(ActrError::ConnectionNotReady(
+            ConnectionNotReadyInfo::without_retry_hint(),
+        ));
+        let msg = err.reason.as_str();
+        assert!(msg.contains(r#""kind":"Transient""#), "kind: {msg}");
+        assert!(
+            msg.contains(r#""code":"ConnectionNotReady""#),
+            "code: {msg}"
+        );
+        assert!(
+            msg.contains(r#""retry_after_ms":null"#),
+            "retry_after_ms: {msg}"
+        );
+        assert!(
+            msg.contains(r#""message":"connection not ready: no retry hint""#),
+            "message: {msg}"
+        );
     }
 }

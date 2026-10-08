@@ -11,9 +11,9 @@ struct ActrErrorBridgeTests {
         let cases: [(ActrBindings.ActrError, String)] = [
             (.Unavailable(msg: text), "unavailable: \(text)"),
             (.ConnectionNotReady(info: .init(retryAfterMs: 42)),
-             "connection not ready: retry_after_ms=Some(42)"),
+             "connection not ready: retry after 42ms"),
             (.ConnectionNotReady(info: .init(retryAfterMs: nil)),
-             "connection not ready: retry_after_ms=None"),
+             "connection not ready: no retry hint"),
             (.TimedOut, "timed out"),
             (.NotFound(msg: text), "not found: \(text)"),
             (.PermissionDenied(msg: text), "permission denied: \(text)"),

@@ -16,6 +16,34 @@ VARIANTS = {
     "DecodeFailure", "NotImplemented", "Internal", "Config", "DeliveryUncertain",
 }
 
+KOTLIN_MESSAGE_HELPER = '''
+    // Keep exception inspection safe before native loading or after linkage failure.
+    internal fun displayMessage(nativeMessage: (ActrException) -> String = ::actrErrorMessage): String {
+        try {
+            return nativeMessage(this)
+        } catch (_: LinkageError) {
+            // Includes UnsatisfiedLinkError, ExceptionInInitializerError and
+            // NoClassDefFoundError on subsequent access to a failed initializer.
+            return when (this) {
+                is Unavailable -> "unavailable: $msg"
+                is ConnectionNotReady -> "connection not ready: " +
+                    (info.retryAfterMs?.let { "retry after ${it}ms" } ?: "no retry hint")
+                is TimedOut -> "timed out"
+                is NotFound -> "not found: $msg"
+                is PermissionDenied -> "permission denied: $msg"
+                is InvalidArgument -> "invalid argument: $msg"
+                is UnknownRoute -> "unknown route: $msg"
+                is DependencyNotFound -> "dependency '$serviceName' not found: $detail"
+                is DecodeFailure -> "decode failure: $msg"
+                is NotImplemented -> "not implemented: $msg"
+                is Internal -> "internal error: $msg"
+                is Config -> "config: $msg"
+                is DeliveryUncertain -> "delivery uncertain for operation $operationId: $causeDetail"
+            }
+        }
+    }
+'''
+
 
 def patch(source: str, language: str) -> str:
     if not re.search(r"\bfun[c]?\s+`?actrErrorMessage`?\s*\(", source):
@@ -24,10 +52,10 @@ def patch(source: str, language: str) -> str:
         pattern = r"sealed class ActrException\b.*?public object FfiConverterTypeActrError\b.*?^}"
         getter = (
             r'(^[ \t]*override val message[ \t]*\n[ \t]*get\(\) = )'
-            r'(?:"(?:[^"\\\n]|\\[^\n])*"|actrErrorMessage\(this\))'
+            r'(?:"(?:[^"\\\n]|\\[^\n])*"|actrErrorMessage\(this\)|displayMessage\(\))'
             r'(?=[ \t]*\n[ \t]*}[ \t]*$)'
         )
-        replacement = r"\g<1>actrErrorMessage(this)"
+        replacement = r"\g<1>displayMessage()"
     else:
         pattern = r"(public enum ActrError:.*?)(?=#if compiler\(>=6\))"
         getter = (
@@ -52,6 +80,14 @@ def patch(source: str, language: str) -> str:
     if count != expected:
         raise ValueError(f"expected {expected} {language} message getters, found {count}")
     if language == "kotlin":
+        if "internal fun displayMessage" in patched:
+            if KOTLIN_MESSAGE_HELPER not in patched:
+                raise ValueError("Kotlin message fallback changed; update message coverage")
+        else:
+            header = "sealed class ActrException: kotlin.Exception() {"
+            if patched.count(header) != 1:
+                raise ValueError("Kotlin ActrException header template changed")
+            patched = patched.replace(header, header + KOTLIN_MESSAGE_HELPER, 1)
         # Retain the existing Kotlin field name: Throwable.cause is already a
         # Throwable?, so UniFFI's String-valued `cause` cannot compile as-is.
         # Include its converter accesses; the Rust field and wire layout stay intact.

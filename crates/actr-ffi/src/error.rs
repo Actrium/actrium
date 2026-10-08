@@ -363,14 +363,20 @@ mod tests {
             actr_error_message(ActrError::Config { msg: msg.into() }),
             format!("config: {msg}")
         );
-        assert_eq!(
-            actr_error_message(ActrError::ConnectionNotReady {
-                info: ConnectionNotReadyInfo {
-                    retry_after_ms: None
-                },
-            }),
-            "connection not ready: retry_after_ms=None"
-        );
+        for (retry_after_ms, expected) in [
+            (Some(42), "connection not ready: retry after 42ms"),
+            (None, "connection not ready: no retry hint"),
+        ] {
+            let info = ConnectionNotReadyInfo { retry_after_ms };
+            let proto: ProtoConnectionNotReadyInfo = info.clone().into();
+            assert_eq!(proto.retry_after_ms, retry_after_ms);
+            let back: ConnectionNotReadyInfo = proto.into();
+            assert_eq!(back.retry_after_ms, retry_after_ms);
+            assert_eq!(
+                actr_error_message(ActrError::ConnectionNotReady { info }),
+                expected
+            );
+        }
     }
 
     #[tokio::test]

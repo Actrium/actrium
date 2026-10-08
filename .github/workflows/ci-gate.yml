@@ -306,8 +306,8 @@ jobs:
         # binding with a library built from the same commit, where UniFFI aborts
         # inside uniffiCheckApiChecksums and the SDK fails to load. This job
         # already has the native toolchain and a warm cargo cache, so verifying
-        # the constants here is cheap. Changes under crates/actr-ffi/ are what
-        # can invalidate them, and those set rust_core.
+        # the constants here is cheap. FFI sources, the committed Kotlin binding,
+        # and the checksum checker all select rust_core.
         run: |
           cargo build -p libactr
           python3 scripts/actr/check-binding-checksums.py \

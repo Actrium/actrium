@@ -15,9 +15,9 @@ class ActrErrorMessageTest {
         val cases = listOf(
             ActrException.Unavailable(text) to "unavailable: $text",
             ActrException.ConnectionNotReady(ConnectionNotReadyInfo(42uL)) to
-                "connection not ready: retry_after_ms=Some(42)",
+                "connection not ready: retry after 42ms",
             ActrException.ConnectionNotReady(ConnectionNotReadyInfo(null)) to
-                "connection not ready: retry_after_ms=None",
+                "connection not ready: no retry hint",
             ActrException.TimedOut() to "timed out",
             ActrException.NotFound(text) to "not found: $text",
             ActrException.PermissionDenied(text) to "permission denied: $text",
@@ -42,6 +42,9 @@ class ActrErrorMessageTest {
                 assertEquals(expected, error.message)
                 assertEquals(actrErrorKind(original), actrErrorKind(error))
                 assertEquals(actrErrorIsRetryable(original), actrErrorIsRetryable(error))
+                if (original is ActrException.ConnectionNotReady && error is ActrException.ConnectionNotReady) {
+                    assertEquals(original.info.retryAfterMs, error.info.retryAfterMs)
+                }
             }
         }
     }

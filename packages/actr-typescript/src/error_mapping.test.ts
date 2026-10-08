@@ -156,7 +156,7 @@ describe('Error mapping — recovery metadata', () => {
       nativeError({
         kind: 'Transient',
         code: 'ConnectionNotReady',
-        message: 'connection not ready: retry_after_ms=Some(5880)',
+        message: 'connection not ready: retry after 5880ms',
         retry_after_ms: 5880,
       }),
     ) as ActrError;
@@ -165,6 +165,7 @@ describe('Error mapping — recovery metadata', () => {
     expect(err.isConnectionNotReady()).toBe(true);
     expect(err.isRetryable()).toBe(true);
     expect(err.retry_after_ms).toBe(5880);
+    expect(err.message).toBe('connection not ready: retry after 5880ms');
   });
 
   it('connection_not_ready_retry_hint_may_be_null', () => {
@@ -173,13 +174,14 @@ describe('Error mapping — recovery metadata', () => {
       nativeError({
         kind: 'Transient',
         code: 'ConnectionNotReady',
-        message: 'connection not ready: retry_after_ms=None',
+        message: 'connection not ready: no retry hint',
         retry_after_ms: null,
       }),
     ) as ActrError;
 
     expect(err.isConnectionNotReady()).toBe(true);
     expect(err.retry_after_ms).toBeNull();
+    expect(err.message).toBe('connection not ready: no retry hint');
   });
 
   it('dependency_not_found_carries_service_name', () => {
