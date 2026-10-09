@@ -2572,19 +2572,23 @@ public func FfiConverterTypeRuntimeObservers_lower(_ value: RuntimeObservers) ->
 
 
 /**
- * Actor identifier (realm + serial_number + type)
+ * Actor identifier (Realm name + Actor serial)
  */
 public struct ActrId: Equatable, Hashable {
-    public var realm: Realm
+    /**
+     * Realm name, `<realm_id>@<domain>`
+     */
+    public var realm: String
     public var serialNumber: UInt64
-    public var type: ActrType
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(realm: Realm, serialNumber: UInt64, type: ActrType) {
+    public init(
+        /**
+         * Realm name, `<realm_id>@<domain>`
+         */realm: String, serialNumber: UInt64) {
         self.realm = realm
         self.serialNumber = serialNumber
-        self.type = type
     }
 
     
@@ -2603,16 +2607,14 @@ public struct FfiConverterTypeActrId: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrId {
         return
             try ActrId(
-                realm: FfiConverterTypeRealm.read(from: &buf), 
-                serialNumber: FfiConverterUInt64.read(from: &buf), 
-                type: FfiConverterTypeActrType.read(from: &buf)
+                realm: FfiConverterString.read(from: &buf), 
+                serialNumber: FfiConverterUInt64.read(from: &buf)
         )
     }
 
     public static func write(_ value: ActrId, into buf: inout [UInt8]) {
-        FfiConverterTypeRealm.write(value.realm, into: &buf)
+        FfiConverterString.write(value.realm, into: &buf)
         FfiConverterUInt64.write(value.serialNumber, into: &buf)
-        FfiConverterTypeActrType.write(value.type, into: &buf)
     }
 }
 
@@ -3458,59 +3460,6 @@ public func FfiConverterTypePeerEventBridge_lift(_ buf: RustBuffer) throws -> Pe
 #endif
 public func FfiConverterTypePeerEventBridge_lower(_ value: PeerEventBridge) -> RustBuffer {
     return FfiConverterTypePeerEventBridge.lower(value)
-}
-
-
-/**
- * Security realm identifier
- */
-public struct Realm: Equatable, Hashable {
-    public var realmId: UInt32
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(realmId: UInt32) {
-        self.realmId = realmId
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension Realm: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeRealm: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Realm {
-        return
-            try Realm(
-                realmId: FfiConverterUInt32.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: Realm, into buf: inout [UInt8]) {
-        FfiConverterUInt32.write(value.realmId, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRealm_lift(_ buf: RustBuffer) throws -> Realm {
-    return try FfiConverterTypeRealm.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRealm_lower(_ value: Realm) -> RustBuffer {
-    return FfiConverterTypeRealm.lower(value)
 }
 
 

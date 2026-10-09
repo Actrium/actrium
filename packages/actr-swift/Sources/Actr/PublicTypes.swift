@@ -1,22 +1,6 @@
 import ActrBindings
 import Foundation
 
-public struct Realm: Equatable, Hashable, Sendable {
-    public var realmId: UInt32
-
-    public init(realmId: UInt32) {
-        self.realmId = realmId
-    }
-
-    init(bridge: ActrBindings.Realm) {
-        self.init(realmId: bridge.realmId)
-    }
-
-    var bridge: ActrBindings.Realm {
-        ActrBindings.Realm(realmId: realmId)
-    }
-}
-
 public struct ActrType: Equatable, Hashable, Sendable {
     public var publisher: String
     public var name: String
@@ -46,30 +30,21 @@ public struct ActrType: Equatable, Hashable, Sendable {
 }
 
 public struct ActrId: Equatable, Hashable, Sendable {
-    public var realm: Realm
+    /// Realm name, `<realm_id>@<domain>`.
+    public var realm: String
     public var serialNumber: UInt64
-    public var type: ActrType
 
-    public init(realm: Realm, serialNumber: UInt64, type: ActrType) {
+    public init(realm: String, serialNumber: UInt64) {
         self.realm = realm
         self.serialNumber = serialNumber
-        self.type = type
     }
 
     init(bridge: ActrBindings.ActrId) {
-        self.init(
-            realm: Realm(bridge: bridge.realm),
-            serialNumber: bridge.serialNumber,
-            type: ActrType(bridge: bridge.type)
-        )
+        self.init(realm: bridge.realm, serialNumber: bridge.serialNumber)
     }
 
     var bridge: ActrBindings.ActrId {
-        ActrBindings.ActrId(
-            realm: realm.bridge,
-            serialNumber: serialNumber,
-            type: type.bridge
-        )
+        ActrBindings.ActrId(realm: realm, serialNumber: serialNumber)
     }
 }
 
