@@ -5317,14 +5317,15 @@ public object FfiConverterTypeRuntimeObservers: FfiConverter<RuntimeObservers, L
 
 
 /**
- * Actor identifier (realm + serial_number + type)
+ * Actor identifier (Realm name + Actor serial)
  */
 data class ActrId (
-    var `realm`: Realm
+    /**
+     * Realm name, `<realm_id>@<domain>`
+     */
+    var `realm`: kotlin.String
     , 
     var `serialNumber`: kotlin.ULong
-    , 
-    var `type`: ActrType
     
 ){
     
@@ -5341,22 +5342,19 @@ data class ActrId (
 public object FfiConverterTypeActrId: FfiConverterRustBuffer<ActrId> {
     override fun read(buf: ByteBuffer): ActrId {
         return ActrId(
-            FfiConverterTypeRealm.read(buf),
+            FfiConverterString.read(buf),
             FfiConverterULong.read(buf),
-            FfiConverterTypeActrType.read(buf),
         )
     }
 
     override fun allocationSize(value: ActrId) = (
-            FfiConverterTypeRealm.allocationSize(value.`realm`) +
-            FfiConverterULong.allocationSize(value.`serialNumber`) +
-            FfiConverterTypeActrType.allocationSize(value.`type`)
+            FfiConverterString.allocationSize(value.`realm`) +
+            FfiConverterULong.allocationSize(value.`serialNumber`)
     )
 
     override fun write(value: ActrId, buf: ByteBuffer) {
-            FfiConverterTypeRealm.write(value.`realm`, buf)
+            FfiConverterString.write(value.`realm`, buf)
             FfiConverterULong.write(value.`serialNumber`, buf)
-            FfiConverterTypeActrType.write(value.`type`, buf)
     }
 }
 
@@ -5968,42 +5966,6 @@ public object FfiConverterTypePeerEventBridge: FfiConverterRustBuffer<PeerEventB
             FfiConverterTypeActrId.write(value.`peer`, buf)
             FfiConverterOptionalBoolean.write(value.`relayed`, buf)
             FfiConverterOptionalTypeWebRtcPeerStatusBridge.write(value.`status`, buf)
-    }
-}
-
-
-
-/**
- * Security realm identifier
- */
-data class Realm (
-    var `realmId`: kotlin.UInt
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeRealm: FfiConverterRustBuffer<Realm> {
-    override fun read(buf: ByteBuffer): Realm {
-        return Realm(
-            FfiConverterUInt.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: Realm) = (
-            FfiConverterUInt.allocationSize(value.`realmId`)
-    )
-
-    override fun write(value: Realm, buf: ByteBuffer) {
-            FfiConverterUInt.write(value.`realmId`, buf)
     }
 }
 

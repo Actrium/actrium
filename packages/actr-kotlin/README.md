@@ -282,7 +282,7 @@ val type = actrType("acme", "EchoService", "1.0.0")
 val type = actrType { publisher = "acme"; name = "EchoService"; version = "1.0.0" }
 
 // ActrId
-val id = actrId { realm = 2281844430u; serialNumber = 1uL; type = "acme/EchoService@1.0.0" }
+val id = actrId { realm = "k7m2q9xh@acme.com"; serialNumber = 0x2af01uL }
 
 // DataChunk
 val chunk = dataChunk {
