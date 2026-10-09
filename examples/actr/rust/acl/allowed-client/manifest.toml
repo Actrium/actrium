@@ -9,4 +9,4 @@ tags = ["dev", "example"]
 exports = []
 
 [dependencies]
-greeter.GreeterService = { actr_type = "acme:greeter.GreeterService:1.0.0" }
+greeter.GreeterService = { actr_type = "acme/greeter.GreeterService@1.0.0" }
