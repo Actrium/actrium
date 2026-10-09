@@ -190,7 +190,8 @@ async fn join(
 }
 
 /// `update_realm`: the owner updates or retires a Realm under this Realm
-/// Provider's domain, whose Realm Profile Loran signs.
+/// Provider's domain, whose Realm Profile Loran signs. The ownership is
+/// checked again where the signed Profile is stored.
 async fn update_realm(
     state: &IssuerState,
     signer: &Signer,
@@ -223,6 +224,7 @@ async fn update_realm(
             }
             ProfileChange {
                 retire: true,
+                owner: Some(signer.clone()),
                 ..Default::default()
             }
         }
@@ -242,6 +244,7 @@ async fn update_realm(
             package: request.package.clone(),
             display_name: request.display_name.clone(),
             retire: false,
+            owner: Some(signer.clone()),
         },
     };
     profiles
@@ -249,6 +252,7 @@ async fn update_realm(
         .await
         .map_err(|error| match error {
             ProfileError::Invalid(message) => MembershipError::new(Code::InvalidRequest, message),
+            ProfileError::Realm(RealmError::Membership(error)) => error,
             ProfileError::Realm(RealmError::Retired) => {
                 MembershipError::new(Code::RealmUnavailable, "the Realm is retired")
             }

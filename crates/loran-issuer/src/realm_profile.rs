@@ -24,6 +24,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use platform::net::FetchError;
 use platform::realm::domain::member_from_descriptor;
+use platform::realm::membership::Signer;
 use platform::realm::{
     IssuerKeyState, Realm, RealmDomain, RealmError, RealmIssuerKey, RealmProfileRecord, RealmStatus,
 };
@@ -141,6 +142,9 @@ pub struct ProfileChange {
     pub package: Option<RealmPackage>,
     pub display_name: Option<String>,
     pub retire: bool,
+    /// The owner who requested the change. The Profile is stored only if,
+    /// in the storing transaction, it still is the owner.
+    pub owner: Option<Signer>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -305,7 +309,9 @@ impl RealmProfiles {
             previous.check_successor(&profile)?;
         }
         let digest = record.as_ref().map(|record| record.digest.as_str());
-        let (realm, _, _) = RealmProfileRecord::store(&profile, &document, digest, None).await?;
+        let (realm, _, _) =
+            RealmProfileRecord::store(&profile, &document, digest, None, change.owner.as_ref())
+                .await?;
         Ok(realm)
     }
 
@@ -740,7 +746,7 @@ async fn store_fetched(
 ) -> Result<(), ProfileError> {
     let document = std::str::from_utf8(document)
         .map_err(|_| ProfileError::Invalid("Realm Profile is not UTF-8".to_string()))?;
-    RealmProfileRecord::store(profile, document, Some(previous_digest), None).await?;
+    RealmProfileRecord::store(profile, document, Some(previous_digest), None, None).await?;
     Ok(())
 }
 

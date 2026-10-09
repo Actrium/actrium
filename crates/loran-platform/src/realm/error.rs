@@ -36,6 +36,10 @@ pub enum RealmError {
 
     #[error("Parse error: {0}")]
     ParseError(String),
+
+    /// A membership check inside a Realm write failed.
+    #[error(transparent)]
+    Membership(#[from] super::membership::MembershipError),
 }
 
 impl From<sqlx::Error> for RealmError {

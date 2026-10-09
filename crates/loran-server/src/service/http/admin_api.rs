@@ -278,7 +278,7 @@ async fn create_realm(
     let profile = ProfileChange {
         package: body.package,
         display_name: body.display_name,
-        retire: false,
+        ..Default::default()
     };
     match state
         .service
