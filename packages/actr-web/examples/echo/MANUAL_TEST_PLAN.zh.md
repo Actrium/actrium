@@ -199,10 +199,10 @@
 > 两端通过同一 Actrix Signaling Server 发现彼此，经由 WebRTC DataChannel 通信。  
 >  
 > **前置条件**：  
-> - 确保 Web Client 与 Rust Server 使用**相同的 `realm`**（Realm 名）和**同一 signaling server URL**  
->   - 示例配置 [server-actr.toml](server-actr.toml) 与 [client-actr.toml](client-actr.toml) 默认都为 `realm = "web-echo@example.com"`  
+> - 确保 Web Client 与 Rust Server 使用**相同的 `realm`**（Realm 名）和**同一 signaling server URL**
+>   - 示例配置 [server-actr.toml](server-actr.toml) 与 [client-actr.toml](client-actr.toml) 默认都为 `realm = "web-echo@example.com"`
 > - Rust Server 配置了 `force_relay = true`，若使用本地 TURN server 需确保其运行  
-> - `actr_type` 已匹配：Server = `acme/EchoService@0.2.0`，Client = `acme/echo-client-app@0.1.0`  
+> - `actr_type` 已匹配：Server = `acme/EchoService@0.2.0`，Client = `acme/echo-client-app@0.1.0`
 > - ACL 双向已配置
 
 ### 14.0 环境准备
