@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use actr_framework::WebRtcUnavailableReason;
 use actr_hyper::lifecycle::{NetworkAvailability, NetworkTransportFlags};
 use actr_hyper::test_support::{
     ActrixTestServices, LinkDirection, MobileEventDriver, PacketRule, SignalingFaultRule,
@@ -671,7 +672,7 @@ async fn mp04_ab_signaling_partition_does_not_starve_ac_or_ad_recovery() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-async fn mp05_close_peer_during_recovery_cannot_revive_it_or_affect_other_links() {
+async fn mp05_close_peer_during_recovery_retires_old_generation_without_affecting_other_links() {
     let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
     let a = topology.peer_id(A);
@@ -699,6 +700,17 @@ async fn mp05_close_peer_during_recovery_cannot_revive_it_or_affect_other_links(
         .expect("A's public hook must expose A-B recovery before close_peer");
     assert_eq!(blocked_hook, blocked);
     assert!(topology.harness.peer(A).rtc.close_peer(&b).await);
+    let closed = topology
+        .harness
+        .peer(A)
+        .hooks
+        .wait_state(&b, WAIT, |state| {
+            state.revision > blocked.revision
+                && state.unavailable_reason == Some(WebRtcUnavailableReason::Closed)
+        })
+        .await
+        .expect("A's public hook must confirm retirement of the old A-B connection");
+    assert!(!closed.sendable);
     assert!(
         topology
             .harness
@@ -706,18 +718,43 @@ async fn mp05_close_peer_during_recovery_cannot_revive_it_or_affect_other_links(
             .heal_link((&a, initial[&(A, B)]), (&b, initial[&(B, A)]),)
     );
 
+    // close_peer retires the current connection, but a fresh remote role
+    // negotiation may already recreate its controller. Join that attempt or
+    // start one explicitly rather than requiring an intermediate peer count.
+    topology.harness.peer(A).rtc.connect(b.clone()).await;
+    for (from, to) in [(A, B), (B, A)] {
+        topology
+            .harness
+            .peer(from)
+            .rtc
+            .wait_state(&topology.peer_id(to), WAIT, |state| {
+                state.sendable && state.pc_generation > initial[&(from, to)]
+            })
+            .await
+            .expect("A-B reconnect must use a fresh generation at both endpoints");
+    }
+    topology.wait_link(B).await;
+    pair_rpc(&topology.harness, A, B, "mp05_ab_fresh").await;
+    pair_rpc(&topology.harness, A, C, "mp05_ac_healthy").await;
+    pair_rpc(&topology.harness, A, D, "mp05_ad_healthy").await;
+
     assert!(
         topology
             .harness
             .peer(A)
-            .rtc
-            .wait_peer_count(2, Duration::from_secs(10))
-            .await,
-        "closed A-B controller must stay removed after its stale callback"
+            .hooks
+            .state_changes_for(&b)
+            .iter()
+            .filter(|state| state.revision > closed.revision)
+            .all(|state| !state.sendable || state.pc_generation > initial[&(A, B)]),
+        "late callbacks must never make the retired A-B generation sendable again"
     );
-    pair_rpc(&topology.harness, A, C, "mp05_ac_healthy").await;
-    pair_rpc(&topology.harness, A, D, "mp05_ad_healthy").await;
-    assert_eq!(topology.harness.peer(A).rtc.peer_count().await, 2);
+    let restored = topology.generations().await;
+    for remote in [C, D] {
+        assert_eq!(restored[&(A, remote)], initial[&(A, remote)]);
+        assert_eq!(restored[&(remote, A)], initial[&(remote, A)]);
+    }
+    assert_eq!(topology.harness.peer(A).rtc.peer_count().await, 3);
     topology.shutdown().await;
 }
 
