@@ -292,7 +292,7 @@ val chunk = dataChunk {
 
 // Workload
 val wl = workload {
-    realm = 2281844430u; type = "acme:my-service"
+    type = "acme/MyService@1.0.0"
     onStart { ctx -> /* setup */ }
     onStop { ctx -> /* teardown */ }
 }
