@@ -258,7 +258,7 @@ Every call must go through:
 
 ## 6. Service
 
-### 6.1 The main façade
+### 6.1 The main facade
 
 The Service:
 

@@ -68,7 +68,7 @@ The instance's Service: exactly one per Realm, created together with the Realm:
 - holds the instance's configuration and access control;
 - its lifecycle is independent of Tab;
 - can run locally or remotely;
-- may orchestrate other Actors, but exposes a single primary façade to the Front.
+- may orchestrate other Actors, but exposes a single primary facade to the Front.
 
 Service is not a "program type", nor a load-balancing candidate that can be freely swapped.
 
@@ -298,7 +298,7 @@ Opening a Realm link `actr://<domain>/<realm_id>[…]`: obtain and verify the Re
 
 Discovery by Actor type is scoped to this Realm; v1 does no cross-Realm discovery.
 
-## 7. Service façade
+## 7. Service facade
 
 To keep the Front minimal, the Guest only gets:
 
