@@ -1175,7 +1175,7 @@ fn guest_rpc_payload_type(raw: i32) -> actr_protocol::PayloadType {
 /// `done` flips to `true` once the forwarder has closed the stream and
 /// unregistered it from the DataChunk registry, letting unregister/re-register
 /// flows wait for actual teardown instead of racing it.
-struct StreamForwarder {
+pub(crate) struct StreamForwarder {
     cancel: CancellationToken,
     done: tokio::sync::watch::Receiver<bool>,
 }
@@ -1185,8 +1185,8 @@ struct StreamForwarder {
 /// `RegisterStream` spawns one forwarder task per registration (bounded by
 /// the guest's registration count); `UnregisterStream` cancels it and waits
 /// for its teardown. Shared by every host-operation handler of one actor
-/// runner.
-type StreamForwarders =
+/// runner via the owning [`crate::context::RuntimeContext`].
+pub(crate) type StreamForwarders =
     std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<StreamForwarder>>>>;
 
 /// Cancel `forwarder` and wait until its task has closed the stream and
@@ -1383,7 +1383,55 @@ async fn host_operation_handler(
                         _ = cancel.cancelled() => break,
                         item = stream.next() => item,
                     };
-                    let Some(item) = item else { break };
+                    let Some(item) = item else {
+                        // Graceful end: the framework stream consumed the
+                        // peer's end-of-stream marker. Forward it so the
+                        // guest's stream completes the same way — in FIFO
+                        // order, behind every data chunk already delivered.
+                        if let Some(marker) = stream.end_marker().cloned() {
+                            if let Some(workload_dispatch) = forwarder_dispatch.upgrade() {
+                                let invocation = crate::workload::InvocationContext {
+                                    self_id: actr_framework::Context::self_id(&forwarder_ctx)
+                                        .clone(),
+                                    caller_id: Some(marker.sender.clone()),
+                                    request_id: format!(
+                                        "data-chunk:{}:{}",
+                                        marker.chunk.stream_id, marker.chunk.sequence
+                                    ),
+                                };
+                                let call_executor: crate::workload::HostAbiFn = {
+                                    let ctx = forwarder_ctx.clone();
+                                    let forwarders = forwarders.clone();
+                                    std::sync::Arc::new(move |pending| {
+                                        let ctx = ctx.clone();
+                                        let forwarders = forwarders.clone();
+                                        Box::pin(async move {
+                                            stream_callback_host_operation_handler(
+                                                ctx, forwarders, pending,
+                                            )
+                                            .await
+                                        })
+                                    })
+                                };
+                                if let Err(error) = workload_dispatch
+                                    .dispatch_data_chunk_until_cancelled(
+                                        marker.chunk,
+                                        marker.sender,
+                                        invocation,
+                                        &call_executor,
+                                        &cancel,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        stream_id = %stream_id,
+                                        "end-of-stream delivery to guest failed: {error:?}"
+                                    );
+                                }
+                            }
+                        }
+                        break;
+                    };
                     let event = match item {
                         Ok(event) => event,
                         Err(error) => {
@@ -1530,7 +1578,10 @@ pub(crate) fn lifecycle_host_abi(
     workload_dispatch: Arc<crate::executor::ActorHandle>,
 ) -> crate::workload::HostAbiFn {
     let workload_dispatch = Arc::downgrade(&workload_dispatch);
-    let stream_forwarders: StreamForwarders = Default::default();
+    // Shared across every RPC of this actor: register/unregister/re-register
+    // operations from different invocations must find the same forwarder
+    // table (see the `StreamForwarders` docs).
+    let stream_forwarders = ctx.stream_forwarders();
     std::sync::Arc::new(move |pending| {
         let ctx = ctx.clone();
         let workload_dispatch = workload_dispatch.clone();

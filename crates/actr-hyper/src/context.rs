@@ -44,6 +44,11 @@ pub struct RuntimeContext {
     outproc_gate: Option<Gate>, // Remote Actor calls - lazily initialized
     data_chunk_registry: Arc<DataChunkRegistry>, // DataChunk callback registry
     media_frame_registry: Arc<MediaFrameRegistry>, // MediaTrack callback registry
+    /// Guest stream forwarder tasks keyed by stream_id. Shared by every
+    /// host-operation handler built from this context, so a guest's
+    /// register/unregister/re-register calls find the same table across
+    /// invocations (one actor lifetime).
+    stream_forwarders: crate::lifecycle::node::StreamForwarders,
     signaling_client: Arc<dyn SignalingClient>,
     credential: AIdCredential,
     actr_lock: Option<Arc<LockFile>>, // packaged manifest.lock.toml for fingerprint lookups
@@ -182,6 +187,7 @@ impl RuntimeContext {
             outproc_gate,
             data_chunk_registry,
             media_frame_registry,
+            stream_forwarders: Default::default(),
             signaling_client,
             credential,
             actr_lock,
@@ -238,9 +244,15 @@ impl RuntimeContext {
         self.reply_claimed.clone()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn data_chunk_registry_for_test(&self) -> Arc<DataChunkRegistry> {
         self.data_chunk_registry.clone()
+    }
+
+    /// Guest stream forwarder table shared by every host-operation handler
+    /// built from this context (one actor lifetime).
+    pub(crate) fn stream_forwarders(&self) -> crate::lifecycle::node::StreamForwarders {
+        self.stream_forwarders.clone()
     }
 
     /// Read-only test handle to the `alias -> ActrType` map.

@@ -714,6 +714,81 @@ describe('@actrium/actr-workload', () => {
     ).resolves.toBeDefined();
   });
 
+  it('sink close sends the marker with any live token when its own ctx is retired', async () => {
+    const { host, runtime } = await loadRuntime();
+    const creatingCtx = testInvocationCtx(50n);
+    const sink = await runtime.dataChunkSink(
+      'host',
+      'stream-1',
+      runtime.PayloadType.StreamReliable,
+      creatingCtx,
+    );
+    await runtime.withInvocationCtx(creatingCtx, async () => {
+      await sink.send(testChunk({ sequence: 2n }));
+    });
+    // Token 50n settled with its invocation; the close happens inside a
+    // different live invocation (the wasm guest shape: no AsyncLocalStorage,
+    // so only the explicit-token liveness set is available).
+    await runtime.withInvocationCtx(testInvocationCtx(77n), async () => {
+      await sink.close();
+    });
+
+    const chunks = host.hostCalls.sendDataChunk.map((call) => call.chunk);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[1].endOfStream).toBe(true);
+    expect(chunks[1].sequence).toBe(3n);
+  });
+
+  it('rejects an end marker carrying a payload', async () => {
+    const { runtime } = await loadRuntime();
+    const sink = await runtime.dataChunkSink(
+      'host',
+      'stream-1',
+      runtime.PayloadType.StreamReliable,
+      testInvocationCtx(36n),
+    );
+
+    await expect(sink.send(testChunk({ endOfStream: true }))).rejects.toThrow(
+      'endOfStream marker must not carry a payload',
+    );
+    // The sink stays usable: the rejected marker was never accepted.
+    await sink.send(testChunk({ sequence: 1n }));
+  });
+
+  it('a failed close can be retried and never reports the marker as sent', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(37n);
+    let failOnce = true;
+    const original = host.sendDataChunk;
+    vi.spyOn(host, 'sendDataChunk').mockImplementation(
+      async (token, target, chunk, payloadType) => {
+        if (failOnce && chunk.endOfStream === true) {
+          failOnce = false;
+          throw new Error('simulated send failure');
+        }
+        return original(token, target, chunk, payloadType);
+      },
+    );
+
+    await runtime.withInvocationCtx(ctx, async () => {
+      const sink = await runtime.dataChunkSink(
+        'host',
+        'stream-1',
+        runtime.PayloadType.StreamReliable,
+        ctx,
+      );
+      await sink.send(testChunk({ sequence: 1n }));
+      await expect(sink.close()).rejects.toThrow('simulated send failure');
+      // Retry: the failed close did not confirm the marker.
+      await sink.close();
+    });
+
+    const markers = host.hostCalls.sendDataChunk.filter(
+      (call) => call.chunk.endOfStream === true,
+    );
+    expect(markers).toHaveLength(1);
+  });
+
   it('ActrContext exposes stream-first adapters', async () => {
     const { host, runtime } = await loadRuntime();
     const ctx = new runtime.ActrContext(testInvocationCtx(96n));

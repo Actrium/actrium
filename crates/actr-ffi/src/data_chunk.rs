@@ -6,7 +6,8 @@
 //! - Only one `next()` may be pending per stream handle; a concurrent call
 //!   returns [`ActrError::InvalidArgument`].
 //! - Stream `close()` is idempotent, never waits behind a pending `next()`,
-//!   and wakes it with `Ok(None)`.
+//!   wakes it with `Ok(None)`, and unregisters synchronously (no
+//!   duplicate-subscription window for an immediate re-subscribe).
 //! - Dropping a handle performs best-effort cancellation, but language
 //!   wrappers must close deterministically.
 //! - Concurrent sink `send()` calls are serialized in bridge-acceptance order.
@@ -47,14 +48,19 @@ pub struct DataChunkStreamBridge {
     inner: std::sync::Arc<tokio::sync::Mutex<Option<DataChunkStream>>>,
     closed: AtomicBool,
     wake: CancellationToken,
+    // Shared cancel hook captured at construction: lets `close` unregister
+    // synchronously instead of waiting on the teardown task.
+    cancel: Option<actr_framework::StreamCancelHandle>,
 }
 
 impl DataChunkStreamBridge {
     pub(crate) fn new(stream: DataChunkStream) -> Self {
+        let cancel = stream.cancel_handle();
         Self {
             inner: std::sync::Arc::new(tokio::sync::Mutex::new(Some(stream))),
             closed: AtomicBool::new(false),
             wake: CancellationToken::new(),
+            cancel,
         }
     }
 }
@@ -103,10 +109,17 @@ impl DataChunkStreamBridge {
     }
 
     /// Close the subscription: idempotent, never waits behind a pending
-    /// `next()`, and wakes any pending `next()` with `Ok(None)`.
+    /// `next()`, and wakes any pending `next()` with `Ok(None)`. The
+    /// registry unregister runs synchronously, so a re-subscription issued
+    /// right after this call cannot be rejected as a duplicate.
     pub async fn close(&self) -> ActrResult<()> {
         if self.closed.swap(true, Ordering::AcqRel) {
             return Ok(());
+        }
+        // Synchronous unregister first: the remaining teardown (async
+        // cleanup) is idempotent and runs through the normal close path.
+        if let Some(cancel) = &self.cancel {
+            cancel.cancel();
         }
         self.wake.cancel();
         // Never wait behind a pending next(): if it holds the lock, its

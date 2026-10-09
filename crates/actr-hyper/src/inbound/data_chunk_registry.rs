@@ -492,7 +492,7 @@ impl DataChunkRegistry {
 
     /// Invoke one callback inline so ownership and host-bridge behaviour can
     /// be asserted deterministically without observing a detached task.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) async fn invoke_for_test(
         &self,
         chunk: DataChunk,

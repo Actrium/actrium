@@ -23,7 +23,7 @@ use std::ffi::{c_char, c_void};
 use std::path::Path;
 
 use actr_framework::{Context, Dest};
-use actr_protocol::{ActrType, DataChunk, PayloadType};
+use actr_protocol::{ActrType, PayloadType};
 use bytes::Bytes;
 
 pub use crate::error::{
@@ -935,13 +935,12 @@ pub unsafe extern "C" fn actr_ref_discover(
 /// actr-cabi runtime worker threads, may re-enter actr-cabi, must not unwind,
 /// and every buffer it receives is valid only for the duration of the call —
 /// copy before returning. `chunk_flags` bit `0x01` indicates that
-/// `timestamp_ms` is set; bit `0x02` marks the synthesized graceful
-/// end-of-stream notification fired once when the peer closes its sink
-/// (empty payload, sequence one past the last delivered chunk; only after at
-/// least one delivered chunk, and never on abort/teardown). `sender_id` is
-/// the sending actor's `to_string_repr()` form. Metadata entries are
-/// forwarded as borrowed key / value pairs in the callback's `metadata_ptr`
-/// array.
+/// `timestamp_ms` is set; bit `0x02` marks the graceful end-of-stream
+/// notification fired once when the peer closes its sink (empty payload,
+/// carrying the marker's original sequence and sender; never fired on
+/// abort/teardown). `sender_id` is the sending actor's
+/// `to_string_repr()` form. Metadata entries are forwarded as borrowed key /
+/// value pairs in the callback's `metadata_ptr` array.
 ///
 /// # Safety
 ///
@@ -1138,37 +1137,25 @@ pub unsafe extern "C" fn actr_stream_listen(
                 callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
                 // Forward until unlistened, the stream ends, or the node
                 // shuts down (runtime teardown terminates the stream).
-                let mut last: Option<(u64, actr_protocol::ActrId)> = None;
                 loop {
                     tokio::select! {
                         biased;
                         _ = cancel.cancelled() => break,
                         item = stream.next() => match item {
                             Some(Ok(event)) => {
-                                last = Some((event.chunk.sequence, event.sender.clone()));
                                 host_sink::forward_chunk_to_host(&event.chunk, &event.sender);
                             }
                             Some(Err(_)) | None => break,
                         },
                     }
                 }
-                if stream.ended_by_marker() {
-                    // The framework stream consumed the peer's in-band
-                    // end-of-stream marker; re-materialize it for the C host,
-                    // which cannot observe `None` completion. A stream that
-                    // ends with zero delivered chunks fires no notification
-                    // (the sender is unknowable and nothing was delivered).
-                    if let Some((last_sequence, sender)) = last {
-                        let marker = DataChunk {
-                            stream_id: stream_id.clone(),
-                            sequence: last_sequence.saturating_add(1),
-                            payload: Bytes::new(),
-                            metadata: Vec::new(),
-                            timestamp_ms: None,
-                            end_of_stream: Some(true),
-                        };
-                        host_sink::forward_chunk_to_host(&marker, &sender);
-                    }
+                // The framework stream consumed the peer's in-band
+                // end-of-stream marker; re-materialize it for the C host,
+                // which cannot observe `None` completion. The original
+                // sender and sequence are preserved, so even a stream that
+                // produced zero data chunks gets its end notification.
+                if let Some(marker) = stream.end_marker() {
+                    host_sink::forward_chunk_to_host(&marker.chunk, &marker.sender);
                 }
                 stream.close().await;
                 // Remove only our own entry: a re-listen during close may

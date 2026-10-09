@@ -91,29 +91,49 @@ pub type StreamWaitFn = Box<dyn FnOnce() -> futures_util::future::LocalBoxFuture
 /// Teardown hooks carried by a [`DataChunkStream`].
 #[doc(hidden)]
 pub struct StreamCloser {
-    cancel: Option<StreamCancelFn>,
+    cancel: StreamCancelHandle,
     wait: Option<StreamWaitFn>,
+}
+
+/// Shared handle to a stream's synchronous cancellation hook. The hook runs
+/// at most once, no matter how many holders cancel through the handle; this
+/// lets FFI wrappers unregister without owning the stream (e.g. a close
+/// path that must not wait behind a pending read).
+#[derive(Clone)]
+pub struct StreamCancelHandle(std::sync::Arc<std::sync::Mutex<Option<StreamCancelFn>>>);
+
+impl StreamCancelHandle {
+    /// Run the cancellation hook once, if it has not run yet.
+    pub fn cancel(&self) {
+        let taken = self.0.lock().unwrap().take();
+        if let Some(cancel) = taken {
+            cancel();
+        }
+    }
 }
 
 impl StreamCloser {
     pub fn new(cancel: StreamCancelFn) -> Self {
         Self {
-            cancel: Some(cancel),
+            cancel: StreamCancelHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(cancel)))),
             wait: None,
         }
     }
 
     pub fn with_wait(cancel: StreamCancelFn, wait: StreamWaitFn) -> Self {
         Self {
-            cancel: Some(cancel),
+            cancel: StreamCancelHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(cancel)))),
             wait: Some(wait),
         }
     }
 
+    /// Handle to the shared synchronous cancellation hook.
+    pub fn cancel_handle(&self) -> StreamCancelHandle {
+        self.cancel.clone()
+    }
+
     fn cancel_sync(&mut self) {
-        if let Some(cancel) = self.cancel.take() {
-            cancel();
-        }
+        self.cancel.cancel();
     }
 
     async fn wait_async(&mut self) {
@@ -147,7 +167,7 @@ impl StreamCloser {
 pub struct DataChunkStream {
     rx: Option<mpsc::Receiver<ActorResult<DataChunkEvent>>>,
     closer: Option<StreamCloser>,
-    ended_by_marker: bool,
+    end_marker: Option<DataChunkEvent>,
 }
 
 impl DataChunkStream {
@@ -159,7 +179,7 @@ impl DataChunkStream {
         Self {
             rx: Some(rx),
             closer: Some(closer),
-            ended_by_marker: false,
+            end_marker: None,
         }
     }
 
@@ -176,10 +196,25 @@ impl DataChunkStream {
 
     /// Whether the stream ended because the peer's graceful `end_of_stream`
     /// marker was received, as opposed to cancellation or runtime teardown.
-    /// Boundaries that cannot observe `None` completion (e.g. callback-based
-    /// FFI sinks) use this to surface a definitive stream end.
     pub fn ended_by_marker(&self) -> bool {
-        self.ended_by_marker
+        self.end_marker.is_some()
+    }
+
+    /// The graceful end marker that terminated this stream, if any.
+    /// Boundaries that must forward the end signal (guest forwarders,
+    /// callback-based FFI sinks) use it to preserve the original sender and
+    /// sequence instead of synthesizing a placeholder.
+    pub fn end_marker(&self) -> Option<&DataChunkEvent> {
+        self.end_marker.as_ref()
+    }
+
+    /// Handle to the shared synchronous cancellation hook, for wrappers that
+    /// must trigger unregister without owning the stream (e.g. an FFI close
+    /// path that must not wait behind a pending read). `None` once the
+    /// closer has been consumed by `close`.
+    #[doc(hidden)]
+    pub fn cancel_handle(&self) -> Option<StreamCancelHandle> {
+        self.closer.as_ref().map(|closer| closer.cancel_handle())
     }
 
     /// Synchronous teardown shared by graceful end and drop: unregister
@@ -204,8 +239,9 @@ impl futures_core::Stream for DataChunkStream {
             Poll::Ready(Some(Ok(event))) if event.chunk.end_of_stream == Some(true) => {
                 // Graceful end: the marker travels in FIFO order behind every
                 // data chunk, so all prior items were already yielded. Unwrap
-                // the marker into stream termination instead of yielding it.
-                self.ended_by_marker = true;
+                // the marker into stream termination instead of yielding it,
+                // keeping it available for boundaries that forward the end.
+                self.end_marker = Some(event);
                 self.teardown_sync();
                 Poll::Ready(None)
             }
@@ -349,6 +385,13 @@ impl futures_sink::Sink<DataChunk> for DataChunkSink {
             )));
         }
         if item.end_of_stream == Some(true) {
+            // An end marker is a control signal: it must not carry a payload
+            // (the receiving stream never surfaces it as data).
+            if !item.payload.is_empty() {
+                return Err(ActrError::InvalidArgument(
+                    "end_of_stream marker must not carry a payload".into(),
+                ));
+            }
             // The application ended the stream explicitly; poll_close will
             // not send a duplicate marker.
             self.end_marker_sent = true;
@@ -402,6 +445,18 @@ mod tests {
             metadata: vec![],
             timestamp_ms: None,
             end_of_stream: None,
+        }
+    }
+
+    /// A protocol-conformant end marker: control signal, no payload.
+    fn test_marker(stream_id: &str, sequence: u64) -> DataChunk {
+        DataChunk {
+            stream_id: stream_id.to_string(),
+            sequence,
+            payload: Default::default(),
+            metadata: vec![],
+            timestamp_ms: None,
+            end_of_stream: Some(true),
         }
     }
 
@@ -490,9 +545,7 @@ mod tests {
         let (send_fn, sent) = ok_send_fn();
         let mut sink =
             DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
-        let mut marker = test_chunk("s", 5);
-        marker.end_of_stream = Some(true);
-        sink.send(marker).await.unwrap();
+        sink.send(test_marker("s", 5)).await.unwrap();
         // No data after an end marker.
         assert!(matches!(
             sink.start_send_unpin(test_chunk("s", 6)),
@@ -503,6 +556,22 @@ mod tests {
         let sent = sent.lock().unwrap();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].sequence, 5);
+    }
+
+    #[tokio::test]
+    async fn sink_rejects_payload_carrying_marker() {
+        let (send_fn, _) = ok_send_fn();
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        let mut marker = test_marker("s", 1);
+        marker.payload = vec![1, 2, 3].into();
+        assert!(matches!(
+            sink.start_send_unpin(marker),
+            Err(ActrError::InvalidArgument(_))
+        ));
+        // The sink stays usable: the rejected marker was never accepted.
+        sink.send(test_chunk("s", 1)).await.unwrap();
+        sink.close().await.unwrap();
     }
 
     #[tokio::test]
@@ -575,10 +644,8 @@ mod tests {
         }))
         .await
         .unwrap();
-        let mut marker = test_chunk("s", 3);
-        marker.end_of_stream = Some(true);
         tx.send(Ok(DataChunkEvent {
-            chunk: marker,
+            chunk: test_marker("s", 3),
             sender: sender.clone(),
         }))
         .await

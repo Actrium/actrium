@@ -153,7 +153,8 @@ pub use data_chunk::{
 // Backend construction hooks (runtime implementations, not user code).
 #[doc(hidden)]
 pub use data_chunk::{
-    SendDataChunkFn, StreamCancelFn, StreamCloser, StreamWaitFn, validate_stream_options,
+    SendDataChunkFn, StreamCancelFn, StreamCancelHandle, StreamCloser, StreamWaitFn,
+    validate_stream_options,
 };
 pub use dest::Dest;
 pub use dispatcher::MessageDispatcher;

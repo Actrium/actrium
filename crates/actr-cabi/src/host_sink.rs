@@ -51,9 +51,9 @@ pub struct StreamMetadataEntry {
 
 /// Stream-chunk sink signature. `chunk_flags` bit 0 (`0x01`) indicates that
 /// `timestamp_ms` is set; bit 1 (`0x02`) indicates the graceful end-of-stream
-/// marker synthesized when the peer's sink closes — payload is empty and
-/// `sequence` is one past the last delivered chunk (0 when none); other bits
-/// are reserved and must be ignored.
+/// marker forwarded when the peer's sink closes — payload is empty and
+/// `sequence`/`sender` are the marker's own; other bits are reserved and
+/// must be ignored.
 /// All pointers are valid only for the duration of the callback.
 pub type StreamSinkCallback = unsafe extern "C" fn(
     stream_id_ptr: *const u8,
@@ -253,10 +253,10 @@ pub fn set_reverse_sink(
 /// annotated the chunk with `timestamp_ms`.
 pub const ACTR_CHUNK_FLAG_HAS_TIMESTAMP: u8 = 0x01;
 
-/// `ACTR_CHUNK_FLAG_END_OF_STREAM`: `chunk_flags` bit set on the synthesized
-/// graceful-end notification fired when the peer's sink closed the stream.
-/// Never combined with a payload; a chunk carrying this bit is a control
-/// marker, not data.
+/// `ACTR_CHUNK_FLAG_END_OF_STREAM`: `chunk_flags` bit set on the graceful-end
+/// notification fired when the peer's sink closed the stream (the peer's
+/// in-band marker, forwarded once). Never combined with a payload; a chunk
+/// carrying this bit is a control marker, not data.
 pub const ACTR_CHUNK_FLAG_END_OF_STREAM: u8 = 0x02;
 
 /// Forward one inbound chunk to the registered host stream sink.

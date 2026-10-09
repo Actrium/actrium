@@ -880,6 +880,19 @@ pub async fn instantiate_wasm_workload(
     })
 }
 
+/// Feed a chunk through the context's DataChunk registry as if it arrived
+/// from the wire. Integration-test seam for driving stream forwarders
+/// without a live transport.
+pub async fn invoke_registry_chunk(
+    ctx: &crate::context::RuntimeContext,
+    chunk: actr_protocol::DataChunk,
+    sender: actr_protocol::ActrId,
+) -> Option<actr_protocol::ActorResult<()>> {
+    ctx.data_chunk_registry_for_test()
+        .invoke_for_test(chunk, sender)
+        .await
+}
+
 /// Test-owned permit that occupies one process-wide WASM instantiation slot.
 /// Used to drive a live poisoned runner through the production quota-denied
 /// rebuild path without adding a polling hook to the runner itself.
@@ -991,7 +1004,7 @@ pub fn instantiate_dynclib_workload(
 /// funneled through the command channel.
 #[cfg(any(feature = "wasm-engine", feature = "dynclib-engine"))]
 pub struct TestWorkloadRunner {
-    handle: crate::executor::ActorHandle,
+    handle: std::sync::Arc<crate::executor::ActorHandle>,
 }
 
 #[cfg(any(feature = "wasm-engine", feature = "dynclib-engine"))]
@@ -1004,8 +1017,21 @@ impl TestWorkloadRunner {
     #[cfg(feature = "wasm-engine")]
     pub(crate) fn spawn(workload: crate::workload::Workload) -> Self {
         Self {
-            handle: crate::executor::spawn_runner(workload),
+            handle: std::sync::Arc::new(crate::executor::spawn_runner(workload)),
         }
+    }
+
+    /// Build the production per-invocation host ABI against this runner.
+    /// The returned ABI shares the guest stream-forwarder table owned by
+    /// `ctx`, so register/unregister calls across invocations see the same
+    /// forwarders (the production [`crate::lifecycle::node::lifecycle_host_abi`]
+    /// wiring).
+    #[cfg(feature = "wasm-engine")]
+    pub fn lifecycle_host_abi(
+        &self,
+        ctx: crate::context::RuntimeContext,
+    ) -> crate::workload::HostAbiFn {
+        crate::lifecycle::node::lifecycle_host_abi(ctx, self.handle.clone())
     }
 
     fn scratch_ctx() -> crate::context::RuntimeContext {
@@ -1084,11 +1110,11 @@ impl TestWasmWorkload {
         dispatch_timeout: Option<std::time::Duration>,
     ) -> TestWorkloadRunner {
         TestWorkloadRunner {
-            handle: crate::executor::spawn_runner_with_mode(
+            handle: std::sync::Arc::new(crate::executor::spawn_runner_with_mode(
                 crate::workload::Workload::Wasm(self.inner),
                 crate::executor::RunnerMode::Interleaved,
                 dispatch_timeout,
-            ),
+            )),
         }
     }
 

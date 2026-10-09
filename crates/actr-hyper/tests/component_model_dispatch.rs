@@ -27,7 +27,9 @@ use std::time::{Duration, Instant};
 
 use actr_framework::{Deliver, ReplyOutcome};
 use actr_hyper::config::WasmRuntimeLimits;
-use actr_hyper::test_support::instantiate_wasm_workload;
+use actr_hyper::test_support::{
+    instantiate_wasm_workload, invoke_registry_chunk, runtime_context_with_host_transport,
+};
 use actr_hyper::wasm::{WasmError, WasmHost};
 use actr_hyper::workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationContext};
 use actr_protocol::{ActrId, DataChunk, RpcEnvelope, prost::Message as ProstMessage};
@@ -136,6 +138,22 @@ fn stream_registration_bridge() -> HostAbiFn {
             match operation {
                 HostOperation::RegisterStream(request)
                     if request.stream_id == "test/captured-context-stream" =>
+                {
+                    HostOperationResult::Done
+                }
+                _ => HostOperationResult::AbiError(-1),
+            }
+        })
+    })
+}
+
+/// Registration bridge for the eof-consumer probe stream.
+fn eof_registration_bridge() -> HostAbiFn {
+    Arc::new(|operation| {
+        Box::pin(async move {
+            match operation {
+                HostOperation::RegisterStream(request)
+                    if request.stream_id == "test/eof-stream" =>
                 {
                     HostOperationResult::Done
                 }
@@ -307,6 +325,99 @@ async fn component_model_typed_call_forwards_timeout() {
     );
 }
 
+/// Differential probe for the eof-consumer route: one plain data chunk must
+/// drive the consumer exactly like the register-stream-context route does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn eof_consumer_starts_on_plain_chunk() {
+    let host = fixture_host();
+    let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
+    workload
+        .handle(
+            &make_envelope("test/eof-consumer", Vec::new()),
+            test_ctx(),
+            &eof_registration_bridge(),
+        )
+        .await
+        .expect("register eof subscription");
+    workload
+        .handle_data_chunk(
+            DataChunk {
+                stream_id: "test/eof-stream".to_string(),
+                sequence: 1,
+                ..Default::default()
+            },
+            test_actr_id(),
+            test_ctx(),
+            &unreachable_bridge(),
+        )
+        .await
+        .expect("chunk delivery");
+
+    let stats = workload
+        .handle(
+            &make_envelope("test/eof-stats", Vec::new()),
+            test_ctx(),
+            &unreachable_bridge(),
+        )
+        .await
+        .expect("eof-stats dispatch");
+    let starts = u64::from_le_bytes(stats[0..8].try_into().unwrap());
+    let chunks = u64::from_le_bytes(stats[8..16].try_into().unwrap());
+    assert_eq!((starts, chunks), (1, 1), "consumer must start and count");
+}
+
+/// Guest-side marker semantics: the consumer loop must drain both data
+/// chunks and then terminate on the in-band end-of-stream marker.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guest_stream_ends_on_end_of_stream_marker() {
+    let host = fixture_host();
+    let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
+    workload
+        .handle(
+            &make_envelope("test/eof-consumer", Vec::new()),
+            test_ctx(),
+            &eof_registration_bridge(),
+        )
+        .await
+        .expect("register eof subscription");
+
+    // Two data chunks, then the graceful end marker.
+    for (sequence, end) in [(1u64, false), (2, false), (3, true)] {
+        workload
+            .handle_data_chunk(
+                DataChunk {
+                    stream_id: "test/eof-stream".to_string(),
+                    sequence,
+                    end_of_stream: end.then_some(true),
+                    ..Default::default()
+                },
+                test_actr_id(),
+                test_ctx(),
+                &unreachable_bridge(),
+            )
+            .await
+            .expect("chunk delivery");
+    }
+
+    // The consumer counted both chunks and observed the stream end.
+    let stats = workload
+        .handle(
+            &make_envelope("test/eof-stats", Vec::new()),
+            test_ctx(),
+            &unreachable_bridge(),
+        )
+        .await
+        .expect("eof-stats dispatch");
+    let starts = u64::from_le_bytes(stats[0..8].try_into().unwrap());
+    let chunks = u64::from_le_bytes(stats[8..16].try_into().unwrap());
+    let ends = u64::from_le_bytes(stats[16..24].try_into().unwrap());
+    assert_eq!(
+        (starts, chunks, ends),
+        (1, 2, 1),
+        "consumer must start, see both chunks, then end on the marker"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serial_stream_consumer_rebinds_captured_context_token() {
     let host = fixture_host();
@@ -378,6 +489,79 @@ async fn resident_stream_consumer_drains_in_later_invocation() {
         "exactly one queued chunk must be drained"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    runner.shutdown().await;
+}
+
+/// P1 regression: the production stream forwarder must forward the peer's
+/// end-of-stream marker into the guest — the guest's stream terminates
+/// (FIFO, after every data chunk) instead of hanging on the next read.
+///
+/// Drives the full production wiring: the guest registers through the real
+/// `lifecycle_host_abi` (which spawns the forwarder), chunks arrive at the
+/// host registry as if from the wire, and the forwarder delivers them into
+/// the guest's `on-data-chunk` export.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn end_of_stream_marker_reaches_guest_via_forwarder() {
+    let host = fixture_host();
+    let wl = instantiate_wasm_workload(host).await.expect("instantiate");
+    let runner = wl.into_workload_runner();
+    let ctx = runtime_context_with_host_transport(
+        test_actr_id(),
+        Arc::new(actr_hyper::transport::HostTransport::new()),
+    );
+    // The production ABI for guest host imports: RegisterStream spawns the
+    // forwarder on the runner, with the forwarder table shared via `ctx`.
+    let abi = runner.lifecycle_host_abi(ctx.clone());
+
+    runner
+        .dispatch(
+            &make_envelope("test/eof-consumer", Vec::new()),
+            test_ctx(),
+            &abi,
+        )
+        .await
+        .expect("eof-consumer dispatch");
+
+    // Feed the host-side subscription as the wire would: two data chunks,
+    // then the graceful end marker.
+    for (sequence, end) in [(1u64, false), (2, false), (3, true)] {
+        let chunk = DataChunk {
+            stream_id: "test/eof-stream".to_string(),
+            sequence,
+            end_of_stream: end.then_some(true),
+            ..Default::default()
+        };
+        invoke_registry_chunk(&ctx, chunk, test_actr_id())
+            .await
+            .expect("subscription must be registered")
+            .expect("chunk must be accepted");
+    }
+
+    // The forwarder delivers asynchronously; poll the guest's probe counters
+    // through follow-up dispatches until the consumer's loop has terminated.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let (chunks_seen, ends_seen) = loop {
+        let stats = runner
+            .dispatch(
+                &make_envelope("test/eof-stats", Vec::new()),
+                test_ctx(),
+                &abi,
+            )
+            .await
+            .expect("eof-stats dispatch");
+        let chunks = u64::from_le_bytes(stats[8..16].try_into().unwrap());
+        let ends = u64::from_le_bytes(stats[16..24].try_into().unwrap());
+        if ends >= 1 {
+            break (chunks, ends);
+        }
+        assert!(
+            Instant::now() < deadline,
+            "guest stream did not end after the end-of-stream marker"
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    };
+    assert_eq!(chunks_seen, 2, "both data chunks must be delivered first");
+    assert_eq!(ends_seen, 1, "the marker must terminate the guest stream");
     runner.shutdown().await;
 }
 

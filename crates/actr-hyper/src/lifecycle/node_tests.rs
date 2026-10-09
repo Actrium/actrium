@@ -675,6 +675,48 @@ async fn data_chunks_stream_ends_on_inband_end_marker() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forwarder_table_is_shared_across_lifecycle_abi_instances() {
+    let (ctx, wl) = harness().await;
+
+    // Production builds the host ABI per RPC via lifecycle_host_abi; two
+    // separate ABI instances (two RPCs) must share the context-owned
+    // forwarder table.
+    let first_rpc_abi = lifecycle_host_abi(ctx.clone(), wl.clone());
+    let second_rpc_abi = lifecycle_host_abi(ctx.clone(), wl.clone());
+
+    let register = first_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
+        stream_id: "shared-stream".into(),
+    }))
+    .await;
+    assert!(
+        matches!(register, HostOperationResult::Done),
+        "register must succeed: {register:?}"
+    );
+
+    // The unregister arrives on a later RPC (a fresh ABI instance): it must
+    // find and retire the forwarder, not silently no-op on an empty table.
+    let unregister = second_rpc_abi(HostOperation::UnregisterStream(HostUnregisterStreamV1 {
+        stream_id: "shared-stream".into(),
+    }))
+    .await;
+    assert!(
+        matches!(unregister, HostOperationResult::Done),
+        "unregister must succeed: {unregister:?}"
+    );
+
+    // An immediate re-registration must not be rejected as a duplicate: the
+    // retired forwarder already unregistered the host-side subscription.
+    let reregister = second_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
+        stream_id: "shared-stream".into(),
+    }))
+    .await;
+    assert!(
+        matches!(reregister, HostOperationResult::Done),
+        "re-register after cross-RPC unregister must succeed: {reregister:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn node_teardown_releases_data_chunk_registry_without_cycle() {
     let (ctx, wl) = harness().await;
     let registry = ctx.data_chunk_registry_for_test();

@@ -40,6 +40,11 @@ thread_local! {
     /// driven by explicit dispatches rather than a detached task).
     static PARKED_STREAM: std::cell::RefCell<Option<actr_framework::DataChunkStream>> =
         const { std::cell::RefCell::new(None) };
+
+    /// Probe counters for `test/eof-consumer`: (consumer starts, chunks
+    /// seen, stream terminations observed by the consumer loop).
+    static EOF_PROBE: std::cell::Cell<(u64, u64, u64)> =
+        const { std::cell::Cell::new((0, 0, 0)) };
 }
 
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
@@ -326,6 +331,49 @@ impl MessageDispatcher for DoubleDispatcher {
                 #[cfg(not(target_arch = "wasm32"))]
                 tokio::spawn(consumer);
                 Ok(Bytes::new())
+            }
+            "test/eof-consumer" => {
+                // Stream-end probe: consume until the stream terminates,
+                // counting chunks and the termination. The host feeds this
+                // subscription via the production stream forwarder; a
+                // graceful end-of-stream marker must terminate the loop
+                // (FIFO, after every data chunk) — without marker forwarding
+                // the consumer hangs forever and the count never reaches 1.
+                let mut incoming = ctx
+                    .data_chunks("test/eof-stream".to_string(), Default::default())
+                    .await?;
+                let consumer = async move {
+                    use futures_util::StreamExt;
+                    EOF_PROBE.with(|probe| {
+                        let (starts, chunks, ends) = probe.get();
+                        probe.set((starts + 1, chunks, ends));
+                    });
+                    while let Some(event) = incoming.next().await {
+                        if event.is_err() {
+                            break;
+                        }
+                        EOF_PROBE.with(|probe| {
+                            let (starts, chunks, ends) = probe.get();
+                            probe.set((starts, chunks + 1, ends));
+                        });
+                    }
+                    EOF_PROBE.with(|probe| {
+                        let (starts, chunks, ends) = probe.get();
+                        probe.set((starts, chunks, ends + 1));
+                    });
+                };
+                #[cfg(target_arch = "wasm32")]
+                actr_framework::guest::wasm::spawn_local(consumer);
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::spawn(consumer);
+                Ok(Bytes::new())
+            }
+            "test/eof-stats" => {
+                let (starts, chunks, ends) = EOF_PROBE.with(|probe| probe.get());
+                let mut out = starts.to_le_bytes().to_vec();
+                out.extend_from_slice(&chunks.to_le_bytes());
+                out.extend_from_slice(&ends.to_le_bytes());
+                Ok(Bytes::from(out))
             }
             "test/park-stream-context" => {
                 // Resident-region variant: on wasm32-wasip2 guest code only
