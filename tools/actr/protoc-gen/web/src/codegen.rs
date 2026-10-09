@@ -346,6 +346,17 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
 // ActorRef generation
 // ═══════════════════════════════════════════════════════════════════
 
+/// Split `publisher/program@version` into `(publisher, program)`.
+fn split_actr_type(actr_type: &str) -> (&str, &str) {
+    match actr_type.split_once('/') {
+        Some((publisher, rest)) => (
+            publisher,
+            rest.split_once('@').map_or(rest, |(name, _)| name),
+        ),
+        None => ("", actr_type),
+    }
+}
+
 fn gen_actor_ref(service: &ServiceInfo, req: &WebCodegenRequest) -> Result<String, String> {
     let service_name = &service.name;
 
@@ -404,12 +415,7 @@ fn gen_actor_ref(service: &ServiceInfo, req: &WebCodegenRequest) -> Result<Strin
     // ActrType
     let actr_type = service.actr_type.as_deref().unwrap_or("");
     if !actr_type.is_empty() {
-        let parts: Vec<&str> = actr_type.splitn(2, ':').collect();
-        let (publisher, name) = if parts.len() == 2 {
-            (parts[0], parts[1])
-        } else {
-            ("", actr_type)
-        };
+        let (publisher, name) = split_actr_type(actr_type);
         out.push_str("/**\n * ActrType definition\n */\n");
         out.push_str(&format!("export const {service_name}ActrType = {{\n"));
         out.push_str(&format!("  publisher: '{publisher}',\n"));
@@ -1807,6 +1813,16 @@ mod tests {
     }
 
     #[test]
+    fn split_actr_type_parses_slash_at_form() {
+        assert_eq!(split_actr_type("acme/Echo@1.0.0"), ("acme", "Echo"));
+        assert_eq!(
+            split_actr_type("acme/greeter.GreeterService@1.0.0"),
+            ("acme", "greeter.GreeterService")
+        );
+        assert_eq!(split_actr_type("Echo"), ("", "Echo"));
+    }
+
+    #[test]
     fn actr_config_dependency_entry_uses_slash_at_actr_type_form() {
         let req = WebCodegenRequest {
             config_path: PathBuf::from("actr.toml"),
@@ -1822,7 +1838,7 @@ mod tests {
             license: String::new(),
             tags: vec![],
             signaling_url: "wss://signal.example.com".to_string(),
-            realm_id: 1,
+            realm: "demo.example.com".to_string(),
             visible_in_discovery: false,
             issuer_endpoint: String::new(),
             force_relay: false,
