@@ -17,7 +17,7 @@ use actr_protocol::{
     AIdCredential, ActrError, ActrId, DataChunk, Direction, PayloadType, RpcEnvelope,
 };
 use async_trait::async_trait;
-use tokio::sync::{Notify, mpsc, watch};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 
 use super::{
     TestSignalingServer, VNetPair, create_credential_state_for_test, dummy_credential,
@@ -35,7 +35,6 @@ use crate::wire::webrtc::rtc::address::{
     DesktopLocalAddressProvider, LocalAddressProvider, TestLocalAddressProvider,
 };
 use crate::wire::webrtc::rtc::factory::PeerConnectionFactory;
-use crate::wire::webrtc::rtc::fault::DirectedSignalingTransport;
 use crate::wire::webrtc::rtc::inbound::{InboundMessage, InboundRouter};
 use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
 use crate::wire::webrtc::rtc::recovery::RtcNetworkEvent;
@@ -999,15 +998,6 @@ impl DataChunkRecorder {
             .map(|observation| (observation.count, observation.latest_payload.clone()))
             .unwrap_or_default()
     }
-
-    fn total(&self) -> usize {
-        self.streams
-            .lock()
-            .expect("test DataChunk recorder lock poisoned")
-            .values()
-            .map(|observation| observation.count)
-            .sum()
-    }
 }
 
 /// Options for adding a peer to [`TestHarness`]. This keeps identity,
@@ -1068,12 +1058,7 @@ pub struct TestPeer {
     request_counts: Arc<StdMutex<HashMap<String, usize>>>,
     request_changed: Arc<Notify>,
     data_chunks: Arc<DataChunkRecorder>,
-    inbound_rx: tokio::sync::Mutex<
-        mpsc::Receiver<(
-            InboundMessage,
-            crate::wire::webrtc::rtc::inbound::InboundLease,
-        )>,
-    >,
+    inbound_rx: tokio::sync::Mutex<mpsc::Receiver<(InboundMessage, OwnedSemaphorePermit)>>,
     router_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     hook_shutdown: tokio_util::sync::CancellationToken,
     hook_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -1086,7 +1071,7 @@ impl TestPeer {
     /// inbound dispatch, and teardown. The context has its own data/media
     /// registries: receive-side callbacks registered through it are not wired
     /// to the fixture's inbound dispatcher. Observe inbound DataChunks through
-    /// `data_chunk_count` / `data_chunk_payload` instead. The fixture does not
+    /// `data_chunk_count` / `data_chunk_observation` instead. The fixture does not
     /// run an in-process host dispatcher, so this context is intended for Peer
     /// destinations; Host/Workload calls require a separately serviced
     /// `HostTransport`.
@@ -1156,16 +1141,6 @@ impl TestPeer {
 
     pub fn data_chunk_count(&self, stream_id: &str) -> usize {
         self.data_chunks.snapshot(stream_id).0
-    }
-
-    /// Total DataChunk payloads observed by the production inbound router.
-    pub fn data_chunk_total(&self) -> usize {
-        self.data_chunks.total()
-    }
-
-    /// Return the most recently received payload for a stream.
-    pub fn data_chunk_payload(&self, stream_id: &str) -> Option<bytes::Bytes> {
-        self.data_chunks.snapshot(stream_id).1
     }
 
     /// Return an atomic count/payload snapshot for one observed stream.
@@ -1259,9 +1234,9 @@ impl TestPeer {
 
     /// Receive the next non-RPC inbound payload recorded by the RTC router.
     ///
-    /// The raw payload queue is bounded and best-effort: unread payloads are
-    /// dropped when it is full so this test-only observation path cannot
-    /// backpressure inbound dispatch or prevent RPC processing.
+    /// The raw payload queue is best-effort, bounded to 512 messages and
+    /// 32 MiB independently of the production ingress budget. Unread payloads
+    /// are dropped at either limit so observation cannot prevent RPC processing.
     pub async fn receive_payload(&self) -> Option<(ActrId, PayloadType, bytes::Bytes)> {
         let (msg, _lease) = self.inbound_rx.lock().await.recv().await?;
         Some((msg.peer, msg.lane.to_payload_type(), msg.payload))
@@ -1447,25 +1422,6 @@ impl TestHarness {
         .await;
     }
 
-    /// Add a peer with the identity allocated by an external Actrix AIS.
-    /// Ordinary fixtures derive the historical `acme:node` identity from the
-    /// serial; remote integration Endpoints preserve the exact AIS identity.
-    pub async fn add_peer_with_identity_and_rtc_configuration_and_credential(
-        &mut self,
-        serial: u64,
-        id: ActrId,
-        rtc_configuration: webrtc::peer_connection::RTCConfiguration,
-        credential: AIdCredential,
-    ) {
-        self.add_peer_with_options(
-            TestPeerOptions::new(serial)
-                .with_identity(id)
-                .with_rtc_configuration(rtc_configuration)
-                .with_credential(credential),
-        )
-        .await;
-    }
-
     /// Add a peer whose production RTC sessions dispatch remote media into
     /// the supplied node-level registry. This is the T3 media fixture: it uses
     /// the same manager, controller, effect runner, track poll pump, and
@@ -1475,11 +1431,8 @@ impl TestHarness {
         serial: u64,
         media_registry: Arc<crate::inbound::MediaFrameRegistry>,
     ) {
-        let configuration = webrtc::peer_connection::RTCConfigurationBuilder::default().build();
         self.add_peer_with_options(
-            TestPeerOptions::new(serial)
-                .with_rtc_configuration(configuration)
-                .with_media_registry(media_registry),
+            TestPeerOptions::new(serial).with_media_registry(media_registry),
         )
         .await;
     }
@@ -1541,6 +1494,10 @@ impl TestHarness {
         .expect("failed to connect test signaling client");
         let signaling_client: Arc<dyn SignalingClient> = signaling;
         let shared_local_id = SharedLocalId::new(id.clone());
+        let faults = crate::wire::webrtc::test_runtime::TestFaultRegistries {
+            rtc: self.rtc_faults.clone(),
+            signaling: self.signaling_faults.clone(),
+        };
 
         let mut runtime = RtcRuntimeConfig::desktop_default();
         if let Some(vnet) = &self.vnet {
@@ -1556,7 +1513,7 @@ impl TestHarness {
             rtc_configuration,
         );
         let factory = if self.rtc_matrix_instrumentation {
-            factory.with_directed_faults(shared_local_id.clone(), self.rtc_faults.clone())
+            faults.wrap_factory(factory, shared_local_id.clone())
         } else {
             factory
         };
@@ -1564,21 +1521,12 @@ impl TestHarness {
 
         let (inbound_tx, mut dispatcher_rx) = mpsc::channel(512);
         let (raw_tx, raw_rx) = mpsc::channel(512);
-        // Keep the test ingress admission budget above the raw queue capacity
-        // so >512-message soak tests exercise the raw queue's overflow policy,
-        // while retaining the normal byte and per-message limits.
-        let inbound_config = crate::wire::webrtc::rtc::config::RtcBufferConfig {
-            max_inbound_dispatch_messages: 1024,
-            ..Default::default()
-        };
-        let router = Arc::new(InboundRouter::new_with_config(
-            Arc::new(move |message, lease| {
-                if inbound_tx.try_send((message, lease)).is_err() {
-                    tracing::warn!("test inbound dispatcher is full; dropping message");
-                }
-            }),
-            inbound_config,
-        ));
+        let raw_bytes = Arc::new(Semaphore::new(32 * 1024 * 1024));
+        let router = Arc::new(InboundRouter::new(Arc::new(move |message, lease| {
+            if inbound_tx.try_send((message, lease)).is_err() {
+                tracing::warn!("test inbound dispatcher is full; dropping message");
+            }
+        })));
         let (signaling_tx, signaling_rx) = mpsc::channel(128);
         let manager = RtcConnectionManager::with_inbound(factory, signaling_tx, router);
         let manager = if self.rtc_matrix_instrumentation {
@@ -1627,16 +1575,10 @@ impl TestHarness {
             credential_state,
         );
         let router_for_task = signaling_router.clone();
-        let test_faults = self
-            .rtc_matrix_instrumentation
-            .then(|| self.signaling_faults.clone());
+        let test_faults = self.rtc_matrix_instrumentation.then_some(faults);
         let router_task = tokio::spawn(async move {
             if let Some(faults) = test_faults {
-                let transport = DirectedSignalingTransport::new(
-                    Arc::new(ws_transport),
-                    shared_local_id,
-                    faults,
-                );
+                let transport = faults.wrap_signaling(ws_transport, shared_local_id);
                 router_for_task.run(transport, signaling_rx).await;
                 return;
             }
@@ -1674,7 +1616,20 @@ impl TestHarness {
                     {
                         data_chunks_for_dispatcher.record(chunk.stream_id, chunk.payload);
                     }
-                    if raw_tx.try_send((message, lease)).is_err() {
+                    // The passive recorder has finished dispatching. Raw
+                    // observation owns a separate byte permit, never the
+                    // production lease needed to admit later chunks and RPCs.
+                    drop(lease);
+                    let Some(raw_lease) = u32::try_from(message.payload.len())
+                        .ok()
+                        .and_then(|bytes| raw_bytes.clone().try_acquire_many_owned(bytes).ok())
+                    else {
+                        tracing::debug!(
+                            "test raw payload byte budget is full; dropping unread payload"
+                        );
+                        continue;
+                    };
+                    if raw_tx.try_send((message, raw_lease)).is_err() {
                         tracing::debug!(
                             "test raw payload queue is full or closed; dropping unread payload"
                         );

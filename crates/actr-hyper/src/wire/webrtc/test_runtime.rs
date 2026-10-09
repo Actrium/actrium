@@ -220,7 +220,31 @@ pub struct TestFaultRegistries {
     pub signaling: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
 }
 
+impl TestFaultRegistries {
+    pub(crate) fn wrap_factory(
+        &self,
+        factory: super::rtc::factory::PeerConnectionFactory,
+        local_id: super::rtc::signaling::SharedLocalId,
+    ) -> super::rtc::factory::PeerConnectionFactory {
+        factory.with_directed_faults(local_id, self.rtc.clone())
+    }
+
+    pub(crate) fn wrap_signaling<T>(
+        &self,
+        transport: T,
+        local_id: super::rtc::signaling::SharedLocalId,
+    ) -> super::rtc::fault::DirectedSignalingTransport<T> {
+        super::rtc::fault::DirectedSignalingTransport::new(
+            Arc::new(transport),
+            local_id,
+            self.signaling.clone(),
+        )
+    }
+}
+
 impl DirectedRtcFaultRegistry {
+    /// Resolve a live scope for fault installation. Retain an already acquired
+    /// handle to inspect metrics after teardown; drained scopes cannot be armed.
     pub fn handle(
         &self,
         local: &ActrId,
@@ -236,6 +260,7 @@ impl DirectedRtcFaultRegistry {
             .lock()
             .expect("RTC fault registry lock poisoned")
             .get(&key)
+            .filter(|state| state.active_leases.load(Ordering::Acquire) > 0)
             .cloned()
             .map(|state| DirectedRtcFaultHandle { key, state })
     }
@@ -928,6 +953,40 @@ mod directed_tests {
             0,
             "the fault lease ends after the old generation releases its final socket"
         );
+    }
+
+    #[test]
+    fn drained_scope_cannot_accept_faults_before_generation_key_is_reused() {
+        let registry = DirectedRtcFaultRegistry::default();
+        let (a, b) = (actor(1), actor(2));
+        let a1 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 1, vec![]);
+        let b1 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 1, vec![]);
+        let old = registry.handle(&a, &b, 1).unwrap();
+        drop((a1, b1));
+        assert_eq!(registry.scope_count(), 2, "retain post-teardown metrics");
+        assert!(registry.handle(&a, &b, 1).is_none());
+        assert!(!registry.set_link_rule(
+            (&a, 1),
+            (&b, 1),
+            LinkDirection::Both,
+            PacketRule::Blackhole
+        ));
+        assert_eq!(old.metrics(), DirectedRtcFaultMetrics::default());
+
+        let _a1 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 1, vec![]);
+        let _b1 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 1, vec![]);
+        assert_eq!(
+            registry.active_rule_count(),
+            0,
+            "new lifetime starts unfaulted"
+        );
+        assert!(registry.set_link_rule(
+            (&a, 1),
+            (&b, 1),
+            LinkDirection::Both,
+            PacketRule::Blackhole
+        ));
+        assert_eq!(registry.active_rule_count(), 2);
     }
 
     #[test]

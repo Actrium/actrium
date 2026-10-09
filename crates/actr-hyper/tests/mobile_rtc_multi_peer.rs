@@ -621,6 +621,7 @@ async fn mp03_one_node_event_soft_recovers_three_controllers_independently_withi
 async fn mp04_ab_signaling_partition_does_not_starve_ac_or_ad_recovery() {
     let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
+    let initial_ice = topology.ice_generations().await;
     let a = topology.peer_id(A);
     let b = topology.peer_id(B);
     topology.harness.signaling_faults.set_rule(
@@ -639,10 +640,27 @@ async fn mp04_ab_signaling_partition_does_not_starve_ac_or_ad_recovery() {
         .await
         .expect("the A-B signaling partition must hit a restart offer");
 
-    topology.wait_link(C).await;
-    topology.wait_link(D).await;
-    pair_rpc(&topology.harness, A, C, "mp04_ac_not_starved").await;
-    pair_rpc(&topology.harness, A, D, "mp04_ad_not_starved").await;
+    // A-B's dropped offer only proves that controller started its recovery.
+    // C/D may still expose pre-restart readiness until their own controllers
+    // process the foreground event. Wait for this recovery on both ends
+    // before checking sendability and issuing a single, unretried RPC.
+    tokio::time::timeout(WAIT, async {
+        for (remote, request_id) in [(C, "mp04_ac_not_starved"), (D, "mp04_ad_not_starved")] {
+            for (local, peer) in [(A, remote), (remote, A)] {
+                topology
+                    .harness
+                    .peer(local)
+                    .rtc
+                    .wait_ice_generation(&topology.peer_id(peer), initial_ice[&(local, peer)], WAIT)
+                    .await
+                    .unwrap_or_else(|| panic!("{local}-{peer} must start its own ICE recovery"));
+            }
+            topology.wait_link(remote).await;
+            pair_rpc(&topology.harness, A, remote, request_id).await;
+        }
+    })
+    .await
+    .expect("C/D must recover within one deadline while A-B signaling is partitioned");
     assert_eq!(
         topology
             .harness
@@ -699,6 +717,13 @@ async fn mp05_close_peer_during_recovery_retires_old_generation_without_affectin
         .await
         .expect("A's public hook must expose A-B recovery before close_peer");
     assert_eq!(blocked_hook, blocked);
+    let b_blocked = topology
+        .harness
+        .peer(B)
+        .rtc
+        .wait_state(&a, WAIT, |state| !state.sendable)
+        .await
+        .expect("B must observe loss of the old A-B connection");
     assert!(topology.harness.peer(A).rtc.close_peer(&b).await);
     let closed = topology
         .harness
@@ -711,12 +736,17 @@ async fn mp05_close_peer_during_recovery_retires_old_generation_without_affectin
         .await
         .expect("A's public hook must confirm retirement of the old A-B connection");
     assert!(!closed.sendable);
-    assert!(
-        topology
-            .harness
-            .rtc_faults
-            .heal_link((&a, initial[&(A, B)]), (&b, initial[&(B, A)]),)
-    );
+    // A's closed scope may already be drained; only still-live old socket
+    // faces need healing before legitimate fresh negotiation can continue.
+    for (local, remote) in [(A, B), (B, A)] {
+        if let Some(handle) = topology.harness.rtc_faults.handle(
+            &topology.peer_id(local),
+            &topology.peer_id(remote),
+            initial[&(local, remote)],
+        ) {
+            handle.heal();
+        }
+    }
 
     // close_peer retires the current connection, but a fresh remote role
     // negotiation may already recreate its controller. Join that attempt or
@@ -748,6 +778,17 @@ async fn mp05_close_peer_during_recovery_retires_old_generation_without_affectin
             .filter(|state| state.revision > closed.revision)
             .all(|state| !state.sendable || state.pc_generation > initial[&(A, B)]),
         "late callbacks must never make the retired A-B generation sendable again"
+    );
+    assert!(
+        topology
+            .harness
+            .peer(B)
+            .hooks
+            .state_changes_for(&a)
+            .iter()
+            .filter(|state| state.revision > b_blocked.revision)
+            .all(|state| !state.sendable || state.pc_generation > initial[&(B, A)]),
+        "B's retired generation must never become sendable after recovery begins"
     );
     let restored = topology.generations().await;
     for remote in [C, D] {

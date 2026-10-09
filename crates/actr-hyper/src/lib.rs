@@ -1269,51 +1269,62 @@ impl Node<Attached> {
         self,
         register_ok: actr_protocol::register_response::RegisterOk,
     ) -> Node<Registered> {
-        self.try_with_preregistered_credential(register_ok)
-            .expect("failed to derive package registration context")
-    }
-
-    /// Fallible variant of `with_preregistered_credential` for test harnesses
-    /// that need to surface package service-spec derivation errors.
-    #[cfg(feature = "test-utils")]
-    pub fn try_with_preregistered_credential(
-        self,
-        register_ok: actr_protocol::register_response::RegisterOk,
-    ) -> HyperResult<Node<Registered>> {
         self.try_with_preregistered_credential_and_resign(register_ok, None)
+            .expect("failed to derive package registration context")
     }
 
     /// Fallible pre-registration path for package credentials that require a
     /// fresh manufacturer proof on hard rebind.
     #[cfg(feature = "test-utils")]
     pub fn try_with_preregistered_credential_and_resign(
-        mut self,
+        self,
         register_ok: actr_protocol::register_response::RegisterOk,
         resign: Option<Arc<dyn ManufacturerAuthProvider>>,
     ) -> HyperResult<Node<Registered>> {
+        let service_spec = self.derived_service_spec()?;
+        Ok(self.finish_registration(register_ok, service_spec, None, resign))
+    }
+
+    fn derived_service_spec(&self) -> HyperResult<Option<ServiceSpec>> {
+        let attachment = self
+            .attachment
+            .as_ref()
+            .expect("Node<Attached> without attachment");
+        match attachment.verified.as_ref() {
+            Some(verified) => crate::service_spec::calculate_service_spec_from_package(
+                &attachment.package_bytes,
+                &verified.manifest,
+            ),
+            None => Ok(None),
+        }
+    }
+
+    fn finish_registration(
+        mut self,
+        register_ok: actr_protocol::register_response::RegisterOk,
+        service_spec: Option<ServiceSpec>,
+        manufacturer_auth: Option<&ManufacturerRegistrationAuth>,
+        resign: Option<Arc<dyn ManufacturerAuthProvider>>,
+    ) -> Node<Registered> {
         let attachment = self
             .attachment
             .as_mut()
             .expect("Node<Attached> without attachment");
         if let Some(verified) = attachment.verified.as_ref() {
-            let service_spec = crate::service_spec::calculate_service_spec_from_package(
-                &attachment.package_bytes,
-                &verified.manifest,
-            )?;
-            let registration_context = package_registration_context(
+            let context = package_registration_context(
                 verified,
                 attachment.node.config.realm.realm_id,
                 service_spec,
                 attachment.node.config.acl.clone(),
-                None,
+                manufacturer_auth,
                 resign,
             );
             attachment
                 .node
-                .set_preregistered_registration_context(registration_context);
+                .set_preregistered_registration_context(context);
         }
         attachment.node.set_preregistered_credential(register_ok);
-        Ok(Node {
+        Node {
             hyper: self.hyper,
             attachment: self.attachment,
             pending_runtime_config: None,
@@ -1322,7 +1333,7 @@ impl Node<Attached> {
             #[cfg(feature = "test-utils")]
             pending_test_faults: None,
             _state: std::marker::PhantomData,
-        })
+        }
     }
 
     /// Register with AIS and optionally attach manufacturer authorization for
@@ -1337,18 +1348,7 @@ impl Node<Attached> {
         ais_endpoint: &str,
         resign: Option<Arc<dyn ManufacturerAuthProvider>>,
     ) -> HyperResult<Node<Registered>> {
-        let attachment = self
-            .attachment
-            .as_ref()
-            .expect("Node<Attached> without attachment");
-        let service_spec = if let Some(verified) = attachment.verified.as_ref() {
-            crate::service_spec::calculate_service_spec_from_package(
-                &attachment.package_bytes,
-                &verified.manifest,
-            )?
-        } else {
-            None
-        };
+        let service_spec = self.derived_service_spec()?;
         self.register_with_inner(ais_endpoint, service_spec, resign)
             .await
     }
@@ -1405,17 +1405,6 @@ impl Node<Attached> {
             ),
             _ => None,
         };
-        let registration_context = attachment.verified.as_ref().map(|verified| {
-            package_registration_context(
-                verified,
-                realm_id,
-                service_spec.clone(),
-                acl.clone(),
-                manufacturer_auth.as_ref(),
-                resign.clone(),
-            )
-        });
-
         let register_ok = if let Some(verified) = attachment.verified.as_ref() {
             let verified = verified.clone();
             bootstrap_credential_inner(
@@ -1424,33 +1413,28 @@ impl Node<Attached> {
                 CredentialBootstrapRequest {
                     ais_endpoint,
                     realm_id,
-                    service_spec,
+                    service_spec: service_spec.clone(),
                     acl,
                     realm_secret: realm_secret.as_deref(),
-                    manufacturer_auth,
+                    manufacturer_auth: manufacturer_auth.clone(),
                 },
             )
             .await?
         } else {
-            bootstrap_linked_credential_inner(&attachment.node.config, ais_endpoint, service_spec)
-                .await?
+            bootstrap_linked_credential_inner(
+                &attachment.node.config,
+                ais_endpoint,
+                service_spec.clone(),
+            )
+            .await?
         };
 
-        attachment.node.set_preregistered_credential(register_ok);
-        if let Some(ctx) = registration_context {
-            attachment.node.set_preregistered_registration_context(ctx);
-        }
-
-        Ok(Node {
-            hyper: self.hyper,
-            attachment: self.attachment,
-            pending_runtime_config: None,
-            pending_linked_manifest: None,
-            pending_conflict_keys: None,
-            #[cfg(feature = "test-utils")]
-            pending_test_faults: None,
-            _state: std::marker::PhantomData,
-        })
+        Ok(self.finish_registration(
+            register_ok,
+            service_spec,
+            manufacturer_auth.as_ref(),
+            resign,
+        ))
     }
 
     /// Create a network event handle for platform callbacks. Must be called

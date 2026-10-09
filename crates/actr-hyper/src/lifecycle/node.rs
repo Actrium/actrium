@@ -3123,9 +3123,7 @@ impl Inner {
                 // consults the same directed RTC registry as the harness.
                 #[cfg(feature = "test-utils")]
                 let factory = match self.test_faults.as_ref() {
-                    Some(faults) => {
-                        factory.with_directed_faults(rtc_local_id.clone(), faults.rtc.clone())
-                    }
+                    Some(faults) => faults.wrap_factory(factory, rtc_local_id.clone()),
                     None => factory,
                 };
                 let factory = Arc::new(factory);
@@ -3225,21 +3223,14 @@ impl Inner {
                 rtc_manager.set_signaling_dispatch_chains(rtc_router.dispatch_chains());
                 let router_shutdown = self.shutdown_token.child_token();
                 #[cfg(feature = "test-utils")]
-                let router_test_faults = self
-                    .test_faults
-                    .as_ref()
-                    .map(|faults| faults.signaling.clone());
+                let router_test_faults = self.test_faults.clone();
                 #[cfg(feature = "test-utils")]
                 let router_local_id = rtc_local_id.clone();
                 let router_handle = tokio::spawn(async move {
                     let run_router = async move {
                         #[cfg(feature = "test-utils")]
                         if let Some(faults) = router_test_faults {
-                            let transport = rtc::fault::DirectedSignalingTransport::new(
-                                Arc::new(rtc_transport),
-                                router_local_id,
-                                faults,
-                            );
+                            let transport = faults.wrap_signaling(rtc_transport, router_local_id);
                             rtc_router.run(transport, signaling_rx).await;
                             return;
                         }

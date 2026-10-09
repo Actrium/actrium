@@ -520,6 +520,12 @@ struct SignalingRouteKey {
     to: ActrId,
 }
 
+#[derive(Debug)]
+struct DeferredSignalingRoute {
+    local_id: super::signaling::SharedLocalId,
+    cancel: tokio_util::sync::CancellationToken,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DirectedSignalingFaultMetrics {
     pub delivered: usize,
@@ -552,8 +558,7 @@ struct DirectedSignalingFaultState {
     changed: tokio::sync::Notify,
     /// Cancellation is route-scoped: healing A-B must not cancel delayed
     /// signaling that belongs to A-C or any other independent peer link.
-    deferred_cancels:
-        Mutex<std::collections::HashMap<SignalingRouteKey, tokio_util::sync::CancellationToken>>,
+    deferred_cancels: Mutex<std::collections::HashMap<SignalingRouteKey, DeferredSignalingRoute>>,
     deferred_idle: tokio::sync::Notify,
     started_at: Instant,
     delivered: AtomicUsize,
@@ -594,6 +599,9 @@ pub struct DirectedSignalingFaultRegistry {
 }
 
 impl DirectedSignalingFaultRegistry {
+    /// Install a policy, including an explicit `Deliver` exception that
+    /// shadows broader rules even if they are installed later. Use
+    /// `clear_rule` to remove an exception and restore broader-rule fallback.
     pub fn set_rule(
         &self,
         from: ActrId,
@@ -737,7 +745,12 @@ impl DirectedSignalingFaultRegistry {
                 .count()
     }
 
-    fn deferred_token(&self, from: &ActrId, to: &ActrId) -> tokio_util::sync::CancellationToken {
+    fn deferred_token(
+        &self,
+        from: &ActrId,
+        to: &ActrId,
+        local_id: &super::signaling::SharedLocalId,
+    ) -> tokio_util::sync::CancellationToken {
         self.state
             .deferred_cancels
             .lock()
@@ -746,7 +759,11 @@ impl DirectedSignalingFaultRegistry {
                 from: from.clone(),
                 to: to.clone(),
             })
-            .or_default()
+            .or_insert_with(|| DeferredSignalingRoute {
+                local_id: local_id.clone(),
+                cancel: Default::default(),
+            })
+            .cancel
             .clone()
     }
 
@@ -756,31 +773,29 @@ impl DirectedSignalingFaultRegistry {
             .deferred_cancels
             .lock()
             .expect("signaling deferred-cancel lock poisoned");
-        for route in [
-            SignalingRouteKey {
-                from: a.clone(),
-                to: b.clone(),
-            },
-            SignalingRouteKey {
-                from: b.clone(),
-                to: a.clone(),
-            },
-        ] {
-            if let Some(cancel) = cancels.remove(&route) {
-                cancel.cancel();
+        cancels.retain(|route, deferred| {
+            // A deferred send belongs to the same local transport after hard
+            // rebind adopts a new identity. Match either the original route
+            // or its current identity, while preserving unrelated peer links.
+            let current = deferred.local_id.get();
+            let matches = ((route.from == *a || current == *a) && route.to == *b)
+                || ((route.from == *b || current == *b) && route.to == *a);
+            if matches {
+                deferred.cancel.cancel();
             }
-        }
+            !matches
+        });
     }
 
     fn cancel_all_deferred(&self) {
-        for (_, cancel) in self
+        for (_, deferred) in self
             .state
             .deferred_cancels
             .lock()
             .expect("signaling deferred-cancel lock poisoned")
             .drain()
         {
-            cancel.cancel();
+            deferred.cancel.cancel();
         }
     }
 
@@ -1076,7 +1091,7 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTr
                 self.faults.state.delayed.fetch_add(1, Ordering::Relaxed);
                 let inner = self.inner.clone();
                 let state = self.faults.state.clone();
-                let cancel = self.faults.deferred_token(&local_id, &to);
+                let cancel = self.faults.deferred_token(&local_id, &to, &self.local_id);
                 state.deferred_inflight.fetch_add(1, Ordering::AcqRel);
                 tokio::spawn(async move {
                     tokio::select! {
@@ -1093,7 +1108,7 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTr
                 self.faults.state.reordered.fetch_add(1, Ordering::Relaxed);
                 let inner = self.inner.clone();
                 let state = self.faults.state.clone();
-                let cancel = self.faults.deferred_token(&local_id, &to);
+                let cancel = self.faults.deferred_token(&local_id, &to, &self.local_id);
                 state.deferred_inflight.fetch_add(1, Ordering::AcqRel);
                 tokio::spawn(async move {
                     tokio::select! {

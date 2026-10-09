@@ -643,7 +643,7 @@ fn deliver_overrides_broader_faults_without_counting_as_an_active_lease() {
         "Deliver is an override, not an active fault lease"
     );
 
-    // Setting Deliver on an absent key is a no-op too.
+    // Deliver on an absent key is an explicit exception, not an active fault.
     faults.set_rule(
         b.clone(),
         a.clone(),
@@ -651,6 +651,23 @@ fn deliver_overrides_broader_faults_without_counting_as_an_active_lease() {
         SignalingFaultRule::Deliver,
     );
     assert_eq!(faults.active_rule_count(), 0);
+    faults.set_rule(
+        b.clone(),
+        a.clone(),
+        SignalingMessageClass::Any,
+        SignalingFaultRule::Drop,
+    );
+    let message = SignalingMessage::RoleAssignment { is_offerer: true };
+    assert_eq!(
+        faults.rule_for_test(&b, &a, &message),
+        SignalingFaultRule::Deliver
+    );
+    faults.clear_rule(&b, &a, SignalingMessageClass::RoleAssignment);
+    assert_eq!(
+        faults.rule_for_test(&b, &a, &message),
+        SignalingFaultRule::Drop
+    );
+    faults.heal_pair(&a, &b);
 
     faults.set_rule(
         a.clone(),
@@ -671,4 +688,53 @@ fn deliver_overrides_broader_faults_without_counting_as_an_active_lease() {
         &SignalingMessage::RoleAssignment { is_offerer: true },
     );
     assert_eq!(decision, SignalingFaultRule::Deliver);
+}
+
+#[tokio::test(start_paused = true)]
+async fn healing_rebound_identity_cancels_only_its_deferred_peer_route() {
+    use crate::wire::webrtc::rtc::signaling::SharedLocalId;
+    let hub = InMemorySignalingHub::new();
+    let (a, b, c, rebound) = (
+        test_actor_id(71),
+        test_actor_id(72),
+        test_actor_id(73),
+        test_actor_id(74),
+    );
+    let faults = DirectedSignalingFaultRegistry::default();
+    for target in [&b, &c] {
+        faults.set_rule(
+            a.clone(),
+            target.clone(),
+            SignalingMessageClass::RoleAssignment,
+            SignalingFaultRule::Delay(Duration::from_secs(1)),
+        );
+    }
+    let identity = SharedLocalId::new(a.clone());
+    let transport =
+        DirectedSignalingTransport::new(Arc::new(hub.connect(a)), identity.clone(), faults.clone());
+    let target_b = hub.connect(b.clone());
+    let target_c = hub.connect(c.clone());
+    for target in [&b, &c] {
+        transport
+            .send(
+                target.clone(),
+                SignalingMessage::RoleAssignment { is_offerer: true },
+            )
+            .await
+            .unwrap();
+    }
+    identity.set(rebound.clone());
+    faults.heal_pair(&rebound, &b);
+    assert!(
+        tokio::time::timeout(WAIT, target_c.recv())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), target_b.recv())
+            .await
+            .is_err()
+    );
+    assert!(faults.wait_deferred_idle(WAIT).await);
 }

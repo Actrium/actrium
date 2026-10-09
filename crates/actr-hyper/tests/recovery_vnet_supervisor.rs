@@ -95,7 +95,17 @@ async fn send_stream(harness: &TestHarness, from: u64, to: u64, stream_id: &str)
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn passive_data_chunk_observation_does_not_block_after_raw_queue_fills() {
-    const CHUNK_COUNT: usize = 600;
+    passive_observation_overflow(600, bytes::Bytes::from_static(b"observed")).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn passive_data_chunk_observation_does_not_exhaust_ingress_byte_budget() {
+    // Exceed the default 32 MiB ingress and raw-observation byte budgets
+    // without reaching the raw queue's 512-message limit.
+    passive_observation_overflow(80, bytes::Bytes::from(vec![0x5a; 512 * 1024])).await;
+}
+
+async fn passive_observation_overflow(chunk_count: usize, payload: bytes::Bytes) {
     const STREAM_ID: &str = "passive-observer-over-raw-queue-capacity";
 
     let harness = setup_bidirectional_vnet().await;
@@ -103,12 +113,12 @@ async fn passive_data_chunk_observation_does_not_block_after_raw_queue_fills() {
 
     // Intentionally do not call receive_payload(): the passive DataChunk
     // observer must keep dispatching after the separate raw queue is full.
-    for index in 0..CHUNK_COUNT {
+    for index in 0..chunk_count {
         let sequence = index as u64 + 1;
         let chunk = DataChunk {
             stream_id: STREAM_ID.into(),
             sequence,
-            payload: bytes::Bytes::from_static(b"observed"),
+            payload: payload.clone(),
             metadata: Vec::new(),
             timestamp_ms: Some(sequence as i64),
         };
@@ -142,11 +152,73 @@ async fn passive_data_chunk_observation_does_not_block_after_raw_queue_fills() {
     assert!(
         harness
             .peer(200)
-            .wait_data_chunk_count(STREAM_ID, CHUNK_COUNT, Duration::from_secs(20))
+            .wait_data_chunk_count(STREAM_ID, chunk_count, Duration::from_secs(20))
             .await,
         "passive observer should receive all chunks even when raw payloads are not drained"
     );
-    rpc(&harness, 100, 200, "rpc-after-passive-observation-overflow").await;
+    assert_eq!(
+        harness.peer(200).data_chunk_observation(STREAM_ID).1,
+        Some(payload.clone())
+    );
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        harness
+            .peer(100)
+            .spawn_request(200, "rpc-after-passive-observation-overflow", 3_000),
+    )
+    .await
+    .expect("RPC deadline after observation overflow")
+    .expect("RPC task")
+    .expect("unread raw payloads must not reject the first RPC");
+    assert_eq!(response.as_ref(), b"pong");
+
+    let (mut raw_count, mut raw_bytes) = (0, 0);
+    while let Ok(Some((_, _, bytes))) = tokio::time::timeout(
+        Duration::from_millis(50),
+        harness.peer(200).receive_payload(),
+    )
+    .await
+    {
+        raw_count += 1;
+        raw_bytes += bytes.len();
+    }
+    assert!(
+        raw_count > 0 && raw_count < chunk_count,
+        "the raw observer must shed overflow"
+    );
+    assert!(raw_count <= 512);
+    assert!(
+        raw_bytes <= 32 * 1024 * 1024,
+        "raw observation has its own byte bound"
+    );
+
+    // Draining raw observation returns its independent permits, so the next
+    // equally sized payload is observable again after either kind of overflow.
+    let chunk = DataChunk {
+        stream_id: STREAM_ID.into(),
+        sequence: chunk_count as u64 + 1,
+        payload,
+        metadata: Vec::new(),
+        timestamp_ms: Some(0),
+    };
+    harness
+        .peer(100)
+        .gate
+        .send_data_chunk(
+            &target,
+            PayloadType::StreamReliable,
+            STREAM_ID,
+            bytes::Bytes::from(chunk.encode_to_vec()),
+            "raw-observation-after-drain",
+        )
+        .await
+        .expect("DataChunk send after draining raw observation");
+    let (_, _, bytes) =
+        tokio::time::timeout(Duration::from_secs(5), harness.peer(200).receive_payload())
+            .await
+            .expect("raw observation permits must be released")
+            .expect("raw payload");
+    assert_eq!(DataChunk::decode(bytes.as_ref()).unwrap(), chunk);
     harness.shutdown().await;
 }
 
