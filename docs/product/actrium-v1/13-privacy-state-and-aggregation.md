@@ -22,7 +22,7 @@ Tab ──locates──▶ Front Actor ──discovers──▶ Rootless applica
                          Else   → cannot establish / re-verifying
 ```
 
-The Front Actor is only the product entry point, not the graph root. The Service is the Guest's business façade, not the security root.
+The Front Actor is only the product entry point, not the graph root. The Service is the Guest's business facade, not the security root.
 
 Internal evidence dimensions (identity, artifact, constraint, computation, channel, storage, egress, output) are assessment inputs. The user sees only the three colors; when the slice is not ready, no color counts as the current application assurance.
 

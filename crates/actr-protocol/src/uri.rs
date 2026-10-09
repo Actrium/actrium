@@ -476,7 +476,7 @@ mod tests {
             "actr://acme.com/k7m2q9xh/~user/%E4%B8%AD?q=%2F#A"
         );
         assert_eq!(
-            parse("actr://例子.中国/k7m2q9xh").domain(),
+            parse("actr://\u{4f8b}\u{5b50}.\u{4e2d}\u{56fd}/k7m2q9xh").domain(),
             "xn--fsqu00a.xn--fiqs8s"
         );
     }
