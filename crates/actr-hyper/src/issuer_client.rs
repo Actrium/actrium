@@ -339,15 +339,20 @@ impl IssuerClient {
         })?;
 
         if !status.is_success() {
-            // The message starts with a stable code (`client_revoked: …`).
-            let message = RenewCredentialResponse::decode(bytes.as_ref())
+            // The message starts with a stable code (`client_revoked: …`); log
+            // only that code, never the free-form remainder (issue #484).
+            let code = RenewCredentialResponse::decode(bytes.as_ref())
                 .ok()
                 .and_then(|response| match response.result {
-                    Some(renew_credential_response::Result::Error(error)) => Some(error.message),
+                    Some(renew_credential_response::Result::Error(error)) => error
+                        .message
+                        .split(':')
+                        .next()
+                        .map(|code| code.trim().to_owned()),
                     _ => None,
                 })
                 .unwrap_or_default();
-            warn!(url = %url, status = %status, message = %message, "Issuer refused renewal");
+            warn!(url = %url, status = %status, code = %code, "Issuer refused renewal");
             return Err(classify_renew_status(status.as_u16(), retry_after));
         }
 
