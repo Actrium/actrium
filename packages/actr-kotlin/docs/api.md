@@ -286,16 +286,15 @@ fun ActrType.matches(typeString: String): Boolean
 
 #### ActrId
 
-Actor identifier (realm + serial number + type).
+Actor identifier (Realm name + Actor serial).
 
 ```kotlin
 // Factory
 inline fun actrId(builder: ActrIdBuilder.() -> Unit): ActrId
 
 // Extensions
-val ActrId.realmId: UInt
-fun ActrId.toShortString(): String
-fun ActrId.toFullString(): String
+val ActrId.realmId: String      // RealmId part of the Realm name
+fun ActrId.toFullString(): String  // "<serial_hex>.<realm_id>@<domain>"
 ```
 
 #### DataChunk
@@ -310,15 +309,6 @@ inline fun dataChunk(builder: DataChunkBuilder.() -> Unit): DataChunk
 fun DataChunk.getMetadata(key: String): String?
 fun DataChunk.hasMetadata(key: String): Boolean
 fun DataChunk.metadataMap(): Map<String, String>
-```
-
-#### Realm
-
-Security realm identifier.
-
-```kotlin
-fun realm(id: UInt): Realm
-fun realm(id: Int): Realm
 ```
 
 ---
@@ -555,8 +545,7 @@ The low-level API is in `io.actrium.actr` and consists of UniFFI-generated bindi
 | Struct | Fields |
 |--------|--------|
 | `ActrType` | `publisher: String`, `name: String`, `version: String` |
-| `ActrId` | `realm: Realm`, `serialNumber: ULong`, `type: ActrType` |
-| `Realm` | `realmId: UInt` |
+| `ActrId` | `realm: String` (Realm name, `<realm_id>@<domain>`), `serialNumber: ULong` |
 | `DataChunk` | `streamId: String`, `sequence: ULong`, `payload: ByteArray`, `metadata: List<MetadataEntry>`, `timestampMs: Long?` |
 | `MetadataEntry` | `key: String`, `value: String` |
 | `RpcEnvelopeBridge` | `routeKey: String`, `payload: ByteArray`, `requestId: String`, `timeoutMs: Long` |

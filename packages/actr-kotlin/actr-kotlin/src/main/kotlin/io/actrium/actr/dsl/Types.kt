@@ -5,7 +5,6 @@ import io.actrium.actr.ActrId
 import io.actrium.actr.ActrType
 import io.actrium.actr.DataChunk
 import io.actrium.actr.MetadataEntry
-import io.actrium.actr.Realm
 
 // ============================================================================
 // ActrType Builders
@@ -94,9 +93,8 @@ fun ActrType.matches(typeString: String): Boolean {
  * Example:
  * ```kotlin
  * val id = actrId {
- *     realm = 2281844430u
- *     serialNumber = 12345uL
- *     type = "acme/EchoService@1.0.0"
+ *     realm = "k7m2q9xh@acme.com"
+ *     serialNumber = 0x2af01uL
  * }
  * ```
  */
@@ -104,35 +102,13 @@ inline fun actrId(builder: ActrIdBuilder.() -> Unit): ActrId = ActrIdBuilder().a
 
 /** Builder for ActrId. */
 class ActrIdBuilder {
-    var realm: UInt = 0u
+    /** Realm name, `<realm_id>@<domain>`. */
+    var realm: String = ""
     var serialNumber: ULong = 0uL
-    private var _type: ActrType? = null
-
-    /** Set the actor type from a string. */
-    var type: String
-        get() = _type?.toTypeString() ?: ""
-        set(value) {
-            _type = value.toActrType()
-        }
-
-    /** Set the actor type directly. */
-    fun type(actrType: ActrType) {
-        _type = actrType
-    }
-
-    /** Set the actor type with publisher, name, and version. */
-    fun type(
-        publisher: String,
-        name: String,
-        version: String,
-    ) {
-        _type = ActrType(publisher = publisher, name = name, version = version)
-    }
 
     fun build(): ActrId {
-        require(realm > 0u) { "realm must be set" }
-        requireNotNull(_type) { "type must be set" }
-        return ActrId(realm = Realm(realmId = realm), serialNumber = serialNumber, type = _type!!)
+        require(realm.isNotBlank()) { "realm must be set" }
+        return ActrId(realm = realm, serialNumber = serialNumber)
     }
 }
 
@@ -140,16 +116,12 @@ class ActrIdBuilder {
 // ActrId Extensions
 // ============================================================================
 
-/** Get the realm ID. */
-val ActrId.realmId: UInt
-    get() = realm.realmId
+/** RealmId part of the Realm name. */
+val ActrId.realmId: String
+    get() = realm.substringBefore('@', missingDelimiterValue = "")
 
-/** Get a short string representation. */
-fun ActrId.toShortString(): String = "${serialNumber.toString(16)}@${type.publisher}/${type.name}"
-
-/** Get a full string representation. */
-fun ActrId.toFullString(): String =
-    "${serialNumber.toString(16)}@${realm.realmId}/${type.publisher}/${type.name}@${type.version}"
+/** Canonical form `<serial_hex>.<realm_id>@<domain>`. */
+fun ActrId.toFullString(): String = "${serialNumber.toString(16)}.$realm"
 
 // ============================================================================
 // DataChunk Builders
@@ -247,13 +219,3 @@ fun DataChunk.hasMetadata(key: String): Boolean = metadata.any { it.key == key }
 
 /** Get metadata as a Map. */
 fun DataChunk.metadataMap(): Map<String, String> = metadata.associate { it.key to it.value }
-
-// ============================================================================
-// Realm Builders
-// ============================================================================
-
-/** Create a Realm from a realm ID. */
-fun realm(id: UInt): Realm = Realm(realmId = id)
-
-/** Create a Realm from an Int. */
-fun realm(id: Int): Realm = Realm(realmId = id.toUInt())

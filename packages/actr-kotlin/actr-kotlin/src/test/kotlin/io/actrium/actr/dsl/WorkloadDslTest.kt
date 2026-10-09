@@ -3,7 +3,6 @@ package io.actrium.actr.dsl
 import io.actrium.actr.ActrId
 import io.actrium.actr.ActrType
 import io.actrium.actr.NoHandle
-import io.actrium.actr.Realm
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -101,7 +100,7 @@ class WorkloadDslTest {
     @Test
     fun `simple workload tracks target server and rejects unimplemented dispatch`() =
         runTest {
-            val target = actorId("acme", "EchoService")
+            val target = actorId(42uL)
             val workload = SimpleWorkload(7u, "acme/EchoClient@1.0.0")
 
             assertNull(workload.getTargetServerId())
@@ -127,7 +126,7 @@ class WorkloadDslTest {
                     realmId = 9u,
                     typeString = "acme/RoutedClient@1.0.0",
                 ) {}
-            val target = actorId("acme", "RoutedService")
+            val target = actorId(43uL)
 
             assertNull(workload.getTargetServerId())
             workload.setTargetServerId(target)
@@ -157,13 +156,5 @@ class WorkloadDslTest {
             assertTrue("dispatch()" in error.message.orEmpty())
         }
 
-    private fun actorId(
-        publisher: String,
-        name: String,
-    ): ActrId =
-        ActrId(
-            realm = Realm(7u),
-            serialNumber = 42uL,
-            type = ActrType(publisher, name, "1.0.0"),
-        )
+    private fun actorId(serialNumber: ULong): ActrId = ActrId(realm = "test@example.com", serialNumber = serialNumber)
 }
