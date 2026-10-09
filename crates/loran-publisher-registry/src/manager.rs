@@ -2,7 +2,6 @@ use crate::{
     PublisherRegistryError, crypto,
     model::{
         ActrPackage, PkgStatus, PublishNonce, Publisher, PublisherKeyHistory, PublisherStatus,
-        key_history::KeyHistoryStatus,
     },
     reserved::canonical_publisher_domain,
 };
@@ -11,6 +10,16 @@ use actr_protocol::{KeyPinOutcome, KeyPins, KeyStatus, PublisherKeys, PublisherP
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::SqlitePool;
+
+/// Trust decision for a package signing key, see
+/// [`PublisherRegistryManager::package_signing_key`].
+#[derive(Debug)]
+pub enum PackageSigningKey {
+    /// A non-revoked key of an active publisher in this registry.
+    Trusted(PublisherPublicInfo),
+    /// No registry record holds the publisher name.
+    Untrusted,
+}
 
 /// How long a package signing key without `not_after` may publish.
 const DEFAULT_KEY_LIFETIME_SECS: i64 = 365 * 24 * 3600;
@@ -171,32 +180,6 @@ impl PublisherRegistryManager {
         }
 
         Ok(())
-    }
-
-    /// The `(key_id, public_key)` pairs of `name`'s active package signing
-    /// keys: the current one and, while it rotates, the second one. Natural
-    /// expiry ends their authority to publish, not to prove possession.
-    pub async fn active_keys(
-        &self,
-        name: &str,
-    ) -> Result<Vec<(String, String)>, PublisherRegistryError> {
-        let record = Publisher::get_by_name(&self.pool, name)
-            .await?
-            .ok_or(PublisherRegistryError::NotFound)?;
-        if record.status != PublisherStatus::Active {
-            return Err(PublisherRegistryError::InvalidStatus(format!(
-                "Publisher '{name}' is not active"
-            )));
-        }
-        let mut keys = Vec::new();
-        if !record.key_id.is_empty() {
-            keys.push((record.key_id, record.public_key));
-        }
-        keys.extend(record.next_key_id.zip(record.next_public_key));
-        if keys.is_empty() {
-            return Err(PublisherRegistryError::CertificateExpired);
-        }
-        Ok(keys)
     }
 
     // ========== Publish Nonce Challenge-Response ==========
@@ -724,100 +707,32 @@ impl PublisherRegistryManager {
         })
     }
 
-    /// Verify the Publisher key that authenticated a published package.
+    /// The trust decision for the package signing key `key_id` that a
+    /// manifest of publisher `name` declares.
     ///
-    /// Natural expiration and normal retirement do not invalidate an existing
-    /// package. Explicitly revoked keys do. New packages store signing_key_id
-    /// directly; legacy rows fall back to the signed manifest or, if needed,
-    /// cryptographic identification across the Publisher Registry's non-revoked keys.
-    pub async fn verify_published_package_signing_key(
+    /// A name this registry holds is reserved for its record: the key must be
+    /// a non-revoked key of that active publisher, spelled exactly as the
+    /// record. Any other outcome is an error, never [`PackageSigningKey::Untrusted`].
+    /// Only a name with no record at all yields `Untrusted`.
+    pub async fn package_signing_key(
         &self,
-        package: &ActrPackage,
-    ) -> Result<String, PublisherRegistryError> {
-        let publisher_record = Publisher::get(&self.pool, package.publisher_id)
-            .await?
-            .ok_or(PublisherRegistryError::NotFound)?;
-        if publisher_record.name != package.publisher {
-            return Err(PublisherRegistryError::InvalidRequest(
-                "package publisher does not match its registry record".to_string(),
-            ));
-        }
-        if publisher_record.status != PublisherStatus::Active {
-            return Err(PublisherRegistryError::InvalidStatus(format!(
-                "Publisher '{}' is not active",
-                publisher_record.name
+        name: &str,
+        key_id: &str,
+    ) -> Result<PackageSigningKey, PublisherRegistryError> {
+        let canonical =
+            canonical_publisher_domain(name).unwrap_or_else(|_| name.to_ascii_lowercase());
+        let Some(record) = Publisher::get_by_name(&self.pool, &canonical).await? else {
+            return Ok(PackageSigningKey::Untrusted);
+        };
+        if record.name != name {
+            return Err(PublisherRegistryError::InvalidRequest(format!(
+                "publisher '{name}' is spelled differently from its registry record '{}'",
+                record.name
             )));
         }
-
-        let manifest_key_id = package
-            .manifest
-            .parse::<toml::Value>()
-            .ok()
-            .and_then(|manifest| {
-                manifest
-                    .get("signing_key_id")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_owned)
-            });
-
-        if let (Some(stored), Some(manifest)) = (
-            package.signing_key_id.as_deref(),
-            manifest_key_id.as_deref(),
-        ) && stored != manifest
-        {
-            return Err(PublisherRegistryError::InvalidSignature);
-        }
-
-        if let Some(key_id) = package
-            .signing_key_id
-            .as_deref()
-            .or(manifest_key_id.as_deref())
-        {
-            let key = self
-                .resolve_key_by_id(&publisher_record.name, key_id)
-                .await?;
-            let valid = crypto::verify_signature(
-                package.manifest.as_bytes(),
-                &package.signature,
-                &key.public_key,
-            )?;
-            return if valid {
-                Ok(key.key_id)
-            } else {
-                Err(PublisherRegistryError::InvalidSignature)
-            };
-        }
-
-        // Legacy package: identify the signing key by verifying the stored
-        // signature against the current key and all non-revoked historical keys.
-        if !publisher_record.key_id.is_empty() && !publisher_record.public_key.is_empty() {
-            let valid = crypto::verify_signature(
-                package.manifest.as_bytes(),
-                &package.signature,
-                &publisher_record.public_key,
-            )?;
-            if valid {
-                return Ok(publisher_record.key_id);
-            }
-        }
-
-        for history in
-            PublisherKeyHistory::list_by_publisher(&self.pool, publisher_record.id).await?
-        {
-            if history.status == KeyHistoryStatus::Revoked {
-                continue;
-            }
-            let valid = crypto::verify_signature(
-                package.manifest.as_bytes(),
-                &package.signature,
-                &history.public_key,
-            )?;
-            if valid {
-                return Ok(history.key_id);
-            }
-        }
-
-        Err(PublisherRegistryError::InvalidSignature)
+        self.resolve_key_by_id(name, key_id)
+            .await
+            .map(PackageSigningKey::Trusted)
     }
 
     pub async fn publish_package(

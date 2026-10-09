@@ -26,9 +26,7 @@ fn test_register_request() -> RegisterRequest {
         publisher_signature: Some(vec![0u8; 64].into()),
         target: Some("wasm32-wasip2".into()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
-        publisher_auth_signature: None,
-        publisher_auth_signed_at: None,
-        publisher_auth_nonce: None,
+        signing_public_key: None,
     }
 }
 

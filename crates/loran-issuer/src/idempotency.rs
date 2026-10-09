@@ -83,8 +83,6 @@ pub(crate) enum AttemptError {
     TokenRejected,
     #[error("actor identity possession proof is no longer valid")]
     PossessionNotProven,
-    #[error("publisher authorization nonce was already consumed")]
-    PublisherNonceRejected,
     /// The actor may no longer receive credentials (revoked, Realm, package
     /// or publisher state changed before the commit).
     #[error("credential refused: {0}")]
@@ -493,8 +491,8 @@ impl ControlAttemptStore {
     }
 
     /// Commit a prepared reissue and its response in one transaction: consume
-    /// the possession proof (its successor row), the publisher-auth nonce, and
-    /// record the package target the reissue was authorized under.
+    /// the possession proof (its successor row) and record the package target
+    /// the reissue was verified under.
     pub(crate) async fn complete_reissue(
         &self,
         lease: &AttemptLease,
@@ -551,34 +549,20 @@ impl ControlAttemptStore {
         .await
         .map_err(AttemptError::Refused)?;
 
-        if let Some(binding) = prepared.publisher_nonce.as_ref() {
-            crate::issuer::AIdIssuer::consume_publisher_auth_nonce(
-                &mut tx,
-                &binding.publisher,
-                &binding.signing_key_id,
-                &binding.nonce,
-                now,
+        if prepared.package
+            && let Some(target) = prepared.target.as_deref().filter(|t| !t.is_empty())
+        {
+            sqlx::query(
+                "UPDATE issued_actor_identity SET target = ?1, auth_mode = ?2
+                 WHERE realm = ?3 AND serial_number = ?4",
             )
+            .bind(target)
+            .bind(actr_protocol::RegisterAuthMode::Package as i32)
+            .bind(&actor_id.realm)
+            .bind(actor_id.serial_number as i64)
+            .execute(&mut *tx)
             .await
-            .map_err(|error| match error {
-                platform::aid::AidError::PublisherNotVerified => {
-                    AttemptError::PublisherNonceRejected
-                }
-                other => AttemptError::Store(other.to_string()),
-            })?;
-            if let Some(target) = prepared.target.as_deref().filter(|t| !t.is_empty()) {
-                sqlx::query(
-                    "UPDATE issued_actor_identity SET target = ?1, auth_mode = ?2
-                     WHERE realm = ?3 AND serial_number = ?4",
-                )
-                .bind(target)
-                .bind(actr_protocol::RegisterAuthMode::Package as i32)
-                .bind(&actor_id.realm)
-                .bind(actor_id.serial_number as i64)
-                .execute(&mut *tx)
-                .await
-                .map_err(|error| AttemptError::Store(format!("target update failed: {error}")))?;
-            }
+            .map_err(|error| AttemptError::Store(format!("target update failed: {error}")))?;
         }
 
         // The successor row marks the proof as consumed. Another attempt that
@@ -904,7 +888,7 @@ pub(crate) mod tests {
             successor_expires_at: now + 86_400,
             proof_hash: crate::renewal::hash_token(&token),
             binding_expires_at: now + 60,
-            publisher_nonce: None,
+            package: false,
             target: None,
             signer: signer.clone(),
         };
@@ -1104,7 +1088,7 @@ pub(crate) mod tests {
                 successor_expires_at: now + 86_400,
                 proof_hash: crate::renewal::hash_token(&token),
                 binding_expires_at: now + 60,
-                publisher_nonce: None,
+                package: false,
                 target: None,
                 signer: signer.clone(),
             };

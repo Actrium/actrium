@@ -59,7 +59,6 @@ pub mod utils {
             "pending_registration",
             "issued_actor_identity",
             "issuer_renewal_token",
-            "issuer_publisher_auth_nonce",
             "issuer_control_attempt",
             "publisher_publish_nonce",
             "publisher_key_history",

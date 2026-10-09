@@ -40,6 +40,7 @@ fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdC
             member: "member-1".to_string(),
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
+            development: None,
         }
         .encode_to_vec()
         .into(),

@@ -182,6 +182,7 @@ mod tests {
             member: "member-1".to_string(),
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
+            development: None,
         }
     }
 

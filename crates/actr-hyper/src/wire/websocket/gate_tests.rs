@@ -48,6 +48,7 @@ fn make_valid_credential(
         member: "member-1".to_string(),
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
     let signature = sk.sign(&claims_bytes);
@@ -295,6 +296,7 @@ async fn verify_credential_realm_or_issuer_mismatch_returns_none() {
             member: "member-1".to_string(),
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
+            development: None,
         };
         let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
         let credential = AIdCredential {

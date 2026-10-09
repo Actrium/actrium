@@ -73,6 +73,9 @@ message IdentityClaims {
   required string   member     = 9;  // Realm member id
   required string   client_key = 10; // Realm client key id the credential was requested with
   required MemberRole role     = 11; // Member role when the credential was signed
+  // Set when the package was signed by a key that is not a trusted Publisher
+  // key: a local development identity, not the Publisher's.
+  optional bool     development = 12;
 }
 
 // Realm member role (`actr/protocols/realm-membership.md`).
@@ -172,8 +175,8 @@ message ErrorResponse {
 // =========================================================================
 enum RegisterAuthMode {
   REGISTER_AUTH_MODE_UNSPECIFIED = 0;
-  // Package-backed registration authenticated by Publisher Registry lookup,
-  // manifest signature verification, or package renewal credentials.
+  // Package-backed registration: the package manifest signature decides
+  // provenance (trusted Publisher key or development identity).
   REGISTER_AUTH_MODE_PACKAGE = 1;
   // Source-linked workload registration authenticated by realm authorization.
   REGISTER_AUTH_MODE_LINKED = 2;
@@ -210,17 +213,17 @@ message RegisterRequest {
   reserved 12;
   reserved "psk_token";
 
-  // Ed25519 signature over the ACTR-PUBLISHER-REGISTER-V1 payload.
-  // A package launcher produces this fresh proof with the Publisher key that signed
-  // manifest_raw, binding the running package to its Publisher.
-  // Required only for unpublished Package Path 2 registrations.
-  optional bytes publisher_auth_signature = 15;
-  // Unix seconds included in the publisher signature payload.
-  // Issuer accepts only a short time window to prevent long-lived replay.
-  optional uint64 publisher_auth_signed_at = 16;
-  // Random nonce included in the publisher signature payload.
-  // Issuer atomically consumes it to prevent replay inside the time window.
-  optional bytes publisher_auth_nonce = 17;
+  // Removed: Publisher-private-key registration proof. Registration is
+  // authorized by the Realm client proof; package provenance comes from the
+  // manifest signature.
+  reserved 15, 16, 17;
+  reserved "publisher_auth_signature", "publisher_auth_signed_at", "publisher_auth_nonce";
+
+  // Ed25519 public key (32 bytes) that signed manifest_raw. Its key id must equal
+  // the manifest's signing_key_id. Issuer uses it only when that key id does not
+  // resolve to a trusted Publisher key; the package then registers as a
+  // development identity.
+  optional bytes signing_public_key = 18;
 }
 
 message RegisterResponse {
@@ -267,8 +270,8 @@ message RenewCredentialResponse {
 }
 
 // Re-issue credentials for an existing actor when its renewal token can no
-// longer be used. The nested registration request re-authenticates the workload
-// (publisher proof for packages, realm authorization for linked workloads),
+// longer be used. The nested registration request re-verifies the workload
+// (package provenance for packages; the Realm client proof authorizes both),
 // while actr_id identifies the stable runtime identity that must be preserved.
 message ReissueCredentialRequest {
   required ActrId actr_id = 1;
@@ -280,8 +283,7 @@ message ReissueCredentialRequest {
   // credentials for another same-realm/type actor or an arbitrary serial.
   optional bytes renewal_proof = 3;
   // Client-generated UUID (16 raw bytes) identifying this logical write.
-  // Retries MUST reuse both this value and the exact request body, including
-  // the publisher proof nested in registration.
+  // Retries MUST reuse both this value and the exact request body.
   required bytes attempt_id = 4;
 }
 

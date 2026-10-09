@@ -61,6 +61,8 @@ pub struct VerifiedPackage {
     pub manifest_raw: Vec<u8>,
     /// Raw `manifest.sig` bytes (64-byte Ed25519 signature).
     pub sig_raw: Vec<u8>,
+    /// Ed25519 public key the signature was verified with.
+    pub signing_public_key: [u8; 32],
 }
 
 /// Verify an .actr package with a safe default payload limit.
@@ -272,6 +274,7 @@ pub fn verify_with_limits(
         manifest,
         manifest_raw: manifest_bytes,
         sig_raw,
+        signing_public_key: pubkey.to_bytes(),
     })
 }
 

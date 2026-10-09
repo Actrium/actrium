@@ -49,12 +49,6 @@
 use crate::signer_client_wrapper::SignerClientWrapper;
 use crate::sn::{AIdSerialNumberIssuer, SerialNumber};
 
-// ========== Constants ==========
-
-const PUBLISHER_SIGNED_AT_MAX_AGE_SECS: u64 = 5 * 60;
-const PUBLISHER_SIGNED_AT_FUTURE_SKEW_SECS: u64 = 60;
-const PUBLISHER_NONCE_TTL_SECS: u64 = 10 * 60;
-
 use actr_protocol::{
     AIdCredential, ActrId, ActrType, ErrorResponse, IdentityClaims, RegisterRequest,
     RegisterResponse, register_response,
@@ -142,15 +136,21 @@ struct VerifiedPossession {
     successor: Vec<u8>,
 }
 
-/// A verified publisher-auth nonce and its scoping identity, returned from
-/// [`verify_publisher_auth`] so the caller can consume (INSERT) the nonce at
-/// the right point in the flow rather than inside the verify step. `/reissue`
-/// consumes it in the transaction that commits the attempt, so a request that
-/// never completed leaves the nonce unconsumed and the attempt retriable.
-pub(crate) struct PublisherAuthBinding {
-    pub(crate) publisher: String,
-    pub(crate) signing_key_id: String,
-    pub(crate) nonce: Vec<u8>,
+/// Where a verified package registration comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Provenance {
+    /// Signed by a trusted key of the Publisher named in the manifest.
+    Publisher,
+    /// Signed by a key that is not a trusted Publisher key: a local
+    /// development identity.
+    Development,
+}
+
+/// What Issuer recorded when it issued an Actor identity.
+pub(crate) struct IssuedActor {
+    pub(crate) actor_type: ActrType,
+    pub(crate) auth_mode: Option<i32>,
+    pub(crate) development: bool,
 }
 
 /// Reissue work prepared without writing identity state. The attempt journal
@@ -164,8 +164,8 @@ pub(crate) struct PreparedReissue {
     pub(crate) successor_expires_at: i64,
     pub(crate) proof_hash: Vec<u8>,
     pub(crate) binding_expires_at: i64,
-    /// Package-auth reissue only: the nonce to consume and the target to record.
-    pub(crate) publisher_nonce: Option<PublisherAuthBinding>,
+    /// Package-auth reissue: the target to record.
+    pub(crate) package: bool,
     pub(crate) target: Option<String>,
     /// The key the Actor is bound to once the reissue commits.
     pub(crate) signer: Signer,
@@ -372,9 +372,7 @@ impl AIdIssuer {
             return Err(AidError::InvalidFormat.into());
         }
 
-        // The publisher-auth nonce is only checked here; it is consumed when
-        // the attempt commits.
-        let publisher_nonce = self.verify_registration_identity(request).await?;
+        let provenance = self.verify_registration_identity(request).await?;
         let proof = self
             .verify_actor_possession(actor_id, renewal_proof)
             .await?;
@@ -392,11 +390,8 @@ impl AIdIssuer {
             .into());
         }
         // The requested type must be the one this identity was issued for.
-        if Self::issued_actor(&mut *Self::db_connection().await?, actor_id)
-            .await?
-            .0
-            != request.actr_type
-        {
+        let issued = Self::issued_actor(&mut *Self::db_connection().await?, actor_id).await?;
+        if issued.actor_type != request.actr_type {
             platform::recording::warn!(
                 "Credential reissue type mismatch: actor={}, requested_type={}",
                 actor_id.to_string_repr(),
@@ -404,6 +399,9 @@ impl AIdIssuer {
             );
             return Err(AidError::InvalidFormat.into());
         }
+        // The provenance class stays fixed: the recheck below refuses a
+        // development identity whose publisher name is now in the registry,
+        // and a Publisher identity whose publisher left it.
 
         let register_ok = self
             .issue_credential_for_actor(actor_id, request.target.as_deref(), signer)
@@ -423,7 +421,7 @@ impl AIdIssuer {
             ),
             proof_hash: proof.proof_hash,
             binding_expires_at: proof.binding_expires_at,
-            publisher_nonce,
+            package: provenance.is_some(),
             target: request.target.clone(),
             signer: signer.clone(),
         })
@@ -522,26 +520,10 @@ impl AIdIssuer {
         request: &RegisterRequest,
         signer: &Signer,
     ) -> Result<register_response::RegisterOk, AidError> {
-        let nonce_binding = self.verify_registration_identity(request).await?;
-        // Fresh registration burns the publisher-auth nonce immediately after
-        // verification, so a replayed /register is rejected within the nonce TTL.
-        if let Some(binding) = nonce_binding {
-            let now = i64::try_from(Self::unix_now_secs()?)
-                .map_err(|_| AidError::InvalidTimestamp("current time exceeds i64".to_string()))?;
-            let mut conn = platform::storage::db::get_database()
-                .get_pool()
-                .acquire()
-                .await
-                .map_err(|e| AidError::GenerationFailed(format!("database unavailable: {e}")))?;
-            Self::consume_publisher_auth_nonce(
-                &mut conn,
-                &binding.publisher,
-                &binding.signing_key_id,
-                &binding.nonce,
-                now,
-            )
-            .await?;
-        }
+        // The handler's Realm client proof (single-use nonce) authorized the
+        // request; this verifies only where the workload comes from.
+        let provenance = self.verify_registration_identity(request).await?;
+        let development = provenance == Some(Provenance::Development);
 
         // Generate ActrId. Persist the package target so /renew and /reissue can
         // later recheck the exact (type_str, target) package row.
@@ -555,6 +537,7 @@ impl AIdIssuer {
                 } else {
                     actr_protocol::RegisterAuthMode::Package
                 },
+                development,
                 signer,
             )
             .await?;
@@ -574,6 +557,7 @@ impl AIdIssuer {
             member: signer.member_id.clone(),
             client_key: signer.key_id.clone(),
             role: actr_protocol::MemberRole::from(signer.role) as i32,
+            development: development.then_some(true),
         };
 
         // Proto-encode the claims bytes.
@@ -620,14 +604,13 @@ impl AIdIssuer {
 
     /// Verify the registration identity according to the explicit request source.
     ///
-    /// Returns the publisher-auth nonce binding when the package-auth path was
-    /// taken, so the caller can burn the nonce at the correct point in its flow
-    /// (immediately for `/register`, in the transaction that commits the
-    /// `/reissue` attempt). `None` for the Linked path (no single-use nonce).
+    /// Returns the package provenance for a package registration, `None` for
+    /// a Linked one. Authorization is not decided here: the Realm client
+    /// proof, membership and Service ownership are checked by the handler.
     async fn verify_registration_identity(
         &self,
         request: &RegisterRequest,
-    ) -> Result<Option<PublisherAuthBinding>, AidError> {
+    ) -> Result<Option<Provenance>, AidError> {
         let auth_mode = match request.auth_mode {
             Some(value) if value == actr_protocol::RegisterAuthMode::Linked as i32 => {
                 actr_protocol::RegisterAuthMode::Linked
@@ -641,9 +624,7 @@ impl AIdIssuer {
         match auth_mode {
             actr_protocol::RegisterAuthMode::Unspecified
             | actr_protocol::RegisterAuthMode::Package => {
-                // Verify Publisher Registry identity through a published package, or through
-                // signatures for an unpublished package.
-                self.verify_publisher_identity(request).await
+                self.verify_package_identity(request).await.map(Some)
             }
             actr_protocol::RegisterAuthMode::Linked => {
                 self.verify_linked_identity(request)?;
@@ -658,9 +639,7 @@ impl AIdIssuer {
         if request.actr_type.version.is_empty()
             || request.manifest_raw.is_some()
             || request.publisher_signature.is_some()
-            || request.publisher_auth_signature.is_some()
-            || request.publisher_auth_signed_at.is_some()
-            || request.publisher_auth_nonce.is_some()
+            || request.signing_public_key.is_some()
         {
             return Err(AidError::InvalidFormat);
         }
@@ -682,362 +661,204 @@ impl AIdIssuer {
         Ok(())
     }
 
-    /// verify Publisher Registry identity
+    /// Verify where a package registration comes from.
     ///
-    /// Path 1: an existing package tuple. The active package must still have an
-    /// active Publisher Registry and a non-revoked signing key, the request
-    /// manifest must hash-match the stored one, and (AIS-02) the caller must
-    /// prove current possession of the publisher's signing key with a fresh
-    /// single-use nonce and a domain-separated `publisher_auth` signature —
-    /// the same possession proof Path 2 requires. Revoked packages are terminal
-    /// and cannot fall through.
-    /// Path 2: only a never-published tuple may use manifest and request
-    /// signatures plus the `publisher_auth` possession proof.
-    /// Otherwise reject
-    async fn verify_publisher_identity(
+    /// The signed manifest must name exactly the requested type and target.
+    /// Its `signing_key_id` then decides the provenance: a key of a publisher
+    /// in this Loran's Publisher Registry gives the Publisher's identity; a
+    /// publisher name the registry does not hold gives a development identity,
+    /// verified with the `signing_public_key` the request carries. A name the
+    /// registry holds is never a development identity, so a development key
+    /// cannot claim a trusted Publisher.
+    ///
+    /// Whether the package was published to this Loran does not choose the
+    /// path. The registry is consulted as a revocation source only: a revoked
+    /// package, or a published release whose manifest differs, is rejected
+    /// whatever the provenance.
+    async fn verify_package_identity(
         &self,
         request: &RegisterRequest,
-    ) -> Result<Option<PublisherAuthBinding>, AidError> {
+    ) -> Result<Provenance, AidError> {
+        use sha2::{Digest, Sha256};
+
         let actr_type = &request.actr_type;
         if actr_type.version.is_empty() {
             return Err(AidError::InvalidFormat);
         }
-
         let type_str = actr_type.to_program_identity();
-        let publisher_name = &actr_type.publisher;
-
-        // SECURITY / COMPATIBILITY: package registration must be bound to the
-        // exact manifest bytes the publisher saw locally. Without
-        // manifest_raw, Issuer can only prove that "some active package has this
-        // type_str"; without target, a multi-target package lookup degrades to
-        // type-only matching. Treat both as malformed package-auth requests
-        // instead of falling back to a broad registry lookup.
-        // This intentionally tightens the legacy Path 1 request shape.
-        let pool = platform::storage::db::get_database().get_pool().clone();
-        let target_ref = request
+        let target = request
             .target
             .as_deref()
             .filter(|target| !target.is_empty())
             .ok_or_else(|| {
                 platform::recording::warn!(
-                    "Publisher Registry verification failed: package registration requires target; type_str={}",
+                    "Package verification failed: registration requires target; type_str={}",
                     type_str
                 );
                 AidError::InvalidFormat
             })?;
-        let request_manifest = request
+        let manifest_bytes = request
             .manifest_raw
             .as_ref()
             .filter(|manifest| !manifest.is_empty())
             .ok_or_else(|| {
                 platform::recording::warn!(
-                    "Publisher Registry verification failed: package registration requires manifest_raw; type_str={}, target={}",
-                    type_str,
-                    target_ref
+                    "Package verification failed: registration requires manifest_raw; type_str={}",
+                    type_str
                 );
                 AidError::InvalidFormat
             })?;
+        let signature = request.publisher_signature.as_ref().ok_or_else(|| {
+            platform::recording::warn!(
+                "Package verification failed: registration requires publisher_signature; type_str={}",
+                type_str
+            );
+            AidError::PublisherNotVerified
+        })?;
 
-        let published_pkg =
+        // Unparseable manifests must not bypass the identity binding below.
+        let manifest_str = std::str::from_utf8(manifest_bytes.as_ref()).map_err(|_| {
+            platform::recording::warn!("Package manifest_raw is not valid UTF-8");
+            AidError::InvalidFormat
+        })?;
+        let manifest: toml::Value = manifest_str.parse().map_err(|e| {
+            platform::recording::warn!("Package manifest_raw is not valid TOML: {}", e);
+            AidError::InvalidFormat
+        })?;
+        let signing_key_id = manifest
+            .get("signing_key_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                platform::recording::warn!(
+                    "Package manifest missing 'signing_key_id'; type_str={}",
+                    type_str
+                );
+                AidError::InvalidFormat
+            })?;
+        let field = |name: &str| manifest.get(name).and_then(|v| v.as_str()).unwrap_or("");
+        // A valid signed manifest of one type must not register another.
+        if field("publisher") != actr_type.publisher
+            || field("name") != actr_type.name
+            || field("version") != actr_type.version
+        {
+            platform::recording::warn!(
+                "Package manifest identity mismatch: manifest={}/{}@{}, request={}",
+                field("publisher"),
+                field("name"),
+                field("version"),
+                type_str
+            );
+            return Err(AidError::PublisherNotVerified);
+        }
+        // The signature binds the target only through binary.target.
+        let manifest_target = manifest
+            .get("binary")
+            .and_then(|b| b.get("target"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                platform::recording::warn!(
+                    "Package manifest missing binary.target; type_str={}",
+                    type_str
+                );
+                AidError::InvalidFormat
+            })?;
+        if manifest_target != target {
+            platform::recording::warn!(
+                "Package manifest target mismatch: manifest={}, request={}",
+                manifest_target,
+                target
+            );
+            return Err(AidError::PublisherNotVerified);
+        }
+
+        // Revocation source: a revoked release stays revoked whatever the
+        // package source, and a published release is pinned to its bytes.
+        let pool = platform::storage::db::get_database().get_pool().clone();
+        let published =
             actrix_publisher_registry::model::ActrPackage::get_by_type_and_target_any_status(
-                &pool, &type_str, target_ref,
+                &pool, &type_str, target,
             )
             .await
             .map_err(|e| {
                 AidError::GenerationFailed(format!("Publisher Registry lookup failed: {e}"))
             })?;
-
-        if let Some(pkg) = published_pkg {
-            use sha2::{Digest, Sha256};
-
-            if pkg.status == actrix_publisher_registry::model::PkgStatus::Revoked {
+        if let Some(package) = published {
+            if package.status == actrix_publisher_registry::model::PkgStatus::Revoked {
                 platform::recording::warn!(
-                    "Publisher Registry table lookup rejected: package revoked, type_str={}, target={}",
+                    "Package verification rejected: package revoked, type_str={}, target={}",
                     type_str,
-                    target_ref
+                    target
                 );
                 return Err(AidError::PackageRevoked);
             }
-
-            if pkg.publisher != actr_type.publisher
-                || pkg.name != actr_type.name
-                || pkg.version != actr_type.version
-                || pkg.target != target_ref
-            {
+            if Sha256::digest(package.manifest.as_bytes()) != Sha256::digest(manifest_bytes) {
                 platform::recording::warn!(
-                    "Publisher Registry table lookup rejected: package identity mismatch, type_str={}, target={}",
+                    "Package verification rejected: manifest differs from the published release, type_str={}, target={}",
                     type_str,
-                    target_ref
+                    target
                 );
                 return Err(AidError::PublisherNotVerified);
             }
-
-            let request_manifest_hash = Sha256::digest(request_manifest.as_ref());
-            let stored_manifest_hash = Sha256::digest(pkg.manifest.as_bytes());
-            if request_manifest_hash[..] != stored_manifest_hash[..] {
-                platform::recording::warn!(
-                    "Publisher Registry table lookup rejected: manifest hash mismatch, type_str={}, target={}",
-                    type_str,
-                    target_ref
-                );
-                // Do not fall through to Path 2 when the published tuple exists.
-                // Rejecting here prevents a mismatched or stale manifest from
-                // downgrading into the unpublished-package authentication path.
-                return Err(AidError::PublisherNotVerified);
-            }
-
-            let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool.clone());
-            let package_signing_key_id = manager
-                .verify_published_package_signing_key(&pkg)
-                .await
-                .map_err(Self::map_publisher_verification_error)?;
-
-            // AIS-02: an existing published package, Realm membership, and the
-            // public manifest are no longer sufficient to register — all of them
-            // are readable/holdable without controlling the publisher. The caller
-            // must additionally prove current possession of the publisher's
-            // signing key, exactly as the unpublished-package path (Path 2) does:
-            // a fresh single-use nonce plus a domain-separated signature bound to
-            // this realm, actr_type, target, and manifest hash. The manifest-hash
-            // check above additionally pins that proof to the exact published
-            // version.
-            let (publisher_auth_signature, publisher_auth_signed_at, publisher_auth_nonce) = match (
-                &request.publisher_auth_signature,
-                request.publisher_auth_signed_at,
-                &request.publisher_auth_nonce,
-            ) {
-                (Some(signature), Some(signed_at), Some(nonce)) => (signature, signed_at, nonce),
-                _ => {
-                    platform::recording::warn!(
-                        "Publisher Registry table lookup rejected: published package registration requires publisher_auth_signature, publisher_auth_signed_at, and publisher_auth_nonce; type_str={}, target={}",
-                        type_str,
-                        target_ref
-                    );
-                    return Err(AidError::PublisherNotVerified);
-                }
-            };
-
-            // Verify possession against an active signing key (the current
-            // one, or the second one while the publisher rotates): a
-            // publisher that has rotated its key must still be able to launch
-            // instances of an already-published package, and control of an
-            // active key is the strongest possession proof available. This
-            // can differ from `package_signing_key_id`, which is the
-            // (possibly retired) key that signed the stored manifest.
-            let publishing_keys = manager
-                .active_keys(publisher_name)
-                .await
-                .map_err(Self::map_publisher_verification_error)?;
-
-            let manifest_sha256_hex = hex::encode(request_manifest_hash);
-            let mut result = Err(AidError::PublisherNotVerified);
-            for (key_id, public_key) in &publishing_keys {
-                result = Self::verify_publisher_auth(
-                    &pool,
-                    public_key,
-                    publisher_name,
-                    key_id,
-                    &request.realm,
-                    actr_type,
-                    target_ref,
-                    &manifest_sha256_hex,
-                    publisher_auth_signature.as_ref(),
-                    publisher_auth_signed_at,
-                    publisher_auth_nonce.as_ref(),
-                )
-                .await;
-                if !matches!(result, Err(AidError::PublisherNotVerified)) {
-                    break;
-                }
-            }
-            let binding = result?;
-
-            platform::recording::debug!(
-                "Publisher Registry table lookup passed, type_str={}, target={}, package_signing_key_id={}, publisher_key_id={}",
-                type_str,
-                target_ref,
-                package_signing_key_id,
-                binding.signing_key_id
-            );
-            return Ok(Some(binding));
         }
 
-        // Path 2: not in table -> verify package signature + publisher authorization
-        // (own package, not yet published).
-        let (
-            manifest_bytes,
-            publisher_signature,
-            publisher_auth_signature,
-            publisher_auth_signed_at,
-            publisher_auth_nonce,
-        ) = match (
-            &request.manifest_raw,
-            &request.publisher_signature,
-            &request.publisher_auth_signature,
-            request.publisher_auth_signed_at,
-            &request.publisher_auth_nonce,
-        ) {
-            (
-                Some(manifest_bytes),
-                Some(publisher_signature),
-                Some(publisher_auth_signature),
-                Some(publisher_auth_signed_at),
-                Some(publisher_auth_nonce),
-            ) => (
-                manifest_bytes,
-                publisher_signature,
-                publisher_auth_signature,
-                publisher_auth_signed_at,
-                publisher_auth_nonce,
-            ),
-            _ => {
-                platform::recording::warn!(
-                    "Publisher Registry verification failed: unpublished package requires manifest_raw, publisher_signature, publisher_auth_signature, publisher_auth_signed_at, and publisher_auth_nonce; type_str={}",
-                    type_str
-                );
-                return Err(AidError::PublisherNotVerified);
+        let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool);
+        let (public_key, provenance) = match manager
+            .package_signing_key(&actr_type.publisher, signing_key_id)
+            .await
+            .map_err(Self::map_publisher_verification_error)?
+        {
+            actrix_publisher_registry::manager::PackageSigningKey::Trusted(info) => {
+                (info.public_key, Provenance::Publisher)
+            }
+            actrix_publisher_registry::manager::PackageSigningKey::Untrusted => {
+                let key = request
+                    .signing_public_key
+                    .as_ref()
+                    .filter(|key| {
+                        actrix_publisher_registry::crypto::compute_key_id(key) == signing_key_id
+                    })
+                    .ok_or_else(|| {
+                        platform::recording::warn!(
+                            "Package verification failed: development package needs the signing_public_key of key {}; type_str={}",
+                            signing_key_id,
+                            type_str
+                        );
+                        AidError::PublisherNotVerified
+                    })?;
+                (BASE64_STANDARD.encode(key), Provenance::Development)
             }
         };
 
-        // Parse manifest using standard TOML. Reject if not valid UTF-8/TOML —
-        // unparseable manifests must not bypass the identity binding check below.
-        let manifest_str = std::str::from_utf8(manifest_bytes.as_ref()).map_err(|_| {
-            platform::recording::warn!("Publisher Registry manifest_raw is not valid UTF-8");
-            AidError::InvalidFormat
-        })?;
-        let manifest_toml: toml::Value = manifest_str.parse().map_err(|e| {
-            platform::recording::warn!("Publisher Registry manifest_raw is not valid TOML: {}", e);
-            AidError::InvalidFormat
-        })?;
-
-        // Extract signing_key_id — mandatory for all modern packages.
-        // Without it, we cannot reliably resolve the correct Publisher Registry key after rotation.
-        let signing_key_id = manifest_toml
-            .get("signing_key_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                platform::recording::warn!(
-                    "Publisher Registry manifest_raw missing 'signing_key_id', publisher={}",
-                    publisher_name
-                );
-                AidError::InvalidFormat
-            })?
-            .to_string();
-
-        // Look up the publisher's public key by key_id (supports current + historical)
-        let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool.clone());
-        let publisher_info = manager
-            .resolve_key_by_id(publisher_name, &signing_key_id)
-            .await
-            .map_err(Self::map_publisher_verification_error)?;
-
-        // Verify package manifest signature using the publisher's public key.
-        let sig_b64 = base64::prelude::BASE64_STANDARD.encode(publisher_signature.as_ref());
         let valid = actrix_publisher_registry::crypto::verify_signature(
-            manifest_bytes.as_ref(),
-            &sig_b64,
-            &publisher_info.public_key,
+            manifest_bytes,
+            &BASE64_STANDARD.encode(signature),
+            &public_key,
         )
         .map_err(|e| {
             platform::recording::warn!(
-                "Publisher Registry signature verification error: publisher={}, err={}",
-                publisher_name,
+                "Package signature verification error: type_str={}, err={}",
+                type_str,
                 e
             );
-            AidError::GenerationFailed(format!("Signature verification error: {e}"))
+            AidError::PublisherNotVerified
         })?;
-
         if !valid {
             platform::recording::warn!(
-                "Publisher Registry signature verification failed: invalid signature, type_str={}",
-                type_str
+                "Package signature verification failed: type_str={}, key_id={}",
+                type_str,
+                signing_key_id
             );
             return Err(AidError::PublisherNotVerified);
         }
-
-        // SECURITY: Verify that manifest identity matches the RegisterRequest.
-        // Without this check, an attacker holding any valid signed manifest from
-        // the same Publisher Registry could reuse it to register a different actr_type/target.
-        let m_publisher = manifest_toml
-            .get("publisher")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let m_name = manifest_toml
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let m_version = manifest_toml
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let m_target = manifest_toml
-            .get("binary")
-            .and_then(|b| b.get("target"))
-            .and_then(|v| v.as_str());
-
-        // Check publisher/name/version match actr_type.
-        if m_publisher != actr_type.publisher
-            || m_name != actr_type.name
-            || m_version != actr_type.version
-        {
-            platform::recording::warn!(
-                "Publisher manifest identity mismatch: manifest={}/{}@{}, request={}",
-                m_publisher,
-                m_name,
-                m_version,
-                type_str
-            );
-            return Err(AidError::PublisherNotVerified);
-        }
-
-        // The Publisher Registry-signed manifest must declare binary.target. Falling back to
-        // request.target would leave the manifest signature unbound to target,
-        // letting one signed manifest be registered under arbitrary targets.
-        // Mirror Path 1, where the registry row's target is authoritative.
-        let manifest_target = m_target.ok_or_else(|| {
-            platform::recording::warn!(
-                "Publisher Registry manifest missing binary.target; type_str={}",
-                type_str
-            );
-            AidError::InvalidFormat
-        })?;
-
-        // request.target is guaranteed non-empty by the entry guard; ensure it
-        // matches the target the Publisher Registry signed into the manifest.
-        if let Some(req_target) = request.target.as_deref() {
-            if req_target != manifest_target {
-                platform::recording::warn!(
-                    "Publisher Registry manifest target mismatch: manifest={}, request={}",
-                    manifest_target,
-                    req_target
-                );
-                return Err(AidError::PublisherNotVerified);
-            }
-        }
-        let manifest_sha256_hex = {
-            use sha2::{Digest, Sha256};
-            hex::encode(Sha256::digest(manifest_bytes.as_ref()))
-        };
-        let binding = Self::verify_publisher_auth(
-            &pool,
-            &publisher_info.public_key,
-            publisher_name,
-            &signing_key_id,
-            &request.realm,
-            actr_type,
-            manifest_target,
-            &manifest_sha256_hex,
-            publisher_auth_signature.as_ref(),
-            publisher_auth_signed_at,
-            publisher_auth_nonce.as_ref(),
-        )
-        .await?;
 
         platform::recording::debug!(
-            "Publisher Registry manifest and publisher signature verification passed, type_str={}",
-            type_str
+            "Package provenance verified: type_str={}, target={}, key_id={}, provenance={:?}",
+            type_str,
+            target,
+            signing_key_id,
+            provenance
         );
-        Ok(Some(binding))
+        Ok(provenance)
     }
 
     fn map_publisher_verification_error(
@@ -1067,197 +888,6 @@ impl AIdIssuer {
         }
     }
 
-    fn unix_now_secs() -> Result<u64, AidError> {
-        crate::renewal::try_now_secs()
-            .map_err(|e| AidError::InvalidTimestamp(format!("system clock before Unix epoch: {e}")))
-    }
-
-    fn verify_publisher_auth_signed_at(signed_at: u64, now: u64) -> Result<(), AidError> {
-        if signed_at > now.saturating_add(PUBLISHER_SIGNED_AT_FUTURE_SKEW_SECS) {
-            platform::recording::warn!(
-                "publisher_auth_signed_at is too far in the future: signed_at={}, now={}, future_skew_secs={}",
-                signed_at,
-                now,
-                PUBLISHER_SIGNED_AT_FUTURE_SKEW_SECS
-            );
-            return Err(AidError::InvalidTimestamp(
-                "publisher_auth_signed_at is too far in the future".to_string(),
-            ));
-        }
-
-        if now.saturating_sub(signed_at) > PUBLISHER_SIGNED_AT_MAX_AGE_SECS {
-            platform::recording::warn!(
-                "publisher_auth_signed_at outside max age: signed_at={}, now={}, max_age_secs={}",
-                signed_at,
-                now,
-                PUBLISHER_SIGNED_AT_MAX_AGE_SECS
-            );
-            return Err(AidError::Expired);
-        }
-
-        Ok(())
-    }
-
-    /// Verify a publisher-possession proof (`publisher_auth`) for package
-    /// registration and check — but not consume — its one-time nonce.
-    ///
-    /// Shared by both package registration paths. Whether or not a registry row
-    /// already exists, an authorized publisher launch is distinguished from a
-    /// caller who merely is a Realm member and holds the public manifest by a
-    /// fresh single-use nonce plus a domain-separated signature binding this
-    /// realm, actr_type, target, and manifest hash to the publisher's signing
-    /// key. `signing_key_id` scopes the nonce and is recorded for audit.
-    ///
-    /// The nonce is **not** burned here. Verification only checks that an
-    /// unexpired row does not already exist for this nonce. The caller is
-    /// responsible for consuming the nonce (INSERT) at the correct point:
-    /// `/register` burns it immediately after this call returns; `/reissue`
-    /// defers the burn to the transaction that commits the attempt, so a
-    /// request that never completed leaves the attempt retriable. The returned
-    /// [`PublisherAuthBinding`] carries the identity needed for that
-    /// deferred INSERT.
-    #[allow(clippy::too_many_arguments)]
-    async fn verify_publisher_auth(
-        pool: &sqlx::SqlitePool,
-        publisher_public_key: &str,
-        publisher_name: &str,
-        signing_key_id: &str,
-        realm: &str,
-        actr_type: &ActrType,
-        target: &str,
-        manifest_sha256_hex: &str,
-        publisher_auth_signature: &[u8],
-        publisher_auth_signed_at: u64,
-        publisher_auth_nonce: &[u8],
-    ) -> Result<PublisherAuthBinding, AidError> {
-        if !matches!(publisher_auth_nonce.len(), 16 | 32) {
-            platform::recording::warn!(
-                "publisher_auth_nonce has invalid length: len={}, publisher={}",
-                publisher_auth_nonce.len(),
-                publisher_name
-            );
-            return Err(AidError::InvalidFormat);
-        }
-
-        let now = Self::unix_now_secs()?;
-        Self::verify_publisher_auth_signed_at(publisher_auth_signed_at, now)?;
-
-        let publisher_payload = actr_protocol::build_publisher_register_payload(
-            actr_protocol::PublisherRegisterPayload {
-                realm,
-                actr_type,
-                target,
-                manifest_sha256_hex,
-                publisher_auth_signed_at,
-                publisher_auth_nonce,
-            },
-        );
-        let publisher_sig_b64 = base64::prelude::BASE64_STANDARD.encode(publisher_auth_signature);
-        let publisher_valid = actrix_publisher_registry::crypto::verify_signature(
-            publisher_payload.as_bytes(),
-            &publisher_sig_b64,
-            publisher_public_key,
-        )
-        .map_err(|e| {
-            platform::recording::warn!(
-                "publisher_auth_signature verification error: publisher={}, key_id={}, err={}",
-                publisher_name,
-                signing_key_id,
-                e
-            );
-            AidError::GenerationFailed(format!("Publisher signature verification error: {e}"))
-        })?;
-
-        if !publisher_valid {
-            platform::recording::warn!(
-                "publisher_auth_signature verification failed: publisher={}, key_id={}, actr_type={}",
-                publisher_name,
-                signing_key_id,
-                actr_type.to_string_repr()
-            );
-            return Err(AidError::PublisherNotVerified);
-        }
-
-        // Check-only — reject an already-consumed (still-unexpired) nonce
-        // without burning it. Consumption is deferred to the caller's commit
-        // transaction. An expired nonce row is treated as unused: the GC in
-        // `consume_publisher_auth_nonce` reclaims it.
-        let now_i64 = i64::try_from(now)
-            .map_err(|_| AidError::InvalidTimestamp("current time exceeds i64".to_string()))?;
-        let already_consumed: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM issuer_publisher_auth_nonce
-             WHERE publisher = ?1 AND key_id = ?2 AND nonce = ?3 AND expires_at > ?4)",
-        )
-        .bind(publisher_name)
-        .bind(signing_key_id)
-        .bind(publisher_auth_nonce)
-        .bind(now_i64)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AidError::GenerationFailed(format!("publisher nonce check failed: {e}")))?;
-        if already_consumed {
-            platform::recording::warn!(
-                "publisher_auth_nonce replay detected during verify: publisher={}, key_id={}",
-                publisher_name,
-                signing_key_id
-            );
-            return Err(AidError::PublisherNotVerified);
-        }
-
-        Ok(PublisherAuthBinding {
-            publisher: publisher_name.to_string(),
-            signing_key_id: signing_key_id.to_string(),
-            nonce: publisher_auth_nonce.to_vec(),
-        })
-    }
-
-    /// Consume a publisher-auth nonce; `PublisherNotVerified` if it already was.
-    pub(crate) async fn consume_publisher_auth_nonce(
-        conn: &mut sqlx::SqliteConnection,
-        publisher: &str,
-        signing_key_id: &str,
-        publisher_auth_nonce: &[u8],
-        now: i64,
-    ) -> Result<(), AidError> {
-        let now_i64 = now;
-        let expires_at = now_i64.saturating_add(PUBLISHER_NONCE_TTL_SECS as i64);
-
-        sqlx::query("DELETE FROM issuer_publisher_auth_nonce WHERE expires_at < ?")
-            .bind(now_i64)
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("publisher nonce cleanup failed: {e}"))
-            })?;
-
-        let result = sqlx::query(
-            "INSERT INTO issuer_publisher_auth_nonce (publisher, key_id, nonce, created_at, expires_at)
-             VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(publisher)
-        .bind(signing_key_id)
-        .bind(publisher_auth_nonce)
-        .bind(now_i64)
-        .bind(expires_at)
-        .execute(&mut *conn)
-        .await;
-
-        match result {
-            Ok(_) => Ok(()),
-            Err(sqlx::Error::Database(err)) if err.is_unique_violation() => {
-                platform::recording::warn!(
-                    "publisher_auth_nonce replay detected: publisher={}, key_id={}",
-                    publisher,
-                    signing_key_id
-                );
-                Err(AidError::PublisherNotVerified)
-            }
-            Err(err) => Err(AidError::GenerationFailed(format!(
-                "publisher nonce consume failed: {err}"
-            ))),
-        }
-    }
-
     /// Generate ActrId.
     async fn generate_actr_id(
         &self,
@@ -1265,6 +895,7 @@ impl AIdIssuer {
         realm: &str,
         target: Option<&str>,
         auth_mode: actr_protocol::RegisterAuthMode,
+        development: bool,
         signer: &Signer,
     ) -> Result<ActrId, AidError> {
         let pool = platform::storage::db::get_database().get_pool();
@@ -1282,8 +913,8 @@ impl AIdIssuer {
             let reserved = sqlx::query(
                 "INSERT OR IGNORE INTO issued_actor_identity
                  (realm, serial_number, actor_type, target, issued_at, auth_mode,
-                  member_id, client_key_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  development, member_id, client_key_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(realm)
             .bind(serial_number as i64)
@@ -1291,6 +922,7 @@ impl AIdIssuer {
             .bind(target)
             .bind(issued_at)
             .bind(auth_mode as i32)
+            .bind(development)
             .bind(&signer.member_id)
             .bind(&signer.key_id)
             .execute(pool)
@@ -1445,13 +1077,13 @@ impl AIdIssuer {
             .map_err(|e| AidError::GenerationFailed(format!("database connection failed: {e}")))
     }
 
-    /// Load the Actor type and auth mode recorded when `actor_id` was issued.
+    /// Load what was recorded when `actor_id` was issued.
     async fn issued_actor(
         conn: &mut sqlx::SqliteConnection,
         actor_id: &ActrId,
-    ) -> Result<(ActrType, Option<i32>), AidError> {
-        let row: Option<(String, Option<i32>)> = sqlx::query_as(
-            "SELECT actor_type, auth_mode FROM issued_actor_identity
+    ) -> Result<IssuedActor, AidError> {
+        let row: Option<(String, Option<i32>, bool)> = sqlx::query_as(
+            "SELECT actor_type, auth_mode, development FROM issued_actor_identity
              WHERE realm = ? AND serial_number = ?",
         )
         .bind(&actor_id.realm)
@@ -1459,7 +1091,7 @@ impl AIdIssuer {
         .fetch_optional(conn)
         .await
         .map_err(|e| AidError::GenerationFailed(format!("actor identity lookup failed: {e}")))?;
-        let Some((actor_type, auth_mode)) = row else {
+        let Some((actor_type, auth_mode, development)) = row else {
             platform::recording::warn!(
                 "Credential issuance rejected: actor {} was not issued by this Realm",
                 actor_id.to_string_repr()
@@ -1469,7 +1101,11 @@ impl AIdIssuer {
         let actor_type = ActrType::from_string_repr(&actor_type).map_err(|e| {
             AidError::GenerationFailed(format!("stored actor type is invalid: {e}"))
         })?;
-        Ok((actor_type, auth_mode))
+        Ok(IssuedActor {
+            actor_type,
+            auth_mode,
+            development,
+        })
     }
 
     /// Re-validate that an existing actor may still receive credentials.
@@ -1483,15 +1119,17 @@ impl AIdIssuer {
     ///
     /// - AIS-04: the actor must not be on the explicit revocation list.
     /// - AIS-03: the realm must still exist and be in a usable state.
-    /// - AIS-03: any published package must remain active, and every package
-    ///   identity (including unpublished packages) requires an active publisher.
-    ///   Explicit Linked identities without a package row skip publisher checks.
+    /// - AIS-03: any published package must remain active. A Publisher
+    ///   identity requires its publisher to stay active; a development
+    ///   identity requires its publisher name to stay absent from the
+    ///   registry. Explicit Linked identities without a package row skip
+    ///   publisher checks.
     async fn recheck_existing_actor(
         &self,
         actor_id: &ActrId,
         target: Option<&str>,
         signer: &Signer,
-    ) -> Result<ActrType, AidError> {
+    ) -> Result<IssuedActor, AidError> {
         Self::recheck_actor_on(&mut *Self::db_connection().await?, actor_id, target, signer).await
     }
 
@@ -1504,7 +1142,7 @@ impl AIdIssuer {
         actor_id: &ActrId,
         target: Option<&str>,
         signer: &Signer,
-    ) -> Result<ActrType, AidError> {
+    ) -> Result<IssuedActor, AidError> {
         // AIS-04: an explicitly revoked identity is terminal, regardless of any
         // still-valid renewal token it may hold.
         if crate::renewal::is_actor_revoked(&mut *conn, actor_id)
@@ -1553,7 +1191,8 @@ impl AIdIssuer {
 
         // AIS-03(b): recheck package/publisher status for package identities.
         // The Actor type is the one recorded when the identity was issued.
-        let (actor_type, auth_mode) = Self::issued_actor(&mut *conn, actor_id).await?;
+        let issued = Self::issued_actor(&mut *conn, actor_id).await?;
+        let (actor_type, auth_mode) = (&issued.actor_type, issued.auth_mode);
         let type_str = actor_type.to_program_identity();
         // Any package row (regardless of lifecycle status) for this type marks a
         // published-package identity. `publisher_package.status` stores 'active' or
@@ -1586,7 +1225,7 @@ impl AIdIssuer {
 
         if statuses.is_empty() && auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32)
         {
-            return Ok(actor_type);
+            return Ok(issued);
         }
 
         let has_active = statuses.iter().any(|status| status == "active");
@@ -1599,15 +1238,32 @@ impl AIdIssuer {
             return Err(AidError::PackageRevoked);
         }
 
-        // Published and unpublished package identities both require an active publisher.
+        let publisher_name =
+            actrix_publisher_registry::reserved::canonical_publisher_domain(&actor_type.publisher)
+                .unwrap_or_else(|_| actor_type.publisher.to_ascii_lowercase());
         let publisher: Option<String> =
             sqlx::query_scalar("SELECT status FROM publisher WHERE name = ?")
-                .bind(&actor_type.publisher)
+                .bind(&publisher_name)
                 .fetch_optional(&mut *conn)
                 .await
                 .map_err(|e| {
                     AidError::GenerationFailed(format!("publisher status lookup failed: {e}"))
                 })?;
+        // A development identity keeps renewing only while no registry record
+        // holds its publisher name.
+        if issued.development {
+            return match publisher {
+                None => Ok(issued),
+                Some(_) => {
+                    platform::recording::warn!(
+                        "Credential issuance rejected: development identity {} claims publisher {}, now held by the Publisher Registry",
+                        actor_id.to_string_repr(),
+                        actor_type.publisher
+                    );
+                    Err(AidError::PublisherNotVerified)
+                }
+            };
+        }
         // Pre-upgrade rows have no auth mode. A DNS-style identity is always a
         // package identity; a non-domain identity without a publisher or package
         // is the legacy linked case. Known package identities never take this fallback.
@@ -1616,14 +1272,15 @@ impl AIdIssuer {
             && publisher.is_none()
             && !actor_type.publisher.contains('.')
         {
-            return Ok(actor_type);
+            return Ok(issued);
         }
+        // A Publisher identity requires its publisher to stay active.
         match publisher {
             Some(status)
                 if status
                     == actrix_publisher_registry::model::PublisherStatus::Active.to_string() =>
             {
-                Ok(actor_type)
+                Ok(issued)
             }
             Some(status) => {
                 platform::recording::warn!(
@@ -1636,7 +1293,7 @@ impl AIdIssuer {
             }
             None => {
                 platform::recording::warn!(
-                    "Credential issuance rejected: publisher {} for active package type {} no longer exists",
+                    "Credential issuance rejected: publisher {} for package type {} no longer exists",
                     actor_type.publisher,
                     type_str
                 );
@@ -1658,7 +1315,7 @@ impl AIdIssuer {
         // Re-validate realm/package/publisher state and the revocation list
         // before signing (AIS-03 / AIS-04). Covers both /renew and /reissue,
         // which are the only callers of this method.
-        let actor_type = self
+        let issued = self
             .recheck_existing_actor(actor_id, target, signer)
             .await?;
 
@@ -1673,10 +1330,11 @@ impl AIdIssuer {
             issuer: actor_id.realm.clone(),
             provider: self.config.provider_id.clone(),
             audience: "actr.signaling".to_string(),
-            actor_type,
+            actor_type: issued.actor_type,
             member: signer.member_id.clone(),
             client_key: signer.key_id.clone(),
             role: actr_protocol::MemberRole::from(signer.role) as i32,
+            development: issued.development.then_some(true),
         };
 
         let claims_bytes = claims_proto.encode_to_vec();

@@ -35,7 +35,6 @@ pub mod authority;
 pub mod error;
 pub mod message;
 pub mod name;
-pub mod publisher_auth;
 pub mod realm_management;
 pub mod realm_membership;
 pub mod realm_profile;
@@ -48,7 +47,6 @@ pub use authority::*;
 pub use error::*;
 pub use message::RpcRequest;
 pub use name::*;
-pub use publisher_auth::*;
 
 // Re-export prost and prost_types for downstream crates
 // This ensures a single source of truth for protobuf dependencies

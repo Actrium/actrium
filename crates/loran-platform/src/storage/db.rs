@@ -353,6 +353,7 @@ impl Database {
                 actor_type TEXT NOT NULL,
                 target TEXT,
                 auth_mode INTEGER,
+                development INTEGER NOT NULL DEFAULT 0,
                 member_id TEXT NOT NULL,
                 client_key_id TEXT NOT NULL,
                 issued_at INTEGER NOT NULL,
@@ -476,30 +477,6 @@ impl Database {
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_publisher_publish_nonce_expires
              ON publisher_publish_nonce(expires_at)",
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        // Issuer unpublished package publisher-proof nonce table. Issuer inserts
-        // after publisher_auth_signature verification; the unique index is the
-        // replay guard.
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS issuer_publisher_auth_nonce (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                publisher TEXT    NOT NULL,
-                key_id       TEXT    NOT NULL,
-                nonce        BLOB    NOT NULL,
-                created_at   INTEGER NOT NULL,
-                expires_at   INTEGER NOT NULL,
-                UNIQUE(publisher, key_id, nonce)
-            )",
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_issuer_publisher_auth_nonce_expires
-             ON issuer_publisher_auth_nonce(expires_at)",
         )
         .execute(&mut *tx)
         .await?;
