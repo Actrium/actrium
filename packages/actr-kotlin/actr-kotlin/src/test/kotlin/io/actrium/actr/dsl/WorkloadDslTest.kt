@@ -28,7 +28,6 @@ class WorkloadDslTest {
                 )
             val workload =
                 workload {
-                    realm = 7u
                     type = "acme/EchoClient@1.2.3"
                     onStart {
                         calls += "start"
@@ -62,13 +61,11 @@ class WorkloadDslTest {
         val direct =
             WorkloadBuilder()
                 .apply {
-                    realm = 11u
                     type(ActrType("acme", "DirectWorker", "2.0.0"))
                 }
         val named =
             WorkloadBuilder()
                 .apply {
-                    realm = 12u
                     type("demo", "NamedWorker", "3.1.4")
                 }
 
@@ -79,21 +76,12 @@ class WorkloadDslTest {
     }
 
     @Test
-    fun `workload builder validates required fields`() {
-        val missingRealm =
-            assertFailsWith<IllegalArgumentException> {
-                workload {
-                    type = "acme/EchoClient@1.0.0"
-                }
-            }
+    fun `workload builder requires a type`() {
         val missingType =
             assertFailsWith<IllegalArgumentException> {
-                workload {
-                    realm = 7u
-                }
+                workload {}
             }
 
-        assertTrue("realm" in missingRealm.message.orEmpty())
         assertTrue("type" in missingType.message.orEmpty())
     }
 
@@ -101,7 +89,7 @@ class WorkloadDslTest {
     fun `simple workload tracks target server and rejects unimplemented dispatch`() =
         runTest {
             val target = actorId(42uL)
-            val workload = SimpleWorkload(7u, "acme/EchoClient@1.0.0")
+            val workload = SimpleWorkload("acme/EchoClient@1.0.0")
 
             assertNull(workload.getTargetServerId())
             workload.setTargetServerId(target)
@@ -122,10 +110,7 @@ class WorkloadDslTest {
     fun `routed workload tracks target server and keeps default lifecycle noops`() =
         runTest {
             val workload =
-                object : RoutedWorkload(
-                    realmId = 9u,
-                    typeString = "acme/RoutedClient@1.0.0",
-                ) {}
+                object : RoutedWorkload(typeString = "acme/RoutedClient@1.0.0") {}
             val target = actorId(43uL)
 
             assertNull(workload.getTargetServerId())

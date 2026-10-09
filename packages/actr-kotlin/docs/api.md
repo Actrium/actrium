@@ -204,7 +204,7 @@ interface Workload {
 |-------|-------------|
 | `SimpleWorkload` | Concrete workload with DataChunk channel support, target server routing, and handler hooks |
 | `RoutedWorkload` | Abstract base class with target server routing — subclass and override lifecycle hooks |
-| `WorkloadBuilder` | DSL builder: `workload { realm = ...; type = ...; onStart { }; onStop { } }` |
+| `WorkloadBuilder` | DSL builder: `workload { type = ...; onStart { }; onStop { } }` |
 
 **Factory functions:**
 
