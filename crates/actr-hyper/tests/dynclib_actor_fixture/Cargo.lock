@@ -35,6 +35,7 @@ dependencies = [
  "prost-types",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "uniffi",
  "uuid",
