@@ -650,6 +650,17 @@ async fn close_peer_allows_fresh_offer_rebuild_with_monotone_lifecycle_floors() 
     assert!(mgr.close_peer(&peer).await);
     let retired_snapshot = retired.snapshot();
 
+    // With no new signaling, delayed callbacks from the retired generation
+    // must neither restore its snapshot nor recreate a registry entry. Keep
+    // this negative separate from the legitimate fresh Offer below.
+    retired.inject_peer_connection_state_for_test(RTCPeerConnectionState::Connected);
+    retired.inject_peer_connection_state_for_test(RTCPeerConnectionState::Connecting);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(mgr.peer_count().await, 0);
+    assert!(mgr.get_controller(&peer).await.is_none());
+    assert_eq!(retired.snapshot(), retired_snapshot);
+    assert!(!retired_snapshot.sendable);
+
     let mut fresh_offer = RTCSessionDescription::default();
     fresh_offer.sdp_type = webrtc::peer_connection::RTCSdpType::Offer;
     mgr.handle_incoming_offer(peer.clone(), fresh_offer).await;
