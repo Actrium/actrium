@@ -978,6 +978,13 @@ struct DataChunkRecorder {
 }
 
 impl DataChunkRecorder {
+    fn clear(&self) {
+        self.streams
+            .lock()
+            .expect("test DataChunk recorder lock poisoned")
+            .clear();
+    }
+
     fn record(&self, stream_id: String, payload: bytes::Bytes) {
         let mut streams = self
             .streams
@@ -1020,6 +1027,8 @@ impl TestPeerOptions {
         }
     }
 
+    /// Set the identity used by signaling, RTC, and serial-based RPC helpers.
+    /// Its serial number must equal this fixture slot's serial.
     pub fn with_identity(mut self, identity: ActrId) -> Self {
         self.identity = Some(identity);
         self
@@ -1054,6 +1063,7 @@ pub struct TestPeer {
     pub transport_manager: Arc<PeerTransport>,
     pub rtc: TestRtcControl,
     pub hooks: TestRtcHookRecorder,
+    peer_identities: Arc<StdMutex<HashMap<u64, ActrId>>>,
     credential: AIdCredential,
     request_counts: Arc<StdMutex<HashMap<String, usize>>>,
     request_changed: Arc<Notify>,
@@ -1148,6 +1158,13 @@ impl TestPeer {
         self.data_chunks.snapshot(stream_id)
     }
 
+    /// Release all per-stream counts and retained latest payloads between soak
+    /// phases. Call after the phase's sends and count waits have completed;
+    /// subsequent chunks start new counts. The raw payload queue is separate.
+    pub fn clear_data_chunk_observations(&self) {
+        self.data_chunks.clear();
+    }
+
     /// Wait for an inbound stream to reach the requested delivery count.
     pub async fn wait_data_chunk_count(
         &self,
@@ -1198,6 +1215,8 @@ impl TestPeer {
         self.spawn_request_with_route(target_serial, request_id, "test.method", timeout_ms)
     }
 
+    /// Resolve the target serial through the harness's current peer registry.
+    /// An absent peer returns `Unavailable` without creating a default identity.
     pub fn spawn_request_with_route(
         &self,
         target_serial: u64,
@@ -1206,7 +1225,12 @@ impl TestPeer {
         timeout_ms: u32,
     ) -> tokio::task::JoinHandle<actr_protocol::ActorResult<actr_framework::Bytes>> {
         let gate = self.gate.clone();
-        let target = make_actor_id(target_serial);
+        let target = self
+            .peer_identities
+            .lock()
+            .expect("test peer identity map lock poisoned")
+            .get(&target_serial)
+            .cloned();
         let envelope = RpcEnvelope {
             request_id: request_id.to_string(),
             route_key: route_key.to_string(),
@@ -1214,7 +1238,14 @@ impl TestPeer {
             timeout_ms: timeout_ms as i64,
             ..Default::default()
         };
-        tokio::spawn(async move { gate.send_request(&target, envelope).await })
+        tokio::spawn(async move {
+            let target = target.ok_or_else(|| {
+                ActrError::Unavailable(format!(
+                    "test peer {target_serial} is not registered in this harness"
+                ))
+            })?;
+            gate.send_request(&target, envelope).await
+        })
     }
 
     /// The harness dispatcher is always active; this handle preserves the
@@ -1287,6 +1318,7 @@ pub struct TestHarness {
     wildcard_rebind_addresses: bool,
     address_providers: HashMap<u64, Arc<TestLocalAddressProvider>>,
     peers: HashMap<u64, TestPeer>,
+    peer_identities: Arc<StdMutex<HashMap<u64, ActrId>>>,
     bg_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -1315,6 +1347,7 @@ impl TestHarness {
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
+            peer_identities: Default::default(),
             bg_tasks: Vec::new(),
         }
     }
@@ -1334,6 +1367,7 @@ impl TestHarness {
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
+            peer_identities: Default::default(),
             bg_tasks: Vec::new(),
         }
     }
@@ -1354,6 +1388,7 @@ impl TestHarness {
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
+            peer_identities: Default::default(),
             bg_tasks: Vec::new(),
         }
     }
@@ -1373,6 +1408,7 @@ impl TestHarness {
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
+            peer_identities: Default::default(),
             bg_tasks: Vec::new(),
         }
     }
@@ -1704,6 +1740,10 @@ impl TestHarness {
                 .insert(serial, mutable_address_provider);
         }
 
+        self.peer_identities
+            .lock()
+            .expect("test peer identity map lock poisoned")
+            .insert(serial, id.clone());
         self.peers.insert(
             serial,
             TestPeer {
@@ -1713,6 +1753,7 @@ impl TestHarness {
                 transport_manager,
                 rtc: TestRtcControl::new(manager),
                 hooks,
+                peer_identities: self.peer_identities.clone(),
                 credential,
                 request_counts,
                 request_changed,
@@ -1761,6 +1802,10 @@ impl TestHarness {
         let Some(peer) = self.peers.remove(&serial) else {
             return false;
         };
+        self.peer_identities
+            .lock()
+            .expect("test peer identity map lock poisoned")
+            .remove(&serial);
         self.address_providers.remove(&serial);
         peer.shutdown().await;
         true

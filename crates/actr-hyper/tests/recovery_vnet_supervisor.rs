@@ -8,9 +8,128 @@ use actr_hyper::lifecycle::{
     AppLifecycleState, NetworkAvailability, NetworkEventProcessor, NetworkSnapshot,
     NetworkTransportFlags, SignalingFactLostCause, SignalingFactOrigin,
 };
-use actr_hyper::test_support::{TestHarness, TestSignalingServer, spawn_network_event_supervisor};
+use actr_hyper::test_support::{
+    TestHarness, TestPeerOptions, TestSignalingServer, spawn_network_event_supervisor,
+};
 use actr_protocol::prost::Message as _;
-use actr_protocol::{DataChunk, PayloadType};
+use actr_protocol::{ActrError, ActrId, ActrType, DataChunk, PayloadType, Realm};
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn serial_rpc_helpers_follow_custom_identities_and_peer_replacement() {
+    let identity = |serial, realm, name: &str| ActrId {
+        realm: Realm { realm_id: realm },
+        serial_number: serial,
+        r#type: ActrType {
+            manufacturer: "custom".into(),
+            name: name.into(),
+            version: "2.0.0".into(),
+        },
+    };
+    let mut harness = TestHarness::with_vnet().await;
+    let source_id = identity(310, 19, "source");
+    let old_target_id = identity(320, 19, "old-target");
+    harness
+        .add_peer_with_options(TestPeerOptions::new(310).with_identity(source_id))
+        .await;
+    harness
+        .add_peer_with_options(TestPeerOptions::new(320).with_identity(old_target_id.clone()))
+        .await;
+    harness.connect(310, 320).await;
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        harness
+            .peer(310)
+            .spawn_request(320, "custom-target-default-route", 3_000),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .expect("serial helper must reach the configured target identity");
+    assert_eq!(response.as_ref(), b"pong");
+    assert_eq!(
+        harness
+            .peer(320)
+            .request_count("custom-target-default-route"),
+        1
+    );
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        harness.peer(320).spawn_request_with_route(
+            310,
+            "custom-source-explicit-route",
+            "test.method",
+            3_000,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .expect("route helper must resolve the custom source as its target");
+    assert_eq!(response.as_ref(), b"pong");
+    assert_eq!(
+        harness
+            .peer(310)
+            .request_count("custom-source-explicit-route"),
+        1
+    );
+
+    assert!(harness.peer(310).rtc.close_peer(&old_target_id).await);
+    assert!(harness.remove_peer(320).await);
+    assert!(matches!(
+        harness
+            .peer(310)
+            .spawn_request(320, "removed-target", 3_000)
+            .await
+            .unwrap(),
+        Err(ActrError::Unavailable(_))
+    ));
+    harness
+        .add_peer_with_options(TestPeerOptions::new(320).with_identity(identity(
+            320,
+            23,
+            "new-target",
+        )))
+        .await;
+    harness.connect(310, 320).await;
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        harness.peer(310).spawn_request_with_route(
+            320,
+            "replaced-custom-target",
+            "test.method",
+            3_000,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .expect("existing source must resolve the replacement identity");
+    assert_eq!(response.as_ref(), b"pong");
+    assert_eq!(harness.peer(320).request_count("replaced-custom-target"), 1);
+    harness.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn passive_observations_can_be_cleared_between_soak_phases() {
+    let harness = setup_bidirectional_vnet().await;
+    send_stream(&harness, 100, 200, "first-stream").await;
+    send_stream(&harness, 100, 200, "second-stream").await;
+    for stream in ["first-stream", "second-stream"] {
+        assert_eq!(
+            harness.peer(200).data_chunk_observation(stream),
+            (1, Some(bytes::Bytes::from_static(b"stream-payload")))
+        );
+    }
+    harness.peer(200).clear_data_chunk_observations();
+    for stream in ["first-stream", "second-stream"] {
+        assert_eq!(harness.peer(200).data_chunk_observation(stream), (0, None));
+    }
+    send_stream(&harness, 100, 200, "first-stream").await;
+    assert_eq!(harness.peer(200).data_chunk_count("first-stream"), 1);
+    rpc(&harness, 100, 200, "rpc-after-observation-clear").await;
+    harness.shutdown().await;
+}
 
 fn snapshot(sequence: u64, availability: NetworkAvailability, wifi: bool) -> NetworkSnapshot {
     NetworkSnapshot {
