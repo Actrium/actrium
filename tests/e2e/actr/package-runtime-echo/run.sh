@@ -54,16 +54,14 @@ if [[ "$BACKEND" != "cdylib" ]]; then
     fail "Only --backend cdylib is supported in this scenario"
 fi
 
-# MODE selects which registration path is exercised:
-#   path1                (default) published package + runner proof, Path 1, full echo round-trip
-#   path1-with-keychain  published package + configured publisher.keychain (Path 1 with runner proof)
-#   path2-happy          unpublished package + runner proof → Path 2 success
-#   path2-no-proof       unpublished package, no keychain → Path 2 rejection
-#   path2-wrong-key      unpublished package, runner proof signed by unrelated key → rejection
-#   rotation             unpublished package, Publisher Registry key retired (pass) then revoked (reject)
-MODE="${MODE:-path1}"
+# MODE selects the scenario. The service host never holds the Publisher's
+# private key: it registers with the signed package and its Realm client key.
+#   published    (default) published package, full echo round-trip
+#   unpublished  package never published to this Loran keeps its Publisher identity
+#   rotation     unpublished package, Publisher key retired (pass) then revoked (reject)
+MODE="${MODE:-published}"
 case "$MODE" in
-    path1|path1-with-keychain|path2-happy|path2-no-proof|path2-wrong-key|rotation) ;;
+    published|unpublished|rotation) ;;
     *) fail "Unknown MODE: $MODE" ;;
 esac
 
@@ -179,7 +177,7 @@ start_actrix() {
     kill_listener tcp "$HTTP_PORT"
     kill_listener udp "$ICE_PORT"
 
-    # ACTRIX_RUST_LOG lets path2 modes capture the debug Path 2 marker.
+    # ACTRIX_RUST_LOG lets modes capture the debug provenance marker.
     RUST_LOG="${ACTRIX_RUST_LOG:-${RUST_LOG:-info}}" \
         "$ACTRIX_BIN" --config "$ACTRIX_CONFIG_PATH" >"$LOG_DIR/actrix.log" 2>&1 &
     ACTRIX_PID=$!
@@ -498,10 +496,8 @@ run_client_and_assert() {
     render_client_runtime_config
     CARGO_TARGET_DIR="$WORKSPACE_TARGET_DIR" cargo build --manifest-path "$SCRIPT_DIR/client/Cargo.toml" >/dev/null
 
-    # The client host registers its packaged workload with Issuer, which (Issuer-02)
-    # requires a runner possession proof of the signing key — pass the same
-    # publisher keychain that signed the client package. The isolated HOME only
-    # keeps the hyper data dir away from the developer's ~/.actr.
+    # The isolated HOME only keeps the hyper data dir away from the
+    # developer's ~/.actr.
     local client_home="$RUN_DIR/home-client"
     mkdir -p "$client_home"
 
@@ -516,7 +512,6 @@ run_client_and_assert() {
         CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
-        CLIENT_GUEST_KEYCHAIN_PATH="$PROVISIONED_KEYCHAIN" \
         RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
         "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
         >"$LOG_DIR/client.log" 2>&1 &
@@ -571,7 +566,6 @@ assert_removed_member_refused() {
         CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
-        CLIENT_GUEST_KEYCHAIN_PATH="$PROVISIONED_KEYCHAIN" \
         RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
         timeout "${CLIENT_TIMEOUT_SECONDS:-40}" \
         "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
@@ -586,7 +580,7 @@ assert_removed_member_refused() {
 }
 
 # ============================================================================
-# Runner-signature / Path 2 mode helpers (P0 isolation + assertions)
+# Mode helpers
 # ============================================================================
 
 # Per-mode isolated HOME and hyper data dir, so actr run never touches the real
@@ -599,33 +593,8 @@ mk_isolated_env() {
     printf '%s\t%s\n' "$home_dir" "$hyper_dir"
 }
 
-# Write the publisher.keychain into the GLOBAL config of an isolated HOME (CWD-independent,
-# since resolve_effective_cli_config reads ~/.actr/config.toml via dirs::home_dir()).
-write_global_keychain_config() {
-    local home_dir="$1"
-    local keychain_path="$2"
-    mkdir -p "$home_dir/.actr"
-    cat >"$home_dir/.actr/config.toml" <<EOF
-[publisher]
-keychain = "$keychain_path"
-EOF
-}
-
-# E2: assert neither the isolated HOME nor the CWD carries a keychain config,
-# so build_runner_auth_provider() is deterministically None.
-assert_no_keychain_config() {
-    local home_dir="$1"
-    if [ -f "$home_dir/.actr/config.toml" ]; then
-        fail "E2 precondition violated: $home_dir/.actr/config.toml exists"
-    fi
-    if [ -f ".actr/config.toml" ]; then
-        fail "E2 precondition violated: CWD .actr/config.toml exists"
-    fi
-    success "Confirmed no keychain config present (provider will be None)"
-}
-
-# P0-2: assert no active publisher_package row for type_str+target, so the request
-# cannot accidentally pass via Path 1.
+# Assert no active publisher_package row for type_str+target: the package was
+# never published to this Loran.
 assert_no_active_package() {
     local type_str="$1"
     local target="$2"
@@ -633,7 +602,7 @@ assert_no_active_package() {
     count="$(sqlite3 "$ACTRIX_DB" \
         "SELECT COUNT(*) FROM publisher_package WHERE type_str='$type_str' AND target='$target' AND status='active';" 2>/dev/null || echo 0)"
     if [ "$count" != "0" ]; then
-        fail "Precondition violated: $count active publisher_package row(s) for type_str=$type_str target=$target (Path 1 would shadow Path 2)"
+        fail "Precondition violated: $count active publisher_package row(s) for type_str=$type_str target=$target"
     fi
     success "Confirmed no active published package for $type_str / $target"
 }
@@ -664,7 +633,7 @@ start_server_isolated() {
     SERVER_PID=$!
 }
 
-# Poll for successful startup (Path 2 success surfaces as "ActrNode started").
+# Poll for successful startup ("ActrNode started").
 expect_server_started() {
     local log_name="${1:-server.log}"
     local attempt=0
@@ -685,9 +654,9 @@ expect_server_started() {
 
 # Poll for expected rejection: server must exit non-zero and log a rejection.
 # Rejection can happen at two stages: Issuer registration ("Failed to register with
-# Issuer") for missing/wrong runner proof, or earlier at package attach
-# ("Failed to attach package: untrusted publisher") when the Publisher Registry key is
-# revoked and cert_cache cannot fetch the pubkey.
+# Issuer"), or earlier at package attach ("Failed to attach package: untrusted
+# publisher") when the Publisher Registry key is revoked and cert_cache cannot
+# fetch the pubkey.
 expect_server_rejected() {
     local log_name="${1:-server.log}"
     local attempt=0
@@ -717,37 +686,13 @@ stop_server() {
     SERVER_PID=""
 }
 
-# Assert actrix.log carries the Path 2 success marker (and NOT the Path 1 marker),
-# proving registration really went through Path 2. Path 2 logs
-# "Publisher Registry manifest and publisher signature verification passed"
-# (issuer.rs); Path 1 logs "Publisher Registry table lookup passed", so the two
-# markers are mutually exclusive.
-assert_path2_taken() {
-    if ! grep -q "manifest and publisher signature verification passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Path 2 success marker not found in actrix.log (did it take Path 1?)"
+# Assert actrix.log shows the package verified with its Publisher identity
+# (not as a development identity).
+assert_publisher_provenance() {
+    if ! grep -q "Package provenance verified.*provenance=Publisher" "$LOG_DIR/actrix.log" 2>/dev/null; then
+        fail "Publisher provenance marker not found in actrix.log"
     fi
-    if grep -q "Publisher Registry table lookup passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Path 1 marker found in actrix.log (should have taken Path 2)"
-    fi
-    success "Confirmed registration went through Path 2"
-}
-
-# Symmetric counterpart to assert_path2_taken: assert registration went through
-# Path 1 (published package, registry table lookup) and NOT Path 2. This catches
-# a silent Path 1 -> Path 2 fallback: if the registry lookup were to miss (e.g.
-# a target/manifest-hash matching regression), a published package with a
-# configured keychain would still succeed via Path 2 and the mode would stay
-# green without actually exercising Path 1. Path 1 logs "Publisher Registry
-# table lookup passed" (issuer.rs); Path 2 logs "...manifest and publisher
-# signature verification passed", so the two markers are mutually exclusive.
-assert_path1_taken() {
-    if ! grep -q "Publisher Registry table lookup passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Path 1 success marker not found in actrix.log (did registration fall through to Path 2, or was the registry lookup missed?)"
-    fi
-    if grep -q "Publisher Registry manifest and publisher signature verification passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Path 2 marker found in actrix.log (should have taken Path 1; the runner proof must resolve through the registry lookup, not the Path 2 signature branch)"
-    fi
-    success "Confirmed registration went through Path 1"
+    success "Confirmed registration kept the Publisher identity"
 }
 
 stop_actrix() {
@@ -762,17 +707,14 @@ stop_actrix() {
 # Mode flows
 # ============================================================================
 
-mode_path1_full_echo() {
-    # Original happy path: publish → run server → client echo round-trip.
-    # Issuer-02: a published package registers via Path 1 only with a runner
-    # possession proof of the publisher's current signing key, so the server
-    # host receives the keychain through its isolated HOME.
+mode_published() {
+    # Publish → run server → client echo round-trip. The server host has no
+    # Publisher keychain: the Realm owner registers with the package alone.
     publish_service_package
     local env
-    env="$(mk_isolated_env "p1")"
+    env="$(mk_isolated_env "published")"
     local home_dir hyper_dir
     IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-    write_global_keychain_config "$home_dir" "$SERVICE_KEYCHAIN"
     start_server_isolated "$home_dir" "$hyper_dir" "server.log"
     expect_server_started "server.log"
     # Dependency installation resolves the service over signaling, so the
@@ -785,78 +727,17 @@ mode_path1_full_echo() {
     stop_server
 }
 
-mode_path1_with_keychain() {
-    section "🧪 MODE=path1-with-keychain (Path 1 with runner proof)"
-    publish_service_package
-    local env
-    env="$(mk_isolated_env "p1kc")"
-    local home_dir hyper_dir
-    IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-    write_global_keychain_config "$home_dir" "$SERVICE_KEYCHAIN"
-    start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    # Issuer-02: a published package succeeds via Path 1 only with the runner
-    # possession proof. Assert Path 1 was actually taken (not a silent fallback
-    # to Path 2, which would also succeed here because the keychain holds key A).
-    expect_server_started "server.log"
-    assert_path1_taken
-    stop_server
-}
-
-mode_path2_happy() {
-    section "🧪 MODE=path2-happy (unpublished package + runner proof → Path 2 success)"
+mode_unpublished() {
+    section "🧪 MODE=unpublished (never-published package keeps its Publisher identity)"
     local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
     local env
-    env="$(mk_isolated_env "p2h")"
+    env="$(mk_isolated_env "unpublished")"
     local home_dir hyper_dir
     IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-    write_global_keychain_config "$home_dir" "$SERVICE_KEYCHAIN"
     start_server_isolated "$home_dir" "$hyper_dir" "server.log"
     expect_server_started "server.log"
-    assert_path2_taken
-    stop_server
-}
-
-mode_path2_no_proof() {
-    section "🧪 MODE=path2-no-proof (unpublished package, no keychain → Path 2 rejection)"
-    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
-    assert_no_active_package "$type_str" "$HOST_TARGET"
-    local env
-    env="$(mk_isolated_env "p2np")"
-    local home_dir hyper_dir
-    IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-    assert_no_keychain_config "$home_dir"
-    start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    expect_server_rejected "server.log"
-    # The no-proof rejection is deterministic: with no keychain the runtime
-    # sends manifest_raw + publisher_signature but no publisher_auth_* triple, so
-    # Path 2 must emit this marker before rejecting. Make it a hard assertion so
-    # a rejection at the wrong stage (e.g. attach-time) cannot pass this mode.
-    if ! grep -q "unpublished package requires" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Expected 'unpublished package requires ...' rejection marker in actrix.log (Path 2 no-proof rejection did not fire as expected)"
-    fi
-    stop_server
-}
-
-mode_path2_wrong_key() {
-    section "🧪 MODE=path2-wrong-key (runner proof signed by unrelated key → rejection)"
-    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
-    assert_no_active_package "$type_str" "$HOST_TARGET"
-
-    local env
-    env="$(mk_isolated_env "p2wk")"
-    local home_dir hyper_dir
-    IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-
-    # Generate an unrelated key B with an ISOLATED HOME: `actr pkg keygen`
-    # writes the keychain path into ~/.actr/config.toml, so it must not touch
-    # the real home (would pollute other modes that read the real config).
-    local wrong_keychain="$RUN_DIR/wrong-key.json"
-    HOME="$home_dir" run_actr pkg keygen --output "$wrong_keychain" --force >/dev/null
-    write_global_keychain_config "$home_dir" "$wrong_keychain"
-
-    start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    expect_server_rejected "server.log"
+    assert_publisher_provenance
     stop_server
 }
 
@@ -881,8 +762,8 @@ PY
     publisher_id="$(sqlite3 "$ACTRIX_DB" "SELECT id FROM publisher WHERE name='${PUBLISHER}';")"
     [ -n "$publisher_id" ] || fail "Could not resolve publisher_id for ${PUBLISHER}"
 
-    # --- Phase 1: rotate A→B (A archived as retired), then run with keychain A. ---
-    section "🔄 Phase 1: rotate key (A → retired), expect Path 2 success"
+    # --- Phase 1: rotate A→B (A archived as retired); the package signed by A still runs. ---
+    section "🔄 Phase 1: rotate key (A → retired), expect success"
     local rotation_keychain="$RUN_DIR/publisher-rotation-b.keychain.json"
     run_actr pkg keygen --output "$rotation_keychain" --force >/dev/null
     python3 - "$ACTRIX_DB" "$PUBLISHER" "$rotation_keychain" <<'PY'
@@ -931,10 +812,9 @@ PY
     env1="$(mk_isolated_env "rot1")"
     local home1 hyper1
     IFS=$'\t' read -r home1 hyper1 <<<"$env1"
-    write_global_keychain_config "$home1" "$SERVICE_KEYCHAIN"
     start_server_isolated "$home1" "$hyper1" "server-phase1.log"
     expect_server_started "server-phase1.log"
-    assert_path2_taken
+    assert_publisher_provenance
     stop_server
 
     # --- Phase 2: revoke key A by history_id (matched by signing_key_id, not array order). ---
@@ -944,14 +824,13 @@ PY
         "UPDATE publisher_key_history SET status='revoked' WHERE publisher_id=${publisher_id} AND key_id='${signing_key_id}'; SELECT changes();")"
     [ "$revoked_rows" = "1" ] || fail "Could not revoke historical key ${signing_key_id}"
 
-    # Re-confirm no published package row, so rejection comes from KeyRevoked, not Path 1.
+    # Re-confirm no published package row, so rejection comes from KeyRevoked.
     assert_no_active_package "$type_str" "$HOST_TARGET"
 
     local env2
     env2="$(mk_isolated_env "rot2")"
     local home2 hyper2
     IFS=$'\t' read -r home2 hyper2 <<<"$env2"
-    write_global_keychain_config "$home2" "$SERVICE_KEYCHAIN"
     start_server_isolated "$home2" "$hyper2" "server-phase2.log"
     expect_server_rejected "server-phase2.log"
     stop_server
@@ -970,11 +849,10 @@ echo "Actrix binary: $ACTRIX_BIN"
 render_runtime_configs
 build_local_actr_cli
 build_local_actrix
-# Modes that assert which path was taken need the debug-level Path 1 / Path 2
-# verification markers ("Publisher Registry table lookup passed" /
-# "...manifest and publisher signature verification passed") in actrix.log.
+# Modes that assert the provenance need the debug-level "Package provenance
+# verified" marker in actrix.log.
 case "$MODE" in
-    path1-with-keychain|path2-happy|rotation) export ACTRIX_RUST_LOG="info,actrix::observability=debug" ;;
+    unpublished|rotation) export ACTRIX_RUST_LOG="info,actrix::observability=debug" ;;
 esac
 start_actrix
 login_admin
@@ -985,12 +863,9 @@ scaffold_service_guest
 build_service_package
 
 case "$MODE" in
-    path1)               mode_path1_full_echo ;;
-    path1-with-keychain) mode_path1_with_keychain ;;
-    path2-happy)         mode_path2_happy ;;
-    path2-no-proof)      mode_path2_no_proof ;;
-    path2-wrong-key)     mode_path2_wrong_key ;;
-    rotation)            mode_rotation ;;
+    published)   mode_published ;;
+    unpublished) mode_unpublished ;;
+    rotation)    mode_rotation ;;
 esac
 
 echo ""

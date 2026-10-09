@@ -19,7 +19,6 @@ bytes = { workspace = true }
 base64 = "0.22"
 serde_json = "1.0"
 toml = "0.8"
-ed25519-dalek = { workspace = true }
 
 [build-dependencies]
 prost-build = "0.14"
