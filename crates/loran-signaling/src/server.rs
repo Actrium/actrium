@@ -3946,9 +3946,16 @@ mod tests {
         }
 
         async fn send(server: &SignalingServerHandle, client_id: &str, relay: ActrRelay) {
-            handle_actr_relay(relay, client_id, server, "req")
-                .await
-                .unwrap();
+            handle_actr_relay(
+                relay,
+                client_id,
+                server,
+                "req",
+                #[cfg(feature = "opentelemetry")]
+                opentelemetry::Context::new(),
+            )
+            .await
+            .unwrap();
         }
 
         #[tokio::test]
