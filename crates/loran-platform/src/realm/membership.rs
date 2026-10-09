@@ -127,7 +127,10 @@ impl From<sqlx::Error> for MembershipError {
 
 impl From<RealmError> for MembershipError {
     fn from(error: RealmError) -> Self {
-        Self::new(Code::Unavailable, error.to_string())
+        match error {
+            RealmError::Membership(error) => error,
+            error => Self::new(Code::Unavailable, error.to_string()),
+        }
     }
 }
 
@@ -250,16 +253,17 @@ pub async fn authenticate(key: ClientKey) -> Result<Signer, MembershipError> {
 }
 
 /// Check on `conn` (e.g. inside a transaction) that the key `key_id` of
-/// `realm` is registered, unrevoked and of an active member.
+/// `realm` is registered, unrevoked and of an active member, and return its
+/// holder with the member's current role.
 pub async fn check_key_on(
     conn: &mut SqliteConnection,
     realm: &str,
     key_id: &str,
-) -> Result<(), MembershipError> {
+) -> Result<Signer, MembershipError> {
     let key = client_key_on(conn, realm, key_id)
         .await?
         .ok_or_else(|| MembershipError::new(Code::ClientUnknown, "unknown Realm client key"))?;
-    signer_of(key).map(|_| ())
+    signer_of(key)
 }
 
 /// Check on `conn` that `actor` is bound to an unrevoked key of an active
@@ -271,7 +275,9 @@ pub async fn check_actor_key_on(
     let binding = actor_binding_on(conn, actor).await?.ok_or_else(|| {
         MembershipError::new(Code::ClientUnknown, "the Actor has no Realm client key")
     })?;
-    check_key_on(conn, &actor.realm, &binding.client_key_id).await
+    check_key_on(conn, &actor.realm, &binding.client_key_id)
+        .await
+        .map(|_| ())
 }
 
 async fn begin() -> Result<Transaction<'static, Sqlite>, MembershipError> {
@@ -287,10 +293,7 @@ async fn recheck(
     tx: &mut Transaction<'_, Sqlite>,
     signer: &Signer,
 ) -> Result<Signer, MembershipError> {
-    let key = client_key_on(tx, &signer.realm, &signer.key_id)
-        .await?
-        .ok_or_else(|| MembershipError::new(Code::ClientUnknown, "unknown Realm client key"))?;
-    let signer = signer_of(key)?;
+    let signer = check_key_on(tx, &signer.realm, &signer.key_id).await?;
     check_realm_active(tx, &signer.realm).await?;
     Ok(signer)
 }
@@ -308,7 +311,8 @@ async fn check_realm_active(
     }
 }
 
-fn require_owner(signer: &Signer) -> Result<(), MembershipError> {
+/// Fail with `forbidden` unless `signer`, as last rechecked, is the owner.
+pub fn require_owner(signer: &Signer) -> Result<(), MembershipError> {
     if signer.role != Role::Owner {
         return fail(Code::Forbidden, "only the owner may do this");
     }

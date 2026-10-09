@@ -10,7 +10,7 @@ use chrono::Utc;
 
 use super::domain::digest;
 use super::error::RealmError;
-use super::membership::{IssuedInvite, issue_owner_invite_in};
+use super::membership::{IssuedInvite, Signer, check_key_on, issue_owner_invite_in, require_owner};
 use super::model::{Realm, retire_in};
 use crate::storage::db::get_database;
 
@@ -50,15 +50,24 @@ impl RealmProfileRecord {
     /// Realm and `owner_invite_by` is set, an owner invite created by it
     /// comes back too. Returns the Realm and whether this store activated
     /// it.
+    ///
+    /// When `owner` requested the Profile, the same transaction rechecks that
+    /// its key is unrevoked, its member active and still the owner: an
+    /// ownership change or revocation that committed while the Profile was
+    /// signed stops the store.
     pub async fn store(
         profile: &RealmProfile,
         document: &str,
         previous_digest: Option<&str>,
         owner_invite_by: Option<&str>,
+        owner: Option<&Signer>,
     ) -> Result<(Realm, bool, Option<IssuedInvite>), RealmError> {
         let name = profile.realm.name.as_str();
         let now = Utc::now().timestamp();
-        let mut tx = get_database().get_pool().begin().await?;
+        let mut tx = get_database()
+            .get_pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await?;
 
         let status: Option<String> = sqlx::query_scalar("SELECT status FROM realm WHERE name = ?")
             .bind(name)
@@ -68,6 +77,9 @@ impl RealmProfileRecord {
             None => return Err(RealmError::NotFound),
             Some("retired") => return Err(RealmError::Retired),
             Some(_) => {}
+        }
+        if let Some(owner) = owner {
+            require_owner(&check_key_on(&mut tx, name, &owner.key_id).await?)?;
         }
 
         let digest = digest(document.as_bytes());
@@ -207,13 +219,13 @@ mod tests {
         let first = document(1, "active", &key);
         let profile = RealmProfile::verify(first.as_bytes(), NAME, &keys)?;
         let (realm, activated, invite) =
-            RealmProfileRecord::store(&profile, &first, None, Some("holder")).await?;
+            RealmProfileRecord::store(&profile, &first, None, Some("holder"), None).await?;
         assert_eq!(realm.status, Lifecycle::Active);
         assert!(activated);
         assert!(invite.unwrap().invite.starts_with("ri_"));
         // A second write that missed the first one conflicts.
         assert!(matches!(
-            RealmProfileRecord::store(&profile, &first, None, None).await,
+            RealmProfileRecord::store(&profile, &first, None, None, None).await,
             Err(RealmError::Conflict(_))
         ));
 
@@ -225,11 +237,11 @@ mod tests {
         let profile = RealmProfile::verify(retired.as_bytes(), NAME, &keys)?;
         accepted.check_successor(&profile)?;
         assert!(matches!(
-            RealmProfileRecord::store(&profile, &retired, Some("stale"), None).await,
+            RealmProfileRecord::store(&profile, &retired, Some("stale"), None, None).await,
             Err(RealmError::Conflict(_))
         ));
         let (realm, _, _) =
-            RealmProfileRecord::store(&profile, &retired, Some(&stored.digest), None).await?;
+            RealmProfileRecord::store(&profile, &retired, Some(&stored.digest), None, None).await?;
         assert_eq!(realm.status, Lifecycle::Retired);
         assert_eq!(RealmProfileRecord::get(NAME).await?.unwrap().sequence, 2);
         let acl: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM actoracl")
@@ -241,7 +253,7 @@ mod tests {
         let later = document(3, "active", &key);
         let profile = RealmProfile::verify(later.as_bytes(), NAME, &keys)?;
         assert!(matches!(
-            RealmProfileRecord::store(&profile, &later, None, None).await,
+            RealmProfileRecord::store(&profile, &later, None, None, None).await,
             Err(RealmError::Retired)
         ));
         let stored: Value =

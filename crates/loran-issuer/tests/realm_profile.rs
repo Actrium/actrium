@@ -2,6 +2,7 @@
 //! checked with the Actr Host rules (`RealmProfile::verify` and
 //! `check_successor`).
 
+use actr_protocol::realm_membership::{RealmInvite, Role, client_key_id, invite_secret_hash};
 use actr_protocol::realm_profile::{
     IceEndpoint, RealmPackage, RealmProfile, RealmStatus as ProfileStatus, SignalingEndpoint, jcs,
 };
@@ -14,6 +15,7 @@ use issuer::signer_client_wrapper::create_signer_client;
 use nonce_auth::storage::MemoryStorage;
 use platform::config::signer::SignerClientConfig;
 use platform::net::FetchError;
+use platform::realm::membership::{self, Code, Signer};
 use platform::realm::{Realm, RealmError, RealmProfileRecord, RealmStatus};
 use serde_json::{Value, json};
 use serial_test::serial;
@@ -237,6 +239,134 @@ async fn signs_verifiable_profiles_for_the_provider_domain() {
     ));
 }
 
+/// Join `realm` with the key of `seed` through `invite`.
+async fn redeem(realm: &str, invite: &membership::IssuedInvite, seed: u8) -> Signer {
+    let secret = RealmInvite::decode(&invite.invite).unwrap().secret;
+    let public_key = SigningKey::from_bytes(&[seed; 32])
+        .verifying_key()
+        .to_bytes();
+    let limits = membership::Limits::from(&platform::config::RealmConfig::default());
+    membership::join(
+        realm,
+        &invite_secret_hash(&secret).unwrap(),
+        &public_key,
+        "",
+        limits,
+    )
+    .await
+    .unwrap();
+    let key = membership::client_key(realm, &client_key_id(&public_key))
+        .await
+        .unwrap()
+        .unwrap();
+    membership::authenticate(key).await.unwrap()
+}
+
+/// An invite from `owner`: a new member of `role`, or with `role` unset a
+/// new client of `member`.
+async fn invite(
+    owner: &Signer,
+    role: Option<Role>,
+    member: Option<&str>,
+) -> membership::IssuedInvite {
+    let limits = membership::Limits::from(&platform::config::RealmConfig::default());
+    let expires_at = chrono::Utc::now().timestamp() + 3600;
+    membership::create_invite(owner, role, member, expires_at, limits)
+        .await
+        .unwrap()
+}
+
+/// The owner's update is stored only if, when it is stored, the signer is
+/// still the owner: a revocation or an ownership transfer that committed
+/// while the Profile was signed stops it.
+#[tokio::test]
+#[serial]
+async fn stores_an_owner_update_only_for_the_current_owner() {
+    let (profiles, _dir) = setup().await;
+    let name = format!("o5n3r8wq@{PROVIDER}");
+    insert(&name, RealmStatus::Pending).await;
+    profiles
+        .issue(
+            &name,
+            ProfileChange {
+                package: Some(package()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let owner = redeem(
+        &name,
+        &membership::issue_owner_invite(&name, membership::BY_OPERATOR)
+            .await
+            .unwrap(),
+        11,
+    )
+    .await;
+    let second_key = redeem(
+        &name,
+        &invite(&owner, None, Some(&owner.member_id)).await,
+        12,
+    )
+    .await;
+    let editor = redeem(&name, &invite(&owner, Some(Role::Editor), None).await, 13).await;
+    let digest = || async {
+        RealmProfileRecord::get(&name)
+            .await
+            .unwrap()
+            .unwrap()
+            .digest
+    };
+    let before = digest().await;
+    let refused = |result: Result<Realm, ProfileError>| match result {
+        Err(ProfileError::Realm(RealmError::Membership(error))) => error.code,
+        other => panic!("expected a membership error, got {other:?}"),
+    };
+
+    // Authenticated as the owner; the key is revoked before the store.
+    membership::revoke_client(&owner, &second_key.key_id)
+        .await
+        .unwrap();
+    let update = ProfileChange {
+        display_name: Some("Renamed".to_string()),
+        owner: Some(second_key.clone()),
+        ..Default::default()
+    };
+    assert_eq!(
+        refused(profiles.issue(&name, update).await),
+        Code::ClientRevoked
+    );
+    assert_eq!(digest().await, before);
+
+    // Authenticated as the owner; ownership moves before the store.
+    membership::transfer_owner(&owner, &editor.member_id, Role::Editor)
+        .await
+        .unwrap();
+    let retire = ProfileChange {
+        retire: true,
+        owner: Some(owner.clone()),
+        ..Default::default()
+    };
+    assert_eq!(
+        refused(profiles.issue(&name, retire).await),
+        Code::Forbidden
+    );
+    assert_eq!(digest().await, before);
+    assert_eq!(
+        Realm::get(&name).await.unwrap().unwrap().status,
+        RealmStatus::Active
+    );
+
+    // The new owner's update is stored.
+    let update = ProfileChange {
+        display_name: Some("Renamed".to_string()),
+        owner: Some(editor),
+        ..Default::default()
+    };
+    profiles.issue(&name, update).await.unwrap();
+    assert_ne!(digest().await, before);
+}
+
 /// `acme.com` as its key holder: a signed `realm_signing_keys` member and
 /// Realm Profiles for `provider.example`.
 struct Domain {
@@ -320,6 +450,7 @@ async fn accept(name: &str, document: &[u8], member: &Value) {
         &profile,
         std::str::from_utf8(document).unwrap(),
         previous.as_ref().map(|record| record.digest.as_str()),
+        None,
         None,
     )
     .await
@@ -664,6 +795,7 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     RealmProfileRecord::store(
         &profile,
         std::str::from_utf8(&acme.profile(three, 1, "active", "rs-1", &issuer[three])).unwrap(),
+        None,
         None,
         None,
     )

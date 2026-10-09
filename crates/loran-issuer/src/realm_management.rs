@@ -434,6 +434,7 @@ async fn publish_profile(
         &document,
         record.as_ref().map(|record| record.digest.as_str()),
         Some(BY_HOLDER),
+        None,
     )
     .await?;
     let mut reply = json!({
