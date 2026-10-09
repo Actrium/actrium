@@ -1258,6 +1258,10 @@ impl TestPeer {
     }
 
     /// Receive the next non-RPC inbound payload recorded by the RTC router.
+    ///
+    /// The raw payload queue is bounded and best-effort: unread payloads are
+    /// dropped when it is full so this test-only observation path cannot
+    /// backpressure inbound dispatch or prevent RPC processing.
     pub async fn receive_payload(&self) -> Option<(ActrId, PayloadType, bytes::Bytes)> {
         let (msg, _lease) = self.inbound_rx.lock().await.recv().await?;
         Some((msg.peer, msg.lane.to_payload_type(), msg.payload))
@@ -1560,11 +1564,21 @@ impl TestHarness {
 
         let (inbound_tx, mut dispatcher_rx) = mpsc::channel(512);
         let (raw_tx, raw_rx) = mpsc::channel(512);
-        let router = Arc::new(InboundRouter::new(Arc::new(move |message, lease| {
-            if inbound_tx.try_send((message, lease)).is_err() {
-                tracing::warn!("test inbound dispatcher is full; dropping message");
-            }
-        })));
+        // Keep the test ingress admission budget above the raw queue capacity
+        // so >512-message soak tests exercise the raw queue's overflow policy,
+        // while retaining the normal byte and per-message limits.
+        let inbound_config = crate::wire::webrtc::rtc::config::RtcBufferConfig {
+            max_inbound_dispatch_messages: 1024,
+            ..Default::default()
+        };
+        let router = Arc::new(InboundRouter::new_with_config(
+            Arc::new(move |message, lease| {
+                if inbound_tx.try_send((message, lease)).is_err() {
+                    tracing::warn!("test inbound dispatcher is full; dropping message");
+                }
+            }),
+            inbound_config,
+        ));
         let (signaling_tx, signaling_rx) = mpsc::channel(128);
         let manager = RtcConnectionManager::with_inbound(factory, signaling_tx, router);
         let manager = if self.rtc_matrix_instrumentation {
@@ -1660,7 +1674,11 @@ impl TestHarness {
                     {
                         data_chunks_for_dispatcher.record(chunk.stream_id, chunk.payload);
                     }
-                    let _ = raw_tx.send((message, lease)).await;
+                    if raw_tx.try_send((message, lease)).is_err() {
+                        tracing::debug!(
+                            "test raw payload queue is full or closed; dropping unread payload"
+                        );
+                    }
                     continue;
                 }
                 let _lease = lease;

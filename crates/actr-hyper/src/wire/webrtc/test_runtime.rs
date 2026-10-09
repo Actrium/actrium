@@ -872,13 +872,16 @@ mod directed_tests {
         }
     }
 
-    #[test]
-    fn active_fault_leases_follow_runtime_lifetime_across_generations() {
+    #[tokio::test]
+    async fn active_fault_leases_follow_runtime_lifetime_across_generations() {
         let registry = DirectedRtcFaultRegistry::default();
         let a = actor(1);
         let b = actor(2);
-        let _a1 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 1, vec![]);
-        let _b1 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 1, vec![]);
+        let a1 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 1, vec![]);
+        let b1 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 1, vec![]);
+        let a1_socket = a1
+            .wrap_udp_socket(std::net::UdpSocket::bind("127.0.0.1:0").unwrap())
+            .unwrap();
         assert!(registry.set_link_rule(
             (&a, 1),
             (&b, 1),
@@ -899,11 +902,31 @@ mod directed_tests {
             2,
             "a newer build must not hide a still-live older generation fault"
         );
-        drop((_a1, _b1));
+
+        // Pruning generation 1 keeps the A→B scope because its wrapped UDP
+        // socket still holds a lease, even after the runtime wrappers drop.
+        drop((a1, b1));
+        registry.retain_generation(&a, &b, 2);
+        registry.retain_generation(&b, &a, 2);
+        assert!(registry.handle(&a, &b, 1).is_some());
+        assert!(registry.handle(&b, &a, 1).is_none());
+        assert_eq!(
+            registry.active_rule_count(),
+            1,
+            "the wrapped socket keeps the generation-1 A→B fault active"
+        );
+
+        // Once the last socket lease is released, the next prune can remove
+        // generation 1 without touching the active generation 2 scopes.
+        drop(a1_socket);
+        registry.retain_generation(&a, &b, 2);
+        registry.retain_generation(&b, &a, 2);
+        assert!(registry.handle(&a, &b, 1).is_none());
+        assert!(registry.handle(&a, &b, 2).is_some());
         assert_eq!(
             registry.active_rule_count(),
             0,
-            "the fault lease ends after the old generation releases its Runtime"
+            "the fault lease ends after the old generation releases its final socket"
         );
     }
 

@@ -93,6 +93,63 @@ async fn send_stream(harness: &TestHarness, from: u64, to: u64, stream_id: &str)
     assert_eq!(received.payload.as_ref(), b"stream-payload");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn passive_data_chunk_observation_does_not_block_after_raw_queue_fills() {
+    const CHUNK_COUNT: usize = 600;
+    const STREAM_ID: &str = "passive-observer-over-raw-queue-capacity";
+
+    let harness = setup_bidirectional_vnet().await;
+    let target = harness.peer(200).id.clone();
+
+    // Intentionally do not call receive_payload(): the passive DataChunk
+    // observer must keep dispatching after the separate raw queue is full.
+    for index in 0..CHUNK_COUNT {
+        let sequence = index as u64 + 1;
+        let chunk = DataChunk {
+            stream_id: STREAM_ID.into(),
+            sequence,
+            payload: bytes::Bytes::from_static(b"observed"),
+            metadata: Vec::new(),
+            timestamp_ms: Some(sequence as i64),
+        };
+        let operation_id = format!("{STREAM_ID}#{sequence}");
+        harness
+            .peer(100)
+            .gate
+            .send_data_chunk(
+                &target,
+                PayloadType::StreamReliable,
+                STREAM_ID,
+                bytes::Bytes::from(chunk.encode_to_vec()),
+                &operation_id,
+            )
+            .await
+            .expect("DataChunk send");
+
+        // Pace against the observer so this exercises the raw-payload queue
+        // limit without overflowing the separate RTC ingress budget.
+        let expected = index + 1;
+        assert!(
+            harness
+                .peer(200)
+                .wait_data_chunk_count(STREAM_ID, expected, Duration::from_secs(5))
+                .await,
+            "passive observer stopped at {} while waiting for {expected}",
+            harness.peer(200).data_chunk_count(STREAM_ID)
+        );
+    }
+
+    assert!(
+        harness
+            .peer(200)
+            .wait_data_chunk_count(STREAM_ID, CHUNK_COUNT, Duration::from_secs(20))
+            .await,
+        "passive observer should receive all chunks even when raw payloads are not drained"
+    );
+    rpc(&harness, 100, 200, "rpc-after-passive-observation-overflow").await;
+    harness.shutdown().await;
+}
+
 fn supervisor(
     harness: &TestHarness,
     serial: u64,
