@@ -173,7 +173,8 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         return encode_result(error_result);
     }
 
-    if let Err(error) = check_service_owner(&request, &signer).await {
+    let pool = platform::storage::db::get_database().get_pool();
+    if let Err(error) = check_service_owner(pool, &request, &signer).await {
         return encode_result(RegisterResponse {
             result: Some(register_response::Result::Error(error)),
         });
@@ -311,18 +312,23 @@ async fn authenticate_client(
 
 /// Only the owner registers the Realm's Service: an Actor whose publisher
 /// and program are those of the Realm Profile `package.type`, any version.
-async fn check_service_owner(
+/// Reads the Profile on `db`, which may be the registration transaction.
+async fn check_service_owner<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
     request: &RegisterRequest,
     signer: &Signer,
 ) -> Result<(), ErrorResponse> {
     if signer.role == Role::Owner {
         return Ok(());
     }
-    let record = RealmProfileRecord::get(&request.realm)
-        .await
-        .map_err(|error| membership_error("unavailable", error))?;
-    let service = record
-        .and_then(|record| serde_json::from_str::<Value>(&record.document).ok())
+    let document: Option<String> =
+        sqlx::query_scalar("SELECT document FROM realm_profile WHERE realm = ?")
+            .bind(&request.realm)
+            .fetch_optional(db)
+            .await
+            .map_err(|error| membership_error("unavailable", error))?;
+    let service = document
+        .and_then(|document| serde_json::from_str::<Value>(&document).ok())
         .and_then(|profile| profile["package"]["type"].as_str().map(str::to_string))
         .and_then(|text| actr_protocol::ActrType::from_program_identity(&text).ok());
     match service {
@@ -412,9 +418,15 @@ async fn persist_registration_state(
 
     // A revocation that committed after the proof was checked stops the
     // registration; one that commits later disables the Actor recorded here.
-    if let Err(error) = membership::check_key_on(&mut tx, &signer.realm, &signer.key_id).await {
-        return Err((error.code.status().into(), error.to_string()));
-    }
+    // Likewise an ownership transfer: the Service is registered only by
+    // whoever is the owner now, under the current Profile's `package.type`.
+    let signer = match membership::check_key_on(&mut tx, &signer.realm, &signer.key_id).await {
+        Ok(signer) => signer,
+        Err(error) => return Err((error.code.status().into(), error.to_string())),
+    };
+    check_service_owner(&mut *tx, request, &signer)
+        .await
+        .map_err(|error| (error.code, error.message))?;
 
     if let Some(ref acl) = request.acl {
         use actr_protocol::acl_rule::SourceRealm;
@@ -1233,6 +1245,86 @@ mod tests {
                     .unwrap();
             assert_eq!(rows, 0, "{table}");
         }
+    }
+
+    #[tokio::test]
+    async fn service_registration_needs_the_current_owner() {
+        use actr_protocol::{AclRule, acl_rule::Permission};
+
+        crate::idempotency::tests::setup_db().await;
+        let realm = "handover@example.com";
+        RealmEntity::create(realm.to_string()).await.unwrap();
+        let owner = crate::test_support::owner_of(realm, 1).await;
+        let editor = crate::test_support::member_of(&owner, Role::Editor, 2).await;
+        let pool = platform::storage::db::get_database().get_pool();
+        let profile = json!({ "package": { "type": "acme.com/notes@1.0.0" } });
+        sqlx::query(
+            "INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at)
+             VALUES (?, 1, 'd', ?, 0)",
+        )
+        .bind(realm)
+        .bind(profile.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+
+        let service = ActrType {
+            publisher: "acme.com".to_string(),
+            name: "notes".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        let request = RegisterRequest {
+            actr_type: service.clone(),
+            realm: realm.to_string(),
+            acl: Some(actr_protocol::Acl {
+                rules: vec![AclRule {
+                    permission: Permission::Allow as i32,
+                    from_type: service,
+                    source_realm: None,
+                }],
+            }),
+            ws_address: Some("ws://127.0.0.1:1".to_string()),
+            ..Default::default()
+        };
+        let register_ok = register_response::RegisterOk {
+            actr_id: actr_protocol::ActrId {
+                realm: realm.to_string(),
+                serial_number: 7,
+            },
+            ..Default::default()
+        };
+        let rows = || async {
+            let mut counts = Vec::new();
+            for table in ["actoracl", "pending_registration"] {
+                let count: i64 =
+                    sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE realm = ?"))
+                        .bind(realm)
+                        .fetch_one(pool)
+                        .await
+                        .unwrap();
+                counts.push(count);
+            }
+            counts
+        };
+
+        // The owner's request passed the entry check; then ownership moves.
+        assert!(check_service_owner(pool, &request, &owner).await.is_ok());
+        membership::transfer_owner(&owner, &editor.member_id, Role::Editor)
+            .await
+            .unwrap();
+
+        let (code, message) = persist_registration_state(&request, &register_ok, &owner)
+            .await
+            .unwrap_err();
+        assert_eq!(code, 403);
+        assert!(message.contains("service_owner_only"), "{message}");
+        assert_eq!(rows().await, [0, 0]);
+
+        // The new owner registers it, though authenticated as an editor.
+        persist_registration_state(&request, &register_ok, &editor)
+            .await
+            .unwrap();
+        assert_eq!(rows().await, [1, 1]);
     }
 
     #[test]
