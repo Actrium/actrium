@@ -17,8 +17,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-#[cfg(feature = "test-utils")]
-use actr_protocol::ActrId;
 use actr_protocol::TurnCredential;
 use futures_util::FutureExt;
 use webrtc::error::Error as RtcError;
@@ -64,7 +62,7 @@ pub(crate) struct PeerConnectionFactory {
     setting_engine: SettingEngine,
     #[cfg(feature = "test-utils")]
     directed_faults: Option<(
-        ActrId,
+        crate::wire::webrtc::rtc::signaling::SharedLocalId,
         crate::wire::webrtc::test_runtime::DirectedRtcFaultRegistry,
     )>,
 }
@@ -137,7 +135,7 @@ impl PeerConnectionFactory {
     #[cfg(feature = "test-utils")]
     pub(crate) fn with_directed_faults(
         mut self,
-        local_id: ActrId,
+        local_id: crate::wire::webrtc::rtc::signaling::SharedLocalId,
         registry: crate::wire::webrtc::test_runtime::DirectedRtcFaultRegistry,
     ) -> Self {
         self.directed_faults = Some((local_id, registry));
@@ -283,7 +281,7 @@ impl PeerConnectionFactory {
         let runtime = match &self.directed_faults {
             Some((local_id, registry)) => registry.scoped_runtime(
                 runtime,
-                local_id.clone(),
+                local_id.get(),
                 handler.peer_id().clone(),
                 handler.generation(),
                 udp_addrs.clone(),

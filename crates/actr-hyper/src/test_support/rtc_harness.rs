@@ -17,7 +17,7 @@ use actr_protocol::{
     AIdCredential, ActrError, ActrId, DataChunk, Direction, PayloadType, RpcEnvelope,
 };
 use async_trait::async_trait;
-use tokio::sync::{Notify, mpsc, watch};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 
 use super::{
     TestSignalingServer, VNetPair, create_credential_state_for_test, dummy_credential,
@@ -35,7 +35,6 @@ use crate::wire::webrtc::rtc::address::{
     DesktopLocalAddressProvider, LocalAddressProvider, TestLocalAddressProvider,
 };
 use crate::wire::webrtc::rtc::factory::PeerConnectionFactory;
-use crate::wire::webrtc::rtc::fault::DirectedSignalingTransport;
 use crate::wire::webrtc::rtc::inbound::{InboundMessage, InboundRouter};
 use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
 use crate::wire::webrtc::rtc::recovery::RtcNetworkEvent;
@@ -63,6 +62,7 @@ pub enum TestRtcRole {
 pub struct TestRtcPeerResourceObservation {
     pub state: actr_framework::WebRtcPeerState,
     pub role: TestRtcRole,
+    pub ice_generation: u64,
     pub signaling_dropped: u64,
     pub mailbox_overflows: u64,
     pub live_lanes: usize,
@@ -74,6 +74,7 @@ pub struct TestRtcResourceObservation {
     pub peer_count: usize,
     pub inbound_dropped_messages: u64,
     pub peers: Vec<TestRtcPeerResourceObservation>,
+    pub recovery_obligations: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -751,6 +752,13 @@ impl TestRtcControl {
         self.manager.peer_ids().await.len()
     }
 
+    /// Number of open manager-owned peer recovery obligations. The ledger is
+    /// the authoritative hand-off record used by the v0.20 recovery contract;
+    /// exposing only the count keeps this test seam read-only and bounded.
+    pub fn recovery_obligation_count(&self) -> usize {
+        self.manager.recovery_obligation_log().open_count()
+    }
+
     /// Await a manager registry size through its production watch edge.
     pub async fn wait_peer_count(&self, expected: usize, timeout: Duration) -> bool {
         let mut changed = self.manager.subscribe_peers();
@@ -793,6 +801,7 @@ impl TestRtcControl {
                     TestRtcPeerResourceObservation {
                         state: peer.snapshot.to_public(),
                         role,
+                        ice_generation: peer.snapshot.ice_generation,
                         signaling_dropped: peer.snapshot.signaling_dropped,
                         mailbox_overflows: peer.snapshot.mailbox_overflows,
                         live_lanes: peer.live_lanes,
@@ -800,6 +809,7 @@ impl TestRtcControl {
                     }
                 })
                 .collect(),
+            recovery_obligations: self.recovery_obligation_count(),
         }
     }
 
@@ -955,6 +965,97 @@ impl NetworkEventProcessor for RtcAwareNetworkEventProcessor {
 }
 
 /// A single node in an integration topology.
+#[derive(Default)]
+struct DataChunkStreamObservation {
+    count: usize,
+    latest_payload: Option<bytes::Bytes>,
+}
+
+#[derive(Default)]
+struct DataChunkRecorder {
+    streams: StdMutex<HashMap<String, DataChunkStreamObservation>>,
+    changed: Notify,
+}
+
+impl DataChunkRecorder {
+    fn clear(&self) {
+        self.streams
+            .lock()
+            .expect("test DataChunk recorder lock poisoned")
+            .clear();
+    }
+
+    fn record(&self, stream_id: String, payload: bytes::Bytes) {
+        let mut streams = self
+            .streams
+            .lock()
+            .expect("test DataChunk recorder lock poisoned");
+        let observation = streams.entry(stream_id).or_default();
+        observation.count += 1;
+        observation.latest_payload = Some(payload);
+        drop(streams);
+        self.changed.notify_waiters();
+    }
+
+    fn snapshot(&self, stream_id: &str) -> (usize, Option<bytes::Bytes>) {
+        self.streams
+            .lock()
+            .expect("test DataChunk recorder lock poisoned")
+            .get(stream_id)
+            .map(|observation| (observation.count, observation.latest_payload.clone()))
+            .unwrap_or_default()
+    }
+}
+
+/// Options for adding a peer to [`TestHarness`]. This keeps identity,
+/// credentials, RTC configuration, and media observation independent without
+/// adding another combination-specific `add_peer_*` method.
+#[derive(Default)]
+pub struct TestPeerOptions {
+    serial: u64,
+    identity: Option<ActrId>,
+    rtc_configuration: Option<webrtc::peer_connection::RTCConfiguration>,
+    credential: Option<AIdCredential>,
+    media_registry: Option<Arc<crate::inbound::MediaFrameRegistry>>,
+}
+
+impl TestPeerOptions {
+    pub fn new(serial: u64) -> Self {
+        Self {
+            serial,
+            ..Self::default()
+        }
+    }
+
+    /// Set the identity used by signaling, RTC, and serial-based RPC helpers.
+    /// Its serial number must equal this fixture slot's serial.
+    pub fn with_identity(mut self, identity: ActrId) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    pub fn with_rtc_configuration(
+        mut self,
+        rtc_configuration: webrtc::peer_connection::RTCConfiguration,
+    ) -> Self {
+        self.rtc_configuration = Some(rtc_configuration);
+        self
+    }
+
+    pub fn with_credential(mut self, credential: AIdCredential) -> Self {
+        self.credential = Some(credential);
+        self
+    }
+
+    pub fn with_media_registry(
+        mut self,
+        media_registry: Arc<crate::inbound::MediaFrameRegistry>,
+    ) -> Self {
+        self.media_registry = Some(media_registry);
+        self
+    }
+}
+
 pub struct TestPeer {
     pub id: ActrId,
     pub signaling_client: Arc<dyn SignalingClient>,
@@ -962,21 +1063,55 @@ pub struct TestPeer {
     pub transport_manager: Arc<PeerTransport>,
     pub rtc: TestRtcControl,
     pub hooks: TestRtcHookRecorder,
+    peer_identities: Arc<StdMutex<HashMap<u64, ActrId>>>,
+    credential: AIdCredential,
     request_counts: Arc<StdMutex<HashMap<String, usize>>>,
     request_changed: Arc<Notify>,
-    data_chunk_counts: Arc<StdMutex<HashMap<String, usize>>>,
-    inbound_rx: tokio::sync::Mutex<
-        mpsc::Receiver<(
-            InboundMessage,
-            crate::wire::webrtc::rtc::inbound::InboundLease,
-        )>,
-    >,
+    data_chunks: Arc<DataChunkRecorder>,
+    inbound_rx: tokio::sync::Mutex<mpsc::Receiver<(InboundMessage, OwnedSemaphorePermit)>>,
     router_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     hook_shutdown: tokio_util::sync::CancellationToken,
     hook_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl TestPeer {
+    /// Build a test-only `RuntimeContext` whose peer route uses this endpoint's
+    /// production `PeerGate`. This lets external integration harnesses exercise
+    /// `RuntimeContext -> PeerGate -> RTC` while the fixture owns signaling,
+    /// inbound dispatch, and teardown. The context has its own data/media
+    /// registries: receive-side callbacks registered through it are not wired
+    /// to the fixture's inbound dispatcher. Observe inbound DataChunks through
+    /// `data_chunk_count` / `data_chunk_observation` instead. The fixture does not
+    /// run an in-process host dispatcher, so this context is intended for Peer
+    /// destinations; Host/Workload calls require a separately serviced
+    /// `HostTransport`.
+    pub fn runtime_context_for_peer_calls(
+        &self,
+        request_id: impl Into<String>,
+    ) -> crate::context::RuntimeContext {
+        use crate::outbound::Gate;
+
+        let peer_gate = Gate::Peer(self.gate.clone());
+        let inproc_gate = Gate::Host(Arc::new(crate::outbound::HostGate::new(Arc::new(
+            crate::transport::HostTransport::new(),
+        ))));
+        crate::context::RuntimeContext::new(
+            self.id.clone(),
+            None,
+            request_id.into(),
+            inproc_gate,
+            Some(peer_gate),
+            Arc::new(crate::inbound::DataChunkRegistry::new()),
+            Arc::new(crate::inbound::MediaFrameRegistry::new()),
+            self.signaling_client.clone(),
+            self.credential.clone(),
+            None,
+            Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            None,
+            0,
+        )
+    }
+
     pub async fn pending_count(&self) -> usize {
         self.gate.pending_count().await
     }
@@ -1001,10 +1136,13 @@ impl TestPeer {
     ) -> bool {
         crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
             loop {
+                let notified = self.request_changed.notified();
+                let mut notified = std::pin::pin!(notified);
+                notified.as_mut().enable();
                 if self.request_count(request_id) >= expected {
                     return true;
                 }
-                self.request_changed.notified().await;
+                notified.await;
             }
         })
         .await
@@ -1012,12 +1150,41 @@ impl TestPeer {
     }
 
     pub fn data_chunk_count(&self, stream_id: &str) -> usize {
-        self.data_chunk_counts
-            .lock()
-            .expect("test DataChunk recorder lock poisoned")
-            .get(stream_id)
-            .copied()
-            .unwrap_or(0)
+        self.data_chunks.snapshot(stream_id).0
+    }
+
+    /// Return an atomic count/payload snapshot for one observed stream.
+    pub fn data_chunk_observation(&self, stream_id: &str) -> (usize, Option<bytes::Bytes>) {
+        self.data_chunks.snapshot(stream_id)
+    }
+
+    /// Release all per-stream counts and retained latest payloads between soak
+    /// phases. Call after the phase's sends and count waits have completed;
+    /// subsequent chunks start new counts. The raw payload queue is separate.
+    pub fn clear_data_chunk_observations(&self) {
+        self.data_chunks.clear();
+    }
+
+    /// Wait for an inbound stream to reach the requested delivery count.
+    pub async fn wait_data_chunk_count(
+        &self,
+        stream_id: &str,
+        expected: usize,
+        timeout: Duration,
+    ) -> bool {
+        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
+            loop {
+                let notified = self.data_chunks.changed.notified();
+                let mut notified = std::pin::pin!(notified);
+                notified.as_mut().enable();
+                if self.data_chunk_count(stream_id) >= expected {
+                    return true;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .is_ok()
     }
 
     pub fn network_processor(&self) -> Arc<RtcAwareNetworkEventProcessor> {
@@ -1048,6 +1215,8 @@ impl TestPeer {
         self.spawn_request_with_route(target_serial, request_id, "test.method", timeout_ms)
     }
 
+    /// Resolve the target serial through the harness's current peer registry.
+    /// An absent peer returns `Unavailable` without creating a default identity.
     pub fn spawn_request_with_route(
         &self,
         target_serial: u64,
@@ -1056,7 +1225,12 @@ impl TestPeer {
         timeout_ms: u32,
     ) -> tokio::task::JoinHandle<actr_protocol::ActorResult<actr_framework::Bytes>> {
         let gate = self.gate.clone();
-        let target = make_actor_id(target_serial);
+        let target = self
+            .peer_identities
+            .lock()
+            .expect("test peer identity map lock poisoned")
+            .get(&target_serial)
+            .cloned();
         let envelope = RpcEnvelope {
             request_id: request_id.to_string(),
             route_key: route_key.to_string(),
@@ -1064,7 +1238,14 @@ impl TestPeer {
             timeout_ms: timeout_ms as i64,
             ..Default::default()
         };
-        tokio::spawn(async move { gate.send_request(&target, envelope).await })
+        tokio::spawn(async move {
+            let target = target.ok_or_else(|| {
+                ActrError::Unavailable(format!(
+                    "test peer {target_serial} is not registered in this harness"
+                ))
+            })?;
+            gate.send_request(&target, envelope).await
+        })
     }
 
     /// The harness dispatcher is always active; this handle preserves the
@@ -1083,6 +1264,10 @@ impl TestPeer {
     }
 
     /// Receive the next non-RPC inbound payload recorded by the RTC router.
+    ///
+    /// The raw payload queue is best-effort, bounded to 512 messages and
+    /// 32 MiB independently of the production ingress budget. Unread payloads
+    /// are dropped at either limit so observation cannot prevent RPC processing.
     pub async fn receive_payload(&self) -> Option<(ActrId, PayloadType, bytes::Bytes)> {
         let (msg, _lease) = self.inbound_rx.lock().await.recv().await?;
         Some((msg.peer, msg.lane.to_payload_type(), msg.payload))
@@ -1133,6 +1318,7 @@ pub struct TestHarness {
     wildcard_rebind_addresses: bool,
     address_providers: HashMap<u64, Arc<TestLocalAddressProvider>>,
     peers: HashMap<u64, TestPeer>,
+    peer_identities: Arc<StdMutex<HashMap<u64, ActrId>>>,
     bg_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -1161,6 +1347,7 @@ impl TestHarness {
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
+            peer_identities: Default::default(),
             bg_tasks: Vec::new(),
         }
     }
@@ -1180,6 +1367,7 @@ impl TestHarness {
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
+            peer_identities: Default::default(),
             bg_tasks: Vec::new(),
         }
     }
@@ -1200,6 +1388,7 @@ impl TestHarness {
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
+            peer_identities: Default::default(),
             bg_tasks: Vec::new(),
         }
     }
@@ -1219,6 +1408,7 @@ impl TestHarness {
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
+            peer_identities: Default::default(),
             bg_tasks: Vec::new(),
         }
     }
@@ -1236,8 +1426,7 @@ impl TestHarness {
     }
 
     pub async fn add_peer(&mut self, serial: u64) {
-        let configuration = webrtc::peer_connection::RTCConfigurationBuilder::default().build();
-        self.add_peer_with_options(serial, configuration, dummy_credential(), None)
+        self.add_peer_with_options(TestPeerOptions::new(serial))
             .await;
     }
 
@@ -1246,8 +1435,10 @@ impl TestHarness {
         serial: u64,
         rtc_configuration: webrtc::peer_connection::RTCConfiguration,
     ) {
-        self.add_peer_with_options(serial, rtc_configuration, dummy_credential(), None)
-            .await;
+        self.add_peer_with_options(
+            TestPeerOptions::new(serial).with_rtc_configuration(rtc_configuration),
+        )
+        .await;
     }
 
     /// Add a peer authenticated by an externally owned production signaling
@@ -1259,8 +1450,12 @@ impl TestHarness {
         rtc_configuration: webrtc::peer_connection::RTCConfiguration,
         credential: AIdCredential,
     ) {
-        self.add_peer_with_options(serial, rtc_configuration, credential, None)
-            .await;
+        self.add_peer_with_options(
+            TestPeerOptions::new(serial)
+                .with_rtc_configuration(rtc_configuration)
+                .with_credential(credential),
+        )
+        .await;
     }
 
     /// Add a peer whose production RTC sessions dispatch remote media into
@@ -1272,25 +1467,44 @@ impl TestHarness {
         serial: u64,
         media_registry: Arc<crate::inbound::MediaFrameRegistry>,
     ) {
-        let configuration = webrtc::peer_connection::RTCConfigurationBuilder::default().build();
         self.add_peer_with_options(
-            serial,
-            configuration,
-            dummy_credential(),
-            Some(media_registry),
+            TestPeerOptions::new(serial).with_media_registry(media_registry),
         )
         .await;
     }
 
-    async fn add_peer_with_options(
+    /// Add a peer with an explicit combination of identity, transport, and
+    /// observation options. Existing convenience methods remain available.
+    pub async fn add_peer_with_options(&mut self, options: TestPeerOptions) {
+        let serial = options.serial;
+        let identity = options.identity.unwrap_or_else(|| make_actor_id(serial));
+        let rtc_configuration = options
+            .rtc_configuration
+            .unwrap_or_else(|| webrtc::peer_connection::RTCConfigurationBuilder::default().build());
+        let credential = options.credential.unwrap_or_else(dummy_credential);
+        self.add_peer_with_options_and_identity(
+            serial,
+            identity,
+            rtc_configuration,
+            credential,
+            options.media_registry,
+        )
+        .await;
+    }
+
+    async fn add_peer_with_options_and_identity(
         &mut self,
         serial: u64,
+        id: ActrId,
         rtc_configuration: webrtc::peer_connection::RTCConfiguration,
         credential: AIdCredential,
         media_registry: Option<Arc<crate::inbound::MediaFrameRegistry>>,
     ) {
         assert!(!self.peers.contains_key(&serial), "duplicate peer {serial}");
-        let id = make_actor_id(serial);
+        assert_eq!(
+            id.serial_number, serial,
+            "test peer serial must match the supplied ActrId"
+        );
         let initial_addresses = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
         let mutable_address_provider = if self.wildcard_rebind_addresses {
             Arc::new(TestLocalAddressProvider::new_with_wildcard_rebind(
@@ -1306,7 +1520,7 @@ impl TestHarness {
                 IpAddr::V4(Ipv4Addr::LOCALHOST),
             ]))
         };
-        let credential_state = create_credential_state_for_test(credential);
+        let credential_state = create_credential_state_for_test(credential.clone());
         let signaling = WebSocketSignalingClient::connect_to_with_identity(
             &self.server.url(),
             id.clone(),
@@ -1315,6 +1529,11 @@ impl TestHarness {
         .await
         .expect("failed to connect test signaling client");
         let signaling_client: Arc<dyn SignalingClient> = signaling;
+        let shared_local_id = SharedLocalId::new(id.clone());
+        let faults = crate::wire::webrtc::test_runtime::TestFaultRegistries {
+            rtc: self.rtc_faults.clone(),
+            signaling: self.signaling_faults.clone(),
+        };
 
         let mut runtime = RtcRuntimeConfig::desktop_default();
         if let Some(vnet) = &self.vnet {
@@ -1330,7 +1549,7 @@ impl TestHarness {
             rtc_configuration,
         );
         let factory = if self.rtc_matrix_instrumentation {
-            factory.with_directed_faults(id.clone(), self.rtc_faults.clone())
+            faults.wrap_factory(factory, shared_local_id.clone())
         } else {
             factory
         };
@@ -1338,6 +1557,7 @@ impl TestHarness {
 
         let (inbound_tx, mut dispatcher_rx) = mpsc::channel(512);
         let (raw_tx, raw_rx) = mpsc::channel(512);
+        let raw_bytes = Arc::new(Semaphore::new(32 * 1024 * 1024));
         let router = Arc::new(InboundRouter::new(Arc::new(move |message, lease| {
             if inbound_tx.try_send((message, lease)).is_err() {
                 tracing::warn!("test inbound dispatcher is full; dropping message");
@@ -1380,29 +1600,26 @@ impl TestHarness {
         } else {
             (TestRtcHookRecorder::default(), None)
         };
-        let shared_local_id = SharedLocalId::new(id.clone());
         let signaling_router = Arc::new(SignalingRouter::new(
             manager.clone(),
             shared_local_id.clone(),
         ));
         manager.set_signaling_dispatch_chains(signaling_router.dispatch_chains());
-        let ws_transport =
-            RtcSignalingTransport::new(signaling_client.clone(), shared_local_id, credential_state);
+        let ws_transport = RtcSignalingTransport::new(
+            signaling_client.clone(),
+            shared_local_id.clone(),
+            credential_state,
+        );
         let router_for_task = signaling_router.clone();
-        let router_task = if self.rtc_matrix_instrumentation {
-            let ws_transport = DirectedSignalingTransport::new(
-                Arc::new(ws_transport),
-                id.clone(),
-                self.signaling_faults.clone(),
-            );
-            tokio::spawn(async move {
-                router_for_task.run(ws_transport, signaling_rx).await;
-            })
-        } else {
-            tokio::spawn(async move {
-                router_for_task.run(ws_transport, signaling_rx).await;
-            })
-        };
+        let test_faults = self.rtc_matrix_instrumentation.then_some(faults);
+        let router_task = tokio::spawn(async move {
+            if let Some(faults) = test_faults {
+                let transport = faults.wrap_signaling(ws_transport, shared_local_id);
+                router_for_task.run(transport, signaling_rx).await;
+                return;
+            }
+            router_for_task.run(ws_transport, signaling_rx).await;
+        });
 
         let pending: PendingRequestsMap =
             std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
@@ -1425,21 +1642,34 @@ impl TestHarness {
         let request_counts_for_dispatcher = request_counts.clone();
         let request_changed = Arc::new(Notify::new());
         let request_changed_for_dispatcher = request_changed.clone();
-        let data_chunk_counts = Arc::new(StdMutex::new(HashMap::<String, usize>::new()));
-        let data_chunk_counts_for_dispatcher = data_chunk_counts.clone();
+        let data_chunks = Arc::new(DataChunkRecorder::default());
+        let data_chunks_for_dispatcher = data_chunks.clone();
         let dispatcher_task = tokio::spawn(async move {
             while let Some((message, lease)) = dispatcher_rx.recv().await {
                 if !message.lane.to_payload_type().is_rpc() {
                     if message.lane.to_payload_type() == PayloadType::StreamReliable
                         && let Ok(chunk) = DataChunk::decode(message.payload.as_ref())
                     {
-                        *data_chunk_counts_for_dispatcher
-                            .lock()
-                            .expect("test DataChunk recorder lock poisoned")
-                            .entry(chunk.stream_id)
-                            .or_default() += 1;
+                        data_chunks_for_dispatcher.record(chunk.stream_id, chunk.payload);
                     }
-                    let _ = raw_tx.send((message, lease)).await;
+                    // The passive recorder has finished dispatching. Raw
+                    // observation owns a separate byte permit, never the
+                    // production lease needed to admit later chunks and RPCs.
+                    drop(lease);
+                    let Some(raw_lease) = u32::try_from(message.payload.len())
+                        .ok()
+                        .and_then(|bytes| raw_bytes.clone().try_acquire_many_owned(bytes).ok())
+                    else {
+                        tracing::debug!(
+                            "test raw payload byte budget is full; dropping unread payload"
+                        );
+                        continue;
+                    };
+                    if raw_tx.try_send((message, raw_lease)).is_err() {
+                        tracing::debug!(
+                            "test raw payload queue is full or closed; dropping unread payload"
+                        );
+                    }
                     continue;
                 }
                 let _lease = lease;
@@ -1472,7 +1702,7 @@ impl TestHarness {
                             .expect("test request recorder lock poisoned")
                             .entry(envelope.request_id.clone())
                             .or_default() += 1;
-                        request_changed_for_dispatcher.notify_one();
+                        request_changed_for_dispatcher.notify_waiters();
                         // Some recovery tests intentionally leave a request
                         // pending so controller teardown must release it.  The
                         // request still traverses the real RTC data plane;
@@ -1510,6 +1740,10 @@ impl TestHarness {
                 .insert(serial, mutable_address_provider);
         }
 
+        self.peer_identities
+            .lock()
+            .expect("test peer identity map lock poisoned")
+            .insert(serial, id.clone());
         self.peers.insert(
             serial,
             TestPeer {
@@ -1519,9 +1753,11 @@ impl TestHarness {
                 transport_manager,
                 rtc: TestRtcControl::new(manager),
                 hooks,
+                peer_identities: self.peer_identities.clone(),
+                credential,
                 request_counts,
                 request_changed,
-                data_chunk_counts,
+                data_chunks,
                 inbound_rx: tokio::sync::Mutex::new(raw_rx),
                 router_task: tokio::sync::Mutex::new(Some(router_task)),
                 hook_shutdown,
@@ -1566,6 +1802,10 @@ impl TestHarness {
         let Some(peer) = self.peers.remove(&serial) else {
             return false;
         };
+        self.peer_identities
+            .lock()
+            .expect("test peer identity map lock poisoned")
+            .remove(&serial);
         self.address_providers.remove(&serial);
         peer.shutdown().await;
         true
