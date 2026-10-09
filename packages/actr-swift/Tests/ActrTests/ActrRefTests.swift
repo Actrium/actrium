@@ -35,11 +35,7 @@ private final class RecordingActrContext: ActrContext, @unchecked Sendable {
         let timeoutMs: Int64
     }
 
-    let selfId = Actr.ActrId(
-        realm: Actr.Realm(realmId: 1),
-        serialNumber: 7,
-        type: Actr.ActrType(publisher: "test", name: "Recorder", version: "1.0.0")
-    )
+    let selfId = Actr.ActrId(realm: "test@example.com", serialNumber: 7)
     let callerId: Actr.ActrId? = nil
     let requestId = "request-1"
     private(set) var calls: [RecordedCall] = []
