@@ -1,5 +1,6 @@
 //! WebSocket transport connection implementation
 
+use super::security::DirectSecurity;
 use crate::transport::{
     ConnType, DataLane, NetworkError, NetworkResult, SecureCell, SecureChannelState,
     SecureDataLane, WebSocketDataLane, WireHandle, WsSink,
@@ -9,13 +10,13 @@ use async_trait::async_trait;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request as WsRequest;
 use tokio_tungstenite::tungstenite::http::Uri as WsUri;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::{Connector, WebSocketStream, connect_async_tls_with_config};
 
 /// WebSocket transmitting messagesprotocol
 ///
@@ -79,10 +80,11 @@ impl TransportMessage {
 }
 
 /// WebSocket transport connection
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct WebSocketConnection {
     /// URL
     url: String,
+    security: DirectSecurity,
     /// Local node identity (hex-encoded protobuf ActrId bytes), sent as X-Actr-Source-ID in handshake request for direct-connect mode
     local_id_hex: Option<String>,
     /// Local AIdCredential (base64-encoded), sent with X-Actr-Credential header during handshake for peer verification
@@ -119,6 +121,7 @@ impl WebSocketConnection {
     pub fn new(url: String) -> Self {
         Self {
             url: url.clone(),
+            security: DirectSecurity::default(),
             local_id_hex: None,
             credential_b64: None,
             sink: Arc::new(Mutex::new(None)), // initial begin as None
@@ -127,6 +130,11 @@ impl WebSocketConnection {
             connected: Arc::new(RwLock::new(false)),
             secure: SecureCell::new(SecureChannelState::LegacyBypass),
         }
+    }
+
+    pub(crate) fn with_security(mut self, security: DirectSecurity) -> Self {
+        self.security = security;
+        self
     }
 
     /// Set local node identity; automatically appends X-Actr-Source-ID header during handshake (used in direct-connect mode)
@@ -148,13 +156,32 @@ impl WebSocketConnection {
     /// inbound connections where the handshake has been completed by
     /// `WebSocketServer`, entering Ready state directly.
     ///
-    /// `server.rs` uses `accept_hdr_async(MaybeTlsStream::Plain(stream), ...)` to produce
-    /// `WebSocketStream<MaybeTlsStream<TcpStream>>`, identical to the client type, no conversion needed.
-    pub fn from_server_stream(ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
+    /// The generic stream accepts either server TLS or explicit loopback development TCP.
+    pub fn from_server_stream<S>(ws_stream: WebSocketStream<S>) -> Self
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
         let (sink, stream) = ws_stream.split();
 
-        let router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>> =
-            Arc::new(RwLock::new([None, None, None, None, None]));
+        let sink: WsSink = Arc::new(Mutex::new(Some(Box::new(sink))));
+        let secure = SecureCell::new(SecureChannelState::LegacyBypass);
+        let mut routes = [None, None, None, None, None];
+        let mut lanes = [None, None, None, None, None];
+        // The peer can send its first frame as soon as the upgrade completes,
+        // before credential verification and the gate's lane readers finish.
+        // Register bounded receive queues before starting the dispatcher.
+        for payload_type in [
+            PayloadType::RpcReliable,
+            PayloadType::RpcSignal,
+            PayloadType::StreamReliable,
+            PayloadType::StreamLatencyFirst,
+            PayloadType::MediaRtp,
+        ] {
+            let (tx, lane) = Self::make_lane(&sink, &secure, payload_type);
+            routes[payload_type as usize] = Some(tx);
+            lanes[payload_type as usize] = Some(lane);
+        }
+        let router = Arc::new(RwLock::new(routes));
         let connected = Arc::new(RwLock::new(true));
 
         Self::spawn_dispatcher(stream, router.clone(), connected.clone());
@@ -163,25 +190,44 @@ impl WebSocketConnection {
 
         Self {
             url: String::from("<inbound>"),
+            security: DirectSecurity::default(),
             local_id_hex: None,
             credential_b64: None,
-            sink: Arc::new(Mutex::new(Some(sink))),
+            sink,
             router,
-            lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
+            lane_cache: Arc::new(RwLock::new(lanes)),
             connected,
-            secure: SecureCell::new(SecureChannelState::LegacyBypass),
+            secure,
         }
     }
 
     /// establish Connect
     pub async fn connect(&self) -> NetworkResult<()> {
+        self.security.validate_url(&self.url)?;
+        // Dial the same normalized authority that the policy validated. In
+        // particular, never pass alternate numeric hosts to a DNS resolver.
+        let url = actr_config::Url::parse(&self.url)
+            .map_err(|_| NetworkError::InvalidArgument("invalid direct WebSocket URL".into()))?
+            .to_string();
+        let client = match self.security.client.clone() {
+            Some(client) => Some(client),
+            None => {
+                DirectSecurity::from_options(&Default::default(), None)
+                    .map_err(|_| {
+                        NetworkError::ConnectionError(
+                            "direct WebSocket TLS configuration failed".into(),
+                        )
+                    })?
+                    .client
+            }
+        };
+        let connector = client.map(Connector::Rustls);
         // 1. Establish WebSocket connection (direct-connect mode carries X-Actr-Source-ID header)
         let (ws_stream, _) = if let Some(ref hex_id) = self.local_id_hex {
             // tungstenite does not auto-complete WebSocket upgrade headers; all must be specified manually.
             // Missing any of (Host/Connection/Upgrade/Sec-WebSocket-Version/Sec-WebSocket-Key)
             // will cause the handshake to fail.
-            let uri: WsUri = self
-                .url
+            let uri: WsUri = url
                 .parse()
                 .map_err(|e| NetworkError::ConnectionError(format!("Invalid WS URI: {e}")))?;
             let host = uri
@@ -192,7 +238,7 @@ impl WebSocketConnection {
                 None => host.to_string(),
             };
             let mut builder = WsRequest::builder()
-                .uri(self.url.as_str())
+                .uri(url.as_str())
                 .header("Host", host_header)
                 .header("Connection", "Upgrade")
                 .header("Upgrade", "websocket")
@@ -207,14 +253,19 @@ impl WebSocketConnection {
             let request = builder.body(()).map_err(|e| {
                 NetworkError::ConnectionError(format!("WS request build failed: {e}"))
             })?;
-            connect_async(request).await?
+            connect_async_tls_with_config(request, None, false, connector).await
         } else {
-            connect_async(&self.url).await?
-        };
+            connect_async_tls_with_config(&url, None, false, connector).await
+        }
+        .map_err(|_| {
+            NetworkError::ConnectionError(
+                "direct WebSocket connection or TLS/upgrade handshake failed".into(),
+            )
+        })?;
         let (sink, stream) = ws_stream.split();
 
         // 2. update new sink
-        *self.sink.lock().await = Some(sink);
+        *self.sink.lock().await = Some(Box::new(sink));
         *self.connected.write().await = true;
 
         // 3. Startmessage dispatch device (in background task, not retain handle)
@@ -228,11 +279,14 @@ impl WebSocketConnection {
     }
 
     /// Startmessage dispatch device (in background task)
-    fn spawn_dispatcher(
-        mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    fn spawn_dispatcher<S>(
+        mut stream: SplitStream<WebSocketStream<S>>,
         router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>>,
         connected: Arc<RwLock<bool>>,
-    ) -> tokio::task::JoinHandle<()> {
+    ) -> tokio::task::JoinHandle<()>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
         tokio::spawn(async move {
             tracing::debug!("📡 WebSocket dispatcher Start");
 
@@ -370,23 +424,23 @@ impl WebSocketConnection {
             ));
         }
 
-        // Create receive channel
-        let (tx, rx) = mpsc::channel(100);
-
-        // Register route
+        let (tx, lane) = Self::make_lane(&self.sink, &self.secure, payload_type);
         self.register_route(payload_type, tx).await?;
-
-        // Get shared Sink
-        let sink = self.sink.clone();
-
-        // Create WebSocketDataLane, wrapped in `SecureDataLane` so the cached
-        // lane gates both outbound `send()` and the response-reader `recv()`
-        // on this session's `SecureCell` (RFC-0563 review point 3).
-        let lane: Arc<dyn DataLane> = Arc::new(SecureDataLane::new(
-            Arc::new(WebSocketDataLane::new(sink, payload_type, rx)),
-            self.secure.clone(),
-        ));
         Ok(lane)
+    }
+
+    // Keep cached lanes gated by the physical session's shared secure state.
+    fn make_lane(
+        sink: &WsSink,
+        secure: &SecureCell,
+        payload_type: PayloadType,
+    ) -> (mpsc::Sender<bytes::Bytes>, Arc<dyn DataLane>) {
+        let (tx, rx) = mpsc::channel(100);
+        let lane = Arc::new(SecureDataLane::new(
+            Arc::new(WebSocketDataLane::new(sink.clone(), payload_type, rx)),
+            secure.clone(),
+        ));
+        (tx, lane)
     }
 
     /// Close connection
@@ -474,3 +528,12 @@ impl WireHandle for WebSocketConnection {
 #[cfg(test)]
 #[path = "connection_tests.rs"]
 mod tests;
+
+impl std::fmt::Debug for WebSocketConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never format the reusable credential or credential-bearing request headers.
+        f.debug_struct("WebSocketConnection")
+            .field("secure", &self.secure)
+            .finish_non_exhaustive()
+    }
+}

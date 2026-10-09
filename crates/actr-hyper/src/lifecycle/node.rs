@@ -2699,18 +2699,12 @@ impl Inner {
         // through `Hyper::register()`.
         let service_spec = None;
 
-        // If a WebSocket listen port is configured, build the advertised ws:// address
-        // to register with the signaling server so clients can discover it.
-        let ws_address = if let Some(port) = self.config.websocket_listen_port {
-            let host = self
-                .config
-                .websocket_advertised_host
-                .as_deref()
-                .unwrap_or("127.0.0.1");
-            Some(format!("ws://{}:{}", host, port))
-        } else {
-            None
-        };
+        // Validate TLS before advertising or sending reusable peer credentials.
+        let direct_security = crate::wire::websocket::security::DirectSecurity::load(&self.config)
+            .map_err(|e| ActrError::Internal(e.to_string()))?;
+        let ws_address = direct_security
+            .advertised_url(&self.config)
+            .map_err(|e| ActrError::Internal(e.to_string()))?;
 
         if let Some(ref addr) = ws_address {
             tracing::info!(
@@ -3306,7 +3300,8 @@ impl Inner {
                 pending_requests: Some(pending_requests.clone()),
             };
             let wire_builder = {
-                let builder = DefaultWireBuilder::new(wire_builder_config);
+                let builder = DefaultWireBuilder::new(wire_builder_config)
+                    .with_direct_security(direct_security.clone());
                 let builder = builder.with_rtc_manager(rtc_manager.clone());
                 Arc::new(builder)
             };
@@ -3527,7 +3522,7 @@ impl Inner {
                     signaling_client: self.signaling_client.clone(),
                 };
 
-                match WebSocketServer::bind(listen_port).await {
+                match WebSocketServer::bind(listen_port, direct_security.clone()).await {
                     Ok((ws_server, conn_rx)) => {
                         ws_server.start(self.shutdown_token.clone());
                         let ws_gate = Arc::new(WebSocketGate::new(

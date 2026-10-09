@@ -527,6 +527,12 @@ timer_inventory! {
         success: "delay elapses and the message is delivered", interrupt: "test cancellation",
         expiry: "deliver the delayed message", reset: "each delayed message", external: false
     },
+    WEBSOCKET_HANDSHAKE => {
+        id: "websocket.handshake", owner: "websocket_server", category: FailureDeadline,
+        duration: "10s", arm: "an inbound TCP connection acquires a handshake slot",
+        success: "TLS and WebSocket upgrade complete and connection is queued", interrupt: "server shutdown",
+        expiry: "drop the connection and release the handshake slot", reset: "each accepted connection", external: false
+    },
     WEBSOCKET_ACCEPT_BACKOFF => {
         id: "websocket.accept_backoff", owner: "websocket_server", category: FailureBackoff,
         duration: "WEBSOCKET_ACCEPT_BACKOFF_DURATION (100ms)", arm: "listener accept returns an error",

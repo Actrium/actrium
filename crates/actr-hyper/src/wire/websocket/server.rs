@@ -14,6 +14,7 @@
 //! - `X-Actr-Credential` is used for Ed25519 signature verification in the gate layer; when missing, connection rejection depends on configuration.
 
 use super::connection::WebSocketConnection;
+use super::security::DirectSecurity;
 use actr_protocol::AIdCredential;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{ActorResult, ActrError};
@@ -21,7 +22,9 @@ use std::net::SocketAddr;
 use std::sync::Mutex as StdMutex;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tokio_tungstenite::MaybeTlsStream;
+
+trait SocketIo: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> SocketIo for T {}
 use tokio_util::sync::CancellationToken;
 
 /// Capacity of the inbound WebSocket connection notification channel.
@@ -36,7 +39,7 @@ pub(crate) type InboundWsConn = (WebSocketConnection, Vec<u8>, Option<AIdCredent
 ///
 /// # Usage
 /// ```rust,ignore
-/// let (server, mut rx) = WebSocketServer::bind(8090).await?;
+/// let (server, mut rx) = WebSocketServer::bind(8090, security).await?;
 /// server.start(shutdown_token);
 ///
 /// while let Some((conn, source_id, credential)) = rx.recv().await {
@@ -45,6 +48,7 @@ pub(crate) type InboundWsConn = (WebSocketConnection, Vec<u8>, Option<AIdCredent
 /// ```
 pub(crate) struct WebSocketServer {
     listener: TcpListener,
+    security: DirectSecurity,
     conn_tx: mpsc::Sender<InboundWsConn>,
     local_addr: SocketAddr,
     /// How long to wait after an `accept()` error before retrying.
@@ -57,18 +61,32 @@ pub(crate) struct WebSocketServer {
 
 impl WebSocketServer {
     /// Bind to the given port and return the server plus the inbound receiver.
-    pub async fn bind(port: u16) -> ActorResult<(Self, mpsc::Receiver<InboundWsConn>)> {
-        Self::bind_with_accept_backoff(port, crate::timer::ids::WEBSOCKET_ACCEPT_BACKOFF_DURATION)
-            .await
+    pub async fn bind(
+        port: u16,
+        security: DirectSecurity,
+    ) -> ActorResult<(Self, mpsc::Receiver<InboundWsConn>)> {
+        Self::bind_with_accept_backoff(
+            port,
+            security,
+            crate::timer::ids::WEBSOCKET_ACCEPT_BACKOFF_DURATION,
+        )
+        .await
     }
 
     /// Bind with an explicit accept-error backoff. `bind` calls this with the
     /// audited production duration.
     async fn bind_with_accept_backoff(
         port: u16,
+        security: DirectSecurity,
         accept_backoff: std::time::Duration,
     ) -> ActorResult<(Self, mpsc::Receiver<InboundWsConn>)> {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let addr = security.listen_address(port);
+        if security.server.is_none() && (!security.allow_insecure || !addr.ip().is_loopback()) {
+            return Err(ActrError::Internal(
+                "direct WebSocket listener requires TLS or explicit loopback development mode"
+                    .into(),
+            ));
+        }
         let listener = TcpListener::bind(addr).await.map_err(|e| {
             ActrError::Internal(format!("WebSocketServer: failed to bind port {port}: {e}"))
         })?;
@@ -83,6 +101,7 @@ impl WebSocketServer {
         Ok((
             Self {
                 listener,
+                security,
                 conn_tx,
                 local_addr,
                 accept_backoff,
@@ -106,6 +125,8 @@ impl WebSocketServer {
                 self.local_addr
             );
 
+            let handshakes =
+                std::sync::Arc::new(tokio::sync::Semaphore::new(ACCEPT_CHANNEL_CAPACITY));
             loop {
                 tokio::select! {
                     _ = shutdown_token.cancelled() => {
@@ -120,112 +141,127 @@ impl WebSocketServer {
                                     peer_addr
                                 );
 
+                                let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+                                    continue;
+                                };
                                 let conn_tx = self.conn_tx.clone();
+                                let tls = self.security.server.clone();
+                                let shutdown = shutdown_token.clone();
 
                                 // Complete the WebSocket handshake in a dedicated task to avoid blocking the accept loop.
                                 tokio::spawn(async move {
-                                    // Use Arc plus std Mutex to capture handshake headers from the synchronous callback.
-                                    let captured_source_id: std::sync::Arc<StdMutex<Vec<u8>>> =
-                                        std::sync::Arc::new(StdMutex::new(Vec::new()));
-                                    let captured_credential: std::sync::Arc<StdMutex<Option<AIdCredential>>> =
-                                        std::sync::Arc::new(StdMutex::new(None));
-
-                                    let capture_src = captured_source_id.clone();
-                                    let capture_cred = captured_credential.clone();
-
-                                    #[allow(clippy::result_large_err)]
-                                    let callback = move |req: &tokio_tungstenite::tungstenite::handshake::server::Request,
-                                                         res: tokio_tungstenite::tungstenite::handshake::server::Response|
-                                     -> Result<
-                                        tokio_tungstenite::tungstenite::handshake::server::Response,
-                                        tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
-                                    > {
-                                        // Extract `X-Actr-Source-ID`.
-                                        if let Some(val) = req.headers().get("X-Actr-Source-ID") {
-                                            if let Ok(hex_str) = val.to_str() {
-                                                match hex::decode(hex_str) {
-                                                    Ok(bytes) => {
-                                                        *capture_src.lock().unwrap() = bytes;
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::warn!(
-                                                            "⚠️ Invalid X-Actr-Source-ID hex from {}: {}",
-                                                            peer_addr,
-                                                            e
-                                                        );
-                                                    }
+                                    let _permit = permit;
+                                    let handshake = async {
+                                        let stream: Box<dyn SocketIo> = if let Some(config) = tls {
+                                            let acceptor = tokio_rustls::TlsAcceptor::from(config);
+                                            let accepted = acceptor.accept(stream).await;
+                                            match accepted {
+                                                Ok(stream) => Box::new(stream),
+                                                Err(_) => {
+                                                    tracing::warn!(%peer_addr, "Direct WebSocket TLS handshake failed");
+                                                    return;
                                                 }
                                             }
-                                        } else {
-                                            tracing::warn!(
-                                                "⚠️ No X-Actr-Source-ID header from {} — response routing will fail",
-                                                peer_addr
-                                            );
-                                        }
-
-                                        // Extract `X-Actr-Credential` (base64 -> protobuf `AIdCredential`).
-                                        if let Some(val) = req.headers().get("X-Actr-Credential") {
-                                            if let Ok(b64_str) = val.to_str() {
-                                                use base64::Engine as _;
-                                                match base64::engine::general_purpose::STANDARD.decode(b64_str) {
-                                                    Ok(cred_bytes) => {
-                                                        match AIdCredential::decode(cred_bytes.as_slice()) {
-                                                            Ok(credential) => {
-                                                                *capture_cred.lock().unwrap() = Some(credential);
-                                                            }
-                                                            Err(e) => {
-                                                                tracing::warn!(
-                                                                    "⚠️ Invalid X-Actr-Credential proto from {}: {}",
-                                                                    peer_addr, e
-                                                                );
-                                                            }
+                                        } else { Box::new(stream) };
+                                        // Use Arc plus std Mutex to capture handshake headers from the synchronous callback.
+                                        let captured_source_id: std::sync::Arc<StdMutex<Vec<u8>>> =
+                                            std::sync::Arc::new(StdMutex::new(Vec::new()));
+                                        let captured_credential: std::sync::Arc<StdMutex<Option<AIdCredential>>> =
+                                            std::sync::Arc::new(StdMutex::new(None));
+                                        let capture_src = captured_source_id.clone();
+                                        let capture_cred = captured_credential.clone();
+                                        #[allow(clippy::result_large_err)]
+                                        let callback = move |req: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                                                             res: tokio_tungstenite::tungstenite::handshake::server::Response|
+                                         -> Result<
+                                            tokio_tungstenite::tungstenite::handshake::server::Response,
+                                            tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+                                        > {
+                                            // Extract `X-Actr-Source-ID`.
+                                            if let Some(val) = req.headers().get("X-Actr-Source-ID") {
+                                                if let Ok(hex_str) = val.to_str() {
+                                                    match hex::decode(hex_str) {
+                                                        Ok(bytes) => {
+                                                            *capture_src.lock().unwrap() = bytes;
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::warn!(
+                                                                "⚠️ Invalid X-Actr-Source-ID hex from {}: {}",
+                                                                peer_addr,
+                                                                e
+                                                            );
                                                         }
                                                     }
-                                                    Err(e) => {
-                                                        tracing::warn!(
-                                                            "⚠️ Invalid X-Actr-Credential base64 from {}: {}",
-                                                            peer_addr, e
-                                                        );
-                                                    }
                                                 }
-                                            }
-                                        }
-
-                                        Ok(res)
-                                    };
-
-                                    match tokio_tungstenite::accept_hdr_async(
-                                        MaybeTlsStream::Plain(stream),
-                                        callback,
-                                    )
-                                    .await
-                                    {
-                                        Ok(ws_stream) => {
-                                            tracing::info!(
-                                                "✅ WebSocket handshake completed from: {}",
-                                                peer_addr
-                                            );
-
-                                            let source_id = captured_source_id.lock().unwrap().clone();
-                                            let credential = captured_credential.lock().unwrap().take();
-
-                                            let conn =
-                                                WebSocketConnection::from_server_stream(ws_stream);
-
-                                            if conn_tx.send((conn, source_id, credential)).await.is_err() {
+                                            } else {
                                                 tracing::warn!(
-                                                    "⚠️ WebSocketServer: conn_tx closed, dropping connection from {}",
+                                                    "⚠️ No X-Actr-Source-ID header from {} — response routing will fail",
                                                     peer_addr
                                                 );
                                             }
+                                            // Extract `X-Actr-Credential` (base64 -> protobuf `AIdCredential`).
+                                            if let Some(val) = req.headers().get("X-Actr-Credential") {
+                                                if let Ok(b64_str) = val.to_str() {
+                                                    use base64::Engine as _;
+                                                    match base64::engine::general_purpose::STANDARD.decode(b64_str) {
+                                                        Ok(cred_bytes) => {
+                                                            match AIdCredential::decode(cred_bytes.as_slice()) {
+                                                                Ok(credential) => {
+                                                                    *capture_cred.lock().unwrap() = Some(credential);
+                                                                }
+                                                                Err(e) => {
+                                                                    tracing::warn!(
+                                                                        "⚠️ Invalid X-Actr-Credential proto from {}: {}",
+                                                                        peer_addr, e
+                                                                    );
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::warn!(
+                                                                "⚠️ Invalid X-Actr-Credential base64 from {}: {}",
+                                                                peer_addr, e
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Ok(res)
+                                        };
+                                        match tokio_tungstenite::accept_hdr_async(
+                                            stream,
+                                            callback,
+                                        )
+                                        .await
+                                        {
+                                            Ok(ws_stream) => {
+                                                tracing::info!(
+                                                    "✅ WebSocket handshake completed from: {}",
+                                                    peer_addr
+                                                );
+                                                let source_id = captured_source_id.lock().unwrap().clone();
+                                                let credential = captured_credential.lock().unwrap().take();
+                                                let conn =
+                                                    WebSocketConnection::from_server_stream(ws_stream);
+                                                if conn_tx.send((conn, source_id, credential)).await.is_err() {
+                                                    tracing::warn!(
+                                                        "⚠️ WebSocketServer: conn_tx closed, dropping connection from {}",
+                                                        peer_addr
+                                                    );
+                                                }
+                                            }
+                                            Err(_) => {
+                                                tracing::warn!(%peer_addr, "WebSocket handshake failed");
+                                            }
                                         }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "❌ WebSocket handshake failed from {}: {}",
-                                                peer_addr,
-                                                e
-                                            );
-                                        }
+                                    };
+                                    tokio::select! {
+                                        _ = shutdown.cancelled() => {},
+                                        _ = crate::timer::timeout(
+                                            crate::timer::ids::WEBSOCKET_HANDSHAKE,
+                                            std::time::Duration::from_secs(10),
+                                            handshake,
+                                        ) => {},
                                     }
                                 });
                             }
