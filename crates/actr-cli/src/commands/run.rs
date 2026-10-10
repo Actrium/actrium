@@ -29,47 +29,6 @@ fn resolve_against(base: &Path, path: &Path) -> PathBuf {
     }
 }
 
-/// [`actr_hyper::PublisherAuthProvider`] backed by an publisher keychain file.
-///
-/// Holds only the key path — the private key is re-read from disk on every
-/// `sign` call, so it is never kept resident in memory. After publisher key rotation,
-/// an old package can still use published Path 1, but it must be rebuilt and
-/// re-signed before it can use unpublished Path 2 again.
-struct KeychainPublisherAuthProvider {
-    key_path: PathBuf,
-}
-
-impl actr_hyper::PublisherAuthProvider for KeychainPublisherAuthProvider {
-    fn sign(
-        &self,
-        realm: &str,
-        actr_type: &actr_protocol::ActrType,
-        target: &str,
-        manifest_raw: &[u8],
-    ) -> std::result::Result<actr_hyper::PublisherRegistrationAuth, actr_hyper::HyperError> {
-        let (signing_key, keychain_publisher) =
-            crate::commands::package_build::load_signing_key_with_publisher(&self.key_path)
-                .map_err(|e| {
-                    actr_hyper::HyperError::Runtime(format!("reload publisher signing key: {e}"))
-                })?;
-        // Reject cross-publisher registration signing (issue #425): a
-        // keychain bound to one publisher must not register a package that
-        // belongs to another.
-        crate::commands::package_build::ensure_publisher_matches(
-            keychain_publisher.as_deref(),
-            &actr_type.publisher,
-        )
-        .map_err(|e| actr_hyper::HyperError::Runtime(format!("publisher mismatch: {e}")))?;
-        actr_hyper::PublisherRegistrationAuth::sign(
-            &signing_key,
-            realm,
-            actr_type,
-            target,
-            manifest_raw,
-        )
-    }
-}
-
 #[derive(Args)]
 pub struct RunCommand {
     /// Runtime configuration file (defaults to ./actr.toml if not specified)
@@ -182,19 +141,6 @@ impl RunCommand {
         info!("📡 Signaling server: {}", config.signaling_url.as_str());
         info!("🔐 Trust anchors: {} configured", config.trust.len());
 
-        let publisher_provider = self.build_publisher_auth_provider().map_err(|e| {
-            ActrCliError::command_error(format!(
-                "Failed to prepare publisher registration signer: {e}"
-            ))
-        })?;
-        if publisher_provider.is_some() {
-            info!("🔏 Publisher registration signer prepared from publisher.keychain");
-        } else {
-            info!(
-                "No publisher.keychain configured; continuing without publisher registration signature"
-            );
-        }
-
         // 6. Initialize observability
         let _obs_guard = init_observability(&config.observability).map_err(|e| {
             ActrCliError::command_error(format!("Failed to initialize observability: {}", e))
@@ -212,20 +158,17 @@ impl RunCommand {
             .map_err(|e| ActrCliError::command_error(format!("Failed to attach package: {}", e)))?;
         info!("✅ Package attached");
 
-        let registered = attached
-            .register_with_publisher_auth(&issuer_endpoint, publisher_provider)
-            .await
-            .map_err(|e| {
-                ActrCliError::command_error(format!(
-                    "Failed to register with Issuer at {}.\n\n\
+        let registered = attached.register(&issuer_endpoint).await.map_err(|e| {
+            ActrCliError::command_error(format!(
+                "Failed to register with Issuer at {}.\n\n\
                  Possible causes:\n\
                  - Issuer server is not running\n\
                  - Incorrect [issuer_endpoint] url in the runtime config\n\
                  - Network connectivity issues\n\n\
                  Error: {}",
-                    issuer_endpoint, e
-                ))
-            })?;
+                issuer_endpoint, e
+            ))
+        })?;
         info!("✅ Issuer registration successful");
 
         let actr_ref = registered
@@ -306,28 +249,6 @@ impl RunCommand {
             authors: vec![],
             license: manifest.metadata.license.clone(),
         }
-    }
-
-    /// Build a publisher re-signing provider backed by the configured publisher
-    /// keychain, if any.
-    ///
-    /// Returns `Ok(None)` when no keychain is configured (published-package or
-    /// no-keychain runs). The provider does **not** hold the private key in
-    /// memory — it reloads it from the keychain file on every sign call. The
-    /// manifest pins Path 2 verification to its build-time key, so rotating the
-    /// publisher key requires rebuilding and re-signing that package before it can use
-    /// Path 2 again. Published Path 1 remains unaffected.
-    fn build_publisher_auth_provider(
-        &self,
-    ) -> anyhow::Result<Option<std::sync::Arc<dyn actr_hyper::PublisherAuthProvider>>> {
-        let cli_config = crate::config::resolver::resolve_effective_cli_config()?;
-        let Some(keychain) = cli_config.publisher.keychain.as_deref() else {
-            return Ok(None);
-        };
-        let key_path = crate::commands::package_build::resolve_key_path(None, Some(keychain))?;
-        Ok(Some(std::sync::Arc::new(KeychainPublisherAuthProvider {
-            key_path,
-        })))
     }
 
     async fn init_hyper(

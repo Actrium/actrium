@@ -6,8 +6,8 @@ use sqlx::SqlitePool;
 use crate::{
     PublisherRegistryError, crypto,
     manager::{
-        NonceRequest, PublishRequest, PublisherCertificate, PublisherRegistryManager,
-        lookup_package,
+        NonceRequest, PackageSigningKey, PublishRequest, PublisherCertificate,
+        PublisherRegistryManager, lookup_package,
     },
     model::{ActrPackage, PkgStatus, PublishNonce, Publisher, PublisherStatus},
 };
@@ -720,59 +720,6 @@ async fn test_package_get_by_id() {
     let found = ActrPackage::get_by_id(&pool, pkg.id).await.unwrap();
     assert!(found.is_some());
     assert_eq!(found.unwrap().type_str, "idpkg/svc@1.0.0");
-}
-
-#[tokio::test]
-async fn test_verify_legacy_package_without_signing_key_id_after_expiry() {
-    use base64::Engine as _;
-    use ed25519_dalek::{Signer, SigningKey};
-    use rand::rngs::OsRng;
-
-    let pool = setup_test_pool().await;
-    let key = SigningKey::generate(&mut OsRng);
-    let public_key =
-        base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
-    let mut record = Publisher::create(&pool, "legacypkg", None).await.unwrap();
-    record.activate(&pool, public_key).await.unwrap();
-
-    let manifest = test_manifest("legacypkg", "svc", "1.0.0", "wasm32-wasip1");
-    let signature =
-        base64::engine::general_purpose::STANDARD.encode(key.sign(manifest.as_bytes()).to_bytes());
-    let package = ActrPackage::publish(
-        &pool,
-        record.id,
-        "legacypkg",
-        "svc",
-        "1.0.0",
-        "wasm32-wasip1",
-        &manifest,
-        &signature,
-        &record.key_id,
-        None,
-    )
-    .await
-    .unwrap();
-    sqlx::query("UPDATE publisher_package SET signing_key_id = NULL WHERE id = ?")
-        .bind(package.id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE publisher SET key_expires_at = ? WHERE id = ?")
-        .bind(chrono::Utc::now().timestamp() - 1)
-        .bind(record.id)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    let legacy_package = ActrPackage::get_by_id(&pool, package.id)
-        .await
-        .unwrap()
-        .unwrap();
-    let resolved_key_id = PublisherRegistryManager::new(pool)
-        .verify_published_package_signing_key(&legacy_package)
-        .await
-        .expect("legacy package signature should remain verifiable");
-    assert_eq!(resolved_key_id, record.key_id);
 }
 
 // ─── manager.rs tests (require DB) ────────────────────────────────────────────
@@ -1574,10 +1521,12 @@ async fn two_active_package_keys_overlap_during_rotation() {
         .await
         .unwrap();
     assert_eq!(by_new.signing_key_id.as_deref(), Some(new_id.as_str()));
-    manager
-        .verify_published_package_signing_key(&by_new)
-        .await
-        .unwrap();
+    assert!(matches!(
+        manager
+            .package_signing_key("overlap.example", &new_id)
+            .await,
+        Ok(PackageSigningKey::Trusted(_))
+    ));
     let stranger = SigningKey::generate(&mut OsRng);
     assert!(matches!(
         publish_with(&manager, &record, "1.2.0", &stranger).await,
@@ -1606,10 +1555,12 @@ async fn two_active_package_keys_overlap_during_rotation() {
     publish_with(&manager, &record, "2.0.0", &new)
         .await
         .unwrap();
-    manager
-        .verify_published_package_signing_key(&by_old)
-        .await
-        .unwrap();
+    assert!(matches!(
+        manager
+            .package_signing_key("overlap.example", &old_id)
+            .await,
+        Ok(PackageSigningKey::Trusted(_))
+    ));
 
     // Removing it revokes it: its packages no longer verify.
     let record = register(
@@ -1620,8 +1571,63 @@ async fn two_active_package_keys_overlap_during_rotation() {
     .unwrap();
     assert_eq!(record.key_id, new_id);
     assert!(matches!(
-        manager.verify_published_package_signing_key(&by_old).await,
+        manager
+            .package_signing_key("overlap.example", &old_id)
+            .await,
         Err(PublisherRegistryError::KeyRevoked(_))
+    ));
+}
+
+#[tokio::test]
+async fn package_signing_key_trust_decisions() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let key = SigningKey::generate(&mut OsRng);
+    let key_id = crypto::compute_key_id(key.verifying_key().as_bytes());
+    register(
+        &manager,
+        &signed_profile(
+            "decide.example",
+            1,
+            &[("root-1", &root, "active")],
+            &[(&key, "active")],
+        ),
+    )
+    .await
+    .unwrap();
+
+    // A key of the active publisher is trusted.
+    assert!(matches!(
+        manager.package_signing_key("decide.example", &key_id).await,
+        Ok(PackageSigningKey::Trusted(info)) if info.key_id == key_id
+    ));
+    // A name the registry does not hold is untrusted: a development identity.
+    assert!(matches!(
+        manager.package_signing_key("other.example", &key_id).await,
+        Ok(PackageSigningKey::Untrusted)
+    ));
+    // A held name never is: another key, another spelling, or a suspended
+    // publisher is an error.
+    assert!(matches!(
+        manager
+            .package_signing_key("decide.example", "actr-pub-0000000000000000")
+            .await,
+        Err(PublisherRegistryError::NotFound)
+    ));
+    assert!(matches!(
+        manager.package_signing_key("Decide.Example", &key_id).await,
+        Err(PublisherRegistryError::InvalidRequest(_))
+    ));
+    sqlx::query("UPDATE publisher SET status = 'suspended' WHERE name = 'decide.example'")
+        .execute(manager.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        manager.package_signing_key("decide.example", &key_id).await,
+        Err(PublisherRegistryError::InvalidStatus(_))
     ));
 }
 

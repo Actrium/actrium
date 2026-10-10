@@ -127,6 +127,7 @@ fn fake_manifest() -> VerifiedPackage {
         },
         manifest_raw: vec![],
         sig_raw: vec![0u8; 64],
+        signing_public_key: [0u8; 32],
     }
 }
 
@@ -149,6 +150,7 @@ fn fake_register_response_bytes() -> Vec<u8> {
         member: "member-1".to_string(),
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     let claims_bytes = claims.encode_to_vec();
 

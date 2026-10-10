@@ -175,7 +175,7 @@ jobs:
           save-if: false
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
-      - name: Run package runtime echo e2e (PR gate, MODE=path1)
+      - name: Run package runtime echo e2e (PR gate, MODE=published)
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
 
   audit:

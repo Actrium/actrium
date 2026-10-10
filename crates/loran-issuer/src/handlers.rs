@@ -1066,11 +1066,6 @@ fn attempt_error_response(error: AttemptError, error_body: fn(u32, String) -> Ve
             "actor identity possession not proven",
             None,
         ),
-        AttemptError::PublisherNonceRejected => (
-            StatusCode::FORBIDDEN,
-            "publisher authorization nonce already consumed",
-            None,
-        ),
         AttemptError::Refused(_) => (StatusCode::FORBIDDEN, "credential refused", None),
         AttemptError::Store(_) | AttemptError::Crypto(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1178,9 +1173,7 @@ mod tests {
             publisher_signature: None,
             target: None,
             auth_mode: Some(RegisterAuthMode::Package as i32),
-            publisher_auth_signature: None,
-            publisher_auth_signed_at: None,
-            publisher_auth_nonce: None,
+            signing_public_key: None,
         };
 
         // Encode
@@ -1393,9 +1386,7 @@ mod tests {
             publisher_signature: None,
             target: None,
             auth_mode: Some(RegisterAuthMode::Package as i32),
-            publisher_auth_signature: None,
-            publisher_auth_signed_at: None,
-            publisher_auth_nonce: None,
+            signing_public_key: None,
         };
 
         // Encode-decode round-trip

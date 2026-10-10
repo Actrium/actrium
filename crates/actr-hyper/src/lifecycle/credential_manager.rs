@@ -80,16 +80,10 @@ pub(crate) enum ReacquireOutcome {
 #[derive(Clone)]
 pub(crate) enum RegistrationContext {
     /// Package-backed registration — carries the full original request
-    /// including manifest bytes and publisher signature.
-    ///
-    /// `resign` is the publisher re-signing capability. It is `Some` when the
-    /// initial registration carried a publisher proof (unpublished package). Hard
-    /// rebind re-invokes it to mint a fresh proof — the original nonce was
-    /// consumed by Issuer on first success and cannot be reused.
+    /// including manifest bytes, manifest signature and signing key.
     Package {
         #[allow(dead_code)]
         request: actr_protocol::RegisterRequest,
-        resign: Option<Arc<dyn crate::PublisherAuthProvider>>,
     },
     /// Source-linked registration — carries the request.
     Linked {
@@ -572,7 +566,7 @@ async fn run_hard_rebind(
     // lapsed (403 possession failure) — the two regressions a `/reissue`-only
     // legacy path would introduce.
     let issuer = issuer_client(&issuer_endpoint, client_key.as_ref());
-    let registration = build_reissue_registration(registration_ctx).await?;
+    let registration = reissue_registration(registration_ctx);
 
     let response = issuer
         .register_with_manifest(registration)
@@ -726,56 +720,14 @@ async fn run_hard_rebind(
 
 // ---- Membership-controller re-acquire (credential-only) --------------------
 
-/// Build the authenticated registration payload for a hard rebind, applying the
-/// publisher re-sign for package registrations.
-///
-/// Shared by the legacy `run_hard_rebind` fresh-`/register` path and the
-/// credential-only controller `/reissue` path so the re-sign / replay-avoidance
-/// logic lives once.
-async fn build_reissue_registration(
-    registration_ctx: RegistrationContext,
-) -> Result<actr_protocol::RegisterRequest, String> {
-    let request = match registration_ctx {
-        RegistrationContext::Package { request, resign } => {
-            let mut request = request;
-            if let Some(provider) = resign.as_ref() {
-                let realm = request.realm.clone();
-                let actr_type = request.actr_type.clone();
-                let target = request
-                    .target
-                    .clone()
-                    .filter(|target| !target.is_empty())
-                    .ok_or_else(|| {
-                        "hard rebind publisher re-sign failed: package target is missing"
-                            .to_string()
-                    })?;
-                let manifest_raw = request
-                    .manifest_raw
-                    .as_ref()
-                    .filter(|manifest| !manifest.is_empty())
-                    .map(|manifest| manifest.to_vec())
-                    .ok_or_else(|| {
-                        "hard rebind publisher re-sign failed: package manifest is missing"
-                            .to_string()
-                    })?;
-                let fresh = crate::sign_publisher_proof(
-                    Arc::clone(provider),
-                    realm,
-                    actr_type,
-                    target,
-                    manifest_raw,
-                )
-                .await
-                .map_err(|e| format!("hard rebind publisher re-sign failed: {e}"))?;
-                request.publisher_auth_signature = Some(bytes::Bytes::from(fresh.signature));
-                request.publisher_auth_signed_at = Some(fresh.signed_at);
-                request.publisher_auth_nonce = Some(bytes::Bytes::from(fresh.nonce));
-            }
+/// The registration payload a hard rebind sends again. It carries no
+/// single-use proof: the Realm client proof is minted per request.
+fn reissue_registration(registration_ctx: RegistrationContext) -> actr_protocol::RegisterRequest {
+    match registration_ctx {
+        RegistrationContext::Package { request } | RegistrationContext::Linked { request } => {
             request
         }
-        RegistrationContext::Linked { request } => request,
-    };
-    Ok(request)
+    }
 }
 
 /// Credential-only single-flight re-acquire for the membership controller.
@@ -1006,10 +958,7 @@ async fn run_credential_only_hard_rebind(
     {
         request
     } else {
-        let registration = match build_reissue_registration(registration_ctx.clone()).await {
-            Ok(registration) => registration,
-            Err(reason) => return ReacquireOutcome::Deferred(reason),
-        };
+        let registration = reissue_registration(registration_ctx.clone());
         let request = ReissueCredentialRequest {
             actr_id: old_snapshot.actor_id.clone(),
             registration,

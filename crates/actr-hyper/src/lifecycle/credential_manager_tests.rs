@@ -47,6 +47,7 @@ fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdC
         member: "member-1".to_string(),
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     AIdCredential {
         key_id,
@@ -625,43 +626,23 @@ fn backoff_sequence() {
     assert!(d4 <= Duration::from_secs(75)); // 60 + 25% jitter
 }
 
-/// Hard rebind of a Package registration must re-invoke the publisher auth
-/// provider to mint a fresh proof. The initial publisher nonce was consumed
-/// by Issuer on the first successful registration; replaying it would be
-/// rejected. This locks in the re-sign behaviour added to fix replay on
-/// hard rebind.
+/// Hard rebind of a Package registration re-sends the saved package
+/// registration as is: the signed manifest and its signing key are all Issuer
+/// needs, and no Publisher private key is involved.
 #[tokio::test]
-async fn package_hard_rebind_re_signs_publisher_proof() {
+async fn package_hard_rebind_resends_package_registration() {
     use actr_protocol::RegisterAuthMode;
-    use std::sync::atomic::AtomicU64;
 
-    struct CountingPublisherProvider {
-        calls: Arc<AtomicU64>,
-    }
-    impl crate::PublisherAuthProvider for CountingPublisherProvider {
-        fn sign(
-            &self,
-            _realm: &str,
-            _actr_type: &actr_protocol::ActrType,
-            _target: &str,
-            _manifest_raw: &[u8],
-        ) -> std::result::Result<crate::PublisherRegistrationAuth, crate::HyperError> {
-            let n = self.calls.fetch_add(1, AtomicOrdering::SeqCst) + 1;
-            // Deterministic fresh proof keyed by call count. The mock Issuer
-            // server does not validate crypto, so the values only need to
-            // differ from the stale proof saved on the original request.
-            Ok(crate::PublisherRegistrationAuth {
-                signature: vec![n as u8; 64],
-                signed_at: 9_999_999_999,
-                nonce: vec![n as u8; 32],
-            })
-        }
-    }
-
-    let calls = Arc::new(AtomicU64::new(0));
-    let provider: Arc<CountingPublisherProvider> = Arc::new(CountingPublisherProvider {
-        calls: calls.clone(),
-    });
+    let request = RegisterRequest {
+        actr_type: test_actr_type(),
+        realm: "test7@example.com".to_string(),
+        manifest_raw: Some(Bytes::from_static(b"manifest-bytes")),
+        publisher_signature: Some(Bytes::from_static(b"publisher-sig")),
+        target: Some("wasm32-wasip1".to_string()),
+        auth_mode: Some(RegisterAuthMode::Package as i32),
+        signing_public_key: Some(Bytes::from_static(&[7; 32])),
+        ..Default::default()
+    };
 
     let mut server = mockito::Server::new_async().await;
     let response = RegisterResponse {
@@ -670,27 +651,13 @@ async fn package_hard_rebind_re_signs_publisher_proof() {
     // Flag-OFF legacy hard rebind re-registers via fresh `/register`.
     let mock = server
         .mock("POST", "/register")
+        .match_body(request.encode_to_vec())
         .with_status(200)
         .with_header("content-type", "application/x-protobuf")
         .with_body(response.encode_to_vec())
         .expect(1)
         .create_async()
         .await;
-
-    // Stale publisher proof (nonce 0xAA) saved on the original request — this
-    // is exactly what must not be replayed to Issuer.
-    let request = RegisterRequest {
-        actr_type: test_actr_type(),
-        realm: "test7@example.com".to_string(),
-        manifest_raw: Some(Bytes::from_static(b"manifest-bytes")),
-        publisher_signature: Some(Bytes::from_static(b"publisher-sig")),
-        target: Some("wasm32-wasip1".to_string()),
-        auth_mode: Some(RegisterAuthMode::Package as i32),
-        publisher_auth_signature: Some(Bytes::from_static(b"stale-publisher-auth-sig")),
-        publisher_auth_signed_at: Some(1),
-        publisher_auth_nonce: Some(Bytes::from_static(&[0xAA; 32])),
-        ..Default::default()
-    };
 
     // Expired renewal token -> run_renewal_once takes the hard rebind branch.
     let session = SessionState::new(SessionSnapshot {
@@ -722,8 +689,7 @@ async fn package_hard_rebind_re_signs_publisher_proof() {
         server.url(),
         None,
         RegistrationContext::Package {
-            request,
-            resign: Some(provider),
+            request: request.clone(),
         },
         None,
         None,
@@ -733,11 +699,6 @@ async fn package_hard_rebind_re_signs_publisher_proof() {
     .expect("hard rebind should commit new snapshot");
 
     mock.assert_async().await;
-    assert_eq!(
-        calls.load(AtomicOrdering::SeqCst),
-        1,
-        "hard rebind must re-invoke the publisher auth provider exactly once"
-    );
 }
 
 #[test]

@@ -337,6 +337,7 @@ pub async fn build_register_ok(
         member: "member-1".to_string(),
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     let claims_bytes = claims.encode_to_vec();
     let signature = state.issuer_signing_key().sign(&claims_bytes);
@@ -1093,9 +1094,7 @@ mod tests {
             publisher_signature: None,
             target: None,
             auth_mode: None,
-            publisher_auth_signature: None,
-            publisher_auth_signed_at: None,
-            publisher_auth_nonce: None,
+            signing_public_key: None,
         };
 
         let ok = build_register_ok(&req, &state).await;

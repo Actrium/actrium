@@ -2362,7 +2362,6 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "bytes",
- "ed25519-dalek",
  "prost",
  "prost-build",
  "serde_json",

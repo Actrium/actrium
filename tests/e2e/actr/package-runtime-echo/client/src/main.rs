@@ -59,53 +59,6 @@ fn runtime_config_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actr.toml"))
 }
 
-/// [`actr_hyper::PublisherAuthProvider`] backed by the keychain file named
-/// in `CLIENT_GUEST_KEYCHAIN_PATH`. Mirrors the CLI's keychain provider: the
-/// private key is re-read on every sign call and never kept resident.
-struct KeychainPublisherAuthProvider {
-    key_path: PathBuf,
-}
-
-impl actr_hyper::PublisherAuthProvider for KeychainPublisherAuthProvider {
-    fn sign(
-        &self,
-        realm: &str,
-        actr_type: &actr_protocol::ActrType,
-        target: &str,
-        manifest_raw: &[u8],
-    ) -> std::result::Result<actr_hyper::PublisherRegistrationAuth, actr_hyper::HyperError> {
-        let content = std::fs::read_to_string(&self.key_path)
-            .map_err(|e| actr_hyper::HyperError::Runtime(format!("read keychain: {e}")))?;
-        let json: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| actr_hyper::HyperError::Runtime(format!("parse keychain: {e}")))?;
-        let private_b64 = json["private_key"].as_str().ok_or_else(|| {
-            actr_hyper::HyperError::Runtime("keychain missing private_key field".into())
-        })?;
-        let private_bytes: Vec<u8> = base64::engine::general_purpose::STANDARD
-            .decode(private_b64)
-            .map_err(|e| actr_hyper::HyperError::Runtime(format!("decode private_key: {e}")))?;
-        let key_arr: [u8; 32] = private_bytes.try_into().map_err(|_| {
-            actr_hyper::HyperError::Runtime("private_key must be exactly 32 bytes".into())
-        })?;
-        let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_arr);
-        actr_hyper::PublisherRegistrationAuth::sign(
-            &signing_key,
-            realm,
-            actr_type,
-            target,
-            manifest_raw,
-        )
-    }
-}
-
-fn keychain_provider_from_env() -> Option<std::sync::Arc<dyn actr_hyper::PublisherAuthProvider>> {
-    env::var("CLIENT_GUEST_KEYCHAIN_PATH").ok().map(|path| {
-        std::sync::Arc::new(KeychainPublisherAuthProvider {
-            key_path: PathBuf::from(path),
-        }) as std::sync::Arc<dyn actr_hyper::PublisherAuthProvider>
-    })
-}
-
 fn load_package_public_key() -> Result<Vec<u8>> {
     let key_path = public_key_path();
     let value: Value =
@@ -178,13 +131,10 @@ async fn main() -> Result<()> {
     let issuer_endpoint =
         env::var("ISSUER_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/issuer".to_string());
 
-    // Issuer-02: package registration needs a runner possession proof of the
-    // publisher signing key; the keychain arrives via env from the e2e runner.
-    let publisher_provider = keychain_provider_from_env();
     let actr_ref = actr_hyper::Node::from_hyper(hyper, config)
         .attach(&package)
         .await?
-        .register_with_publisher_auth(&issuer_endpoint, publisher_provider)
+        .register(&issuer_endpoint)
         .await?
         .start()
         .await?;

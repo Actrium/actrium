@@ -578,112 +578,6 @@ impl WorkloadPackage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublisherRegistrationAuth {
-    pub signature: Vec<u8>,
-    pub signed_at: u64,
-    pub nonce: Vec<u8>,
-}
-
-/// Re-signing capability for the publisher proof used in package registration.
-///
-/// Unpublished package registration (Issuer Path 2) requires a publisher proof —
-/// an Ed25519 signature over the `ACTR-PUBLISHER-REGISTER-V1` payload that Issuer
-/// verifies with the publisher key that signed the package manifest. Its nonce is
-/// consumed once to prevent replay. Because the nonce is single-use, the proof
-/// **cannot be reused**: hard rebind must mint a fresh `signed_at` + `nonce` +
-/// signature.
-///
-/// Rather than caching the signing key in memory, this trait is implemented by
-/// the CLI with a type that reloads the publisher private key from the keychain on
-/// every [`Self::sign`] call. Issuer bootstrap calls it once for the initial
-/// registration; the credential manager calls it again on each hard rebind.
-pub trait PublisherAuthProvider: Send + Sync {
-    /// Produce a fresh publisher proof for the given registration inputs.
-    ///
-    /// `manifest_raw` is the exact package manifest bound into the proof
-    /// (via its SHA-256). Implementations must generate a new `signed_at` and
-    /// random `nonce` each call.
-    fn sign(
-        &self,
-        realm: &str,
-        actr_type: &actr_protocol::ActrType,
-        target: &str,
-        manifest_raw: &[u8],
-    ) -> Result<PublisherRegistrationAuth, HyperError>;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn sign_publisher_proof(
-    provider: Arc<dyn PublisherAuthProvider>,
-    realm: String,
-    actr_type: ActrType,
-    target: String,
-    manifest_raw: Vec<u8>,
-) -> HyperResult<PublisherRegistrationAuth> {
-    tokio::task::spawn_blocking(move || provider.sign(&realm, &actr_type, &target, &manifest_raw))
-        .await
-        .map_err(|err| HyperError::Runtime(format!("publisher signing task failed: {err}")))?
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn publisher_auth_fields(
-    auth: Option<&PublisherRegistrationAuth>,
-) -> (Option<bytes::Bytes>, Option<u64>, Option<bytes::Bytes>) {
-    match auth {
-        Some(auth) => (
-            Some(bytes::Bytes::from(auth.signature.clone())),
-            Some(auth.signed_at),
-            Some(bytes::Bytes::from(auth.nonce.clone())),
-        ),
-        None => (None, None, None),
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl PublisherRegistrationAuth {
-    pub fn sign(
-        signing_key: &ed25519_dalek::SigningKey,
-        realm: &str,
-        actr_type: &actr_protocol::ActrType,
-        target: &str,
-        manifest_raw: &[u8],
-    ) -> HyperResult<Self> {
-        use ed25519_dalek::Signer as _;
-        use rand::RngCore as _;
-        use sha2::{Digest as _, Sha256};
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let signed_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| HyperError::Runtime(format!("system clock before Unix epoch: {e}")))?
-            .as_secs();
-
-        let mut nonce = vec![0u8; 32];
-        rand::thread_rng().fill_bytes(&mut nonce);
-
-        let manifest_sha256 = Sha256::digest(manifest_raw);
-        let manifest_sha256_hex = hex::encode(manifest_sha256);
-        let payload = actr_protocol::build_publisher_register_payload(
-            actr_protocol::PublisherRegisterPayload {
-                realm,
-                actr_type,
-                target,
-                manifest_sha256_hex: &manifest_sha256_hex,
-                publisher_auth_signed_at: signed_at,
-                publisher_auth_nonce: &nonce,
-            },
-        );
-        let signature = signing_key.sign(payload.as_bytes()).to_bytes().to_vec();
-
-        Ok(Self {
-            signature,
-            signed_at,
-            nonce,
-        })
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 /// Result of verifying a package and preparing a runtime workload from it.
 pub(crate) struct LoadedWorkload {
@@ -1174,27 +1068,10 @@ impl Node<Attached> {
     /// exports when a package-backed attach was used. Linked attachments
     /// register from the runtime config's actor metadata instead.
     ///
-    /// This convenience method does not supply a publisher proof. A
-    /// package-backed caller can therefore use it only for a published package
-    /// accepted through Issuer Path 1. Use
-    /// [`Self::register_with_publisher_auth`] for an unpublished package.
+    /// A package registers with its signed manifest and signing key; Issuer
+    /// decides from them whether it runs as its Publisher or as a development
+    /// identity. No Publisher private key is involved.
     pub async fn register(self, issuer_endpoint: &str) -> HyperResult<Node<Registered>> {
-        self.register_with_publisher_auth(issuer_endpoint, None)
-            .await
-    }
-
-    /// Register with Issuer and optionally attach publisher authorization for
-    /// unpublished package registrations.
-    ///
-    /// When `resign` is `Some`, it is invoked once here to mint the initial
-    /// publisher proof, and is then retained in the registration context so hard
-    /// rebind can re-invoke it to mint a fresh proof (the proof's nonce is
-    /// single-use on the Issuer side). Linked registration ignores it.
-    pub async fn register_with_publisher_auth(
-        self,
-        issuer_endpoint: &str,
-        resign: Option<Arc<dyn PublisherAuthProvider>>,
-    ) -> HyperResult<Node<Registered>> {
         let attachment = self
             .attachment
             .as_ref()
@@ -1207,7 +1084,7 @@ impl Node<Attached> {
         } else {
             None
         };
-        self.register_with_inner(issuer_endpoint, service_spec, resign)
+        self.register_with_inner(issuer_endpoint, service_spec)
             .await
     }
 
@@ -1216,14 +1093,12 @@ impl Node<Attached> {
     /// This skips package-based `service_spec` derivation for
     /// package-backed attachments. Linked attachments use the supplied
     /// `service_spec` together with the runtime config's actor metadata.
-    /// Like [`Self::register`], this convenience method supplies no
-    /// publisher proof and package-backed callers must use published Path 1.
     pub async fn register_with(
         self,
         issuer_endpoint: &str,
         service_spec: Option<ServiceSpec>,
     ) -> HyperResult<Node<Registered>> {
-        self.register_with_inner(issuer_endpoint, service_spec, None)
+        self.register_with_inner(issuer_endpoint, service_spec)
             .await
     }
 
@@ -1231,7 +1106,6 @@ impl Node<Attached> {
         mut self,
         issuer_endpoint: &str,
         service_spec: Option<ServiceSpec>,
-        resign: Option<Arc<dyn PublisherAuthProvider>>,
     ) -> HyperResult<Node<Registered>> {
         let attachment = self
             .attachment
@@ -1241,31 +1115,6 @@ impl Node<Attached> {
         let acl = attachment.node.config.acl.clone();
         let client_key =
             RealmClientKey::load_for(attachment.node.config.realm_client_key.as_deref(), &realm)?;
-
-        // Mint the initial publisher proof (if a re-signing provider was supplied)
-        // so the same one-shot auth feeds both the saved registration context
-        // and the bootstrap request. The provider itself is retained in the
-        // context below so hard rebind can re-invoke it for a fresh proof
-        // instead of replaying the single-use nonce.
-        let publisher_auth = match (&resign, attachment.verified.as_ref()) {
-            (Some(provider), Some(verified)) => Some(
-                sign_publisher_proof(
-                    Arc::clone(provider),
-                    realm.clone(),
-                    ActrType {
-                        publisher: verified.manifest.publisher.clone(),
-                        name: verified.manifest.name.clone(),
-                        version: verified.manifest.version.clone(),
-                    },
-                    verified.manifest.binary.target.clone(),
-                    verified.manifest_raw.clone(),
-                )
-                .await?,
-            ),
-            _ => None,
-        };
-        let (publisher_auth_signature, publisher_auth_signed_at, publisher_auth_nonce) =
-            publisher_auth_fields(publisher_auth.as_ref());
 
         let registration_context = if let Some(verified) = attachment.verified.as_ref() {
             let manifest = &verified.manifest;
@@ -1286,11 +1135,8 @@ impl Node<Attached> {
                         publisher_signature: Some(verified.sig_raw.clone().into()),
                         target: Some(manifest.binary.target.clone()),
                         auth_mode: Some(RegisterAuthMode::Package as i32),
-                        publisher_auth_signature,
-                        publisher_auth_signed_at,
-                        publisher_auth_nonce,
+                        signing_public_key: Some(verified.signing_public_key.to_vec().into()),
                     },
-                    resign,
                 },
             )
         } else {
@@ -1308,7 +1154,6 @@ impl Node<Attached> {
                     service_spec,
                     acl,
                     client_key,
-                    publisher_auth,
                 },
             )
             .await?
@@ -1441,11 +1286,6 @@ impl Hyper {
     /// Credential renewal uses the renewal token returned by Issuer through
     /// `POST /issuer/renew`, not a follow-up `/register` call.
     ///
-    /// This legacy convenience API cannot supply a fresh publisher proof,
-    /// so it is suitable only for published packages accepted through Issuer
-    /// Path 1. Unpublished packages must use
-    /// [`Node::<Attached>::register_with_publisher_auth`].
-    ///
     /// ## Parameters
     ///
     /// - `verified`: verified package bundle (from `verify_package`) — carries
@@ -1475,7 +1315,6 @@ impl Hyper {
                 service_spec,
                 acl,
                 client_key,
-                publisher_auth: None,
             },
         )
         .await
@@ -1702,7 +1541,6 @@ struct CredentialBootstrapRequest<'a> {
     service_spec: Option<ServiceSpec>,
     acl: Option<Acl>,
     client_key: Option<RealmClientKey>,
-    publisher_auth: Option<PublisherRegistrationAuth>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1717,7 +1555,6 @@ async fn bootstrap_credential_inner(
         service_spec,
         acl,
         client_key,
-        publisher_auth,
     } = request;
     let manifest = &verified.manifest;
     info!(
@@ -1751,9 +1588,6 @@ async fn bootstrap_credential_inner(
         "registering with Issuer using publisher manifest"
     );
 
-    let (publisher_auth_signature, publisher_auth_signed_at, publisher_auth_nonce) =
-        publisher_auth_fields(publisher_auth.as_ref());
-
     let req = RegisterRequest {
         actr_type,
         realm: realm.to_string(),
@@ -1765,9 +1599,7 @@ async fn bootstrap_credential_inner(
         publisher_signature: Some(verified.sig_raw.clone().into()),
         target: Some(manifest.binary.target.clone()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
-        publisher_auth_signature,
-        publisher_auth_signed_at,
-        publisher_auth_nonce,
+        signing_public_key: Some(verified.signing_public_key.to_vec().into()),
     };
     let response = issuer.register_with_manifest(req).await?;
 

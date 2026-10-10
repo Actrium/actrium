@@ -159,9 +159,8 @@ impl ActrPackage {
 
     /// Lookup a package tuple regardless of lifecycle status.
     ///
-    /// Issuer uses this to distinguish a package that was never published from a
-    /// package that was explicitly revoked. A revoked tuple must not fall
-    /// through to unpublished-package authentication.
+    /// Issuer uses this as a revocation source: a revoked tuple is rejected
+    /// whatever source the package came from.
     pub async fn get_by_type_and_target_any_status(
         pool: &SqlitePool,
         type_str: &str,

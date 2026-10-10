@@ -629,9 +629,7 @@ async fn issuer_register_result(
         publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        publisher_auth_signature: None,
-        publisher_auth_signed_at: None,
-        publisher_auth_nonce: None,
+        signing_public_key: None,
     };
     let client = reqwest::Client::new();
     let register_url = format!("{base_url}/issuer/register");
@@ -1112,9 +1110,7 @@ async fn actrix_end_to_end_register_and_health() {
         publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        publisher_auth_signature: None,
-        publisher_auth_signed_at: None,
-        publisher_auth_nonce: None,
+        signing_public_key: None,
     };
     let body = register_req.encode_to_vec();
     let register_url = format!("{base}/issuer/register");
@@ -1381,9 +1377,7 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
         publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        publisher_auth_signature: None,
-        publisher_auth_signed_at: None,
-        publisher_auth_nonce: None,
+        signing_public_key: None,
     };
 
     let body = register_req.encode_to_vec();
@@ -1974,9 +1968,7 @@ async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachab
         publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        publisher_auth_signature: None,
-        publisher_auth_signed_at: None,
-        publisher_auth_nonce: None,
+        signing_public_key: None,
     };
     let body = register_req.encode_to_vec();
     let register_resp = client
@@ -3615,9 +3607,7 @@ async fn signaling_rejects_register_request_via_ws() {
         publisher_signature: None,
         target: None,
         auth_mode: None,
-        publisher_auth_signature: None,
-        publisher_auth_signed_at: None,
-        publisher_auth_nonce: None,
+        signing_public_key: None,
     };
     let env = make_envelope(signaling_envelope::Flow::PeerToServer(
         actr_protocol::PeerToSignaling {

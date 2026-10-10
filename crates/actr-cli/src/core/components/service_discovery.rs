@@ -431,9 +431,7 @@ impl NetworkServiceDiscovery {
             publisher_signature: None,
             target: None,
             auth_mode: Some(RegisterAuthMode::Linked as i32),
-            publisher_auth_signature: None,
-            publisher_auth_signed_at: None,
-            publisher_auth_nonce: None,
+            signing_public_key: None,
         }
     }
 }
