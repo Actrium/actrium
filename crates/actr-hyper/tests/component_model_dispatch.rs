@@ -542,10 +542,12 @@ async fn parked_sink_sends_after_creating_invocation_retired() {
         .await
         .expect("parked-sink-send dispatch");
 
-    let sent = sent.lock().unwrap();
-    assert_eq!(sent.len(), 2, "data chunk + close-time marker");
-    assert_eq!(sent[0].end_of_stream, None);
-    assert_eq!(sent[1].end_of_stream, Some(true));
+    {
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2, "data chunk + close-time marker");
+        assert_eq!(sent[0].end_of_stream, None);
+        assert_eq!(sent[1].end_of_stream, Some(true));
+    }
     runner.shutdown().await;
 }
 
