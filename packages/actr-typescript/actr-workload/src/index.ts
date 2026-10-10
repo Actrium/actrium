@@ -347,6 +347,18 @@ function resolveLiveToken(explicit?: InvocationCtx): bigint | undefined {
   return liveTokens.values().next().value;
 }
 
+/**
+ * Token resolution for actor-global stream SENDS (sink `send`, and the
+ * close-time end marker). Live tokens win for precise routing; when nothing
+ * is live (a detached consumer resumed after its invocation settled) the
+ * sink's captured token is presented and the host routes the send via the
+ * instance's standing ABI — the host accepts a retired token for this
+ * actor-global import. `undefined` only when the sink carries no ctx at all.
+ */
+function resolveStreamSendToken(explicit?: InvocationCtx): bigint | undefined {
+  return resolveLiveToken(explicit) ?? explicit?.ctxToken;
+}
+
 function resolveCtxToken(ctx?: InvocationCtx): bigint {
   if (ctx?.ctxToken !== undefined) {
     return ctx.ctxToken;
@@ -707,51 +719,54 @@ export class DataChunkSink {
         throw new Error('endOfStream marker must not carry a payload');
       }
       // The application ended the stream explicitly; close() will not send
-      // a duplicate marker.
+      // a duplicate marker. If the delivery fails the state is rolled back
+      // so a later close() can retry the marker (see below).
       this.endMarkerSent = true;
     }
     this.lastSequence = BigInt(chunk.sequence);
-    const send = this.tail.then(() => {
-      // In the wasm guest (no AsyncLocalStorage) the host traps or rejects
-      // imports on a retired token, so resolve a currently-live one: the
-      // captured construction ctx may already be retired when the sink is
-      // reused across invocations. Stream sends are actor-global, so any
-      // live token routes them. On the Node host the token is inert
-      // bookkeeping, so the explicit/ALS resolution is kept verbatim.
-      const token =
-        invocationStorage === undefined
-          ? resolveLiveToken(this.ctx)
-          : resolveCtxToken(this.ctx);
-      if (token === undefined) {
-        throw new Error(
-          'ACTR host import requires a live invocation; the sink outlived its creating invocation',
-        );
-      }
-      return hostSendDataChunk(
-        token,
-        toWitDest(this.target),
-        toWitDataChunk(chunk),
-        { tag: this.payloadType } satisfies WitPayloadType,
-      ).then(() => undefined);
-    });
+    // Resolve the token NOW, while the caller's invocation is certainly
+    // live; the host import executes at the end of the tail chain, possibly
+    // after this invocation has settled — the host then falls back to the
+    // instance's standing ABI for this actor-global import. A sink carrying
+    // no ctx with no live invocation is the only failure mode.
+    const token = resolveStreamSendToken(this.ctx);
+    if (token === undefined) {
+      throw new Error(
+        'ACTR host import requires an InvocationCtx; the sink carries none and no invocation is live',
+      );
+    }
+    const send = this.tail.then(() =>
+      hostSendDataChunk(token, toWitDest(this.target), toWitDataChunk(chunk), {
+        tag: this.payloadType,
+      } satisfies WitPayloadType).then(() => undefined),
+    );
     // Later sends queue behind this one even if it fails.
     this.tail = send.catch(() => undefined);
+    if (chunk.endOfStream === true) {
+      // A failed marker send leaves the close path retryable.
+      send.catch(() => {
+        this.endMarkerSent = false;
+      });
+    }
     return send;
   }
 
   async close(): Promise<void> {
     this.closed = true;
     if (!this.closePromise) {
+      // Resolve the token at call time, while the caller's invocation is
+      // certainly live; the marker goes out at the end of the tail chain.
+      // A retired token is still presented — the host routes this
+      // actor-global send via the instance's standing ABI. Skipped only
+      // when the sink carries no ctx at all (nothing to route with).
+      const token = resolveStreamSendToken(this.ctx);
       this.closePromise = (async () => {
         await this.tail;
         if (this.endMarkerSent) {
           return;
         }
         // The marker rides the same lane so it travels behind every data
-        // chunk in FIFO order. It is sent only with a currently-live token
-        // (host imports trap on a retired one); otherwise the peer observes
-        // the end via its own timeout/abort path.
-        const token = resolveLiveToken(this.ctx);
+        // chunk in FIFO order.
         if (token === undefined) {
           return;
         }

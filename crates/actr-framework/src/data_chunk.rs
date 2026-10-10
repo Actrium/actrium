@@ -278,7 +278,9 @@ pub struct DataChunkSink {
     payload_type: PayloadType,
     send_fn: SendDataChunkFn,
     in_flight: Option<MaybeSendBoxFuture<'static, ActorResult<()>>>,
+    in_flight_is_marker: bool,
     pending: Option<DataChunk>,
+    pending_is_marker: bool,
     last_sequence: Option<u64>,
     end_marker_sent: bool,
     closed: bool,
@@ -304,7 +306,9 @@ impl DataChunkSink {
             payload_type,
             send_fn,
             in_flight: None,
+            in_flight_is_marker: false,
             pending: None,
+            pending_is_marker: false,
             last_sequence: None,
             end_marker_sent: false,
             closed: false,
@@ -342,6 +346,13 @@ impl DataChunkSink {
             match fut.as_mut().poll(cx) {
                 Poll::Ready(result) => {
                     self.in_flight = None;
+                    if result.is_err() && self.in_flight_is_marker {
+                        // A failed marker send stays retryable: a later
+                        // poll_close re-sends instead of reporting an
+                        // undelivered end as success.
+                        self.end_marker_sent = false;
+                    }
+                    self.in_flight_is_marker = false;
                     Poll::Ready(result)
                 }
                 Poll::Pending => Poll::Pending,
@@ -365,6 +376,8 @@ impl futures_sink::Sink<DataChunk> for DataChunkSink {
         if let Some(chunk) = self.pending.take() {
             let fut = (self.send_fn)(chunk);
             self.in_flight = Some(fut);
+            self.in_flight_is_marker = self.pending_is_marker;
+            self.pending_is_marker = false;
         }
         Poll::Ready(Ok(()))
     }
@@ -393,10 +406,12 @@ impl futures_sink::Sink<DataChunk> for DataChunkSink {
                 ));
             }
             // The application ended the stream explicitly; poll_close will
-            // not send a duplicate marker.
+            // not send a duplicate marker. Rolled back if the delivery fails
+            // (see poll_in_flight), so a later close can retry.
             self.end_marker_sent = true;
         }
         self.last_sequence = Some(item.sequence);
+        self.pending_is_marker = item.end_of_stream == Some(true);
         self.pending = Some(item);
         Ok(())
     }
@@ -420,6 +435,7 @@ impl futures_sink::Sink<DataChunk> for DataChunkSink {
             let marker = self.end_marker();
             let fut = (self.send_fn)(marker);
             self.in_flight = Some(fut);
+            self.in_flight_is_marker = true;
             self.end_marker_sent = true;
         }
         match self.poll_in_flight(cx) {
@@ -572,6 +588,61 @@ mod tests {
         // The sink stays usable: the rejected marker was never accepted.
         sink.send(test_chunk("s", 1)).await.unwrap();
         sink.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn close_retries_marker_after_failed_send() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let attempts = std::sync::Arc::new(AtomicUsize::new(0));
+        let send_fn: SendDataChunkFn = {
+            let attempts = attempts.clone();
+            Box::new(move |chunk| {
+                let attempts = attempts.clone();
+                Box::pin(async move {
+                    if chunk.end_of_stream == Some(true)
+                        && attempts.fetch_add(1, Ordering::SeqCst) == 0
+                    {
+                        return Err(ActrError::Internal("boom".into()));
+                    }
+                    Ok(())
+                })
+            })
+        };
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        // The first close fails with the marker send; the failed marker must
+        // not be reported as confirmed.
+        assert!(sink.close().await.is_err());
+        sink.close().await.unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn failed_application_marker_is_retryable_via_close() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let marker_attempts = std::sync::Arc::new(AtomicUsize::new(0));
+        let send_fn: SendDataChunkFn = {
+            let marker_attempts = marker_attempts.clone();
+            Box::new(move |chunk| {
+                let marker_attempts = marker_attempts.clone();
+                Box::pin(async move {
+                    if chunk.end_of_stream == Some(true) {
+                        // Fail only the first marker attempt.
+                        if marker_attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                            return Err(ActrError::Internal("boom".into()));
+                        }
+                    }
+                    Ok(())
+                })
+            })
+        };
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        // The application's explicit marker fails to send.
+        assert!(sink.send(test_marker("s", 4)).await.is_err());
+        // close() re-sends a marker rather than treating it as confirmed.
+        sink.close().await.unwrap();
+        assert_eq!(marker_attempts.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

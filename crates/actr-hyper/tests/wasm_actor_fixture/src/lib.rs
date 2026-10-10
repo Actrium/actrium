@@ -27,7 +27,9 @@
 //! exercising guest→host structured error propagation.
 
 use actr_framework::{Context, Dest, MessageDispatcher, Workload, entry};
-use actr_protocol::{ActorResult, ActrError, ReplyMode, RpcEnvelope, RpcRequest};
+use actr_protocol::{
+    ActorResult, ActrError, DataChunk, PayloadType, ReplyMode, RpcEnvelope, RpcRequest,
+};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -45,6 +47,11 @@ thread_local! {
     /// seen, stream terminations observed by the consumer loop).
     static EOF_PROBE: std::cell::Cell<(u64, u64, u64)> =
         const { std::cell::Cell::new((0, 0, 0)) };
+
+    /// Sink parked by `test/park-sink`, used by `test/parked-sink-send` in a
+    /// later invocation — the sink's captured ctx token is retired by then.
+    static PARKED_SINK: std::cell::RefCell<Option<actr_framework::DataChunkSink>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
@@ -374,6 +381,45 @@ impl MessageDispatcher for DoubleDispatcher {
                 out.extend_from_slice(&chunks.to_le_bytes());
                 out.extend_from_slice(&ends.to_le_bytes());
                 Ok(Bytes::from(out))
+            }
+            "test/park-sink" => {
+                // Create a sink bound to self and park it across the
+                // invocation boundary. Its send_fn captured THIS invocation's
+                // ctx token, which retires when this dispatch returns.
+                let sink = ctx
+                    .data_chunk_sink(
+                        &actr_framework::Dest::Peer(ctx.self_id().clone()),
+                        "test/parked-sink-stream".to_string(),
+                        PayloadType::StreamReliable,
+                    )
+                    .await?;
+                PARKED_SINK.with(|slot| {
+                    *slot.borrow_mut() = Some(sink);
+                });
+                Ok(Bytes::new())
+            }
+            "test/parked-sink-send" => {
+                // Send from a later invocation: the sink's captured token is
+                // retired, so this exercises the host's standing-ABI fallback
+                // for actor-global stream sends.
+                let mut sink = PARKED_SINK.with(|slot| slot.borrow_mut().take());
+                let Some(sink) = sink.as_mut() else {
+                    return Err(ActrError::Internal(
+                        "no parked sink; call test/park-sink first".into(),
+                    ));
+                };
+                use futures_util::SinkExt;
+                sink.send(DataChunk {
+                    stream_id: "test/parked-sink-stream".to_string(),
+                    sequence: 1,
+                    payload: Bytes::from_static(b"detached"),
+                    metadata: Vec::new(),
+                    timestamp_ms: None,
+                    end_of_stream: None,
+                })
+                .await?;
+                sink.close().await?;
+                Ok(Bytes::new())
             }
             "test/park-stream-context" => {
                 // Resident-region variant: on wasm32-wasip2 guest code only

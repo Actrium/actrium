@@ -351,7 +351,10 @@ impl HostWithStore<HostState> for HostState {
         chunk: WitDataChunk,
         payload_type: WitPayloadType,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
-        let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
+        // Actor-global import: a sink captured by a detached consumer sends
+        // with its creating invocation's (retired) token; fall back to the
+        // instance's standing ABI instead of trapping.
+        let host_abi = accessor.with(|mut a| a.get().stream_host_abi(ctx_token));
         let op = HostOperation::SendDataChunk(HostSendDataChunkV1 {
             dest: wit_dest_to_v1(&target),
             chunk: wit_data_chunk_to_proto(chunk),

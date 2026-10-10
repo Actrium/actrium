@@ -492,6 +492,63 @@ async fn resident_stream_consumer_drains_in_later_invocation() {
     runner.shutdown().await;
 }
 
+/// Round-5 regression: a sink parked across the invocation boundary sends
+/// with its creating invocation's retired token; the host must route the
+/// actor-global stream send via the instance's standing ABI instead of
+/// trapping on the retired token.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parked_sink_sends_after_creating_invocation_retired() {
+    let host = fixture_host();
+    let wl = instantiate_wasm_workload(host).await.expect("instantiate");
+    let runner = wl.into_workload_runner();
+    let ctx = runtime_context_with_host_transport(
+        test_actr_id(),
+        Arc::new(actr_hyper::transport::HostTransport::new()),
+    );
+    // Record stream sends; answer them Done without touching the wire (the
+    // assertion target is the token routing, not the transport).
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let inner_abi = runner.lifecycle_host_abi(ctx.clone());
+    let abi: HostAbiFn = {
+        let sent = sent.clone();
+        Arc::new(move |pending| {
+            if let HostOperation::SendDataChunk(request) = &pending {
+                sent.lock().unwrap().push(request.chunk.clone());
+                return Box::pin(async { HostOperationResult::Done });
+            }
+            inner_abi(pending)
+        })
+    };
+
+    // Invocation A: create and park the sink (its send_fn captures A's token).
+    runner
+        .dispatch(
+            &make_envelope("test/park-sink", Vec::new()),
+            test_ctx(),
+            &abi,
+        )
+        .await
+        .expect("park-sink dispatch");
+
+    // Invocation B (token A retired): the parked sink sends data + the close
+    // marker. Both must arrive — pre-fix, the host import trapped on the
+    // retired token ("host ABI bridge not installed").
+    runner
+        .dispatch(
+            &make_envelope("test/parked-sink-send", Vec::new()),
+            test_ctx(),
+            &abi,
+        )
+        .await
+        .expect("parked-sink-send dispatch");
+
+    let sent = sent.lock().unwrap();
+    assert_eq!(sent.len(), 2, "data chunk + close-time marker");
+    assert_eq!(sent[0].end_of_stream, None);
+    assert_eq!(sent[1].end_of_stream, Some(true));
+    runner.shutdown().await;
+}
+
 /// P1 regression: the production stream forwarder must forward the peer's
 /// end-of-stream marker into the guest — the guest's stream terminates
 /// (FIFO, after every data chunk) instead of hanging on the next read.

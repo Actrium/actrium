@@ -593,7 +593,9 @@ describe('@actrium/actr-workload', () => {
 
     expect(
       host.hostCalls.sendDataChunk.map((call) => call.chunk.sequence),
-    ).toEqual([1n, 2n]);
+    ).toEqual([1n, 2n, 3n]);
+    // The close-time end-of-stream marker follows the data chunks.
+    expect(host.hostCalls.sendDataChunk[2].chunk.endOfStream).toBe(true);
   });
 
   it('sink close sends an in-band end-of-stream marker inside a live invocation', async () => {
@@ -620,7 +622,7 @@ describe('@actrium/actr-workload', () => {
     expect(chunks[1].payload).toHaveLength(0);
   });
 
-  it('sink close outside a live invocation skips the marker', async () => {
+  it('sink close outside a live invocation still sends the marker via the captured token', async () => {
     const { host, runtime } = await loadRuntime();
     const sink = await runtime.dataChunkSink(
       'host',
@@ -632,9 +634,11 @@ describe('@actrium/actr-workload', () => {
     await sink.send(testChunk({ sequence: 1n }));
     await sink.close();
 
-    expect(
-      host.hostCalls.sendDataChunk.map((call) => call.chunk.sequence),
-    ).toEqual([1n]);
+    // The host routes actor-global stream sends with a retired token through
+    // the instance's standing ABI, so the marker still goes out.
+    const chunks = host.hostCalls.sendDataChunk.map((call) => call.chunk);
+    expect(chunks.map((chunk) => chunk.sequence)).toEqual([1n, 2n]);
+    expect(chunks[1].endOfStream).toBe(true);
   });
 
   it('an application-sent end marker suppresses the close-time marker', async () => {
@@ -678,6 +682,51 @@ describe('@actrium/actr-workload', () => {
     await expect(sink.send(testChunk())).rejects.toThrow(
       'endOfStream marker already sent',
     );
+  });
+
+  it('a rejected application-sent marker leaves close() retryable', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(38n);
+    const original = host.sendDataChunk;
+    let rejectOnce = true;
+    vi.spyOn(host, 'sendDataChunk').mockImplementation(
+      async (token, target, chunk, payloadType) => {
+        if (rejectOnce && chunk.endOfStream === true) {
+          rejectOnce = false;
+          throw new Error('simulated marker send failure');
+        }
+        return original(token, target, chunk, payloadType);
+      },
+    );
+
+    await runtime.withInvocationCtx(ctx, async () => {
+      const sink = await runtime.dataChunkSink(
+        'host',
+        'stream-1',
+        runtime.PayloadType.StreamReliable,
+        ctx,
+      );
+      await expect(
+        sink.send(
+          testChunk({
+            sequence: 9n,
+            endOfStream: true,
+            payload: new Uint8Array(0),
+          }),
+        ),
+      ).rejects.toThrow('simulated marker send failure');
+      // The failed application marker was never confirmed: close() sends
+      // its own marker rather than treating the stream as ended.
+      await sink.close();
+    });
+
+    const markers = host.hostCalls.sendDataChunk.filter(
+      (call) => call.chunk.endOfStream === true,
+    );
+    // The mock's rejected attempt is never recorded; the single recorded
+    // marker is close()'s retry, carrying the sink-side sequence.
+    expect(markers).toHaveLength(1);
+    expect(markers[0].chunk.sequence).toBe(10n);
   });
 
   it('stream ends on an in-band marker without yielding it', async () => {

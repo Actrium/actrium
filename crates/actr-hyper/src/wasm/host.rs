@@ -135,6 +135,12 @@ pub(crate) struct HostState {
     /// Reset to one whenever the map is cleared on a trap-poison so a rebuilt
     /// instance starts from a clean sheet.
     next_token: u64,
+    /// The most recently allocated invocation's ABI, used as the routing
+    /// fallback for actor-global stream sends (`send-data-chunk`) whose
+    /// captured ctx token has been retired. Detached guest consumers outlive
+    /// their creating invocation; a stream chunk carries no invocation-scoped
+    /// reply state, so routing by instance identity is sound.
+    standing_host_abi: Option<HostAbiFn>,
     /// issue #346: per-store resource limits (memory/table/instance caps).
     /// Installed via `Store::limiter` so `memory.grow`/`table.grow` over the
     /// bound trap (or return an error, per `trap_on_grow_failure`).
@@ -190,6 +196,7 @@ impl HostState {
             stream_context_tokens: HashMap::new(),
             stream_token_aliases: HashMap::new(),
             next_token: 1,
+            standing_host_abi: None,
             limits: StoreResourceLimiter::new(limits),
         }
     }
@@ -226,6 +233,9 @@ impl HostState {
                 .as_ref()
                 .map(|_| Arc::new(AtomicBool::new(false)))
         });
+        // Latest-allocated wins: actor-global stream sends that arrive with a
+        // retired token fall back to this ABI (see `stream_host_abi`).
+        self.standing_host_abi = Some(host_abi.clone());
         self.invocations.insert(
             token,
             InvocationEntry {
@@ -256,6 +266,18 @@ impl HostState {
         self.invocations
             .get(&token)
             .map(|e| Arc::clone(&e.host_abi))
+    }
+
+    /// Resolve the ABI for an actor-global stream import (`send-data-chunk`).
+    /// Falls back to the most recently allocated invocation's ABI when the
+    /// presented token has no live entry: a sink captured by a detached guest
+    /// consumer outlives its creating invocation, and a chunk send carries no
+    /// invocation-scoped reply state, so routing by instance identity is
+    /// sound. Request-scoped imports (call/tell/reply/discover) stay
+    /// fail-closed on unknown tokens.
+    pub(crate) fn stream_host_abi(&self, token: u64) -> Option<HostAbiFn> {
+        self.invocation_host_abi(token)
+            .or_else(|| self.standing_host_abi.clone())
     }
 
     pub(crate) fn invocation_exists(&self, token: u64) -> bool {
