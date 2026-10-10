@@ -669,7 +669,9 @@ export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
  * `endOfStream` marker (sequence one past the last chunk), and is
  * idempotent. A `send()` after close — or after an application-sent end
  * marker — throws. A failed `close()` can be retried: it never reports an
- * unsent marker as success.
+ * unsent marker as success. Note the marker is at-least-once under retries:
+ * if its send response was lost in transit, a retried close re-sends it —
+ * the receiver's runtime drops the duplicate (the stream already ended).
  */
 export class DataChunkSink {
   private closed = false;
@@ -709,14 +711,29 @@ export class DataChunkSink {
       this.endMarkerSent = true;
     }
     this.lastSequence = BigInt(chunk.sequence);
-    const send = this.tail.then(() =>
-      hostSendDataChunk(
-        resolveCtxToken(this.ctx),
+    const send = this.tail.then(() => {
+      // In the wasm guest (no AsyncLocalStorage) the host traps or rejects
+      // imports on a retired token, so resolve a currently-live one: the
+      // captured construction ctx may already be retired when the sink is
+      // reused across invocations. Stream sends are actor-global, so any
+      // live token routes them. On the Node host the token is inert
+      // bookkeeping, so the explicit/ALS resolution is kept verbatim.
+      const token =
+        invocationStorage === undefined
+          ? resolveLiveToken(this.ctx)
+          : resolveCtxToken(this.ctx);
+      if (token === undefined) {
+        throw new Error(
+          'ACTR host import requires a live invocation; the sink outlived its creating invocation',
+        );
+      }
+      return hostSendDataChunk(
+        token,
         toWitDest(this.target),
         toWitDataChunk(chunk),
         { tag: this.payloadType } satisfies WitPayloadType,
-      ).then(() => undefined),
-    );
+      ).then(() => undefined);
+    });
     // Later sends queue behind this one even if it fails.
     this.tail = send.catch(() => undefined);
     return send;

@@ -12,6 +12,15 @@ public struct DataChunkEvent: Sendable {
     }
 }
 
+/// Seam over the UniFFI stream bridge so the sequence lifecycle is unit-testable
+/// without a live runtime.
+protocol DataChunkStreamBridging: Sendable {
+    func next() async throws -> ActrBindings.DataChunkEventBridge?
+    func close() async throws
+}
+
+extension ActrBindings.DataChunkStreamBridge: DataChunkStreamBridging {}
+
 /// Pull-based `AsyncSequence` over one DataChunk subscription.
 ///
 /// The iterator calls the opaque bridge's `next()` directly — there is no
@@ -32,10 +41,10 @@ public struct DataChunkEvent: Sendable {
 public struct DataChunkSequence: AsyncSequence, Sendable {
     public typealias Element = DataChunkEvent
 
-    private let bridge: ActrBindings.DataChunkStreamBridge
+    private let bridge: any DataChunkStreamBridging
     private let state: State
 
-    init(bridge: ActrBindings.DataChunkStreamBridge) {
+    init(bridge: any DataChunkStreamBridging) {
         self.bridge = bridge
         self.state = State()
     }
@@ -64,11 +73,11 @@ public struct DataChunkSequence: AsyncSequence, Sendable {
     }
 
     public struct Iterator: AsyncIteratorProtocol {
-        private let bridge: ActrBindings.DataChunkStreamBridge
+        private let bridge: any DataChunkStreamBridging
         private let usable: Bool
         private var finished = false
 
-        init(bridge: ActrBindings.DataChunkStreamBridge, usable: Bool) {
+        init(bridge: any DataChunkStreamBridging, usable: Bool) {
             self.bridge = bridge
             self.usable = usable
         }

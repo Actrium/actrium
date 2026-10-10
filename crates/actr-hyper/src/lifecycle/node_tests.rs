@@ -717,6 +717,61 @@ async fn forwarder_table_is_shared_across_lifecycle_abi_instances() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subscription_channel_backpressures_registry_dispatch_for_slow_consumer() {
+    use actr_framework::Context as _;
+    use futures_util::StreamExt as _;
+
+    let (ctx, _wl) = harness().await;
+    let mut stream = ctx
+        .data_chunks(
+            "bp-stream".to_string(),
+            actr_framework::DataChunkStreamOptions { capacity: 1 },
+        )
+        .await
+        .expect("data_chunks subscription");
+    let registry = ctx.data_chunk_registry_for_test();
+    let chunk = |sequence: u64| actr_protocol::DataChunk {
+        stream_id: "bp-stream".into(),
+        sequence,
+        ..Default::default()
+    };
+
+    // Fill the per-subscription channel until a dispatch blocks. The blocked
+    // feed future is HELD, not dropped: a dropped in-flight channel send
+    // would leave the capacity bookkeeping in an undefined state for this
+    // test's purposes.
+    let mut pending_feed = None;
+    let mut filled = 0u64;
+    for sequence in 1..=8u64 {
+        let mut feed = Box::pin(registry.invoke_for_test(chunk(sequence), ActrId::default()));
+        match tokio::time::timeout(Duration::from_millis(100), &mut feed).await {
+            Ok(result) => {
+                result.expect("registered").expect("accepted");
+                filled += 1;
+            }
+            Err(_) => {
+                pending_feed = Some(feed);
+                break;
+            }
+        }
+    }
+    let mut pending_feed =
+        pending_feed.expect("the bounded channel must eventually stop a dispatch");
+    assert!(filled >= 1, "at least the capacity must fit");
+
+    // A slow consumer resumes the flow: reading one item frees a slot and
+    // the held dispatch completes.
+    assert!(stream.next().await.is_some());
+    tokio::time::timeout(Duration::from_secs(2), &mut pending_feed)
+        .await
+        .expect("dispatch must unblock after the consumer reads")
+        .expect("registered")
+        .expect("accepted");
+
+    stream.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn node_teardown_releases_data_chunk_registry_without_cycle() {
     let (ctx, wl) = harness().await;
     let registry = ctx.data_chunk_registry_for_test();

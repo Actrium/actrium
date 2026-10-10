@@ -1381,4 +1381,32 @@ mod stream_listener_tests {
         first.await;
         second.await;
     }
+
+    #[tokio::test]
+    async fn unlisten_completes_when_listener_dies_without_signaling_done() {
+        // Sender-drop-before-done: if the listener task dies without flipping
+        // `done` (e.g. runner abort), the watch sender closes and the wait
+        // must resolve instead of hanging.
+        let key = (usize::MAX, "dropped-listener".to_owned());
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        stream_listeners()
+            .lock()
+            .unwrap()
+            .insert(key.clone(), entry.clone());
+
+        // The listener task vanished without signaling done.
+        drop(done_tx);
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            stop_stream_listener(key.0, key.1.clone()),
+        )
+        .await
+        .expect("unlisten must not hang on a dead listener");
+        assert!(entry.cancel.is_cancelled());
+    }
 }

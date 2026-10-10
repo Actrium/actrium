@@ -1339,6 +1339,12 @@ async fn host_operation_handler(
             // subscription without unregistering, or rebinds the stream) must
             // be retired first, otherwise data_chunks rejects the new
             // subscription as a duplicate.
+            //
+            // Invariant: host operations of one actor are dispatched
+            // serially by the runner, so no concurrent RegisterStream can
+            // interleave between this lookup and the registration below. The
+            // table lock is held only for the lookup; the retire await relies
+            // on that serial dispatch, not on the lock.
             let stale = stream_forwarders
                 .lock()
                 .expect("stream forwarders poisoned")
