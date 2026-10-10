@@ -97,7 +97,7 @@ jobs:
     # plus crate downloads, and compiles Rust + Kotlin in parallel — the
     # external cluster's egress and 4-16 CPU / SSD work volume cut both the
     # download and compile phases.
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     env:
       ACTR_GRADLE_REPOSITORIES: canonical
       # rustc-level compilation cache (in-cluster MinIO backend) instead of

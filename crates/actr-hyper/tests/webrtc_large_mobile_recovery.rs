@@ -5,8 +5,8 @@
 //! network and app-lifecycle interruptions.
 //!
 //! The scenario matrix, relative timing, role cases, directions, and outcome
-//! assertions are retained from the pre-v0.20 suite. Only the construction and
-//! fault-injection seams use the v0.20 manager/controller/event-handler stack.
+//! assertions are retained from the pre-RTC suite. Only the construction and
+//! fault-injection seams use the RTC manager/controller/event-handler stack.
 
 use actr_framework::Bytes;
 use actr_hyper::lifecycle::{
@@ -827,7 +827,7 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
         } else {
             // SCTP acceptance is not delivery confirmation. Preserve the old
             // terminal give-up branch by explicitly closing the recovering
-            // v0.20 controller generation.
+            // RTC controller generation.
             harness
                 .peer(direction.from_serial)
                 .rtc
@@ -927,7 +927,7 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
         }
         assert_pending_empty(&harness, case.mobile_serial, &call_id).await;
 
-        // v0.20 deliberately makes business sends fail fast while a peer is
+        // RTC deliberately makes business sends fail fast while a peer is
         // not sendable. The legacy gate waited for dial-on-demand internally,
         // so adapt that boundary through the new controller API before keeping
         // the original single post-storm business retry assertion.
@@ -940,7 +940,7 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
 
         let (retry_data, retry_hash) = generate_test_data(LARGE_PAYLOAD_SIZE);
         // Preserve the legacy post-storm contract: one fresh request must
-        // establish/rebuild the v0.20 peer controller and succeed.
+        // establish/rebuild the RTC peer controller and succeed.
         expect_large_request_ok_between(
             &harness,
             case.mobile_serial,

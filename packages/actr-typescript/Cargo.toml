@@ -5,7 +5,7 @@
 
 [package]
 name = "actr-ts"
-version = "0.10.3"
+version = "0.10.5"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -17,7 +17,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # napi-rs
-napi = { version = "3.8.2", features = ["async", "tokio_rt"] }
+napi = { version = "3.8.2", features = ["async", "tokio_rt", "napi6"] }
 napi-derive = "3.5.1"
 
 # actr dependencies

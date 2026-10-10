@@ -69,7 +69,7 @@ pub(crate) const REASSEMBLY_TTL: std::time::Duration = std::time::Duration::from
 pub(crate) const DC_MAX_PAYLOAD_SIZE: usize = DC_MAX_MESSAGE_SIZE - FRAGMENT_HEADER_SIZE;
 
 // Keep the historical integration-test seam at the fragmentation boundary.
-// The v0.20 data plane moved fragmentation from `WebRtcDataLane` into
+// The RTC data plane moved fragmentation from `WebRtcDataLane` into
 // `RtcPeerControllerHandle`, but the legacy mobile interruption tests still
 // need to pause a concrete multi-fragment send at the same point in time.
 #[cfg(feature = "test-utils")]
@@ -178,9 +178,8 @@ impl Default for ReassemblyLimits {
 }
 
 impl ReassemblyLimits {
-    #[cfg(feature = "webrtc-v020")]
     pub(crate) fn from_buffer_config(
-        config: &crate::wire::webrtc::v020::config::RtcBufferConfig,
+        config: &crate::wire::webrtc::rtc::config::RtcBufferConfig,
     ) -> Self {
         let fragments = config
             .max_inbound_message_bytes
@@ -265,7 +264,7 @@ impl ReassemblyBuffer {
             .flatten()
     }
 
-    /// Bounded insertion used by the v0.20 production pump. Every malformed or
+    /// Bounded insertion used by the RTC production pump. Every malformed or
     /// over-budget fragment is reported explicitly; partial state for the
     /// affected message is discarded so an attacker cannot permanently poison
     /// a message id or retain its bytes until the TTL.
@@ -477,8 +476,8 @@ pub(crate) fn decode_fragment_header(
 // ── Type alias ────────────────────────────────────────────────────────────────
 
 /// Type alias for WebSocket sink (shared across all PayloadTypes)
-pub(crate) type WsSink =
-    Arc<Mutex<Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>>>>;
+pub(crate) type WsSink<S = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>> =
+    Arc<Mutex<Option<S>>>;
 
 // ── DataLane trait ────────────────────────────────────────────────────────────
 
@@ -796,7 +795,7 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     fn lane_type(&self) -> &'static str;
 
     /// Whether the lane's backing transport is still usable. Stateless lanes
-    /// default to healthy; v0.20 lanes project their controller sendability so
+    /// default to healthy; RTC lanes project their controller sendability so
     /// the secure wrapper does not hide a retired RTC generation.
     #[allow(dead_code)]
     fn is_healthy(&self) -> bool {
@@ -892,10 +891,11 @@ impl DataLane for MpscLane {
 ///
 /// All PayloadTypes share the same underlying WebSocket connection,
 /// distinguished by a message header.
-#[derive(Clone)]
-pub(crate) struct WebSocketDataLane {
+pub(crate) struct WebSocketDataLane<
+    S = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>,
+> {
     /// Shared Sink (all PayloadTypes share the same WebSocket connection)
-    pub(crate) sink: WsSink,
+    pub(crate) sink: WsSink<S>,
 
     /// PayloadType identifier (used to add message header when sending)
     payload_type: PayloadType,
@@ -904,17 +904,28 @@ pub(crate) struct WebSocketDataLane {
     rx: Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>,
 }
 
-impl std::fmt::Debug for WebSocketDataLane {
+// Cloning a lane shares the sink; the sink itself need not implement Clone.
+impl<S> Clone for WebSocketDataLane<S> {
+    fn clone(&self) -> Self {
+        Self {
+            sink: Arc::clone(&self.sink),
+            payload_type: self.payload_type,
+            rx: Arc::clone(&self.rx),
+        }
+    }
+}
+
+impl<S> std::fmt::Debug for WebSocketDataLane<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "WebSocketDataLane(type={:?})", self.payload_type)
     }
 }
 
-impl WebSocketDataLane {
+impl<S> WebSocketDataLane<S> {
     /// Create WebSocket DataLane
     #[inline]
     pub(crate) fn new(
-        sink: WsSink,
+        sink: WsSink<S>,
         payload_type: PayloadType,
         rx: mpsc::Receiver<bytes::Bytes>,
     ) -> Self {
@@ -949,7 +960,13 @@ fn map_websocket_send_result(
 }
 
 #[async_trait]
-impl DataLane for WebSocketDataLane {
+impl<S> DataLane for WebSocketDataLane<S>
+where
+    S: futures_util::Sink<WsMessage, Error = tokio_tungstenite::tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
+{
     async fn send(&self, data: bytes::Bytes) -> NetworkResult<()> {
         self.send_with_progress(data).await.into_result()
     }

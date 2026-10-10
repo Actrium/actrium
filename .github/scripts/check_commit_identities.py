@@ -13,6 +13,7 @@ from pathlib import Path
 
 USER_NOREPLY_RE = re.compile(r"^[^@\s<>]+@users\.noreply\.github\.com$", re.IGNORECASE)
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+SWIFT_MANIFEST_RE = re.compile(r"Package@swift-[0-9]+(?:\.[0-9]+){0,2}\.swift")
 ANONYMOUS_ROOT_NAME = "root"
 GITHUB_SERVICE_COMMITTER_NAME = "GitHub"
 GITHUB_SERVICE_COMMITTER_EMAIL = "noreply@github.com"
@@ -47,7 +48,9 @@ def is_allowed_identity(name: str, email: str) -> bool:
 
 
 def is_allowed_message_email(email: str) -> bool:
-    return bool(USER_NOREPLY_RE.fullmatch(email))
+    # Swift version-specific manifest filenames resemble email addresses.
+    # Exempt only the exact filename shape, and only in commit messages.
+    return bool(USER_NOREPLY_RE.fullmatch(email) or SWIFT_MANIFEST_RE.fullmatch(email))
 
 
 def is_allowed_committer(commit: CommitIdentity) -> bool:

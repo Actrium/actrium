@@ -35,24 +35,33 @@ pub struct ActrId {
     /// Realm name, `<realm_id>@<domain>`
     pub realm: String,
     #[napi(js_name = "serialNumber")]
-    pub serial_number: i64, // i64 for JavaScript number safety
+    pub serial_number: BigInt,
 }
 
 impl From<actr_protocol::ActrId> for ActrId {
     fn from(id: actr_protocol::ActrId) -> Self {
         Self {
             realm: id.realm,
-            serial_number: id.serial_number as i64,
+            serial_number: id.serial_number.into(),
         }
     }
 }
 
-impl From<ActrId> for actr_protocol::ActrId {
-    fn from(id: ActrId) -> Self {
-        Self {
-            realm: id.realm,
-            serial_number: id.serial_number as u64,
+impl TryFrom<ActrId> for actr_protocol::ActrId {
+    type Error = Error;
+
+    fn try_from(id: ActrId) -> Result<Self> {
+        let (negative, serial_number, lossless) = id.serial_number.get_u64();
+        if negative || !lossless {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "serialNumber must be an unsigned 64-bit bigint",
+            ));
         }
+        Ok(Self {
+            realm: id.realm,
+            serial_number,
+        })
     }
 }
 
@@ -175,6 +184,38 @@ impl From<actr_protocol::RpcEnvelope> for RpcEnvelopeBridge {
                 .unwrap_or_else(|| Buffer::from(vec![])),
             request_id: envelope.request_id,
             timeout_ms: envelope.timeout_ms,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn actor_id(serial_number: u64) -> actr_protocol::ActrId {
+        actr_protocol::ActrId {
+            realm: "test@example.com".into(),
+            serial_number,
+        }
+    }
+
+    #[test]
+    fn actor_ids_round_trip_without_number_precision_loss() {
+        for serial in [0, (1_u64 << 53) + 1, i64::MAX as u64 + 1, u64::MAX] {
+            let original = actor_id(serial);
+            let binding: ActrId = original.clone().into();
+            let restored = actr_protocol::ActrId::try_from(binding).unwrap();
+            assert_eq!(restored, original);
+        }
+    }
+
+    #[test]
+    fn rejects_negative_and_overflowing_actor_ids() {
+        for serial in [BigInt::from(-1_i64), BigInt::from(1_u128 << 64)] {
+            let mut binding: ActrId = actor_id(0).into();
+            binding.serial_number = serial;
+            let error = actr_protocol::ActrId::try_from(binding).unwrap_err();
+            assert_eq!(error.status, Status::InvalidArg);
         }
     }
 }

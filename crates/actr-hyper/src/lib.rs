@@ -52,8 +52,8 @@
 //! │           (Channel Management)                      │  HostTransport
 //! │                                                     │  PeerTransport
 //! ├─────────────────────────────────────────────────────┤
-//! │  Layer 0: Wire                                      │  WebRtcGate
-//! │           (Physical Connections)                     │  WebRtcCoordinator
+//! │  Layer 0: Wire                                      │  RtcPeerController
+//! │           (Physical Connections)                     │  RtcConnectionManager
 //! │                                                     │  SignalingClient
 //! └─────────────────────────────────────────────────────┘
 //! ```
@@ -476,6 +476,11 @@ pub struct Node<S: NodeState = Attached> {
     /// [`Node::with_conflict_keys`], consumed by attach / link into the dispatch
     /// scheduler. `None` = no declarations = fully serial dispatch.
     pending_conflict_keys: Option<crate::dispatch::ConflictKeySpec>,
+    /// Test-only directed fault registries declared on `Node<Init>` via
+    /// [`Node::with_test_faults`], consumed by attach / link into the node
+    /// inner so `start()` wraps the v0.20 RTC runtime and signaling transport.
+    #[cfg(feature = "test-utils")]
+    pending_test_faults: Option<crate::wire::webrtc::test_runtime::TestFaultRegistries>,
     _state: std::marker::PhantomData<S>,
 }
 
@@ -776,6 +781,8 @@ impl Node {
             pending_runtime_config: Some(runtime_config),
             pending_linked_manifest: None,
             pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
             _state: std::marker::PhantomData,
         }
     }
@@ -875,6 +882,24 @@ impl Node<Init> {
         self.pending_conflict_keys = Some(spec);
         self
     }
+
+    /// Install test-only directed fault registries (`test-utils` builds only).
+    ///
+    /// When set, `Node::start` wraps the v0.20 `PeerConnectionFactory` runtime
+    /// with the RTC registry (generation-scoped UDP packet rules) and the
+    /// signaling transport with the signaling registry (per-class message
+    /// rules). The host keeps its own clone of [`TestFaultRegistries`] for
+    /// rule installation and hit observation — both registries share state
+    /// across clones. Production builds without the `test-utils` feature do
+    /// not expose this method and never wrap anything.
+    #[cfg(feature = "test-utils")]
+    pub fn with_test_faults(
+        mut self,
+        faults: crate::wire::webrtc::test_runtime::TestFaultRegistries,
+    ) -> Self {
+        self.pending_test_faults = Some(faults);
+        self
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -891,6 +916,8 @@ impl Node<Init> {
             .pending_runtime_config
             .expect("Node<Init> without pending runtime config");
         let conflict_keys = self.pending_conflict_keys;
+        #[cfg(feature = "test-utils")]
+        let test_faults = self.pending_test_faults;
         let hyper_inner = self.hyper;
         let loaded = load_workload_package_inner(&hyper_inner, package).await?;
         // Only consume the lock entry when the verified manifest authenticates
@@ -942,6 +969,10 @@ impl Node<Init> {
                 workload_dispatch: node_inner.workload_dispatch.clone(),
             });
         node_inner.hook_observer = Some(observer);
+        #[cfg(feature = "test-utils")]
+        {
+            node_inner.test_faults = test_faults;
+        }
         Ok(Node {
             hyper: hyper_inner,
             attachment: Some(Attachment {
@@ -952,6 +983,8 @@ impl Node<Init> {
             pending_runtime_config: None,
             pending_linked_manifest: None,
             pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
             _state: std::marker::PhantomData,
         })
     }
@@ -979,6 +1012,8 @@ impl Node<Init> {
             .pending_runtime_config
             .expect("Node<Init> without pending runtime config");
         let conflict_keys = self.pending_conflict_keys;
+        #[cfg(feature = "test-utils")]
+        let test_faults = self.pending_test_faults;
         let hyper_inner = self.hyper;
         let mailbox_backpressure_threshold =
             hyper_inner.config.resolved_mailbox_backpressure_threshold();
@@ -1002,6 +1037,10 @@ impl Node<Init> {
         let observer: Arc<dyn crate::lifecycle::hooks::WorkloadHookObserver> =
             Arc::new(crate::workload::LinkedHandleObserver { handle });
         node_inner.hook_observer = Some(observer);
+        #[cfg(feature = "test-utils")]
+        {
+            node_inner.test_faults = test_faults;
+        }
         Ok(Node {
             hyper: hyper_inner,
             attachment: Some(Attachment {
@@ -1012,6 +1051,8 @@ impl Node<Init> {
             pending_runtime_config: None,
             pending_linked_manifest: None,
             pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
             _state: std::marker::PhantomData,
         })
     }
@@ -1072,27 +1113,100 @@ impl Node<Attached> {
     /// decides from them whether it runs as its Publisher or as a development
     /// identity. No Publisher private key is involved.
     pub async fn register(self, issuer_endpoint: &str) -> HyperResult<Node<Registered>> {
-        let attachment = self
-            .attachment
-            .as_ref()
-            .expect("Node<Attached> without attachment");
-        let service_spec = if let Some(verified) = attachment.verified.as_ref() {
-            crate::service_spec::calculate_service_spec_from_package(
-                &attachment.package_bytes,
-                &verified.manifest,
-            )?
-        } else {
-            None
-        };
+        let service_spec = self.derived_service_spec()?;
         self.register_with_inner(issuer_endpoint, service_spec)
             .await
     }
 
+    /// Adopt an already-issued credential without registering a second time.
+    /// Both package and linked attachments retain their registration inputs
+    /// for subsequent credential recovery.
+    #[cfg(feature = "test-utils")]
+    pub fn with_preregistered_credential(
+        self,
+        register_ok: actr_protocol::register_response::RegisterOk,
+    ) -> Node<Registered> {
+        self.try_with_preregistered_credential(register_ok)
+            .expect("failed to derive registration context")
+    }
+
+    /// Fallible pre-registration path, including package service-spec validation.
+    #[cfg(feature = "test-utils")]
+    pub fn try_with_preregistered_credential(
+        self,
+        register_ok: actr_protocol::register_response::RegisterOk,
+    ) -> HyperResult<Node<Registered>> {
+        let service_spec = self.derived_service_spec()?;
+        let context = self.registration_context(service_spec);
+        Ok(self.finish_registration(register_ok, context))
+    }
+
+    fn derived_service_spec(&self) -> HyperResult<Option<ServiceSpec>> {
+        let attachment = self
+            .attachment
+            .as_ref()
+            .expect("Node<Attached> without attachment");
+        match attachment.verified.as_ref() {
+            Some(verified) => crate::service_spec::calculate_service_spec_from_package(
+                &attachment.package_bytes,
+                &verified.manifest,
+            ),
+            None => Ok(None),
+        }
+    }
+
+    fn registration_context(
+        &self,
+        service_spec: Option<ServiceSpec>,
+    ) -> crate::lifecycle::credential_manager::RegistrationContext {
+        use crate::lifecycle::credential_manager::RegistrationContext;
+        let attachment = self
+            .attachment
+            .as_ref()
+            .expect("Node<Attached> without attachment");
+        let config = &attachment.node.config;
+        match attachment.verified.as_ref() {
+            Some(verified) => RegistrationContext::Package {
+                request: build_package_register_request(
+                    verified,
+                    &config.realm,
+                    service_spec,
+                    config.acl.clone(),
+                ),
+            },
+            None => RegistrationContext::Linked {
+                request: build_linked_register_request(config, service_spec),
+            },
+        }
+    }
+
+    fn finish_registration(
+        mut self,
+        register_ok: actr_protocol::register_response::RegisterOk,
+        context: crate::lifecycle::credential_manager::RegistrationContext,
+    ) -> Node<Registered> {
+        let attachment = self
+            .attachment
+            .as_mut()
+            .expect("Node<Attached> without attachment");
+        attachment
+            .node
+            .set_preregistered_registration_context(context);
+        attachment.node.set_preregistered_credential(register_ok);
+        Node {
+            hyper: self.hyper,
+            attachment: self.attachment,
+            pending_runtime_config: None,
+            pending_linked_manifest: None,
+            pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
+            _state: std::marker::PhantomData,
+        }
+    }
+
     /// Register with Issuer using an explicit `service_spec`.
-    ///
-    /// This skips package-based `service_spec` derivation for
-    /// package-backed attachments. Linked attachments use the supplied
-    /// `service_spec` together with the runtime config's actor metadata.
+    /// The same spec is retained for credential recovery in both attachment modes.
     pub async fn register_with(
         self,
         issuer_endpoint: &str,
@@ -1103,82 +1217,36 @@ impl Node<Attached> {
     }
 
     async fn register_with_inner(
-        mut self,
+        self,
         issuer_endpoint: &str,
         service_spec: Option<ServiceSpec>,
     ) -> HyperResult<Node<Registered>> {
+        let context = self.registration_context(service_spec.clone());
         let attachment = self
             .attachment
-            .as_mut()
+            .as_ref()
             .expect("Node<Attached> without attachment");
-        let realm = attachment.node.config.realm.clone();
-        let acl = attachment.node.config.acl.clone();
-        let client_key =
-            RealmClientKey::load_for(attachment.node.config.realm_client_key.as_deref(), &realm)?;
-
-        let registration_context = if let Some(verified) = attachment.verified.as_ref() {
-            let manifest = &verified.manifest;
-            Some(
-                crate::lifecycle::credential_manager::RegistrationContext::Package {
-                    request: RegisterRequest {
-                        actr_type: ActrType {
-                            publisher: manifest.publisher.clone(),
-                            name: manifest.name.clone(),
-                            version: manifest.version.clone(),
-                        },
-                        realm: realm.clone(),
-                        service_spec: service_spec.clone(),
-                        acl: acl.clone(),
-                        service: None,
-                        ws_address: None,
-                        manifest_raw: Some(verified.manifest_raw.clone().into()),
-                        publisher_signature: Some(verified.sig_raw.clone().into()),
-                        target: Some(manifest.binary.target.clone()),
-                        auth_mode: Some(RegisterAuthMode::Package as i32),
-                        signing_public_key: Some(verified.signing_public_key.to_vec().into()),
-                    },
-                },
-            )
-        } else {
-            None
-        };
-
+        let config = &attachment.node.config;
         let register_ok = if let Some(verified) = attachment.verified.as_ref() {
-            let verified = verified.clone();
             bootstrap_credential_inner(
                 &self.hyper,
-                &verified,
+                verified,
                 CredentialBootstrapRequest {
                     issuer_endpoint,
-                    realm: &realm,
+                    realm: &config.realm,
                     service_spec,
-                    acl,
-                    client_key,
+                    acl: config.acl.clone(),
+                    client_key: RealmClientKey::load_for(
+                        config.realm_client_key.as_deref(),
+                        &config.realm,
+                    )?,
                 },
             )
             .await?
         } else {
-            bootstrap_linked_credential_inner(
-                &attachment.node.config,
-                issuer_endpoint,
-                service_spec,
-            )
-            .await?
+            bootstrap_linked_credential_inner(config, issuer_endpoint, service_spec).await?
         };
-
-        attachment.node.set_preregistered_credential(register_ok);
-        if let Some(ctx) = registration_context {
-            attachment.node.set_preregistered_registration_context(ctx);
-        }
-
-        Ok(Node {
-            hyper: self.hyper,
-            attachment: self.attachment,
-            pending_runtime_config: None,
-            pending_linked_manifest: None,
-            pending_conflict_keys: None,
-            _state: std::marker::PhantomData,
-        })
+        Ok(self.finish_registration(register_ok, context))
     }
 
     /// Create a network event handle for platform callbacks. Must be called
@@ -1578,29 +1646,12 @@ async fn bootstrap_credential_inner(
         issuer = issuer.with_client_key(key);
     }
 
-    let actr_type = ActrType {
-        publisher: manifest.publisher.clone(),
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-    };
     info!(
         actr_type = manifest.actr_type_str(),
         "registering with Issuer using publisher manifest"
     );
 
-    let req = RegisterRequest {
-        actr_type,
-        realm: realm.to_string(),
-        service_spec,
-        acl,
-        service: None,
-        ws_address: None,
-        manifest_raw: Some(verified.manifest_raw.clone().into()),
-        publisher_signature: Some(verified.sig_raw.clone().into()),
-        target: Some(manifest.binary.target.clone()),
-        auth_mode: Some(RegisterAuthMode::Package as i32),
-        signing_public_key: Some(verified.signing_public_key.to_vec().into()),
-    };
+    let req = build_package_register_request(verified, realm, service_spec, acl);
     let response = issuer.register_with_manifest(req).await?;
 
     // 3. Process Issuer response
@@ -1701,6 +1752,33 @@ async fn bootstrap_linked_credential_inner(
         None => Err(HyperError::IssuerBootstrapFailed(
             "Issuer response missing result field".to_string(),
         )),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn build_package_register_request(
+    verified: &VerifiedPackage,
+    realm: &str,
+    service_spec: Option<ServiceSpec>,
+    acl: Option<Acl>,
+) -> RegisterRequest {
+    let manifest = &verified.manifest;
+    RegisterRequest {
+        actr_type: ActrType {
+            publisher: manifest.publisher.clone(),
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+        },
+        realm: realm.to_string(),
+        service_spec,
+        acl,
+        service: None,
+        ws_address: None,
+        manifest_raw: Some(verified.manifest_raw.clone().into()),
+        publisher_signature: Some(verified.sig_raw.clone().into()),
+        target: Some(manifest.binary.target.clone()),
+        auth_mode: Some(RegisterAuthMode::Package as i32),
+        signing_public_key: Some(verified.signing_public_key.to_vec().into()),
     }
 }
 

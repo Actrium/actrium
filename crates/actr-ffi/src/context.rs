@@ -12,6 +12,17 @@ use crate::error::run_on_tokio_runtime;
 use crate::{ActrError, ActrResult};
 
 /// Callback interface for DataChunk events.
+///
+/// Chunks of one stream are delivered to `on_stream` serially,
+/// run-to-completion, strictly in arrival order; different streams run
+/// independently (see `Context::register_stream`). Consequently `on_stream`
+/// must not block waiting for a later chunk of the same stream — that chunk
+/// is queued behind this call, so both stall forever (self-deadlock).
+/// Finalize a stream out-of-band instead: a separate RPC the sender invokes
+/// after the last chunk, or a background task watching shared reassembly
+/// state. Reassemble and detect gaps by `DataChunk.sequence` — chunks are
+/// dispatched in send order, but `StreamLatencyFirst` drops and reconnects
+/// can lose in-flight chunks.
 #[uniffi::export(callback_interface)]
 #[async_trait]
 pub trait DataChunkCallback: Send + Sync + 'static {
@@ -235,6 +246,11 @@ impl ContextBridge {
     }
 
     /// Register a DataChunk callback for a stream ID.
+    ///
+    /// Chunks of one stream are delivered to the callback serially,
+    /// run-to-completion, in arrival order; different streams run
+    /// independently. See [`DataChunkCallback`] for the resulting blocking
+    /// constraint and reassembly rules.
     pub async fn register_stream(
         &self,
         stream_id: String,

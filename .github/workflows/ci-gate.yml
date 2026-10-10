@@ -145,7 +145,7 @@ jobs:
     name: E2E Package Runtime
     needs: determine
     if: needs.determine.outputs.e2e_package_runtime == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -299,7 +299,7 @@ jobs:
     name: Test (Rust, ${{ matrix.shard }})
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
@@ -452,6 +452,13 @@ jobs:
         # Prebuilt binary. Pin to a fixed release for reproducibility if
         # desired via `taiki-e/install-action@v2` with `tool: cargo-nextest@<ver>`.
         uses: taiki-e/install-action@cargo-nextest
+      - name: RFC-0507 live WebSocket no-replay gate
+        if: matrix.shard == 'rest'
+        # Fail if the exact acceptance test disappears; its nextest override
+        # forbids retries. The full shard below retains all other safety gates.
+        run: >-
+          cargo nextest run -p actr-hyper --all-features --no-tests=fail
+          -E 'test(/^outbound::peer_gate::websocket_tests::live_websocket_partial_write_is_uncertain_without_replay$/)'
       - name: Run tests (nextest, ${{ matrix.shard }} shard)
         # Integration tests (tests/) get bounded retries via .config/nextest.toml.
         # --no-fail-fast: run the whole suite even when a test fails. With the
@@ -846,14 +853,10 @@ jobs:
           ACTR_XCFRAMEWORK_TARGETS: macos
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
-          ACTR_BINDINGS_PATH=dist/ActrBindings \
-          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           ./build-xcframework.sh
       - name: Build Swift bindings package
         working-directory: packages/actr-swift
         run: |
-          ACTR_BINDINGS_PATH=dist/ActrBindings \
-          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           swift build
       - name: Pre-build mock-actrix
         run: cargo build -p actr-mock-actrix --bin mock-actrix
@@ -1048,11 +1051,11 @@ jobs:
           --ignored
           --nocapture
 
-  webrtc_v020:
-    name: WebRTC v0.20
+  webrtc:
+    name: WebRTC
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64, high]
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     env:
@@ -1080,18 +1083,17 @@ jobs:
           save-if: "false"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
-      # Gate the parallel webrtc-rs v0.20 migration path (the `webrtc-v020`
-      # optional feature), which is otherwise not exercised by CI.
-      - name: Check (webrtc-v020)
-        run: cargo check -p actr-hyper --features webrtc-v020 --all-targets
-      - name: Clippy (webrtc-v020, deny warnings)
-        run: cargo clippy -p actr-hyper --all-targets --features webrtc-v020 -- -D warnings
+      # Exercise the native RTC implementation in a dedicated job.
+      - name: Check (WebRTC)
+        run: cargo check -p actr-hyper --all-targets
+      - name: Clippy (WebRTC, deny warnings)
+        run: cargo clippy -p actr-hyper --all-targets -- -D warnings
       # nextest (not bare cargo test): the real-PC suites in this filter hit
       # CI-load handshake-timing flakes, and libtest would fail the whole job
       # on the first one without retries or running the rest. nextest picks up
       # the .config/nextest.toml retry overrides and --no-fail-fast semantics.
-      - name: Test (webrtc-v020)
-        run: cargo nextest run -p actr-hyper --features webrtc-v020 -E 'test(/^wire::webrtc::v020/)' --no-fail-fast
+      - name: Test (WebRTC)
+        run: cargo nextest run -p actr-hyper -E 'test(/^wire::webrtc::rtc/)' --no-fail-fast
 
   cjk:
     name: Language Policy
@@ -1141,7 +1143,7 @@ jobs:
       - web
       - c_go_workloads
       - test
-      - webrtc_v020
+      - webrtc
       - cjk
     env:
       MODE: ${{ needs.determine.outputs.mode }}
@@ -1162,7 +1164,7 @@ jobs:
       E2E_RUST_RESULT: ${{ needs.e2e_rust.result }}
       E2E_PACKAGE_RUNTIME_RESULT: ${{ needs.e2e_package_runtime.result }}
       TEST_RESULT: ${{ needs.test.result }}
-      WEBRTC_V020_RESULT: ${{ needs.webrtc_v020.result }}
+      WEBRTC_RESULT: ${{ needs.webrtc.result }}
       CJK_RESULT: ${{ needs.cjk.result }}
     steps:
       - name: Summarize gate
@@ -1188,7 +1190,7 @@ jobs:
               "e2e_rust": os.environ["E2E_RUST_RESULT"],
               "e2e_package_runtime": os.environ["E2E_PACKAGE_RUNTIME_RESULT"],
               "test": os.environ["TEST_RESULT"],
-              "webrtc_v020": os.environ["WEBRTC_V020_RESULT"],
+              "webrtc": os.environ["WEBRTC_RESULT"],
               "cjk": os.environ["CJK_RESULT"],
           }
 

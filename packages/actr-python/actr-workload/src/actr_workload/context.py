@@ -360,6 +360,7 @@ class Workload(_generated_workload_base()):
         "on_webrtc_connecting",
         "on_webrtc_connected",
         "on_webrtc_disconnected",
+        "on_webrtc_state_changed",
         "on_credential_renewed",
         "on_credential_expiring",
         "on_mailbox_backpressure",

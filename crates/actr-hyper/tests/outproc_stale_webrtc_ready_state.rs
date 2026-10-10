@@ -1,6 +1,6 @@
 //! Stale WebRTC readiness regression tests for the answerer send path.
 //!
-//! The v0.20 controller snapshot is the sole sendability authority. These
+//! The RTC controller snapshot is the sole sendability authority. These
 //! tests use real VNet/signaling loss and recovery instead of injecting the
 //! removed 0.14 `ConnectionEvent` stream.
 

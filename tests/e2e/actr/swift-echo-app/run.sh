@@ -672,8 +672,14 @@ prepare_echo_app_workspace() {
 
     ACTR_SWIFT_PATH="$REPO_ROOT/packages/actr-swift" \
         perl -i -pe '
-            if (/^\s*path: \.\.\/\.\.\/bindings\/swift\s*$/) {
+            if (/^\s{2}actr-swift:\s*$/) {
+                $in_actr_swift_package = 1;
+            } elsif ($in_actr_swift_package && /^\s{2}\S/) {
+                $in_actr_swift_package = 0;
+            }
+            if ($in_actr_swift_package && /^\s+path:\s*/) {
                 $_ = qq{    path: $ENV{ACTR_SWIFT_PATH}\n};
+                $in_actr_swift_package = 0;
             }
         ' "$TMP_APP_DIR/project.yml"
     grep -Fq "path: $REPO_ROOT/packages/actr-swift" "$TMP_APP_DIR/project.yml" ||

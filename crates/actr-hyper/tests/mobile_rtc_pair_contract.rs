@@ -1,5 +1,5 @@
 //! PR-gate pair contract for mobile recovery through real Actrix services and
-//! the production v0.20 lifecycle feed.
+//! the production RTC lifecycle feed.
 
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
@@ -104,7 +104,7 @@ fn assert_bind_ip(addresses: &[std::net::SocketAddr], expected: Ipv4Addr) {
             && addresses
                 .iter()
                 .all(|address| address.ip() == IpAddr::V4(expected)),
-        "v0.20 builder used unexpected bind addresses: {addresses:?}"
+        "RTC builder used unexpected bind addresses: {addresses:?}"
     );
 }
 
@@ -322,6 +322,29 @@ async fn p03_a_only_long_background_preserves_duration_and_hard_rebuilds_pair() 
 
     assert!(rebuilt.a_to_b.pc_generation > initial.a_to_b.pc_generation);
     assert!(rebuilt.b_to_a.pc_generation > initial.b_to_a.pc_generation);
+    // Old ICE read-loop sockets release their fault leases asynchronously.
+    // Readiness does not imply teardown; prune only after those leases drain.
+    tokio::time::timeout(WAIT, async {
+        loop {
+            let registry = &pair.harness().rtc_faults;
+            registry.retain_generation(
+                &pair.id(PairEndpoint::A),
+                &pair.id(PairEndpoint::B),
+                rebuilt.a_to_b.pc_generation,
+            );
+            registry.retain_generation(
+                &pair.id(PairEndpoint::B),
+                &pair.id(PairEndpoint::A),
+                rebuilt.b_to_a.pc_generation,
+            );
+            if pair.rtc_fault_scope_count() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("retired generation socket leases must drain");
     assert_eq!(pair.rtc_fault_scope_count(), 2);
     pair.assert_rpc_both_directions("p03_long_background").await;
     pair.shutdown().await;
@@ -1099,7 +1122,7 @@ async fn p14_inflight_rpc_is_bounded_across_hard_recovery(
             .peer(pair.serial(to))
             .wait_request_count(REQUEST_ID, 1, Duration::from_secs(10))
             .await,
-        "in-flight request must cross the real v0.20 lane before recovery"
+        "in-flight request must cross the real RTC lane before recovery"
     );
 
     pair.background(PairEndpoint::A).await;

@@ -54,7 +54,7 @@ async fn test_stale_callbacks_do_not_kill_new_connection() {
     harness.connect(100, 200).await;
     tracing::info!("✅ Phase 1 complete: Connection established and verified");
 
-    // Record the physical PC generation. v0.20 tags every handler/pump event
+    // Record the physical PC generation. RTC tags every handler/pump event
     // with this identity; a Hard Recovery must move to a strictly newer one.
     let target = harness.peer(200).id.clone();
     let source = harness.peer(100).id.clone();

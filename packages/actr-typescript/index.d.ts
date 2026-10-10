@@ -90,7 +90,7 @@ export declare class ActrRef {
 export interface ActrId {
   /** Realm name, `<realm_id>@<domain>` */
   realm: string;
-  serialNumber: number;
+  serialNumber: bigint;
 }
 
 export interface ActrType {

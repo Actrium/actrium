@@ -1,15 +1,12 @@
 //! `InboundDispatcher` — the shared inbound message dispatch logic.
 //!
-//! Extracted from `WebRtcGate` (W3a) so both the 0.14 gate and the v0.20
-//! inbound bridge route messages through the same dispatch path:
+//! The RTC inbound bridge routes messages through this dispatch path:
 //!
 //! * RPC envelopes (`RpcReliable`/`RpcSignal`): `Request`/`Tell` → Mailbox;
 //!   `Response` → pending_requests wake; invalid direction → drop + warn.
 //! * Data chunks (`StreamReliable`/`StreamLatencyFirst`): decode →
 //!   `DataChunkRegistry.dispatch`.
 //!
-//! This is a pure refactor — no behavior change. The 0.14 `WebRtcGate`
-//! delegates here; the v0.20 inbound bridge (W3b) will too.
 
 use std::sync::Arc;
 
@@ -26,8 +23,7 @@ use super::DataChunkRegistry;
 
 /// Shared inbound dispatcher: routes decoded inbound messages to the Mailbox
 /// (RPC), the pending-requests map (RPC responses), or the `DataChunkRegistry`
-/// (stream chunks). Used by both the 0.14 `WebRtcGate` and the v0.20 inbound
-/// bridge.
+/// (stream chunks). Used by the RTC inbound bridge.
 pub(crate) struct InboundDispatcher {
     pending_requests: PendingRequestsMap,
     data_chunk_registry: Arc<DataChunkRegistry>,

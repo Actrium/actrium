@@ -59,7 +59,7 @@ pub struct MobileEventDriver {
 }
 
 impl MobileEventDriver {
-    /// Attach the production gated lifecycle reconciler and v0.20 recovery
+    /// Attach the production gated lifecycle reconciler and RTC recovery
     /// feed to one endpoint in any integration topology. Mobile tests submit
     /// native network-path events explicitly; address polling is intentionally
     /// not part of the mobile production path.
@@ -67,7 +67,7 @@ impl MobileEventDriver {
         let peer = harness.peer(serial);
         let processor = peer.production_network_processor();
         let (handle, facts, shutdown, task, status) =
-            super::spawn_gated_v020_network_event_supervisor(processor, &peer.rtc);
+            super::spawn_gated_rtc_network_event_supervisor(processor, &peer.rtc);
         // Wire the signaling client's generation facts into this supervisor
         // and seed a live generation (the `recovery_vnet_supervisor` wiring).
         // The harness client connects eagerly at `add_peer`, before this sink
@@ -202,7 +202,7 @@ impl MobileEventDriver {
 }
 
 /// Two independent Actr endpoints connected through production Actrix
-/// Signaling/STUN/TURN and real webrtc-rs v0.20 PeerConnections.
+/// Signaling/STUN/TURN and real webrtc-rs PeerConnections.
 pub struct MobileRtcPairHarness {
     services: ActrixTestServices,
     harness: TestHarness,
@@ -362,15 +362,43 @@ impl MobileRtcPairHarness {
             self.harness
                 .peer(self.a_serial)
                 .rtc
-                .wait_state(&b_id, timeout, |state| state.sendable),
+                .wait_state_diagnosed(&b_id, timeout, |state| state.sendable),
             self.harness
                 .peer(self.b_serial)
                 .rtc
-                .wait_state(&a_id, timeout, |state| state.sendable),
+                .wait_state_diagnosed(&a_id, timeout, |state| state.sendable),
         );
+        let (a_to_b, b_to_a) = match (a_to_b, b_to_a) {
+            (Ok(a_to_b), Ok(b_to_a)) => (a_to_b, b_to_a),
+            (a_to_b, b_to_a) => {
+                // A succeeded direction only needs a compact summary; the failing
+                // side carries the full diagnostics.
+                let compact = |state: actr_framework::WebRtcPeerState| {
+                    format!(
+                        "sendable={} status={:?} pc_generation={} revision={} \
+                         network_path={:?} unavailable_reason={:?}",
+                        state.sendable,
+                        state.status,
+                        state.pc_generation,
+                        state.revision,
+                        state.network_path,
+                        state.unavailable_reason,
+                    )
+                };
+                let a_to_b = a_to_b.map(compact).unwrap_or_else(|d| d);
+                let b_to_a = b_to_a.map(compact).unwrap_or_else(|d| d);
+                let trace = self.signaling_trace();
+                let recent = &trace[trace.len().saturating_sub(32)..];
+                panic!(
+                    "pair did not become sendable within {timeout:?}: \
+                     A->B={a_to_b}; B->A={b_to_a}; \
+                     recent signaling (oldest first)={recent:#?}"
+                );
+            }
+        };
         let snapshot = PairSnapshot {
-            a_to_b: a_to_b.expect("A did not become sendable to B"),
-            b_to_a: b_to_a.expect("B did not become sendable to A"),
+            a_to_b,
+            b_to_a,
             role_a: self
                 .harness
                 .peer(self.a_serial)
@@ -655,7 +683,7 @@ impl MobileRtcPairHarness {
     }
 
     /// Start a DataChunk send without waiting for its remote observation so a
-    /// test can interrupt a concrete fragmented send at the v0.20 lane seam.
+    /// test can interrupt a concrete fragmented send at the RTC lane seam.
     pub fn spawn_data_chunk(
         &self,
         from: PairEndpoint,
@@ -772,7 +800,7 @@ impl MobileRtcPairHarness {
     }
 
     /// Wait until the configured physical link fault is observed on either
-    /// endpoint's generation-scoped v0.20 Runtime wrapper.
+    /// endpoint's generation-scoped RTC Runtime wrapper.
     pub async fn wait_rtc_fault_hit(
         &self,
         timeout: Duration,

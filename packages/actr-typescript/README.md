@@ -172,3 +172,14 @@ GitHub Actions workflow `Publish TypeScript Package`.
 - Required workflow permission: `id-token: write`
 - Initial release requirement: publish `@actrium/actr` once manually before
   adding the npm trusted publisher for this workflow
+
+## Actor ID integer migration
+
+`ActrId.serialNumber` is a JavaScript `bigint` in both native results and
+`call`/`tell` inputs. This replaces the previous `number` field so the complete
+unsigned 64-bit protocol ID survives discovery and subsequent RPC calls.
+Use literals such as `42n`, or `BigInt(decimalString)` when restoring an ID.
+Negative values and values above `18446744073709551615n` are rejected.
+Do not convert IDs through `Number`, which loses precision above `2^53 - 1`.
+For JSON storage, serialize the serial number as a decimal string and restore
+it with `BigInt` before passing the ID to the SDK.

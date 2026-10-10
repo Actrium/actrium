@@ -1,7 +1,7 @@
 //! Wire Layer 0: Physical wire layer
 //!
 //! Low-level transport implementations:
-//! - webrtc: WebRTC transport (DataChannel, MediaTrack, Coordinator, Signaling)
+//! - webrtc: WebRTC transport (DataChannel, MediaTrack, RTC controllers, Signaling)
 //! - websocket: WebSocket transport
 //!
 //! **Note**: For intra-process communication, use `crate::transport::HostTransport`

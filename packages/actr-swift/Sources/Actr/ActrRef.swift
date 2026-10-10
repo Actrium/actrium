@@ -98,22 +98,21 @@ public final class ActrRef: Sendable {
         }
     }
 
-    /// Query one peer's current WebRTC state (v0.20 backend). `nil` when the
-    /// peer has no controller or the node runs the 0.14 backend.
+    /// Query one peer's current WebRTC state. `nil` when the
+    /// peer has no controller or RTC has not been initialized.
     public func getRtcPeerStatus(peer: ActrId) async -> WebRTCPeerState? {
         await inner.getRtcPeerStatus(peer: peer.bridge).map(WebRTCPeerState.init(bridge:))
     }
 
-    /// List every current peer's WebRTC state (v0.20 backend; empty on 0.14).
+    /// List every current peer's WebRTC state; empty when no peers are registered.
     public func listRtcPeerStatuses() async -> [WebRTCPeerState] {
         await inner.listRtcPeerStatuses().map(WebRTCPeerState.init(bridge:))
     }
 
-    /// Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+    /// Subscribe to one peer's WebRTC state changes. The
     /// handler immediately receives the current state (initial replay), then
     /// every revision. The returned subscription stops delivery on deinit.
-    /// `nil` when the peer has no controller or the node runs the 0.14
-    /// backend.
+    /// `nil` when the peer has no controller or RTC has not been initialized.
     public func subscribeRtcPeerStatus(
         peer: ActrId,
         onState: @escaping @Sendable (WebRTCPeerState) -> Void

@@ -414,7 +414,7 @@ timer_inventory! {
     SIGNALING_INBOUND_RETRY_BACKOFF => {
         id: "signaling.inbound.retry_backoff", owner: "signaling_router", category: FailureBackoff,
         duration: "bounded exponential backoff, 50ms doubling to a 1s cap",
-        arm: "the sole v0.20 signaling consumer observes the inbound queue close or a receive error",
+        arm: "the sole RTC signaling consumer observes the inbound queue close or a receive error",
         success: "backoff deadline", interrupt: "router shutdown",
         expiry: "retry receive on the (possibly replaced) inbound queue",
         reset: "a received envelope", external: false
@@ -962,19 +962,19 @@ mod tests {
             ),
             (
                 "wire/webrtc/test_runtime.rs",
-                "webrtc v0.20 Runtime methods require std::time::Instant; this adapter forwards that upstream clock contract and never makes an Actr lifecycle decision",
+                "webrtc Runtime methods require std::time::Instant; this adapter forwards that upstream clock contract and never makes an Actr lifecycle decision",
             ),
             (
-                "wire/webrtc/v020/fault.rs",
-                "the instrumented webrtc v0.20 Runtime must preserve upstream std::time::Instant method signatures; PolicyClock owns Actr recovery deadlines",
+                "wire/webrtc/rtc/fault.rs",
+                "the instrumented webrtc Runtime must preserve upstream std::time::Instant method signatures; PolicyClock owns Actr recovery deadlines",
             ),
             (
-                "wire/webrtc/v020/media.rs",
+                "wire/webrtc/rtc/media.rs",
                 "the test-only RtpSender mock implements the upstream get_stats(std::time::Instant) signature and never gates lifecycle state",
             ),
             (
-                "wire/webrtc/v020/peer/effects.rs",
-                "webrtc v0.20 get_stats() requires a std::time::Instant report stamp; the report is observation-only and never gates sendability or recovery",
+                "wire/webrtc/rtc/peer/effects.rs",
+                "webrtc get_stats() requires a std::time::Instant report stamp; the report is observation-only and never gates sendability or recovery",
             ),
         ];
 

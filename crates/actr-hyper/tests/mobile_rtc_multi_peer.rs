@@ -1,9 +1,10 @@
 //! Multi-peer isolation over real Actrix services, production mobile recovery
-//! feed, and independent v0.20 controllers.
+//! feed, and independent RTC controllers.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
+use actr_framework::WebRtcUnavailableReason;
 use actr_hyper::lifecycle::{NetworkAvailability, NetworkTransportFlags};
 use actr_hyper::test_support::{
     ActrixTestServices, LinkDirection, MobileEventDriver, PacketRule, SignalingFaultRule,
@@ -291,10 +292,10 @@ impl MultiPeerTopology {
             .expect("remote directed Runtime fault handle");
         tokio::select! {
             hit = a.wait_for_hit_after(0, Duration::from_secs(10)) => {
-                hit.expect("A-side v0.20 Runtime fault did not hit");
+                hit.expect("A-side RTC Runtime fault did not hit");
             }
             hit = remote_handle.wait_for_hit_after(0, Duration::from_secs(10)) => {
-                hit.expect("remote-side v0.20 Runtime fault did not hit");
+                hit.expect("remote-side RTC Runtime fault did not hit");
             }
         }
         self.harness.evidence.record(
@@ -302,7 +303,7 @@ impl MultiPeerTopology {
             "fault",
             Some(self.peer_id(remote)),
             "RTC link fault",
-            "hit real v0.20 Runtime",
+            "hit real RTC Runtime",
         );
     }
 
@@ -388,7 +389,7 @@ async fn mp01_one_link_fault_does_not_change_or_block_other_peer_connections() {
         .rtc
         .wait_state(&b, WAIT, |state| !state.sendable)
         .await
-        .expect("A-B must become non-sendable from a real v0.20 ICE/PC callback");
+        .expect("A-B must become non-sendable from a real RTC ICE/PC callback");
     let blocked_hook = topology
         .harness
         .peer(A)
@@ -620,6 +621,7 @@ async fn mp03_one_node_event_soft_recovers_three_controllers_independently_withi
 async fn mp04_ab_signaling_partition_does_not_starve_ac_or_ad_recovery() {
     let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
+    let initial_ice = topology.ice_generations().await;
     let a = topology.peer_id(A);
     let b = topology.peer_id(B);
     topology.harness.signaling_faults.set_rule(
@@ -638,10 +640,27 @@ async fn mp04_ab_signaling_partition_does_not_starve_ac_or_ad_recovery() {
         .await
         .expect("the A-B signaling partition must hit a restart offer");
 
-    topology.wait_link(C).await;
-    topology.wait_link(D).await;
-    pair_rpc(&topology.harness, A, C, "mp04_ac_not_starved").await;
-    pair_rpc(&topology.harness, A, D, "mp04_ad_not_starved").await;
+    // A-B's dropped offer only proves that controller started its recovery.
+    // C/D may still expose pre-restart readiness until their own controllers
+    // process the foreground event. Wait for this recovery on both ends
+    // before checking sendability and issuing a single, unretried RPC.
+    tokio::time::timeout(WAIT, async {
+        for (remote, request_id) in [(C, "mp04_ac_not_starved"), (D, "mp04_ad_not_starved")] {
+            for (local, peer) in [(A, remote), (remote, A)] {
+                topology
+                    .harness
+                    .peer(local)
+                    .rtc
+                    .wait_ice_generation(&topology.peer_id(peer), initial_ice[&(local, peer)], WAIT)
+                    .await
+                    .unwrap_or_else(|| panic!("{local}-{peer} must start its own ICE recovery"));
+            }
+            topology.wait_link(remote).await;
+            pair_rpc(&topology.harness, A, remote, request_id).await;
+        }
+    })
+    .await
+    .expect("C/D must recover within one deadline while A-B signaling is partitioned");
     assert_eq!(
         topology
             .harness
@@ -671,7 +690,7 @@ async fn mp04_ab_signaling_partition_does_not_starve_ac_or_ad_recovery() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-async fn mp05_close_peer_during_recovery_cannot_revive_it_or_affect_other_links() {
+async fn mp05_close_peer_during_recovery_retires_old_generation_without_affecting_other_links() {
     let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
     let a = topology.peer_id(A);
@@ -689,7 +708,7 @@ async fn mp05_close_peer_during_recovery_cannot_revive_it_or_affect_other_links(
         .rtc
         .wait_state(&b, WAIT, |state| !state.sendable)
         .await
-        .expect("A-B recovery must be driven by the real v0.20 callback");
+        .expect("A-B recovery must be driven by the real RTC callback");
     let blocked_hook = topology
         .harness
         .peer(A)
@@ -698,26 +717,85 @@ async fn mp05_close_peer_during_recovery_cannot_revive_it_or_affect_other_links(
         .await
         .expect("A's public hook must expose A-B recovery before close_peer");
     assert_eq!(blocked_hook, blocked);
+    let b_blocked = topology
+        .harness
+        .peer(B)
+        .rtc
+        .wait_state(&a, WAIT, |state| !state.sendable)
+        .await
+        .expect("B must observe loss of the old A-B connection");
     assert!(topology.harness.peer(A).rtc.close_peer(&b).await);
-    assert!(
+    let closed = topology
+        .harness
+        .peer(A)
+        .hooks
+        .wait_state(&b, WAIT, |state| {
+            state.revision > blocked.revision
+                && state.unavailable_reason == Some(WebRtcUnavailableReason::Closed)
+        })
+        .await
+        .expect("A's public hook must confirm retirement of the old A-B connection");
+    assert!(!closed.sendable);
+    // A's closed scope may already be drained; only still-live old socket
+    // faces need healing before legitimate fresh negotiation can continue.
+    for (local, remote) in [(A, B), (B, A)] {
+        if let Some(handle) = topology.harness.rtc_faults.handle(
+            &topology.peer_id(local),
+            &topology.peer_id(remote),
+            initial[&(local, remote)],
+        ) {
+            handle.heal();
+        }
+    }
+
+    // close_peer retires the current connection, but a fresh remote role
+    // negotiation may already recreate its controller. Join that attempt or
+    // start one explicitly rather than requiring an intermediate peer count.
+    topology.harness.peer(A).rtc.connect(b.clone()).await;
+    for (from, to) in [(A, B), (B, A)] {
         topology
             .harness
-            .rtc_faults
-            .heal_link((&a, initial[&(A, B)]), (&b, initial[&(B, A)]),)
-    );
+            .peer(from)
+            .rtc
+            .wait_state(&topology.peer_id(to), WAIT, |state| {
+                state.sendable && state.pc_generation > initial[&(from, to)]
+            })
+            .await
+            .expect("A-B reconnect must use a fresh generation at both endpoints");
+    }
+    topology.wait_link(B).await;
+    pair_rpc(&topology.harness, A, B, "mp05_ab_fresh").await;
+    pair_rpc(&topology.harness, A, C, "mp05_ac_healthy").await;
+    pair_rpc(&topology.harness, A, D, "mp05_ad_healthy").await;
 
     assert!(
         topology
             .harness
             .peer(A)
-            .rtc
-            .wait_peer_count(2, Duration::from_secs(10))
-            .await,
-        "closed A-B controller must stay removed after its stale callback"
+            .hooks
+            .state_changes_for(&b)
+            .iter()
+            .filter(|state| state.revision > closed.revision)
+            .all(|state| !state.sendable || state.pc_generation > initial[&(A, B)]),
+        "late callbacks must never make the retired A-B generation sendable again"
     );
-    pair_rpc(&topology.harness, A, C, "mp05_ac_healthy").await;
-    pair_rpc(&topology.harness, A, D, "mp05_ad_healthy").await;
-    assert_eq!(topology.harness.peer(A).rtc.peer_count().await, 2);
+    assert!(
+        topology
+            .harness
+            .peer(B)
+            .hooks
+            .state_changes_for(&a)
+            .iter()
+            .filter(|state| state.revision > b_blocked.revision)
+            .all(|state| !state.sendable || state.pc_generation > initial[&(B, A)]),
+        "B's retired generation must never become sendable after recovery begins"
+    );
+    let restored = topology.generations().await;
+    for remote in [C, D] {
+        assert_eq!(restored[&(A, remote)], initial[&(A, remote)]);
+        assert_eq!(restored[&(remote, A)], initial[&(remote, A)]);
+    }
+    assert_eq!(topology.harness.peer(A).rtc.peer_count().await, 3);
     topology.shutdown().await;
 }
 

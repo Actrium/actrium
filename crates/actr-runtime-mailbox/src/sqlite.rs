@@ -8,18 +8,19 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use uuid::Uuid;
 
 /// SQLite configuration
 #[derive(Debug, Clone)]
 pub struct SqliteConfig {
-    /// Database file path
+    /// Database file path or `:memory:`. SQLite `file:` URIs are not supported.
     pub database_path: PathBuf,
     /// Whether to enable WAL mode
     pub enable_wal: bool,
@@ -47,11 +48,53 @@ struct SqliteConnection {
 
 impl SqliteConnection {
     fn new(config: &SqliteConfig) -> StorageResult<Self> {
-        let conn = Connection::open(&config.database_path)?;
+        // URI options can override PRIVATE_CACHE or even disable file locks.
+        // Reject them before opening, including when URI support is enabled
+        // globally by another SQLite user in the process.
+        if config
+            .database_path
+            .as_os_str()
+            .as_encoded_bytes()
+            .starts_with(b"file:")
+        {
+            return Err(StorageError::ConfigError(
+                "Mailbox requires a filesystem path or :memory:, not a SQLite file: URI".into(),
+            ));
+        }
+        // A shared pager retains locks for the cache, not for this instance;
+        // another connection could otherwise recover our active Inflight rows.
+        // Override the process-wide shared-cache default explicitly.
+        let flags = (OpenFlags::default() & !OpenFlags::SQLITE_OPEN_URI)
+            | OpenFlags::SQLITE_OPEN_PRIVATE_CACHE;
+        let mut conn = Connection::open_with_flags(&config.database_path, flags)?;
+        // Ownership contention is a startup error, not an unbounded wait.
+        conn.busy_timeout(Duration::from_millis(250))?;
+        // Set this before the first WAL access. Unlike an exclusive transaction
+        // alone, exclusive locking mode retains ownership between transactions.
+        let mode: String =
+            conn.query_row("PRAGMA main.locking_mode = EXCLUSIVE", [], |row| row.get(0))?;
+        if !mode.eq_ignore_ascii_case("exclusive") {
+            return Err(StorageError::ConfigError(format!(
+                "Mailbox requires exclusive SQLite locking mode, got {mode}"
+            )));
+        }
         if config.enable_wal {
             conn.execute_batch("PRAGMA journal_mode = WAL;")?;
         }
-        Self::create_tables(&conn)?;
+        // The PRAGMA selects a mode; this transaction actually acquires the
+        // lock before we touch stale Inflight messages. Failure drops the
+        // connection, and no partially initialized mailbox can escape.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Exclusive)?;
+        Self::create_tables(&tx)?;
+        let recovered = tx.execute("UPDATE messages SET status = 0 WHERE status = 1", [])?;
+        tx.commit()?;
+        if recovered > 0 {
+            tracing::info!(
+                database_path = %config.database_path.display(),
+                recovered_messages = recovered,
+                "Recovered unacknowledged mailbox messages"
+            );
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -91,7 +134,20 @@ impl SqliteConnection {
     }
 }
 
-/// SQLite mailbox implementation
+/// SQLite mailbox with exclusive database ownership and restart recovery.
+///
+/// A file-backed database belongs to one live instance. Share that instance via
+/// `Arc` for concurrent producers and consumers. Other connections, including
+/// external readers, cannot access the database until this connection closes;
+/// use [`Mailbox::status`] for live inspection. Ownership contention returns
+/// [`StorageError::ConcurrencyError`] after a bounded wait.
+///
+/// Opening recovers all unacknowledged messages before exposing the mailbox.
+/// Delivery is at least once: a crash after business side effects but before
+/// ACK can repeat those effects, so handlers need durable business idempotency.
+/// `:memory:` databases remain independent and do not survive a restart.
+/// Pass a filesystem path or `:memory:`; SQLite `file:` URIs are rejected to
+/// prevent URI options from bypassing exclusive ownership.
 pub struct SqliteMailbox {
     connection: Arc<SqliteConnection>,
     /// Optional depth observer invoked after every successful
@@ -318,12 +374,13 @@ mod tests {
     use super::*;
     use actr_protocol::ActrId;
     use actr_protocol::prost::Message as ProstMessage;
-    use tempfile::tempdir;
+    use tempfile::{TempDir, tempdir};
 
-    async fn setup_mailbox() -> SqliteMailbox {
+    async fn setup_mailbox() -> (TempDir, SqliteMailbox) {
         let dir = tempdir().unwrap();
         let path = dir.path().join("test.db");
-        SqliteMailbox::new(&path).await.unwrap()
+        let mailbox = SqliteMailbox::new(&path).await.unwrap();
+        (dir, mailbox)
     }
 
     fn dummy_actr_id_bytes() -> Vec<u8> {
@@ -338,7 +395,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enqueue_dequeue_ack_workflow() {
-        let mailbox = setup_mailbox().await;
+        let (_dir, mailbox) = setup_mailbox().await;
 
         // 1. Enqueue
         let from = dummy_actr_id_bytes();
@@ -371,7 +428,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_priority_order() {
-        let mailbox = setup_mailbox().await;
+        let (_dir, mailbox) = setup_mailbox().await;
 
         let from = dummy_actr_id_bytes();
         let normal_id = mailbox
@@ -410,7 +467,7 @@ mod tests {
             }
         }
 
-        let mailbox = setup_mailbox().await;
+        let (_dir, mailbox) = setup_mailbox().await;
         let latest = Arc::new(AtomicUsize::new(0));
         let calls = Arc::new(AtomicUsize::new(0));
         let installed = mailbox.set_depth_observer(Arc::new(CountingObserver {
@@ -447,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_status_tracking() {
-        let mailbox = setup_mailbox().await;
+        let (_dir, mailbox) = setup_mailbox().await;
 
         let from = dummy_actr_id_bytes();
         mailbox

@@ -259,6 +259,107 @@ fn linked_register_request_uses_linked_auth_mode() {
     assert_eq!(req.ws_address.as_deref(), Some("ws://127.0.0.1:9100"));
 }
 
+struct RegistrationTestWorkload;
+
+#[async_trait::async_trait]
+impl crate::workload::LinkedWorkloadHandle for RegistrationTestWorkload {}
+
+async fn registration_test_node(dir: &TempDir, package: bool) -> Node<Attached> {
+    let hyper = Hyper::new(dev_config(dir)).await.unwrap();
+    let mut node = Node::from_hyper(hyper, linked_runtime_config(dir))
+        .link_handle(Arc::new(RegistrationTestWorkload))
+        .await
+        .unwrap();
+    if package {
+        node.attachment.as_mut().unwrap().verified = Some(fake_manifest());
+    }
+    node
+}
+
+#[tokio::test]
+async fn registration_preserves_the_sent_request_for_credential_recovery() {
+    use crate::lifecycle::credential_manager::RegistrationContext;
+
+    for package in [false, true] {
+        let mut server = mockito::Server::new_async().await;
+        let received = Arc::new(std::sync::Mutex::new(None));
+        let captured = received.clone();
+        let mock = server
+            .mock("POST", "/register")
+            .match_request(move |request| {
+                let request = RegisterRequest::decode(request.body().unwrap().as_slice()).unwrap();
+                *captured.lock().unwrap() = Some(request);
+                true
+            })
+            .with_status(200)
+            .with_header("content-type", "application/x-protobuf")
+            .with_body(fake_register_response_bytes())
+            .expect(1)
+            .create_async()
+            .await;
+        let dir = TempDir::new().unwrap();
+        let registered = registration_test_node(&dir, package)
+            .await
+            .register_with(&server.url(), test_service_spec())
+            .await
+            .unwrap();
+        mock.assert_async().await;
+
+        let node = registered.attachment.unwrap().node;
+        assert!(node.preregistered_credential.is_some());
+        let context = node.preregistered_registration_context.unwrap();
+        let saved = match (package, context) {
+            (true, RegistrationContext::Package { request })
+            | (false, RegistrationContext::Linked { request }) => request,
+            _ => panic!("credential recovery changed the workload's registration mode"),
+        };
+        assert_eq!(saved, received.lock().unwrap().take().unwrap());
+        assert_eq!(saved.realm, "test7@example.com");
+        assert_eq!(saved.service_spec, test_service_spec());
+        assert_eq!(saved.acl, test_acl());
+        if package {
+            assert_eq!(saved.publisher_signature, Some(vec![0; 64].into()));
+            assert_eq!(saved.signing_public_key, Some(vec![0; 32].into()));
+        } else {
+            assert_eq!(saved.ws_address.as_deref(), Some("ws://127.0.0.1:9100"));
+        }
+    }
+}
+
+#[cfg(feature = "test-utils")]
+#[tokio::test]
+async fn preregistered_credentials_keep_the_workload_recovery_context() {
+    use crate::lifecycle::credential_manager::RegistrationContext;
+    use actr_protocol::{RegisterResponse, register_response};
+
+    for package in [false, true] {
+        let dir = TempDir::new().unwrap();
+        let response = RegisterResponse::decode(fake_register_response_bytes().as_slice()).unwrap();
+        let Some(register_response::Result::Success(ok)) = response.result else {
+            panic!("fixture must contain a successful registration");
+        };
+        let registered = registration_test_node(&dir, package)
+            .await
+            .try_with_preregistered_credential(ok.clone())
+            .unwrap();
+        let node = registered.attachment.unwrap().node;
+        assert_eq!(node.preregistered_credential, Some(ok));
+        match (package, node.preregistered_registration_context.unwrap()) {
+            (true, RegistrationContext::Package { request }) => {
+                assert_eq!(request.realm, "test7@example.com");
+                assert_eq!(request.auth_mode, Some(RegisterAuthMode::Package as i32));
+                assert_eq!(request.publisher_signature, Some(vec![0; 64].into()));
+                assert_eq!(request.signing_public_key, Some(vec![0; 32].into()));
+            }
+            (false, RegistrationContext::Linked { request }) => {
+                assert_eq!(request.auth_mode, Some(RegisterAuthMode::Linked as i32));
+                assert_eq!(request.acl, test_acl());
+            }
+            _ => panic!("pre-registration must preserve the workload's auth mode"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn with_actor_type_overrides_pending_runtime_metadata() {
     let dir = TempDir::new().unwrap();

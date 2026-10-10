@@ -83,7 +83,7 @@ async fn default_send_with_progress_classifies_by_error_shape() {
     // SecureChannelNotReady stays NotAttempted: it is a pre-send gate by
     // construction. Adapters with a proven pre-send state check override
     // `send_with_progress` to report NotAttempted (see the WebSocket tests
-    // above, the v0.20 lane, and ClosedLikePreSendLane in
+    // above, the RTC lane, and ClosedLikePreSendLane in
     // dest_transport_tests).
     for (mode, expected) in [
         (DefaultProgressMode::ClosedLike, DeliveryProgress::Unknown),

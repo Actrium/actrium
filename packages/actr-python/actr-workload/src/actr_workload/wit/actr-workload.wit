@@ -9,7 +9,7 @@
 //
 // `actr:workload@0.5.0` extends the lane-aware 0.4.0 contract with the
 // unified WebRTC peer-state export (`on-webrtc-state-changed`) carried by
-// the v0.20 RTC backend. Adding a required guest export is a contract break
+// the RTC implementation. Adding a required guest export is a contract break
 // for already-compiled packages, hence the version bump; the host rejects
 // pre-0.5.0 worlds at load with an actionable rebuild hint.
 //
@@ -444,7 +444,7 @@ interface workload {
 
     // ── Transport: WebRTC unified state (1, infallible, 0.5.0) ───────────
 
-    // Unified per-peer state hook fed by the v0.20 RTC backend: carries the
+    // Unified per-peer state hook fed by the RTC implementation: carries the
     // full `webrtc-peer-state` snapshot on every transition, subsuming the
     // connecting/connected/disconnected triple for state-machine consumers.
     on-webrtc-state-changed: async func(event: webrtc-peer-state, ctx: invocation-ctx);

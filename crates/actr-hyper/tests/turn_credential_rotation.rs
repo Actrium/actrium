@@ -1,4 +1,5 @@
-//! TURN credential rotation through webrtc-rs v0.20 `set_configuration`.
+//! TURN credential rotation through Actr's v0.20 backend and the v0.21 RTC
+//! `set_configuration` path.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -19,6 +20,9 @@ use webrtc::peer_connection::{
 const TURN_REALM: &str = "actr.test";
 const TURN_SHARED_TEST_KEY: &str = "actrix-turn-rotation-integration-test-key";
 const WAIT: Duration = Duration::from_secs(60);
+
+#[path = "turn_credential_rotation/issue_248.rs"]
+mod issue_248;
 
 type HmacSha1 = Hmac<Sha1>;
 

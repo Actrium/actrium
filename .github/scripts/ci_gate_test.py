@@ -28,15 +28,18 @@ def _job(workflow: str, name: str, next_name: str) -> str:
     return workflow[job_start:next_job_start]
 
 
-def test_gate_aggregates_webrtc_v020_domain() -> None:
+def test_gate_aggregates_webrtc_domain() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     # `gate` is the workflow's final job, so slice from its key to EOF.
     gate = workflow[workflow.index("  gate:\n"):]
-    # The v0.20 domain must stay in the gate's needs list and in the Python
-    # summary dict; dropping either would detach the v0.20 migration from the
+    # The RTC domain must stay in the gate's needs list and in the Python
+    # summary dict; dropping either would detach the RTC implementation from the
     # gating decision without failing any other structure pin.
-    assert "webrtc_v020" in gate
-    assert "WEBRTC_V020_RESULT" in gate
+    assert "      - webrtc\n" in gate
+    assert 'WEBRTC_RESULT: ${{ needs.webrtc.result }}' in gate
+    assert '"webrtc": os.environ["WEBRTC_RESULT"]' in gate
+    rtc_job = _job(workflow, "webrtc", "cjk")
+    assert "test(/^wire::webrtc::rtc/)" in rtc_job
 
 
 def test_gate_enforces_anonymous_commit_identities() -> None:
@@ -411,7 +414,7 @@ def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
     assert "Actrium/actrix" not in workflow
     assert "actions: read" not in workflow
 
-    assert "runs-on: [self-hosted, Linux, X64, high]" in pkg_job
+    assert "runs-on: [self-hosted, Linux, X64]" in pkg_job
     assert "runs-on: macos-arm64-larger" in swift_job
 
 
@@ -883,7 +886,7 @@ def test_service_readiness_waits_for_exact_registration() -> None:
 
 
 if __name__ == "__main__":
-    test_gate_aggregates_webrtc_v020_domain()
+    test_gate_aggregates_webrtc_domain()
     test_gate_enforces_anonymous_commit_identities()
     test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm()
     test_rust_test_gate_restores_cache_before_installing_tools()

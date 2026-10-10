@@ -1351,10 +1351,9 @@ fn online_route_snapshot_with_cost(
     }
 }
 
-#[cfg(feature = "webrtc-v020")]
 #[test]
-fn v020_material_path_change_emits_local_address_edge() {
-    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+fn rtc_material_path_change_emits_local_address_edge() {
+    use crate::wire::webrtc::rtc::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
 
     let supervisor = RtcRecoverySupervisor::new();
     let mut events = supervisor.subscribe();
@@ -1362,7 +1361,7 @@ fn v020_material_path_change_emits_local_address_edge() {
     let mut path_change_pending = false;
 
     let wifi = online_route_snapshot_with_cost(1, true, false);
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged {
             snapshot: wifi.clone(),
@@ -1382,7 +1381,7 @@ fn v020_material_path_change_emits_local_address_edge() {
 
     // A billing/data-saver-only change is not a local transport change and
     // must not trigger an ICE rebind.
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged {
             snapshot: online_route_snapshot_with_cost(2, true, true),
@@ -1401,7 +1400,7 @@ fn v020_material_path_change_emits_local_address_edge() {
     );
 
     let cellular = online_route_snapshot_with_cost(3, false, true);
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged { snapshot: cellular },
         previous_path,
@@ -1418,10 +1417,9 @@ fn v020_material_path_change_emits_local_address_edge() {
     );
 }
 
-#[cfg(feature = "webrtc-v020")]
 #[test]
-fn v020_offline_online_restore_does_not_emit_duplicate_local_address_edge() {
-    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+fn rtc_offline_online_restore_does_not_emit_duplicate_local_address_edge() {
+    use crate::wire::webrtc::rtc::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
 
     let supervisor = RtcRecoverySupervisor::new();
     let mut events = supervisor.subscribe();
@@ -1429,7 +1427,7 @@ fn v020_offline_online_restore_does_not_emit_duplicate_local_address_edge() {
     let mut path_change_pending = false;
 
     let online = online_route_snapshot_with_cost(1, true, false);
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged {
             snapshot: online.clone(),
@@ -1447,7 +1445,7 @@ fn v020_offline_online_restore_does_not_emit_duplicate_local_address_edge() {
     let mut offline = online.clone();
     offline.sequence = 2;
     offline.availability = NetworkAvailability::Unavailable;
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged { snapshot: offline },
         previous_path,
@@ -1466,7 +1464,7 @@ fn v020_offline_online_restore_does_not_emit_duplicate_local_address_edge() {
 
     let mut restored = online;
     restored.sequence = 3;
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged { snapshot: restored },
         previous_path,
@@ -1483,17 +1481,16 @@ fn v020_offline_online_restore_does_not_emit_duplicate_local_address_edge() {
     );
 }
 
-#[cfg(feature = "webrtc-v020")]
 #[test]
-fn v020_path_change_survives_android_unknown_intermediate_state() {
-    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+fn rtc_path_change_survives_android_unknown_intermediate_state() {
+    use crate::wire::webrtc::rtc::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
 
     let supervisor = RtcRecoverySupervisor::new();
     let mut events = supervisor.subscribe();
     let mut previous_path = None;
     let mut path_change_pending = false;
 
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged {
             snapshot: online_route_snapshot(1, true),
@@ -1507,7 +1504,7 @@ fn v020_path_change_survives_android_unknown_intermediate_state() {
         RtcNetworkEvent::NetworkAvailable
     );
 
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged {
             snapshot: NetworkSnapshot {
@@ -1528,7 +1525,7 @@ fn v020_path_change_survives_android_unknown_intermediate_state() {
     );
     assert!(path_change_pending);
 
-    super::publish_v020_network_fact(
+    super::publish_rtc_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged {
             snapshot: online_route_snapshot(3, false),
@@ -1579,8 +1576,7 @@ async fn gated_reconciler_waits_for_authoritative_foreground() {
         ReconcilerConfig {
             profile,
             clock_origin,
-            #[cfg(feature = "webrtc-v020")]
-            v020_recovery: None,
+            rtc_recovery: None,
         },
     ));
 
@@ -1645,8 +1641,7 @@ async fn current_effect_fact_and_event_storm_preserve_monotonic_supervisor_statu
         ReconcilerConfig {
             profile,
             clock_origin,
-            #[cfg(feature = "webrtc-v020")]
-            v020_recovery: None,
+            rtc_recovery: None,
         },
     ));
 
@@ -2105,7 +2100,6 @@ async fn bounded_cleanup_abandons_remaining_steps_at_budget() {
 /// dispatch alone never yields a success-class outcome for an uncovered
 /// target. These tests drive the real manager, real controllers, and the
 /// exact trait method `spawn_effect` calls.
-#[cfg(feature = "webrtc-v020")]
 mod inv33_peer_coverage {
     use super::super::{
         DefaultNetworkEventProcessor, EffectDiagnosis, EffectReport, NetworkEventProcessor,
@@ -2114,11 +2108,11 @@ mod inv33_peer_coverage {
     use super::ForceReconnectFakeSignalingClient;
     use crate::lifecycle::CredentialState;
     use crate::transport::NetworkResult;
-    use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
-    use crate::wire::webrtc::v020::manager::RtcConnectionManager;
-    use crate::wire::webrtc::v020::peer::effects::test_support::fake_data_channel;
-    use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
-    use crate::wire::webrtc::v020::recovery::PeerRecoveryTarget;
+    use crate::wire::webrtc::rtc::event_handler::WebRtcEventHandler;
+    use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
+    use crate::wire::webrtc::rtc::peer::effects::test_support::fake_data_channel;
+    use crate::wire::webrtc::rtc::peer::effects::{SessionFactory, SessionOps};
+    use crate::wire::webrtc::rtc::recovery::PeerRecoveryTarget;
     use crate::wire::webrtc::{SignalingEvent, SignalingStats};
     use actr_protocol::{
         AIdCredential, ActrId, Pong, RegisterRequest, RegisterResponse, RouteCandidatesRequest,
@@ -2174,22 +2168,26 @@ mod inv33_peer_coverage {
             &self,
             label: &str,
             _init: webrtc::data_channel::RTCDataChannelInit,
-        ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
+        ) -> Result<Arc<dyn crate::wire::webrtc::rtc::peer::adapter::LaneDataChannel>, RtcError>
+        {
             Ok(fake_data_channel(label))
         }
         async fn add_track(
             &self,
             _t: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-        ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+        ) -> Result<Arc<dyn crate::wire::webrtc::rtc::peer::adapter::ActrRtpSender>, RtcError>
+        {
             Err(RtcError::Other("no media in inv33 tests".into()))
         }
         async fn remove_track(
             &self,
-            _s: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+            _s: &Arc<dyn crate::wire::webrtc::rtc::peer::adapter::ActrRtpSender>,
         ) -> Result<(), RtcError> {
             Ok(())
         }
-        async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+        async fn get_senders(
+            &self,
+        ) -> Vec<Arc<dyn crate::wire::webrtc::rtc::peer::adapter::ActrRtpSender>> {
             Vec::new()
         }
         async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
@@ -2392,7 +2390,7 @@ mod inv33_peer_coverage {
         let processor = DefaultNetworkEventProcessor::new(Arc::new(
             ForceReconnectFakeSignalingClient::new(false),
         ))
-        .with_v020_manager(Some(manager.clone()));
+        .with_rtc_manager(Some(manager.clone()));
         let report = processor
             .process_network_recovery_effect_for_action(NetworkRecoveryAction::Restore, 4201)
             .await
@@ -2453,7 +2451,7 @@ mod inv33_peer_coverage {
         let signaling = Arc::new(DepartOnConnectSignaling::new());
         signaling.close_this_peer_on_connect(manager.clone(), peer.clone());
         let processor =
-            DefaultNetworkEventProcessor::new(signaling).with_v020_manager(Some(manager.clone()));
+            DefaultNetworkEventProcessor::new(signaling).with_rtc_manager(Some(manager.clone()));
         let report = processor
             .process_network_recovery_effect_for_action(NetworkRecoveryAction::Restore, 4202)
             .await
@@ -2493,11 +2491,51 @@ mod inv33_peer_coverage {
         let processor = DefaultNetworkEventProcessor::new(Arc::new(
             ForceReconnectFakeSignalingClient::new(false),
         ))
-        .with_v020_manager(Some(manager));
+        .with_rtc_manager(Some(manager));
         let report = processor
             .process_network_recovery_effect_for_action(NetworkRecoveryAction::Restore, 4203)
             .await
             .expect("restore completes");
         assert_eq!(report, EffectReport::PURE);
+    }
+
+    /// A node-wide cleanup fences passive inbound admission so messages from
+    /// the retired signaling generation cannot recreate controllers behind a
+    /// terminal cleanup. That fence must not outlive the generation it
+    /// fenced: once the lifecycle owner installs a fresh signaling generation
+    /// (Restore), a peer-initiated offer is legitimate again — otherwise an
+    /// endpoint that remains the answerer can never rebuild after a cleanup.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn restore_reopens_passive_inbound_admission_after_node_wide_cleanup() {
+        let manager = manager();
+        let peer = peer_id(704);
+        manager.ensure_controller(peer.clone()).await;
+        manager.close_all().await;
+
+        let mut offer = RTCSessionDescription::default();
+        offer.sdp_type = webrtc::peer_connection::RTCSdpType::Offer;
+        manager
+            .handle_incoming_offer(peer.clone(), offer.clone())
+            .await;
+        assert!(
+            manager.get_controller(&peer).await.is_none(),
+            "a node-wide cleanup must fence passive inbound until a new signaling generation is installed"
+        );
+
+        let processor = DefaultNetworkEventProcessor::new(Arc::new(
+            ForceReconnectFakeSignalingClient::new(false),
+        ))
+        .with_rtc_manager(Some(manager.clone()));
+        processor
+            .process_network_recovery_effect_for_action(NetworkRecoveryAction::Restore, 4301)
+            .await
+            .expect("restore completes");
+
+        manager.handle_incoming_offer(peer.clone(), offer).await;
+        assert!(
+            manager.get_controller(&peer).await.is_some(),
+            "a fresh signaling generation must admit a passive answerer again"
+        );
+        assert!(manager.close_peer(&peer).await);
     }
 }

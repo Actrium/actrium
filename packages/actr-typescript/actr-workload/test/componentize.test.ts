@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { runInNewContext } from 'node:vm';
 
 import {
   ASYNC_COMPONENTIZE_UPSTREAM_ISSUE,
@@ -27,6 +28,69 @@ describe('componentize shim', () => {
     const source = shimSource('/tmp/workload.js', '/tmp/runtime.js');
 
     expect(source).toContain('__dispatchDataChunk(chunk, sender, ctx)');
+  });
+
+  it('delivers every observation hook with the original event and context', async () => {
+    const signaling = [
+      'onSignalingConnecting',
+      'onSignalingConnected',
+      'onSignalingDisconnected',
+    ];
+    const events = [
+      'onWebsocketConnecting',
+      'onWebsocketConnected',
+      'onWebsocketDisconnected',
+      'onWebrtcConnecting',
+      'onWebrtcConnected',
+      'onWebrtcDisconnected',
+      'onWebrtcStateChanged',
+      'onCredentialRenewed',
+      'onCredentialExpiring',
+      'onMailboxBackpressure',
+    ];
+    const calls: { name: string; args: unknown[] }[] = [];
+    const userWorkload = {
+      dispatch: () => new Uint8Array(),
+      ...Object.fromEntries(
+        [...signaling, ...events].map((name) => [
+          name,
+          async (...args: unknown[]) => {
+            await Promise.resolve();
+            calls.push({ name, args });
+          },
+        ]),
+      ),
+    };
+    const source = shimSource('/tmp/workload.js', '/tmp/runtime.js')
+      .replace(/^\s*import .*;$/gm, '')
+      .replace('export const workload =', 'globalThis.workload =');
+    const ctx = { ctxToken: 7n };
+    const event = { revision: 9n };
+    const sandbox = {
+      userWorkload,
+      withInvocationCtx: async (actual: unknown, body: () => Promise<void>) => {
+        expect(actual).toBe(ctx);
+        await body();
+      },
+      workload: {} as Record<string, (...args: unknown[]) => Promise<void>>,
+    };
+    runInNewContext(source, sandbox);
+    for (const name of [...signaling, ...events]) {
+      const args = signaling.includes(name) ? [ctx] : [event, ctx];
+      await sandbox.workload[name](...args);
+      const call = calls.at(-1)!;
+      expect(call.name).toBe(name);
+      expect(call.args).toHaveLength(args.length);
+      args.forEach((arg, index) => expect(call.args[index]).toBe(arg));
+    }
+    expect(calls).toHaveLength(signaling.length + events.length);
+    // Observation hooks remain optional on user workloads.
+    sandbox.userWorkload = { dispatch: () => new Uint8Array() };
+    for (const name of [...signaling, ...events]) {
+      await sandbox.workload[name](
+        ...(signaling.includes(name) ? [ctx] : [event, ctx]),
+      );
+    }
   });
 
   it('explains the known ComponentizeJS async-func blocker', () => {
