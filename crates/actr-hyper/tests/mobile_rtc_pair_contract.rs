@@ -213,23 +213,46 @@ async fn p01_a_only_short_background_uses_production_feed_and_soft_recovers() {
         .wait_state(&pair.id(PairEndpoint::B), WAIT, |state| !state.sendable)
         .await
         .expect("the production hook must expose A as not sendable");
-    let blocked_send = tokio::time::timeout(
-        Duration::from_secs(2),
-        pair.rpc(PairEndpoint::A, PairEndpoint::B, "p01_blocked_send"),
-    )
-    .await
-    .expect("business admission while gated must be bounded");
-    assert!(
-        blocked_send.is_err(),
-        "mobile business must not admit a new send while the public state is not sendable"
-    );
-    assert_eq!(
-        pair.harness()
-            .peer(pair.serial(PairEndpoint::A))
-            .pending_count()
-            .await,
-        0
-    );
+    {
+        let blocked_send =
+            pair.rpc_with_timeout(PairEndpoint::A, PairEndpoint::B, "p01_blocked_send", 300);
+        tokio::pin!(blocked_send);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut blocked_send)
+                .await
+                .is_err(),
+            "a reliable call must wait while the backgrounded peer can recover"
+        );
+        assert_eq!(
+            pair.harness()
+                .peer(pair.serial(PairEndpoint::A))
+                .pending_count()
+                .await,
+            0,
+            "readiness waiting must not register an in-flight RPC"
+        );
+        let blocked_send = tokio::time::timeout(Duration::from_secs(2), &mut blocked_send)
+            .await
+            .expect("business admission while gated must be bounded");
+        assert!(
+            matches!(blocked_send, Err(ActrError::TimedOut)),
+            "an unsubmitted call must time out at its own deadline: {blocked_send:?}"
+        );
+        assert_eq!(
+            pair.harness()
+                .peer(pair.serial(PairEndpoint::B))
+                .request_count("p01_blocked_send"),
+            0,
+            "the backgrounded peer must not send the waiting request"
+        );
+        assert_eq!(
+            pair.harness()
+                .peer(pair.serial(PairEndpoint::A))
+                .pending_count()
+                .await,
+            0
+        );
+    }
     pair.foreground(PairEndpoint::A, Duration::from_secs(5))
         .await;
 

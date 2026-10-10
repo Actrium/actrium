@@ -457,7 +457,7 @@ async fn vnet_committed_offline_restores_once_and_recovers_bidirectionally() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn accepted_event_while_webrtc_not_ready_fails_fast_without_pending_leak() {
+async fn accepted_event_while_webrtc_not_ready_respects_deadline_without_pending_leak() {
     let mut harness = TestHarness::with_vnet().await;
     harness.add_peer(100).await;
     harness.add_peer(200).await;
@@ -469,19 +469,22 @@ async fn accepted_event_while_webrtc_not_ready_fails_fast_without_pending_leak()
         .handle_network_path_changed(snapshot(1, NetworkAvailability::Available, true))
         .await
         .expect("accepted event");
-    let request = harness.peer(100).spawn_request(200, "not-ready", 30_000);
-    let error = tokio::time::timeout(Duration::from_secs(2), request)
-        .await
-        .expect("fast failure")
-        .expect("request task")
-        .expect_err("initial connection is not ready");
+    let mut request = harness.peer(100).spawn_request(200, "not-ready", 300);
     assert!(
-        error
-            .to_string()
-            .to_ascii_lowercase()
-            .contains("connection")
+        tokio::time::timeout(Duration::from_millis(50), &mut request)
+            .await
+            .is_err(),
+        "initial connection readiness must be awaited"
     );
     assert_eq!(harness.peer(100).pending_count().await, 0);
+    let error = tokio::time::timeout(Duration::from_secs(2), request)
+        .await
+        .expect("the request deadline must bound readiness waiting")
+        .expect("request task")
+        .expect_err("initial connection cannot recover while signaling is paused");
+    assert!(matches!(error, ActrError::TimedOut), "{error}");
+    assert_eq!(harness.peer(100).pending_count().await, 0);
+    assert_eq!(harness.peer(200).request_count("not-ready"), 0);
     harness.server.resume_forwarding();
     stop_supervisor(shutdown, task).await;
     harness.shutdown().await;

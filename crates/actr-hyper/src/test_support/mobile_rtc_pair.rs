@@ -548,6 +548,16 @@ impl MobileRtcPairHarness {
         to: PairEndpoint,
         request_id: &str,
     ) -> actr_protocol::ActorResult<actr_framework::Bytes> {
+        self.rpc_with_timeout(from, to, request_id, 15_000).await
+    }
+
+    pub async fn rpc_with_timeout(
+        &self,
+        from: PairEndpoint,
+        to: PairEndpoint,
+        request_id: &str,
+        timeout_ms: u32,
+    ) -> actr_protocol::ActorResult<actr_framework::Bytes> {
         assert_ne!(from, to, "pair RPC requires distinct endpoints");
         self.harness.evidence.record(
             Some(self.id(from)),
@@ -566,7 +576,7 @@ impl MobileRtcPairHarness {
                     request_id: request_id.to_owned(),
                     route_key: "test.ping".to_string(),
                     payload: Some(bytes::Bytes::from_static(b"ping")),
-                    timeout_ms: 15_000,
+                    timeout_ms: i64::from(timeout_ms),
                     ..Default::default()
                 },
             )

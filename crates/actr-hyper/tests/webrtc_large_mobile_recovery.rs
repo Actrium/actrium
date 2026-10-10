@@ -146,8 +146,42 @@ async fn setup_mobile_to_server_with_serials(
 async fn reconnect_from_offerer(harness: &TestHarness, offerer_serial: u64, answerer_serial: u64) {
     tokio::time::sleep(Duration::from_secs(1)).await;
     let answerer = harness.peer(answerer_serial).id.clone();
+    let offerer = harness.peer(offerer_serial).id.clone();
+    let old_offer_generation = harness
+        .peer(offerer_serial)
+        .rtc
+        .generation(&answerer)
+        .await
+        .unwrap_or_default();
+    let old_answer_generation = harness
+        .peer(answerer_serial)
+        .rtc
+        .generation(&offerer)
+        .await
+        .unwrap_or_default();
     harness.peer(offerer_serial).rtc.close_peer(&answerer).await;
-    harness.peer(offerer_serial).rtc.connect(answerer).await;
+    harness
+        .peer(offerer_serial)
+        .rtc
+        .connect(answerer.clone())
+        .await;
+    // connect() only enqueues negotiation. The Answerer can still expose its
+    // old sendable session until the replacement Offer arrives, so fence both
+    // endpoints on a newer physical generation before the fresh business call.
+    let (offer_state, answer_state) = tokio::join!(
+        harness
+            .peer(offerer_serial)
+            .rtc
+            .wait_state(&answerer, Duration::from_secs(30), |state| state.sendable
+                && state.pc_generation > old_offer_generation,),
+        harness
+            .peer(answerer_serial)
+            .rtc
+            .wait_state(&offerer, Duration::from_secs(30), |state| state.sendable
+                && state.pc_generation > old_answer_generation,),
+    );
+    offer_state.expect("Offerer replacement must be sendable");
+    answer_state.expect("Answerer replacement must be sendable");
 }
 
 fn spawn_large_request(
@@ -927,16 +961,9 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
         }
         assert_pending_empty(&harness, case.mobile_serial, &call_id).await;
 
-        // RTC deliberately makes business sends fail fast while a peer is
-        // not sendable. The legacy gate waited for dial-on-demand internally,
-        // so adapt that boundary through the new controller API before keeping
-        // the original single post-storm business retry assertion.
+        // Await both replacement sessions before checking the single fresh
+        // post-storm request. No uncertain in-flight operation is replayed.
         reconnect_from_offerer(&harness, offerer_serial, answerer_serial).await;
-        harness
-            .peer(case.mobile_serial)
-            .rtc
-            .wait_sendable(&target, Duration::from_secs(30))
-            .await;
 
         let (retry_data, retry_hash) = generate_test_data(LARGE_PAYLOAD_SIZE);
         // Preserve the legacy post-storm contract: one fresh request must
