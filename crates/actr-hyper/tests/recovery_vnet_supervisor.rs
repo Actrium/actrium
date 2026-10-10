@@ -236,6 +236,7 @@ async fn passive_observation_overflow(chunk_count: usize, payload: bytes::Bytes)
             payload: payload.clone(),
             metadata: Vec::new(),
             timestamp_ms: Some(sequence as i64),
+            end_of_stream: None,
         };
         let operation_id = format!("{STREAM_ID}#{sequence}");
         harness
@@ -315,6 +316,7 @@ async fn passive_observation_overflow(chunk_count: usize, payload: bytes::Bytes)
         payload,
         metadata: Vec::new(),
         timestamp_ms: Some(0),
+        end_of_stream: None,
     };
     harness
         .peer(100)
