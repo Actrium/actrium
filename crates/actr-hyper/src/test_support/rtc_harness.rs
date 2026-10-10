@@ -454,9 +454,8 @@ impl TestRtcControl {
         }
     }
 
-    /// Close physical resources without removing their logical Controller,
-    /// then deliver its terminal driver fact. This models S4 explicitly;
-    /// it does not pretend the test merely changed a network interface.
+    /// Close the physical PeerConnection and publish its generation's terminal
+    /// fact. The logical Controller and effect runner stay alive.
     #[cfg(test)]
     pub(crate) async fn retire_physical_session(&self, peer: &ActrId) -> u64 {
         let handle = self
@@ -465,10 +464,10 @@ impl TestRtcControl {
             .await
             .expect("fixture controller");
         let generation = handle.snapshot().pc_generation;
-        handle.force_close_sessions().await;
-        handle.inject_peer_connection_state_for_test(
-            webrtc::peer_connection::RTCPeerConnectionState::Closed,
-        );
+        handle
+            .close_physical_session_for_test(generation)
+            .await
+            .expect("close the physical fixture session");
         generation
     }
 

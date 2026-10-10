@@ -323,6 +323,10 @@ pub struct PeerGate {
     /// Live global send authority derived by the recovery supervisor.
     send_projection_rx: watch::Receiver<SendProjection>,
 
+    /// Keep the constant Normal projection alive when no supervisor is supplied.
+    /// A closed watch channel would otherwise terminate reliable route waits.
+    _normal_projection_tx: Option<watch::Sender<SendProjection>>,
+
     /// Bounded readiness wait accounting.  Waiting never owns an unbounded
     /// payload queue; the guard is released as soon as the wait ends.
     waiter_budget: Arc<WaiterBudget>,
@@ -353,12 +357,19 @@ impl PeerGate {
         Self::spawn_terminal_transport_cleanup(&rtc_manager, &transport_manager, &pending_requests);
         Self::spawn_pending_invalidated_generation_cleanup(&rtc_manager, &pending_requests);
         Self::spawn_pending_sendability_cleanup(&rtc_manager, &pending_requests);
+        let (send_projection_rx, normal_projection_tx) = match send_projection_rx {
+            Some(rx) => (rx, None),
+            None => {
+                let (tx, rx) = watch::channel(SendProjection::Normal);
+                (rx, Some(tx))
+            }
+        };
         Self {
             transport_manager,
             pending_requests,
             rtc_manager,
-            send_projection_rx: send_projection_rx
-                .unwrap_or_else(Self::normal_send_projection_receiver),
+            send_projection_rx,
+            _normal_projection_tx: normal_projection_tx,
             waiter_budget: Arc::new(WaiterBudget::default()),
             hook_callback: std::sync::OnceLock::new(),
         }
@@ -788,11 +799,6 @@ impl PeerGate {
                 }
             }
         });
-    }
-
-    fn normal_send_projection_receiver() -> watch::Receiver<SendProjection> {
-        let (_tx, rx) = watch::channel(SendProjection::Normal);
-        rx
     }
 
     fn send_projection_not_ready_error() -> ActrError {
@@ -2931,15 +2937,25 @@ mod tests {
             Arc::new(RpcCorrelation::new()),
             None,
         );
-        let dest = PeerGate::actr_id_to_dest(&target);
         let deadline = RpcDeadline::from_duration(Duration::from_millis(100));
 
+        // Exercise the caller-owned deadline through the real RPC entry. The
+        // private readiness helper intentionally relies on this outer budget.
         let result = gate
-            .wait_until_route_ready(&target, &dest, PayloadType::RpcReliable, deadline, 0)
+            .send_request_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                RpcEnvelope {
+                    request_id: "default-projection-wait".to_owned(),
+                    ..Default::default()
+                },
+                deadline,
+            )
             .await;
+        assert_eq!(gate.pending_count().await, 0);
         assert!(
-            result.is_err(),
-            "the test waiter must remain blocked until its caller deadline"
+            matches!(result, Err(ActrError::TimedOut)),
+            "the default projection must keep waiting until the caller deadline: {result:?}"
         );
         assert_eq!(
             handle.business_recovery_hint_attempts(),
@@ -2948,6 +2964,28 @@ mod tests {
         );
 
         manager.close_all().await;
+    }
+
+    #[tokio::test]
+    async fn closed_supervisor_projection_rejects_a_waiting_request_before_send() {
+        let (gate, _transport, projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::Blocked);
+        drop(projection_tx);
+        let result = gate
+            .send_request_with_type(
+                &test_actor_id(2),
+                PayloadType::RpcReliable,
+                RpcEnvelope {
+                    request_id: "closed-supervisor".to_owned(),
+                    timeout_ms: 1_000,
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(matches!(result, Err(ActrError::ConnectionNotReady(_))));
+        assert_eq!(gate.pending_count().await, 0);
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

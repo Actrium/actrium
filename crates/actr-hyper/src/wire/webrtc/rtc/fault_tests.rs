@@ -480,6 +480,90 @@ async fn directed_signaling_fault_can_duplicate_restart_request_ack() {
 }
 
 #[tokio::test]
+async fn held_signaling_waits_for_explicit_release() {
+    let hub = InMemorySignalingHub::new();
+    let (a, b) = (test_actor_id(43), test_actor_id(44));
+    let faults = DirectedSignalingFaultRegistry::default();
+    faults.set_rule(
+        a.clone(),
+        b.clone(),
+        SignalingMessageClass::RoleAssignment,
+        SignalingFaultRule::Hold,
+    );
+    let transport_a = DirectedSignalingTransport::new(
+        Arc::new(hub.connect(a.clone())),
+        a.clone(),
+        faults.clone(),
+    );
+    let transport_b = hub.connect(b.clone());
+    transport_a
+        .send(
+            b.clone(),
+            SignalingMessage::RoleAssignment { is_offerer: true },
+        )
+        .await
+        .unwrap();
+    faults
+        .wait_for_hits_after(&a, &b, SignalingMessageClass::RoleAssignment, 0, WAIT)
+        .await
+        .expect("held hit");
+    tokio::time::timeout(Duration::from_millis(50), transport_b.recv())
+        .await
+        .expect_err("held message must not reach the receiver");
+    faults.release_held(&a, &b, SignalingMessageClass::RoleAssignment);
+    assert!(matches!(
+        tokio::time::timeout(WAIT, transport_b.recv())
+            .await
+            .unwrap(),
+        Some((_, SignalingMessage::RoleAssignment { is_offerer: true }))
+    ));
+    assert!(faults.wait_deferred_idle(WAIT).await);
+    transport_a
+        .send(b, SignalingMessage::RoleAssignment { is_offerer: false })
+        .await
+        .unwrap();
+    assert!(matches!(
+        tokio::time::timeout(WAIT, transport_b.recv())
+            .await
+            .unwrap(),
+        Some((_, SignalingMessage::RoleAssignment { is_offerer: false }))
+    ));
+}
+
+#[tokio::test]
+async fn healing_cancels_held_signaling_before_release() {
+    let hub = InMemorySignalingHub::new();
+    let (a, b) = (test_actor_id(45), test_actor_id(46));
+    let faults = DirectedSignalingFaultRegistry::default();
+    faults.set_rule(
+        a.clone(),
+        b.clone(),
+        SignalingMessageClass::RoleAssignment,
+        SignalingFaultRule::Hold,
+    );
+    let transport_a = DirectedSignalingTransport::new(
+        Arc::new(hub.connect(a.clone())),
+        a.clone(),
+        faults.clone(),
+    );
+    let transport_b = hub.connect(b.clone());
+    transport_a
+        .send(
+            b.clone(),
+            SignalingMessage::RoleAssignment { is_offerer: true },
+        )
+        .await
+        .unwrap();
+    // Neither deferred task has to run before cancellation and release race.
+    faults.heal_pair(&a, &b);
+    faults.release_held(&a, &b, SignalingMessageClass::RoleAssignment);
+    assert!(faults.wait_deferred_idle(WAIT).await);
+    tokio::time::timeout(Duration::from_millis(50), transport_b.recv())
+        .await
+        .expect_err("healing must discard held messages");
+}
+
+#[tokio::test]
 async fn directed_signaling_reorder_allows_the_next_message_to_overtake() {
     let hub = InMemorySignalingHub::new();
     let (a, b) = (test_actor_id(37), test_actor_id(38));

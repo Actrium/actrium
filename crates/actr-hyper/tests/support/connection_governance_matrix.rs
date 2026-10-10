@@ -295,17 +295,50 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
     let b = pair.id(PairEndpoint::B);
     let initial = pair.wait_pair_ready(READY_WAIT).await;
     assert_eq!(initial.role_a, TestRtcRole::Answerer);
-    // Prevent a restart offer from overtaking observation of the empty slot.
+    // Generate a real, correlated restart while both physical sessions exist.
+    // Hold that message at the external transport boundary until A is empty;
+    // driver-close callbacks may instead make B send an ordinary Offer.
+    pair.set_signaling_fault(
+        LinkDirection::BToA,
+        SignalingMessageClass::Offer,
+        SignalingFaultRule::Drop,
+    );
     pair.set_signaling_fault(
         LinkDirection::BToA,
         SignalingMessageClass::IceRestartOffer,
-        SignalingFaultRule::Drop,
+        SignalingFaultRule::Hold,
     );
     pair.harness()
         .peer(pair.serial(PairEndpoint::A))
         .rtc
+        .local_address_changed();
+    pair.harness()
+        .signaling_faults
+        .wait_for_hits_after(
+            &b,
+            &a,
+            SignalingMessageClass::IceRestartOffer,
+            0,
+            READY_WAIT,
+        )
+        .await
+        .expect("hold a real restart offer before closing A");
+    let held_exchange = pair
+        .signaling_trace()
+        .iter()
+        .find(|event| {
+            event.class == SignalingMessageClass::IceRestartOffer
+                && event.rule == SignalingFaultRule::Hold
+        })
+        .and_then(|event| event.exchange_id.clone())
+        .expect("held restart has an exchange identity");
+    let old_generation = pair
+        .harness()
+        .peer(pair.serial(PairEndpoint::A))
+        .rtc
         .retire_physical_session(&b)
         .await;
+    assert_eq!(old_generation, initial.a_to_b.pc_generation);
     pair.harness()
         .peer(pair.serial(PairEndpoint::A))
         .rtc
@@ -321,26 +354,10 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
         1,
         "S4 retains Controller; this is not the unknown-Controller case"
     );
-    // Count only an offer emitted after removing the drop rule. An earlier
-    // observed-but-dropped offer is not evidence that the router received it.
-    let dropped_offers =
-        pair.harness()
-            .signaling_faults
-            .hits(&b, &a, SignalingMessageClass::IceRestartOffer);
-    pair.heal_signaling_faults();
     pair.harness()
         .signaling_faults
-        .wait_for_hits_after(
-            &b,
-            &a,
-            SignalingMessageClass::IceRestartOffer,
-            dropped_offers,
-            RECOVERY_WAIT,
-        )
-        .await
-        .expect("restart must reach the empty-session Answerer");
-    let rejection = pair
-        .harness()
+        .release_held(&b, &a, SignalingMessageClass::IceRestartOffer);
+    pair.harness()
         .signaling_faults
         .wait_for_hits_after(
             &a,
@@ -349,45 +366,62 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
             0,
             Duration::from_secs(15),
         )
-        .await;
+        .await
+        .expect("empty-session Answerer must reject the released restart");
     let a_state = pair
         .harness()
         .peer(pair.serial(PairEndpoint::A))
         .rtc
         .state(&b)
         .await
-        .expect("A controller state after the rejection");
+        .expect("A controller after rejection");
     assert_eq!(
         a_state.pc_generation, 0,
-        "the rejection must not build a replacement session on the answerer"
+        "rejecting the restart must not build a replacement session"
     );
     let evidence = pair.signaling_trace();
-    pair.shutdown().await;
-    assert!(
-        rejection.is_some(),
-        "no-active Session must explicitly reject ICE restart; trace={evidence:?}"
-    );
     let rejected = evidence
         .iter()
         .find(|event| event.class == SignalingMessageClass::IceRestartRejected)
-        .expect("rejection event in the trace");
-    let delivered_exchanges: Vec<&str> = evidence
-        .iter()
-        .filter(|event| {
-            event.class == SignalingMessageClass::IceRestartOffer
-                && event.rule == SignalingFaultRule::Deliver
-        })
-        .filter_map(|event| event.exchange_id.as_deref())
-        .collect();
-    assert!(
-        delivered_exchanges.contains(&rejected.exchange_id.as_deref().unwrap_or("")),
-        "the rejection must answer a delivered restart exchange; trace={evidence:?}"
+        .expect("rejection event in trace");
+    assert_eq!(
+        rejected.exchange_id.as_deref(),
+        Some(held_exchange.as_str()),
+        "rejection must answer the released exchange; trace={evidence:?}"
     );
     assert_eq!(
         rejected.reject_reason,
         Some(actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32),
-        "the rejection must carry the NoActiveSession reason; trace={evidence:?}"
+        "rejection must carry NoActiveSession; trace={evidence:?}"
     );
+    // Prove physical retirement leaves the effect runner usable. Recovery
+    // owns the new connection; the fixture never calls connect/close_peer.
+    pair.heal_signaling_faults();
+    let recovered = pair.wait_pair_ready(RECOVERY_WAIT).await;
+    assert!(recovered.a_to_b.pc_generation > old_generation);
+    assert_eq!(
+        pair.rpc(
+            PairEndpoint::A,
+            PairEndpoint::B,
+            "after-empty-session-a-to-b"
+        )
+        .await
+        .unwrap()
+        .as_ref(),
+        b"pong"
+    );
+    assert_eq!(
+        pair.rpc(
+            PairEndpoint::B,
+            PairEndpoint::A,
+            "after-empty-session-b-to-a"
+        )
+        .await
+        .unwrap()
+        .as_ref(),
+        b"pong"
+    );
+    pair.shutdown().await;
 }
 
 fn live_lanes(

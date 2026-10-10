@@ -408,6 +408,12 @@ pub(crate) trait RtcPeerEffectPort: Send + Sync {
         sender: Arc<dyn ActrRtpSender>,
     ) -> Option<Result<(), webrtc::error::Error>>;
 
+    /// Test-only physical driver failure; keep the logical runner accepting effects.
+    #[cfg(all(test, feature = "test-utils"))]
+    async fn close_physical_session_for_test(&self, _generation: u64) -> Result<(), String> {
+        Err("physical session close is unsupported by this effect port".to_owned())
+    }
+
     async fn close_all_sessions(&self);
 }
 
@@ -1217,6 +1223,20 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
         sender: Arc<dyn ActrRtpSender>,
     ) -> Option<Result<(), webrtc::error::Error>> {
         WebRtcEffectRunner::remove_track(self, generation, sender).await
+    }
+
+    #[cfg(all(test, feature = "test-utils"))]
+    async fn close_physical_session_for_test(&self, generation: u64) -> Result<(), String> {
+        let ops = self
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .get(&generation)
+            .map(|session| session.ops().clone())
+            .ok_or_else(|| format!("physical session {generation} is missing"))?;
+        // Close only this PC; ordinary Controller retirement still owns the
+        // Session's lane/resource cleanup and the runner remains open.
+        ops.close().await.map_err(|error| error.to_string())
     }
 
     async fn close_all_sessions(&self) {

@@ -261,6 +261,26 @@ impl RtcPeerControllerHandle {
         self.effect_port.close_all_sessions().await;
     }
 
+    #[cfg(all(test, feature = "test-utils"))]
+    pub(crate) async fn close_physical_session_for_test(
+        &self,
+        generation: u64,
+    ) -> Result<(), String> {
+        self.effect_port
+            .close_physical_session_for_test(generation)
+            .await?;
+        // Explicit PC close can stop the driver before it delivers Closed.
+        // Publish its terminal fact with the captured physical generation,
+        // never a later snapshot's generation (which may already be zero).
+        self.event_mailbox.try_publish(
+            crate::wire::webrtc::rtc::events::PeerDriverEvent::PeerConnectionStateChanged {
+                generation,
+                state: webrtc::peer_connection::RTCPeerConnectionState::Closed,
+            },
+        );
+        Ok(())
+    }
+
     /// Reliable ordered send on a lane (RFC: "Reliable RPC SHOULD use
     /// `send().await`"). Waits for send-buffer capacity (bounded by the
     /// channel's configured send-buffer limit). Preflights `Snapshot.sendable`,
