@@ -19,10 +19,24 @@ private final class MockStreamBridge: DataChunkStreamBridging, @unchecked Sendab
     private let lock = NSLock()
     private var steps: [Step]
     private var pending: CheckedContinuation<ActrBindings.DataChunkEventBridge?, Never>?
+    private var closeWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var closeCalls = 0
 
     init(steps: [Step]) {
         self.steps = steps
+    }
+
+    /// Resolves once `close()` has been called at least once.
+    func waitForClose() async {
+        await withCheckedContinuation { continuation in
+            lock.withLock {
+                if closeCalls > 0 {
+                    continuation.resume()
+                } else {
+                    closeWaiters.append(continuation)
+                }
+            }
+        }
     }
 
     func next() async throws -> ActrBindings.DataChunkEventBridge? {
@@ -70,6 +84,10 @@ private final class MockStreamBridge: DataChunkStreamBridging, @unchecked Sendab
                 self.pending = nil
                 pending.resume(returning: nil)
             }
+            for waiter in closeWaiters {
+                waiter.resume()
+            }
+            closeWaiters.removeAll()
         }
     }
 }
@@ -135,8 +153,19 @@ struct DataChunkSequenceTests {
 
         _ = try? await read.value
         // The cancellation handler closes the bridge from an independent
-        // task; give it a moment to run.
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(bridge.closeCalls >= 1)
+        // task; await the signal with a deadline instead of sleeping blind.
+        try await withThrowingTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                await bridge.waitForClose()
+                return true
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(5))
+                return false
+            }
+            let observed = try await group.next() ?? false
+            group.cancelAll()
+            #expect(observed, "bridge.close() must run after the read is cancelled")
+        }
     }
 }

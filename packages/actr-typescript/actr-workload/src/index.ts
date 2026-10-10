@@ -752,13 +752,17 @@ export class DataChunkSink {
   }
 
   async close(): Promise<void> {
+    // `closed` is set up front: a failed close (e.g. the marker send
+    // rejected) may be retried via close(), but sends are not reopened —
+    // the sink never accepts data after close was requested.
     this.closed = true;
     if (!this.closePromise) {
       // Resolve the token at call time, while the caller's invocation is
       // certainly live; the marker goes out at the end of the tail chain.
       // A retired token is still presented — the host routes this
-      // actor-global send via the instance's standing ABI. Skipped only
-      // when the sink carries no ctx at all (nothing to route with).
+      // actor-global send via the instance's standing ABI. A sink carrying
+      // no ctx with nothing live fails closed, matching send(): the peer
+      // must not be left hanging on a graceful end that never comes.
       const token = resolveStreamSendToken(this.ctx);
       this.closePromise = (async () => {
         await this.tail;
@@ -768,7 +772,9 @@ export class DataChunkSink {
         // The marker rides the same lane so it travels behind every data
         // chunk in FIFO order.
         if (token === undefined) {
-          return;
+          throw new Error(
+            'ACTR host import requires an InvocationCtx; the sink carries none and no invocation is live — the end-of-stream marker was not sent',
+          );
         }
         const marker: DataChunk = {
           streamId: this.streamId,

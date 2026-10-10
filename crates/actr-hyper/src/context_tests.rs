@@ -64,6 +64,7 @@ async fn select_gate_peer_errors_when_outproc_unset() {
         None, // outproc_gate unset
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         Arc::new(WebSocketSignalingClient::new(SignalingConfig {
             server_url: url::Url::parse("ws://127.0.0.1:9").unwrap(),
             connection_timeout: 1,
@@ -327,6 +328,7 @@ fn builder() -> BootstrapContextBuilder {
         Some(inproc),
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         {
             use crate::wire::webrtc::{
                 InboundQueueConfig, ReconnectConfig, SignalingConfig, WebSocketSignalingClient,
@@ -411,6 +413,7 @@ fn ctx_with_lock(lock: Option<LockFile>) -> RuntimeContext {
         None,
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         Arc::new(WebSocketSignalingClient::new(SignalingConfig {
             server_url: url::Url::parse("ws://127.0.0.1:9").unwrap(),
             connection_timeout: 1,

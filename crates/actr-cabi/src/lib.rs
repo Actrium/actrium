@@ -36,7 +36,8 @@ use crate::handle::{
     drop_actr_ref, drop_handle, take_attached, take_init, take_link_inputs, take_registered,
 };
 pub use crate::host_sink::{
-    ACTR_CHUNK_FLAG_HAS_TIMESTAMP, ReverseRpcCallback, StreamMetadataEntry, StreamSinkCallback,
+    ACTR_CHUNK_FLAG_END_OF_STREAM, ACTR_CHUNK_FLAG_HAS_TIMESTAMP, ReverseRpcCallback,
+    StreamMetadataEntry, StreamSinkCallback,
     ask_host, forward_chunk_to_host, pending_ask_count,
 };
 use crate::observer::{CabiObserver, ObserverCallbacks};

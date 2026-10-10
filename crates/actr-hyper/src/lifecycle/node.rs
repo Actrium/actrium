@@ -868,6 +868,10 @@ pub(crate) struct Inner {
     /// (register_stream / send_data_chunk).
     pub(crate) data_chunk_registry: Arc<DataChunkRegistry>,
 
+    /// Guest stream forwarder tasks keyed by stream_id, shared by every
+    /// `RuntimeContext` this node materializes (see `StreamForwarders`).
+    pub(crate) stream_forwarders: StreamForwarders,
+
     /// MediaTrack callback registry shared between WebRTC media tracks and
     /// `RuntimeContext` (register_media_track / send_media_sample).
     pub(crate) media_frame_registry: Arc<MediaFrameRegistry>,
@@ -2915,6 +2919,7 @@ impl Inner {
             outproc_gate: None, // Populated in start() once WebRTC / PeerGate is ready.
             _data_chunk_registry_cleanup: DataChunkRegistryCleanupGuard::new(&data_chunk_registry),
             data_chunk_registry,
+            stream_forwarders: Default::default(),
             media_frame_registry,
             signaling_client,
             actor_id: None,
@@ -2972,6 +2977,7 @@ impl Inner {
             self.outproc_gate.clone(),
             self.data_chunk_registry.clone(),
             self.media_frame_registry.clone(),
+            self.stream_forwarders.clone(),
             self.signaling_client.clone(),
             self.actr_lock.clone(),
             self.alias_map.clone(),
@@ -3003,6 +3009,7 @@ impl Inner {
             self.outproc_gate.clone(),
             self.data_chunk_registry.clone(),
             self.media_frame_registry.clone(),
+            self.stream_forwarders.clone(),
             self.signaling_client.clone(),
             credential.clone(),
             self.actr_lock.clone(),

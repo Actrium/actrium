@@ -388,6 +388,7 @@ pub fn runtime_context_with_host_transport(
         outproc_gate,
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         signaling_client,
         AIdCredential {
             key_id: 1,

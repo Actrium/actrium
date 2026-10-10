@@ -729,6 +729,44 @@ describe('@actrium/actr-workload', () => {
     expect(markers[0].chunk.sequence).toBe(10n);
   });
 
+  it('send stays rejected after a failed close; close itself stays retryable', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(39n);
+    const original = host.sendDataChunk;
+    let rejectOnce = true;
+    vi.spyOn(host, 'sendDataChunk').mockImplementation(
+      async (token, target, chunk, payloadType) => {
+        if (rejectOnce && chunk.endOfStream === true) {
+          rejectOnce = false;
+          throw new Error('simulated marker failure');
+        }
+        return original(token, target, chunk, payloadType);
+      },
+    );
+
+    await runtime.withInvocationCtx(ctx, async () => {
+      const sink = await runtime.dataChunkSink(
+        'host',
+        'stream-1',
+        runtime.PayloadType.StreamReliable,
+        ctx,
+      );
+      await sink.send(testChunk({ sequence: 1n }));
+      await expect(sink.close()).rejects.toThrow('simulated marker failure');
+      // A failed close must not reopen the sink for sends.
+      await expect(sink.send(testChunk({ sequence: 2n }))).rejects.toThrow(
+        'DataChunkSink is closed',
+      );
+      // close() itself remains retryable and eventually confirms.
+      await sink.close();
+    });
+
+    const markers = host.hostCalls.sendDataChunk.filter(
+      (call) => call.chunk.endOfStream === true,
+    );
+    expect(markers).toHaveLength(1);
+  });
+
   it('stream ends on an in-band marker without yielding it', async () => {
     const { runtime } = await loadRuntime();
     const ctx = testInvocationCtx(33n);

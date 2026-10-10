@@ -667,6 +667,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subscription_channel_bound_is_capacity_plus_one() {
+        // Pin the documented effective bound: a futures mpsc channel holds
+        // `capacity` items plus one slot per live sender. With the single
+        // sender clone the backends keep alive, capacity 1 fits exactly 2 —
+        // a regression to unbounded storage would let the third through.
+        let (mut tx, rx) = mpsc::channel::<ActorResult<DataChunkEvent>>(1);
+        let mut stream = DataChunkStream::from_parts(rx, StreamCloser::new(Box::new(|| {})));
+        let sender = ActrId {
+            serial_number: 1,
+            ..Default::default()
+        };
+        let event = |sequence: u64| {
+            Ok(DataChunkEvent {
+                chunk: test_chunk("s", sequence),
+                sender: sender.clone(),
+            })
+        };
+        tx.try_send(event(1)).unwrap();
+        tx.try_send(event(2)).unwrap();
+        assert!(tx.try_send(event(3)).is_err(), "third item must not fit");
+        // Draining one frees exactly one slot.
+        assert!(stream.next().await.is_some());
+        tx.try_send(event(3)).unwrap();
+    }
+
+    #[tokio::test]
     async fn stream_yields_items_then_terminates() {
         let (mut tx, rx) = mpsc::channel(4);
         let closer = StreamCloser::new(Box::new(|| {}));

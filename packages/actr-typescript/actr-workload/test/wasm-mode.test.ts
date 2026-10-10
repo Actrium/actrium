@@ -89,7 +89,7 @@ describe('wasm guest mode (no AsyncLocalStorage)', () => {
     expect(host.hostCalls.ctxTokens).toEqual([77n]);
   });
 
-  it('sink.send with no ctx at all fails closed when nothing is live', async () => {
+  it('sink with no ctx at all fails closed on send and close when nothing is live', async () => {
     const { runtime } = await loadWasmRuntime();
     const sink = await runtime.dataChunkSink(
       'host',
@@ -98,6 +98,9 @@ describe('wasm guest mode (no AsyncLocalStorage)', () => {
     );
 
     await expect(sink.send(testChunk(1n))).rejects.toThrow('InvocationCtx');
+    // close() fails closed the same way: silently skipping the marker would
+    // leave the peer hanging on a graceful end that never comes.
+    await expect(sink.close()).rejects.toThrow('InvocationCtx');
   });
 
   it('a detached consumer resumed by a later delivery sends through the delivery token', async () => {

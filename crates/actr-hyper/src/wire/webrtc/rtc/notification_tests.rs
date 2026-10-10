@@ -460,6 +460,7 @@ mod projection {
             None,
             Arc::new(DataChunkRegistry::new()),
             Arc::new(MediaFrameRegistry::new()),
+            Default::default(),
             signaling_client,
             AIdCredential {
                 key_id: 1,

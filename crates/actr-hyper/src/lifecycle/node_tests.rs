@@ -479,6 +479,7 @@ async fn actorless_harness() -> (
         None,
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         Arc::new(WebSocketSignalingClient::new(SignalingConfig {
             server_url: url::Url::parse("ws://127.0.0.1:9").unwrap(),
             connection_timeout: 1,
@@ -713,6 +714,91 @@ async fn forwarder_table_is_shared_across_lifecycle_abi_instances() {
     assert!(
         matches!(reregister, HostOperationResult::Done),
         "re-register after cross-RPC unregister must succeed: {reregister:?}"
+    );
+}
+
+/// Build a request context on the shared per-node stream state — the shape
+/// of the production per-RPC dispatch path (`Inner::make_runtime_context`).
+fn context_sharing_stream_state(
+    data_chunk_registry: Arc<crate::inbound::DataChunkRegistry>,
+    stream_forwarders: StreamForwarders,
+) -> crate::context::RuntimeContext {
+    use crate::inbound::MediaFrameRegistry;
+    use crate::outbound::{Gate, HostGate};
+    use crate::wire::webrtc::{
+        InboundQueueConfig, ReconnectConfig, SignalingConfig, WebSocketSignalingClient,
+    };
+
+    let host = Arc::new(HostTransport::new());
+    let inproc = Gate::Host(Arc::new(HostGate::new(host)));
+    crate::context::RuntimeContext::new(
+        ActrId::default(),
+        None,
+        "req".into(),
+        inproc,
+        None,
+        data_chunk_registry,
+        Arc::new(MediaFrameRegistry::new()),
+        stream_forwarders,
+        Arc::new(WebSocketSignalingClient::new(SignalingConfig {
+            server_url: url::Url::parse("ws://127.0.0.1:9").unwrap(),
+            connection_timeout: 1,
+            heartbeat_interval: 30,
+            reconnect_config: ReconnectConfig::default(),
+            auth_config: None,
+            webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
+        })) as Arc<dyn SignalingClient>,
+        AIdCredential::default(),
+        None,
+        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        None,
+        0,
+    )
+}
+
+/// Two separately built request contexts of one node share the forwarder
+/// table the node injects: an unregister landing on a later RPC (fresh
+/// RuntimeContext) must still retire the forwarder and free the registry
+/// subscription for re-registration.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forwarder_table_is_shared_across_request_contexts() {
+    let data_chunk_registry = Arc::new(crate::inbound::DataChunkRegistry::new());
+    let stream_forwarders: StreamForwarders = Default::default();
+    let first_ctx =
+        context_sharing_stream_state(data_chunk_registry.clone(), stream_forwarders.clone());
+    let second_ctx = context_sharing_stream_state(data_chunk_registry, stream_forwarders);
+    let wl = Workload::Linked(Arc::new(DummyLinkedHandle) as Arc<dyn LinkedWorkloadHandle>);
+    let runner = Arc::new(crate::executor::spawn_runner(wl));
+
+    let first_rpc_abi = lifecycle_host_abi(first_ctx, runner.clone());
+    let second_rpc_abi = lifecycle_host_abi(second_ctx, runner);
+
+    let register = first_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
+        stream_id: "cross-ctx-stream".into(),
+    }))
+    .await;
+    assert!(
+        matches!(register, HostOperationResult::Done),
+        "register must succeed: {register:?}"
+    );
+
+    let unregister = second_rpc_abi(HostOperation::UnregisterStream(HostUnregisterStreamV1 {
+        stream_id: "cross-ctx-stream".into(),
+    }))
+    .await;
+    assert!(
+        matches!(unregister, HostOperationResult::Done),
+        "unregister from a later context must succeed: {unregister:?}"
+    );
+
+    let reregister = second_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
+        stream_id: "cross-ctx-stream".into(),
+    }))
+    .await;
+    assert!(
+        matches!(reregister, HostOperationResult::Done),
+        "re-register after cross-context unregister must succeed: {reregister:?}"
     );
 }
 
