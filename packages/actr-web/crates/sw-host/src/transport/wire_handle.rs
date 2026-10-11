@@ -29,6 +29,7 @@ pub struct WebRtcConnection {
 
     /// DataLane cache keyed by `PayloadType` to avoid rebuilding lanes.
     lane_cache: Arc<DashMap<PayloadType, DataLane>>,
+    relayed: Arc<Mutex<Option<bool>>>,
 }
 
 impl WebRtcConnection {
@@ -39,6 +40,7 @@ impl WebRtcConnection {
             datachannel_port: None,
             connected: Arc::new(parking_lot::Mutex::new(false)),
             lane_cache: Arc::new(DashMap::new()),
+            relayed: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -77,6 +79,9 @@ impl WebRtcConnection {
     ///
     /// The caching strategy matches `WebSocketConnection::get_lane`.
     pub async fn get_lane(&self, payload_type: PayloadType) -> WebResult<DataLane> {
+        if !self.is_connected() {
+            return Err(WebError::Transport("WebRTC connection is not ready".into()));
+        }
         // 1. Check the cache.
         if let Some(lane) = self.lane_cache.get(&payload_type) {
             log::trace!(
@@ -136,6 +141,18 @@ impl WebRtcConnection {
     pub fn peer_id(&self) -> &str {
         &self.peer_id
     }
+
+    pub fn set_network_path(&self, relayed: Option<bool>) {
+        *self.relayed.lock() = relayed;
+    }
+
+    fn priority(&self) -> u8 {
+        if *self.relayed.lock() == Some(false) {
+            2
+        } else {
+            0
+        }
+    }
 }
 
 impl std::fmt::Debug for WebRtcConnection {
@@ -160,14 +177,61 @@ pub enum WireHandle {
 
     /// WebRTC connection handle.
     WebRTC(WebRtcConnection),
+
+    /// One worker-local peer session on the shared outbound WSS.
+    Relay(RelayConnection),
+}
+
+#[derive(Clone)]
+pub struct RelayConnection {
+    send: Arc<js_sys::Function>,
+    connected: Arc<Mutex<bool>>,
+}
+impl std::fmt::Debug for RelayConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RelayConnection")
+            .field("connected", &*self.connected.lock())
+            .finish()
+    }
+}
+impl RelayConnection {
+    pub fn new(send: js_sys::Function) -> Self {
+        Self {
+            send: Arc::new(send),
+            connected: Arc::new(Mutex::new(true)),
+        }
+    }
+    async fn get_lane(&self, payload_type: PayloadType) -> WebResult<DataLane> {
+        if payload_type == PayloadType::MediaRtp {
+            return Err(WebError::Transport("Native media requires WebRTC".into()));
+        }
+        Ok(DataLane::Relay {
+            send: self.send.clone(),
+            connected: self.connected.clone(),
+            payload_type,
+        })
+    }
 }
 
 impl WireHandle {
+    pub(crate) fn same_connection(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Relay(left), Self::Relay(right)) => {
+                Arc::ptr_eq(&left.connected, &right.connected)
+            }
+            (Self::WebRTC(left), Self::WebRTC(right)) => {
+                Arc::ptr_eq(&left.connected, &right.connected)
+            }
+            (Self::WebSocket(left), Self::WebSocket(right)) => left.same_connection(right),
+            _ => false,
+        }
+    }
     /// Get the connection type.
     #[inline]
     pub fn conn_type(&self) -> ConnType {
         match self {
             WireHandle::WebSocket(_) => ConnType::WebSocket,
+            WireHandle::Relay(_) => ConnType::WebSocket,
             WireHandle::WebRTC(_) => ConnType::WebRTC,
         }
     }
@@ -177,6 +241,7 @@ impl WireHandle {
     pub fn connection_type(&self) -> &'static str {
         match self {
             WireHandle::WebSocket(_) => "WebSocket",
+            WireHandle::Relay(_) => "WSSRelay",
             WireHandle::WebRTC(_) => "WebRTC",
         }
     }
@@ -186,7 +251,8 @@ impl WireHandle {
     pub fn priority(&self) -> u8 {
         match self {
             WireHandle::WebSocket(_) => 0,
-            WireHandle::WebRTC(_) => 1, // WebRTC has higher priority.
+            WireHandle::WebRTC(rtc) => rtc.priority(),
+            WireHandle::Relay(_) => 1,
         }
     }
 
@@ -196,6 +262,8 @@ impl WireHandle {
         match self {
             WireHandle::WebSocket(ws) => ws.connect().await,
             WireHandle::WebRTC(rtc) => rtc.connect().await,
+            WireHandle::Relay(relay) if *relay.connected.lock() => Ok(()),
+            WireHandle::Relay(_) => Err(WebError::Transport("Relay channel closed".into())),
         }
     }
 
@@ -205,6 +273,7 @@ impl WireHandle {
         match self {
             WireHandle::WebSocket(ws) => ws.is_connected(),
             WireHandle::WebRTC(rtc) => rtc.is_connected(),
+            WireHandle::Relay(relay) => *relay.connected.lock(),
         }
     }
 
@@ -214,6 +283,10 @@ impl WireHandle {
         match self {
             WireHandle::WebSocket(ws) => ws.close().await,
             WireHandle::WebRTC(rtc) => rtc.close().await,
+            WireHandle::Relay(relay) => {
+                *relay.connected.lock() = false;
+                Ok(())
+            }
         }
     }
 
@@ -223,6 +296,7 @@ impl WireHandle {
         match self {
             WireHandle::WebSocket(ws) => ws.get_lane(payload_type).await,
             WireHandle::WebRTC(rtc) => rtc.get_lane(payload_type).await,
+            WireHandle::Relay(relay) => relay.get_lane(payload_type).await,
         }
     }
 
@@ -372,10 +446,16 @@ mod tests {
         let rtc = WebRtcConnection::new("peer-test".to_string());
         let rtc_handle = WireHandle::WebRTC(rtc);
 
-        // WebRTC has higher priority.
         assert_eq!(ws_handle.priority(), 0);
-        assert_eq!(rtc_handle.priority(), 1);
+        assert_eq!(rtc_handle.priority(), 0);
+        rtc_handle
+            .as_webrtc()
+            .unwrap()
+            .set_network_path(Some(false));
+        assert_eq!(rtc_handle.priority(), 2);
         assert!(rtc_handle.priority() > ws_handle.priority());
+        rtc_handle.as_webrtc().unwrap().set_network_path(Some(true));
+        assert!(1 > rtc_handle.priority());
     }
 
     #[test]

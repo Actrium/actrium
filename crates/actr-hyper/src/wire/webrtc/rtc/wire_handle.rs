@@ -27,7 +27,7 @@ use crate::transport::{
 use crate::wire::webrtc::rtc::data_lane::RtcDataLane;
 use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
 use crate::wire::webrtc::rtc::peer::handle::RtcPeerControllerHandle;
-use crate::wire::webrtc::rtc::status::LaneKind;
+use crate::wire::webrtc::rtc::status::{LaneKind, NetworkPath};
 
 /// A [`WireHandle`] backed by the RTC `RtcConnectionManager`.
 ///
@@ -82,9 +82,19 @@ impl WireHandle for RtcWireHandle {
     }
 
     fn priority(&self) -> u8 {
-        // Match 0.14's WebRTC priority (1). The transport layer picks the
-        // highest-priority connected handle; WebSocket is lower.
-        1
+        // Only a verified direct ICE pair outranks the WSS relay. TURN and
+        // an as-yet unclassified pair remain usable fallback paths.
+        if self
+            .controller
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|handle| handle.snapshot().network_path == NetworkPath::Direct)
+        {
+            2
+        } else {
+            0
+        }
     }
 
     async fn connect(&self) -> NetworkResult<()> {
@@ -393,7 +403,6 @@ mod tests {
         let peer = test_actor_id(3);
         let builder = DefaultWireBuilder::new(DefaultWireBuilderConfig {
             enable_websocket: false,
-            ..Default::default()
         })
         .with_rtc_manager(manager.clone());
 

@@ -29,3 +29,10 @@ tokio = { version = "1", features = ["rt", "time"] }
 inherits = "dev"
 debug = 0
 incremental = false
+
+# Native RTC/WebRTC Git sources come from the SDK dependency declarations.
+# Only legacy TURN server crates require these workspace-root overrides.
+[patch.crates-io]
+turn = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }
+webrtc-util = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }
+stun = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }

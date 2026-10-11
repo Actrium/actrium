@@ -45,8 +45,10 @@ pub use inbound::{InboundPacketDispatcher, MailboxMessageHandler, MailboxProcess
 pub use lifecycle::SwLifecycleManager;
 pub use outbound::{Gate, HostGate, PeerGate};
 pub use runtime::{
-    handle_dom_control, handle_dom_fast_path, handle_dom_webrtc_event, init_global,
-    register_client, register_datachannel_port, register_workload, unregister_client,
+    handle_dom_control, handle_dom_fast_path, handle_dom_webrtc_event, handle_relay_data,
+    handle_relay_record, init_global, prepare_relay_connection, register_client,
+    register_datachannel_port, register_relay_connection, register_workload, relay_channel_closed,
+    relay_connection_info, relay_peer_identity, start_relay_handshake, unregister_client,
 };
 pub use system::System;
 pub use transport::{

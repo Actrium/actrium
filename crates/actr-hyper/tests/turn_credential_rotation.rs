@@ -196,7 +196,19 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
             relay_configuration(turn_address, &new_credential),
         )
         .await
-        .expect("v0.20 set_configuration command");
+        .expect("set_configuration command");
+    rpc(
+        &harness,
+        46_501,
+        46_502,
+        "turn_rotation_existing_allocation",
+    )
+    .await;
+    assert_eq!(
+        turn_server.get_allocations_info(None).await.unwrap().len(),
+        2,
+        "updating future credentials must preserve established allocations"
+    );
     harness.peer(46_501).rtc.network_unavailable();
     harness
         .peer(46_501)

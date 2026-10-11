@@ -64,6 +64,7 @@ const SERVICES = [
   { name: "TURN", bit: 4, type: 2, route: "/admin/services/turn" },
   { name: "Issuer", bit: 8, type: 4, route: "/admin/services/issuer" },
   { name: "Signer", bit: 16, type: 5, route: "/admin/services/signer" },
+  { name: "Relay", bit: 32, type: 7, route: "/admin/config" },
 ] as const;
 
 /* ── Helpers for timeseries data ────────────────────────── */

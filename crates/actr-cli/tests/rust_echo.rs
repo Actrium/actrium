@@ -9,6 +9,9 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
+#[path = "../src/upstream_patch_support.rs"]
+mod upstream_patch_support;
+
 fn actr_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_actr"))
 }
@@ -63,6 +66,7 @@ actr-runtime-mailbox = {{ path = "{}" }}
     let mut content = std::fs::read_to_string(&cargo_toml).unwrap();
     content.push_str(&patch);
     std::fs::write(&cargo_toml, content).unwrap();
+    upstream_patch_support::append_upstream_patches(&workspace, &cargo_toml).unwrap();
 }
 
 fn cargo_check(project_dir: &std::path::Path) -> Output {

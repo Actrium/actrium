@@ -433,6 +433,7 @@ pub enum ProofOp {
     Register,
     Reissue,
     Renew,
+    RelayIdentity,
 }
 
 /// The `x-actr-client-proof` envelope (section 6).

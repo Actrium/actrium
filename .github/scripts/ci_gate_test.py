@@ -64,6 +64,8 @@ def test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     rust_job = _job(workflow, "rust", "test")
 
+    assert "rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-wasip2" in rust_job
+    assert 'ACTR_REQUIRE_WASM_FIXTURE: "1"' in rust_job
     assert "- name: Run tests" not in rust_job
     assert "cargo test --workspace" not in rust_job
     assert "- name: Prepare Rust codegen plugins" not in rust_job
@@ -117,6 +119,15 @@ def test_pr_gate_excludes_heavy_root_e2e_jobs() -> None:
     assert "  web_browser_e2e:\n" not in workflow
     assert "ts_stream_e2e" not in workflow
     assert "web_browser_e2e" not in workflow
+
+
+def test_cli_web_assets_uses_preinstalled_wasm_toolchain() -> None:
+    workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    job = _job(workflow, "cli_web_assets", "e2e_rust")
+    assert "runs-on: [self-hosted, Linux, X64]" in job
+    assert "RUSTUP_TOOLCHAIN: 1.99.0" in job
+    assert "rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-unknown-unknown" in job
+    assert "dtolnay/rust-toolchain" not in job
 
 
 def test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile() -> None:
@@ -979,6 +990,7 @@ if __name__ == "__main__":
     test_rust_test_gate_restores_cache_before_installing_tools()
     test_msrv_gate_builds_full_workspace_on_pinned_toolchain()
     test_pr_gate_excludes_heavy_root_e2e_jobs()
+    test_cli_web_assets_uses_preinstalled_wasm_toolchain()
     test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile()
     test_pr_gate_runs_package_runtime_scenario_when_targeted()
     test_native_workload_gate_builds_c_and_go_with_pinned_tools()

@@ -5370,3 +5370,121 @@ async fn test_publisher_profile_cache_stops_at_signed_expiry() {
         env.shutdown_signer().await;
     }
 }
+
+#[tokio::test]
+#[serial]
+async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let registration = post_register(
+        app.clone(),
+        linked_register_request(),
+        Some(DEFAULT_KEY_LABEL),
+    )
+    .await;
+    let register_response::Result::Success(ok) = registration.result.unwrap() else {
+        panic!("registration failed");
+    };
+    let identity_key = actr_relay_security::IdentityKey::generate().unwrap();
+    let enrollment = actr_relay_security::IdentityRequest {
+        endpoint: ok.actr_id.to_string_repr(),
+        renewal_token: ok.renewal_token.clone().unwrap().to_vec(),
+        public_key: identity_key.public,
+        admission_commitment: identity_key.admission_commitment(),
+    };
+    async fn request(
+        app: Router,
+        enrollment: &actr_relay_security::IdentityRequest,
+        label: Option<&str>,
+    ) -> (StatusCode, Vec<u8>) {
+        let body = serde_json::to_vec(enrollment).unwrap();
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/relay-identity")
+            .header("content-type", "application/json")
+            .header("x-real-ip", "127.0.0.1");
+        if let Some(label) = label {
+            builder = builder.header(
+                CLIENT_PROOF_HEADER,
+                proof(ProofOp::RelayIdentity, TEST_REALM, &body, &key_for(label)),
+            );
+        }
+        let mut request = builder.body(Body::from(body)).unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                12345,
+            ))));
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+        (
+            status,
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+    }
+    assert_eq!(
+        request(app.clone(), &enrollment, None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        request(app.clone(), &enrollment, Some("unregistered-key"))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let invalid = actr_relay_security::IdentityRequest {
+        endpoint: enrollment.endpoint.clone(),
+        renewal_token: vec![9; 32],
+        public_key: enrollment.public_key,
+        admission_commitment: enrollment.admission_commitment,
+    };
+    assert_eq!(
+        request(app.clone(), &invalid, Some(DEFAULT_KEY_LABEL))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let invalid_commitment = actr_relay_security::IdentityRequest {
+        endpoint: enrollment.endpoint.clone(),
+        renewal_token: enrollment.renewal_token.clone(),
+        public_key: enrollment.public_key,
+        admission_commitment: [0; 32],
+    };
+    assert_eq!(
+        request(app.clone(), &invalid_commitment, Some(DEFAULT_KEY_LABEL))
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (status, body) = request(app.clone(), &enrollment, Some(DEFAULT_KEY_LABEL)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let issued: actr_relay_security::IssuedIdentity = serde_json::from_slice(&body).unwrap();
+    let claims: actr_relay_security::IdentityClaims =
+        serde_json::from_slice(&issued.certificate.claims).unwrap();
+    assert_eq!(claims.actor_type, registered_type(&ok).to_string_repr());
+    assert_eq!(
+        claims.client_key,
+        client_key_id(&key_for(DEFAULT_KEY_LABEL).verifying_key().to_bytes())
+    );
+    identity_key
+        .certify(
+            issued,
+            &enrollment.endpoint,
+            issuer::renewal::now_secs() as u64,
+        )
+        .unwrap();
+    sqlx::query("UPDATE realm SET enabled = 0 WHERE name = ?")
+        .bind(TEST_REALM)
+        .execute(platform::storage::db::get_database().get_pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        request(app, &enrollment, Some(DEFAULT_KEY_LABEL)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    env.shutdown_signer().await;
+}

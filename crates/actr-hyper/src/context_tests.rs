@@ -75,7 +75,6 @@ async fn select_gate_peer_errors_when_outproc_unset() {
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         None,
-        Arc::new(RwLock::new(HashMap::new())),
         None,
         0,
     );
@@ -341,7 +340,6 @@ fn builder() -> BootstrapContextBuilder {
         None,
         Arc::new(HashMap::new()),
         Arc::new(HashMap::new()),
-        Arc::new(RwLock::new(HashMap::new())),
         None,
         0,
     )
@@ -420,7 +418,6 @@ fn ctx_with_lock(lock: Option<LockFile>) -> RuntimeContext {
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         lock.map(Arc::new),
-        Arc::new(RwLock::new(HashMap::new())),
         None,
         0,
     )

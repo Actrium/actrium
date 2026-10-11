@@ -1,8 +1,8 @@
 //! WebSocketGate - message router for inbound WebSocket connections
 //!
-//! Receives new connections from the `WebSocketServer` channel (including sender ActrId bytes and AIdCredential),
-//! performs Ed25519 credential verification for each connection (if `WsAuthContext` is configured),
-//! then routes messages by PayloadType to Mailbox or DataChunkRegistry upon successful verification.
+//! Installs virtual connections from the outbound relay client after peer authentication,
+//! then routes messages by PayloadType to Mailbox or DataChunkRegistry.
+//! The optional credential verifier also supports isolated authentication fixtures.
 //!
 //! # Design comparison with RTC inbound dispatch
 //!
@@ -13,13 +13,13 @@
 //! | Message aggregation | Session lane pumps → `InboundRouter` | Per-connection `DataLane` reading |
 
 use super::connection::WebSocketConnection;
-use super::server::InboundWsConn;
 use crate::inbound::DataChunkRegistry;
 use crate::key_cache::IssuerKeyCache;
 use crate::lifecycle::CredentialState;
 use crate::lifecycle::node::PeerTypes;
 use crate::transport::WsSink;
 use crate::transport::correlation::PendingRequestsMap;
+use crate::transport::handover::HandoverBook;
 use crate::transport::secure_channel::SecureCell;
 use crate::wire::SignalingKeyFetcher;
 use crate::wire::webrtc::SignalingClient;
@@ -27,6 +27,7 @@ use crate::wire::webrtc::{HookCallback, HookEvent};
 use crate::wire::{DirectionError, direction_for_routing};
 use actr_framework::Bytes;
 use actr_protocol::prost::Message as ProstMessage;
+use actr_protocol::transport_control;
 use actr_protocol::{
     AIdCredential, ActrId, ActrType, DataChunk, Direction, IdentityClaims, PayloadType, RpcEnvelope,
 };
@@ -38,6 +39,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{RwLock, mpsc};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+pub(crate) type InboundWsConn = (WebSocketConnection, Vec<u8>, Option<AIdCredential>);
 
 /// WebSocket authentication context (optional)
 ///
@@ -71,6 +74,7 @@ type InboundSinkMap = Arc<RwLock<HashMap<ActrId, (WsSink, SecureCell)>>>;
 
 /// WebSocketGate - receives and routes inbound WebSocket messages
 pub(crate) struct WebSocketGate {
+    handover: OnceLock<Arc<HandoverBook>>,
     /// Inbound connection channel (taken once and moved into background task)
     conn_rx: tokio::sync::Mutex<Option<mpsc::Receiver<InboundWsConn>>>,
 
@@ -94,13 +98,17 @@ pub(crate) struct WebSocketGate {
     /// cleaned up on disconnect.  Used by `send_response` to route replies
     /// back over the same inbound WebSocket connection.
     inbound_sinks: InboundSinkMap,
+    relay_mailbox: OnceLock<Arc<dyn Mailbox>>,
+    mailbox_ready: tokio::sync::Notify,
+    relay_mode: bool,
+    relay_peer_types: PeerTypes,
 }
 
 impl WebSocketGate {
     /// Create WebSocketGate
     ///
     /// # Arguments
-    /// - `conn_rx`: receiver end from `WebSocketServer::bind()`
+    /// - `conn_rx`: incoming virtual relay connections
     /// - `pending_requests`: pending requests map shared with PeerGate
     /// - `data_chunk_registry`: DataChunk registry
     /// - `auth_ctx`: authentication context (when configured, enforces credential verification on all inbound connections)
@@ -111,12 +119,78 @@ impl WebSocketGate {
         auth_ctx: Option<WsAuthContext>,
     ) -> Self {
         Self {
+            handover: OnceLock::new(),
             conn_rx: tokio::sync::Mutex::new(Some(conn_rx)),
             pending_requests,
             data_chunk_registry,
             auth_ctx: auth_ctx.map(Arc::new),
             hook_callback: OnceLock::new(),
             inbound_sinks: Arc::new(RwLock::new(HashMap::new())),
+            relay_mailbox: OnceLock::new(),
+            mailbox_ready: tokio::sync::Notify::new(),
+            relay_mode: false,
+            relay_peer_types: PeerTypes::default(),
+        }
+    }
+
+    pub(crate) fn set_handover(&self, book: Arc<HandoverBook>) {
+        let _ = self.handover.set(book);
+    }
+
+    /// Authenticated relay ingress. Only the encrypted adapter attaches connections;
+    /// peer identity is bound by Loran's credential authentication.
+    pub(crate) fn new_relay(
+        pending_requests: PendingRequestsMap,
+        data_chunk_registry: Arc<DataChunkRegistry>,
+        peer_types: PeerTypes,
+    ) -> Self {
+        let (_, receiver) = mpsc::channel(1);
+        let mut gate = Self::new(receiver, pending_requests, data_chunk_registry, None);
+        gate.relay_mode = true;
+        gate.relay_peer_types = peer_types;
+        gate
+    }
+
+    pub(crate) async fn attach_relay(
+        &self,
+        conn: WebSocketConnection,
+        peer: ActrId,
+        actor_type: ActrType,
+    ) -> ActorResult<()> {
+        if !self.relay_mode {
+            return Err(ActrError::Internal("Relay ingress not configured".into()));
+        }
+        let mailbox = loop {
+            let notified = self.mailbox_ready.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if let Some(mailbox) = self.relay_mailbox.get() {
+                break mailbox.clone();
+            }
+            notified.await;
+        };
+        Self::spawn_connection_tasks(
+            conn,
+            peer.encode_to_vec(),
+            actor_type,
+            self.pending_requests.clone(),
+            self.data_chunk_registry.clone(),
+            mailbox,
+            self.hook_callback.get().cloned(),
+            self.inbound_sinks.clone(),
+            false,
+            self.handover.get().cloned(),
+            self.relay_peer_types.clone(),
+        )
+        .await;
+        Ok(())
+    }
+
+    pub(crate) fn relay_ready(&self, peer: ActrId) {
+        if let Some(callback) = self.hook_callback.get().cloned() {
+            tokio::spawn(async move {
+                callback(HookEvent::WebSocketConnected { peer_id: peer }).await;
+            });
         }
     }
 
@@ -156,7 +230,13 @@ impl WebSocketGate {
         // or fall back once the session is sendable again.
         let state = secure.state();
         if state.is_terminal() {
-            self.inbound_sinks.write().await.remove(peer);
+            let mut sinks = self.inbound_sinks.write().await;
+            if sinks
+                .get(peer)
+                .is_some_and(|(current, _)| Arc::ptr_eq(current, &sink))
+            {
+                sinks.remove(peer);
+            }
             return Ok(false);
         }
         if !state.is_sendable() {
@@ -312,6 +392,7 @@ impl WebSocketGate {
         peer_id_for_lane: Option<ActrId>,
         hook_cb_for_lane: Option<HookCallback>,
         sinks_for_lane: InboundSinkMap,
+        expected_sink: WsSink,
         peer_types: PeerTypes,
     ) {
         let remaining = active_lanes
@@ -319,8 +400,15 @@ impl WebSocketGate {
             .saturating_sub(1);
         if remaining == 0 {
             if let Some(ref peer) = peer_id_for_lane {
-                sinks_for_lane.write().await.remove(peer);
+                let mut sinks = sinks_for_lane.write().await;
                 peer_types.connection_closed(peer);
+                if !sinks
+                    .get(peer)
+                    .is_some_and(|(sink, _)| Arc::ptr_eq(sink, &expected_sink))
+                {
+                    return;
+                }
+                sinks.remove(peer);
                 tracing::debug!(peer = %peer, "WS inbound sink removed (all lanes closed)");
             }
             if let (Some(peer), Some(cb)) = (peer_id_for_lane, hook_cb_for_lane) {
@@ -454,6 +542,7 @@ impl WebSocketGate {
     /// The sink is registered synchronously (before any lane task is spawned)
     /// so that `send_response` can find it even when the first request arrives
     /// via a parallel transport (e.g. WebRTC) before the lanes are fully up.
+    // Each task owns independent receive lanes and shared routing state.
     #[allow(clippy::too_many_arguments)]
     async fn spawn_connection_tasks(
         conn: WebSocketConnection,
@@ -464,6 +553,8 @@ impl WebSocketGate {
         mailbox: Arc<dyn Mailbox>,
         hook_callback: Option<HookCallback>,
         inbound_sinks: InboundSinkMap,
+        emit_connected: bool,
+        handover: Option<Arc<HandoverBook>>,
         peer_types: PeerTypes,
     ) {
         // Fire `WebSocketConnected` for the peer once the connection is
@@ -472,7 +563,9 @@ impl WebSocketGate {
         // the lane readers so that the connection can fail-fast on its
         // own terms.
         let peer_id = ActrId::decode(&source_id[..]).ok();
-        if let (Some(peer), Some(cb)) = (peer_id.clone(), hook_callback.clone()) {
+        if let (true, Some(peer), Some(cb)) =
+            (emit_connected, peer_id.clone(), hook_callback.clone())
+        {
             let cb_for_connected = cb.clone();
             tokio::spawn(async move {
                 cb_for_connected(HookEvent::WebSocketConnected { peer_id: peer }).await;
@@ -498,7 +591,7 @@ impl WebSocketGate {
 
         // Count active per-lane reader tasks. When the last one exits
         // we fire `WebSocketDisconnected` exactly once (and remove the sink).
-        let active_lanes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let active_lanes = Arc::new(std::sync::atomic::AtomicUsize::new(4));
         // Spawn per-PayloadType receive tasks
         for pt in [
             PayloadType::RpcReliable,
@@ -515,13 +608,16 @@ impl WebSocketGate {
             let peer_id_for_lane = peer_id.clone();
             let hook_cb_for_lane = hook_callback.clone();
             let sinks_for_lane = inbound_sinks.clone();
+            let expected_sink = conn.sink();
+            let handover = handover.clone();
+            // Register every route before acknowledging the relay channel.
+            let lane_result = conn_clone.get_lane(pt).await;
             let peer_types_for_lane = peer_types.clone();
             let actor_type = actor_type.clone();
-            active_lanes.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 
             tokio::spawn(async move {
                 // get_lane lazily creates the mpsc channel and registers in router
-                let lane = match conn_clone.get_lane(pt).await {
+                let lane = match lane_result {
                     Ok(l) => Some(l),
                     Err(e) => {
                         tracing::error!("❌ WS get_lane({:?}) failed: {:?}", pt, e);
@@ -535,12 +631,26 @@ impl WebSocketGate {
                     loop {
                         match lane.recv().await {
                             Ok(data) => {
-                                let data_bytes = Bytes::copy_from_slice(&data);
+                                let data_bytes = data.clone();
 
                                 match pt {
                                     PayloadType::RpcReliable | PayloadType::RpcSignal => {
                                         match RpcEnvelope::decode(&data[..]) {
                                             Ok(envelope) => {
+                                                if pt == PayloadType::RpcSignal
+                                                    && let Some(nonce) =
+                                                        transport_control::acknowledgement_nonce(
+                                                            &envelope,
+                                                        )
+                                                {
+                                                    if let (Some(book), Ok(peer)) = (
+                                                        handover.as_ref(),
+                                                        ActrId::decode(src.as_slice()),
+                                                    ) {
+                                                        book.acknowledge(&peer, nonce);
+                                                    }
+                                                    continue;
+                                                }
                                                 Self::handle_envelope(
                                                     envelope,
                                                     src.clone(),
@@ -571,10 +681,24 @@ impl WebSocketGate {
                                                 );
                                                 match ActrId::decode(&src[..]) {
                                                     Ok(sender_id) => {
-                                                        // Dispatch tasks are per lane, but bounded
-                                                        // queues share one TCP reader. A full lane
-                                                        // can backpressure RPC/control frames too;
-                                                        // the session watchdog bounds that stall.
+                                                        if pt == PayloadType::StreamReliable
+                                                            && let Some(nonce) =
+                                                                transport_control::barrier_nonce(
+                                                                    &chunk,
+                                                                )
+                                                        {
+                                                            if let Some(book) = handover.as_ref() {
+                                                                book.receive_barrier(
+                                                                    sender_id, nonce,
+                                                                )
+                                                                .await;
+                                                            }
+                                                            continue;
+                                                        }
+                                                        // Per-lane task: a full StreamReliable
+                                                        // queue blocks only this stream lane, not
+                                                        // the RPC lanes (unlike the WebRTC single
+                                                        // receive loop).
                                                         registry
                                                             .dispatch(chunk, sender_id, pt)
                                                             .await;
@@ -619,6 +743,7 @@ impl WebSocketGate {
                     peer_id_for_lane,
                     hook_cb_for_lane,
                     sinks_for_lane,
+                    expected_sink,
                     peer_types_for_lane,
                 )
                 .await;
@@ -632,6 +757,13 @@ impl WebSocketGate {
     /// If `auth_ctx` is configured, performs credential verification for each inbound connection;
     /// drops connections on verification failure, calls `spawn_connection_tasks` on success.
     pub async fn start_receive_loop(&self, mailbox: Arc<dyn Mailbox>) -> ActorResult<()> {
+        if self.relay_mode {
+            self.relay_mailbox
+                .set(mailbox)
+                .map_err(|_| ActrError::Internal("Relay receive loop already started".into()))?;
+            self.mailbox_ready.notify_waiters();
+            return Ok(());
+        }
         let rx = self.conn_rx.lock().await.take().ok_or_else(|| {
             ActrError::Internal("WebSocketGate: start_receive_loop already called".to_string())
         })?;
@@ -641,6 +773,7 @@ impl WebSocketGate {
         let auth_ctx = self.auth_ctx.clone();
         let hook_cb = self.hook_callback.get().cloned();
         let inbound_sinks = self.inbound_sinks.clone();
+        let handover = self.handover.get().cloned();
 
         tokio::spawn(async move {
             tracing::info!("🚀 WebSocketGate receive loop started");
@@ -702,6 +835,8 @@ impl WebSocketGate {
                         mailbox.clone(),
                         hook_cb.clone(),
                         inbound_sinks.clone(),
+                        true,
+                        handover.clone(),
                         ctx.peer_types.clone(),
                     )
                     .await;

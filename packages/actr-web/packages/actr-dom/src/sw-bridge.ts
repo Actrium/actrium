@@ -74,6 +74,8 @@ export interface SubscriptionDataPayload {
  * Corresponds to DomWebRtcEvent in Rust
  */
 export type WebRtcEventPayload =
+  | { eventType: 'network_path_changed'; data: { peerId: string; relayed: boolean | null } }
+  | { eventType: 'relay_state_changed'; data: { peerId: string; connected: boolean } }
   | {
       eventType: 'connection_state_changed';
       data: { peerId: string; state: RTCPeerConnectionState };

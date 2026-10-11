@@ -11,6 +11,9 @@ use anyhow::{Context, Result, bail};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
+#[path = "upstream_patch_support.rs"]
+mod upstream_patch_support;
+
 pub const LOCAL_E2E_REALM: &str = "e2e-local@e2e.test";
 const SIGNER_GRPC_PORT: u16 = 50052;
 const E2E_RENEWAL_TOKEN_SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -145,15 +148,16 @@ pub fn pin_echo_service_dependency_version(project_dir: &Path, publisher: &str) 
 }
 
 pub fn align_rust_project_with_workspace(project_dir: &Path) -> Result<()> {
+    let workspace = workspace_root();
     let cargo_toml_path = project_dir.join("Cargo.toml");
     let mut content = fs::read_to_string(&cargo_toml_path)
         .with_context(|| format!("failed to read {}", cargo_toml_path.display()))?;
 
     if content.contains("[patch.crates-io]") && content.contains("actr = { path =") {
+        upstream_patch_support::append_upstream_patches(&workspace, &cargo_toml_path)?;
         return Ok(());
     }
 
-    let workspace = workspace_root();
     let mut patch = String::from("\n[patch.crates-io]\n");
     let crates = [
         ("actr", workspace.join("crates/actr")),
@@ -182,6 +186,7 @@ pub fn align_rust_project_with_workspace(project_dir: &Path) -> Result<()> {
     content.push_str(&patch);
     fs::write(&cargo_toml_path, content)
         .with_context(|| format!("failed to write {}", cargo_toml_path.display()))?;
+    upstream_patch_support::append_upstream_patches(&workspace, &cargo_toml_path)?;
     Ok(())
 }
 

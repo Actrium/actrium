@@ -402,45 +402,15 @@ jobs:
           set -euo pipefail
           bash packages/actr-web/scripts/sync-cli-assets.sh --build
           mkdir -p release/validation/crates
-          packages=(
-            actr-protocol
-            actr-service-compat
-            actr-config
-            actr-web-abi
-            actr-framework
-            actr-runtime-mailbox
-            actr-runtime
-            actr-platform-traits
-            actr-pack
-            actr-mock-actrix
-            actr-hyper
-            actr-platform-native
-            actr-framework-protoc-codegen
-            actr-web-protoc-codegen
-            actr
-            actr-cli
-          )
-          package_workspace_dir() {
-            case "$1" in
-              actr-web-abi) printf '%s\n' packages/actr-web ;;
-              *) printf '%s\n' . ;;
-            esac
-          }
-          for package in "${packages[@]}"; do
-            echo "Packaging ${package}"
-            (
-              cd "$(package_workspace_dir "$package")"
-              # --no-verify: prerelease path deps (e.g. actr-protocol 0.4.12-rc.1)
-              # are not on crates.io, so tarball build verification pulls stale
-              # stable versions and fails. Real `cargo publish` verifies later.
-              cargo package -p "$package" --locked --allow-dirty --no-verify --target-dir "$GITHUB_WORKSPACE/target/release-validation"
-            )
-          done
-          find target/release-validation/package -maxdepth 1 -type f -name '*.crate' -print0 |
-            sort -z |
-            xargs -0 -I{} cp {} release/validation/crates/
+          python3 scripts/actr/package-release-crates.py --output release/validation/crates
           (cd release/validation/crates && for asset in *.crate; do sha256sum "$asset" > "$asset.sha256"; done)
-          test "$(find release/validation/crates -name '*.crate' | wc -l | tr -d ' ')" -eq "${#packages[@]}"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          directory = Path("release/validation/crates")
+          manifest = json.loads((directory / "manifest.json").read_text())
+          assert len(list(directory.glob("*.crate"))) == len(manifest["packages"])
+          PY
 
       - name: Stage Rust crate assets
         uses: actions/upload-artifact@v4

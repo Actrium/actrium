@@ -77,19 +77,7 @@ macro_rules! timer_inventory {
         ),+ $(,)?
     ) => {
         pub(crate) mod ids {
-            use super::{Duration, TimerCategory, TimerDefinition};
-
-            /// How long `WebSocketServer` waits after an `accept()` error before
-            /// retrying. Lives beside its inventory entry so the documented
-            /// duration and the enforced duration cannot drift apart.
-            pub(crate) const WEBSOCKET_ACCEPT_BACKOFF_DURATION: Duration =
-                Duration::from_millis(100);
-
-            /// Deadline for one inbound TLS + WebSocket upgrade handshake.
-            /// Lives beside its inventory entry for the same no-drift reason.
-            pub(crate) const WEBSOCKET_HANDSHAKE_TIMEOUT: Duration =
-                Duration::from_secs(10);
-
+            use super::{TimerCategory, TimerDefinition};
             $(
                 $(#[$entry_attr])*
                 #[allow(dead_code)] // Some entries are feature-gated in production.
@@ -532,53 +520,77 @@ timer_inventory! {
         success: "delay elapses and the message is delivered", interrupt: "test cancellation",
         expiry: "deliver the delayed message", reset: "each delayed message", external: false
     },
-    WEBSOCKET_HANDSHAKE => {
-        id: "websocket.handshake", owner: "websocket_server", category: FailureDeadline,
-        duration: "WEBSOCKET_HANDSHAKE_TIMEOUT (10s)", arm: "an inbound TCP connection acquires a handshake slot",
-        success: "TLS and WebSocket upgrade complete and connection is queued", interrupt: "server shutdown",
-        expiry: "drop the connection and release the handshake slot", reset: "each accepted connection", external: false
+    RELAY_SUBMIT => {
+        id: "relay.submit", owner: "relay_client", category: FailureDeadline,
+        duration: "IO_TIMEOUT (5s)", arm: "relay frame enters the bounded writer queue",
+        success: "writer acknowledges frame submission", interrupt: "relay session cancellation",
+        expiry: "report a closed lane without replay", reset: "each submitted frame", external: false
     },
-    WEBSOCKET_PING_SCHEDULE => {
-        id: "websocket.ping_schedule", owner: "websocket_connection", category: ProtocolSchedule,
-        duration: "PING_INTERVAL (15s)", arm: "direct WebSocket session established, matching Pong or peer pressure heartbeat received, or local receive pressure clears",
-        success: "schedule elapses", interrupt: "session retirement, local receive backpressure change, or peer pressure heartbeat",
-        expiry: "send a connection-local Ping probe or local receive-pressure heartbeat", reset: "after each successful probe or pressure heartbeat", external: false
+    RELAY_WARM_RECONNECT => {
+        id: "relay.warm_reconnect", owner: "relay_client", category: FailureBackoff,
+        duration: "5s", arm: "relay session has desired disconnected peers",
+        success: "retry scan deadline", interrupt: "relay session cancellation",
+        expiry: "retry a bounded batch of desired peers", reset: "after each retry scan", external: false
     },
-    WEBSOCKET_PROBE_DEADLINE => {
-        id: "websocket.probe_deadline", owner: "websocket_connection", category: FailureDeadline,
-        duration: "PROBE_TIMEOUT (10s)", arm: "direct WebSocket Ping probe or pressure heartbeat starts before sink acquisition",
-        success: "Pong matching the current probe arrives, or pressure heartbeat is written", interrupt: "session retirement, local receive backpressure change, or peer pressure heartbeat",
-        expiry: "retire the physical session and invalidate cached lanes", reset: "each probe", external: false
+    RELAY_RECONNECT_BACKOFF => {
+        id: "relay.reconnect_backoff", owner: "relay_client", category: FailureBackoff,
+        duration: "250ms exponential backoff with jitter capped at 30s", arm: "relay socket or discovery fails",
+        success: "backoff deadline", interrupt: "node shutdown",
+        expiry: "retry relay discovery and authentication", reset: "healthy session resets delay", external: false
     },
-    WEBSOCKET_CLOSE_DEADLINE => {
-        id: "websocket.close_deadline", owner: "websocket_connection", category: FailureDeadline,
-        duration: "CLOSE_TIMEOUT (1s)", arm: "retire a direct WebSocket sink",
-        success: "Close frame flushed or failed socket dropped", interrupt: "close future cancellation",
-        expiry: "drop the owned sink without waiting for the peer", reset: "never", external: false
+    RELAY_SOCKET_CONNECT => {
+        id: "relay.socket_connect", owner: "relay_client", category: FailureDeadline,
+        duration: "CONNECT_TIMEOUT (15s)", arm: "outbound WebSocket handshake begins",
+        success: "WebSocket handshake completes", interrupt: "node shutdown",
+        expiry: "close failed attempt and retry", reset: "each socket attempt", external: false
     },
-    WEBSOCKET_PROBE_CYCLE_DEADLINE => {
-        id: "websocket.probe_cycle_deadline", owner: "websocket_connection", category: FailureDeadline,
-        duration: "PING_INTERVAL + PROBE_TIMEOUT (25s)", arm: "direct WebSocket probe cycle starts",
-        success: "matching challenge Pong arrives", interrupt: "session retirement or local pressure",
-        expiry: "retire the session", reset: "a new cycle after a valid Pong or local pressure clears", external: false
+    RELAY_AUTHENTICATION => {
+        id: "relay.authentication", owner: "relay_client", category: FailureDeadline,
+        duration: "IO_TIMEOUT (5s)", arm: "relay hello is written or welcome is awaited",
+        success: "hello submission or authenticated welcome", interrupt: "node shutdown",
+        expiry: "reject the unauthenticated session", reset: "each authentication phase", external: false
     },
-    WEBSOCKET_PEER_PRESSURE_DEADLINE => {
-        id: "websocket.peer_pressure_deadline", owner: "websocket_connection", category: FailureDeadline,
-        duration: "PEER_BACKPRESSURE_TIMEOUT (120s)", arm: "first peer pressure heartbeat without round-trip proof",
-        success: "matching challenge Pong arrives", interrupt: "session retirement",
-        expiry: "retire the session despite further pressure heartbeats", reset: "only a matching challenge Pong", external: false
+    RELAY_SOCKET_WRITE => {
+        id: "relay.socket_write", owner: "relay_client", category: FailureDeadline,
+        duration: "IO_TIMEOUT (5s)", arm: "queued relay frame reaches socket writer",
+        success: "socket write completes", interrupt: "relay session cancellation",
+        expiry: "close failed session and resolve writer acknowledgement", reset: "each socket write", external: false
     },
-    WEBSOCKET_RECEIVE_BACKPRESSURE_DEADLINE => {
-        id: "websocket.receive_backpressure_deadline", owner: "websocket_connection", category: FailureDeadline,
-        duration: "RECEIVE_BACKPRESSURE_TIMEOUT (120s) from the current receive stall start", arm: "local receive queue becomes full",
-        success: "local receive queue resumes accepting messages", interrupt: "session retirement or pressure-heartbeat write failure",
-        expiry: "retire the physical session even if pressure heartbeats can still be written", reset: "only after local receive pressure clears; heartbeats never renew this deadline", external: false
+    RELAY_SOCKET_SHUTDOWN => {
+        id: "relay.socket_shutdown", owner: "relay_client", category: FailureDeadline,
+        duration: "1s", arm: "relay writer shuts down",
+        success: "WebSocket close completes", interrupt: "writer completion",
+        expiry: "drop unfinished socket close", reset: "once per socket", external: false
     },
-    WEBSOCKET_ACCEPT_BACKOFF => {
-        id: "websocket.accept_backoff", owner: "websocket_server", category: FailureBackoff,
-        duration: "WEBSOCKET_ACCEPT_BACKOFF_DURATION (100ms)", arm: "listener accept returns an error",
-        success: "backoff deadline", interrupt: "server shutdown",
-        expiry: "retry listener accept", reset: "each accept failure", external: false
+    RELAY_IDENTITY_POLL => {
+        id: "relay.identity_poll", owner: "relay_client", category: CompatibilityPolling,
+        duration: "1s", arm: "authenticated relay session begins",
+        success: "current session identity snapshot is checked", interrupt: "relay session cancellation",
+        expiry: "replace a rebound or renewed credential session", reset: "fixed period", external: false
+    },
+    RELAY_SESSION_READY => {
+        id: "relay.session_ready", owner: "relay_client", category: FailureDeadline,
+        duration: "CONNECT_TIMEOUT (15s)", arm: "peer dial awaits an authenticated relay socket",
+        success: "authenticated socket becomes available", interrupt: "node shutdown",
+        expiry: "return a bounded pre-send failure", reset: "each peer dial", external: false
+    },
+    RELAY_CHANNEL_CONNECT => {
+        id: "relay.channel_connect", owner: "relay_client", category: FailureDeadline,
+        duration: "CONNECT_TIMEOUT (15s)", arm: "peer connect request is submitted",
+        success: "peer-acknowledged Connected response", interrupt: "node shutdown",
+        expiry: "remove pending request and fail the channel attempt", reset: "each connect request", external: false
+    },
+    TRANSPORT_HANDOVER => {
+        id: "transport.handover", owner: "dest_transport", category: FailureDeadline,
+        duration: "3s", arm: "reliable stream prefers a different healthy route",
+        success: "peer acknowledges the old-route barrier", interrupt: "send future cancellation",
+        expiry: "retain the old route and cache the negative probe", reset: "each uncached handover probe", external: false
+    },
+    TRANSPORT_HANDOVER_ACK => {
+        id: "transport.handover_ack", owner: "handover_book", category: FailureDeadline,
+        duration: "1s", arm: "an ordered receive pump observes a barrier",
+        success: "acknowledgement submits on an existing route", interrupt: "receive task cancellation",
+        expiry: "drop the acknowledgement without dialing", reset: "each received barrier", external: false
     },
     EXTERNAL_ICE_CANDIDATE_SELECTION => {
         id: "external.webrtc.ice_candidate_selection", owner: "webrtc_ice", category: ProtocolSelection,

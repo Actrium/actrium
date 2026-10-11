@@ -490,7 +490,6 @@ async fn actorless_harness() -> (
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         None,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         None,
         0,
     );
@@ -1455,9 +1454,6 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         mailbox_path: None,
         scripts: std::collections::HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
-        websocket_listen_port: None,
-        websocket_security: Default::default(),
-        websocket_advertised_host: None,
         observability: actr_config::ObservabilityConfig {
             filter_level: "info".to_string(),
             tracing_enabled: false,

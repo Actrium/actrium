@@ -193,10 +193,6 @@ impl ControlConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if !self.admin_ui_enabled() && !self.grpc_api_enabled() {
-            return Err("at least one control endpoint must be enabled".to_string());
-        }
-
         if self.admin_ui_enabled() {
             self.validate_admin_ui()?;
         }

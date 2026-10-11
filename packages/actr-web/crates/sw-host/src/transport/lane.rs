@@ -53,6 +53,13 @@ impl PortFailureNotifier {
 /// Data transport lane used by the Service Worker runtime.
 #[derive(Clone)]
 pub enum DataLane {
+    /// Worker-local relay sender. Synchronous submission keeps the WSS byte
+    /// budget authoritative without an unbounded MessagePort staging queue.
+    Relay {
+        send: Arc<js_sys::Function>,
+        connected: Arc<Mutex<bool>>,
+        payload_type: PayloadType,
+    },
     /// WebSocket Lane
     ///
     /// WebSocket connection to the server.
@@ -79,6 +86,21 @@ impl DataLane {
     /// Send a message using zero-copy helpers.
     pub async fn send(&self, data: Bytes) -> LaneResult<()> {
         match self {
+            DataLane::Relay {
+                send,
+                connected,
+                payload_type,
+            } => {
+                if !*connected.lock() {
+                    return Err(WebError::Transport("Relay channel closed".into()));
+                }
+                let header = construct_message_header(*payload_type as u8, data.len());
+                let message = construct_message_zero_copy(&header, &data);
+                let bytes = js_sys::Uint8Array::from(message.as_ref());
+                send.call1(&JsValue::NULL, &bytes.into())
+                    .map_err(|_| WebError::Transport("Relay submission failed".into()))?;
+                Ok(())
+            }
             DataLane::WebSocket {
                 ws, payload_type, ..
             } => {
@@ -214,7 +236,7 @@ impl DataLane {
                 }
             }
 
-            DataLane::WebSocket { .. } => {
+            DataLane::WebSocket { .. } | DataLane::Relay { .. } => {
                 // WebSocket does not support transferable objects, so fall back to `send`.
                 log::warn!("WebSocket does not support transferable objects; falling back to send");
                 self.send(data).await
@@ -254,6 +276,7 @@ impl DataLane {
         use futures::StreamExt;
 
         match self {
+            DataLane::Relay { .. } => None, // Receive dispatch is worker-local.
             DataLane::WebSocket {
                 rx, payload_type, ..
             } => {
@@ -287,6 +310,7 @@ impl DataLane {
         match self {
             DataLane::WebSocket { payload_type, .. } => *payload_type,
             DataLane::PostMessage { payload_type, .. } => *payload_type,
+            DataLane::Relay { payload_type, .. } => *payload_type,
         }
     }
 }
@@ -294,6 +318,10 @@ impl DataLane {
 impl std::fmt::Debug for DataLane {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            DataLane::Relay { payload_type, .. } => f
+                .debug_struct("DataLane::Relay")
+                .field("payload_type", payload_type)
+                .finish_non_exhaustive(),
             DataLane::WebSocket { payload_type, .. } => f
                 .debug_struct("DataLane::WebSocket")
                 .field("payload_type", payload_type)

@@ -57,7 +57,13 @@ async-trait = "0.1"
 # URL parsing
 url = "2.0"
 
+# Native RTC/WebRTC Git sources come from the SDK dependency declarations.
+# Only legacy TURN server crates require these workspace-root overrides.
 [patch.crates-io]
+turn = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }
+webrtc-util = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }
+stun = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }
+
 actr = { path = "../../../crates/actr" }
 actr-framework = { path = "../../../crates/actr-framework" }
 actr-protocol = { path = "../../../crates/actr-protocol" }

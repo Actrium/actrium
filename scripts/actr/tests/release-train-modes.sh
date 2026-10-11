@@ -1629,6 +1629,9 @@ EOF
   # Stub out all Cargo.toml paths.
   for f in \
     Cargo.toml \
+    crates/actr-relay-security/Cargo.toml \
+    crates/loran-relay-protocol/Cargo.toml \
+    crates/loran-relay/Cargo.toml \
     crates/actr/Cargo.toml \
     packages/actr-web/Cargo.toml \
     crates/actr-protocol/Cargo.toml \
@@ -1782,6 +1785,9 @@ test_update_versions_rewrites_prerelease_embedded_versions() {
   # Stub out all Cargo.toml paths.
   for f in \
     Cargo.toml \
+    crates/actr-relay-security/Cargo.toml \
+    crates/loran-relay-protocol/Cargo.toml \
+    crates/loran-relay/Cargo.toml \
     crates/actr/Cargo.toml \
     packages/actr-web/Cargo.toml \
     crates/actr-protocol/Cargo.toml \
@@ -2300,15 +2306,9 @@ test_actrix_crates_publish_in_dependency_order() {
   local expected actual dependency
   expected=$(cat <<'EOF'
 loran-packages
-actrix-proto
-actrix-signer
-actrix-platform
-actrix-admin
 actrix-publisher-registry
-actrix-signaling
-actrix-stun
-actrix-turn
 actrix-issuer
+actrix-admin
 actrix-sdk
 actrix
 EOF
@@ -2339,7 +2339,7 @@ test_publish_rust_stage_publishes_packages() {
   stage_publish_rust
 
   assert_eq "read_context" "${calls[0]}" "publish-rust context load"
-  assert_eq "publish_rust_package:actr-protocol:foundation" "${calls[1]}" "first Rust publish"
+  assert_eq "publish_rust_package:loran-relay-protocol:foundation" "${calls[1]}" "first Rust publish"
 }
 
 test_python_release_tools_are_stage_scoped() {

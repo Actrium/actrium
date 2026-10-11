@@ -183,43 +183,19 @@ pub struct RawSystemConfig {
 
     #[serde(default)]
     pub webrtc: RawWebRtcConfig,
-    #[serde(default)]
-    pub websocket: RawWebSocketConfig,
+    #[serde(default, deserialize_with = "reject_peer_websocket")]
+    pub(crate) websocket: Option<()>,
     #[serde(default)]
     pub observability: RawObservabilityConfig,
 }
 
-/// WebSocket data transport configuration
-///
-/// Configuration example (actr.toml):
-/// ```toml
-/// [websocket]
-/// listen_port = 9001
-/// bind_address = "0.0.0.0"
-/// advertised_host = "node.example.com"
-/// tls_cert = "certs/node.pem"
-/// tls_key = "certs/node-key.pem"
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RawWebSocketConfig {
-    #[serde(flatten)]
-    pub security: DirectWebSocketSecurity,
-    /// Port for listening to inbound WebSocket connections (for direct mode)
-    ///
-    /// When configured, the node starts a WebSocket server on this port,
-    /// accepting direct connections from peer nodes.
-    /// When not configured, the node does not listen on any port (relay mode only).
-    #[serde(default)]
-    pub listen_port: Option<u16>,
-
-    /// Externally advertised WebSocket hostname or IP (for signaling registration)
-    ///
-    /// When a node has `listen_port` configured, the signaling server needs an address
-    /// reachable by peer nodes. This field specifies the hostname or IP registered with
-    /// the signaling server, e.g., `"192.168.1.10"` or `"mynode.example.com"`.
-    /// Defaults to the bind address; wildcard binds require an explicit advertised host.
-    #[serde(default)]
-    pub advertised_host: Option<String>,
+/// Legacy peer listeners are intentionally rejected with migration advice.
+pub(crate) fn reject_peer_websocket<'de, D: serde::Deserializer<'de>>(
+    _deserializer: D,
+) -> std::result::Result<Option<()>, D::Error> {
+    Err(serde::de::Error::custom(
+        "Peer WebSocket listeners have been removed; delete the websocket section. The SDK discovers Loran relay automatically.",
+    ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -503,32 +479,5 @@ manufacturer = "acme"
         let message = error.to_string();
         assert!(message.contains("package.manufacturer"), "{message}");
         assert!(message.contains("package.publisher"), "{message}");
-    }
-}
-
-/// Security policy for the peer direct WebSocket transport (separate from signaling).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DirectWebSocketSecurity {
-    /// Listener address; defaults to loopback, independently of advertised_host.
-    pub bind_address: std::net::IpAddr,
-    /// PEM server certificate chain and private key. Both are required for TLS.
-    pub tls_cert: Option<std::path::PathBuf>,
-    pub tls_key: Option<std::path::PathBuf>,
-    /// Optional PEM trust roots for direct peers; replaces public roots when set.
-    pub ca_cert: Option<std::path::PathBuf>,
-    /// Development only: permit plaintext on literal loopback IP addresses.
-    pub allow_insecure: bool,
-}
-
-impl Default for DirectWebSocketSecurity {
-    fn default() -> Self {
-        Self {
-            bind_address: std::net::Ipv4Addr::LOCALHOST.into(),
-            tls_cert: None,
-            tls_key: None,
-            ca_cert: None,
-            allow_insecure: false,
-        }
     }
 }

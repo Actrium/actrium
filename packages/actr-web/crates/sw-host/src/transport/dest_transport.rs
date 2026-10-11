@@ -3,11 +3,27 @@
 //! Manages all connections and message routing for one `Dest` using an
 //! event-driven model with no polling.
 
+use super::handover::HandoverBook;
 use super::wire_handle::WireHandle;
 use super::wire_pool::WirePool;
+use actr_protocol::{prost::Message, transport_control};
 use actr_web_common::{ConnType, Dest, PayloadType, WebError, WebResult};
 use bytes::Bytes;
-use std::sync::Arc;
+use futures::lock::Mutex;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
+};
+
+const RTC_STABLE: u8 = 0;
+const RTC_RECOVERING: u8 = 1;
+const RTC_RESUMED: u8 = 2;
+
+#[derive(Default)]
+struct ReliableRoute {
+    current: Option<WireHandle>,
+    retry_after: f64,
+}
 
 /// Transport manager for a single destination.
 ///
@@ -23,6 +39,9 @@ pub struct DestTransport {
 
     /// Connection manager.
     wire_pool: Arc<WirePool>,
+    handover: Arc<HandoverBook>,
+    reliable: Mutex<ReliableRoute>,
+    rtc_recovery: AtomicU8,
 }
 
 impl DestTransport {
@@ -40,7 +59,144 @@ impl DestTransport {
             wire_pool.add_connection(conn);
         }
 
-        Ok(Self { dest, wire_pool })
+        Ok(Self {
+            dest,
+            wire_pool,
+            handover: Arc::new(HandoverBook::default()),
+            reliable: Mutex::new(ReliableRoute::default()),
+            rtc_recovery: AtomicU8::new(RTC_STABLE),
+        })
+    }
+
+    pub(crate) fn set_handover(&mut self, handover: Arc<HandoverBook>) {
+        self.handover = handover;
+    }
+
+    async fn reliable_wire(
+        &self,
+        preferred: WireHandle,
+        route: &mut ReliableRoute,
+    ) -> WebResult<WireHandle> {
+        let Some(mut previous) = route.current.clone() else {
+            return Ok(preferred);
+        };
+        if previous.conn_type() == ConnType::WebRTC {
+            let recovery = self.rtc_recovery.load(Ordering::Acquire);
+            if recovery != RTC_STABLE {
+                let recovered = if recovery == RTC_RESUMED {
+                    self.wire_pool.get_connection(ConnType::WebRTC).await
+                } else {
+                    None
+                };
+                if let Some(wire) = recovered.filter(WireHandle::is_connected) {
+                    previous = wire;
+                    route.current = Some(previous.clone());
+                    self.rtc_recovery.store(RTC_STABLE, Ordering::Release);
+                } else {
+                    return Err(WebError::Transport(
+                        "Previous reliable RTC path is recovering".into(),
+                    ));
+                }
+            }
+        }
+        if previous.same_connection(&preferred) {
+            return Ok(preferred);
+        }
+        let still_current = self
+            .wire_pool
+            .get_connection(previous.conn_type())
+            .await
+            .is_some_and(|wire| previous.same_connection(&wire));
+        let previous_lane = if still_current && previous.is_connected() {
+            previous.get_lane(PayloadType::StreamReliable).await.ok()
+        } else {
+            None
+        };
+        let Some(lane) = previous_lane else {
+            // A failed physical route retains delivery uncertainty; application
+            // chunks are never automatically replayed on a replacement route.
+            route.retry_after = 0.0;
+            return Ok(preferred);
+        };
+        if route.retry_after > js_sys::Date::now() {
+            return Ok(previous);
+        }
+        let Dest::Peer(peer) = &self.dest else {
+            return Ok(preferred);
+        };
+        let Some(mut pending) = self.handover.begin(peer) else {
+            return Ok(previous);
+        };
+        let barrier = transport_control::barrier(&pending.nonce).encode_to_vec();
+        let acknowledgement = async {
+            if lane.send(Bytes::from(barrier)).await.is_err() {
+                return false;
+            }
+            (&mut pending.receiver).await.is_ok()
+        };
+        let acknowledged = matches!(
+            futures::future::select(
+                Box::pin(acknowledgement),
+                Box::pin(gloo_timers::future::TimeoutFuture::new(3000)),
+            )
+            .await,
+            futures::future::Either::Left((true, _))
+        );
+        let old_current = self
+            .wire_pool
+            .get_connection(previous.conn_type())
+            .await
+            .is_some_and(|wire| previous.same_connection(&wire) && wire.is_connected());
+        let new_current = self
+            .wire_pool
+            .get_connection(preferred.conn_type())
+            .await
+            .is_some_and(|wire| preferred.same_connection(&wire) && wire.is_connected());
+        if !old_current
+            || !new_current
+            || (previous.conn_type() == ConnType::WebRTC
+                && self.rtc_recovery.load(Ordering::Acquire) != RTC_STABLE)
+        {
+            return Err(WebError::Transport(
+                "Reliable route changed during handover".into(),
+            ));
+        }
+        if acknowledged {
+            route.retry_after = 0.0;
+            Ok(preferred)
+        } else {
+            // Legacy receivers cannot acknowledge the control. Keep their
+            // healthy ordered lane and avoid delaying every subsequent chunk.
+            route.retry_after = js_sys::Date::now() + 30_000.0;
+            Ok(previous)
+        }
+    }
+
+    pub(crate) async fn rtc_disconnected(&self) -> WebResult<()> {
+        self.rtc_recovery.store(RTC_RECOVERING, Ordering::Release);
+        if let Some(connection) = self.wire_pool.get_connection(ConnType::WebRTC).await {
+            connection.close().await?;
+        }
+        self.wire_pool.mark_connection_failed(ConnType::WebRTC);
+        Ok(())
+    }
+
+    pub(crate) fn rtc_connected(&self) {
+        let _ = self.rtc_recovery.compare_exchange(
+            RTC_RECOVERING,
+            RTC_RESUMED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    pub(crate) async fn rtc_terminated(&self) -> WebResult<()> {
+        self.rtc_recovery.store(RTC_STABLE, Ordering::Release);
+        if let Some(connection) = self.wire_pool.get_connection(ConnType::WebRTC).await {
+            connection.close().await?;
+        }
+        self.wire_pool.mark_connection_failed(ConnType::WebRTC);
+        Ok(())
     }
 
     /// Get the WirePool reference.
@@ -59,6 +215,11 @@ impl DestTransport {
     /// - Otherwise wait for connection state changes through the watcher channel
     /// - `WirePool` already handles priority, so this method only tries lane types in order
     pub async fn send(&self, payload_type: PayloadType, data: &[u8]) -> WebResult<()> {
+        let mut reliable = if payload_type == PayloadType::StreamReliable {
+            Some(self.reliable.lock().await)
+        } else {
+            None
+        };
         log::debug!(
             "[{:?}] Sending message: type={:?}, size={}",
             self.dest,
@@ -67,7 +228,7 @@ impl DestTransport {
         );
 
         // 1. Determine candidate connection types (simplified: WebRTC first).
-        let conn_types = self.get_conn_types_for(payload_type);
+        let mut conn_types = self.get_conn_types_for(payload_type);
 
         if conn_types.is_empty() {
             return Err(WebError::Transport(format!(
@@ -80,6 +241,18 @@ impl DestTransport {
         let mut watcher = self.wire_pool.subscribe_changes();
 
         loop {
+            if payload_type != PayloadType::MediaRtp {
+                let rtc = self.wire_pool.get_connection(ConnType::WebRTC).await;
+                let relay = self.wire_pool.get_connection(ConnType::WebSocket).await;
+                if relay.as_ref().is_some_and(|relay| {
+                    rtc.as_ref()
+                        .is_none_or(|rtc| relay.priority() > rtc.priority())
+                }) {
+                    conn_types = vec![ConnType::WebSocket, ConnType::WebRTC];
+                } else {
+                    conn_types = vec![ConnType::WebRTC, ConnType::WebSocket];
+                }
+            }
             // 3. Check the current ready connections snapshot.
             let ready_set = watcher.borrow_and_update();
 
@@ -95,6 +268,11 @@ impl DestTransport {
 
                 // Fetch the connection and build or reuse its lane.
                 if let Some(conn) = self.wire_pool.get_connection(conn_type).await {
+                    let conn = if let Some(route) = reliable.as_deref_mut() {
+                        self.reliable_wire(conn, route).await?
+                    } else {
+                        conn
+                    };
                     match conn.get_lane(payload_type).await {
                         Ok(lane) => {
                             log::debug!(
@@ -104,6 +282,9 @@ impl DestTransport {
                                 payload_type
                             );
 
+                            if let Some(route) = reliable.as_deref_mut() {
+                                route.current = Some(conn.clone());
+                            }
                             // Convert to `Bytes`.
                             return lane.send(Bytes::copy_from_slice(data)).await;
                         }
@@ -198,6 +379,368 @@ mod tests {
     use wasm_bindgen_test::*;
 
     wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    async fn reliable_handover_requires_ack_and_does_not_hold_rpc() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::{JsCast, closure::Closure};
+
+        let relay_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let recorded = relay_frames.clone();
+        let relay_send = Closure::wrap(Box::new(move |frame: js_sys::Uint8Array| {
+            recorded.borrow_mut().push(frame.to_vec());
+        }) as Box<dyn FnMut(js_sys::Uint8Array)>);
+        let relay = WireHandle::Relay(crate::transport::RelayConnection::new(
+            relay_send
+                .as_ref()
+                .unchecked_ref::<js_sys::Function>()
+                .clone(),
+        ));
+
+        let channel = web_sys::MessageChannel::new().unwrap();
+        let rtc_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let recorded = rtc_frames.clone();
+        let on_message = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+            recorded
+                .borrow_mut()
+                .push(js_sys::Uint8Array::new(&event.data()).to_vec());
+        }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+        channel
+            .port2()
+            .set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+        channel.port2().start();
+        let mut rtc = WebRtcConnection::new("peer".into());
+        rtc.set_datachannel_port(channel.port1());
+        let rtc_path = rtc.clone();
+        let transport = Arc::new(
+            DestTransport::new(
+                Dest::Peer("peer".into()),
+                vec![relay, WireHandle::WebRTC(rtc)],
+            )
+            .await
+            .unwrap(),
+        );
+        let mut ready = transport.wire_pool().subscribe_changes();
+        while ready.borrow_and_update().len() != 2 {
+            ready.changed().await.unwrap();
+        }
+        transport
+            .send(PayloadType::StreamReliable, b"before")
+            .await
+            .unwrap();
+        assert_eq!(relay_frames.borrow().len(), 1);
+        rtc_path.set_network_path(Some(false));
+
+        let (sent, mut received) = futures::channel::oneshot::channel();
+        let sending = transport.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = sent.send(sending.send(PayloadType::StreamReliable, b"after").await);
+        });
+        for _ in 0..100 {
+            if relay_frames.borrow().len() == 2 {
+                break;
+            }
+            gloo_timers::future::TimeoutFuture::new(5).await;
+        }
+        assert_eq!(relay_frames.borrow().len(), 2);
+        let barrier = actr_protocol::DataChunk::decode(&relay_frames.borrow()[1][5..]).unwrap();
+        let nonce = transport_control::barrier_nonce(&barrier)
+            .unwrap()
+            .to_owned();
+        assert!(rtc_frames.borrow().is_empty());
+        transport
+            .send(PayloadType::RpcReliable, b"rpc")
+            .await
+            .unwrap();
+        transport.handover.acknowledge("other peer", &nonce);
+        assert!(received.try_recv().unwrap().is_none());
+        transport.handover.acknowledge("peer", &nonce);
+        received.await.unwrap().unwrap();
+        for _ in 0..100 {
+            if rtc_frames.borrow().len() == 2 {
+                break;
+            }
+            gloo_timers::future::TimeoutFuture::new(5).await;
+        }
+        {
+            let frames = rtc_frames.borrow();
+            assert_eq!(frames.len(), 2);
+            assert_eq!(&frames[0][5..], b"rpc");
+            assert_eq!(&frames[1][5..], b"after");
+        }
+        transport.close().await.unwrap();
+        channel.port2().close();
+        drop(on_message);
+        drop(relay_send);
+    }
+
+    #[wasm_bindgen_test]
+    async fn reliable_rtc_disconnect_must_not_bypass_the_handover_barrier() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::{JsCast, closure::Closure};
+
+        let relay_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let recorded = relay_frames.clone();
+        let relay_send = Closure::wrap(Box::new(move |frame: js_sys::Uint8Array| {
+            recorded.borrow_mut().push(frame.to_vec());
+        }) as Box<dyn FnMut(js_sys::Uint8Array)>);
+        let relay = WireHandle::Relay(crate::transport::RelayConnection::new(
+            relay_send
+                .as_ref()
+                .unchecked_ref::<js_sys::Function>()
+                .clone(),
+        ));
+
+        // Hold the first message in the simulated DOM bridge: closing the SW
+        // handle does not close the physical RTC peer or its buffered data.
+        let channel = web_sys::MessageChannel::new().unwrap();
+        let rtc_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let recorded = rtc_frames.clone();
+        let on_message = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+            recorded
+                .borrow_mut()
+                .push(js_sys::Uint8Array::new(&event.data()).to_vec());
+        }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+        channel
+            .port2()
+            .set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+        channel.port2().start();
+        let mut rtc = WebRtcConnection::new("peer".into());
+        rtc.set_datachannel_port(channel.port1());
+        rtc.set_network_path(Some(false));
+        let transport = Arc::new(
+            DestTransport::new(
+                Dest::Peer("peer".into()),
+                vec![relay, WireHandle::WebRTC(rtc.clone())],
+            )
+            .await
+            .unwrap(),
+        );
+        let mut ready = transport.wire_pool().subscribe_changes();
+        while ready.borrow_and_update().len() != 2 {
+            ready.changed().await.unwrap();
+        }
+        transport
+            .send(PayloadType::StreamReliable, b"before")
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if !rtc_frames.borrow().is_empty() {
+                break;
+            }
+            gloo_timers::future::TimeoutFuture::new(5).await;
+        }
+        assert_eq!(rtc_frames.borrow().len(), 1);
+        assert!(relay_frames.borrow().is_empty());
+
+        // This is the SW action taken for a recoverable DOM disconnected
+        // event; it leaves the physical connection and its old queue alive.
+        transport.rtc_disconnected().await.unwrap();
+        let sending = transport.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = sending.send(PayloadType::StreamReliable, b"after").await;
+        });
+        gloo_timers::future::TimeoutFuture::new(50).await;
+        assert!(
+            relay_frames.borrow().is_empty(),
+            "new reliable data reached relay while the old RTC path could still deliver"
+        );
+        transport.rtc_terminated().await.unwrap();
+        transport
+            .send(PayloadType::StreamReliable, b"after termination")
+            .await
+            .unwrap();
+        assert_eq!(relay_frames.borrow().len(), 1);
+        transport.close().await.unwrap();
+        channel.port2().close();
+        drop(on_message);
+        drop(relay_send);
+    }
+
+    #[wasm_bindgen_test]
+    async fn recovered_rtc_must_acknowledge_before_switching_to_relay() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::{JsCast, closure::Closure};
+
+        let relay_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let recorded = relay_frames.clone();
+        let relay_send = Closure::wrap(Box::new(move |frame: js_sys::Uint8Array| {
+            recorded.borrow_mut().push(frame.to_vec());
+        }) as Box<dyn FnMut(js_sys::Uint8Array)>);
+        let relay = WireHandle::Relay(crate::transport::RelayConnection::new(
+            relay_send
+                .as_ref()
+                .unchecked_ref::<js_sys::Function>()
+                .clone(),
+        ));
+        let old_channel = web_sys::MessageChannel::new().unwrap();
+        let mut rtc = WebRtcConnection::new("peer".into());
+        rtc.set_datachannel_port(old_channel.port1());
+        rtc.set_network_path(Some(false));
+        let transport = Arc::new(
+            DestTransport::new(
+                Dest::Peer("peer".into()),
+                vec![relay, WireHandle::WebRTC(rtc)],
+            )
+            .await
+            .unwrap(),
+        );
+        let mut ready = transport.wire_pool().subscribe_changes();
+        while ready.borrow_and_update().len() != 2 {
+            ready.changed().await.unwrap();
+        }
+        transport
+            .send(PayloadType::StreamReliable, b"before")
+            .await
+            .unwrap();
+        transport.rtc_disconnected().await.unwrap();
+        assert!(
+            transport
+                .send(PayloadType::StreamReliable, b"blocked")
+                .await
+                .is_err()
+        );
+        transport.rtc_connected();
+        assert!(
+            transport
+                .send(PayloadType::StreamReliable, b"not rebound")
+                .await
+                .is_err()
+        );
+
+        let channel = web_sys::MessageChannel::new().unwrap();
+        let rtc_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let recorded = rtc_frames.clone();
+        let on_message = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+            recorded
+                .borrow_mut()
+                .push(js_sys::Uint8Array::new(&event.data()).to_vec());
+        }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+        channel
+            .port2()
+            .set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+        channel.port2().start();
+        let mut recovered = WebRtcConnection::new("peer".into());
+        recovered.set_datachannel_port(channel.port1());
+        // Relay is preferred over a TURN-mediated RTC path, but the recovered
+        // RTC lane must first acknowledge all earlier reliable messages.
+        recovered.set_network_path(Some(true));
+        transport
+            .wire_pool()
+            .reconnect(WireHandle::WebRTC(recovered));
+        while !ready.borrow_and_update().contains(&ConnType::WebRTC) {
+            ready.changed().await.unwrap();
+        }
+        let (sent, received) = futures::channel::oneshot::channel();
+        let sending = transport.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = sent.send(sending.send(PayloadType::StreamReliable, b"after").await);
+        });
+        for _ in 0..100 {
+            if !rtc_frames.borrow().is_empty() {
+                break;
+            }
+            gloo_timers::future::TimeoutFuture::new(5).await;
+        }
+        assert!(relay_frames.borrow().is_empty());
+        let barrier = actr_protocol::DataChunk::decode(&rtc_frames.borrow()[0][5..]).unwrap();
+        let nonce = transport_control::barrier_nonce(&barrier).unwrap();
+        transport.handover.acknowledge("peer", nonce);
+        received.await.unwrap().unwrap();
+        assert_eq!(relay_frames.borrow().len(), 1);
+        transport.close().await.unwrap();
+        channel.port2().close();
+        old_channel.port2().close();
+        drop(on_message);
+        drop(relay_send);
+    }
+
+    #[wasm_bindgen_test]
+    async fn rtc_disconnect_during_barrier_does_not_submit_the_new_chunk() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::{JsCast, closure::Closure};
+
+        let relay_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let recorded = relay_frames.clone();
+        let relay_send = Closure::wrap(Box::new(move |frame: js_sys::Uint8Array| {
+            recorded.borrow_mut().push(frame.to_vec());
+        }) as Box<dyn FnMut(js_sys::Uint8Array)>);
+        let relay = WireHandle::Relay(crate::transport::RelayConnection::new(
+            relay_send
+                .as_ref()
+                .unchecked_ref::<js_sys::Function>()
+                .clone(),
+        ));
+        let channel = web_sys::MessageChannel::new().unwrap();
+        let rtc_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let recorded = rtc_frames.clone();
+        let on_message = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+            recorded
+                .borrow_mut()
+                .push(js_sys::Uint8Array::new(&event.data()).to_vec());
+        }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+        channel
+            .port2()
+            .set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+        channel.port2().start();
+        let mut rtc = WebRtcConnection::new("peer".into());
+        rtc.set_datachannel_port(channel.port1());
+        rtc.set_network_path(Some(false));
+        let transport = Arc::new(
+            DestTransport::new(
+                Dest::Peer("peer".into()),
+                vec![relay, WireHandle::WebRTC(rtc.clone())],
+            )
+            .await
+            .unwrap(),
+        );
+        let mut ready = transport.wire_pool().subscribe_changes();
+        while ready.borrow_and_update().len() != 2 {
+            ready.changed().await.unwrap();
+        }
+        transport
+            .send(PayloadType::StreamReliable, b"before")
+            .await
+            .unwrap();
+        rtc.set_network_path(Some(true));
+        let (sent, received) = futures::channel::oneshot::channel();
+        let sending = transport.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = sent.send(sending.send(PayloadType::StreamReliable, b"after").await);
+        });
+        for _ in 0..100 {
+            if rtc_frames.borrow().len() >= 2 {
+                break;
+            }
+            gloo_timers::future::TimeoutFuture::new(5).await;
+        }
+        assert_eq!(rtc_frames.borrow().len(), 2, "old payload and barrier");
+        transport.rtc_disconnected().await.unwrap();
+        assert!(received.await.unwrap().is_err());
+        assert_eq!(
+            rtc_frames.borrow().len(),
+            2,
+            "new payload reached the stale RTC port"
+        );
+        assert!(
+            relay_frames.borrow().is_empty(),
+            "new payload bypassed the barrier"
+        );
+        transport.rtc_terminated().await.unwrap();
+        transport
+            .send(PayloadType::StreamReliable, b"after termination")
+            .await
+            .unwrap();
+        assert_eq!(relay_frames.borrow().len(), 1);
+        transport.close().await.unwrap();
+        channel.port2().close();
+        drop(on_message);
+        drop(relay_send);
+    }
 
     #[test]
     fn test_get_conn_types_for_media_rtp() {
@@ -374,6 +917,12 @@ mod tests {
     fn create_test_transport() -> DestTransport {
         let dest = Dest::Server("wss://test.com".to_string());
         let wire_pool = Arc::new(WirePool::new());
-        DestTransport { dest, wire_pool }
+        DestTransport {
+            dest,
+            wire_pool,
+            handover: Arc::new(HandoverBook::default()),
+            reliable: Mutex::new(ReliableRoute::default()),
+            rtc_recovery: AtomicU8::new(RTC_STABLE),
+        }
     }
 }

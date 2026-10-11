@@ -13,6 +13,9 @@ readonly PYPI_API="https://pypi.org/pypi"
 readonly TEST_PYPI_API="https://test.pypi.org/pypi"
 
 readonly FOUNDATION_CRATES=(
+  "loran-relay-protocol"
+  "loran-relay"
+  "actr-relay-security"
   "actr-protocol"
   "actr-service-compat"
   "actr-config"
@@ -22,6 +25,13 @@ readonly FOUNDATION_CRATES=(
   "actr-runtime"
   "actr-platform-traits"
   "actr-pack"
+  # Optional native test-utils dependencies still need registry versions at publish time.
+  "actrix-proto"
+  "actrix-signer"
+  "actrix-platform"
+  "actrix-signaling"
+  "actrix-stun"
+  "actrix-turn"
   "actr-mock-actrix"
   "actr-hyper"
   "actr-platform-native"
@@ -44,15 +54,9 @@ readonly CLI_CRATES=(
 # registry dependency is visible before `actrix` is published.
 readonly ACTRIX_CRATES=(
   "loran-packages"
-  "actrix-proto"
-  "actrix-signer"
-  "actrix-platform"
-  "actrix-admin"
   "actrix-publisher-registry"
-  "actrix-signaling"
-  "actrix-stun"
-  "actrix-turn"
   "actrix-issuer"
+  "actrix-admin"
   "actrix-sdk"
   "actrix"
 )
@@ -1036,6 +1040,9 @@ skip_python = sys.argv[3] == "true"
 
 package_files = [
     repo / "Cargo.toml",
+    repo / "crates/actr-relay-security/Cargo.toml",
+    repo / "crates/loran-relay-protocol/Cargo.toml",
+    repo / "crates/loran-relay/Cargo.toml",
     repo / "crates/actr/Cargo.toml",
     repo / "packages/actr-web/Cargo.toml",
     repo / "crates/actr-protocol/Cargo.toml",
@@ -1091,6 +1098,13 @@ cli_dependency_names = {
 dependency_version_names = {
     "actr-web-abi",
     "actr-pack",
+    "actr-relay-security",
+    "loran-relay",
+    "loran-relay-protocol",
+    "actrix-signaling-service",
+    "actrix-stun-service",
+    "actrix-turn",
+    "platform",
 }
 
 workspace_dependency_names = {
@@ -1308,6 +1322,8 @@ package_workspace_dir() {
 }
 
 run_validation_suite() {
+  python3 scripts/actr/tests/test_package_release_crates.py
+  bash scripts/actr/tests/release-train-relay-dependencies.sh
   log_info "Running formatter and compile checks"
   log_info "Generating CLI web runtime assets"
   bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -1819,6 +1835,9 @@ publish_package_sync_repo() {
 
 stage_release_version_files() {
   git add Cargo.toml Cargo.lock \
+    crates/actr-relay-security/Cargo.toml \
+    crates/loran-relay-protocol/Cargo.toml \
+    crates/loran-relay/Cargo.toml \
     crates/actr/Cargo.toml \
     packages/actr-web/Cargo.toml \
     crates/actr-protocol/Cargo.toml \

@@ -93,6 +93,14 @@ pub fn create_router(state: IssuerState) -> Router {
     Router::new()
         .route("/register", post(register_actr))
         .route("/renew", post(renew_credential))
+        .route(
+            "/relay-identity",
+            post(relay_identity).layer(axum::extract::DefaultBodyLimit::max(32 * 1024)),
+        )
+        .route(
+            "/relay-key/{realm}/{key_id}",
+            axum::routing::get(relay_signing_key),
+        )
         .route("/reissue", post(reissue_credential))
         .route("/membership", post(crate::membership::post_membership))
         .route("/health", axum::routing::get(health_check))
@@ -1159,6 +1167,104 @@ fn aid_error_to_response(err: AidError) -> (u32, String) {
 fn aid_error_to_error_response(err: AidError) -> ErrorResponse {
     let (code, message) = aid_error_to_response(err);
     ErrorResponse { code, message }
+}
+
+/// The enrollment request proves both possession of the Realm client key and
+/// the actor's private renewal token. Neither proof is sent to the relay.
+async fn relay_identity(
+    State(state): State<IssuerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<actr_relay_security::IssuedIdentity>, StatusCode> {
+    let request: actr_relay_security::IdentityRequest =
+        serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let actor = actr_protocol::ActrId::from_string_repr(&request.endpoint)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    if request.endpoint.len() > 512
+        || actor.to_string_repr() != request.endpoint
+        || request.public_key == [0; 32]
+        || request.admission_commitment == [0; 32]
+        || request.renewal_token.len() != 32
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let signer = authenticate_client(
+        &state,
+        &headers,
+        ProofOp::RelayIdentity,
+        &actor.realm,
+        &body,
+    )
+    .await
+    .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    check_binding(&actor, &signer, true)
+        .await
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    let actor_type = state
+        .issuer
+        .relay_actor_type(&actor, &signer)
+        .await
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    let hash = crate::renewal::hash_token(&request.renewal_token);
+    let expires = crate::renewal::find_binding_token_expiry(&actor, &hash)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .filter(|expires| *expires > crate::renewal::now_secs())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let issued = state
+        .issuer
+        .mint_relay_identity(
+            &actor,
+            &actor_type,
+            &signer,
+            request.public_key,
+            request.admission_commitment,
+            expires as u64,
+        )
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    // Recheck after signer I/O so revocation and proof rotation fail closed.
+    check_binding(&actor, &signer, true)
+        .await
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    let current_type = state
+        .issuer
+        .relay_actor_type(&actor, &signer)
+        .await
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    if current_type != actor_type {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if crate::renewal::find_binding_token_expiry(&actor, &hash)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_none_or(|expires| expires <= crate::renewal::now_secs())
+    {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(Json(issued))
+}
+
+async fn relay_signing_key(
+    State(state): State<IssuerState>,
+    axum::extract::Path((realm, key_id)): axum::extract::Path<(String, u32)>,
+) -> Result<Json<actr_relay_security::IssuerKey>, StatusCode> {
+    use platform::aid::credential::AIdCredentialValidator;
+    AIdCredentialValidator::init(&state.issuer.config.sqlite_path)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    let (key, expires_at) = AIdCredentialValidator::get_verifying_key(&realm, key_id)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(actr_relay_security::IssuerKey {
+        key_id,
+        public_key: *key.as_bytes(),
+        expires_at: expires_at.min(
+            (crate::renewal::now_secs() as u64)
+                .saturating_add(actr_relay_security::CERTIFICATE_TTL),
+        ),
+    }))
 }
 
 #[cfg(test)]

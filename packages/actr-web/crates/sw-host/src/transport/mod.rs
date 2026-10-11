@@ -6,6 +6,7 @@
 //! - RouteTable for route management
 
 pub mod dest_transport;
+pub(crate) mod handover;
 pub mod lane;
 pub mod peer_transport;
 pub mod postmessage;
@@ -26,5 +27,5 @@ pub use sw_transport::SwTransport;
 pub use websocket::WebSocketLaneBuilder;
 pub use websocket_connection::WebSocketConnection;
 pub use wire_builder::{WebWireBuilder, WireBuilder};
-pub use wire_handle::{WebRtcConnection, WireHandle, WireStatus};
+pub use wire_handle::{RelayConnection, WebRtcConnection, WireHandle, WireStatus};
 pub use wire_pool::{ReadySet, ReadyWatcher, WirePool};

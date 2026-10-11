@@ -15,9 +15,6 @@
 //! requests project to the global `Serial` key and must NOT run concurrently —
 //! the barrier is proven to stay unreleased while the first handler is in flight.
 
-#[path = "support/direct_websocket.rs"]
-mod direct_websocket;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -189,9 +186,6 @@ fn runtime_config(
         mailbox_path: None,
         scripts: HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
-        websocket_listen_port: None,
-        websocket_security: direct_websocket::tls_options(),
-        websocket_advertised_host: None,
         observability: actr_config::ObservabilityConfig {
             filter_level: "warn".to_string(),
             tracing_enabled: false,
@@ -255,9 +249,7 @@ async fn setup(
         }));
     }
     let hyper_b = Hyper::new(echo_cfg).await.unwrap();
-    let mut cfg_b = runtime_config(dir_b, server, "EchoNode", echo_type());
-    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
-    cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
+    let cfg_b = runtime_config(dir_b, server, "EchoNode", echo_type());
 
     let mut node_b = Node::from_hyper(hyper_b, cfg_b);
     if declare_key {
@@ -340,9 +332,7 @@ async fn setup_serial(
             dispatch_timeout: None,
         }));
     let hyper_b = Hyper::new(echo_cfg).await.unwrap();
-    let mut cfg_b = runtime_config(dir_b, server, "EchoNode", echo_type());
-    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
-    cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
+    let cfg_b = runtime_config(dir_b, server, "EchoNode", echo_type());
     // NOTE: no `with_conflict_keys` → the route is undeclared → Serial.
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(GatedWorkload { entry_tx, entered })

@@ -476,11 +476,13 @@ async fn finish_lane_task_last_lane_removes_sink_and_fires_disconnect() {
         })
     });
 
+    let expected_sink = inbound_sinks.read().await.get(&peer).unwrap().0.clone();
     WebSocketGate::finish_lane_task(
         active_lanes.clone(),
         Some(peer.clone()),
         Some(hook),
         inbound_sinks.clone(),
+        expected_sink,
         PeerTypes::default(),
     )
     .await;
@@ -518,11 +520,13 @@ async fn finish_lane_task_non_last_lane_keeps_sink_and_skips_disconnect() {
         })
     });
 
+    let expected_sink = inbound_sinks.read().await.get(&peer).unwrap().0.clone();
     WebSocketGate::finish_lane_task(
         active_lanes.clone(),
         Some(peer.clone()),
         Some(hook),
         inbound_sinks.clone(),
+        expected_sink,
         PeerTypes::default(),
     )
     .await;
@@ -555,6 +559,8 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
         CapturingMailbox::new(),
         Some(hook),
         inbound_sinks.clone(),
+        true,
+        None,
         peer_types.clone(),
     )
     .await;
@@ -1353,8 +1359,9 @@ async fn receive_loop_rejection_tears_down_the_socket() {
         None,
     )
     .await;
+    let (sink, stream) = server_stream.split();
     let conn =
-        crate::wire::websocket::connection::WebSocketConnection::from_server_stream(server_stream);
+        crate::wire::websocket::connection::WebSocketConnection::from_parts(Box::pin(sink), stream);
 
     let source_id = actr_protocol::prost::Message::encode_to_vec(&peer);
     running

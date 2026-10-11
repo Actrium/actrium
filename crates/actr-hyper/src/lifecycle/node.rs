@@ -377,9 +377,9 @@ pub(crate) type RtcResponseRoute =
 
 /// Send `response_envelope` back to `caller` via the best available transport.
 ///
-/// Priority: inbound WebSocket connection (if the caller dialled us directly) →
-/// the RTC lane. Module-level so both the inline mailbox path and the
-/// gate-on continuation share one implementation.
+/// Priority: ready direct RTC → accepted relay → other ready RTC.
+/// Module-level so both the inline mailbox path and the gate-on continuation
+/// share one implementation.
 /// How long the RTC response path waits for the caller's peer to become
 /// sendable before falling through to the gate-off delivery path. Named (like
 /// DATA_CHUNK_SEND_TIMEOUT / TELL_SEND_TIMEOUT) so the budget stays tunable
@@ -409,7 +409,38 @@ async fn send_envelope_to_caller(
         error_code = ?response_envelope.error.as_ref().map(|e| e.code),
         "response send attempted: routing guest response back to caller"
     );
-    // 1. Try inbound WebSocket connection first.
+    // Promote responses too: retaining the relay receive path must not pin
+    // every reply to WSS after direct ICE becomes usable.
+    if let Some(manager) = rtc_route
+        && let Some(handle) = manager.get_controller(caller).await
+        && handle.snapshot().sendable
+        && handle.snapshot().network_path == crate::wire::webrtc::rtc::status::NetworkPath::Direct
+    {
+        match handle
+            .send(
+                crate::wire::webrtc::rtc::status::LaneKind::RpcReliable,
+                Bytes::from(response_envelope.encode_to_vec()),
+            )
+            .await
+        {
+            Ok(()) => tracing::info!(
+                target: "actr_response_send",
+                request_id = %request_id,
+                target_actor = %caller,
+                "response send succeeded via direct RTC reliable lane"
+            ),
+            Err(error) => tracing::warn!(
+                target: "actr_response_send",
+                request_id = %request_id,
+                target_actor = %caller,
+                error = ?error,
+                "direct RTC response submission failed; delivery may be uncertain"
+            ),
+        }
+        return;
+    }
+
+    // Try the already-accepted relay without waiting for ICE.
     if let Some(wsg) = ws_gate {
         match wsg.send_response(caller, response_envelope.clone()).await {
             Ok(true) => {
@@ -419,7 +450,7 @@ async fn send_envelope_to_caller(
                     route_key = %route_key,
                     payload_type = "RpcReliable",
                     target_actor = %caller,
-                    "response send succeeded via inbound WebSocket gate"
+                    "response send succeeded via relay gate"
                 );
                 return; // sent successfully
             }
@@ -427,7 +458,7 @@ async fn send_envelope_to_caller(
                 tracing::debug!(
                     request_id = request_id,
                     caller = %caller,
-                    "No inbound WS connection for caller; falling back to WebRTC gate"
+                    "No accepted relay connection for caller; falling back to WebRTC gate"
                 );
             }
             Err(e) => {
@@ -435,9 +466,10 @@ async fn send_envelope_to_caller(
                     severity = 5,
                     error_category = "transport_error",
                     request_id = request_id,
-                    "WebSocketGate send_response failed, falling back: {:?}",
+                    "Relay response submission failed; delivery may be uncertain: {:?}",
                     e
                 );
+                return;
             }
         }
     }
@@ -896,14 +928,6 @@ pub(crate) struct Inner {
     /// Registration context matching `preregistered_credential`, used for
     /// hard rebind if renewal token is no longer usable.
     pub(crate) preregistered_registration_context: Option<RegistrationContext>,
-
-    /// Shared WebSocket direct-connect address map populated by discovery
-    ///
-    /// Shared with `DefaultWireBuilder` so discovered ws:// URLs can be reused
-    /// directly instead of relying on a static url_template
-    /// The map is keyed by `ActrId`.
-    pub(crate) discovered_ws_addresses:
-        Arc<tokio::sync::RwLock<std::collections::HashMap<ActrId, String>>>,
 
     /// Verified Actor types of peers, read by the inbound ACL.
     pub(crate) peer_types: PeerTypes,
@@ -2665,9 +2689,6 @@ impl Inner {
             package_manifest,
             preregistered_credential: None,
             preregistered_registration_context: None,
-            discovered_ws_addresses: Arc::new(tokio::sync::RwLock::new(
-                std::collections::HashMap::new(),
-            )),
             peer_types: PeerTypes::default(),
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
@@ -2698,7 +2719,6 @@ impl Inner {
             self.actr_lock.clone(),
             self.alias_map.clone(),
             self.dependency_fingerprints.clone(),
-            self.discovered_ws_addresses.clone(),
             self.session_state.clone(),
             self.session_state
                 .as_ref()
@@ -2731,7 +2751,6 @@ impl Inner {
             self.actr_lock.clone(),
             self.alias_map.clone(),
             self.dependency_fingerprints.clone(),
-            self.discovered_ws_addresses.clone(),
             self.session_state.clone(),
             self.session_state
                 .as_ref()
@@ -2849,60 +2868,13 @@ impl Inner {
         // through `Hyper::register()`.
         let service_spec = None;
 
-        // Validate TLS before advertising or sending reusable peer credentials.
-        let direct_security = crate::wire::websocket::security::DirectSecurity::load(&self.config)
-            .map_err(|e| ActrError::Internal(e.to_string()))?;
-
-        // Bind the direct WebSocket listener before registration so an
-        // ephemeral listen_port (0) advertises the actual bound port, and so a
-        // bind failure aborts startup instead of advertising an endpoint that
-        // nobody serves.
-        let ws_listener = match self.config.websocket_listen_port {
-            Some(listen_port) => {
-                tracing::info!(
-                    "🔌 WebSocket direct-connect mode enabled, binding port {}",
-                    listen_port
-                );
-                Some(
-                    crate::wire::websocket::WebSocketServer::bind(
-                        listen_port,
-                        direct_security.clone(),
-                    )
-                    .await?,
-                )
-            }
-            None => None,
-        };
-        let ws_address = match &ws_listener {
-            Some((server, _)) => {
-                let advertised = direct_security
-                    .advertised_url_for(&self.config, server.local_addr().port())
-                    .map_err(|e| ActrError::Internal(e.to_string()))?;
-                if advertised.is_some() && server.local_addr().ip().is_loopback() {
-                    tracing::warn!(
-                        "🔌 direct WebSocket listener is loopback-only ({}); peers on other hosts cannot reach it — set websocket.bind_address to a routable interface",
-                        server.local_addr()
-                    );
-                }
-                advertised
-            }
-            None => None,
-        };
-
-        if let Some(ref addr) = ws_address {
-            tracing::info!(
-                "📡 Advertising WebSocket address to signaling server: {}",
-                addr
-            );
-        }
-
         let register_request = RegisterRequest {
             actr_type: actr_type.clone(),
             realm: self.config.realm.clone(),
             service_spec,
             acl: self.config.acl.clone(),
             service: None,
-            ws_address,
+            ws_address: None,
             auth_mode: Some(RegisterAuthMode::Linked as i32),
             ..Default::default()
         };
@@ -3226,6 +3198,7 @@ impl Inner {
             // matching).
             let pending_requests: crate::outbound::PendingRequestsMap =
                 std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
+            let handover = Arc::new(crate::transport::handover::HandoverBook::default());
 
             // Construct the RTC manager, controllers, and recovery stack as
             // one unit sharing the node's identity and inbound dispatch.
@@ -3332,7 +3305,10 @@ impl Inner {
                     ));
                 let (inbound_handler, inbound_dispatch_tasks) =
                     rtc::inbound_bridge::dispatcher_bridge(
-                        inbound_dispatcher,
+                        {
+                            inbound_dispatcher.set_handover(handover.clone());
+                            inbound_dispatcher
+                        },
                         inbound_mailbox_slot.clone(),
                         self.shutdown_token.child_token(),
                     );
@@ -3475,33 +3451,34 @@ impl Inner {
             // Create DefaultWireBuilder with the configured wire transports
             use crate::transport::{DefaultWireBuilder, DefaultWireBuilderConfig};
 
-            // WebSocket channel is enabled: target ws:// address is fully discovered at runtime
-            // Direct-connect mode: encode local node ActrId as hex, sent as X-Actr-Node-Id
-            let local_id_hex = hex::encode(actor_id.encode_to_vec());
-            let wire_builder_config = DefaultWireBuilderConfig {
-                local_id_hex,
-                enable_websocket: true,
-                // Share the discovered_ws_addresses map so that post-discovery calls
-                // can use the signaling-provided ws:// URL for this actor node.
-                discovered_ws_addresses: self.discovered_ws_addresses.clone(),
-                // Pass credential_state so outbound WS handshake carries X-Actr-Credential,
-                // enabling peer WebSocketGate to perform Ed25519 signature verification.
-                credential_state: Some(credential_state.clone()),
-                session_state: Some(session_state.clone()),
-                // Pass pending_requests so outbound WS connections spawn reader tasks
-                // to deliver server responses back to `send_request_with_type` futures.
-                pending_requests: Some(pending_requests.clone()),
-            };
-            let wire_builder = {
-                let builder = DefaultWireBuilder::new(wire_builder_config)
-                    .with_direct_security(direct_security.clone());
-                let builder = builder.with_rtc_manager(rtc_manager.clone());
-                Arc::new(builder)
-            };
+            let relay_gate = Arc::new(crate::wire::websocket::WebSocketGate::new_relay(
+                pending_requests.clone(),
+                self.data_chunk_registry.clone(),
+                self.peer_types.clone(),
+            ));
+            let relay_client = crate::wire::relay::RelayClient::new(
+                self.config.signaling_url.to_string(),
+                self.config.issuer_endpoint.clone(),
+                client_key.clone(),
+                session_state.clone(),
+                relay_gate.clone(),
+                self.shutdown_token.clone(),
+            );
+            relay_gate.set_handover(handover.clone());
+            let wire_builder = Arc::new(
+                DefaultWireBuilder::new(DefaultWireBuilderConfig::default())
+                    .with_rtc_manager(rtc_manager.clone())
+                    .with_relay(relay_client.clone()),
+            );
+            self.websocket_gate = Some(relay_gate.clone());
 
             // Create PeerTransport
             use crate::transport::PeerTransport;
-            let transport_manager = Arc::new(PeerTransport::new(actor_id.clone(), wire_builder));
+            let transport_manager = Arc::new(
+                PeerTransport::new(actor_id.clone(), wire_builder).with_handover(handover.clone()),
+            );
+            handover.bind(&transport_manager);
+            relay_client.set_transport(&transport_manager);
             self.peer_transport = Some(transport_manager.clone());
 
             // Create PeerGate with the pre-allocated pending_requests map.
@@ -3517,8 +3494,6 @@ impl Inner {
             ));
             let outproc_gate_enum = Gate::Peer(outproc_gate.clone());
             tracing::info!("PeerTransport + PeerGate initialized");
-
-            let data_chunk_registry = self.data_chunk_registry.clone();
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // 1.7. Wire the outproc gate into Inner so subsequent
@@ -3674,85 +3649,31 @@ impl Inner {
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 1.7.6. WebSocket Server (direct-connect mode, optional)
+            // 1.7.6. Outbound WSS relay (no application-side listener).
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if let Some((ws_server, conn_rx)) = ws_listener {
-                use crate::key_cache::IssuerKeyCache;
-                use crate::wire::websocket::WebSocketGate;
-                use crate::wire::websocket::gate::WsAuthContext;
-
-                // Build IssuerKeyCache and seed it with the signing key from the registration response
-                let issuer_key_cache = IssuerKeyCache::new();
-                if !register_ok.signing_pubkey.is_empty() {
-                    match issuer_key_cache
-                        .seed(register_ok.signing_key_id, &register_ok.signing_pubkey)
-                        .await
-                    {
-                        Ok(()) => tracing::info!(
-                            key_id = register_ok.signing_key_id,
-                            "🔑 IssuerKeyCache seeded from RegisterOk"
-                        ),
-                        Err(e) => tracing::warn!(
-                            key_id = register_ok.signing_key_id,
-                            error = ?e,
-                            "IssuerKeyCache seed failed; WebSocket will reject all inbound connections"
-                        ),
-                    }
-                } else {
-                    tracing::warn!(
-                        "RegisterOk missing signing_pubkey; WebSocket credential verification will degrade"
-                    );
-                }
-
-                let auth_ctx = WsAuthContext {
-                    issuer_key_cache,
-                    actor_id: actor_id.clone(),
-                    credential_state: credential_state.clone(),
-                    signaling_client: self.signaling_client.clone(),
-                    peer_types: self.peer_types.clone(),
-                };
-
-                // The listener was bound before registration so the advertised
-                // address carries the actual (possibly ephemeral) bound port.
-                ws_server.start(self.shutdown_token.clone());
-                let ws_gate = Arc::new(WebSocketGate::new(
-                    conn_rx,
-                    outproc_gate.get_pending_requests(),
-                    data_chunk_registry.clone(),
-                    Some(auth_ctx),
-                ));
-
-                // Install the WebSocket peer-lifecycle hook.
-                {
-                    let actor_id_for_hook = actor_id.clone();
-                    let credential_state_for_hook = credential_state.clone();
-                    // Snapshot taken after outproc_gate is live: ws
-                    // peer-lifecycle hook contexts can issue
-                    // Dest::Peer(_) calls.
-                    let ctx_builder_snapshot = self.bootstrap_ctx_builder();
-                    let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
-                        Arc::new(move || {
-                            let snapshot = ctx_builder_snapshot.clone();
-                            let actor_id = actor_id_for_hook.clone();
-                            let credential_state = credential_state_for_hook.clone();
-                            Box::pin(async move {
-                                Some(snapshot.build_bootstrap(
+            {
+                let actor_id_for_hook = actor_id.clone();
+                let credential_state_for_hook = credential_state.clone();
+                let ctx_builder_snapshot = self.bootstrap_ctx_builder();
+                let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
+                    Arc::new(move || {
+                        let snapshot = ctx_builder_snapshot.clone();
+                        let actor_id = actor_id_for_hook.clone();
+                        let credential_state = credential_state_for_hook.clone();
+                        Box::pin(async move {
+                            Some(
+                                snapshot.build_bootstrap(
                                     &actor_id,
                                     &credential_state.credential().await,
-                                ))
-                            })
-                        });
-                    let cb = crate::lifecycle::hooks::build_hook_callback(
-                        self.hook_observer.clone(),
-                        ctx_builder,
-                    );
-                    ws_gate.set_hook_callback(cb);
-                }
-
-                self.websocket_gate = Some(ws_gate);
-                tracing::info!(
-                    "✅ WebSocketServer + WebSocketGate initialized (credential auth enabled)"
-                );
+                                ),
+                            )
+                        })
+                    });
+                relay_gate.set_hook_callback(crate::lifecycle::hooks::build_hook_callback(
+                    self.hook_observer.clone(),
+                    ctx_builder,
+                ));
+                task_handles.push(relay_client.start());
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3989,7 +3910,7 @@ impl Inner {
             *slot.write().await = Some(node_ref.mailbox.clone());
         }
 
-        // Start WebSocketGate message receive loop (route to Mailbox, direct-connect mode)
+        // Publish the relay ingress mailbox before acknowledging peer channels.
         if let Some(ws_gate) = &node_ref.websocket_gate {
             ws_gate
                 .start_receive_loop(node_ref.mailbox.clone())

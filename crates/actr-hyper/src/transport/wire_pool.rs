@@ -268,7 +268,13 @@ impl WirePool {
                         }
                         let committed = {
                             let mut conns = connections.write().await;
-                            if closed.load(Ordering::Acquire) {
+                            if closed.load(Ordering::Acquire)
+                                || (conn_type == ConnType::WebSocket
+                                    && !matches!(
+                                        &conns[conn_type.as_index()],
+                                        Some(WireStatus::Connecting(current)) if Arc::ptr_eq(current, &connection)
+                                    ))
+                            {
                                 false
                             } else {
                                 conns[conn_type.as_index()] =
@@ -377,7 +383,13 @@ impl WirePool {
 
             let committed_failure = {
                 let mut conns = connections.write().await;
-                if closed.load(Ordering::Acquire) {
+                if closed.load(Ordering::Acquire)
+                    || (conn_type == ConnType::WebSocket
+                        && !matches!(
+                            &conns[conn_type.as_index()],
+                            Some(WireStatus::Connecting(current)) if Arc::ptr_eq(current, &connection)
+                        ))
+                {
                     false
                 } else {
                     conns[conn_type.as_index()] = Some(WireStatus::Failed(Arc::clone(&connection)));
@@ -502,6 +514,60 @@ impl WirePool {
             }
             _ => None,
         }
+    }
+
+    /// Check ownership even during a temporary secure-readiness suspension.
+    pub(crate) async fn owns_active_wire(&self, wire: &Arc<dyn WireHandle>) -> bool {
+        let conns = self.connections.read().await;
+        matches!(
+            &conns[wire.connection_type().as_index()],
+            Some(WireStatus::Ready(current) | WireStatus::Connecting(current))
+                if Arc::ptr_eq(current, wire)
+        )
+    }
+
+    /// Adopt a recovered physical connection without racing an in-flight
+    /// dial. A live slot keeps its owner; only absent or terminal slots change.
+    pub(crate) async fn adopt_ready(&self, connection: Arc<dyn WireHandle>) {
+        if !connection.is_connected() || !connection.secure_channel_state().is_sendable() {
+            return;
+        }
+        let index = connection.connection_type().as_index();
+        {
+            let mut slots = self.connections.write().await;
+            if self.closed.load(Ordering::Acquire) {
+                return;
+            }
+            match &slots[index] {
+                Some(WireStatus::Connecting(_)) => return,
+                Some(WireStatus::Ready(current))
+                    if current.is_connected() && current.secure_channel_state().is_sendable() =>
+                {
+                    return;
+                }
+                _ => {}
+            }
+            slots[index] = Some(WireStatus::Ready(connection.clone()));
+        }
+        let mut epoch = connection.secure_epoch();
+        Self::broadcast_ready_connections(&self.connections, &self.ready_tx).await;
+        let connections = self.connections.clone();
+        let ready_tx = self.ready_tx.clone();
+        let shutdown = self.shutdown.clone();
+        tokio::spawn(async move {
+            loop {
+                if connection.secure_channel_state().is_terminal() {
+                    Self::broadcast_ready_connections(&connections, &ready_tx).await;
+                    return;
+                }
+                tokio::select! {
+                    _ = shutdown.cancelled() => return,
+                    _ = connection.await_secure_state_change(epoch) => {}
+                }
+                epoch = connection.secure_epoch();
+                Self::broadcast_ready_connections(&connections, &ready_tx).await;
+            }
+        });
     }
 
     /// Return true if any candidate can still become sendable.
