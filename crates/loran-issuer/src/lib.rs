@@ -72,6 +72,7 @@ mod idempotency;
 pub mod identity;
 pub mod issuer;
 mod membership;
+pub mod publisher_profiles;
 pub mod ratelimit;
 pub mod realm_management;
 pub mod realm_profile;
@@ -173,6 +174,21 @@ pub async fn create_issuer_state(
     let issuer = AIdIssuer::new(signer_client, issuer_config, cancel)
         .await
         .context("Failed to create Issuer issuer")?;
+
+    // Registration re-checks a registered publisher's Publisher Profile
+    // against its domain before trusting this Loran's registry row: fetched
+    // through the SSRF-checked cache, accepted under the pins stored at
+    // `register_publisher` time, and failing closed while it cannot be
+    // re-checked (`publisher_profiles`).
+    let fetcher = Arc::new(platform::net::CachedFetcher::new(
+        // The refresher owns successful and failed check lifetimes. A second
+        // cache must not delay a missing-key refresh or a 60-second retry.
+        std::time::Duration::ZERO,
+        10,
+    ));
+    let issuer = issuer.with_publisher_profiles(Arc::new(
+        publisher_profiles::PublisherProfileRefresher::with_defaults(fetcher),
+    ));
 
     let state = if let Some(ctr) = counters {
         IssuerState::new(issuer).with_counters(ctr)

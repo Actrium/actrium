@@ -46,6 +46,7 @@
 //! # }
 //! ```
 
+use crate::publisher_profiles::PublisherProfileRefresher;
 use crate::signer_client_wrapper::SignerClientWrapper;
 use crate::sn::{AIdSerialNumberIssuer, SerialNumber};
 
@@ -254,6 +255,9 @@ pub struct AIdIssuer {
     realm_keys: Arc<RwLock<HashMap<String, (u32, VerifyingKey)>>>,
     /// Issuer configuration (public for renewal handler access).
     pub config: IssuerConfig,
+    /// Registration-time Publisher Profile freshness; `None` leaves package
+    /// provenance to the Publisher Registry row alone (isolated test setups).
+    publisher_profiles: Option<Arc<PublisherProfileRefresher>>,
 }
 
 impl AIdIssuer {
@@ -280,6 +284,7 @@ impl AIdIssuer {
             signer_client,
             realm_keys: Arc::new(RwLock::new(HashMap::new())),
             config,
+            publisher_profiles: None,
         };
 
         // Retirements are read from the Realm database, which callers
@@ -293,6 +298,14 @@ impl AIdIssuer {
         }
 
         Ok(issuer)
+    }
+
+    /// Wire the registration-time Publisher Profile freshness check. The
+    /// server composition always wires one; without it, package provenance
+    /// falls back to the Publisher Registry row alone.
+    pub fn with_publisher_profiles(mut self, refresher: Arc<PublisherProfileRefresher>) -> Self {
+        self.publisher_profiles = Some(refresher);
+        self
     }
 
     /// Process a register request from `signer`, whose Realm client key
@@ -669,7 +682,10 @@ impl AIdIssuer {
     /// publisher name the registry does not hold gives a development identity,
     /// verified with the `signing_public_key` the request carries. A name the
     /// registry holds is never a development identity, so a development key
-    /// cannot claim a trusted Publisher.
+    /// cannot claim a trusted Publisher. When a
+    /// [`PublisherProfileRefresher`] is wired, the registry row is re-checked
+    /// against the publisher domain's current Publisher Profile first
+    /// ([`Self::resolve_package_key`]).
     ///
     /// Whether the package was published to this Loran does not choose the
     /// path. The registry is consulted as a revocation source only: a revoked
@@ -802,15 +818,12 @@ impl AIdIssuer {
         }
 
         let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool);
-        let (public_key, provenance) = match manager
-            .package_signing_key(&actr_type.publisher, signing_key_id)
-            .await
-            .map_err(Self::map_publisher_verification_error)?
+        let (public_key, provenance) = match self
+            .resolve_package_key(&manager, &actr_type.publisher, signing_key_id, &type_str)
+            .await?
         {
-            actrix_publisher_registry::manager::PackageSigningKey::Trusted(info) => {
-                (info.public_key, Provenance::Publisher)
-            }
-            actrix_publisher_registry::manager::PackageSigningKey::Untrusted => {
+            Some(public_key) => (public_key, Provenance::Publisher),
+            None => {
                 let key = request
                     .signing_public_key
                     .as_ref()
@@ -859,6 +872,69 @@ impl AIdIssuer {
             provenance
         );
         Ok(provenance)
+    }
+
+    /// Resolve the package signing key `signing_key_id` of `publisher` to a
+    /// public key of a trusted Publisher identity.
+    ///
+    /// The Publisher Registry row is a projection captured by
+    /// `register_publisher`; when a refresher is wired, the publisher's
+    /// domain is re-checked first so a key the domain has removed is revoked
+    /// here on this registration instead of waiting for a re-registration.
+    /// `Ok(None)` means no registry record holds the publisher name; the
+    /// caller may then fall back to a development identity. A refresh that
+    /// finds the key gone is a final refusal, never a downgrade.
+    async fn resolve_package_key(
+        &self,
+        manager: &actrix_publisher_registry::PublisherRegistryManager,
+        publisher: &str,
+        signing_key_id: &str,
+        type_str: &str,
+    ) -> Result<Option<String>, AidError> {
+        use actrix_publisher_registry::manager::PackageSigningKey;
+
+        let resolved = manager.package_signing_key(publisher, signing_key_id).await;
+        let refresh = match resolved {
+            Ok(PackageSigningKey::Untrusted) => return Ok(None),
+            Ok(PackageSigningKey::Trusted(info)) => {
+                let Some(refresher) = &self.publisher_profiles else {
+                    return Ok(Some(info.public_key));
+                };
+                refresher.ensure_current(publisher).await
+            }
+            Err(actrix_publisher_registry::PublisherRegistryError::NotFound)
+                if self.publisher_profiles.is_some() =>
+            {
+                // The publisher exists, but its registry projection may not
+                // contain a key newly added to the domain's Profile.
+                self.publisher_profiles
+                    .as_ref()
+                    .unwrap()
+                    .refresh_missing_key(publisher)
+                    .await
+            }
+            Err(error) => return Err(Self::map_publisher_verification_error(error)),
+        };
+        refresh.map_err(|error| {
+                platform::recording::warn!(
+                    "Package verification failed: Publisher Profile refresh: {error}; type_str={type_str}"
+                );
+                AidError::GenerationFailed(format!("Publisher Profile refresh: {error}"))
+            })?;
+        match manager
+            .package_signing_key(publisher, signing_key_id)
+            .await
+            .map_err(Self::map_publisher_verification_error)?
+        {
+            PackageSigningKey::Trusted(info) => Ok(Some(info.public_key)),
+            PackageSigningKey::Untrusted => {
+                platform::recording::warn!(
+                    "Package verification rejected: the Publisher Profile of {publisher} no longer \
+                     trusts key {signing_key_id}; type_str={type_str}"
+                );
+                Err(AidError::PublisherNotVerified)
+            }
+        }
     }
 
     fn map_publisher_verification_error(

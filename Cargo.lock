@@ -563,6 +563,7 @@ dependencies = [
  "actrix-turn",
  "aes-gcm",
  "anyhow",
+ "async-trait",
  "axum",
  "base64",
  "chrono",

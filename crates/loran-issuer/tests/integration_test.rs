@@ -16,6 +16,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use base64::Engine as _;
+use issuer::publisher_profiles::{PublicDocumentFetcher, PublisherProfileRefresher};
 use issuer::signer_client_wrapper::create_signer_client;
 use issuer::{
     handlers::{IssuerState, create_router},
@@ -31,7 +32,8 @@ use signer::{GrpcClient, GrpcClientConfig, KeyStorage, SignerServiceConfig, crea
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::path::Path;
-use std::sync::{LazyLock, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 use tokio::sync::oneshot;
@@ -4636,4 +4638,581 @@ async fn web_issuer_http_fixture() {
         assert_ne!(observed[0].1, observed[1].1, "retry reused the proof nonce");
     }
     env.shutdown_signer().await;
+}
+
+// ── Publisher Profile freshness at registration ───────────────────────────
+//
+// `register_publisher` captures the publisher domain's Publisher Profile into
+// this Loran's Publisher Registry once. These tests wire a
+// `PublisherProfileRefresher` so registration re-checks the domain, and cover
+// what the captured projection alone cannot: a key the domain has removed, an
+// unreachable domain, and a rolled-back Profile.
+
+/// Serves one canned descriptor for every fetch; counts the calls.
+struct StubFetcher {
+    response: Mutex<Result<Arc<[u8]>, String>>,
+    calls: AtomicUsize,
+}
+
+impl StubFetcher {
+    fn serving(document: Vec<u8>) -> Arc<Self> {
+        Arc::new(Self {
+            response: Mutex::new(Ok(Arc::from(document))),
+            calls: AtomicUsize::new(0),
+        })
+    }
+
+    fn failing(message: &str) -> Arc<Self> {
+        Arc::new(Self {
+            response: Mutex::new(Err(message.to_string())),
+            calls: AtomicUsize::new(0),
+        })
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+
+    fn serve(&self, document: Vec<u8>) {
+        *self.response.lock().unwrap() = Ok(Arc::from(document));
+    }
+}
+
+#[async_trait::async_trait]
+impl PublicDocumentFetcher for StubFetcher {
+    async fn fetch(&self, _url: &str) -> Result<Arc<[u8]>, platform::net::FetchError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        tokio::task::yield_now().await;
+        self.response
+            .lock()
+            .unwrap()
+            .clone()
+            .map_err(platform::net::FetchError::new)
+    }
+}
+
+/// The signed `publisher` member for `domain`: `root` (id `root-1`) signs the
+/// Profile; `package_keys` lists package signing keys with their status.
+fn signed_publisher_profile(
+    domain: &str,
+    sequence: u64,
+    root: &ed25519_dalek::SigningKey,
+    package_keys: &[(&ed25519_dalek::SigningKey, &str)],
+) -> serde_json::Value {
+    let member = |id: &str, key: &ed25519_dalek::SigningKey, status: &str| {
+        serde_json::json!({
+            "id": id,
+            "algorithm": "Ed25519",
+            "status": status,
+            "public_key": base64::prelude::BASE64_STANDARD.encode(key.verifying_key().to_bytes()),
+        })
+    };
+    let now = chrono::Utc::now();
+    let mut profile = serde_json::json!({
+        "schema": "actr.publisher/v1",
+        "sequence": sequence,
+        "domain": domain,
+        "profile_signing_keys": [member("root-1", root, "active")],
+        "keys": package_keys
+            .iter()
+            .map(|(package, status)| member(
+                &actr_protocol::package_key_id(package.verifying_key().as_bytes()),
+                package,
+                status,
+            ))
+            .collect::<Vec<_>>(),
+        "profile_issued_at": (now - chrono::Duration::hours(1)).to_rfc3339(),
+        "profile_expires_at": (now + chrono::Duration::days(30)).to_rfc3339(),
+    });
+    actr_protocol::realm_profile::sign_document(&mut profile, "root-1", root);
+    profile
+}
+
+/// `domain`'s authority descriptor carrying its signed Publisher Profile.
+fn publisher_descriptor(domain: &str, profile: serde_json::Value) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "version": 1,
+        "authority": format!("actr://{domain}"),
+        "services": [{ "rel": "contracts", "href": format!("https://{domain}/contracts") }],
+        "publisher": profile,
+    }))
+    .unwrap()
+}
+
+/// The registration baseline: the Profile `register_publisher` accepts into
+/// this Loran's Publisher Registry.
+async fn register_publisher_from_profile(domain: &str, profile: &serde_json::Value) {
+    let profile: actr_protocol::PublisherProfile =
+        serde_json::from_value(profile.clone()).expect("Publisher Profile");
+    let keys = profile
+        .verify(domain, chrono::Utc::now())
+        .expect("verify Publisher Profile");
+    let pool = platform::storage::db::get_database().get_pool().clone();
+    actrix_publisher_registry::PublisherRegistryManager::new(pool)
+        .register_publisher(domain, &profile, &keys)
+        .await
+        .expect("register publisher");
+}
+
+/// The registry row's `actr-pub-…` id of `package`.
+fn package_key_id_of(package: &ed25519_dalek::SigningKey) -> String {
+    actrix_publisher_registry::crypto::compute_key_id(&package.verifying_key().to_bytes())
+}
+
+/// The registry still lists the key when the registration arrives; the
+/// publisher's domain has removed it. Registration must be refused and the
+/// registry must agree afterwards — without a publisher re-registration.
+#[tokio::test]
+#[serial]
+async fn test_key_removed_by_the_domain_is_rejected_at_registration() {
+    use actrix_publisher_registry::manager::PackageSigningKey;
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let env = setup_test_environment().await;
+    let realm = "domain-removed-key@example.com";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+    let pool = platform::storage::db::get_database().get_pool().clone();
+
+    let domain = "rotated-publisher.example";
+    let root = SigningKey::generate(&mut OsRng);
+    let package = SigningKey::generate(&mut OsRng);
+    let successor = SigningKey::generate(&mut OsRng);
+
+    let baseline = signed_publisher_profile(domain, 1, &root, &[(&package, "active")]);
+    register_publisher_from_profile(domain, &baseline).await;
+    let key_id = package_key_id_of(&package);
+    let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool.clone());
+    assert!(
+        matches!(
+            manager.package_signing_key(domain, &key_id).await.unwrap(),
+            PackageSigningKey::Trusted(_)
+        ),
+        "the registry projection alone still trusts the key"
+    );
+
+    // The domain has moved on: the key removed, a successor active.
+    let updated = signed_publisher_profile(domain, 2, &root, &[(&successor, "active")]);
+    let fetcher = StubFetcher::serving(publisher_descriptor(domain, updated));
+    let refresher = Arc::new(PublisherProfileRefresher::new(
+        fetcher.clone(),
+        Duration::ZERO,
+        Duration::ZERO,
+    ));
+
+    let request =
+        signed_package_request(domain, "notes", "1.0.0", realm, "wasm32-wasip1", &package);
+    let issuer = create_test_issuer(&env)
+        .await
+        .with_publisher_profiles(refresher);
+    let response = issuer
+        .issue_credential(&request, &owner(realm).await)
+        .await
+        .expect("issue");
+    assert_eq!(
+        error_code(&response),
+        Some(403),
+        "a key the domain removed must not register: {response:?}"
+    );
+    assert_eq!(fetcher.calls(), 1, "the registration checked the domain");
+    assert!(
+        manager.package_signing_key(domain, &key_id).await.is_err(),
+        "the refresh revoked the key in the registry"
+    );
+}
+
+/// A Profile the domain has not changed: registration succeeds, and a second
+/// registration reads the fresh check instead of fetching again.
+#[tokio::test]
+#[serial]
+async fn test_unchanged_profile_registers_with_one_fetch() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let env = setup_test_environment().await;
+    let realm = "fresh-profile@example.com";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+
+    let domain = "steady-publisher.example";
+    let root = SigningKey::generate(&mut OsRng);
+    let package = SigningKey::generate(&mut OsRng);
+
+    let baseline = signed_publisher_profile(domain, 1, &root, &[(&package, "active")]);
+    register_publisher_from_profile(domain, &baseline).await;
+    let fetcher = StubFetcher::serving(publisher_descriptor(domain, baseline));
+    let refresher = Arc::new(PublisherProfileRefresher::new(
+        fetcher.clone(),
+        Duration::from_secs(3600),
+        Duration::from_secs(60),
+    ));
+    let issuer = create_test_issuer(&env)
+        .await
+        .with_publisher_profiles(refresher);
+
+    for name in ["notes", "other-notes"] {
+        let request =
+            signed_package_request(domain, name, "1.0.0", realm, "wasm32-wasip1", &package);
+        let response = issuer
+            .issue_credential(&request, &owner(realm).await)
+            .await
+            .expect("issue");
+        match response.result.expect("result") {
+            register_response::Result::Success(ok) => {
+                assert_eq!(
+                    development(&ok),
+                    None,
+                    "{name}: keeps the Publisher identity"
+                )
+            }
+            register_response::Result::Error(err) => {
+                panic!("an unchanged Publisher Profile must register: {err:?}")
+            }
+        }
+    }
+    assert_eq!(
+        fetcher.calls(),
+        1,
+        "the second registration reads the fresh check"
+    );
+}
+
+/// While the domain cannot be reached, registration fails closed, and the
+/// failed check is not retried within the retry window.
+#[tokio::test]
+#[serial]
+async fn test_unreachable_publisher_domain_fails_closed_and_throttles() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let env = setup_test_environment().await;
+    let realm = "unreachable-domain@example.com";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+
+    let domain = "unreachable-publisher.example";
+    let root = SigningKey::generate(&mut OsRng);
+    let package = SigningKey::generate(&mut OsRng);
+
+    let baseline = signed_publisher_profile(domain, 1, &root, &[(&package, "active")]);
+    register_publisher_from_profile(domain, &baseline).await;
+    let fetcher = StubFetcher::failing("connection refused");
+    let refresher = Arc::new(PublisherProfileRefresher::new(
+        fetcher.clone(),
+        Duration::ZERO,
+        Duration::from_secs(60),
+    ));
+    let issuer = create_test_issuer(&env)
+        .await
+        .with_publisher_profiles(refresher);
+
+    for name in ["notes", "other-notes"] {
+        let request =
+            signed_package_request(domain, name, "1.0.0", realm, "wasm32-wasip1", &package);
+        let response = issuer
+            .issue_credential(&request, &owner(realm).await)
+            .await
+            .expect("issue");
+        assert_eq!(
+            error_code(&response),
+            Some(500),
+            "{name}: an unreachable domain must not fall back to the stale row: {response:?}"
+        );
+    }
+    assert_eq!(
+        fetcher.calls(),
+        1,
+        "the failed check is not retried within the retry window"
+    );
+}
+
+/// A domain serving an older Profile than the accepted baseline is a
+/// rollback; registration is refused and the baseline stays.
+#[tokio::test]
+#[serial]
+async fn test_rolled_back_profile_is_rejected() {
+    use actrix_publisher_registry::manager::PackageSigningKey;
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let env = setup_test_environment().await;
+    let realm = "rolled-back-profile@example.com";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+    let pool = platform::storage::db::get_database().get_pool().clone();
+
+    let domain = "rollback-publisher.example";
+    let root = SigningKey::generate(&mut OsRng);
+    let package = SigningKey::generate(&mut OsRng);
+
+    let baseline = signed_publisher_profile(domain, 2, &root, &[(&package, "active")]);
+    register_publisher_from_profile(domain, &baseline).await;
+
+    let rolled_back = signed_publisher_profile(domain, 1, &root, &[(&package, "active")]);
+    let fetcher = StubFetcher::serving(publisher_descriptor(domain, rolled_back));
+    let refresher = Arc::new(PublisherProfileRefresher::new(
+        fetcher.clone(),
+        Duration::ZERO,
+        Duration::ZERO,
+    ));
+
+    let request =
+        signed_package_request(domain, "notes", "1.0.0", realm, "wasm32-wasip1", &package);
+    let issuer = create_test_issuer(&env)
+        .await
+        .with_publisher_profiles(refresher);
+    let response = issuer
+        .issue_credential(&request, &owner(realm).await)
+        .await
+        .expect("issue");
+    assert_eq!(
+        error_code(&response),
+        Some(500),
+        "a rolled-back Profile must not be accepted: {response:?}"
+    );
+
+    let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool);
+    assert!(
+        matches!(
+            manager
+                .package_signing_key(domain, &package_key_id_of(&package))
+                .await
+                .unwrap(),
+            PackageSigningKey::Trusted(_)
+        ),
+        "the accepted baseline stays"
+    );
+}
+
+/// A key the domain retired but still lists keeps verifying, like the
+/// documented `retired` package signing keys.
+#[tokio::test]
+#[serial]
+async fn test_key_retired_by_the_domain_still_registers() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let env = setup_test_environment().await;
+    let realm = "retired-key@example.com";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+
+    let domain = "retiring-publisher.example";
+    let root = SigningKey::generate(&mut OsRng);
+    let package = SigningKey::generate(&mut OsRng);
+    let successor = SigningKey::generate(&mut OsRng);
+
+    let baseline = signed_publisher_profile(domain, 1, &root, &[(&package, "active")]);
+    register_publisher_from_profile(domain, &baseline).await;
+
+    let updated = signed_publisher_profile(
+        domain,
+        2,
+        &root,
+        &[(&package, "retired"), (&successor, "active")],
+    );
+    let fetcher = StubFetcher::serving(publisher_descriptor(domain, updated));
+    let refresher = Arc::new(PublisherProfileRefresher::new(
+        fetcher.clone(),
+        Duration::ZERO,
+        Duration::ZERO,
+    ));
+
+    let request =
+        signed_package_request(domain, "notes", "1.0.0", realm, "wasm32-wasip1", &package);
+    let issuer = create_test_issuer(&env)
+        .await
+        .with_publisher_profiles(refresher);
+    let response = issuer
+        .issue_credential(&request, &owner(realm).await)
+        .await
+        .expect("issue");
+    match response.result.expect("result") {
+        register_response::Result::Success(ok) => {
+            assert_eq!(
+                development(&ok),
+                None,
+                "a retired key keeps its Publisher identity"
+            )
+        }
+        register_response::Result::Error(err) => {
+            panic!("a retired-but-listed key must keep verifying: {err:?}")
+        }
+    }
+}
+
+/// A publisher name no registry record holds is a development identity; the
+/// freshness check must not fetch a Profile for it.
+#[tokio::test]
+#[serial]
+async fn test_development_identity_registers_without_fetching_a_profile() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let env = setup_test_environment().await;
+    let realm = "dev-identity-no-fetch@example.com";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+
+    let fetcher = StubFetcher::failing("a development identity must not fetch a Profile");
+    let refresher = Arc::new(PublisherProfileRefresher::new(
+        fetcher.clone(),
+        Duration::ZERO,
+        Duration::ZERO,
+    ));
+    let issuer = create_test_issuer(&env)
+        .await
+        .with_publisher_profiles(refresher);
+
+    let key = SigningKey::generate(&mut OsRng);
+    let request = signed_package_request(
+        "stranger.example",
+        "notes",
+        "1.0.0",
+        realm,
+        "wasm32-wasip1",
+        &key,
+    );
+    let response = issuer
+        .issue_credential(&request, &owner(realm).await)
+        .await
+        .expect("issue");
+    match response.result.expect("result") {
+        register_response::Result::Success(ok) => {
+            assert_eq!(
+                development(&ok),
+                Some(true),
+                "an unknown publisher stays development"
+            )
+        }
+        register_response::Result::Error(err) => {
+            panic!("a valid development package must register: {err:?}")
+        }
+    }
+    assert_eq!(fetcher.calls(), 0);
+}
+
+/// A new domain key must trigger discovery even when the projection has
+/// never seen it, including when an earlier key's check is still fresh.
+#[tokio::test]
+#[serial]
+async fn test_new_domain_key_refreshes_before_registration() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    for cached in [false, true] {
+        let mut env = setup_test_environment().await;
+        let realm = if cached {
+            "cached-new-domain-key@example.com"
+        } else {
+            "new-domain-key@example.com"
+        };
+        seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+        let domain = if cached {
+            "cached-new-key-publisher.example"
+        } else {
+            "new-key-publisher.example"
+        };
+        let root = SigningKey::generate(&mut OsRng);
+        let old = SigningKey::generate(&mut OsRng);
+        let new = SigningKey::generate(&mut OsRng);
+        let baseline = signed_publisher_profile(domain, 1, &root, &[(&old, "active")]);
+        register_publisher_from_profile(domain, &baseline).await;
+        let fetcher = StubFetcher::serving(publisher_descriptor(domain, baseline));
+        let issuer = create_test_issuer(&env)
+            .await
+            .with_publisher_profiles(Arc::new(PublisherProfileRefresher::new(
+                fetcher.clone(),
+                Duration::from_secs(3600),
+                Duration::ZERO,
+            )));
+        if cached {
+            let request =
+                signed_package_request(domain, "old-notes", "1.0.0", realm, "wasm32-wasip1", &old);
+            let response = issuer
+                .issue_credential(&request, &owner(realm).await)
+                .await
+                .unwrap();
+            assert_eq!(error_code(&response), None, "{response:?}");
+        }
+        let updated =
+            signed_publisher_profile(domain, 2, &root, &[(&old, "retired"), (&new, "active")]);
+        fetcher.serve(publisher_descriptor(domain, updated));
+        let request =
+            signed_package_request(domain, "new-notes", "1.0.0", realm, "wasm32-wasip1", &new);
+        let response = issuer
+            .issue_credential(&request, &owner(realm).await)
+            .await
+            .unwrap();
+        match response.result.unwrap() {
+            register_response::Result::Success(ok) => assert_eq!(development(&ok), None),
+            other => panic!("new key must register, cached={cached}: {other:?}"),
+        }
+        assert_eq!(fetcher.calls(), if cached { 2 } else { 1 });
+        let manager = actrix_publisher_registry::PublisherRegistryManager::new(
+            platform::storage::db::get_database().get_pool().clone(),
+        );
+        assert!(matches!(
+            manager
+                .package_signing_key(domain, &package_key_id_of(&new))
+                .await
+                .unwrap(),
+            actrix_publisher_registry::manager::PackageSigningKey::Trusted(_)
+        ));
+        env.shutdown_signer().await;
+    }
+}
+
+/// Repeated unknown-key requests must neither hammer the publisher domain
+/// nor downgrade a registered publisher to a development identity.
+#[tokio::test]
+#[serial]
+async fn test_missing_domain_key_is_rejected_with_one_fetch_per_retry_window() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+    let env = setup_test_environment().await;
+    let realm = "missing-domain-key@example.com";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+    let domain = "missing-key-publisher.example";
+    let root = SigningKey::generate(&mut OsRng);
+    let package = SigningKey::generate(&mut OsRng);
+    let unknown = SigningKey::generate(&mut OsRng);
+    let profile = signed_publisher_profile(domain, 1, &root, &[(&package, "active")]);
+    register_publisher_from_profile(domain, &profile).await;
+    let fetcher = StubFetcher::serving(publisher_descriptor(domain, profile));
+    let issuer = create_test_issuer(&env)
+        .await
+        .with_publisher_profiles(Arc::new(PublisherProfileRefresher::with_defaults(
+            fetcher.clone(),
+        )));
+    for name in ["notes", "other-notes"] {
+        let request =
+            signed_package_request(domain, name, "1.0.0", realm, "wasm32-wasip1", &unknown);
+        let response = issuer
+            .issue_credential(&request, &owner(realm).await)
+            .await
+            .unwrap();
+        assert_eq!(error_code(&response), Some(403), "{response:?}");
+    }
+    assert_eq!(fetcher.calls(), 1);
+}
+
+/// Checks arriving while a fetch is in progress share that accepted result.
+#[tokio::test]
+#[serial]
+async fn test_concurrent_publisher_profile_checks_share_one_fetch() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+    let _env = setup_test_environment().await;
+    let domain = "concurrent-publisher.example";
+    let root = SigningKey::generate(&mut OsRng);
+    let package = SigningKey::generate(&mut OsRng);
+    let profile = signed_publisher_profile(domain, 1, &root, &[(&package, "active")]);
+    register_publisher_from_profile(domain, &profile).await;
+    let fetcher = StubFetcher::serving(publisher_descriptor(domain, profile));
+    let refresher = PublisherProfileRefresher::with_defaults(fetcher.clone());
+    let (a, b, c) = tokio::join!(
+        refresher.ensure_current(domain),
+        refresher.ensure_current(domain),
+        refresher.ensure_current(domain),
+    );
+    a.unwrap();
+    b.unwrap();
+    c.unwrap();
+    assert_eq!(fetcher.calls(), 1);
 }
