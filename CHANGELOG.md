@@ -36,6 +36,28 @@ an abort that discards buffered chunks.
   `dataChunks(streamId, { capacity })` (single-consumer
   `AsyncIterable<DataChunkEvent>`) and `dataChunkSink(target, streamId,
   payloadType)`.
+- **Component Model ABI**: the WIT world moves to `actr:workload@0.8.0`. The
+  `data-chunk` record gains `end-of-stream`, and `register-stream` takes an
+  optional `capacity` so the guest's queue bound applies to the host-side
+  subscription too. Packages built against older worlds are rejected at load
+  with a rebuild hint.
+- **Abort vs graceful end**: sinks gain `abort()` (Rust / FFI / Swift /
+  Kotlin DSL), which seals the sink WITHOUT emitting the end-of-stream
+  marker — the right failure-path tool; a graceful `close()` on a broken
+  sink would otherwise report an end the peer should not trust.
+- **Marker validation**: an `end_of_stream` chunk carrying a payload is a
+  protocol violation — senders reject it (`InvalidArgument`), and a
+  receiving stream surfaces one terminal `DecodeFailure` error instead of a
+  clean end.
+- **Marker sender inspection**: `DataChunkStream::end_marker`, the FFI
+  `endMarker()` / `endedByMarker()`, and the Swift `DataChunkSequence`
+  equivalents expose the terminating marker and its
+  transport-authenticated sender, so apps that pin a stream to one producer
+  can detect a foreign terminator.
+- **C ABI**: `actr-cabi.h` publishes `ACTR_CHUNK_FLAG_END_OF_STREAM` (0x02)
+  on the stream sink callback, and ActrSharp's `ActrStreamChunk` gains
+  `EndOfStream`. `actr_stream_listen` no longer keeps the `ActrRef` alive
+  for the listener's lifetime.
 
 Behavior changes to note:
 

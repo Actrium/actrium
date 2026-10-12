@@ -1358,7 +1358,16 @@ async fn host_operation_handler(
                 retire_stream_forwarder(&stale).await;
             }
 
-            let mut stream = match ctx.data_chunks(stream_id.clone(), Default::default()).await {
+            // The guest's queue capacity becomes the host-side subscription
+            // bound, so the documented backpressure holds end to end instead
+            // of being off by the host default.
+            let stream_options = req
+                .capacity
+                .map(|capacity| actr_framework::DataChunkStreamOptions {
+                    capacity: capacity as usize,
+                })
+                .unwrap_or_default();
+            let mut stream = match ctx.data_chunks(stream_id.clone(), stream_options).await {
                 Ok(stream) => stream,
                 Err(e) => {
                     tracing::error!("register_stream failed: {e:?}");
@@ -1383,8 +1392,10 @@ async fn host_operation_handler(
             // One forwarder task per registration: pulls events from the
             // stream and delivers each to the guest through the runner's
             // data-chunk dispatch. Bounded by the guest's own registration
-            // count; it exits on stream end, runner termination, delivery
-            // failure, or an explicit guest unregister.
+            // count; it exits on stream end, runner termination, the guest
+            // reporting its subscription gone (NotFound), or an explicit
+            // guest unregister. Other delivery failures drop the chunk and
+            // keep the subscription alive.
             tokio::spawn(async move {
                 use futures_util::StreamExt;
                 loop {
@@ -1491,11 +1502,35 @@ async fn host_operation_handler(
                         )
                         .await
                     {
+                        // Permanent "delivery can never succeed": the guest
+                        // reports its side of the subscription is gone
+                        // (NotFound — closed or dropped), or the workload can
+                        // never consume stream callbacks (NotImplemented —
+                        // linked workloads register directly on the runtime
+                        // context, so a guest forwarder has no consumer).
+                        // Retire the forwarder so the stream id is freed and
+                        // the registry entry is drained; neither case leaves a
+                        // live guest consumer behind.
+                        if matches!(error, ActrError::NotFound(_) | ActrError::NotImplemented(_)) {
+                            tracing::debug!(
+                                stream_id = %stream_id,
+                                "guest subscription is gone; retiring stream forwarder: {error:?}"
+                            );
+                            break;
+                        }
+                        // Any other failure drops this chunk but keeps the
+                        // subscription: the host→guest ABI has no stream-error
+                        // event, so a forwarder-initiated close would orphan
+                        // the guest-side stream (its sender would stay live
+                        // and next() would pend forever). Genuinely terminal
+                        // runner states surface as a failed Weak upgrade on
+                        // the next chunk (or at runner teardown), which is
+                        // where this loop is allowed to end.
                         tracing::warn!(
                             stream_id = %stream_id,
-                            "data chunk delivery to guest failed: {error:?}"
+                            "data chunk delivery to guest failed (dropped, stream kept): {error:?}"
                         );
-                        break;
+                        continue;
                     }
                 }
                 stream.close().await;

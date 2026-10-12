@@ -595,15 +595,14 @@ class BoundedQueue<T> {
  * so applications on lossy lanes should still back completion with a
  * timeout.
  *
- * Host-side teardown note: the subscription-time ctx token is retired once
- * the subscribing invocation returns, and calling a host import with a
- * retired token traps the store. `close()` therefore only calls
- * `hostUnregisterStream` with a token that is live right now (the explicit
- * ctx when its invocation is still active, the AsyncLocalStorage store on
- * Node, or any live token in the wasm guest); otherwise it tears down
- * locally and the host reclaims its registration on the next delivery (the
- * dispatch fails against the missing queue) or when the guest re-subscribes
- * (the host retires the stale forwarder first).
+ * Host-side teardown: `close()` unregisters through the host import with the
+ * captured (possibly retired) ctx token; the host routes this actor-global
+ * import through the instance's standing ABI when the token has no live
+ * entry, and resolves a close issued from inside this stream's own delivery
+ * to a cancel-only path, so the call is safe from any invocation state. The
+ * import is skipped only when the stream carries no ctx and no invocation is
+ * live — there is nothing to present; the host then reclaims the
+ * registration when a delivery finds the guest queue gone.
  */
 export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
   private iterator?: AsyncIterator<DataChunkEvent>;
@@ -622,7 +621,13 @@ export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
         streamQueues.delete(this.streamId);
         closingStreams.add(this.streamId);
         try {
-          const token = resolveLiveToken(this.ctx);
+          // Always unregister host-side: the captured (possibly retired)
+          // token is routed through the instance's standing ABI, and a close
+          // from inside this stream's own delivery resolves to a cancel-only
+          // host path — neither traps nor self-deadlocks. Skipping the
+          // import would leak the host forwarder whenever no further chunk
+          // arrives to trip its reclaim path.
+          const token = resolveStreamSendToken(this.ctx);
           if (token !== undefined) {
             await hostUnregisterStream(token, this.streamId);
           }
@@ -718,12 +723,10 @@ export class DataChunkSink {
       if (toUint8Array(chunk.payload).length > 0) {
         throw new Error('endOfStream marker must not carry a payload');
       }
-      // The application ended the stream explicitly; close() will not send
-      // a duplicate marker. If the delivery fails the state is rolled back
-      // so a later close() can retry the marker (see below).
-      this.endMarkerSent = true;
     }
-    this.lastSequence = BigInt(chunk.sequence);
+    // Resolve the token BEFORE mutating any state: every failure above this
+    // line leaves the sink reusable, and a token-resolution failure must not
+    // poison the marker/sequence bookkeeping that close() relies on.
     // Resolve the token NOW, while the caller's invocation is certainly
     // live; the host import executes at the end of the tail chain, possibly
     // after this invocation has settled — the host then falls back to the
@@ -735,6 +738,14 @@ export class DataChunkSink {
         'ACTR host import requires an InvocationCtx; the sink carries none and no invocation is live',
       );
     }
+    const isMarker = chunk.endOfStream === true;
+    if (isMarker) {
+      // The application ended the stream explicitly; close() will not send
+      // a duplicate marker. If the delivery fails the state is rolled back
+      // so a later close() can retry the marker (see below).
+      this.endMarkerSent = true;
+    }
+    this.lastSequence = BigInt(chunk.sequence);
     const send = this.tail.then(() =>
       hostSendDataChunk(token, toWitDest(this.target), toWitDataChunk(chunk), {
         tag: this.payloadType,
@@ -742,7 +753,7 @@ export class DataChunkSink {
     );
     // Later sends queue behind this one even if it fails.
     this.tail = send.catch(() => undefined);
-    if (chunk.endOfStream === true) {
+    if (isMarker) {
       // A failed marker send leaves the close path retryable.
       send.catch(() => {
         this.endMarkerSent = false;
@@ -822,11 +833,13 @@ export async function dataChunks(
     throw new Error(`stream '${streamId}' already has an active subscription`);
   }
   // Reserve the ID before yielding so concurrent registrations cannot replace
-  // each other's host forwarder or guest queue.
+  // each other's host forwarder or guest queue. The capacity crosses the
+  // boundary so the host-side subscription applies the same backpressure
+  // bound as the guest queue.
   const queue = new BoundedQueue<DataChunkEvent>(capacity);
   streamQueues.set(streamId, queue);
   try {
-    await hostRegisterStream(resolveCtxToken(ctx), streamId);
+    await hostRegisterStream(resolveCtxToken(ctx), streamId, capacity);
   } catch (error) {
     streamQueues.delete(streamId);
     queue.close();
@@ -871,6 +884,13 @@ export async function __dispatchDataChunk(
     throw new Error(`No stream subscription for ${chunk.streamId}`);
   }
   await queue.enqueue({ chunk, sender });
+}
+
+/** Whether a live `dataChunks()` subscription exists for `streamId`. The
+ * componentize shim uses it to keep the legacy `onDataChunk` hook from
+ * shadowing the stream-first API. */
+export function __hasStreamSubscription(streamId: string): boolean {
+  return streamQueues.has(streamId);
 }
 
 function validateTimeout(timeoutMs: bigint | number): bigint {

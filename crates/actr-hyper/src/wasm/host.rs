@@ -268,12 +268,16 @@ impl HostState {
             .map(|e| Arc::clone(&e.host_abi))
     }
 
-    /// Resolve the ABI for an actor-global stream import (`send-data-chunk`).
+    /// Resolve the ABI for an actor-global stream import (`send-data-chunk`,
+    /// `register-stream`, `unregister-stream`).
     /// Falls back to the most recently allocated invocation's ABI when the
     /// presented token has no live entry: a sink captured by a detached guest
     /// consumer outlives its creating invocation, and a chunk send carries no
     /// invocation-scoped reply state, so routing by instance identity is
-    /// sound. Request-scoped imports (call/tell/reply/discover) stay
+    /// sound. Register/unregister are likewise actor-global — the forwarder
+    /// table they mutate is node-scoped — so a guest closing or subscribing
+    /// from a detached/resident task may present its captured (retired)
+    /// token. Request-scoped imports (call/tell/reply/discover) stay
     /// fail-closed on unknown tokens.
     pub(crate) fn stream_host_abi(&self, token: u64) -> Option<HostAbiFn> {
         self.invocation_host_abi(token)
@@ -612,12 +616,12 @@ impl WasmHost {
     /// Probes the component's exported world and rejects anything that is not
     /// the sole supported `actr:workload@0.8.0` async world, then instantiates
     /// it on the `run_concurrent` async path via [`WasmWorkloadV2::instantiate`].
-    /// Retired `@0.1.0` through `@0.5.0` packages (or an unrecognised world)
+    /// Retired `@0.1.0` through `@0.7.0` packages (or an unrecognised world)
     /// are rejected with an actionable rebuild hint rather than loaded.
     ///
     /// Builds a fresh [`Linker`] per instance (cheap) inside the V2
     /// instantiation helper, registers WASI p2 as well as the generated
-    /// `actr:workload/host@0.6.0` linker, and runs `Component::instantiate_async`.
+    /// `actr:workload/host@0.8.0` linker, and runs `Component::instantiate_async`.
     pub(crate) async fn instantiate(&self) -> WasmResult<WasmWorkloadV2> {
         let store_permit = acquire_store(&self.limits)?;
         probe_world(&self.component, &self.engine)?;
@@ -643,10 +647,11 @@ impl WasmHost {
 /// so it reflects what the binary actually exports.
 ///
 /// A component exporting a retired world (`@0.1.0` synchronous, the
-/// `@0.2.0`/`@0.3.0` async worlds, the pre-state-hook `@0.4.0`, or the
-/// pre-EXPLICIT-reply `@0.5.0`) — or no recognised world at all — is rejected
-/// with an actionable rebuild hint. Older packages must be rebuilt with the
-/// current SDK, which emits only the 0.8.0 async-world ABI.
+/// `@0.2.0`/`@0.3.0` async worlds, the pre-state-hook `@0.4.0`, the
+/// pre-EXPLICIT-reply `@0.5.0`, or the pre-end-of-stream `@0.7.0`) — or no
+/// recognised world at all — is rejected with an actionable rebuild hint.
+/// Older packages must be rebuilt with the current SDK, which emits only the
+/// 0.8.0 async-world ABI.
 fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
     let mut saw_v08 = false;
     let mut saw_v07 = false;
@@ -696,7 +701,10 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
     }
     if saw_v07 {
         return Err(WasmError::LoadFailed(
-            "component exports the retired actr:workload@0.7.0 world with the old Actor identity record; rebuild the package with the current SDK, which emits actr:workload@0.8.0".to_string(),
+            "component exports the retired actr:workload@0.7.0 world, whose Actor identity \
+             record and data-chunk record (no end-of-stream marker) predate this \
+             contract; rebuild the package with the current SDK, which emits \
+             actr:workload@0.8.0".to_string(),
         ));
     }
     if saw_v5 {

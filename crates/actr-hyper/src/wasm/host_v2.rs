@@ -308,10 +308,16 @@ impl HostWithStore<HostState> for HostState {
         accessor: &Accessor<HostState, Self>,
         ctx_token: u64,
         stream_id: String,
+        capacity: Option<u32>,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
-        let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
+        // Actor-global like send-data-chunk: a guest subscribing from a
+        // detached/resident task presents its captured (possibly retired)
+        // token, and the forwarder table it lands in is node-scoped, so
+        // routing by instance identity is sound.
+        let host_abi = accessor.with(|mut a| a.get().stream_host_abi(ctx_token));
         let op = HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: stream_id.clone(),
+            capacity,
         });
         match run_host_operation(host_abi, op).await? {
             Ok(_) => {
@@ -329,7 +335,10 @@ impl HostWithStore<HostState> for HostState {
         ctx_token: u64,
         stream_id: String,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
-        let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
+        // Actor-global like send-data-chunk: close()/drop routinely runs
+        // after the subscribing invocation retired, and the forwarder table
+        // is node-scoped, so the standing ABI routes this correctly.
+        let host_abi = accessor.with(|mut a| a.get().stream_host_abi(ctx_token));
         let op = HostOperation::UnregisterStream(HostUnregisterStreamV1 {
             stream_id: stream_id.clone(),
         });
@@ -1250,14 +1259,17 @@ impl WasmWorkloadV2 {
         }
     }
 
-    /// Drive one DataChunk fast-path chunk.
+    /// Drive one DataChunk fast-path chunk. The outer error is a
+    /// transport-level failure (trap/timeout poison); the inner error is the
+    /// guest's typed `actr-error`, preserved so callers can react to
+    /// structural signals like `NotFound` (guest subscription gone).
     pub(crate) async fn handle_data_chunk(
         &mut self,
         chunk: DataChunk,
         sender: ActrId,
         ctx: InvocationContext,
         host_abi: &HostAbiFn,
-    ) -> WasmResult<()> {
+    ) -> WasmResult<ActorResult<()>> {
         self.ensure_instance().await?;
         let _invocation_permit = acquire_invocation(&self.limits)?;
         self.reseed_fuel()?;
@@ -1311,12 +1323,11 @@ impl WasmWorkloadV2 {
         match region {
             Err(trap) => Err(self.trap_poison("on_data_chunk", trap)),
             Ok(call) => match call {
-                Ok(inner) => inner.map_err(|e| {
-                    WasmError::ExecutionFailed(format!(
-                        "on_data_chunk error: {:?}",
-                        wit_actr_error_to_proto(e)
-                    ))
-                }),
+                // The guest's typed error is preserved (not flattened into a
+                // string): the stream forwarder retires a subscription whose
+                // guest side reports NotFound (its consumer is gone), while
+                // treating transport-level failures as recoverable.
+                Ok(inner) => Ok(inner.map_err(wit_actr_error_to_proto)),
                 Err(trap) => Err(self.trap_poison("on_data_chunk", trap)),
             },
         }
@@ -1878,6 +1889,16 @@ fn classify_unit(label: &str, res: Result<(), WitActrError>) -> ActorResult<()> 
     }
 }
 
+/// Classify the guest's data-chunk result, preserving its typed error: the
+/// stream forwarder retires a subscription whose guest side reports
+/// `NotFound` (its consumer is gone), so the variant must survive.
+fn classify_data_chunk(res: Result<(), WitActrError>) -> ActorResult<()> {
+    match res {
+        Ok(()) => Ok(()),
+        Err(wit_err) => Err(wit_actr_error_to_proto(wit_err)),
+    }
+}
+
 /// The resident `select!` loop that runs *inside* the live `run_concurrent`
 /// region. Accepts new commands off `cmd_rx`, drives dispatches concurrently in
 /// a `FuturesUnordered`, and runs every non-dispatch command as a barrier.
@@ -2362,7 +2383,7 @@ async fn run_barrier(
                 .expect("reply ledger mutex poisoned")
                 .remove(&token)
             {
-                reply.send(classify_unit("on_data_chunk", call_result));
+                reply.send(classify_data_chunk(call_result));
             }
             BarrierNext::Continue
         }

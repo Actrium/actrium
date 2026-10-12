@@ -149,9 +149,15 @@ impl MessageDispatcher for RecordingDispatcher {
             }
             "finish" => {
                 let stream = String::from_utf8(payload.to_vec()).unwrap();
-                if let Some(handle) = w.0.stream_tasks.lock().unwrap().remove(&stream) {
-                    // Aborting drops the stream, which unregisters it.
+                // Drop the map guard before awaiting: holding it across the
+                // join would make the dispatch future non-Send.
+                let handle = w.0.stream_tasks.lock().unwrap().remove(&stream);
+                if let Some(handle) = handle {
+                    // Aborting drops the stream, which unregisters it;
+                    // awaiting the handle makes the unregister complete
+                    // before finish returns (no absorb window needed).
                     handle.abort();
+                    let _ = handle.await;
                 }
                 w.0.record(format!("finished:{stream}"), Bytes::new());
             }

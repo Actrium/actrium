@@ -583,6 +583,7 @@ async-trait = "0.1"
 prost = "0.14"
 prost-types = "0.14"
 bytes = "1"
+futures-util = { version = "0.3", features = ["sink"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(actr_has_generated)'] }

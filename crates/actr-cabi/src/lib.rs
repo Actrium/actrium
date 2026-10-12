@@ -1111,6 +1111,32 @@ pub unsafe extern "C" fn actr_stream_listen(
         };
         let ud = user_data as usize;
         let ref_key = ref_handle as usize;
+        // Insert the listener entry BEFORE spawning the forwarding task. An
+        // unlisten landing before the task's first await must still find and
+        // cancel it, and a duplicate listen must fail fast instead of
+        // parking a task no later unlisten can reach.
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        {
+            let mut listeners = stream_listeners().lock().unwrap();
+            if listeners.contains_key(&(ref_key, stream_id.clone())) {
+                emit_void_error(
+                    GENERIC_ERROR,
+                    "stream already has a listener",
+                    callback,
+                    user_data,
+                );
+                return GENERIC_ERROR;
+            }
+            listeners.insert((ref_key, stream_id.clone()), entry.clone());
+        }
+        let cancel = entry.cancel.clone();
+        let stream_id_fail = stream_id.clone();
+        let entry_fail = entry.clone();
+        let done_tx_fail = done_tx.clone();
         runtime::spawn_guarded(
             async move {
                 use futures_util::StreamExt;
@@ -1120,20 +1146,28 @@ pub unsafe extern "C" fn actr_stream_listen(
                 {
                     Ok(stream) => stream,
                     Err(e) => {
+                        // Roll back the pre-inserted entry (only ours: a
+                        // re-listen during teardown may already have
+                        // installed a newer listener for this stream) and
+                        // release any unlisten waiting on `done`.
+                        let mut listeners = stream_listeners().lock().unwrap();
+                        if listeners
+                            .get(&(ref_key, stream_id.clone()))
+                            .is_some_and(|current| std::sync::Arc::ptr_eq(current, &entry))
+                        {
+                            listeners.remove(&(ref_key, stream_id.clone()));
+                        }
+                        drop(listeners);
+                        let _ = done_tx.send(true);
                         emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void);
                         return;
                     }
                 };
-                let (done_tx, done_rx) = tokio::sync::watch::channel(false);
-                let entry = std::sync::Arc::new(StreamListener {
-                    cancel: tokio_util::sync::CancellationToken::new(),
-                    done: done_rx,
-                });
-                stream_listeners()
-                    .lock()
-                    .unwrap()
-                    .insert((ref_key, stream_id.clone()), entry.clone());
-                let cancel = entry.cancel.clone();
+                // The listener must not keep the ref alive for its whole
+                // lifetime: a host that releases it (without shutdown) must
+                // still run `ActrRefShared::drop`. The stream drives its own
+                // teardown once the runtime cancels it.
+                drop(actr_ref);
                 callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
                 // Forward until unlistened, the stream ends, or the node
                 // shuts down (runtime teardown terminates the stream).
@@ -1170,7 +1204,20 @@ pub unsafe extern "C" fn actr_stream_listen(
                 drop(listeners);
                 let _ = done_tx.send(true);
             },
-            move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
+            move |code| {
+                // Spawn/panic failure: roll back the pre-inserted listener
+                // entry so no immortal entry survives the dead task.
+                let mut listeners = stream_listeners().lock().unwrap();
+                if listeners
+                    .get(&(ref_key, stream_id_fail.clone()))
+                    .is_some_and(|current| std::sync::Arc::ptr_eq(current, &entry_fail))
+                {
+                    listeners.remove(&(ref_key, stream_id_fail));
+                }
+                drop(listeners);
+                let _ = done_tx_fail.send(true);
+                emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void)
+            },
         )
     })
 }
@@ -1380,6 +1427,43 @@ mod stream_listener_tests {
         done_tx.send(true).unwrap();
         first.await;
         second.await;
+    }
+
+    #[tokio::test]
+    async fn unlisten_before_listener_task_starts_still_cancels_it() {
+        // The listen path inserts its entry BEFORE spawning the forwarding
+        // task, so an unlisten racing the task's first poll must find and
+        // cancel it (previously the entry appeared only after the first
+        // await, and such an unlisten returned success over an immortal
+        // listener).
+        let key = (usize::MAX, "early-unlisten".to_owned());
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        stream_listeners()
+            .lock()
+            .unwrap()
+            .insert(key.clone(), entry.clone());
+
+        // Unlisten lands before the "task" ever runs.
+        let unlisten = tokio::spawn(stop_stream_listener(key.0, key.1.clone()));
+        tokio::task::yield_now().await;
+        assert!(entry.cancel.is_cancelled());
+
+        // The task finally starts: its first select arm observes the
+        // cancellation and runs teardown immediately (remove + done).
+        stream_listeners().lock().unwrap().remove(&key);
+        done_tx.send(true).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), unlisten)
+            .await
+            .expect("unlisten must complete")
+            .unwrap();
+        assert!(
+            stream_listeners().lock().unwrap().get(&key).is_none(),
+            "no listener entry survives the race"
+        );
     }
 
     #[tokio::test]

@@ -567,6 +567,10 @@ pub struct HostResolveDependencyV1 {
 pub struct HostRegisterStreamV1 {
     #[prost(string, tag = "1")]
     pub stream_id: String,
+    /// Guest-side queue capacity, so the host-side subscription applies the
+    /// same backpressure bound. `None` selects the host default.
+    #[prost(uint32, optional, tag = "2")]
+    pub capacity: Option<u32>,
 }
 
 /// Runtime guest->host DataChunk unregistration payload.

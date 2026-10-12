@@ -87,6 +87,27 @@ fn probe_world_accepts_current_v08_component() {
 }
 
 #[test]
+fn probe_world_rejects_retired_v07_component_with_rebuild_hint() {
+    let src = r#"
+        (component
+          (instance $v07)
+          (export "actr:workload/workload@0.7.0" (instance $v07))
+        )
+    "#;
+    let err = probe_wat(src).unwrap_err();
+    assert!(matches!(err, WasmError::LoadFailed(_)));
+    assert!(
+        err.to_string().contains("end-of-stream")
+            && err.to_string().contains("@0.7.0")
+            && err.to_string().contains("@0.8.0")
+            && err
+                .to_string()
+                .contains("rebuild the package with the current SDK"),
+        "unexpected message: {err}"
+    );
+}
+
+#[test]
 fn probe_world_rejects_retired_v06_component_with_rebuild_hint() {
     let src = r#"
         (component

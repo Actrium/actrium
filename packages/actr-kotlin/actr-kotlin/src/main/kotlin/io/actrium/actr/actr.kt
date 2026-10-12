@@ -965,11 +965,17 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_unregister_media_track(
     ): Short
+    external fun uniffi_actr_checksum_method_datachunksinkbridge_abort(
+    ): Short
     external fun uniffi_actr_checksum_method_datachunksinkbridge_close(
     ): Short
     external fun uniffi_actr_checksum_method_datachunksinkbridge_send(
     ): Short
     external fun uniffi_actr_checksum_method_datachunkstreambridge_close(
+    ): Short
+    external fun uniffi_actr_checksum_method_datachunkstreambridge_end_marker(
+    ): Short
+    external fun uniffi_actr_checksum_method_datachunkstreambridge_ended_by_marker(
     ): Short
     external fun uniffi_actr_checksum_method_datachunkstreambridge_next(
     ): Short
@@ -1136,6 +1142,8 @@ external fun uniffi_actr_fn_clone_datachunksinkbridge(`handle`: Long,uniffi_out_
 ): Long
 external fun uniffi_actr_fn_free_datachunksinkbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_actr_fn_method_datachunksinkbridge_abort(`ptr`: Long,
+): Long
 external fun uniffi_actr_fn_method_datachunksinkbridge_close(`ptr`: Long,
 ): Long
 external fun uniffi_actr_fn_method_datachunksinkbridge_send(`ptr`: Long,`chunk`: RustBuffer.ByValue,
@@ -1146,6 +1154,10 @@ external fun uniffi_actr_fn_free_datachunkstreambridge(`handle`: Long,uniffi_out
 ): Unit
 external fun uniffi_actr_fn_method_datachunkstreambridge_close(`ptr`: Long,
 ): Long
+external fun uniffi_actr_fn_method_datachunkstreambridge_end_marker(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_actr_fn_method_datachunkstreambridge_ended_by_marker(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 external fun uniffi_actr_fn_method_datachunkstreambridge_next(`ptr`: Long,
 ): Long
 external fun uniffi_actr_fn_clone_opusencoder(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1457,13 +1469,22 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_unregister_media_track() != 52187.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_method_datachunksinkbridge_abort() != 960.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_method_datachunksinkbridge_close() != 21245.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_datachunksinkbridge_send() != 21274.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_datachunkstreambridge_close() != 24663.toShort()) {
+    if (lib.uniffi_actr_checksum_method_datachunkstreambridge_close() != 39686.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_datachunkstreambridge_end_marker() != 41149.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_datachunkstreambridge_ended_by_marker() != 6848.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_datachunkstreambridge_next() != 30311.toShort()) {
@@ -3980,6 +4001,15 @@ public object FfiConverterTypeContextBridge: FfiConverter<ContextBridge, Long> {
 public interface DataChunkSinkBridgeInterface {
     
     /**
+     * Abort the sink: stop accepting new sends and wait for accepted sends
+     * to finish — WITHOUT emitting the end-of-stream marker. Use on failure
+     * paths (e.g. a transient send error) where the peer must not observe a
+     * graceful end. Idempotent; a later `close()` is a no-op because the
+     * marker window has passed.
+     */
+    suspend fun `abort`()
+    
+    /**
      * Stop accepting new sends, wait for already accepted sends to finish,
      * and close. Idempotent.
      */
@@ -4092,6 +4122,35 @@ open class DataChunkSinkBridge: Disposable, AutoCloseable, DataChunkSinkBridgeIn
         return uniffiRustCall() { status ->
             UniffiLib.uniffi_actr_fn_clone_datachunksinkbridge(handle, status)
         }
+    }
+
+    
+    /**
+     * Abort the sink: stop accepting new sends and wait for accepted sends
+     * to finish — WITHOUT emitting the end-of-stream marker. Use on failure
+     * paths (e.g. a transient send error) where the peer must not observe a
+     * graceful end. Idempotent; a later `close()` is a no-op because the
+     * marker window has passed.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `abort`() {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_datachunksinkbridge_abort(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
     }
 
     
@@ -4288,9 +4347,26 @@ public interface DataChunkStreamBridgeInterface {
     
     /**
      * Close the subscription: idempotent, never waits behind a pending
-     * `next()`, and wakes any pending `next()` with `Ok(None)`.
+     * `next()`, and wakes any pending `next()` with `Ok(None)`. The
+     * registry unregister runs synchronously, so a re-subscription issued
+     * right after this call cannot be rejected as a duplicate.
      */
     suspend fun `closeAsync`()
+    
+    /**
+     * The end-of-stream marker event that terminated the stream, if any.
+     * The sender is the transport-authenticated peer that sent it, so a
+     * consumer that pins a stream to one expected producer can detect a
+     * foreign terminator here.
+     */
+    fun `endMarker`(): DataChunkEventBridge?
+    
+    /**
+     * Whether the stream ended on the peer's in-band end-of-stream marker
+     * (as opposed to a local `close()` or runtime teardown). Meaningful
+     * after `next()` returned `None`; survives `close()`.
+     */
+    fun `endedByMarker`(): kotlin.Boolean
     
     /**
      * Wait for the next inbound chunk. Returns `None` at end of stream and
@@ -4407,7 +4483,9 @@ open class DataChunkStreamBridge: Disposable, AutoCloseable, DataChunkStreamBrid
     
     /**
      * Close the subscription: idempotent, never waits behind a pending
-     * `next()`, and wakes any pending `next()` with `Ok(None)`.
+     * `next()`, and wakes any pending `next()` with `Ok(None)`. The
+     * registry unregister runs synchronously, so a re-subscription issued
+     * right after this call cannot be rejected as a duplicate.
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
@@ -4429,6 +4507,43 @@ open class DataChunkStreamBridge: Disposable, AutoCloseable, DataChunkStreamBrid
         ActrException.ErrorHandler,
     )
     }
+
+    
+    /**
+     * The end-of-stream marker event that terminated the stream, if any.
+     * The sender is the transport-authenticated peer that sent it, so a
+     * consumer that pins a stream to one expected producer can detect a
+     * foreign terminator here.
+     */override fun `endMarker`(): DataChunkEventBridge? {
+            return FfiConverterOptionalTypeDataChunkEventBridge.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_actr_fn_method_datachunkstreambridge_end_marker(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Whether the stream ended on the peer's in-band end-of-stream marker
+     * (as opposed to a local `close()` or runtime teardown). Meaningful
+     * after `next()` returned `None`; survives `close()`.
+     */override fun `endedByMarker`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_actr_fn_method_datachunkstreambridge_ended_by_marker(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
 
     
     /**

@@ -351,7 +351,8 @@ async fn eof_consumer_starts_on_plain_chunk() {
             &unreachable_bridge(),
         )
         .await
-        .expect("chunk delivery");
+        .expect("chunk delivery")
+        .expect("guest accepted the chunk");
 
     let stats = workload
         .handle(
@@ -396,7 +397,8 @@ async fn guest_stream_ends_on_end_of_stream_marker() {
                 &unreachable_bridge(),
             )
             .await
-            .expect("chunk delivery");
+            .expect("chunk delivery")
+            .expect("guest accepted the chunk");
     }
 
     // The consumer counted both chunks and observed the stream end.
@@ -443,7 +445,8 @@ async fn serial_stream_consumer_rebinds_captured_context_token() {
             &bridge,
         )
         .await
-        .expect("captured context must use the DataChunk invocation's live host bridge");
+        .expect("captured context must use the DataChunk invocation's live host bridge")
+        .expect("guest accepted the captured-context chunk");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
@@ -621,6 +624,63 @@ async fn end_of_stream_marker_reaches_guest_via_forwarder() {
     };
     assert_eq!(chunks_seen, 2, "both data chunks must be delivered first");
     assert_eq!(ends_seen, 1, "the marker must terminate the guest stream");
+    runner.shutdown().await;
+}
+
+/// A guest stream dropped without close tears down only guest-side state;
+/// the host forwarder stays registered until the next delivery finds the
+/// guest subscription gone (NotFound) and retires it. The reclaim must free
+/// the host-side registration — otherwise the parked forwarder and its queue
+/// leak for the actor's lifetime.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forwarder_retires_when_guest_subscription_is_gone() {
+    let host = fixture_host();
+    let wl = instantiate_wasm_workload(host).await.expect("instantiate");
+    let runner = wl.into_workload_runner();
+    let ctx = runtime_context_with_host_transport(
+        test_actr_id(),
+        Arc::new(actr_hyper::transport::HostTransport::new()),
+    );
+    let abi = runner.lifecycle_host_abi(ctx.clone());
+
+    runner
+        .dispatch(
+            &make_envelope("test/drop-subscription", Vec::new()),
+            test_ctx(),
+            &abi,
+        )
+        .await
+        .expect("drop-subscription dispatch");
+
+    // The host forwarder for test/dropped-stream is still registered: the
+    // guest dropped its side without close. Feed one chunk as the wire
+    // would; the delivery finds the guest subscription gone (NotFound), so
+    // the forwarder retires itself and unregisters the host subscription.
+    let chunk = DataChunk {
+        stream_id: "test/dropped-stream".to_string(),
+        sequence: 1,
+        ..Default::default()
+    };
+    invoke_registry_chunk(&ctx, chunk.clone(), test_actr_id())
+        .await
+        .expect("subscription must be registered")
+        .expect("chunk must be accepted");
+
+    // The retiring delivery is asynchronous: probe the registry until the
+    // subscription is gone (a re-feed finds no registration).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match invoke_registry_chunk(&ctx, chunk.clone(), test_actr_id()).await {
+            None => break,
+            Some(_) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "forwarder for a guest-dropped stream never retired"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
     runner.shutdown().await;
 }
 

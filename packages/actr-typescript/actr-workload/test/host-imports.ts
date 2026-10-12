@@ -18,6 +18,7 @@ type DataChunk = {
   payload: Uint8Array;
   metadata: Array<{ key: string; value: string }>;
   timestampMs?: bigint;
+  endOfStream?: boolean;
 };
 
 type PayloadType = {
@@ -41,6 +42,7 @@ export const hostCalls = {
   timeouts: [] as bigint[],
   payloadTypes: [] as PayloadType[],
   registerStream: [] as string[],
+  registerStreamCapacities: [] as (number | undefined)[],
   unregisterStream: [] as string[],
   replyPayloads: [] as Uint8Array[],
   replyErrors: [] as unknown[],
@@ -53,6 +55,7 @@ export function resetHostCalls(): void {
   hostCalls.timeouts.length = 0;
   hostCalls.payloadTypes.length = 0;
   hostCalls.registerStream.length = 0;
+  hostCalls.registerStreamCapacities.length = 0;
   hostCalls.unregisterStream.length = 0;
   hostCalls.replyPayloads.length = 0;
   hostCalls.replyErrors.length = 0;
@@ -149,9 +152,11 @@ export async function resolveDependency(
 export async function registerStream(
   ctxToken: bigint,
   streamId: string,
+  capacity: number | undefined,
 ): Promise<void> {
   record(ctxToken, 'registerStream');
   hostCalls.registerStream.push(streamId);
+  hostCalls.registerStreamCapacities.push(capacity);
 }
 
 export async function unregisterStream(

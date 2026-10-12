@@ -152,11 +152,15 @@ describe('wasm guest mode (no AsyncLocalStorage)', () => {
     expect(sends.map((call) => call.chunk.sequence)).toEqual([1n]);
     // The consumer resumes after the delivery invocation settled, so the
     // send presents the sink's captured token; the host routes it via the
-    // instance's standing ABI (actor-global import).
+    // instance's standing ABI (actor-global import). The consumer's `break`
+    // closes the stream: with nothing live, close() presents the captured
+    // (retired) token and the host routes the unregister the same way —
+    // skipping it would leak the host forwarder.
     expect(host.hostCalls.operations).toEqual([
       'registerStream',
       'sendDataChunk',
+      'unregisterStream',
     ]);
-    expect(host.hostCalls.ctxTokens).toEqual([10n, 10n]);
+    expect(host.hostCalls.ctxTokens).toEqual([10n, 10n, 10n]);
   });
 });

@@ -21,10 +21,16 @@ private final class MockStreamBridge: DataChunkStreamBridging, @unchecked Sendab
     private var pending: CheckedContinuation<ActrBindings.DataChunkEventBridge?, Never>?
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var closeCalls = 0
+    private let marker: ActrBindings.DataChunkEventBridge?
 
-    init(steps: [Step]) {
+    init(steps: [Step], marker: ActrBindings.DataChunkEventBridge? = nil) {
         self.steps = steps
+        self.marker = marker
     }
+
+    func endedByMarker() -> Bool { marker != nil }
+
+    func endMarker() -> ActrBindings.DataChunkEventBridge? { marker }
 
     /// Resolves once `close()` has been called at least once.
     func waitForClose() async {
@@ -105,6 +111,40 @@ struct DataChunkSequenceTests {
         #expect(try await iterator.next() == nil)
         #expect(try await iterator.next() == nil)
         #expect(bridge.closeCalls == 0)
+    }
+
+    @Test
+    func endMarkerSurvivesSequenceEnd() async throws {
+        let marker = ActrBindings.DataChunkEventBridge(
+            chunk: ActrBindings.DataChunk(
+                streamId: "s",
+                sequence: 3,
+                payload: Data(),
+                metadata: [],
+                timestampMs: nil,
+                endOfStream: true
+            ),
+            sender: ActrBindings.ActrId(
+                realm: ActrBindings.Realm(realmId: 1),
+                serialNumber: 42,
+                type: ActrBindings.ActrType(
+                    manufacturer: "test", name: "fixture", version: "0.1.0"
+                )
+            )
+        )
+        let bridge = MockStreamBridge(steps: [.event(1), .end], marker: marker)
+        let sequence = DataChunkSequence(bridge: bridge)
+        var iterator = sequence.makeAsyncIterator()
+        #expect(try await iterator.next()?.chunk.sequence == 1)
+        #expect(try await iterator.next() == nil)
+        // The terminating marker (sender included) is inspectable after the
+        // stream ended — and stays so after close().
+        #expect(sequence.endedByMarker)
+        #expect(sequence.endMarker?.sender.serialNumber == 42)
+        #expect(sequence.endMarker?.chunk.endOfStream == true)
+        await sequence.close()
+        #expect(sequence.endedByMarker)
+        #expect(sequence.endMarker?.sender.serialNumber == 42)
     }
 
     @Test

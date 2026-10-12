@@ -439,6 +439,18 @@ impl MessageDispatcher for DoubleDispatcher {
                 });
                 Ok(Bytes::new())
             }
+            "test/drop-subscription" => {
+                // Subscribe, then drop the stream handle WITHOUT close():
+                // the guest-side teardown is local-only (the closer's async
+                // wait never runs from Drop), so the host forwarder stays
+                // registered until the next delivery finds the guest
+                // subscription gone (NotFound) and retires it.
+                let incoming = ctx
+                    .data_chunks("test/dropped-stream".to_string(), Default::default())
+                    .await?;
+                drop(incoming);
+                Ok(Bytes::new())
+            }
             "test/drain-parked-stream" => {
                 let taken = PARKED_STREAM.with(|slot| slot.borrow_mut().take());
                 let Some(mut incoming) = taken else {

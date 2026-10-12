@@ -328,19 +328,34 @@ impl Context for WasmContext {
             senders.borrow_mut().insert(stream_id.clone(), tx);
         });
         let cancel_stream_id = stream_id.clone();
-        // Cancel-only closer: the async host unregister import would need a
-        // live invocation token, but close()/drop may run in an invocation
-        // where the registering token is already retired. Host-side teardown
-        // happens instead when the next on-data-chunk delivery returns an
-        // error and the host forwarder retires its subscription.
-        let closer = crate::StreamCloser::new(Box::new(move || {
-            STREAM_SENDERS.with(|senders| {
-                senders.borrow_mut().remove(&cancel_stream_id);
-            });
-        }));
+        let unregister_stream_id = stream_id.clone();
+        let ctx_token = self.ctx_token;
+        // Cancel (sync): prompt local teardown for close() and Drop alike.
+        // Wait (async): unregister the host-side forwarder. The captured
+        // token may be retired by now — the host routes this actor-global
+        // import through the instance's standing ABI — and a close issued
+        // from inside this stream's own delivery resolves to a cancel-only
+        // host path, so neither a trap nor a self-deadlock is possible. The
+        // import is best-effort: a failure is covered by the host reclaim
+        // path (the forwarder retires when a delivery finds the guest
+        // subscription gone).
+        let closer = crate::StreamCloser::with_wait(
+            Box::new(move || {
+                STREAM_SENDERS.with(|senders| {
+                    senders.borrow_mut().remove(&cancel_stream_id);
+                });
+            }),
+            Box::new(move || {
+                Box::pin(async move {
+                    let _ = wit_host::unregister_stream(ctx_token, unregister_stream_id).await;
+                })
+            }),
+        );
         let stream = crate::DataChunkStream::from_parts(rx, closer);
         // The stream's Drop rolls back the reservation on error or cancellation.
-        wit_host::register_stream(self.ctx_token, stream_id)
+        // The capacity rides along so the host-side subscription applies the
+        // same backpressure bound as this guest queue.
+        wit_host::register_stream(self.ctx_token, stream_id, Some(capacity as u32))
             .await
             .map_err(wit_actr_error_to_proto)?;
         Ok(stream)

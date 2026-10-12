@@ -57,6 +57,7 @@ declare module 'actr:workload/host@0.8.0' {
   export function registerStream(
     ctxToken: bigint,
     streamId: string,
+    capacity: number | undefined,
   ): Promise<void>;
 
   export function unregisterStream(

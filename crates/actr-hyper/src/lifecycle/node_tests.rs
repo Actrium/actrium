@@ -607,6 +607,7 @@ async fn register_and_unregister_stream_roundtrip() {
         Default::default(),
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "stream-1".to_string(),
+            capacity: None,
         }),
     )
     .await;
@@ -687,6 +688,7 @@ async fn forwarder_table_is_shared_across_lifecycle_abi_instances() {
 
     let register = first_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
         stream_id: "shared-stream".into(),
+        capacity: None,
     }))
     .await;
     assert!(
@@ -709,6 +711,7 @@ async fn forwarder_table_is_shared_across_lifecycle_abi_instances() {
     // retired forwarder already unregistered the host-side subscription.
     let reregister = second_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
         stream_id: "shared-stream".into(),
+        capacity: None,
     }))
     .await;
     assert!(
@@ -776,6 +779,7 @@ async fn forwarder_table_is_shared_across_request_contexts() {
 
     let register = first_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
         stream_id: "cross-ctx-stream".into(),
+        capacity: None,
     }))
     .await;
     assert!(
@@ -794,6 +798,7 @@ async fn forwarder_table_is_shared_across_request_contexts() {
 
     let reregister = second_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
         stream_id: "cross-ctx-stream".into(),
+        capacity: None,
     }))
     .await;
     assert!(
@@ -870,6 +875,7 @@ async fn node_teardown_releases_data_chunk_registry_without_cycle() {
         Default::default(),
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "cycle-stream".to_string(),
+            capacity: None,
         }),
     )
     .await;
@@ -956,6 +962,7 @@ async fn unregister_then_reregister_same_stream_succeeds() {
     let register = || {
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "rebind".to_string(),
+            capacity: None,
         })
     };
 
@@ -996,6 +1003,7 @@ async fn reregister_without_unregister_retires_stale_forwarder() {
     let register = || {
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "rebind-stale".to_string(),
+            capacity: None,
         })
     };
 
@@ -1148,6 +1156,7 @@ async fn stream_callback_register_stream_is_unsupported() {
         Default::default(),
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "s".to_string(),
+            capacity: None,
         }),
     )
     .await;
@@ -3534,6 +3543,7 @@ async fn unregister_retires_chunk_queued_behind_active_serial_invocation() {
     let register = || {
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "queued-stream".into(),
+            capacity: None,
         })
     };
     assert!(matches!(

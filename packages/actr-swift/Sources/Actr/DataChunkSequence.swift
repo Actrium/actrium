@@ -17,6 +17,8 @@ public struct DataChunkEvent: Sendable {
 protocol DataChunkStreamBridging: Sendable {
     func next() async throws -> ActrBindings.DataChunkEventBridge?
     func close() async throws
+    func endedByMarker() -> Bool
+    func endMarker() -> ActrBindings.DataChunkEventBridge?
 }
 
 extension ActrBindings.DataChunkStreamBridge: DataChunkStreamBridging {}
@@ -70,6 +72,23 @@ public struct DataChunkSequence: AsyncSequence, Sendable {
     /// Close the subscription. Idempotent; wakes a pending `next()` with `nil`.
     public func close() async {
         try? await bridge.close()
+    }
+
+    /// Whether the stream ended on the peer's in-band end-of-stream marker
+    /// (as opposed to a local `close()` or runtime teardown). Meaningful
+    /// after iteration returned `nil`; survives `close()`.
+    public var endedByMarker: Bool {
+        bridge.endedByMarker()
+    }
+
+    /// The end-of-stream marker event that terminated the stream, if any.
+    /// The sender is the transport-authenticated peer that sent it, so a
+    /// consumer that pins a stream to one expected producer can detect a
+    /// foreign terminator here.
+    public var endMarker: DataChunkEvent? {
+        bridge.endMarker().map {
+            DataChunkEvent(chunk: DataChunk(bridge: $0.chunk), sender: ActrId(bridge: $0.sender))
+        }
     }
 
     public struct Iterator: AsyncIteratorProtocol {

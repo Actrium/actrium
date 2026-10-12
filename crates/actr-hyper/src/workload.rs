@@ -776,12 +776,19 @@ impl Workload {
                     ))
                 }
                 #[cfg(feature = "wasm-engine")]
-                Workload::Wasm(workload) => workload
+                Workload::Wasm(workload) => match workload
                     .handle_data_chunk(chunk, sender, invocation, host_abi)
                     .await
-                    .map_err(|e| {
-                        ActrError::Internal(format!("workload stream dispatch failed: {e}"))
-                    }),
+                {
+                    // Trap/poison layer: flattened as before. The guest's
+                    // typed error (e.g. NotFound for a retired guest-side
+                    // subscription) passes through untouched so the stream
+                    // forwarder can react to it.
+                    Ok(typed) => typed,
+                    Err(e) => Err(ActrError::Internal(format!(
+                        "workload stream dispatch failed: {e}"
+                    ))),
+                },
                 #[cfg(feature = "dynclib-engine")]
                 Workload::DynClib(workload) => workload
                     .handle_data_chunk(chunk, sender, host_abi)

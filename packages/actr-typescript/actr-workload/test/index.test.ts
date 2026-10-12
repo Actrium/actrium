@@ -255,16 +255,18 @@ describe('@actrium/actr-workload', () => {
     ).rejects.toThrow('No stream subscription for stream-1');
   });
 
-  it('close outside a live invocation tears down locally only', async () => {
+  it('close outside a live invocation still unregisters via the captured token', async () => {
     const { host, runtime } = await loadRuntime();
     const ctx = testInvocationCtx(13n);
 
     const stream = await runtime.dataChunks('stream-1', undefined, ctx);
-    // No active invocation: the subscription-time token may be retired, so
-    // close() must not touch the host import at all.
+    // No active invocation: the subscription-time token may be retired, but
+    // the host routes this actor-global import via the standing ABI, so
+    // close() MUST still unregister — otherwise the host forwarder leaks
+    // whenever no further chunk arrives to trip its reclaim path.
     await stream.close();
 
-    expect(host.hostCalls.unregisterStream).toEqual([]);
+    expect(host.hostCalls.unregisterStream).toEqual(['stream-1']);
     await expect(
       runtime.__dispatchDataChunk(testChunk(), testActorId(), ctx),
     ).rejects.toThrow('No stream subscription for stream-1');
@@ -287,6 +289,26 @@ describe('@actrium/actr-workload', () => {
     // After close, subscribing again succeeds.
     const reopened = await runtime.dataChunks('stream-1', undefined, ctx);
     await reopened.close();
+  });
+
+  it('passes the subscription capacity to the host registration', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(17n);
+
+    const stream = await runtime.dataChunks('stream-cap', { capacity: 1 }, ctx);
+    const defaulted = await runtime.dataChunks(
+      'stream-default',
+      undefined,
+      ctx,
+    );
+
+    expect(host.hostCalls.registerStream).toEqual([
+      'stream-cap',
+      'stream-default',
+    ]);
+    expect(host.hostCalls.registerStreamCapacities).toEqual([1, 64]);
+    await stream.close();
+    await defaulted.close();
   });
 
   it('reserves the stream ID until host unregistration finishes', async () => {
@@ -727,6 +749,40 @@ describe('@actrium/actr-workload', () => {
     // marker is close()'s retry, carrying the sink-side sequence.
     expect(markers).toHaveLength(1);
     expect(markers[0].chunk.sequence).toBe(10n);
+  });
+
+  it('a token-resolution failure poisons neither the marker flag nor the sequence', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(40n);
+
+    // A sink carrying no ctx is legal; with no live invocation the send
+    // fails closed at token resolution, before any host import runs.
+    const sink = await runtime.dataChunkSink(
+      'host',
+      'stream-1',
+      runtime.PayloadType.StreamReliable,
+    );
+    await expect(
+      sink.send(
+        testChunk({
+          sequence: 9n,
+          endOfStream: true,
+          payload: new Uint8Array(0),
+        }),
+      ),
+    ).rejects.toThrow('requires an InvocationCtx');
+
+    // The throw must not latch endMarkerSent (close would skip the marker)
+    // nor advance lastSequence (the marker would skip a sequence that never
+    // reached the wire). Closing inside a live invocation sends the marker
+    // at the stream's true tail.
+    await runtime.withInvocationCtx(ctx, () => sink.close());
+
+    const markers = host.hostCalls.sendDataChunk.filter(
+      (call) => call.chunk.endOfStream === true,
+    );
+    expect(markers).toHaveLength(1);
+    expect(markers[0].chunk.sequence).toBe(0n);
   });
 
   it('send stays rejected after a failed close; close itself stays retryable', async () => {

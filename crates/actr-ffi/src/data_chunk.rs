@@ -26,7 +26,7 @@ use crate::{ActrError, ActrResult};
 
 /// One inbound DataChunk with its sender, as returned by
 /// [`DataChunkStreamBridge::next`].
-#[derive(uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
 pub struct DataChunkEventBridge {
     pub chunk: crate::types::DataChunk,
     pub sender: crate::types::ActrId,
@@ -51,6 +51,10 @@ pub struct DataChunkStreamBridge {
     // Shared cancel hook captured at construction: lets `close` unregister
     // synchronously instead of waiting on the teardown task.
     cancel: Option<actr_framework::StreamCancelHandle>,
+    // Copied out of the stream when it ends on the peer's marker, so the
+    // terminating sender stays inspectable after close() consumes the
+    // stream. `None` for a stream that ended any other way.
+    end_marker: std::sync::Mutex<Option<DataChunkEventBridge>>,
 }
 
 impl DataChunkStreamBridge {
@@ -61,6 +65,7 @@ impl DataChunkStreamBridge {
             closed: AtomicBool::new(false),
             wake: CancellationToken::new(),
             cancel,
+            end_marker: std::sync::Mutex::new(None),
         }
     }
 }
@@ -102,10 +107,33 @@ impl DataChunkStreamBridge {
                 match item {
                     Some(Ok(event)) => Ok(Some(event.into())),
                     Some(Err(error)) => Err(error.into()),
-                    None => Ok(None),
+                    None => {
+                        // Preserve the terminating marker (sender included)
+                        // for post-end inspection; the stream object itself
+                        // may be consumed by a later close().
+                        if let Some(marker) = stream.end_marker() {
+                            *self.end_marker.lock().unwrap() = Some(marker.clone().into());
+                        }
+                        Ok(None)
+                    }
                 }
             }
         }
+    }
+
+    /// Whether the stream ended on the peer's in-band end-of-stream marker
+    /// (as opposed to a local `close()` or runtime teardown). Meaningful
+    /// after `next()` returned `None`; survives `close()`.
+    pub fn ended_by_marker(&self) -> bool {
+        self.end_marker.lock().unwrap().is_some()
+    }
+
+    /// The end-of-stream marker event that terminated the stream, if any.
+    /// The sender is the transport-authenticated peer that sent it, so a
+    /// consumer that pins a stream to one expected producer can detect a
+    /// foreign terminator here.
+    pub fn end_marker(&self) -> Option<DataChunkEventBridge> {
+        self.end_marker.lock().unwrap().clone()
     }
 
     /// Close the subscription: idempotent, never waits behind a pending
@@ -191,6 +219,17 @@ impl DataChunkSinkBridge {
         // Waits behind all accepted sends, then flushes.
         let mut guard = self.inner.lock().await;
         guard.close().await.map_err(Into::into)
+    }
+
+    /// Abort the sink: stop accepting new sends and wait for accepted sends
+    /// to finish — WITHOUT emitting the end-of-stream marker. Use on failure
+    /// paths (e.g. a transient send error) where the peer must not observe a
+    /// graceful end. Idempotent; a later `close()` is a no-op because the
+    /// marker window has passed.
+    pub async fn abort(&self) -> ActrResult<()> {
+        self.closed.store(true, Ordering::Release);
+        let mut guard = self.inner.lock().await;
+        guard.abort().await.map_err(Into::into)
     }
 }
 

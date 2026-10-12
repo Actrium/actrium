@@ -852,7 +852,7 @@ impl TestWasmWorkload {
         sender: ActrId,
         ctx: InvocationContext,
         host_abi: &HostAbiFn,
-    ) -> Result<(), crate::wasm::WasmError> {
+    ) -> Result<actr_protocol::ActorResult<()>, crate::wasm::WasmError> {
         self.inner
             .handle_data_chunk(chunk, sender, ctx, host_abi)
             .await

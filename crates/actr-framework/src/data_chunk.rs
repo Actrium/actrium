@@ -160,6 +160,13 @@ impl StreamCloser {
 /// any other chunk, so applications on lossy lanes should still back stream
 /// completion with a timeout.
 ///
+/// Trust model: subscriptions are keyed by `stream_id` alone, and the marker
+/// is honoured from any transport-authenticated sender addressing it (the
+/// same keying already allows data injection from any such peer). Consumers
+/// that pin a stream to one expected producer can inspect the terminating
+/// sender via [`DataChunkStream::end_marker`] — and the FFI/Swift/Kotlin
+/// equivalents — to detect foreign termination.
+///
 /// Cancellation: dropping the stream or calling [`DataChunkStream::close`]
 /// unregisters immediately, discards buffered items, and wakes pending
 /// readers. This is an intentional cancellation exception to the graceful
@@ -237,6 +244,16 @@ impl futures_core::Stream for DataChunkStream {
         };
         match Pin::new(rx).poll_next(cx) {
             Poll::Ready(Some(Ok(event))) if event.chunk.end_of_stream == Some(true) => {
+                // A marker carrying a payload is a protocol violation, not a
+                // graceful end: surface one terminal error instead of
+                // silently dropping the payload and reporting a clean end.
+                if !event.chunk.payload.is_empty() {
+                    let error = ActrError::DecodeFailure(
+                        "end_of_stream marker must not carry a payload".into(),
+                    );
+                    self.teardown_sync();
+                    return Poll::Ready(Some(Err(error)));
+                }
                 // Graceful end: the marker travels in FIFO order behind every
                 // data chunk, so all prior items were already yielded. Unwrap
                 // the marker into stream termination instead of yielding it,
@@ -284,6 +301,9 @@ pub struct DataChunkSink {
     last_sequence: Option<u64>,
     end_marker_sent: bool,
     closed: bool,
+    /// Set by [`DataChunkSink::abort`]: the sink never emits an end marker,
+    /// and `poll_close` short-circuits (the marker window has passed).
+    aborted: bool,
 }
 
 impl DataChunkSink {
@@ -312,6 +332,7 @@ impl DataChunkSink {
             last_sequence: None,
             end_marker_sent: false,
             closed: false,
+            aborted: false,
         })
     }
 
@@ -339,6 +360,22 @@ impl DataChunkSink {
             timestamp_ms: None,
             end_of_stream: Some(true),
         }
+    }
+
+    /// Abort the sink without emitting the end-of-stream marker: drop any
+    /// queued chunk, stop accepting sends, and wait out the in-flight send
+    /// (if any) so abort observes the same acceptance order as `poll_close`.
+    /// The peer's stream stays open — use this on failure paths where a
+    /// graceful end would be a lie (the stream ends on transport teardown).
+    /// A later `poll_close` is a no-op: the marker window has passed.
+    pub async fn abort(&mut self) -> ActorResult<()> {
+        self.aborted = true;
+        self.pending = None;
+        self.pending_is_marker = false;
+        self.end_marker_sent = false;
+        let result = std::future::poll_fn(|cx| self.poll_in_flight(cx)).await;
+        self.closed = true;
+        result
     }
 
     fn poll_in_flight(&mut self, cx: &mut TaskContext<'_>) -> Poll<ActorResult<()>> {
@@ -425,6 +462,14 @@ impl futures_sink::Sink<DataChunk> for DataChunkSink {
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<ActorResult<()>> {
+        // An aborted sink never emits the marker it deliberately skipped.
+        if self.aborted {
+            return Poll::Ready(Ok(()));
+        }
+        // Seal sends up front: a failed close (marker send error) stays
+        // retryable via a later poll_close, but sends are not reopened — the
+        // sink never accepts data after close was requested.
+        self.closed = true;
         match self.as_mut().poll_flush(cx) {
             Poll::Ready(Ok(())) => {}
             other => return other,
@@ -655,6 +700,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_close_seals_sends_but_stays_retryable() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let attempts = std::sync::Arc::new(AtomicUsize::new(0));
+        let send_fn: SendDataChunkFn = {
+            let attempts = attempts.clone();
+            Box::new(move |chunk| {
+                let attempts = attempts.clone();
+                Box::pin(async move {
+                    if chunk.end_of_stream == Some(true)
+                        && attempts.fetch_add(1, Ordering::SeqCst) == 0
+                    {
+                        return Err(ActrError::Internal("boom".into()));
+                    }
+                    Ok(())
+                })
+            })
+        };
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        sink.send(test_chunk("s", 1)).await.unwrap();
+        // The first close fails on the marker send...
+        assert!(sink.close().await.is_err());
+        // ...but sends stay sealed: close was requested, the sink does not
+        // reopen for data...
+        assert!(matches!(
+            sink.start_send_unpin(test_chunk("s", 2)),
+            Err(ActrError::InvalidArgument(_))
+        ));
+        // ...while close itself stays retryable and redelivers the marker.
+        sink.close().await.unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn abort_skips_end_marker_and_seals_close() {
+        let (send_fn, sent) = ok_send_fn();
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        sink.send(test_chunk("s", 1)).await.unwrap();
+        sink.abort().await.unwrap();
+        // Only the data chunk went out: abort emits no marker.
+        assert_eq!(sent.lock().unwrap().len(), 1);
+        // A close after abort must not emit a late marker.
+        sink.close().await.unwrap();
+        assert_eq!(sent.lock().unwrap().len(), 1);
+        // The sink rejects new sends after abort.
+        assert!(matches!(
+            sink.start_send_unpin(test_chunk("s", 2)),
+            Err(ActrError::InvalidArgument(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn abort_waits_out_in_flight_send() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let started = std::sync::Arc::new(AtomicBool::new(false));
+        let release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let send_fn: SendDataChunkFn = {
+            let started = started.clone();
+            let release = release.clone();
+            Box::new(move |_| {
+                let started = started.clone();
+                let release = release.clone();
+                Box::pin(async move {
+                    started.store(true, Ordering::SeqCst);
+                    release.notified().await;
+                    Ok(())
+                })
+            })
+        };
+        let mut sink =
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap();
+        // Drive the chunk into the in-flight slot and start its future
+        // (send_fn's body runs on first poll, parking on `release`).
+        sink.start_send_unpin(test_chunk("s", 1)).unwrap();
+        std::future::poll_fn(|cx| {
+            assert!(sink.poll_flush_unpin(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert!(started.load(Ordering::SeqCst));
+        let abort = tokio::spawn(async move {
+            let mut sink = sink;
+            sink.abort().await.map(|_| sink)
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !abort.is_finished(),
+            "abort must wait out the in-flight send"
+        );
+        release.notify_waiters();
+        let mut sink = abort.await.unwrap().unwrap();
+        // The in-flight send completed; abort then sealed the sink.
+        assert!(matches!(
+            sink.start_send_unpin(test_chunk("s", 2)),
+            Err(ActrError::InvalidArgument(_))
+        ));
+    }
+
+    #[tokio::test]
     async fn validate_stream_options_rejects_zero_capacity() {
         assert!(matches!(
             validate_stream_options(&DataChunkStreamOptions { capacity: 0 }),
@@ -758,6 +903,41 @@ mod tests {
         assert!(stream.ended_by_marker());
         assert!(cancelled.load(Ordering::SeqCst));
         assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn payload_carrying_marker_is_a_terminal_error_not_a_clean_end() {
+        let (mut tx, rx) = mpsc::channel(4);
+        let mut stream = DataChunkStream::from_parts(rx, StreamCloser::new(Box::new(|| {})));
+        let sender = ActrId {
+            serial_number: 1,
+            ..Default::default()
+        };
+        tx.send(Ok(DataChunkEvent {
+            chunk: test_chunk("s", 1),
+            sender: sender.clone(),
+        }))
+        .await
+        .unwrap();
+        let mut bad_marker = test_marker("s", 2);
+        bad_marker.payload = vec![9u8].into();
+        tx.send(Ok(DataChunkEvent {
+            chunk: bad_marker,
+            sender,
+        }))
+        .await
+        .unwrap();
+
+        // The queued data chunk is still yielded; the malformed marker
+        // surfaces one terminal error (never a clean end), then the stream
+        // is over.
+        assert_eq!(stream.next().await.unwrap().unwrap().chunk.sequence, 1);
+        assert!(matches!(
+            stream.next().await,
+            Some(Err(ActrError::DecodeFailure(_)))
+        ));
+        assert!(stream.next().await.is_none());
+        assert!(!stream.ended_by_marker());
     }
 
     #[tokio::test]

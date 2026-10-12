@@ -30,6 +30,89 @@ describe('componentize shim', () => {
     expect(source).toContain('__dispatchDataChunk(chunk, sender, ctx)');
   });
 
+  it('feeds stream subscriptions even when a legacy onDataChunk hook exists', async () => {
+    const source = shimSource('/tmp/workload.js', '/tmp/runtime.js')
+      .replace(/^\s*import .*;$/gm, '')
+      .replace('export const workload =', 'globalThis.workload =');
+    const ctx = { ctxToken: 7n };
+    const chunk = { streamId: 's', sequence: 1n };
+    const sender = { serialNumber: 1n };
+    const hookCalls: unknown[][] = [];
+    const dispatched: unknown[][] = [];
+    const sandbox = {
+      userWorkload: {
+        dispatch: () => new Uint8Array(),
+        onDataChunk: async (...args: unknown[]) => {
+          hookCalls.push(args);
+        },
+      },
+      withInvocationCtx: async (_c: unknown, body: () => Promise<void>) =>
+        body(),
+      __dispatchDataChunk: async (...args: unknown[]) => {
+        dispatched.push(args);
+      },
+      __hasStreamSubscription: () => true,
+      workload: {} as Record<string, (...args: unknown[]) => Promise<void>>,
+    };
+    runInNewContext(source, sandbox);
+    await sandbox.workload.onDataChunk(chunk, sender, ctx);
+    expect(dispatched).toHaveLength(1);
+    expect(hookCalls).toHaveLength(1);
+  });
+
+  it('keeps legacy-hook-only routing when no subscription exists', async () => {
+    const source = shimSource('/tmp/workload.js', '/tmp/runtime.js')
+      .replace(/^\s*import .*;$/gm, '')
+      .replace('export const workload =', 'globalThis.workload =');
+    const ctx = { ctxToken: 7n };
+    const chunk = { streamId: 's', sequence: 1n };
+    const sender = { serialNumber: 1n };
+    const hookCalls: unknown[][] = [];
+    const sandbox = {
+      userWorkload: {
+        dispatch: () => new Uint8Array(),
+        onDataChunk: async (...args: unknown[]) => {
+          hookCalls.push(args);
+        },
+      },
+      withInvocationCtx: async (_c: unknown, body: () => Promise<void>) =>
+        body(),
+      __dispatchDataChunk: async () => {
+        throw new Error('No stream subscription for s');
+      },
+      __hasStreamSubscription: () => false,
+      workload: {} as Record<string, (...args: unknown[]) => Promise<void>>,
+    };
+    runInNewContext(source, sandbox);
+    await sandbox.workload.onDataChunk(chunk, sender, ctx);
+    // No subscription: the chunk never touches the queue machinery, so the
+    // legacy hook keeps working exactly as before.
+    expect(hookCalls).toHaveLength(1);
+  });
+
+  it('surfaces stale deliveries when neither a subscription nor a hook exists', async () => {
+    const source = shimSource('/tmp/workload.js', '/tmp/runtime.js')
+      .replace(/^\s*import .*;$/gm, '')
+      .replace('export const workload =', 'globalThis.workload =');
+    const ctx = { ctxToken: 7n };
+    const chunk = { streamId: 's', sequence: 1n };
+    const sender = { serialNumber: 1n };
+    const sandbox = {
+      userWorkload: { dispatch: () => new Uint8Array() },
+      withInvocationCtx: async (_c: unknown, body: () => Promise<void>) =>
+        body(),
+      __dispatchDataChunk: async () => {
+        throw new Error('No stream subscription for s');
+      },
+      __hasStreamSubscription: () => false,
+      workload: {} as Record<string, (...args: unknown[]) => Promise<void>>,
+    };
+    runInNewContext(source, sandbox);
+    await expect(
+      sandbox.workload.onDataChunk(chunk, sender, ctx),
+    ).rejects.toThrow('No stream subscription for s');
+  });
+
   it('delivers every observation hook with the original event and context', async () => {
     const signaling = [
       'onSignalingConnecting',

@@ -34,6 +34,11 @@ data class DataChunkEvent(
  * The Flow-returning adapter lives on the bridge (not on `ActrContext`)
  * because the generated `ContextBridge.dataChunks` member shadows any
  * same-named extension.
+ *
+ * After the flow completes, `endedByMarker()`/`endMarker()` report whether
+ * the peer's in-band end-of-stream marker terminated the stream (and which
+ * transport-authenticated sender sent it), as opposed to local cancellation
+ * or runtime teardown; they survive the `finally` close.
  */
 fun DataChunkStreamBridge.asFlow(): Flow<DataChunkEvent> = flow {
     synchronized(collectedStreams) {

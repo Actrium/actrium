@@ -311,6 +311,14 @@ impl RuntimeContext {
         chunk: DataChunk,
         payload_type: actr_protocol::PayloadType,
     ) -> ActorResult<()> {
+        // An end marker is a control signal: it must not carry a payload.
+        // `DataChunkSink` enforces this for its own sends; this is the choke
+        // point for every other path (guest host-op, raw context calls).
+        if chunk.end_of_stream == Some(true) && !chunk.payload.is_empty() {
+            return Err(ActrError::InvalidArgument(
+                "end_of_stream marker must not carry a payload".into(),
+            ));
+        }
         let deadline =
             crate::transport::RpcDeadline::from_duration(crate::transport::DATA_CHUNK_SEND_TIMEOUT);
         self.ensure_session_ready_until(crate::timer::ids::RUNTIME_DATA_CHUNK_PREFLIGHT, deadline)

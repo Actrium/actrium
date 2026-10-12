@@ -307,10 +307,14 @@ impl Context for DynclibContext {
     ) -> ActorResult<crate::DataChunkStream> {
         let capacity = crate::validate_stream_options(&options)?;
 
-        // Check, insert, host-register, and rollback in ONE lock scope:
-        // `invoke_frame` is synchronous, so holding the lock across it keeps
-        // the duplicate check atomic with the insertion (a concurrent
-        // data_chunks on another thread cannot slip between them).
+        // Reserve the stream id under the lock, then invoke the host WITHOUT
+        // holding it: `invoke_frame` is a synchronous, unbounded host
+        // round-trip, and holding the process-global sender lock across it
+        // stalls every other stream's delivery lookup. The reservation makes
+        // a concurrent data_chunks for the same id fail fast as a duplicate
+        // while this registration is in flight; a failed registration rolls
+        // the entry back (it can only still be ours — nobody else could have
+        // inserted past the reservation).
         let (tx, rx) = futures_channel::mpsc::channel(capacity);
         {
             let mut senders = stream_senders()
@@ -322,25 +326,28 @@ impl Context for DynclibContext {
                 )));
             }
             senders.insert(stream_id.clone(), tx);
+        }
 
-            let payload = HostRegisterStreamV1 {
-                stream_id: stream_id.clone(),
-            };
-            let registration = payload
-                .to_frame()
-                .map_err(abi_error_to_actr)
-                .and_then(|frame| self.invoke_frame(frame))
-                .and_then(|reply| {
-                    if reply.status == abi::code::SUCCESS {
-                        Ok(())
-                    } else {
-                        Err(reply_to_actr_error(reply))
-                    }
-                });
-            if let Err(error) = registration {
+        let payload = HostRegisterStreamV1 {
+            stream_id: stream_id.clone(),
+            capacity: Some(capacity as u32),
+        };
+        let registration = payload
+            .to_frame()
+            .map_err(abi_error_to_actr)
+            .and_then(|frame| self.invoke_frame(frame))
+            .and_then(|reply| {
+                if reply.status == abi::code::SUCCESS {
+                    Ok(())
+                } else {
+                    Err(reply_to_actr_error(reply))
+                }
+            });
+        if let Err(error) = registration {
+            if let Ok(mut senders) = stream_senders().lock() {
                 senders.remove(&stream_id);
-                return Err(error);
             }
+            return Err(error);
         }
 
         let cancel_stream_id = stream_id.clone();
