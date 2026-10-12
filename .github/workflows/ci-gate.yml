@@ -175,8 +175,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: false
+      - name: Cache CLI web runtime assets
+        # Cache generated files only; HTML and the SW entry point stay in source.
+        # Include the web workspace and all monorepo path dependencies.
+        id: cli-web-assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+            crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          key: >-
+            cli-web-runtime-v2-${{ hashFiles(
+              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
+              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
+              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
+              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
+              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
+              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
+              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
       - name: Generate CLI web runtime assets
-        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
+        run: |
+          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ]; then
+            bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
+          else
+            bash packages/actr-web/scripts/sync-cli-assets.sh --build
+          fi
       - name: Run package runtime echo e2e (PR gate, MODE=path1)
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
 
@@ -274,15 +299,28 @@ jobs:
             cargo install wasm-tools --version 1.253.0 --locked --force
           fi
       - name: Cache CLI web runtime assets
-        # Same source-hash key as the Test (Rust) shards: the sw-host wasm is
-        # a release wasm-pack compile (~2 min) derived only from packages/actr-web.
+        # Cache generated files only; HTML and the SW entry point stay in source.
+        # Include the web workspace and all monorepo path dependencies.
+        id: cli-web-assets
         uses: actions/cache@v4
         with:
-          path: crates/actr-cli/assets/web-runtime
-          key: cli-web-runtime-v1-${{ hashFiles('packages/actr-web/packages/**', 'packages/actr-web/crates/**', 'packages/actr-web/scripts/**') }}
+          path: |
+            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+            crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          key: >-
+            cli-web-runtime-v2-${{ hashFiles(
+              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
+              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
+              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
+              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
+              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
+              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
+              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
       - name: Generate CLI web runtime assets
         run: |
-          if [ -f crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ]; then
             bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
           else
             bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -444,16 +482,28 @@ jobs:
           wasm-component-ld --version
           wasm-tools --version
       - name: Cache CLI web runtime assets
-        # The sw-host wasm build is a full wasm-pack release compile (~2 min)
-        # whose output depends only on packages/actr-web sources. Restore it by
-        # source hash; on a hit only the cheap non-wasm asset sync runs.
+        # Cache generated files only; HTML and the SW entry point stay in source.
+        # Include the web workspace and all monorepo path dependencies.
+        id: cli-web-assets
         uses: actions/cache@v4
         with:
-          path: crates/actr-cli/assets/web-runtime
-          key: cli-web-runtime-v1-${{ hashFiles('packages/actr-web/packages/**', 'packages/actr-web/crates/**', 'packages/actr-web/scripts/**') }}
+          path: |
+            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+            crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          key: >-
+            cli-web-runtime-v2-${{ hashFiles(
+              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
+              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
+              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
+              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
+              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
+              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
+              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
       - name: Generate CLI web runtime assets
         run: |
-          if [ -f crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ]; then
             bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
           else
             bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -559,13 +609,28 @@ jobs:
             cargo install wasm-tools --version 1.253.0 --locked --force
           fi
       - name: Cache CLI web runtime assets
+        # Cache generated files only; HTML and the SW entry point stay in source.
+        # Include the web workspace and all monorepo path dependencies.
+        id: cli-web-assets
         uses: actions/cache@v4
         with:
-          path: crates/actr-cli/assets/web-runtime
-          key: cli-web-runtime-v1-${{ hashFiles('packages/actr-web/packages/**', 'packages/actr-web/crates/**', 'packages/actr-web/scripts/**') }}
+          path: |
+            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+            crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          key: >-
+            cli-web-runtime-v2-${{ hashFiles(
+              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
+              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
+              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
+              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
+              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
+              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
+              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
       - name: Generate CLI web runtime assets
         run: |
-          if [ -f crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ]; then
             bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
           else
             bash packages/actr-web/scripts/sync-cli-assets.sh --build
