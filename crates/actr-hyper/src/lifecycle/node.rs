@@ -1463,6 +1463,10 @@ fn parse_length_prefixed_delivery_uncertain(message: &str) -> Option<ActrError> 
 fn parse_connection_not_ready_retry_hint(message: &str) -> Option<u64> {
     // ErrorResponse currently carries only a code and display string. Keep this
     // parser narrow and best-effort until the wire error payload grows typed details.
+    if let Some(rest) = message.strip_prefix("connection not ready: retry after ") {
+        return rest.strip_suffix("ms")?.parse().ok();
+    }
+    // Accept the previous Display form from older peers as well.
     let marker = "retry_after_ms=Some(";
     let start = message.find(marker)? + marker.len();
     let rest = &message[start..];
