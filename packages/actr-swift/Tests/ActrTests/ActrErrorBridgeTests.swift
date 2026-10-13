@@ -24,7 +24,7 @@ struct ActrErrorBridgeTests {
             (.NotImplemented(msg: text), "not implemented: \(text)"),
             (.Internal(msg: text), "internal error: \(text)"),
             (.Config(msg: text), "config: \(text)"),
-            (.DeliveryUncertain(operationId: "op-1", cause: text), "delivery uncertain for operation op-1: \(text)"),
+            (.DeliveryUncertain(operationId: "op-1", causeDetail: text), "delivery uncertain for operation op-1: \(text)"),
             (.Internal(msg: ""), "internal error: "),
         ]
         for (original, expected) in cases {
