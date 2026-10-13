@@ -380,7 +380,17 @@ mod tests {
         }
     }
 
+    /// Wait for the gathering cycle armed after `previous_seq` to settle.
+    ///
+    /// `gathering_state` is a coalesced latest-value field, so once the first
+    /// cycle completes it stays `Complete` until a later cycle publishes
+    /// `Gathering`. An ICE restart therefore republishes that stale `Complete`
+    /// as soon as any other state field (signaling, ICE connection) advances
+    /// `seq`, and a state-only predicate returns before the rebind has
+    /// gathered anything. Requiring the local description to carry candidates
+    /// closes that window.
     async fn wait_for_gathering_complete(
+        pc: &Arc<dyn PeerConnection>,
         events: &crate::wire::webrtc::rtc::events::PeerEventMailboxReceiver,
         previous_seq: u64,
     ) {
@@ -389,6 +399,10 @@ mod tests {
                 let tick = events.latest_state();
                 if tick.seq > previous_seq
                     && tick.gathering_state == Some(RTCIceGatheringState::Complete)
+                    && pc
+                        .local_description()
+                        .await
+                        .is_some_and(|description| description.sdp.contains("a=candidate:"))
                 {
                     break;
                 }
@@ -396,7 +410,7 @@ mod tests {
             }
         })
         .await
-        .expect("ICE gathering did not complete");
+        .expect("ICE gathering did not complete with published candidates");
     }
 
     fn relay_configuration() -> RTCConfiguration {
@@ -481,7 +495,7 @@ mod tests {
         pc.set_local_description(first_offer)
             .await
             .expect("set first wildcard offer");
-        wait_for_gathering_complete(&events, 0).await;
+        wait_for_gathering_complete(&pc, &events, 0).await;
         let first_sdp = pc
             .local_description()
             .await
@@ -498,7 +512,7 @@ mod tests {
         pc.set_local_description(restart_offer)
             .await
             .expect("wildcard ICE restart rebind must succeed");
-        wait_for_gathering_complete(&events, restart_state_seq).await;
+        wait_for_gathering_complete(&pc, &events, restart_state_seq).await;
         let second_sdp = pc
             .local_description()
             .await
