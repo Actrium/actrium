@@ -108,6 +108,7 @@ pub struct ActrixTestServices {
     stun_shutdown: broadcast::Sender<()>,
     stun_task: tokio::task::JoinHandle<()>,
     turn_server: Option<turn_crate::server::Server>,
+    turn_bindings: turn::InactiveRealms,
 }
 
 impl ActrixTestServices {
@@ -161,12 +162,14 @@ impl ActrixTestServices {
 
         let turn_socket = Arc::new(UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await?);
         let turn_addr = turn_socket.local_addr()?;
+        let turn_bindings = turn::InactiveRealms::default();
         let authenticator = Arc::new(
             turn::Authenticator::new(
                 TURN_SHARED_TEST_KEY.to_owned(),
                 "provider.example".to_owned(),
             )
-            .map_err(|error| anyhow::anyhow!("Actrix TURN authenticator: {error}"))?,
+            .map_err(|error| anyhow::anyhow!("Actrix TURN authenticator: {error}"))?
+            .with_inactive_realms(turn_bindings.clone()),
         );
         let turn_server = turn::create_turn_server(
             turn_socket,
@@ -188,6 +191,7 @@ impl ActrixTestServices {
             stun_shutdown,
             stun_task,
             turn_server: Some(turn_server),
+            turn_bindings,
         })
     }
 
@@ -216,10 +220,10 @@ impl ActrixTestServices {
             .unwrap_or_default()
             .saturating_add(CREDENTIAL_LIFETIME)
             .as_secs();
-        // Username must match the scoped format enforced by `turn::Authenticator`:
-        // `{expires_at}:realm={realm}:provider=provider.example:audience=actr.turn:actor={actr_id}`
+        self.turn_bindings
+            .bind_actor(&actor_id.to_string_repr(), "aaaaaaaaaaaaaaaa");
         let username = format!(
-            "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:actor={actor_id}",
+            "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:client_key=aaaaaaaaaaaaaaaa:actor={actor_id}",
             actor_id.realm
         );
         let secret = platform::realm::realm_turn_secret(

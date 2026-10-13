@@ -12,7 +12,7 @@
 use actr_protocol::ActrId;
 use platform::realm::Realm;
 use platform::realm::membership::{actor_disabled, disabled_actors};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -39,10 +39,21 @@ pub struct InactiveRealms {
     realms: Arc<RwLock<HashSet<String>>>,
     /// Text form of the disabled ActorIds.
     actors: Arc<RwLock<HashSet<String>>>,
+    bindings: Arc<RwLock<HashMap<String, String>>>,
     deactivated: Arc<Notify>,
 }
 
 impl InactiveRealms {
+    /// Unknown identities fail closed, as do credentials from a previous
+    /// device after an Actor moves to another client key.
+    pub fn matches_binding(&self, actor_id: &str, client_key: &str) -> bool {
+        self.bindings
+            .read()
+            .expect("TURN bindings poisoned")
+            .get(actor_id)
+            .is_some_and(|current| current == client_key)
+    }
+
     /// Whether credentials of `realm` are refused
     pub fn contains(&self, realm: &str) -> bool {
         self.realms
@@ -93,6 +104,7 @@ impl InactiveRealms {
     }
 
     async fn reload_all(&self) {
+        self.reload_bindings().await;
         match Realm::get_all().await {
             Ok(realms) => {
                 let inactive: HashSet<String> = realms
@@ -145,6 +157,8 @@ impl InactiveRealms {
     }
 
     async fn reload_actor(&self, actor: &ActrId) {
+        // Publish the new binding before clearing an Actor's disabled flag.
+        self.reload_bindings().await;
         match actor_disabled(actor).await {
             Ok(disabled) => self.update(&self.actors, &actor.to_string_repr(), disabled),
             Err(e) => platform::recording::warn!(
@@ -153,6 +167,48 @@ impl InactiveRealms {
                 e
             ),
         }
+    }
+
+    async fn reload_bindings(&self) {
+        match platform::realm::membership::turn_actor_bindings().await {
+            Ok(bindings) => {
+                let next: HashMap<_, _> = bindings
+                    .into_iter()
+                    .map(|(actor, key)| (actor.to_string_repr(), key))
+                    .collect();
+                let mut current = self.bindings.write().expect("TURN bindings poisoned");
+                let changed = current
+                    .iter()
+                    .any(|(actor, key)| next.get(actor) != Some(key));
+                *current = next;
+                if changed {
+                    self.deactivated.notify_one();
+                }
+            }
+            Err(error) => {
+                // Do not keep accepting a stale authorization snapshot.
+                self.bindings
+                    .write()
+                    .expect("TURN bindings poisoned")
+                    .clear();
+                self.deactivated.notify_one();
+                platform::recording::warn!("Failed to load TURN Actor bindings: {error}");
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn actors_for_test_resume(&self, actor: &str) {
+        self.update(&self.actors, actor, false);
+    }
+
+    /// Install an authorized binding in a deterministic test fixture.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn bind_actor(&self, actor: &str, client_key: &str) {
+        self.bindings
+            .write()
+            .unwrap()
+            .insert(actor.to_string(), client_key.to_string());
     }
 
     #[cfg(test)]

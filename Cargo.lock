@@ -560,6 +560,7 @@ dependencies = [
  "actrix-platform",
  "actrix-publisher-registry",
  "actrix-signer",
+ "actrix-turn",
  "aes-gcm",
  "anyhow",
  "axum",
@@ -589,6 +590,7 @@ dependencies = [
  "tower",
  "tower_governor",
  "tracing",
+ "turn",
  "uuid",
 ]
 

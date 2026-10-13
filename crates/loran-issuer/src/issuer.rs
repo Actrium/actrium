@@ -584,7 +584,7 @@ impl AIdIssuer {
         });
 
         // Generate a time-limited TURN credential compatible with coturn --use-auth-secret.
-        let turn_credential = self.generate_turn_credential(&actr_id, expr_time);
+        let turn_credential = self.generate_turn_credential(&actr_id, &signer.key_id, expr_time);
 
         let (renewal_token, renewal_token_expires_at) =
             self.issue_fresh_renewal_token(&actr_id).await?;
@@ -1358,7 +1358,7 @@ impl AIdIssuer {
         });
 
         // Generate a time-limited TURN credential.
-        let turn_credential = self.generate_turn_credential(actor_id, expr_time);
+        let turn_credential = self.generate_turn_credential(actor_id, &signer.key_id, expr_time);
 
         Ok(register_response::RegisterOk {
             actr_id: actor_id.clone(),
@@ -1375,12 +1375,13 @@ impl AIdIssuer {
 
     /// Generate a time-limited TURN credential (coturn --use-auth-secret compatible format).
     ///
-    /// `username = "<expires_at>:realm=<realm>:provider=<provider>:audience=actr.turn:actor=<actor_id>"`
+    /// The username and HMAC bind the issuing Realm client key as well as the Actor.
     /// `password = base64(HMAC-SHA1(realm_turn_secret, username))`, keyed by
     /// the Realm's secret derived from the master `turn_secret`.
     fn generate_turn_credential(
         &self,
         actor_id: &ActrId,
+        client_key: &str,
         expires_at: u64,
     ) -> actr_protocol::TurnCredential {
         let realm = actor_id.realm.clone();
@@ -1388,7 +1389,7 @@ impl AIdIssuer {
         let provider = &self.config.provider_id;
         let audience = "actr.turn";
         let username = format!(
-            "{expires_at}:realm={realm}:provider={provider}:audience={audience}:actor={actor_id}"
+            "{expires_at}:realm={realm}:provider={provider}:audience={audience}:client_key={client_key}:actor={actor_id}"
         );
         let secret = platform::realm::realm_turn_secret(
             self.config.turn_secret.as_bytes(),

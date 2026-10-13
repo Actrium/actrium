@@ -239,6 +239,14 @@ for good. Actor credentials already issued stop working outside the Realm
 Provider (for example, where a peer Actor verifies them) when they expire. Changing a role
 revokes no key; it takes effect in the member's next Actor credential.
 
+TURN credentials bind the issuing Realm client key as well as the ActorId.
+Their HMAC-covered username contains `:client_key=<key_id>:actor=<actor_id>`.
+The Provider checks that binding against the Actor's currently authorized key
+before accepting cached or uncached authentication, and closes allocations
+whose binding is no longer current. Reissuing an Actor under another key must
+never make the old device's TURN credentials usable again. Legacy credentials
+without a key binding are refused; clients obtain bound credentials by renewal.
+
 A Realm client key is a capability of the Actr Host and **MUST NOT** be given
 to Guest workloads.
 

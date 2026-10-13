@@ -7,6 +7,13 @@ description = "WebRTC TURN service implementation, as a component of aux-servers
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+test-utils = []
+
+[[example]]
+name = "browser_interop"
+required-features = ["test-utils"]
+
 [dependencies]
 turn_crate = { workspace = true }
 webrtc-util = { workspace = true }

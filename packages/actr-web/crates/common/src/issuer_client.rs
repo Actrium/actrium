@@ -4,6 +4,9 @@
 //! endpoint. Mirrors the native `IssuerClient` (`crates/actr-hyper/src/issuer_client.rs`) semantics.
 
 use actr_protocol::prost::Message;
+use actr_protocol::realm_membership::{
+    CLIENT_PROOF_HEADER, ClientProof, ProofOp, RealmClientKeyFile,
+};
 use actr_protocol::{
     RegisterRequest, RegisterResponse, RenewCredentialRequest, RenewCredentialResponse,
 };
@@ -48,16 +51,70 @@ pub enum RenewError {
 /// via `fetch()`. Works in both Window and Service Worker contexts.
 pub struct WebIssuerClient {
     endpoint: String,
+    client_key: WebRealmClientKey,
+}
+
+/// A browser device key provisioned through Realm membership (for example by
+/// importing the output of `actr realm join`). Never generate an unregistered
+/// replacement when this key is absent or revoked.
+pub struct WebRealmClientKey {
+    realm: String,
+    provider: String,
+    key_id: String,
+    key: ed25519_dalek::SigningKey,
+}
+
+impl WebRealmClientKey {
+    pub fn from_key_file(endpoint: &str, realm: &str, text: &str) -> WebResult<Self> {
+        let (file, key) =
+            RealmClientKeyFile::parse(text).map_err(|e| WebError::Protocol(e.to_string()))?;
+        if file.realm != realm
+            || file.issuer.trim_end_matches('/') != endpoint.trim_end_matches('/')
+            || file.provider_id.is_empty()
+        {
+            return Err(WebError::Protocol(
+                "Realm client key does not match this Realm/Issuer".into(),
+            ));
+        }
+        Ok(Self {
+            realm: file.realm,
+            provider: file.provider_id,
+            key_id: file.key_id,
+            key,
+        })
+    }
 }
 
 impl WebIssuerClient {
     /// Create a new Web Issuer client.
     ///
     /// `endpoint` is the Issuer base URL, e.g. `"https://issuer.example.com:8080"`.
-    pub fn new(endpoint: impl Into<String>) -> Self {
+    pub fn new(endpoint: impl Into<String>, client_key: WebRealmClientKey) -> Self {
         Self {
-            endpoint: endpoint.into(),
+            endpoint: endpoint.into().trim_end_matches('/').to_string(),
+            client_key,
         }
+    }
+
+    pub fn accepts_credential(&self, credential: &actr_protocol::AIdCredential) -> bool {
+        actr_protocol::IdentityClaims::decode(credential.claims.as_ref()).is_ok_and(|claims| {
+            claims.realm == self.client_key.realm
+                && claims.provider == self.client_key.provider
+                && claims.client_key == self.client_key.key_id
+        })
+    }
+
+    fn proof_header(&self, op: ProofOp, realm: &str, body: &[u8]) -> WebResult<String> {
+        if realm != self.client_key.realm {
+            return Err(WebError::Protocol(
+                "request Realm does not match the client key".into(),
+            ));
+        }
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        Ok(
+            ClientProof::new(op, realm, &self.client_key.provider, body, &nonce)
+                .header_value(&self.client_key.key),
+        )
     }
 
     /// Initial registration: authenticate with publisher manifest.
@@ -91,7 +148,14 @@ impl WebIssuerClient {
     ) -> Result<RenewCredentialResponse, RenewError> {
         let url = format!("{}/renew", self.endpoint);
         let body = req.encode_to_vec();
-        let buf = self.post_protobuf_for_renew(&url, body).await?;
+        if req.actr_id.realm != self.client_key.realm {
+            return Err(RenewError::InvalidRequest(
+                "request Realm does not match the client key".into(),
+            ));
+        }
+        let buf = self
+            .post_protobuf_for_renew(&url, &req.actr_id.realm, body)
+            .await?;
 
         let decoded = RenewCredentialResponse::decode(buf.as_slice()).map_err(|e| {
             log::error!("failed to decode Issuer RenewCredentialResponse: {}", e);
@@ -114,7 +178,7 @@ impl WebIssuerClient {
         let url = format!("{}/register", self.endpoint);
         let body = req.encode_to_vec();
 
-        let buf = self.post_protobuf(&url, body).await?;
+        let buf = self.post_protobuf(&url, &req.realm, body).await?;
 
         let register_response = RegisterResponse::decode(buf.as_slice()).map_err(|e| {
             log::error!("failed to decode Issuer RegisterResponse: {}", e);
@@ -124,8 +188,10 @@ impl WebIssuerClient {
         Ok(register_response)
     }
 
-    async fn post_protobuf(&self, url: &str, body: Vec<u8>) -> WebResult<Vec<u8>> {
-        let (status, status_text, _retry_after, buf) = self.post_protobuf_raw(url, body).await?;
+    async fn post_protobuf(&self, url: &str, realm: &str, body: Vec<u8>) -> WebResult<Vec<u8>> {
+        let (status, status_text, _retry_after, buf) = self
+            .post_protobuf_raw(url, ProofOp::Register, realm, body)
+            .await?;
         if !(200..300).contains(&status) {
             log::warn!(
                 "Issuer returned non-2xx status: {} {} (url={})",
@@ -143,6 +209,7 @@ impl WebIssuerClient {
     async fn post_protobuf_for_renew(
         &self,
         url: &str,
+        realm: &str,
         body: Vec<u8>,
     ) -> Result<Vec<u8>, RenewError> {
         let deadline_ms = js_sys::Date::now() + CONTROL_ATTEMPT_RETRY_DEADLINE_MS;
@@ -150,7 +217,10 @@ impl WebIssuerClient {
         let mut last_error = None;
         let mut retry_count = 0u32;
         loop {
-            match self.post_protobuf_raw(url, body.clone()).await {
+            match self
+                .post_protobuf_raw(url, ProofOp::Renew, realm, body.clone())
+                .await
+            {
                 Ok(result) => {
                     let retryable = result.0 == 425;
                     if retryable {
@@ -198,6 +268,8 @@ impl WebIssuerClient {
     async fn post_protobuf_raw(
         &self,
         url: &str,
+        op: ProofOp,
+        realm: &str,
         body: Vec<u8>,
     ) -> WebResult<(u16, String, Option<u64>, Vec<u8>)> {
         log::debug!(
@@ -216,6 +288,11 @@ impl WebIssuerClient {
         // Build Headers
         let headers = web_sys::Headers::new()
             .map_err(|e| WebError::Network(format!("failed to create Headers: {e:?}")))?;
+        // Sign the exact transmitted bytes anew on every HTTP attempt. The
+        // renewal body/attempt id stays stable while its proof nonce changes.
+        headers
+            .set(CLIENT_PROOF_HEADER, &self.proof_header(op, realm, &body)?)
+            .map_err(|e| WebError::Network(format!("failed to set client proof: {e:?}")))?;
         headers
             .set("Content-Type", "application/x-protobuf")
             .map_err(|e| WebError::Network(format!("failed to set Content-Type: {e:?}")))?;
@@ -369,6 +446,79 @@ fn classify_renew_error(code: u32, message: String) -> RenewError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proofs_bind_the_encoded_body_and_use_fresh_nonces() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
+        let file = RealmClientKeyFile::new(
+            "browser@example.com",
+            "provider.example",
+            "https://provider.example/issuer",
+            &key,
+        );
+        let text = serde_json::to_string(&file).unwrap();
+        let signer = WebRealmClientKey::from_key_file(&file.issuer, &file.realm, &text).unwrap();
+        let client = WebIssuerClient::new(&file.issuer, signer);
+        let body = b"same encoded renewal body and attempt id";
+        let first = ClientProof::parse_header(
+            &client
+                .proof_header(ProofOp::Renew, &file.realm, body)
+                .unwrap(),
+        )
+        .unwrap();
+        let retry = ClientProof::parse_header(
+            &client
+                .proof_header(ProofOp::Renew, &file.realm, body)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_ne!(first.nonce, retry.nonce);
+        assert_eq!(first.body_sha256, retry.body_sha256);
+        first.verify(&key.verifying_key().to_bytes()).unwrap();
+        first
+            .check(
+                ProofOp::Renew,
+                &file.realm,
+                &file.provider_id,
+                body,
+                chrono::Utc::now(),
+            )
+            .unwrap();
+        assert!(
+            first
+                .check(
+                    ProofOp::Register,
+                    &file.realm,
+                    &file.provider_id,
+                    body,
+                    chrono::Utc::now()
+                )
+                .is_err()
+        );
+        assert!(
+            first
+                .check(
+                    ProofOp::Renew,
+                    &file.realm,
+                    &file.provider_id,
+                    b"changed",
+                    chrono::Utc::now()
+                )
+                .is_err()
+        );
+        assert!(
+            client
+                .proof_header(ProofOp::Renew, "other@example.com", body)
+                .is_err()
+        );
+        assert!(
+            WebRealmClientKey::from_key_file("https://other.example/issuer", &file.realm, &text)
+                .is_err()
+        );
+        assert!(
+            WebRealmClientKey::from_key_file(&file.issuer, "other@example.com", &text).is_err()
+        );
+    }
 
     #[test]
     fn structured_http_statuses_remain_distinguishable() {

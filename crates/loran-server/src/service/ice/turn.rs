@@ -152,11 +152,7 @@ impl IceService for TurnService {
             tokio::spawn(async move {
                 loop {
                     inactive_realms.deactivated().await;
-                    match turn::close_allocations(&server, |realm, actor| {
-                        inactive_realms.contains(realm) || inactive_realms.contains_actor(actor)
-                    })
-                    .await
-                    {
+                    match turn::close_unauthorized_allocations(&server, &inactive_realms).await {
                         Ok(0) => {}
                         Ok(closed) => platform::recording::info!(
                             "Closed the TURN allocations of {} credentials of inactive Realms or Actors",

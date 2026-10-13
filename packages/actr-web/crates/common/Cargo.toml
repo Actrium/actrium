@@ -13,6 +13,13 @@ workspace = true
 [lib]
 crate-type = ["rlib"] # Pure Rust library, no WASM output
 
+[features]
+live-issuer-tests = []
+
+[[test]]
+name = "issuer_live"
+required-features = ["live-issuer-tests"]
+
 [dependencies]
 # Serialization
 serde.workspace = true
@@ -42,6 +49,9 @@ web-sys = { workspace = true, features = [
 
 # Actor-RTC Core
 actr-protocol.workspace = true
+ed25519-dalek = "2"
+uuid.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

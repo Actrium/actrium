@@ -1,7 +1,7 @@
 //! Local Chromium/WebRTC interoperability fixture for Actrix TURN.
 //!
 //! Run with:
-//! `cargo run -p actrix-turn --example browser_interop`
+//! `cargo run -p actrix-turn --example browser_interop --features test-utils`
 //! and open the printed localhost URL in Chromium. The page forces both peers
 //! to use relay candidates and reports the selected candidate pair.
 
@@ -27,7 +27,7 @@ fn scoped_credential(secret: &str) -> (String, String) {
         .as_secs()
         + 600;
     let username = format!(
-        "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor={ACTOR_ID}"
+        "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:client_key=aaaaaaaaaaaaaaaa:actor={ACTOR_ID}"
     );
     let secret = platform::realm::realm_turn_secret(
         secret.as_bytes(),
@@ -164,7 +164,11 @@ async fn main() -> anyhow::Result<()> {
     let turn_address = turn_socket.local_addr()?.to_string();
     let secret = format!("browser-interop-{}-{}", Uuid::new_v4(), Uuid::new_v4());
     let (username, password) = scoped_credential(&secret);
-    let authenticator = Arc::new(Authenticator::new(secret, "provider.example".to_string())?);
+    let bindings = turn::InactiveRealms::default();
+    bindings.bind_actor(ACTOR_ID, "aaaaaaaaaaaaaaaa");
+    let authenticator = Arc::new(
+        Authenticator::new(secret, "provider.example".to_string())?.with_inactive_realms(bindings),
+    );
     let turn_server = create_turn_server(
         turn_socket,
         "127.0.0.1",

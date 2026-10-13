@@ -114,6 +114,7 @@ let SW_BROADCAST = null;
 
 /** @type {import('@actrium/actr-web').SwRuntimeConfig | null} */
 let RUNTIME_CONFIG = null;
+let RUNTIME_CLIENT_KEY_ID = null;
 
 function canonicalRuntimeConfig(value) {
   if (Array.isArray(value)) {
@@ -129,10 +130,13 @@ function canonicalRuntimeConfig(value) {
   return value;
 }
 
-function runtimeConfigsEqual(left, right) {
+function runtimeConfigsEqual(left, right, rightKeyId = right.realm_client_key?.key_id) {
+  const { realm_client_key: leftKey, ...leftConfig } = left;
+  const { realm_client_key: rightKey, ...rightConfig } = right;
   return (
-    JSON.stringify(canonicalRuntimeConfig(left)) ===
-    JSON.stringify(canonicalRuntimeConfig(right))
+    (!leftKey || leftKey.key_id === rightKeyId) &&
+    JSON.stringify(canonicalRuntimeConfig(leftConfig)) ===
+    JSON.stringify(canonicalRuntimeConfig(rightConfig))
   );
 }
 
@@ -562,6 +566,7 @@ async function ensureWasmReady() {
     // A failed first configuration must not permanently poison this worker.
     // No workload has been registered successfully at this point.
     RUNTIME_CONFIG = null;
+    RUNTIME_CLIENT_KEY_ID = null;
     wasmInitPromise = null;
     throw error;
   }
@@ -690,7 +695,8 @@ self.addEventListener('message', async (event) => {
     }
     if (!RUNTIME_CONFIG) {
       RUNTIME_CONFIG = candidateConfig;
-    } else if (!runtimeConfigsEqual(candidateConfig, RUNTIME_CONFIG)) {
+      RUNTIME_CLIENT_KEY_ID = candidateConfig.realm_client_key?.key_id ?? null;
+    } else if (!runtimeConfigsEqual(candidateConfig, RUNTIME_CONFIG, RUNTIME_CLIENT_KEY_ID)) {
       const message =
         '[SW] This Service Worker is already bound to a different runtime/package configuration';
       emitSwLog('error', 'runtime_config_mismatch', { clientId, message });
@@ -848,6 +854,9 @@ self.addEventListener('message', async (event) => {
         throw new Error('[SW] RUNTIME_CONFIG not received from main thread');
       }
       await wasm_bindgen.register_client(clientId, RUNTIME_CONFIG, port);
+      // The Host has persisted the imported key. Avoid retaining its private
+      // material in the worker's shared configuration between registrations.
+      delete RUNTIME_CONFIG.realm_client_key;
       console.log('[SW] Client registered (WBG):', clientId);
       emitSwLog('info', 'client_registered', { clientId, variant: 'wbg' });
       port.postMessage({ type: 'runtime_ready' });

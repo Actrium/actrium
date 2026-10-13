@@ -391,6 +391,9 @@ struct SwConfig {
     signaling_url: String,
     /// Realm name `<realm_id>@<domain>`.
     realm: String,
+    /// Import an already authorized device key once; subsequent starts restore it.
+    #[serde(default)]
+    realm_client_key: Option<actr_protocol::realm_membership::RealmClientKeyFile>,
     client_actr_type: String,
     #[serde(default)]
     target_actr_type: Option<String>,
@@ -557,7 +560,7 @@ const P2P_RETRY_MAX_DELAY_MS: u64 = 15000;
 struct SwRuntime {
     /// Unique client identifier (one per browser tab)
     client_id: String,
-    issuer_endpoint: String,
+    issuer: WebIssuerClient,
     signaling_url: String,
     reconnect_config: ReconnectConfig,
     realm: String,
@@ -630,8 +633,9 @@ impl SwRuntime {
         // TD-004: partition the namespace by `client_id` so each tab performs
         // an independent Issuer registration and receives its own `actor_id`.
         let cred_kv_ns = Self::build_cred_kv_namespace(&client_actr_type, &client_id);
+        let issuer = Self::load_issuer_client(&config, &platform).await?;
         let (actor_id, credential, turn_credential) = Self::obtain_credential_from_issuer(
-            &config.issuer_endpoint,
+            &issuer,
             &client_actr_type,
             &config.realm,
             &acl,
@@ -656,7 +660,7 @@ impl SwRuntime {
 
         Ok(Self {
             client_id,
-            issuer_endpoint: config.issuer_endpoint,
+            issuer,
             signaling_url: config.signaling_url,
             reconnect_config: config.reconnect_config,
             realm: config.realm,
@@ -691,13 +695,53 @@ impl SwRuntime {
         })
     }
 
+    async fn load_issuer_client(
+        config: &SwConfig,
+        platform: &WebPlatformProvider,
+    ) -> Result<WebIssuerClient, JsValue> {
+        use actr_web_common::issuer_client::WebRealmClientKey;
+        let scope = serde_json::to_vec(&(
+            "actr-web-realm-client-key/v1",
+            &config.realm,
+            config.issuer_endpoint.trim_end_matches('/'),
+        ))
+        .map_err(|_| JsValue::from_str("Cannot encode Realm key scope"))?;
+        let namespace = StorageNamespace::actr_v1(Sha256::digest(scope).into());
+        let store = platform
+            .secret_store(&namespace)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Cannot open Realm key store: {e}")))?;
+        let text = match &config.realm_client_key {
+            Some(file) => serde_json::to_string(file)
+                .map_err(|_| JsValue::from_str("Cannot encode Realm client key"))?,
+            None => {
+                let bytes = store.get("realm_client_key").await
+                    .map_err(|e| JsValue::from_str(&format!("Cannot load Realm client key: {e}")))?
+                    .ok_or_else(|| JsValue::from_str(
+                        "Import an authorized Realm client key with runtimeConfig.realm_client_key before starting this browser Host"
+                    ))?;
+                String::from_utf8(bytes)
+                    .map_err(|_| JsValue::from_str("Stored Realm client key is invalid"))?
+            }
+        };
+        let key = WebRealmClientKey::from_key_file(&config.issuer_endpoint, &config.realm, &text)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        if config.realm_client_key.is_some() {
+            store
+                .set("realm_client_key", text.as_bytes())
+                .await
+                .map_err(|e| JsValue::from_str(&format!("Cannot persist Realm client key: {e}")))?;
+        }
+        Ok(WebIssuerClient::new(&config.issuer_endpoint, key))
+    }
+
     /// Register with Issuer via HTTP and obtain credential.
     ///
     /// Web always uses Linked registration (realm authorization). Credential
     /// renewal is handled by the Web Credential Manager via POST /issuer/renew.
     async fn register_via_issuer(&mut self) -> Result<(), JsValue> {
         let (actor_id, credential, turn_credential) = Self::obtain_credential_from_issuer(
-            &self.issuer_endpoint,
+            &self.issuer,
             &self.client_actr_type,
             &self.realm,
             &self.acl,
@@ -717,7 +761,7 @@ impl SwRuntime {
     /// 2. Persist credential and actor_id to IndexedDB
     /// 3. Return (actor_id, credential, turn_credential)
     async fn obtain_credential_from_issuer(
-        issuer_endpoint: &str,
+        issuer: &WebIssuerClient,
         client_actr_type: &ActrType,
         realm: &str,
         acl: &Option<Acl>,
@@ -732,16 +776,16 @@ impl SwRuntime {
                 "[SW] credentials restored from IndexedDB (actor_id={})",
                 actor_id
             );
-            // Also try to restore persisted TurnCredential
-            let turn_credential =
-                Self::try_restore_turn_credential_static(platform, cred_kv_ns).await?;
-            return Ok((actor_id, credential, turn_credential));
+            if issuer.accepts_credential(&credential) && actor_id.realm == realm {
+                let turn_credential =
+                    Self::try_restore_turn_credential_static(platform, cred_kv_ns).await?;
+                return Ok((actor_id, credential, turn_credential));
+            }
+            Self::clear_persisted_identity_static(platform, cred_kv_ns).await?;
         }
 
-        let issuer = WebIssuerClient::new(issuer_endpoint);
-
         if let Some((actor_id, credential, turn_credential)) =
-            Self::try_renew_persisted_credential_static(&issuer, platform, cred_kv_ns).await?
+            Self::try_renew_persisted_credential_static(issuer, platform, cred_kv_ns).await?
         {
             log::info!(
                 "[SW] credentials renewed from persisted identity lease (actor_id={})",
@@ -951,6 +995,18 @@ impl SwRuntime {
             .secret_store(cred_kv_ns)
             .await
             .map_err(|e| JsValue::from_str(&format!("Failed to open KV store: {e}")))?;
+
+        let credential = kv
+            .get("credential")
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to read credential: {e}")))?;
+        if !credential.as_ref().is_some_and(|bytes| {
+            AIdCredential::decode(bytes.as_slice())
+                .is_ok_and(|credential| issuer.accepts_credential(&credential))
+        }) {
+            Self::clear_persisted_identity_static(platform, cred_kv_ns).await?;
+            return Ok(None);
+        }
 
         let Some(id_bytes) = kv
             .get("actor_id")
@@ -1235,7 +1291,7 @@ impl SwRuntime {
                 claims.expires_at,
                 now_secs
             );
-            let _ = kv.delete("credential").await;
+            // Keep the expired credential as the binding of the renewal lease.
             return Ok(None);
         }
 
@@ -1368,10 +1424,9 @@ impl SwRuntime {
 
     async fn renew_current_credential(&mut self) -> Result<(), JsValue> {
         let cred_kv_ns = self.cred_kv_namespace();
-        let issuer = WebIssuerClient::new(self.issuer_endpoint.clone());
 
         let Some((actor_id, credential, turn_credential)) =
-            Self::try_renew_persisted_credential_static(&issuer, &self.platform, &cred_kv_ns)
+            Self::try_renew_persisted_credential_static(&self.issuer, &self.platform, &cred_kv_ns)
                 .await?
         else {
             log::warn!("[SW] renewal token unavailable; falling back to Issuer registration");
@@ -4116,6 +4171,78 @@ fn js_encode_uri_component(s: &str) -> String {
 #[cfg(test)]
 mod cred_ns_tests {
     use super::*;
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn authorized_realm_key_survives_host_restart_and_is_scoped() {
+        use actr_protocol::IdentityClaims;
+        use actr_protocol::realm_membership::RealmClientKeyFile;
+        let root = format!("realm-key-test-{}", uuid::Uuid::new_v4());
+        let file = RealmClientKeyFile::new(
+            "browser@example.com",
+            "provider.example",
+            "https://provider.example/issuer",
+            &ed25519_dalek::SigningKey::from_bytes(&[57; 32]),
+        );
+        let mut config: SwConfig = serde_json::from_value(serde_json::json!({
+            "issuer_endpoint": file.issuer,
+            "signaling_url": "wss://provider.example/signaling/ws",
+            "realm": file.realm,
+            "client_actr_type": "example.com/browser@1.0.0",
+            "service_fingerprint": "test",
+            "realm_client_key": file,
+        }))
+        .unwrap();
+        let credential = AIdCredential {
+            claims: IdentityClaims {
+                realm: file.realm.clone(),
+                provider: file.provider_id.clone(),
+                client_key: file.key_id.clone(),
+                ..Default::default()
+            }
+            .encode_to_vec()
+            .into(),
+            ..Default::default()
+        };
+        let imported = SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+            .await
+            .unwrap();
+        assert!(imported.accepts_credential(&credential));
+        drop(imported);
+        config.realm_client_key = None;
+        // Recreate the provider: restoration must come from IndexedDB, not memory.
+        let restored = SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+            .await
+            .unwrap();
+        assert!(restored.accepts_credential(&credential));
+        assert!(
+            SwRuntime::load_issuer_client(
+                &config,
+                &WebPlatformProvider::new(format!("{root}-other"))
+            )
+            .await
+            .is_err()
+        );
+        config.realm = "other@example.com".into();
+        assert!(
+            SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+                .await
+                .is_err()
+        );
+        config.realm = file.realm.clone();
+        config.issuer_endpoint = "https://other.example/issuer".into();
+        assert!(
+            SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+                .await
+                .is_err()
+        );
+        config.realm_client_key = Some(file);
+        assert!(
+            SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+                .await
+                .is_err()
+        );
+    }
 
     fn ty(m: &str, n: &str, v: &str) -> ActrType {
         ActrType {

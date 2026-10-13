@@ -1374,3 +1374,248 @@ async fn invite_state(text: &str) -> Option<(String, bool)> {
     .unwrap()
     .map(|(realm, revoked)| (realm, revoked.is_some()))
 }
+
+/// Simulate an interruption after switch commits but before republish completes.
+#[tokio::test]
+#[serial]
+async fn rotation_republishes_after_interrupted_switch() {
+    use platform::realm::RealmIssuerKey;
+    let (profiles, _dir) = setup().await;
+    let keys = profiles.signing_keys().unwrap().clone();
+    let name = format!("interrupted@{PROVIDER}");
+    insert(&name, RealmStatus::Pending).await;
+    profiles
+        .issue(
+            &name,
+            ProfileChange {
+                package: Some(package()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let old = RealmIssuerKey::current(&name).await.unwrap().unwrap();
+    let next = profiles.rotate_issuer_key(&name).await.unwrap();
+    let before = RealmProfileRecord::get(&name).await.unwrap().unwrap();
+    assert_eq!(before.sequence, 2);
+    let now = chrono::Utc::now().timestamp();
+    // Fast-forward the prepublication timer through persisted state.
+    sqlx::query("UPDATE realm_issuer_key SET published_at = ? WHERE realm = ? AND state = 'next'")
+        .bind(now - issuer::realm_profile::PREPUBLISH_SECS - 1)
+        .bind(&name)
+        .execute(platform::storage::db::get_database().get_pool())
+        .await
+        .unwrap();
+    // This is the durable state left by a crash/RPC failure in the gap
+    // between RealmIssuerKey::switch and RealmProfiles::republish.
+    RealmIssuerKey::switch(&name, now, now + 3600 + 300)
+        .await
+        .unwrap();
+    assert_eq!(
+        RealmIssuerKey::current(&name)
+            .await
+            .unwrap()
+            .unwrap()
+            .key_id,
+        next
+    );
+    // On restart/background retry the healthy signer should reconcile the Profile.
+    fail_profile_publication_twice(&profiles, &name, now + 60).await;
+    profiles.maintain_issuer_keys(now + 60).await.unwrap();
+    let after = RealmProfileRecord::get(&name).await.unwrap().unwrap();
+    let profile = RealmProfile::verify(after.document.as_bytes(), &name, &keys).unwrap();
+    assert_eq!(
+        profile.issuer_key(old.key_id).unwrap().status,
+        KeyStatus::Retired,
+        "committed switch was not republished after maintenance resumed"
+    );
+    assert!(after.sequence > before.sequence);
+}
+
+/// Simulate interruption after retired key removal, before publishing the successor.
+#[tokio::test]
+#[serial]
+async fn rotation_republishes_after_interrupted_removal() {
+    use platform::realm::RealmIssuerKey;
+    let (profiles, _dir) = setup().await;
+    let keys = profiles.signing_keys().unwrap().clone();
+    let name = format!("removeinterrupted@{PROVIDER}");
+    insert(&name, RealmStatus::Pending).await;
+    profiles
+        .issue(
+            &name,
+            ProfileChange {
+                package: Some(package()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let old = RealmIssuerKey::current(&name).await.unwrap().unwrap();
+    let next = profiles.rotate_issuer_key(&name).await.unwrap();
+    let now = chrono::Utc::now().timestamp();
+    let switch_time = now - 3600 - 300 - 60;
+    // Persist a due transition; create the signed switched Profile normally.
+    sqlx::query("UPDATE realm_issuer_key SET published_at = ? WHERE realm = ? AND state = 'next'")
+        .bind(switch_time - issuer::realm_profile::PREPUBLISH_SECS - 1)
+        .bind(&name)
+        .execute(platform::storage::db::get_database().get_pool())
+        .await
+        .unwrap();
+    profiles.maintain_issuer_keys(switch_time).await.unwrap();
+    assert_eq!(
+        RealmIssuerKey::current(&name)
+            .await
+            .unwrap()
+            .unwrap()
+            .key_id,
+        next
+    );
+    let before = RealmProfileRecord::get(&name).await.unwrap().unwrap();
+    let old_profile = RealmProfile::verify(before.document.as_bytes(), &name, &keys).unwrap();
+    assert_eq!(
+        old_profile.issuer_key(old.key_id).unwrap().status,
+        KeyStatus::Retired
+    );
+    // The persistent DB state after the old key was removed and republish was lost.
+    RealmIssuerKey::remove(&name, old.key_id).await.unwrap();
+    // A signing RPC that started before removal cannot restore its stale snapshot.
+    assert!(matches!(
+        RealmProfileRecord::store_issued(
+            &old_profile,
+            &before.document,
+            Some(&before.digest),
+            None,
+        )
+        .await,
+        Err(platform::realm::RealmError::Conflict(_))
+    ));
+    fail_profile_publication_twice(&profiles, &name, now).await;
+    profiles.maintain_issuer_keys(now).await.unwrap();
+    let after = RealmProfileRecord::get(&name).await.unwrap().unwrap();
+    let profile = RealmProfile::verify(after.document.as_bytes(), &name, &keys).unwrap();
+    assert!(
+        profile.issuer_key(old.key_id).is_none(),
+        "removed key remained in published Profile after maintenance resumed"
+    );
+    assert!(after.sequence > before.sequence);
+}
+
+async fn fail_profile_publication_twice(profiles: &RealmProfiles, realm: &str, now: i64) {
+    let before = RealmProfileRecord::get(realm).await.unwrap().unwrap();
+    let pool = platform::storage::db::get_database().get_pool();
+    // Use a persistent trigger: maintenance may acquire another pooled connection.
+    sqlx::query("CREATE TRIGGER fail_profile_publish_all BEFORE UPDATE ON realm_profile BEGIN SELECT RAISE(FAIL, 'injected Profile store failure'); END")
+        .execute(pool).await.unwrap();
+    for _ in 0..2 {
+        profiles.maintain_issuer_keys(now).await.unwrap();
+        assert_eq!(
+            RealmProfileRecord::get(realm)
+                .await
+                .unwrap()
+                .unwrap()
+                .digest,
+            before.digest
+        );
+    }
+    sqlx::query("DROP TRIGGER fail_profile_publish_all")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[serial]
+async fn removed_profile_key_cannot_verify_or_be_redistributed_from_cache() {
+    use actr_protocol::prost::Message;
+    use platform::aid::credential::validator::AIdCredentialValidator as Validator;
+    static CACHE_DIR: std::sync::OnceLock<TempDir> = std::sync::OnceLock::new();
+    let cache_dir = CACHE_DIR.get_or_init(|| TempDir::new().unwrap());
+    let (_profiles, _dir) = setup().await;
+    Validator::init(cache_dir.path()).await.unwrap();
+    let name = "cache-revocation@acme.com";
+    insert(name, RealmStatus::Active).await;
+    let domain = Domain {
+        keys: vec![("rs-1", SigningKey::from_bytes(&[31; 32]))],
+    };
+    let member = domain.member(1, &["rs-1"]);
+    let old = SigningKey::from_bytes(&[32; 32]);
+    let current = SigningKey::from_bytes(&[33; 32]);
+    let key = |id: &str, status: &str, key: &SigningKey| {
+        json!({
+            "id": id, "algorithm": "Ed25519", "status": status,
+            "public_key": BASE64.encode(key.verifying_key().to_bytes())
+        })
+    };
+    let issuer = json!({"url": "https://provider.example/issuer", "keys": [
+        key("901", "retired", &old), key("902", "active", &current)
+    ]});
+    accept(
+        name,
+        &domain.profile(name, 1, "active", "rs-1", &issuer),
+        &member,
+    )
+    .await;
+    let expires_at = chrono::Utc::now().timestamp() as u64 + 3600;
+    Validator::populate_key(name, 901, &old.verifying_key(), expires_at)
+        .await
+        .unwrap();
+    let claims = actr_protocol::IdentityClaims {
+        realm: name.into(),
+        actor_id: format!("1.{name}"),
+        expires_at,
+        protocol_version: 1,
+        issuer: name.into(),
+        provider: PROVIDER.into(),
+        audience: "actr.signaling".into(),
+        actor_type: actr_protocol::ActrType::from_string_repr("acme.com/notes@1.0.0").unwrap(),
+        member: "member".into(),
+        client_key: "aaaaaaaaaaaaaaaa".into(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
+    }
+    .encode_to_vec();
+    let credential = actr_protocol::AIdCredential {
+        key_id: 901,
+        signature: old.sign(&claims).to_bytes().to_vec().into(),
+        claims: claims.into(),
+    };
+    // Listed retired keys retain their normal verification semantics.
+    Validator::check(&credential, name, PROVIDER, "actr.signaling")
+        .await
+        .unwrap();
+    assert!(Validator::get_key_bytes(name, 901).await.unwrap().is_some());
+    let issuer =
+        json!({"url": "https://provider.example/issuer", "keys": [key("902", "active", &current)]});
+    accept(
+        name,
+        &domain.profile(name, 2, "active", "rs-1", &issuer),
+        &member,
+    )
+    .await;
+    assert!(Realm::get(name).await.unwrap().unwrap().is_active());
+    let cache = platform::aid::KeyCache::new(cache_dir.path().join("signaling_key_cache.db"))
+        .await
+        .unwrap();
+    assert!(cache.get_cached_key(name, 901).await.unwrap().is_none());
+    // A delayed issuer write or cache reopened after a restart cannot undo revocation.
+    cache
+        .cache_key(name, 901, &old.verifying_key(), expires_at)
+        .await
+        .unwrap();
+    assert!(
+        Validator::check(&credential, name, PROVIDER, "actr.signaling")
+            .await
+            .is_err()
+    );
+    assert!(Validator::get_key_bytes(name, 901).await.unwrap().is_none());
+    // A matching id with another public key is also insufficient.
+    Validator::populate_key(name, 902, &old.verifying_key(), expires_at)
+        .await
+        .unwrap();
+    assert!(Validator::get_key_bytes(name, 902).await.unwrap().is_none());
+    Validator::populate_key(name, 902, &current.verifying_key(), expires_at)
+        .await
+        .unwrap();
+    assert!(Validator::get_key_bytes(name, 902).await.unwrap().is_some());
+}

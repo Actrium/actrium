@@ -223,6 +223,33 @@ impl KeyCache {
         Ok(())
     }
 
+    /// Remove entries absent from an accepted Profile, including a mismatched
+    /// public key under the same id. Other Realms are unaffected.
+    pub async fn retain_profile_keys(
+        &self,
+        profile: &actr_protocol::realm_profile::RealmProfile,
+    ) -> Result<(), AidError> {
+        let mut query =
+            sqlx::QueryBuilder::<sqlx::Sqlite>::new("DELETE FROM key_cache WHERE realm = ");
+        query.push_bind(&profile.realm.name);
+        for key in &profile.issuer.keys {
+            if let Some(id) = actr_protocol::realm_profile::parse_issuer_key_id(&key.id) {
+                query
+                    .push(" AND NOT (key_id = ")
+                    .push_bind(i64::from(id))
+                    .push(" AND pubkey = ")
+                    .push_bind(&key.public_key)
+                    .push(")");
+            }
+        }
+        query
+            .build()
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AidError::DecodeFailure(format!("failed to prune key cache: {e}")))?;
+        Ok(())
+    }
+
     /// Clean up all expired cache entries
     pub async fn cleanup_expired_keys(&self) -> Result<u32, AidError> {
         let now = SystemTime::now()

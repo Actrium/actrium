@@ -34,7 +34,8 @@ async fn allocate_retransmission_replays_success() {
             TURN_SHARED_TEST_KEY.to_owned(),
             "provider.example".to_owned(),
         )
-        .unwrap(),
+        .unwrap()
+        .with_inactive_realms(turn_bindings().clone()),
     );
     let (address, server) = start_turn(auth).await;
     let expires = SystemTime::now()
@@ -181,7 +182,8 @@ async fn allocation_lifecycle(restart: bool) {
             TURN_SHARED_TEST_KEY.to_owned(),
             "provider.example".to_owned(),
         )
-        .unwrap(),
+        .unwrap()
+        .with_inactive_realms(turn_bindings().clone()),
     );
     let (address, server) = start_turn(auth).await;
     let expires = SystemTime::now()

@@ -39,7 +39,8 @@ impl CountingAuthenticator {
                 TURN_SHARED_TEST_KEY.to_owned(),
                 "provider.example".to_owned(),
             )
-            .expect("TURN authenticator"),
+            .expect("TURN authenticator")
+            .with_inactive_realms(turn_bindings().clone()),
         );
         (
             Self {
@@ -63,11 +64,16 @@ impl AuthHandler for CountingAuthenticator {
     }
 }
 
+fn turn_bindings() -> &'static turn::InactiveRealms {
+    static BINDINGS: std::sync::LazyLock<turn::InactiveRealms> =
+        std::sync::LazyLock::new(turn::InactiveRealms::default);
+    &BINDINGS
+}
+
 fn turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
-    // Username must match the scoped format enforced by `turn::Authenticator`:
-    // `{expires_at}:realm={realm}:provider=provider.example:audience=actr.turn:actor={actr_id}`
+    turn_bindings().bind_actor(&id.to_string_repr(), "aaaaaaaaaaaaaaaa");
     let username = format!(
-        "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:actor={id}",
+        "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:client_key=aaaaaaaaaaaaaaaa:actor={id}",
         id.realm
     );
     let secret = platform::realm::realm_turn_secret(
@@ -154,7 +160,8 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
             TURN_SHARED_TEST_KEY.to_owned(),
             "provider.example".to_owned(),
         )
-        .expect("TURN authenticator"),
+        .expect("TURN authenticator")
+        .with_inactive_realms(turn_bindings().clone()),
     );
     let (turn_address, turn_server) = start_turn(authenticator.clone()).await;
     let now = SystemTime::now()

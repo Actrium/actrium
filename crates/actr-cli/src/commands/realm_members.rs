@@ -341,9 +341,47 @@ async fn send(issuer: &str, document: &Value) -> std::result::Result<Value, Send
         .with_context(|| format!("Failed to read the membership reply from {url}"))
         .map_err(SendError::Unknown)?;
     if !status.is_success() {
-        return Err(SendError::Refused(anyhow::anyhow!(
-            "membership request refused (HTTP {status}): {body}"
-        )));
+        let error = anyhow::anyhow!("membership request failed (HTTP {status}): {body}");
+        // A gateway can replace the reply after redemption committed. Only
+        // recognized application refusals establish that this attempt failed.
+        let code = serde_json::from_str::<Value>(&body).ok();
+        let definitive = matches!(
+            (
+                status.as_u16(),
+                code.as_ref().and_then(|v| v["error"].as_str())
+            ),
+            (400, Some("invalid_request"))
+                | (
+                    403,
+                    Some(
+                        "client_unknown"
+                            | "client_revoked"
+                            | "member_removed"
+                            | "forbidden"
+                            | "realm_unavailable"
+                    )
+                )
+                | (404, Some("invite_unknown" | "not_found"))
+                | (
+                    409,
+                    Some(
+                        "invite_realm_mismatch"
+                            | "owner_last_client"
+                            | "owner_must_transfer"
+                            | "conflict"
+                    )
+                )
+                | (
+                    410,
+                    Some("invite_expired" | "invite_used" | "invite_revoked")
+                )
+                | (429, Some("quota"))
+        );
+        return Err(if definitive {
+            SendError::Refused(error)
+        } else {
+            SendError::Unknown(error)
+        });
     }
     serde_json::from_str(&body)
         .context("membership reply is not JSON")
@@ -719,6 +757,55 @@ mod tests {
         };
         let error = join(&other).await.unwrap_err();
         assert!(error.to_string().contains("already exists"), "{error:#}");
+    }
+
+    #[tokio::test]
+    async fn committed_join_with_gateway_error_keeps_the_registered_key() {
+        for status in [502, 504, 500, 408] {
+            let registered = std::sync::Arc::new(std::sync::Mutex::new(None::<[u8; 32]>));
+            let app = Router::new().route(
+                "/issuer/membership",
+                post({
+                    let registered = registered.clone();
+                    move |body: axum::body::Bytes| {
+                        let registered = registered.clone();
+                        async move {
+                            let request = MembershipRequest::parse(&body).unwrap();
+                            let public_key = request.verify_join().unwrap();
+                            let mut stored = registered.lock().unwrap();
+                            if let Some(original) = *stored {
+                                assert_eq!(public_key, original, "retry must use the redeemed key");
+                                (axum::http::StatusCode::OK, "{\"joined\":true}")
+                            } else {
+                                *stored = Some(public_key); // redemption committed
+                                (
+                                    axum::http::StatusCode::from_u16(status).unwrap(),
+                                    "gateway response lost",
+                                )
+                            }
+                        }
+                    }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let dir = tempfile::tempdir().unwrap();
+            let args = JoinArgs {
+                invite: RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([9u8; 32])).encode(),
+                output: dir.path().join("client.json"),
+                issuer: Some(format!("http://{address}/issuer")),
+                provider: None,
+                label: None,
+                force: false,
+            };
+            let error = join(&args).await.unwrap_err();
+            assert!(format!("{error:#}").contains("invite may have been redeemed"));
+            let before = std::fs::read(&args.output).unwrap();
+            assert_eq!(join(&args).await.unwrap()["joined"], true);
+            assert_eq!(std::fs::read(&args.output).unwrap(), before);
+            server.abort();
+        }
     }
 
     #[tokio::test]

@@ -205,6 +205,7 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
                         })),
                     });
                 }
+                platform::realm::changes::announce_actor(&register_ok.actr_id);
             }
             if let Some(ref ctr) = state.counters {
                 ctr.record_request(true, start.elapsed().as_secs_f64() * 1000.0)

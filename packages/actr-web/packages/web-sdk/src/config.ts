@@ -23,6 +23,19 @@ export interface SwRuntimeConfig {
   /** Realm name (`<realm_id>@<domain>`) */
   realm: string;
 
+  /** Authorized device key JSON produced by `actr realm join`. Import once;
+   * subsequent starts restore it from the browser's Realm/Issuer secret store.
+   * Supply at runtime through the Host's credential import flow, never embed
+   * a private key in a public JavaScript bundle or generated config. */
+  realm_client_key?: {
+    realm: string;
+    provider_id: string;
+    issuer: string;
+    key_id: string;
+    private_key: string;
+    public_key: string;
+  };
+
   /** This actor's type (publisher/program@version) */
   client_actr_type: string;
 

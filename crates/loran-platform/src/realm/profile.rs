@@ -62,6 +62,37 @@ impl RealmProfileRecord {
         owner_invite_by: Option<&str>,
         owner: Option<&Signer>,
     ) -> Result<(Realm, bool, Option<IssuedInvite>), RealmError> {
+        Self::store_inner(
+            profile,
+            document,
+            previous_digest,
+            owner_invite_by,
+            owner,
+            false,
+        )
+        .await
+    }
+
+    /// Store a locally signed Profile only if its issuer keys still match the
+    /// ledger in the commit transaction. A transition during the signing RPC
+    /// must not republish removed keys or overwrite a newer key status.
+    pub async fn store_issued(
+        profile: &RealmProfile,
+        document: &str,
+        previous_digest: Option<&str>,
+        owner: Option<&Signer>,
+    ) -> Result<(Realm, bool, Option<IssuedInvite>), RealmError> {
+        Self::store_inner(profile, document, previous_digest, None, owner, true).await
+    }
+
+    async fn store_inner(
+        profile: &RealmProfile,
+        document: &str,
+        previous_digest: Option<&str>,
+        owner_invite_by: Option<&str>,
+        owner: Option<&Signer>,
+        check_issuer_ledger: bool,
+    ) -> Result<(Realm, bool, Option<IssuedInvite>), RealmError> {
         let name = profile.realm.name.as_str();
         let now = Utc::now().timestamp();
         let mut tx = get_database()
@@ -80,6 +111,26 @@ impl RealmProfileRecord {
         }
         if let Some(owner) = owner {
             require_owner(&check_key_on(&mut tx, name, &owner.key_id).await?)?;
+        }
+        if check_issuer_ledger {
+            let keys = sqlx::query_as::<_, super::issuer_key::RealmIssuerKey>(
+                "SELECT * FROM realm_issuer_key WHERE realm = ?",
+            )
+            .bind(name)
+            .fetch_all(&mut *tx)
+            .await?;
+            if keys.len() != profile.issuer.keys.len()
+                || keys.iter().any(|key| {
+                    profile.issuer_key(key.key_id).is_none_or(|published| {
+                        published.public_key != key.public_key
+                            || published.status != key.profile_status()
+                    })
+                })
+            {
+                return Err(RealmError::Conflict(
+                    "issuer keys changed while signing the Realm Profile".into(),
+                ));
+            }
         }
 
         let digest = digest(document.as_bytes());
@@ -143,6 +194,8 @@ impl RealmProfileRecord {
             }
         }
         tx.commit().await?;
+        crate::aid::credential::validator::AIdCredentialValidator::reconcile_profile_cache(profile)
+            .await;
         super::changes::announce(name);
         let realm = Realm::get(name).await?.ok_or(RealmError::NotFound)?;
         Ok((realm, activated, owner_invite))

@@ -139,6 +139,37 @@ pub async fn close_allocations(
     server: &Server,
     closed: impl Fn(&str, &str) -> bool,
 ) -> error::Result<usize> {
+    close_allocations_matching(server, |username| {
+        username_scope(username).is_some_and(|(realm, actor)| closed(realm, actor))
+    })
+    .await
+}
+
+/// Close allocations whose issuing device is no longer authorized, including
+/// after a recovery skips over the transient disabled-Actor state.
+pub async fn close_unauthorized_allocations(
+    server: &Server,
+    state: &InactiveRealms,
+) -> error::Result<usize> {
+    close_allocations_matching(server, |username| {
+        let Some((realm, actor)) = username_scope(username) else {
+            return true;
+        };
+        let key = username
+            .split_once(":client_key=")
+            .and_then(|(_, rest)| rest.split_once(":actor="))
+            .map(|(key, _)| key);
+        state.contains(realm)
+            || state.contains_actor(actor)
+            || key.is_none_or(|key| !state.matches_binding(actor, key))
+    })
+    .await
+}
+
+async fn close_allocations_matching(
+    server: &Server,
+    closed: impl Fn(&str) -> bool,
+) -> error::Result<usize> {
     let infos =
         server
             .get_allocations_info(None)
@@ -149,9 +180,7 @@ pub async fn close_allocations(
     let mut usernames: Vec<String> = infos
         .into_values()
         .map(|info| info.username)
-        .filter(|username| {
-            username_scope(username).is_some_and(|(realm, actor)| closed(realm, actor))
-        })
+        .filter(|username| closed(username))
         .collect();
     usernames.sort();
     usernames.dedup();

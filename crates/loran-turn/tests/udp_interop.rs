@@ -21,7 +21,7 @@ fn scoped_credential() -> (String, String) {
         .as_secs()
         + 300;
     let username = format!(
-        "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com"
+        "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:client_key=aaaaaaaaaaaaaaaa:actor=1.k7m2q9xh@example.com"
     );
     let secret = platform::realm::realm_turn_secret(
         TURN_SECRET.as_bytes(),
@@ -34,13 +34,27 @@ fn scoped_credential() -> (String, String) {
     (username, password)
 }
 
-async fn start_turn_server() -> anyhow::Result<(turn_crate::server::Server, String)> {
+async fn start_turn_server()
+-> anyhow::Result<(turn_crate::server::Server, String, turn::WatchGuard)> {
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
     let address = socket.local_addr()?.to_string();
-    let authenticator = Arc::new(Authenticator::new(
-        TURN_SECRET.to_string(),
-        "provider.example".to_string(),
-    )?);
+    static READY: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    static DB_DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    READY.get_or_init(|| async {
+        let dir = DB_DIR.get_or_init(|| tempfile::tempdir().unwrap());
+        platform::storage::db::set_db_path(dir.path()).await.unwrap();
+        platform::realm::Realm::create("k7m2q9xh@example.com".into()).await.unwrap();
+        let pool = platform::storage::db::get_database().get_pool();
+        sqlx::query("INSERT INTO realm_member (realm, member_id, role, status, created_at) VALUES ('k7m2q9xh@example.com', 'm', 'owner', 'active', 1)").execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO realm_client_key (realm, key_id, member_id, public_key, registered_at) VALUES ('k7m2q9xh@example.com', 'aaaaaaaaaaaaaaaa', 'm', ?, 1)").bind(vec![1u8; 32]).execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO issued_actor_identity (realm, serial_number, actor_type, member_id, client_key_id, issued_at) VALUES ('k7m2q9xh@example.com', 1, 'test/echo@1', 'm', 'aaaaaaaaaaaaaaaa', 1)").execute(pool).await.unwrap();
+    }).await;
+    let inactive = turn::InactiveRealms::default();
+    let guard = inactive.watch().await;
+    let authenticator = Arc::new(
+        Authenticator::new(TURN_SECRET.to_string(), "provider.example".to_string())?
+            .with_inactive_realms(inactive),
+    );
     let server = create_turn_server(
         socket,
         "127.0.0.1",
@@ -50,7 +64,7 @@ async fn start_turn_server() -> anyhow::Result<(turn_crate::server::Server, Stri
         true,
     )
     .await?;
-    Ok((server, address))
+    Ok((server, address, guard))
 }
 
 async fn turn_client(server_address: &str) -> anyhow::Result<Client> {
@@ -74,7 +88,7 @@ async fn turn_client(server_address: &str) -> anyhow::Result<Client> {
 
 #[tokio::test]
 async fn udp_allocate_permission_and_bidirectional_relay_interoperate() -> anyhow::Result<()> {
-    let (server, server_address) = start_turn_server().await?;
+    let (server, server_address, _guard) = start_turn_server().await?;
     let client = turn_client(&server_address).await?;
 
     let mapped_address = timeout(Duration::from_secs(3), client.send_binding_request()).await??;
@@ -110,7 +124,7 @@ async fn udp_allocate_permission_and_bidirectional_relay_interoperate() -> anyho
 
 #[tokio::test]
 async fn malformed_udp_burst_does_not_starve_a_valid_allocation() -> anyhow::Result<()> {
-    let (server, server_address) = start_turn_server().await?;
+    let (server, server_address, _guard) = start_turn_server().await?;
     let abuse_socket = UdpSocket::bind("127.0.0.1:0").await?;
 
     // Alternate malformed STUN-looking packets and ChannelData-looking packets.
@@ -133,7 +147,7 @@ async fn malformed_udp_burst_does_not_starve_a_valid_allocation() -> anyhow::Res
 
 #[tokio::test]
 async fn allocations_of_a_closed_realm_or_actor_are_closed() -> anyhow::Result<()> {
-    let (server, server_address) = start_turn_server().await?;
+    let (server, server_address, _guard) = start_turn_server().await?;
     let client = turn_client(&server_address).await?;
     let relay = timeout(Duration::from_secs(3), client.allocate()).await??;
     assert_eq!(server.get_allocations_info(None).await?.len(), 1);

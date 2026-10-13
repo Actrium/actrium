@@ -277,7 +277,10 @@ impl Authenticator {
         let (provider, scoped_identity) = scoped_identity
             .split_once(":audience=")
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
-        let (audience, actor_id) = scoped_identity
+        let (audience, scoped_identity) = scoped_identity
+            .split_once(":client_key=")
+            .ok_or_else(|| Error::Other("missing TURN client key binding".to_string()))?;
+        let (client_key, actor_id) = scoped_identity
             .split_once(":actor=")
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
         let actor = actr_protocol::ActrId::from_string_repr(actor_id)
@@ -299,6 +302,11 @@ impl Authenticator {
             platform::recording::warn!("TURN credential refused: Actor {} is disabled", actor_id);
             return Err(Error::Other(
                 "TURN credential Actor is disabled".to_string(),
+            ));
+        }
+        if !self.inactive_realms.matches_binding(actor_id, client_key) {
+            return Err(Error::Other(
+                "TURN credential client key binding is no longer current".to_string(),
             ));
         }
 
@@ -460,11 +468,20 @@ mod tests {
             "provider.example".to_string(),
         )
         .expect("authenticator should initialize")
+        .with_inactive_realms(active_bindings())
+    }
+
+    fn active_bindings() -> InactiveRealms {
+        let state = InactiveRealms::default();
+        for realm in ["k7m2q9xh@example.com", "p3n8w2rt@example.com"] {
+            state.bind_actor(&format!("1.{realm}"), "aaaaaaaaaaaaaaaa");
+        }
+        state
     }
 
     fn username(expires_at: u64) -> String {
         format!(
-            "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com"
+            "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:client_key=aaaaaaaaaaaaaaaa:actor=1.k7m2q9xh@example.com"
         )
     }
 
@@ -472,6 +489,47 @@ mod tests {
     fn test_authenticator_creation() {
         let _auth = make_auth();
         assert!(Authenticator::new("short".to_string(), "provider.example".to_string()).is_err());
+    }
+
+    #[test]
+    fn old_device_turn_credentials_stay_revoked_after_actor_recovery() {
+        let auth = make_auth();
+        let actor = "1.k7m2q9xh@example.com";
+        let source = "127.0.0.1:3478".parse().unwrap();
+        let old = username(2_000_000_060);
+        let old_integrity = auth
+            .auth_handle_at(&old, "actrix.local", source, 2_000_000_000)
+            .unwrap();
+        auth.inactive_realms.insert_actor(actor);
+        assert!(
+            auth.auth_handle_at(&old, "actrix.local", source, 2_000_000_000)
+                .is_err()
+        );
+        auth.inactive_realms.bind_actor(actor, "bbbbbbbbbbbbbbbb");
+        auth.inactive_realms.actors_for_test_resume(actor);
+        // The old integrity key is still cached, but its binding is refused.
+        assert!(
+            auth.auth_handle_at(&old, "actrix.local", source, 2_000_000_000)
+                .is_err()
+        );
+        auth.clear_cache();
+        assert!(
+            auth.auth_handle_at(&old, "actrix.local", source, 2_000_000_000)
+                .is_err()
+        );
+        let new = old.replace("aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+        let new_integrity = auth
+            .auth_handle_at(&new, "actrix.local", source, 2_000_000_000)
+            .unwrap();
+        assert_ne!(
+            new_integrity, old_integrity,
+            "altering the binding cannot reuse the old password"
+        );
+        let legacy = old.replace(":client_key=aaaaaaaaaaaaaaaa", "");
+        assert!(
+            auth.auth_handle_at(&legacy, "actrix.local", source, 2_000_000_000)
+                .is_err()
+        );
     }
 
     #[test]
@@ -558,7 +616,7 @@ mod tests {
 
     #[test]
     fn test_auth_handle_refuses_inactive_realm_even_when_cached() {
-        let inactive = InactiveRealms::default();
+        let inactive = active_bindings();
         let auth = make_auth().with_inactive_realms(inactive.clone());
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
         let username = username(2_000_000_060);
@@ -574,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_auth_handle_refuses_disabled_actor_even_when_cached() {
-        let inactive = InactiveRealms::default();
+        let inactive = active_bindings();
         let auth = make_auth().with_inactive_realms(inactive.clone());
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
         let username = username(2_000_000_060);
@@ -593,7 +651,7 @@ mod tests {
     fn test_auth_handle_rejects_cross_realm_or_audience_scope() {
         let auth = make_auth();
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
-        let base = "2000000060:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com";
+        let base = "2000000060:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:client_key=aaaaaaaaaaaaaaaa:actor=1.k7m2q9xh@example.com";
 
         for invalid in [
             base.replace("realm=k7m2q9xh@", "realm=other@"),
@@ -686,12 +744,14 @@ mod tests {
             "first-secret-at-least-32-bytes-long".to_string(),
             "provider.example".to_string(),
         )
-        .unwrap();
+        .unwrap()
+        .with_inactive_realms(active_bindings());
         let second = Authenticator::new(
             "second-secret-at-least-32-bytes-long".to_string(),
             "provider.example".to_string(),
         )
-        .unwrap();
+        .unwrap()
+        .with_inactive_realms(active_bindings());
         let username = username(2_000_000_060);
         let server_realm = "actrix.local";
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
@@ -716,8 +776,12 @@ mod tests {
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
 
         for serial in 1..=(AUTH_CACHE_CAPACITY + 64) {
+            auth.inactive_realms.bind_actor(
+                &format!("{serial:x}.k7m2q9xh@example.com"),
+                "aaaaaaaaaaaaaaaa",
+            );
             let username = format!(
-                "{}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor={:x}.k7m2q9xh@example.com",
+                "{}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:client_key=aaaaaaaaaaaaaaaa:actor={:x}.k7m2q9xh@example.com",
                 now + 60,
                 serial
             );

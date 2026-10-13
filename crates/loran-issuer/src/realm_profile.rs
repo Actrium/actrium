@@ -310,7 +310,7 @@ impl RealmProfiles {
         }
         let digest = record.as_ref().map(|record| record.digest.as_str());
         let (realm, _, _) =
-            RealmProfileRecord::store(&profile, &document, digest, None, change.owner.as_ref())
+            RealmProfileRecord::store_issued(&profile, &document, digest, change.owner.as_ref())
                 .await?;
         Ok(realm)
     }
@@ -634,6 +634,25 @@ impl RealmProfiles {
                 }
                 _ => {}
             }
+        }
+        // The ledger is durable, but `changed` is not. Reconcile even when a
+        // previous process committed a switch/removal and lost publication.
+        // External domains still publish with their own signing authority.
+        if self.holds_key_for(realm)
+            && let Some(record) = RealmProfileRecord::get(realm).await?
+        {
+            let signing_keys = self.signing_keys().ok_or_else(|| {
+                ProfileError::Unavailable("Realm signing key is not ready".to_string())
+            })?;
+            let profile = record.verify(signing_keys)?;
+            let current_keys = RealmIssuerKey::list(realm).await?;
+            changed |= profile.issuer.keys.len() != current_keys.len()
+                || current_keys.iter().any(|key| {
+                    profile.issuer_key(key.key_id).is_none_or(|published| {
+                        published.public_key != key.public_key
+                            || published.status != key.profile_status()
+                    })
+                });
         }
         if changed {
             self.republish(realm).await?;

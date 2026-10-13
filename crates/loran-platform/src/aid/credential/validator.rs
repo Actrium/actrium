@@ -9,6 +9,7 @@ use super::error::AidError;
 use super::verifier::AIdCredentialVerifier;
 use crate::aid::key_cache::KeyCache;
 use actr_protocol::{AIdCredential, ActrId, IdentityClaims};
+use base64::Engine as _;
 use ed25519_dalek::VerifyingKey;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
@@ -55,8 +56,7 @@ impl AIdCredentialValidator {
         let cache = Self::get_cache()?;
         let key_id = credential.key_id;
 
-        let (verifying_key, _expires_at) = cache
-            .get_cached_key(realm, key_id)
+        let (verifying_key, _expires_at) = Self::accepted_cached_key(&cache, realm, key_id)
             .await?
             .ok_or(AidError::InvalidFormat)?; // key_id not found in cache
 
@@ -83,8 +83,47 @@ impl AIdCredentialValidator {
     /// Returns the Ed25519 public key bytes of `realm`'s key `key_id` (used for GetSigningKeyRequest responses)
     pub async fn get_key_bytes(realm: &str, key_id: u32) -> Result<Option<Vec<u8>>, AidError> {
         let cache = Self::get_cache()?;
-        let result = cache.get_cached_key(realm, key_id).await?;
+        let result = Self::accepted_cached_key(&cache, realm, key_id).await?;
         Ok(result.map(|(verifying_key, _expires_at)| verifying_key.as_bytes().to_vec()))
+    }
+
+    /// Cache lifetime never overrides the currently accepted Profile. Reading
+    /// it on every lookup also covers restart and late writes of removed keys.
+    async fn accepted_cached_key(
+        cache: &KeyCache,
+        realm: &str,
+        key_id: u32,
+    ) -> Result<Option<(VerifyingKey, u64)>, AidError> {
+        let Some(cached) = cache.get_cached_key(realm, key_id).await? else {
+            return Ok(None);
+        };
+        if crate::storage::db::is_database_initialized()
+            && let Some(record) = crate::realm::RealmProfileRecord::get(realm).await?
+        {
+            // Only verified Profiles enter this table; malformed stored data
+            // must fail closed instead of falling back to a cached key.
+            let profile: actr_protocol::realm_profile::RealmProfile =
+                serde_json::from_str(&record.document)
+                    .map_err(|error| AidError::DecodeFailure(error.to_string()))?;
+            let public_key = base64::engine::general_purpose::STANDARD.encode(cached.0.as_bytes());
+            if profile
+                .issuer_key(key_id)
+                .is_none_or(|key| key.public_key != public_key)
+            {
+                return Ok(None);
+            }
+        }
+        Ok(Some(cached))
+    }
+
+    /// Best-effort cache hygiene after Profile acceptance. Authorization is
+    /// enforced by `accepted_cached_key`, including if this cleanup is lost.
+    pub async fn reconcile_profile_cache(profile: &actr_protocol::realm_profile::RealmProfile) {
+        if let Some(cache) = KEY_CACHE.get()
+            && let Err(error) = cache.retain_profile_keys(profile).await
+        {
+            crate::recording::warn!("Failed to prune Realm issuer key cache: {error}");
+        }
     }
 
     /// Write the Ed25519 verifying key into the global KeyCache (called by the issuer)

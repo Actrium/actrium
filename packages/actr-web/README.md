@@ -66,6 +66,23 @@ Shared Service Worker: actor.sw.js
 
 Each browser tab owns its own DOM-side client identity. The Service Worker is shared by the origin and keeps per-client runtime state.
 
+### Realm client authorization
+
+Production Issuers require an authorized Realm device key on both registration
+and renewal. Import a `RealmClientKeyFile` JSON document (for example, the output
+of `actr realm join` for this browser device) through
+`runtimeConfig.realm_client_key` at first startup. Supply it from a local file
+picker or another private provisioning flow; never embed it in a public bundle.
+The Service Worker persists it in IndexedDB, scoped to the workload, Realm and
+Issuer. Later starts omit this option and restore the same key. Missing keys
+produce an explicit import error; revoked keys require renewed membership
+authorization. Browser storage clearing requires importing the key again.
+
+Every HTTP attempt signs its operation, Realm, Provider and exact protobuf body
+with a fresh nonce. Renewal retries retain their attempt ID and request body.
+Run the real Issuer/WASM registration and renewal regression with
+`bash scripts/test-issuer-proof.sh` (Rust/WASM, Chrome and wasm-pack required).
+
 ## Packages
 
 - `packages/actr-dom`: `@actrium/actr-dom`, the DOM-side bridge for Service Worker, WebRTC, and browser APIs.

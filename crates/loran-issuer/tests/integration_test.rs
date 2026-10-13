@@ -4373,6 +4373,19 @@ async fn test_a_revoked_key_disables_its_actors_until_the_member_reissues() {
     let owner = owner(realm).await;
     let second = add_second_client(realm, &owner, "revoked-second").await;
     let token = ok.renewal_token.clone().unwrap();
+    use turn_crate::auth::AuthHandler as _;
+    let inactive = turn::InactiveRealms::default();
+    let _watch = inactive.watch().await;
+    let auth = turn::Authenticator::new(
+        "test-turn-secret-at-least-32-bytes!".into(),
+        PROVIDER_ID.into(),
+    )
+    .unwrap()
+    .with_inactive_realms(inactive.clone());
+    let source = "127.0.0.1:3478".parse().unwrap();
+    let old_turn = &ok.turn_credential;
+    auth.auth_handle(&old_turn.username, "turn.test", source)
+        .unwrap();
 
     // Another key of the member does not renew the Actor.
     let renew = RenewCredentialRequest {
@@ -4416,6 +4429,24 @@ async fn test_a_revoked_key_disables_its_actors_until_the_member_reissues() {
         actr_protocol::IdentityClaims::decode(reissued.credential.claims.as_ref()).unwrap();
     assert_eq!(claims.client_key, second.key_id);
     assert!(!membership::actor_disabled(&ok.actr_id).await.unwrap());
+    for _ in 0..100 {
+        if inactive.matches_binding(&ok.actr_id.to_string_repr(), &second.key_id) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(inactive.matches_binding(&ok.actr_id.to_string_repr(), &second.key_id));
+    assert!(
+        auth.auth_handle(&old_turn.username, "turn.test", source)
+            .is_err()
+    );
+    auth.clear_cache();
+    assert!(
+        auth.auth_handle(&old_turn.username, "turn.test", source)
+            .is_err()
+    );
+    auth.auth_handle(&reissued.turn_credential.username, "turn.test", source)
+        .unwrap();
 
     env.shutdown_signer().await;
 }
@@ -4476,4 +4507,133 @@ fn renew_message(response: &RenewCredentialResponse) -> &str {
         Some(renew_credential_response::Result::Error(err)) => &err.message,
         other => panic!("expected an error, got {other:?}"),
     }
+}
+
+/// Loopback-only fixture for packages/actr-web/scripts/test-issuer-proof.sh.
+/// Uses real Issuer handlers, membership transactions, and an embedded Signer.
+#[tokio::test]
+#[serial]
+#[ignore = "started by the Web Issuer integration test script"]
+async fn web_issuer_http_fixture() {
+    use axum::response::IntoResponse as _;
+    use axum::{Json, middleware, routing::get};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let ready = std::env::var("ACTR_WEB_FIXTURE_READY").expect("fixture ready path");
+    let mut env = setup_test_environment().await;
+    let realm = "browser@example.com";
+    let label = "browser-device";
+    seed_realm(realm, Some(label)).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let file = actr_protocol::realm_membership::RealmClientKeyFile::new(
+        realm,
+        PROVIDER_ID,
+        &endpoint,
+        &key_for(label),
+    );
+    let first_renew = Arc::new(AtomicBool::new(true));
+    let observed = Arc::new(Mutex::new(Vec::<(Vec<u8>, String)>::new()));
+    let app = create_test_router(&env).await.layer(middleware::from_fn({
+        let first_renew = first_renew.clone();
+        let observed = observed.clone();
+        move |request: Request<Body>, next: middleware::Next| {
+            let first_renew = first_renew.clone();
+            let observed = observed.clone();
+            async move {
+                if request.uri().path() != "/renew" {
+                    return next.run(request).await;
+                }
+                let (parts, body) = request.into_parts();
+                let body = to_bytes(body, usize::MAX).await.unwrap();
+                let proof =
+                    ClientProof::parse_header(parts.headers[CLIENT_PROOF_HEADER].to_str().unwrap())
+                        .unwrap();
+                observed.lock().unwrap().push((body.to_vec(), proof.nonce));
+                let response = next.run(Request::from_parts(parts, Body::from(body))).await;
+                if response.status().is_success() && first_renew.swap(false, Ordering::SeqCst) {
+                    // The operation committed and consumed the proof. Retrying
+                    // needs the same body/attempt and a new signed nonce.
+                    (StatusCode::TOO_EARLY, [("retry-after", "0")]).into_response()
+                } else {
+                    response
+                }
+            }
+        }
+    }));
+    let stop = Arc::new(tokio::sync::Notify::new());
+    let app = app
+        .route(
+            "/fixture",
+            get(move || {
+                let file = file.clone();
+                async move { Json(file) }
+            }),
+        )
+        .route(
+            "/stop",
+            get({
+                let stop = stop.clone();
+                move || {
+                    let stop = stop.clone();
+                    async move {
+                        stop.notify_one();
+                        "stopped"
+                    }
+                }
+            }),
+        );
+    // Only the loopback test fixture exposes these headers to the test runner.
+    let app = app.layer(middleware::from_fn(
+        |request: Request<Body>, next: middleware::Next| async move {
+            let mut response = if request.method() == axum::http::Method::OPTIONS {
+                StatusCode::NO_CONTENT.into_response()
+            } else {
+                next.run(request).await
+            };
+            for (key, value) in [
+                ("access-control-allow-origin", "*"),
+                ("access-control-allow-methods", "GET, POST, OPTIONS"),
+                (
+                    "access-control-allow-headers",
+                    "content-type, accept, x-actr-client-proof",
+                ),
+                ("access-control-expose-headers", "retry-after"),
+            ] {
+                response.headers_mut().insert(key, value.parse().unwrap());
+            }
+            response
+        },
+    ));
+    std::fs::write(ready, &endpoint).unwrap();
+    let shutdown = stop.clone();
+    tokio::time::timeout(
+        Duration::from_secs(180),
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            shutdown.notified().await;
+        })
+        .into_future(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    {
+        let observed = observed.lock().unwrap();
+        assert!(
+            observed.len() >= 2,
+            "the browser must retry a committed renewal"
+        );
+        assert_eq!(
+            observed[0].0, observed[1].0,
+            "retry changed the body/attempt"
+        );
+        assert_ne!(observed[0].1, observed[1].1, "retry reused the proof nonce");
+    }
+    env.shutdown_signer().await;
 }

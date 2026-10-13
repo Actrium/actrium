@@ -1181,6 +1181,30 @@ pub async fn credential_refused(actor: &ActrId, client_key: &str) -> Result<bool
         .is_some_and(|binding| binding.client_key_id != client_key))
 }
 
+/// Current TURN bindings of active members and unrevoked client keys.
+pub async fn turn_actor_bindings() -> Result<Vec<(ActrId, String)>, sqlx::Error> {
+    let rows: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT i.realm, i.serial_number, i.client_key_id FROM issued_actor_identity i
+         JOIN realm_client_key k ON k.realm = i.realm AND k.key_id = i.client_key_id
+         JOIN realm_member m ON m.realm = k.realm AND m.member_id = k.member_id
+         WHERE k.revoked_at IS NULL AND m.status = 'active'",
+    )
+    .fetch_all(get_database().get_pool())
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(realm, serial, key)| {
+            (
+                ActrId {
+                    realm,
+                    serial_number: serial as u64,
+                },
+                key,
+            )
+        })
+        .collect())
+}
+
 /// Every disabled Actor.
 pub async fn disabled_actors() -> Result<Vec<ActrId>, sqlx::Error> {
     let rows: Vec<(String, i64)> = sqlx::query_as(
