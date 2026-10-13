@@ -60,6 +60,28 @@ The startup path performs no network downloads.
 | Rust compilation | sccache with in-cluster MinIO | `SCCACHE_ENDPOINT=sccache-minio.arc-sccache.svc:9000`, bucket `sccache` |
 | Actions file caches | gha-cache-server with MinIO storage | `ACTIONS_RESULTS_URL=http://gha-cache-server.arc-sccache.svc:3000/`, bucket `gha-cache` |
 
+### Cargo registry layout
+
+The fleet shares one node-local Cargo registry between every Pod on that node
+(`/var/openebs/cargo-registry` hostPath). That is what makes crate downloads
+free, but only part of the registry may actually be shared:
+
+| Registry path | Backing | Why |
+|---|---|---|
+| `registry/cache` | node hostPath | Holds the `.crate` archives; cargo downloads to a temporary file and renames it into place, so concurrent Pods are safe and no Pod re-downloads |
+| `registry/index` | node hostPath | Sparse index cache, protected by cargo's own advisory locks |
+| `registry/src` | per-Pod `emptyDir` | Extraction target. Cargo unpacks each `.crate` here and marks a finished unpack with a `.cargo-ok` file; a shared directory lets two Pods extracting the same crate collide on that marker (`failed to unpack ... File exists (os error 17)`), which fails the losing job |
+
+Only the extraction directory is therefore Pod-local. Each Pod re-extracts
+crates from the shared archive cache - CPU only, never network - and the volume
+carries a 20 GiB guard (measured extraction for this workspace is ~1.3 GiB).
+This matters most when many Rust jobs run concurrently on one node, which is
+exactly when the shared-directory race used to fire.
+
+The stale shared `registry/src` left on each node by the previous layout is
+inert (it is shadowed by the per-Pod mount). It can be reclaimed node-side with
+`rm -rf /var/openebs/cargo-registry/src` once no runner uses the old layout.
+
 ### Actions cache integration
 
 The fleet's `gha-cache-server` (`falcondev-oss/github-actions-cache-server`)
