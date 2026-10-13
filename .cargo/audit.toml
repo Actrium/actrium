@@ -1,0 +1,7 @@
+[advisories]
+# Existing advisories outside the WASM host are tracked separately.
+ignore = [
+    "RUSTSEC-2025-0132", # maxminddb (framework GeoIP)
+    "RUSTSEC-2024-0437", # protobuf 2 (prometheus)
+    "RUSTSEC-2023-0071", # rsa (TURN)
+]
