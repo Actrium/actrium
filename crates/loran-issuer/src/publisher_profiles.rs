@@ -1,0 +1,286 @@
+//! Registration-time freshness of Publisher Profiles
+//! (`actr/protocols/actor-package.zh.md` section 6.8): the package signing
+//! key a registration resolves in this Loran's Publisher Registry must still
+//! be listed by the publisher domain's current Publisher Profile.
+//!
+//! The registry row is a projection captured by `register_publisher`. This
+//! refresher re-checks the domain within [`DEFAULT_TTL`] and accepts the
+//! fetched Profile into the registry, which enforces the pins stored when the
+//! publisher registered: a key the domain has removed is revoked here on the
+//! next registration instead of waiting for the publisher to register again.
+//! Checks fail closed — a registration whose Publisher Profile cannot be
+//! re-checked is refused rather than verified against a stale projection.
+
+use actr_protocol::{PublisherKeys, PublisherProfile};
+use platform::net::FetchError;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// How long a successful check stands before the domain is fetched again.
+pub const DEFAULT_TTL: Duration = Duration::from_secs(24 * 3600);
+
+/// Shortest spacing of fetch attempts for one publisher after a failure.
+pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(60);
+
+/// Fetches a public document over HTTPS. Production passes the SSRF-checked
+/// [`platform::net::CachedFetcher`]; tests substitute a stub.
+#[async_trait::async_trait]
+pub trait PublicDocumentFetcher: Send + Sync {
+    async fn fetch(&self, url: &str) -> Result<Arc<[u8]>, FetchError>;
+}
+
+#[async_trait::async_trait]
+impl PublicDocumentFetcher for platform::net::CachedFetcher {
+    async fn fetch(&self, url: &str) -> Result<Arc<[u8]>, FetchError> {
+        self.get(url).await
+    }
+}
+
+/// Why a Publisher Profile could not be re-checked. Every variant fails the
+/// registration closed; the endpoint maps them to a retryable status.
+#[derive(Debug, thiserror::Error)]
+pub enum RefreshError {
+    #[error("cannot fetch the Publisher Profile of {domain}: {message}")]
+    Fetch { domain: String, message: String },
+    #[error("the Publisher Profile of {domain} was refused: {message}")]
+    Profile { domain: String, message: String },
+    #[error("the Publisher Profile of {domain} failed its last check too recently")]
+    Throttled { domain: String },
+}
+
+#[derive(Default)]
+struct Entry {
+    /// The last successful check.
+    checked_at: Option<Instant>,
+    /// The last attempt, success or failure, for the retry spacing.
+    attempted_at: Option<Instant>,
+}
+
+/// Re-checks registered publishers' Publisher Profiles during registration
+/// ([`crate::issuer::AIdIssuer`]'s package verification).
+pub struct PublisherProfileRefresher {
+    fetcher: Arc<dyn PublicDocumentFetcher>,
+    ttl: Duration,
+    retry_after_failure: Duration,
+    entries: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Entry>>>>,
+}
+
+impl PublisherProfileRefresher {
+    pub fn new(
+        fetcher: Arc<dyn PublicDocumentFetcher>,
+        ttl: Duration,
+        retry_after_failure: Duration,
+    ) -> Self {
+        Self {
+            fetcher,
+            ttl,
+            retry_after_failure,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn with_defaults(fetcher: Arc<dyn PublicDocumentFetcher>) -> Self {
+        Self::new(fetcher, DEFAULT_TTL, RETRY_AFTER_FAILURE)
+    }
+
+    /// Ensure `domain`'s Publisher Profile was checked recently, fetching and
+    /// accepting it again when it has not been. A failed check is retried at
+    /// most every [`RETRY_AFTER_FAILURE`]; in between it stays failed.
+    pub async fn ensure_current(&self, domain: &str) -> Result<(), RefreshError> {
+        self.refresh(domain, false).await
+    }
+
+    /// A missing key requests a refresh even inside the successful TTL, but
+    /// still observes the per-publisher minimum spacing between attempts.
+    pub async fn refresh_missing_key(&self, domain: &str) -> Result<(), RefreshError> {
+        self.refresh(domain, true).await
+    }
+
+    async fn refresh(&self, domain: &str, missing_key: bool) -> Result<(), RefreshError> {
+        let entry = {
+            let mut entries = self
+                .entries
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            entries.entry(domain.to_string()).or_default().clone()
+        };
+        // Serialize checks of one publisher across registrations. Other
+        // publishers do not wait for this domain's network request.
+        let mut entry = entry.lock().await;
+        let now = Instant::now();
+        if !missing_key
+            && entry
+                .checked_at
+                .is_some_and(|checked| now.duration_since(checked) < self.ttl)
+        {
+            return Ok(());
+        }
+        if entry
+            .attempted_at
+            .is_some_and(|attempted| now.duration_since(attempted) < self.retry_after_failure)
+        {
+            return if entry.checked_at.is_some() {
+                // A recent accepted Profile still lacks this key: the caller
+                // re-resolves it and refuses it without another fetch.
+                Ok(())
+            } else {
+                Err(RefreshError::Throttled {
+                    domain: domain.to_string(),
+                })
+            };
+        }
+        entry.attempted_at = Some(now);
+        entry.checked_at = None;
+        let result = self.check(domain).await;
+        if result.is_ok() {
+            entry.checked_at = Some(Instant::now());
+        }
+        result
+    }
+
+    /// Fetch `domain`'s authority descriptor, verify its Publisher Profile,
+    /// and accept it into this Loran's Publisher Registry.
+    async fn check(&self, domain: &str) -> Result<(), RefreshError> {
+        let url = format!("https://{domain}/.well-known/actr");
+        let document = self
+            .fetcher
+            .fetch(&url)
+            .await
+            .map_err(|error| RefreshError::Fetch {
+                domain: domain.to_string(),
+                message: error.to_string(),
+            })?;
+        let (profile, keys) = verify_descriptor(domain, &document)?;
+        let pool = platform::storage::db::get_database().get_pool().clone();
+        actrix_publisher_registry::PublisherRegistryManager::new(pool)
+            .register_publisher(domain, &profile, &keys)
+            .await
+            .map(|_| ())
+            .map_err(|error| RefreshError::Profile {
+                domain: domain.to_string(),
+                message: error.to_string(),
+            })
+    }
+}
+
+/// The verified `publisher` member of `domain`'s authority descriptor: its
+/// own signature, domain binding and validity period; pinning against the
+/// accepted baseline happens when the registry accepts it.
+fn verify_descriptor(
+    domain: &str,
+    document: &[u8],
+) -> Result<(PublisherProfile, PublisherKeys), RefreshError> {
+    let invalid = |message: String| RefreshError::Profile {
+        domain: domain.to_string(),
+        message,
+    };
+    let profile =
+        crate::realm_management::publisher_from_descriptor(domain, document).map_err(invalid)?;
+    let keys = profile
+        .verify(domain, chrono::Utc::now())
+        .map_err(|error| invalid(error.to_string()))?;
+    Ok((profile, keys))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actr_protocol::realm_profile::sign_document;
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    use ed25519_dalek::SigningKey;
+    use serde_json::json;
+
+    fn key_member(id: &str, key: &SigningKey, status: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "algorithm": "Ed25519",
+            "status": status,
+            "public_key": BASE64.encode(key.verifying_key().to_bytes()),
+        })
+    }
+
+    fn descriptor(
+        domain: &str,
+        root: &SigningKey,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Vec<u8> {
+        let package = SigningKey::from_bytes(&[9; 32]);
+        let now = chrono::Utc::now();
+        let mut profile = json!({
+            "schema": "actr.publisher/v1",
+            "sequence": 1,
+            "domain": domain,
+            "profile_signing_keys": [key_member("root-1", root, "active")],
+            "keys": [key_member(
+                &actr_protocol::package_key_id(package.verifying_key().as_bytes()),
+                &package,
+                "active",
+            )],
+            "profile_issued_at": (now - chrono::Duration::hours(1)).to_rfc3339(),
+            "profile_expires_at": expires_at.to_rfc3339(),
+        });
+        sign_document(&mut profile, "root-1", root);
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "authority": format!("actr://{domain}"),
+            "services": [{ "rel": "contracts", "href": format!("https://{domain}/contracts") }],
+            "publisher": profile,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn accepts_a_well_formed_descriptor() {
+        let root = SigningKey::from_bytes(&[3; 32]);
+        let document = descriptor(
+            "acme.com",
+            &root,
+            chrono::Utc::now() + chrono::Duration::days(1),
+        );
+        let (profile, keys) = verify_descriptor("acme.com", &document).unwrap();
+        assert_eq!(profile.domain, "acme.com");
+        assert_eq!(keys.sequence, 1);
+        assert_eq!(keys.keys.len(), 1);
+    }
+
+    #[test]
+    fn refuses_another_domains_profile() {
+        let root = SigningKey::from_bytes(&[4; 32]);
+        let document = descriptor(
+            "acme.com",
+            &root,
+            chrono::Utc::now() + chrono::Duration::days(1),
+        );
+        let error = verify_descriptor("other.example", &document).unwrap_err();
+        assert!(matches!(error, RefreshError::Profile { .. }), "{error}");
+    }
+
+    #[test]
+    fn refuses_a_tampered_descriptor() {
+        let root = SigningKey::from_bytes(&[5; 32]);
+        let document = descriptor(
+            "acme.com",
+            &root,
+            chrono::Utc::now() + chrono::Duration::days(1),
+        );
+        let mut value: serde_json::Value = serde_json::from_slice(&document).unwrap();
+        value["publisher"]["keys"][0]["status"] = json!("retired");
+        let error =
+            verify_descriptor("acme.com", &serde_json::to_vec(&value).unwrap()).unwrap_err();
+        assert!(matches!(error, RefreshError::Profile { .. }), "{error}");
+    }
+
+    #[test]
+    fn refuses_an_expired_profile() {
+        let root = SigningKey::from_bytes(&[6; 32]);
+        let document = descriptor(
+            "acme.com",
+            &root,
+            chrono::Utc::now() - chrono::Duration::hours(1),
+        );
+        let error = verify_descriptor("acme.com", &document).unwrap_err();
+        assert!(matches!(error, RefreshError::Profile { .. }), "{error}");
+    }
+}
