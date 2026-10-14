@@ -256,7 +256,7 @@ async fn setup(
     }
     let hyper_b = Hyper::new(echo_cfg).await.unwrap();
     let mut cfg_b = runtime_config(dir_b, server, "EchoNode", echo_type());
-    cfg_b.websocket_listen_port = Some(direct_websocket::listen_port());
+    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
 
     let mut node_b = Node::from_hyper(hyper_b, cfg_b);
@@ -341,7 +341,7 @@ async fn setup_serial(
         }));
     let hyper_b = Hyper::new(echo_cfg).await.unwrap();
     let mut cfg_b = runtime_config(dir_b, server, "EchoNode", echo_type());
-    cfg_b.websocket_listen_port = Some(direct_websocket::listen_port());
+    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
     // NOTE: no `with_conflict_keys` → the route is undeclared → Serial.
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)

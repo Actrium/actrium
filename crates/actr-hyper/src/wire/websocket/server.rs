@@ -30,6 +30,10 @@ use tokio_util::sync::CancellationToken;
 /// Capacity of the inbound WebSocket connection notification channel.
 const ACCEPT_CHANNEL_CAPACITY: usize = 64;
 
+/// Bound on in-flight TLS/upgrade handshakes. Kept independent of the accept
+/// channel capacity so the two limits do not move together accidentally.
+const MAX_CONCURRENT_HANDSHAKES: usize = 64;
+
 /// Inbound connection info: connection instance, sender `ActrId` bytes, and optional sender `AIdCredential`.
 pub(crate) type InboundWsConn = (WebSocketConnection, Vec<u8>, Option<AIdCredential>);
 
@@ -110,6 +114,11 @@ impl WebSocketServer {
         ))
     }
 
+    /// Return the bound local address (with the actual port for an ephemeral bind).
+    pub(crate) fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
     /// Start the accept loop in a background task.
     ///
     /// Each accepted TCP connection is upgraded to WebSocket, then wrapped as
@@ -126,7 +135,7 @@ impl WebSocketServer {
             );
 
             let handshakes =
-                std::sync::Arc::new(tokio::sync::Semaphore::new(ACCEPT_CHANNEL_CAPACITY));
+                std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_HANDSHAKES));
             loop {
                 tokio::select! {
                     _ = shutdown_token.cancelled() => {
@@ -142,6 +151,13 @@ impl WebSocketServer {
                                 );
 
                                 let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+                                    // Load shedding must be observable: unlike
+                                    // the accept-error arm, a dropped accepted
+                                    // socket is otherwise invisible.
+                                    tracing::warn!(
+                                        %peer_addr,
+                                        "⚠️ direct WebSocket handshake slots exhausted ({MAX_CONCURRENT_HANDSHAKES}); dropping accepted connection"
+                                    );
                                     continue;
                                 };
                                 let conn_tx = self.conn_tx.clone();
@@ -243,11 +259,14 @@ impl WebSocketServer {
                                                 let credential = captured_credential.lock().unwrap().take();
                                                 let conn =
                                                     WebSocketConnection::from_server_stream(ws_stream);
-                                                if conn_tx.send((conn, source_id, credential)).await.is_err() {
+                                                if let Err(rejected) =
+                                                    conn_tx.send((conn, source_id, credential)).await
+                                                {
                                                     tracing::warn!(
                                                         "⚠️ WebSocketServer: conn_tx closed, dropping connection from {}",
                                                         peer_addr
                                                     );
+                                                    let _ = rejected.0.0.close().await;
                                                 }
                                             }
                                             Err(_) => {
@@ -259,7 +278,7 @@ impl WebSocketServer {
                                         _ = shutdown.cancelled() => {},
                                         _ = crate::timer::timeout(
                                             crate::timer::ids::WEBSOCKET_HANDSHAKE,
-                                            std::time::Duration::from_secs(10),
+                                            crate::timer::ids::WEBSOCKET_HANDSHAKE_TIMEOUT,
                                             handshake,
                                         ) => {},
                                     }

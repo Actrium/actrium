@@ -252,7 +252,7 @@ async fn linked_node_advertises_websocket_listen_port() {
 
     let mut cfg = runtime_config(&dir, &server, "WsAdvertised");
     // Advertise a concrete port, as required by the direct WebSocket policy.
-    cfg.websocket_listen_port = Some(direct_websocket::listen_port());
+    cfg.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg.websocket_advertised_host = Some("127.0.0.1".to_string());
 
     let ais = format!("http://127.0.0.1:{}/ais", server.port());
@@ -443,7 +443,7 @@ async fn two_nodes_connect_and_exchange_rpc() {
     .await
     .unwrap();
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(direct_websocket::listen_port());
+    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
     let ais = format!("http://127.0.0.1:{}/ais", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
@@ -513,7 +513,7 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
     .await
     .unwrap();
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(direct_websocket::listen_port());
+    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
     let ais = format!("http://127.0.0.1:{}/ais", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
@@ -1033,7 +1033,7 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
     .await
     .unwrap();
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoDiscNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(direct_websocket::listen_port());
+    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
     let ais = format!("http://127.0.0.1:{}/ais", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)

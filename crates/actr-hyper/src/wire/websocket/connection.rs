@@ -17,6 +17,18 @@ use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request as WsRequest;
 use tokio_tungstenite::tungstenite::http::Uri as WsUri;
 use tokio_tungstenite::{Connector, WebSocketStream, connect_async_tls_with_config};
+use tokio_util::sync::CancellationToken;
+
+/// Cancels the dispatcher task when the last `WebSocketConnection` handle is
+/// dropped, so a connection dropped without `close()` (e.g. a credential
+/// rejection in the gate) cannot leave the socket and read loop alive.
+struct CancelOnDrop(CancellationToken);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
 
 /// WebSocket transmitting messagesprotocol
 ///
@@ -104,6 +116,11 @@ pub(crate) struct WebSocketConnection {
     /// Secure-channel state owned by this physical WebSocket session (RFC-0563).
     /// Phase 2 constructs `LegacyBypass`; phase 3 drives the real handshake.
     secure: SecureCell,
+
+    /// Shared teardown signal: `close()` cancels it directly, and the guard
+    /// cancels it when the last handle drops. The dispatcher holds only the
+    /// token, so its own lifetime never keeps the connection open.
+    teardown: Arc<CancelOnDrop>,
 }
 
 impl WebSocketConnection {
@@ -129,6 +146,7 @@ impl WebSocketConnection {
             lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
             connected: Arc::new(RwLock::new(false)),
             secure: SecureCell::new(SecureChannelState::LegacyBypass),
+            teardown: Arc::new(CancelOnDrop(CancellationToken::new())),
         }
     }
 
@@ -183,8 +201,14 @@ impl WebSocketConnection {
         }
         let router = Arc::new(RwLock::new(routes));
         let connected = Arc::new(RwLock::new(true));
+        let teardown = Arc::new(CancelOnDrop(CancellationToken::new()));
 
-        Self::spawn_dispatcher(stream, router.clone(), connected.clone());
+        Self::spawn_dispatcher(
+            stream,
+            router.clone(),
+            connected.clone(),
+            teardown.0.clone(),
+        );
 
         tracing::info!("✅ WebSocketConnection created from server stream (already connected)");
 
@@ -198,6 +222,7 @@ impl WebSocketConnection {
             lane_cache: Arc::new(RwLock::new(lanes)),
             connected,
             secure,
+            teardown,
         }
     }
 
@@ -207,21 +232,22 @@ impl WebSocketConnection {
         // Dial the same normalized authority that the policy validated. In
         // particular, never pass alternate numeric hosts to a DNS resolver.
         let url = actr_config::Url::parse(&self.url)
-            .map_err(|_| NetworkError::InvalidArgument("invalid direct WebSocket URL".into()))?
-            .to_string();
-        let client = match self.security.client.clone() {
-            Some(client) => Some(client),
-            None => {
-                DirectSecurity::from_options(&Default::default(), None)
-                    .map_err(|_| {
-                        NetworkError::ConnectionError(
-                            "direct WebSocket TLS configuration failed".into(),
-                        )
-                    })?
-                    .client
+            .map_err(|_| NetworkError::InvalidArgument("invalid direct WebSocket URL".into()))?;
+        let is_tls = url.scheme() == "wss";
+        let url = url.to_string();
+        let connector = match self.security.client.clone() {
+            Some(client) => Some(Connector::Rustls(client)),
+            None if is_tls => {
+                // Fail closed: never substitute a default public-roots policy
+                // for the operator's. The node's `DirectSecurity` must be
+                // attached via `with_security`.
+                return Err(NetworkError::ConfigurationError(
+                    "direct WebSocket wss:// connection has no TLS client roots configured"
+                        .into(),
+                ));
             }
+            None => None,
         };
-        let connector = client.map(Connector::Rustls);
         // 1. Establish WebSocket connection (direct-connect mode carries X-Actr-Source-ID header)
         let (ws_stream, _) = if let Some(ref hex_id) = self.local_id_hex {
             // tungstenite does not auto-complete WebSocket upgrade headers; all must be specified manually.
@@ -257,11 +283,7 @@ impl WebSocketConnection {
         } else {
             connect_async_tls_with_config(&url, None, false, connector).await
         }
-        .map_err(|_| {
-            NetworkError::ConnectionError(
-                "direct WebSocket connection or TLS/upgrade handshake failed".into(),
-            )
-        })?;
+        .map_err(|e| Self::classify_connect_error(e, &url))?;
         let (sink, stream) = ws_stream.split();
 
         // 2. update new sink
@@ -271,11 +293,31 @@ impl WebSocketConnection {
         // 3. Startmessage dispatch device (in background task, not retain handle)
         let router = self.router.clone();
         let connected = self.connected.clone();
-        Self::spawn_dispatcher(stream, router, connected);
+        Self::spawn_dispatcher(stream, router, connected, self.teardown.0.clone());
 
         tracing::info!("✅ WebSocketConnection already Connect: {}", self.url);
 
         Ok(())
+    }
+
+    /// Preserve the shared tungstenite classification (closed-like eviction,
+    /// typed HTTP statuses) while keeping the direct-transport context that
+    /// distinguishes these failures from signaling handshake errors.
+    fn classify_connect_error(
+        err: tokio_tungstenite::tungstenite::Error,
+        url: &str,
+    ) -> NetworkError {
+        match NetworkError::from(err) {
+            NetworkError::WebSocketClosed(m) => {
+                NetworkError::WebSocketClosed(format!("direct WebSocket {url}: {m}"))
+            }
+            NetworkError::WebSocketError(m) => {
+                NetworkError::WebSocketError(format!("direct WebSocket {url}: {m}"))
+            }
+            // Typed handshake failures (401/403/503) keep their verdict
+            // semantics untouched.
+            typed => typed,
+        }
     }
 
     /// Startmessage dispatch device (in background task)
@@ -283,6 +325,7 @@ impl WebSocketConnection {
         mut stream: SplitStream<WebSocketStream<S>>,
         router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>>,
         connected: Arc<RwLock<bool>>,
+        shutdown: CancellationToken,
     ) -> tokio::task::JoinHandle<()>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -290,7 +333,14 @@ impl WebSocketConnection {
         tokio::spawn(async move {
             tracing::debug!("📡 WebSocket dispatcher Start");
 
-            while let Some(msg_result) = stream.next().await {
+            loop {
+                let msg_result = tokio::select! {
+                    _ = shutdown.cancelled() => break,
+                    msg_result = stream.next() => match msg_result {
+                        Some(msg_result) => msg_result,
+                        None => break,
+                    },
+                };
                 match msg_result {
                     Ok(WsMessage::Binary(data)) => {
                         // decodemessage
@@ -340,6 +390,7 @@ impl WebSocketConnection {
                 }
             }
 
+            *connected.write().await = false;
             tracing::debug!("📡 WebSocket dispatcher rollback exit ");
         })
     }
@@ -450,6 +501,10 @@ impl WebSocketConnection {
         // method — RFC-0563 review point on shadowed terminal driving) marks
         // the session `Closed` and invalidates all wrapped `SecureDataLane`s.
         self.secure.drive_terminal(SecureChannelState::Closed);
+
+        // Stop the dispatcher promptly instead of waiting for the peer's
+        // Close echo; a non-cooperative peer must not keep the socket alive.
+        self.teardown.0.cancel();
 
         *self.connected.write().await = false;
 

@@ -21,8 +21,12 @@ Paths are relative to `actr.toml`; absolute paths are also accepted. The certifi
 file is a PEM chain, leaf first; the private key is unencrypted PEM. Protect the
 key with filesystem permissions. Provision a certificate whose SAN matches the
 advertised DNS name or IP. `bind_address` is a literal IP independent of the
-advertised hostname. Wildcard binds require an explicit reachable advertised host.
-IPv6 hosts may be bracketed or unbracketed. Port zero is rejected for discovery.
+advertised hostname. Wildcard binds require an explicit reachable advertised host,
+and an advertised host that is not loopback is rejected while the bind stays on
+its loopback default — set `bind_address` to the interface that serves it.
+IPv6 hosts may be bracketed or unbracketed. A zero `listen_port` binds an
+ephemeral port and advertises the actual bound port. A startup warning is logged
+when a configured listener is reachable only from loopback.
 
 The configured CA bundle **replaces** native/public roots for direct peers. Without
 it, clients use native and WebPKI roots. Clients validate the certificate chain,
@@ -87,3 +91,7 @@ clients. Configuration and certificates are loaded at startup, not hot-reloaded.
 Keep old valid TLS material for rollback; disable the optional direct listener if
 TLS cannot be provisioned instead of exposing plaintext. Other transport behavior
 and signaling configuration remain separate.
+
+Direct WebSocket TLS builds on rustls with the aws-lc-rs provider. Building the
+e2e and WinUI workload lockfiles therefore compiles `aws-lc-sys`, which needs
+CMake (and NASM on Windows MSVC) — the CI images already provide both.

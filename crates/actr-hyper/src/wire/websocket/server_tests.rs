@@ -85,7 +85,12 @@ async fn tls_listener_rejects_plaintext_and_clients_reject_untrusted_certificate
                 .await
                 .is_err()
         );
-        let untrusted = WebSocketConnection::new(format!("wss://{addr}"));
+        // A client with the default public-roots policy must reject the
+        // private test CA.
+        let public_roots =
+            DirectSecurity::from_options(&Default::default(), None).unwrap();
+        let untrusted =
+            WebSocketConnection::new(format!("wss://{addr}")).with_security(public_roots);
         assert!(untrusted.connect().await.is_err());
         use base64::Engine as _;
         let credential = AIdCredential::default();
@@ -116,8 +121,19 @@ async fn tls_listener_rejects_plaintext_and_clients_reject_untrusted_certificate
 
 #[tokio::test]
 async fn trusted_ca_does_not_bypass_endpoint_name_validation() {
-    let mut options = super::super::security::test_options();
-    options.bind_address = "127.0.0.2".parse().unwrap();
+    // The endpoint-mismatch fixture is signed by its own test CA and covers
+    // only the `localhost` DNS name, so dialing the loopback IP must fail
+    // endpoint-name validation even though the chain is trusted. Binding the
+    // default loopback keeps this portable (127.0.0.2 is not assigned on
+    // every platform's loopback).
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/direct-websocket");
+    let options = actr_config::DirectWebSocketSecurity {
+        tls_cert: Some(dir.join("endpoint-mismatch-cert.pem")),
+        tls_key: Some(dir.join("endpoint-mismatch-key.pem")),
+        ca_cert: Some(dir.join("endpoint-mismatch-ca.pem")),
+        ..Default::default()
+    };
     let security = DirectSecurity::from_options(&options, None).unwrap();
     let (server, _) = WebSocketServer::bind(0, security.clone()).await.unwrap();
     let client =

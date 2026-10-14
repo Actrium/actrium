@@ -2702,9 +2702,42 @@ impl Inner {
         // Validate TLS before advertising or sending reusable peer credentials.
         let direct_security = crate::wire::websocket::security::DirectSecurity::load(&self.config)
             .map_err(|e| ActrError::Internal(e.to_string()))?;
-        let ws_address = direct_security
-            .advertised_url(&self.config)
-            .map_err(|e| ActrError::Internal(e.to_string()))?;
+
+        // Bind the direct WebSocket listener before registration so an
+        // ephemeral listen_port (0) advertises the actual bound port, and so a
+        // bind failure aborts startup instead of advertising an endpoint that
+        // nobody serves.
+        let ws_listener = match self.config.websocket_listen_port {
+            Some(listen_port) => {
+                tracing::info!(
+                    "🔌 WebSocket direct-connect mode enabled, binding port {}",
+                    listen_port
+                );
+                Some(
+                    crate::wire::websocket::WebSocketServer::bind(
+                        listen_port,
+                        direct_security.clone(),
+                    )
+                    .await?,
+                )
+            }
+            None => None,
+        };
+        let ws_address = match &ws_listener {
+            Some((server, _)) => {
+                let advertised = direct_security
+                    .advertised_url_for(&self.config, server.local_addr().port())
+                    .map_err(|e| ActrError::Internal(e.to_string()))?;
+                if advertised.is_some() && server.local_addr().ip().is_loopback() {
+                    tracing::warn!(
+                        "🔌 direct WebSocket listener is loopback-only ({}); peers on other hosts cannot reach it — set websocket.bind_address to a routable interface",
+                        server.local_addr()
+                    );
+                }
+                advertised
+            }
+            None => None,
+        };
 
         if let Some(ref addr) = ws_address {
             tracing::info!(
@@ -3483,14 +3516,10 @@ impl Inner {
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // 1.7.6. WebSocket Server (direct-connect mode, optional)
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if let Some(listen_port) = self.config.websocket_listen_port {
-                tracing::info!(
-                    "🔌 WebSocket direct-connect mode enabled, binding port {}",
-                    listen_port
-                );
+            if let Some((ws_server, conn_rx)) = ws_listener {
                 use crate::key_cache::AisKeyCache;
+                use crate::wire::websocket::WebSocketGate;
                 use crate::wire::websocket::gate::WsAuthContext;
-                use crate::wire::websocket::{WebSocketGate, WebSocketServer};
 
                 // Build AisKeyCache and seed it with the signing key from the registration response
                 let ais_key_cache = AisKeyCache::new();
@@ -3522,56 +3551,47 @@ impl Inner {
                     signaling_client: self.signaling_client.clone(),
                 };
 
-                match WebSocketServer::bind(listen_port, direct_security.clone()).await {
-                    Ok((ws_server, conn_rx)) => {
-                        ws_server.start(self.shutdown_token.clone());
-                        let ws_gate = Arc::new(WebSocketGate::new(
-                            conn_rx,
-                            outproc_gate.get_pending_requests(),
-                            data_chunk_registry.clone(),
-                            Some(auth_ctx),
-                        ));
+                // The listener was bound before registration so the advertised
+                // address carries the actual (possibly ephemeral) bound port.
+                ws_server.start(self.shutdown_token.clone());
+                let ws_gate = Arc::new(WebSocketGate::new(
+                    conn_rx,
+                    outproc_gate.get_pending_requests(),
+                    data_chunk_registry.clone(),
+                    Some(auth_ctx),
+                ));
 
-                        // Install the WebSocket peer-lifecycle hook.
-                        {
-                            let actor_id_for_hook = actor_id.clone();
-                            let credential_state_for_hook = credential_state.clone();
-                            // Snapshot taken after outproc_gate is live: ws
-                            // peer-lifecycle hook contexts can issue
-                            // Dest::Peer(_) calls.
-                            let ctx_builder_snapshot = self.bootstrap_ctx_builder();
-                            let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
-                                Arc::new(move || {
-                                    let snapshot = ctx_builder_snapshot.clone();
-                                    let actor_id = actor_id_for_hook.clone();
-                                    let credential_state = credential_state_for_hook.clone();
-                                    Box::pin(async move {
-                                        Some(snapshot.build_bootstrap(
-                                            &actor_id,
-                                            &credential_state.credential().await,
-                                        ))
-                                    })
-                                });
-                            let cb = crate::lifecycle::hooks::build_hook_callback(
-                                self.hook_observer.clone(),
-                                ctx_builder,
-                            );
-                            ws_gate.set_hook_callback(cb);
-                        }
-
-                        self.websocket_gate = Some(ws_gate);
-                        tracing::info!(
-                            "✅ WebSocketServer + WebSocketGate initialized (credential auth enabled)"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "❌ Failed to bind WebSocket server on port {}: {:?}",
-                            listen_port,
-                            e
-                        );
-                    }
+                // Install the WebSocket peer-lifecycle hook.
+                {
+                    let actor_id_for_hook = actor_id.clone();
+                    let credential_state_for_hook = credential_state.clone();
+                    // Snapshot taken after outproc_gate is live: ws
+                    // peer-lifecycle hook contexts can issue
+                    // Dest::Peer(_) calls.
+                    let ctx_builder_snapshot = self.bootstrap_ctx_builder();
+                    let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
+                        Arc::new(move || {
+                            let snapshot = ctx_builder_snapshot.clone();
+                            let actor_id = actor_id_for_hook.clone();
+                            let credential_state = credential_state_for_hook.clone();
+                            Box::pin(async move {
+                                Some(snapshot.build_bootstrap(
+                                    &actor_id,
+                                    &credential_state.credential().await,
+                                ))
+                            })
+                        });
+                    let cb = crate::lifecycle::hooks::build_hook_callback(
+                        self.hook_observer.clone(),
+                        ctx_builder,
+                    );
+                    ws_gate.set_hook_callback(cb);
                 }
+
+                self.websocket_gate = Some(ws_gate);
+                tracing::info!(
+                    "✅ WebSocketServer + WebSocketGate initialized (credential auth enabled)"
+                );
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

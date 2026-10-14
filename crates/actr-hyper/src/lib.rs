@@ -1975,7 +1975,13 @@ fn build_linked_register_request(
     service_spec: Option<ServiceSpec>,
 ) -> HyperResult<RegisterRequest> {
     let security = crate::wire::websocket::security::DirectSecurity::load(config)?;
-    let ws_address = security.advertised_url(config)?;
+    // An ephemeral listen_port (0) has no bindable address here: the node
+    // pre-binds the listener and advertises the actual bound port when it
+    // starts. The bootstrap registration must not advertise port zero.
+    let ws_address = match config.websocket_listen_port {
+        Some(0) => None,
+        _ => security.advertised_url(config)?,
+    };
 
     Ok(RegisterRequest {
         actr_type: config.actr_type().clone(),

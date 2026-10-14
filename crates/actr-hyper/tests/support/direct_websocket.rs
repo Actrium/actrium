@@ -9,12 +9,3 @@ pub fn tls_options() -> actr_config::DirectWebSocketSecurity {
         ..Default::default()
     }
 }
-
-/// Choose a concrete loopback port so discovery advertises the listener endpoint.
-pub fn listen_port() -> u16 {
-    std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .expect("reserve a loopback port")
-        .local_addr()
-        .expect("read the loopback port")
-        .port()
-}
