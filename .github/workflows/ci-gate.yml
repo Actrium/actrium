@@ -141,13 +141,21 @@ jobs:
             packages/actr-web/dist/sw
           key: >-
             cli-web-runtime-v4-rust1.98.0-wp0.15.0-wb0.2.126-${{ hashFiles(
-              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
+              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/config.toml',
               'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
-              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
+              'packages/actr-web/.cargo/config.toml', 'packages/actr-web/rust-toolchain*',
               'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
               'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
               'crates/actr-framework/**', 'crates/actr-platform-traits/**',
               'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
+      - name: Cache cold web-build dependencies
+        # Output-cache hits skip both this restore and its post-job save.
+        if: steps.cli-web-assets.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-web -> ../../target/bindings-web
+          cache-bin: false
+          shared-key: cli-web-assets
       - name: Ensure wasm-bindgen CLI
         if: steps.cli-web-assets.outputs.cache-hit != 'true'
         run: bash tools/ci/runner/install-wasm-bindgen.sh packages/actr-web/Cargo.lock
@@ -509,8 +517,13 @@ jobs:
         run: |
           install_binary() {
             local name="$1"
-            local url="$2"
-            local sha256="$3"
+            local expected="$2"
+            local url="$3"
+            local sha256="$4"
+            if "$HOME/.cargo/bin/$name" --version 2>/dev/null | grep -Eq "$expected"; then
+              echo "Reusing image $name"
+              return
+            fi
             local archive="$RUNNER_TEMP/$name.tar.gz"
             local extract_dir
             extract_dir=$(mktemp -d "$RUNNER_TEMP/$name.XXXXXX")
@@ -519,15 +532,17 @@ jobs:
             echo "$sha256  $archive" | sha256sum --check --status
             tar --extract --gzip --file "$archive" --strip-components=1 --directory "$extract_dir"
             install --mode=0755 "$extract_dir/$name" "$HOME/.cargo/bin/$name"
+            rm -rf "$archive" "$extract_dir"
+            "$HOME/.cargo/bin/$name" --version | grep -Eq "$expected"
           }
 
-          install_binary wasm-pack \
+          install_binary wasm-pack '^wasm-pack 0\.15\.0$' \
             https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
             "$WASM_PACK_SHA256"
-          install_binary wasm-component-ld \
+          install_binary wasm-component-ld '^wasm-component-ld 0\.5\.26$' \
             https://github.com/bytecodealliance/wasm-component-ld/releases/download/v0.5.26/wasm-component-ld-v0.5.26-x86_64-linux.tar.gz \
             "$WASM_COMPONENT_LD_SHA256"
-          install_binary wasm-tools \
+          install_binary wasm-tools '^wasm-tools 1\.253\.0( \(.*\))?$' \
             https://github.com/bytecodealliance/wasm-tools/releases/download/v1.253.0/wasm-tools-1.253.0-x86_64-linux.tar.gz \
             "$WASM_TOOLS_SHA256"
 

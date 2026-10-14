@@ -354,9 +354,9 @@ ARG CMDLINE_TOOLS=12266719
 # per-job distribution + KtLint dependency downloads.
 ARG GRADLE_VERSION=9.2.1
 ARG KTLINT_VERSION=1.5.0
-# The default must match packages/actr-kotlin/gradle/wrapper/gradle-wrapper.properties
-# so the staged distribution is reused by the wrapper.
-ARG GRADLE_DIST_PROXY=https://mirrors.cloud.tencent.com/gradle
+# Optional archive download mirror. The wrapper's canonical URL still selects
+# the cache slot, and the archive must match the checksum below.
+ARG GRADLE_DIST_PROXY=
 # SHA-256 of the Gradle archive named by the wrapper. Verify the image-build
 # download too; a pre-seeded distribution bypasses the wrapper's download-time
 # checksum check. Update this together with the wrapper property when the
@@ -435,8 +435,8 @@ RUN set -eux; \
 
 # Pre-seed Gradle and the KtLint dependencies so the Kotlin Binding Test does
 # not download them at job time. GRADLE_USER_HOME is set explicitly so its
-# location does not drift with HOME handling. GRADLE_DIST_PROXY must resolve
-# to the same base URL as the wrapper's distributionUrl.
+# location does not drift with HOME handling. The canonical wrapper URL selects
+# the cache slot; GRADLE_DIST_PROXY may change only the download source.
 #
 # The Gradle wrapper keys wrapper/dists off MD5(distributionUrl), so a
 # manually placed copy under a different subdir is never reused — the wrapper
@@ -446,12 +446,14 @@ RUN set -eux; \
 # so ./gradlew resolves it with zero download. GRADLE_DIST_MD5 is the
 # base36-encoded MD5(distributionUrl); the build checks it below.
 ENV GRADLE_USER_HOME=/home/runner/.gradle
-ARG GRADLE_DIST_MD5=9fgc9dy84duywbml6zqd0l4mo
+ARG GRADLE_DIST_MD5=2t0n5ozlw9xmuyvbp7dnzaxug
+COPY prepare-gradle-cache.py /usr/local/bin/prepare-gradle-cache.py
 COPY ktlint-preseed.gradle /tmp/ktlint-preseed/build.gradle
 RUN set -eux; \
-    dist_url="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"; \
+    wrapper_url="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"; \
+    dist_url="$wrapper_url"; \
     if [ -n "${GRADLE_DIST_PROXY}" ]; then dist_url="${GRADLE_DIST_PROXY%/}/gradle-${GRADLE_VERSION}-bin.zip"; fi; \
-    dist_hash="$("$RUNNER_TOOL_CACHE/node/${NODE_VERSION}/x64/bin/node" -e 'const crypto=require("crypto"); const url=process.argv[1]; process.stdout.write(BigInt("0x"+crypto.createHash("md5").update(url).digest("hex")).toString(36));' "$dist_url")"; \
+    dist_hash="$(python3 /usr/local/bin/prepare-gradle-cache.py --distribution-url "$wrapper_url" --print-cache-key)"; \
     test "$dist_hash" = "$GRADLE_DIST_MD5"; \
     dist_dir="$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}"; \
     mkdir -p /tmp/gradle-dist "$dist_dir"; \
@@ -462,8 +464,8 @@ RUN set -eux; \
     # the local zip name, i.e. "gradle-<ver>-bin.zip.ok" (presence check only,
     # content is ignored — verified with a local wrapper experiment). A marker
     # without the .zip infix, or one holding the sha256, is never recognized
-    # and every job re-downloads the 200 MB dist. The lock file is created by
-    # the wrapper itself; do not pre-create it.
+    # and every job re-downloads the distribution. Preparation and the wrapper
+    # use the same lock when staging or validating this directory.
     touch "$dist_dir/gradle-${GRADLE_VERSION}-bin.zip.ok"; \
     rm -rf /tmp/gradle-dist; \
     export JAVA_HOME="$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64"; \
@@ -496,7 +498,7 @@ ARG JDK_VERSION=17.0.20+8
 ARG GRADLE_VERSION=9.2.1
 ARG KTLINT_VERSION=1.5.0
 ARG KTLINT_GRADLE_VERSION=12.1.2
-ARG GRADLE_DIST_MD5=9fgc9dy84duywbml6zqd0l4mo
+ARG GRADLE_DIST_MD5=2t0n5ozlw9xmuyvbp7dnzaxug
 
 # Default user: runner (non-root, matches GitHub Actions convention).
 USER runner
@@ -583,6 +585,12 @@ RUN set -eux; \
     test -f "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}-bin.zip.ok"; \
     test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/com.pinterest.ktlint/ktlint-cli/${KTLINT_VERSION}"; \
     test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/org.jlleitschuh.gradle/ktlint-gradle/${KTLINT_GRADLE_VERSION}"
+
+# Both build paths use the same bootstrap and toolcache validation.
+COPY --chown=runner:runner check-runner-bootstrap.sh /tmp/check-runner-bootstrap.sh
+RUN sh /tmp/check-runner-bootstrap.sh "${PY311}" "${PY313}" "${NODE_VERSION}" "${JDK_VERSION}" \
+    "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+    && rm /tmp/check-runner-bootstrap.sh
 
 # The runner agent is registered at container start: ARC injects the JIT
 # config via ACTIONS_RUNNER_INPUT_JITCONFIG and run.sh consumes it. The

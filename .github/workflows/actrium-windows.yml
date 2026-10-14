@@ -146,7 +146,9 @@ jobs:
         shell: pwsh
         run: |
           $expected = (Get-FileHash windows/native/actro_core.dll -Algorithm SHA256).Hash
-          foreach ($zip in Get-ChildItem dist/windows/*.zip) {
+          $zips = @(Get-ChildItem dist/windows/*.zip -File -ErrorAction Stop)
+          if ($zips.Count -eq 0) { throw 'No portable zip was produced for DLL verification' }
+          foreach ($zip in $zips) {
             $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
             try {
               $entry = $archive.GetEntry('actro_core.dll')

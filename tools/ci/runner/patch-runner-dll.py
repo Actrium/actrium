@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """Patch the Actions runner worker for the in-cluster Actions cache server.
 
-The Actrium ARC fleet stores Actions file caches in an in-cluster
-gha-cache-server (falcondev-oss/github-actions-cache-server, MinIO bucket
-`gha-cache`) instead of GitHub's hosted cache service. The server implements
-the v2 cache API, addressed through ACTIONS_RESULTS_URL when the runner sets
-ACTIONS_CACHE_SERVICE_V2. ACTIONS_CACHE_URL belongs to the legacy v1 protocol
-and does not configure this server.
-
-The cache-enabled production image therefore ships a worker assembly whose
-ACTIONS_RESULTS_URL literal is renamed to ACTIONS_RESULTS_ORL, which keeps the
-worker from binding the job's cache traffic to the hosted v2 results endpoint
-and lets the fleet's v2 cache requests resolve to the in-cluster server. The
-runtime behaviour is what the deployment's cache restore/save check verifies.
+The runner normally writes GitHub's hosted results endpoint into the job's
+ACTIONS_RESULTS_URL environment key. Renaming that worker literal to
+ACTIONS_RESULTS_ORL moves the generated assignment to a separate key, preserving
+the externally configured ACTIONS_RESULTS_URL inherited by cache clients.
+The ConfigMap therefore retains the original key. The cache server must support
+the protocol selected by the job; verify actual restores/saves after upgrades.
 
 The rename keeps the UTF-16LE byte length identical, so the surrounding .NET
 metadata is untouched and the replacement is a pure in-place substitution. The

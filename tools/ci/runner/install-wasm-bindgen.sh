@@ -10,6 +10,8 @@ install_dir=${WASM_BINDGEN_INSTALL_DIR:-${CARGO_HOME:-$HOME/.cargo}/bin}
 if [ "$#" -gt 0 ]; then
     locked_version=$(python3 - "$1" <<'PY'
 import sys
+if sys.version_info < (3, 11):
+    raise SystemExit("Python 3.11 or newer is required to validate the web Cargo.lock")
 import tomllib
 from pathlib import Path
 

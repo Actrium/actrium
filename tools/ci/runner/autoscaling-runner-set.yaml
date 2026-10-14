@@ -49,7 +49,7 @@ spec:
             name: runner-env
         - secretRef:
             name: sccache-s3
-        image: harbor.zlibs.com/platform/actrium-runner:20261014b-wasm-cache
+        image: harbor.zlibs.com/platform/actrium-runner@sha256:520ab9f2146303f9ceac34b5331f0395fe37183abaca328d1edf15c05b55bdce
         name: runner
         resources:
           limits:
@@ -75,8 +75,8 @@ spec:
       - command:
         - sh
         - "-c"
-        - install -d -o 1001 -g 1001 /home/runner/.cargo/registry
-        image: harbor.zlibs.com/platform/actrium-runner:20260901
+        - install -d -o 1001 -g 1001 /home/runner/.cargo/registry /home/runner/.cargo/registry/cache /home/runner/.cargo/registry/index
+        image: harbor.zlibs.com/platform/actrium-runner@sha256:520ab9f2146303f9ceac34b5331f0395fe37183abaca328d1edf15c05b55bdce
         name: fix-cargo-registry-ownership
         securityContext:
           runAsUser: 0

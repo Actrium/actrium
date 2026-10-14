@@ -127,17 +127,20 @@ ENV PATH="/opt/hostedtoolcache/Python/${PY311}/x64/bin:${PATH}"
 
 USER runner
 
-# Fail the build - not a CI job - when the bootstrap is incomplete.
-RUN set -eux; \
-    sccache --version | grep -Fxq 'sccache 0.18.0'; \
-    zstd --version | grep -Fq 'v1.5.7,'; \
-    wasm-pack --version | grep -Fxq 'wasm-pack 0.15.0'; \
-    wasm-opt --version; \
-    python3 --version; \
-    python3 -c 'import tomllib'; \
-    test "$(id -u)" = "1001"; \
-    test -x /usr/local/bin/runner-entrypoint.sh; \
-    sh -n /usr/local/bin/runner-entrypoint.sh; \
-    python3 -c "from pathlib import Path; d = Path('/home/runner/actions-runner/bin/Runner.Worker.dll').read_bytes(); assert d.count('ACTIONS_RESULTS_URL'.encode('utf-16-le')) == 0, 'cache patch missing'; assert d.count('ACTIONS_RESULTS_ORL'.encode('utf-16-le')) == 1, 'cache patch malformed'; print('cache patch verified')"
+# Preserve inherited toolcache versions and normalize the wrapper cache slot.
+ARG PY313=3.13.15
+ARG NODE_VERSION=24.19.0
+ARG JDK_VERSION=17.0.20+8
+ARG GRADLE_VERSION=9.2.1
+COPY --chown=runner:runner prepare-gradle-cache.py /usr/local/bin/prepare-gradle-cache.py
+RUN python3 /usr/local/bin/prepare-gradle-cache.py \
+    --distribution-url "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+    --require-preseeded
+
+# Fail both build paths on the same missing capabilities or cache markers.
+COPY --chown=runner:runner check-runner-bootstrap.sh /tmp/check-runner-bootstrap.sh
+RUN sh /tmp/check-runner-bootstrap.sh "${PY311}" "${PY313}" "${NODE_VERSION}" "${JDK_VERSION}" \
+    "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+    && rm /tmp/check-runner-bootstrap.sh
 
 ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]
