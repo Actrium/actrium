@@ -7,4 +7,5 @@
 # Release scripts execute inside workflows that can write repository contents.
 /scripts/actr/release-*.sh @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
 /scripts/actr/detect-pre-release-label.sh @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+/scripts/actr/generate-changelog.py @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
 /scripts/actr/tests/release-*.sh @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
