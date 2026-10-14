@@ -682,6 +682,22 @@ impl TestRtcControl {
         Ok(generation)
     }
 
+    /// Inject a Disconnected fact through the controller's real mailbox.
+    /// Unlike Failed, this keeps the live PC eligible for soft recovery, and
+    /// lets pair tests order independent endpoint observations deterministically.
+    pub async fn disconnect_peer(&self, peer: &ActrId) -> Result<u64, String> {
+        let handle = self
+            .manager
+            .get_controller(peer)
+            .await
+            .ok_or_else(|| "peer controller not found".to_string())?;
+        let generation = handle.snapshot().pc_generation;
+        handle.inject_peer_connection_state_for_test(
+            webrtc::peer_connection::RTCPeerConnectionState::Disconnected,
+        );
+        Ok(generation)
+    }
+
     /// Publish an authoritative network/app fact to every peer controller.
     pub(crate) fn publish(&self, event: RtcNetworkEvent) -> usize {
         self.manager.supervisor().publish(event)

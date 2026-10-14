@@ -368,6 +368,11 @@ fn pause_next_multifragment_send_after(
                 if paused.swap(true, Ordering::SeqCst) {
                     return;
                 }
+                // Publish the pause only after registering its resume waiter.
+                // The test may release immediately from another runtime thread.
+                let resumed = release.notified();
+                tokio::pin!(resumed);
+                resumed.as_mut().enable();
                 if let Some(tx) = event_tx
                     .lock()
                     .expect("pause hook sender mutex poisoned")
@@ -375,7 +380,7 @@ fn pause_next_multifragment_send_after(
                 {
                     let _ = tx.send(event);
                 }
-                release.notified().await;
+                resumed.await;
             })
         })
     };

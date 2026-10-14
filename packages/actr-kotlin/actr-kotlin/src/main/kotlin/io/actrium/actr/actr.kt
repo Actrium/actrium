@@ -937,9 +937,9 @@ internal object IntegrityCheckingUniffiLib {
     }
     external fun uniffi_actr_checksum_func_actr_error_is_retryable(
     ): Short
-    external fun uniffi_actr_checksum_func_actr_error_message(
-    ): Short
     external fun uniffi_actr_checksum_func_actr_error_kind(
+    ): Short
+    external fun uniffi_actr_checksum_func_actr_error_message(
     ): Short
     external fun uniffi_actr_checksum_func_actr_error_requires_dlq(
     ): Short
@@ -1255,9 +1255,9 @@ external fun uniffi_actr_fn_init_callback_vtable_workloadlifecyclebridge(`vtable
 ): Unit
 external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-external fun uniffi_actr_fn_func_actr_error_message(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-): RustBuffer.ByValue
 external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_actr_fn_func_actr_error_message(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
@@ -1393,10 +1393,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_actr_error_is_retryable() != 34175.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_actr_error_message() != 60098.toShort()) {
+    if (lib.uniffi_actr_checksum_func_actr_error_kind() != 40651.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_actr_error_kind() != 40651.toShort()) {
+    if (lib.uniffi_actr_checksum_func_actr_error_message() != 60098.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_actr_error_requires_dlq() != 62057.toShort()) {
@@ -1408,13 +1408,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_set_log_callback() != 22627.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency() != 20704.toShort()) {
+    if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency() != 47641.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency_alias_list() != 45756.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_resolve_manifest_package_actr_type() != 16114.toShort()) {
+    if (lib.uniffi_actr_checksum_func_resolve_manifest_package_actr_type() != 8884.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_add_media_track() != 37665.toShort()) {
@@ -1429,7 +1429,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_claim_reply() != 7617.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_discover() != 38410.toShort()) {
+    if (lib.uniffi_actr_checksum_method_contextbridge_discover() != 2735.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_log() != 34242.toShort()) {
@@ -3011,6 +3011,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     )
     }
 
+
     /**
      * Wait for shutdown to complete.
      */
@@ -3231,6 +3232,11 @@ public interface ContextBridgeInterface {
     
     /**
      * Register a DataChunk callback for a stream ID.
+     *
+     * Chunks of one stream are delivered to the callback serially,
+     * run-to-completion, in arrival order; different streams run
+     * independently. See [`DataChunkCallback`] for the resulting blocking
+     * constraint and reassembly rules.
      */
     suspend fun `registerStream`(`streamId`: kotlin.String, `callback`: DataChunkCallback)
     
@@ -3402,6 +3408,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         }
     }
 
+
     /**
      * Add a media track to the WebRTC connection with the target
      */
@@ -3492,6 +3499,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_actr_fn_method_contextbridge_claim_reply(
                 uniffiHandle,
+
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
@@ -3499,6 +3507,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
@@ -3577,6 +3586,11 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     
     /**
      * Register a DataChunk callback for a stream ID.
+     *
+     * Chunks of one stream are delivered to the callback serially,
+     * run-to-completion, in arrival order; different streams run
+     * independently. See [`DataChunkCallback`] for the resulting blocking
+     * constraint and reassembly rules.
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
@@ -3648,6 +3662,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         ActrException.ErrorHandler,
     )
     }
+
 
     /**
      * Deliver a response through the current inbound RPC reply boundary.
@@ -6142,8 +6157,13 @@ public object FfiConverterTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebR
  * Error type for actr operations.
  *
  * Protocol errors are mirrored one-for-one where the binding ABI exposes
- * them. DeliveryUncertain is appended so the existing UniFFI error
- * discriminants remain stable; Config is a binding-local pre-protocol error.
+ * them. `DeliveryUncertain` is appended after the existing variants so adding
+ * this case does not renumber the established UniFFI error discriminants.
+ * The binding-local `Config` variant captures failures that originate inside
+ * the FFI shell before the protocol layer is reached.
+ * UniFFI error discriminants are append-only: future protocol variants must
+ * be appended after the existing cases and mirrored in every generated SDK;
+ * never reorder or remove an established case.
  */
 sealed class ActrException: kotlin.Exception() {
     // Keep exception inspection safe before native loading or after linkage failure.
@@ -6276,7 +6296,13 @@ sealed class ActrException: kotlin.Exception() {
             get() = displayMessage()
     }
 
-    /** The operation may have entered the transport; generic retry is unsafe. */
+    /**
+     * The operation may have entered the transport, so generic retry is
+     * unsafe. Keep the operation ID and cause available to SDK callers.
+     *
+     * This variant is intentionally appended to preserve the discriminants
+     * of the existing UniFFI ABI.
+     */
     class DeliveryUncertain(
 
         val `operationId`: kotlin.String,
@@ -6664,7 +6690,8 @@ enum class ErrorKind {
      */
     CLIENT,
     /**
-     * Framework bug or panic — do not retry; alert.
+     * Framework fault or uncertain delivery — do not retry. Framework faults
+     * are alertable; uncertain delivery requires caller reconciliation.
      */
     INTERNAL,
     /**
@@ -7032,7 +7059,7 @@ public object FfiConverterTypeReconnectReason: FfiConverterRustBuffer<ReconnectR
 
 /**
  * Whether the selected ICE candidate pair is direct or relayed. Mirrors
- *  `actr_framework::WebRtcNetworkPath`.
+ * `actr_framework::WebRtcNetworkPath`.
  */
 
 enum class WebRtcNetworkPathBridge {
@@ -7116,7 +7143,7 @@ public object FfiConverterTypeWebRtcPeerStatusBridge: FfiConverterRustBuffer<Web
 
 /**
  * Stable, FFI-safe reason a WebRTC peer is unavailable. Mirrors
- *  `actr_framework::WebRtcUnavailableReason`.
+ * `actr_framework::WebRtcUnavailableReason`.
  */
 
 enum class WebRtcUnavailableReasonBridge {
@@ -7282,6 +7309,17 @@ public object FfiConverterTypeCredentialObserverBridge: FfiConverterCallbackInte
 
 /**
  * Callback interface for DataChunk events.
+ *
+ * Chunks of one stream are delivered to `on_stream` serially,
+ * run-to-completion, strictly in arrival order; different streams run
+ * independently (see `Context::register_stream`). Consequently `on_stream`
+ * must not block waiting for a later chunk of the same stream — that chunk
+ * is queued behind this call, so both stall forever (self-deadlock).
+ * Finalize a stream out-of-band instead: a separate RPC the sender invokes
+ * after the last chunk, or a background task watching shared reassembly
+ * state. Reassemble and detect gaps by `DataChunk.sequence` — chunks are
+ * dispatched in send order, but `StreamLatencyFirst` drops and reconnects
+ * can lose in-flight chunks.
  */
 public interface DataChunkCallback {
     
@@ -9112,14 +9150,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
     }
     
 
-        /** Rust Display text for an error, shared by SDK message properties. */
-fun actrErrorMessage(err: ActrException): kotlin.String =
-    FfiConverterString.lift(uniffiRustCall { status ->
-        UniffiLib.uniffi_actr_fn_func_actr_error_message(
-            FfiConverterTypeActrError.lower(err), status)
-    })
-
-/**
+        /**
          * Fault-domain classification of `err` (see [`ErrorKind`]).
          */ fun `actrErrorKind`(`err`: ActrException): ErrorKind {
             return FfiConverterTypeErrorKind.lift(
@@ -9131,6 +9162,19 @@ fun actrErrorMessage(err: ActrException): kotlin.String =
     )
     }
     
+
+        /**
+         * Rust Display text for an error, shared by SDK message properties.
+         */ fun `actrErrorMessage`(`err`: ActrException): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_actr_fn_func_actr_error_message(
+
+        FfiConverterTypeActrError.lower(`err`),_status)
+}
+    )
+    }
+
 
         /**
          * `true` iff the error is in the Corrupt fault domain — route to DLQ.
@@ -9146,17 +9190,24 @@ fun actrErrorMessage(err: ActrException): kotlin.String =
 
 
         /**
-         * Test hook: fail with `err` so the error-buffer reader is exercised
-         * against the real Rust UniFFI writer — the discriminant, field order,
-         * and integer widths crossing the boundary are exactly the ones a
-         * production throw produces.
-         */ @Throws(ActrException::class) fun `actrErrorThrowForTest`(`err`: ActrException)
+         * Test hook: fail with `err` so foreign-side error-buffer readers are
+         * exercised against the real Rust UniFFI writer — the discriminant, field
+         * order, and integer widths crossing the boundary are exactly the ones a
+         * production throw produces. The Swift test calls this to prove its
+         * `FfiConverterTypeActrError.read` lifts a Rust-generated case-13
+         * `DeliveryUncertain` without losing `operation_id` or `cause`; the Kotlin
+         * unit suite is JVM-only, so its `ActrErrorFfiReadTest` hand-builds the
+         * same buffer layout instead of calling this hook.
+         */
+    @Throws(ActrException::class) fun `actrErrorThrowForTest`(`err`: ActrException)
         =
     uniffiRustCallWithError(ActrException) { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_throw_for_test(
 
         FfiConverterTypeActrError.lower(`err`),_status)
 }
+
+
 
         /**
          * Set or clear the global log callback.
