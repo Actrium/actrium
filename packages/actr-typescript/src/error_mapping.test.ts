@@ -43,7 +43,8 @@ describe('Error mapping — protocol scenarios', () => {
       nativeError({
         kind: 'Client',
         code: 'UnknownRoute',
-        message: 'no handler for route fixture.Fixture.NoSuchMethod',
+        message:
+          'unknown route: no handler for route fixture.Fixture.NoSuchMethod',
       }),
     );
 
@@ -62,7 +63,7 @@ describe('Error mapping — protocol scenarios', () => {
       nativeError({
         kind: 'Transient',
         code: 'TimedOut',
-        message: 'operation timed out',
+        message: 'timed out',
       }),
     );
 
@@ -155,7 +156,7 @@ describe('Error mapping — recovery metadata', () => {
       nativeError({
         kind: 'Transient',
         code: 'ConnectionNotReady',
-        message: 'connection not ready: retry_after_ms=Some(5880)',
+        message: 'connection not ready: retry after 5880ms',
         retry_after_ms: 5880,
       }),
     ) as ActrError;
@@ -164,6 +165,7 @@ describe('Error mapping — recovery metadata', () => {
     expect(err.isConnectionNotReady()).toBe(true);
     expect(err.isRetryable()).toBe(true);
     expect(err.retry_after_ms).toBe(5880);
+    expect(err.message).toBe('connection not ready: retry after 5880ms');
   });
 
   it('connection_not_ready_retry_hint_may_be_null', () => {
@@ -172,13 +174,14 @@ describe('Error mapping — recovery metadata', () => {
       nativeError({
         kind: 'Transient',
         code: 'ConnectionNotReady',
-        message: 'connection not ready: retry_after_ms=None',
+        message: 'connection not ready: no retry hint',
         retry_after_ms: null,
       }),
     ) as ActrError;
 
     expect(err.isConnectionNotReady()).toBe(true);
     expect(err.retry_after_ms).toBeNull();
+    expect(err.message).toBe('connection not ready: no retry hint');
   });
 
   it('dependency_not_found_carries_service_name', () => {
@@ -276,5 +279,20 @@ describe('Error mapping — callNative wrapper', () => {
   it('passes_through_a_successful_result', async () => {
     const value = await callNative(async () => 'ok');
     expect(value).toBe('ok');
+  });
+});
+
+// Display text is opaque at the JS boundary: never strip prefixes or escape it twice.
+describe('Rust Display message preservation', () => {
+  it.each([
+    ['Internal', 'Internal', 'internal error: unknown text: unknown'],
+    ['Transient', 'TimedOut', 'timed out'],
+    ['Client', 'Config', 'config: invalid manifest'],
+    ['Client', 'DependencyNotFound', "dependency 'echo' not found: missing"],
+    ['Internal', 'Internal', 'internal error: \u4e2d\u6587\n"quoted"\\path'],
+  ])('preserves %s/%s text exactly', (kind, code, message) => {
+    const wrapped = mapNativeError(nativeError({ kind, code, message }));
+    expect(wrapped).toBeInstanceOf(ActrError);
+    expect((wrapped as ActrError).message).toBe(message);
   });
 });

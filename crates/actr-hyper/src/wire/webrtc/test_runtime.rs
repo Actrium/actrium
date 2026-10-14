@@ -51,6 +51,10 @@ struct FaultKey {
 struct ScopedFaultState {
     outgoing: Mutex<PacketRule>,
     incoming: Mutex<PacketRule>,
+    /// Number of live Runtime/socket leases using this generation. A fault
+    /// stops counting only after the builder and every wrapped socket release
+    /// their shared lease.
+    active_leases: AtomicUsize,
     outgoing_sequence: AtomicU64,
     incoming_sequence: AtomicU64,
     outgoing_hits: AtomicUsize,
@@ -68,6 +72,7 @@ impl Default for ScopedFaultState {
         Self {
             outgoing: Mutex::new(PacketRule::Pass),
             incoming: Mutex::new(PacketRule::Pass),
+            active_leases: AtomicUsize::new(0),
             outgoing_sequence: AtomicU64::new(0),
             incoming_sequence: AtomicU64::new(0),
             outgoing_hits: AtomicUsize::new(0),
@@ -204,7 +209,42 @@ pub struct DirectedRtcFaultRegistry {
     scopes: Arc<Mutex<HashMap<FaultKey, Arc<ScopedFaultState>>>>,
 }
 
+/// Pair of test-only fault registries injectable into a real `Node` through
+/// [`crate::Node::with_test_faults`]. Both registries share state across
+/// clones, so the host can keep its own copy for rule installation and hit
+/// observation while the node uses its copy inside the factory and signaling
+/// transport.
+#[derive(Debug, Clone, Default)]
+pub struct TestFaultRegistries {
+    pub rtc: DirectedRtcFaultRegistry,
+    pub signaling: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
+}
+
+impl TestFaultRegistries {
+    pub(crate) fn wrap_factory(
+        &self,
+        factory: super::rtc::factory::PeerConnectionFactory,
+        local_id: super::rtc::signaling::SharedLocalId,
+    ) -> super::rtc::factory::PeerConnectionFactory {
+        factory.with_directed_faults(local_id, self.rtc.clone())
+    }
+
+    pub(crate) fn wrap_signaling<T>(
+        &self,
+        transport: T,
+        local_id: super::rtc::signaling::SharedLocalId,
+    ) -> super::rtc::fault::DirectedSignalingTransport<T> {
+        super::rtc::fault::DirectedSignalingTransport::new(
+            Arc::new(transport),
+            local_id,
+            self.signaling.clone(),
+        )
+    }
+}
+
 impl DirectedRtcFaultRegistry {
+    /// Resolve a live scope for fault installation. Retain an already acquired
+    /// handle to inspect metrics after teardown; drained scopes cannot be armed.
     pub fn handle(
         &self,
         local: &ActrId,
@@ -220,6 +260,7 @@ impl DirectedRtcFaultRegistry {
             .lock()
             .expect("RTC fault registry lock poisoned")
             .get(&key)
+            .filter(|state| state.active_leases.load(Ordering::Acquire) > 0)
             .cloned()
             .map(|state| DirectedRtcFaultHandle { key, state })
     }
@@ -271,21 +312,49 @@ impl DirectedRtcFaultRegistry {
         true
     }
 
-    /// Remove retired generations for a logical local→remote controller.
+    /// Prune inactive generations for a logical local→remote controller.
+    /// Older scopes whose Runtime or wrapped sockets are still live remain
+    /// observable and counted until their final lease is released.
     pub fn retain_generation(&self, local: &ActrId, remote: &ActrId, generation: u64) {
         self.scopes
             .lock()
             .expect("RTC fault registry lock poisoned")
-            .retain(|key, _| {
-                key.local != *local || key.remote != *remote || key.generation == generation
+            .retain(|key, state| {
+                key.local != *local
+                    || key.remote != *remote
+                    || key.generation == generation
+                    || state.active_leases.load(Ordering::Acquire) > 0
             });
     }
 
+    /// Number of retained generation scopes, including inactive scopes kept
+    /// for post-teardown metric inspection.
     pub fn scope_count(&self) -> usize {
         self.scopes
             .lock()
             .expect("RTC fault registry lock poisoned")
             .len()
+    }
+
+    /// Number of live generation scopes with a currently active non-Pass rule.
+    /// A scope remains live while its builder or any wrapped socket holds a
+    /// lease, regardless of whether a newer generation has started building.
+    pub fn active_rule_count(&self) -> usize {
+        self.scopes
+            .lock()
+            .expect("RTC fault registry lock poisoned")
+            .values()
+            .filter(|state| {
+                state.active_leases.load(Ordering::Acquire) > 0
+                    && (!matches!(
+                        *state.outgoing.lock().expect("RTC fault lock poisoned"),
+                        PacketRule::Pass
+                    ) || !matches!(
+                        *state.incoming.lock().expect("RTC fault lock poisoned"),
+                        PacketRule::Pass
+                    ))
+            })
+            .count()
     }
 
     pub fn clear(&self) {
@@ -308,18 +377,60 @@ impl DirectedRtcFaultRegistry {
             remote,
             generation,
         };
-        let state = self
-            .scopes
-            .lock()
-            .expect("RTC fault registry lock poisoned")
-            .entry(key)
-            .or_default()
-            .clone();
+        let (state, lease) = {
+            let mut scopes = self
+                .scopes
+                .lock()
+                .expect("RTC fault registry lock poisoned");
+            let state = match scopes.get(&key).cloned() {
+                Some(state) => {
+                    let previous = state.active_leases.fetch_add(1, Ordering::AcqRel);
+                    if previous == 0 {
+                        // The generation key has been reused after its prior
+                        // sockets were fully released. Give this lifetime a
+                        // fresh state so an old rule cannot silently reappear.
+                        state.active_leases.fetch_sub(1, Ordering::AcqRel);
+                        let replacement = Arc::new(ScopedFaultState::default());
+                        replacement.active_leases.store(1, Ordering::Release);
+                        scopes.insert(key.clone(), replacement.clone());
+                        replacement
+                    } else {
+                        state
+                    }
+                }
+                None => {
+                    let state = Arc::new(ScopedFaultState::default());
+                    state.active_leases.store(1, Ordering::Release);
+                    scopes.insert(key.clone(), state.clone());
+                    state
+                }
+            };
+            let lease = Arc::new(ScopedFaultLease {
+                state: state.clone(),
+            });
+            (state, lease)
+        };
         *state
             .bind_addresses
             .lock()
             .expect("RTC bind-address lock poisoned") = bind_addresses;
-        Arc::new(ScopedFaultRuntime { inner, state })
+        Arc::new(ScopedFaultRuntime {
+            inner,
+            state,
+            _lease: lease,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ScopedFaultLease {
+    state: Arc<ScopedFaultState>,
+}
+
+impl Drop for ScopedFaultLease {
+    fn drop(&mut self) {
+        let previous = self.state.active_leases.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "RTC fault lease count underflowed");
     }
 }
 
@@ -327,6 +438,7 @@ impl DirectedRtcFaultRegistry {
 struct ScopedFaultRuntime {
     inner: Arc<dyn Runtime>,
     state: Arc<ScopedFaultState>,
+    _lease: Arc<ScopedFaultLease>,
 }
 
 impl Runtime for ScopedFaultRuntime {
@@ -349,6 +461,7 @@ impl Runtime for ScopedFaultRuntime {
         Ok(Arc::new(ScopedFaultUdpSocket {
             inner,
             state: self.state.clone(),
+            _lease: self._lease.clone(),
         }))
     }
 
@@ -359,6 +472,7 @@ impl Runtime for ScopedFaultRuntime {
         Ok(Arc::new(ScopedFaultTcpListener {
             inner: self.inner.wrap_tcp_listener(listener)?,
             state: self.state.clone(),
+            _lease: self._lease.clone(),
         }))
     }
 
@@ -371,6 +485,7 @@ impl Runtime for ScopedFaultRuntime {
             Ok(Arc::new(ScopedFaultTcpStream {
                 inner,
                 state: self.state.clone(),
+                _lease: self._lease.clone(),
             }) as Arc<dyn AsyncTcpStream>)
         })
     }
@@ -407,6 +522,7 @@ impl Runtime for ScopedFaultRuntime {
 struct ScopedFaultUdpSocket {
     inner: Arc<dyn AsyncUdpSocket>,
     state: Arc<ScopedFaultState>,
+    _lease: Arc<ScopedFaultLease>,
 }
 
 impl ScopedFaultState {
@@ -542,6 +658,7 @@ impl AsyncUdpSocket for ScopedFaultUdpSocket {
 struct ScopedFaultTcpListener {
     inner: Arc<dyn AsyncTcpListener>,
     state: Arc<ScopedFaultState>,
+    _lease: Arc<ScopedFaultLease>,
 }
 
 impl AsyncTcpListener for ScopedFaultTcpListener {
@@ -555,6 +672,7 @@ impl AsyncTcpListener for ScopedFaultTcpListener {
                 Arc::new(ScopedFaultTcpStream {
                     inner,
                     state: self.state.clone(),
+                    _lease: self._lease.clone(),
                 }) as Arc<dyn AsyncTcpStream>,
                 remote,
             ))
@@ -570,6 +688,7 @@ impl AsyncTcpListener for ScopedFaultTcpListener {
 struct ScopedFaultTcpStream {
     inner: Arc<dyn AsyncTcpStream>,
     state: Arc<ScopedFaultState>,
+    _lease: Arc<ScopedFaultLease>,
 }
 
 impl AsyncTcpStream for ScopedFaultTcpStream {
@@ -776,6 +895,98 @@ mod directed_tests {
                 version: "1.0.0".to_string(),
             },
         }
+    }
+
+    #[tokio::test]
+    async fn active_fault_leases_follow_runtime_lifetime_across_generations() {
+        let registry = DirectedRtcFaultRegistry::default();
+        let a = actor(1);
+        let b = actor(2);
+        let a1 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 1, vec![]);
+        let b1 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 1, vec![]);
+        let a1_socket = a1
+            .wrap_udp_socket(std::net::UdpSocket::bind("127.0.0.1:0").unwrap())
+            .unwrap();
+        assert!(registry.set_link_rule(
+            (&a, 1),
+            (&b, 1),
+            LinkDirection::AToB,
+            PacketRule::Blackhole
+        ));
+        assert!(
+            registry.active_rule_count() > 0,
+            "an installed generation-1 fault must count as active"
+        );
+
+        // Beginning a newer build does not retire the older scope while its
+        // Runtime lease is still live.
+        let _a2 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 2, vec![]);
+        let _b2 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 2, vec![]);
+        assert_eq!(
+            registry.active_rule_count(),
+            2,
+            "a newer build must not hide a still-live older generation fault"
+        );
+
+        // Pruning generation 1 keeps the A→B scope because its wrapped UDP
+        // socket still holds a lease, even after the runtime wrappers drop.
+        drop((a1, b1));
+        registry.retain_generation(&a, &b, 2);
+        registry.retain_generation(&b, &a, 2);
+        assert!(registry.handle(&a, &b, 1).is_some());
+        assert!(registry.handle(&b, &a, 1).is_none());
+        assert_eq!(
+            registry.active_rule_count(),
+            1,
+            "the wrapped socket keeps the generation-1 A→B fault active"
+        );
+
+        // Once the last socket lease is released, the next prune can remove
+        // generation 1 without touching the active generation 2 scopes.
+        drop(a1_socket);
+        registry.retain_generation(&a, &b, 2);
+        registry.retain_generation(&b, &a, 2);
+        assert!(registry.handle(&a, &b, 1).is_none());
+        assert!(registry.handle(&a, &b, 2).is_some());
+        assert_eq!(
+            registry.active_rule_count(),
+            0,
+            "the fault lease ends after the old generation releases its final socket"
+        );
+    }
+
+    #[test]
+    fn drained_scope_cannot_accept_faults_before_generation_key_is_reused() {
+        let registry = DirectedRtcFaultRegistry::default();
+        let (a, b) = (actor(1), actor(2));
+        let a1 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 1, vec![]);
+        let b1 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 1, vec![]);
+        let old = registry.handle(&a, &b, 1).unwrap();
+        drop((a1, b1));
+        assert_eq!(registry.scope_count(), 2, "retain post-teardown metrics");
+        assert!(registry.handle(&a, &b, 1).is_none());
+        assert!(!registry.set_link_rule(
+            (&a, 1),
+            (&b, 1),
+            LinkDirection::Both,
+            PacketRule::Blackhole
+        ));
+        assert_eq!(old.metrics(), DirectedRtcFaultMetrics::default());
+
+        let _a1 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 1, vec![]);
+        let _b1 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 1, vec![]);
+        assert_eq!(
+            registry.active_rule_count(),
+            0,
+            "new lifetime starts unfaulted"
+        );
+        assert!(registry.set_link_rule(
+            (&a, 1),
+            (&b, 1),
+            LinkDirection::Both,
+            PacketRule::Blackhole
+        ));
+        assert_eq!(registry.active_rule_count(), 2);
     }
 
     #[test]

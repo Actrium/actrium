@@ -138,6 +138,7 @@ if [[ ! -f "${DYLIB_PATH}" ]]; then
 fi
 
 (cd "${CRATE_DIR}" && uniffi-bindgen generate --library "${DYLIB_PATH}" --language swift --out-dir "${BINDINGS_DIR}")
+python3 "${WORKSPACE_ROOT}/scripts/actr/patch-error-messages.py" swift "${BINDINGS_DIR}/Actr.swift"
 
 require_file "${BINDINGS_DIR}/Actr.swift"
 MODULEMAP_FILE=$(find "${BINDINGS_DIR}" -maxdepth 1 -iname "actrFFI.modulemap" | head -n 1)

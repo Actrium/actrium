@@ -384,6 +384,16 @@ impl PeerRecoveryObligationLog {
             })
     }
 
+    /// Count open obligations without cloning the retained audit ledger.
+    pub(crate) fn open_count(&self) -> usize {
+        self.records
+            .lock()
+            .expect("obligation log poisoned")
+            .iter()
+            .filter(|record| record.status == PeerRecoveryObligationStatus::Open)
+            .count()
+    }
+
     /// A copy of the full audit ledger (bounded; oldest records evicted).
     pub(crate) fn records(&self) -> Vec<PeerRecoveryObligation> {
         self.records

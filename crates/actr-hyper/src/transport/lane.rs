@@ -476,8 +476,8 @@ pub(crate) fn decode_fragment_header(
 // ── Type alias ────────────────────────────────────────────────────────────────
 
 /// Type alias for WebSocket sink (shared across all PayloadTypes)
-pub(crate) type WsSink =
-    Arc<Mutex<Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>>>>;
+pub(crate) type WsSink<S = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>> =
+    Arc<Mutex<Option<S>>>;
 
 // ── DataLane trait ────────────────────────────────────────────────────────────
 
@@ -891,10 +891,11 @@ impl DataLane for MpscLane {
 ///
 /// All PayloadTypes share the same underlying WebSocket connection,
 /// distinguished by a message header.
-#[derive(Clone)]
-pub(crate) struct WebSocketDataLane {
+pub(crate) struct WebSocketDataLane<
+    S = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>,
+> {
     /// Shared Sink (all PayloadTypes share the same WebSocket connection)
-    pub(crate) sink: WsSink,
+    pub(crate) sink: WsSink<S>,
 
     /// PayloadType identifier (used to add message header when sending)
     payload_type: PayloadType,
@@ -903,17 +904,28 @@ pub(crate) struct WebSocketDataLane {
     rx: Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>,
 }
 
-impl std::fmt::Debug for WebSocketDataLane {
+// Cloning a lane shares the sink; the sink itself need not implement Clone.
+impl<S> Clone for WebSocketDataLane<S> {
+    fn clone(&self) -> Self {
+        Self {
+            sink: Arc::clone(&self.sink),
+            payload_type: self.payload_type,
+            rx: Arc::clone(&self.rx),
+        }
+    }
+}
+
+impl<S> std::fmt::Debug for WebSocketDataLane<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "WebSocketDataLane(type={:?})", self.payload_type)
     }
 }
 
-impl WebSocketDataLane {
+impl<S> WebSocketDataLane<S> {
     /// Create WebSocket DataLane
     #[inline]
     pub(crate) fn new(
-        sink: WsSink,
+        sink: WsSink<S>,
         payload_type: PayloadType,
         rx: mpsc::Receiver<bytes::Bytes>,
     ) -> Self {
@@ -948,7 +960,13 @@ fn map_websocket_send_result(
 }
 
 #[async_trait]
-impl DataLane for WebSocketDataLane {
+impl<S> DataLane for WebSocketDataLane<S>
+where
+    S: futures_util::Sink<WsMessage, Error = tokio_tungstenite::tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
+{
     async fn send(&self, data: bytes::Bytes) -> NetworkResult<()> {
         self.send_with_progress(data).await.into_result()
     }
