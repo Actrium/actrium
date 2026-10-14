@@ -1,131 +1,179 @@
-# Actrium self-hosted runner scale set on ARC (gha-runner-scale-set).
-#
-# Spawns ephemeral runner Pods from the image built by ./Dockerfile. The
-# ARC controller creates one Pod per queued job, injects the JIT runner
-# config as ACTIONS_RUNNER_INPUT_JITCONFIG into the `runner` container,
-# and reaps the Pod when the job finishes.
-#
-# Prerequisites (see README.md, "ARC mode"): the gha-runner-scale-set
-# controller installed in arc-systems, the actrium-arc-github-app secret in
-# this namespace, and the image pushed to a registry the cluster can pull
-# from.
+# Actrium ARC fleet with externally managed environment configuration.
+# The runner image carries the bootstrap (wasm-opt, sccache, hosted-toolcache
+# PATH, the Actions cache worker patch) and its own entrypoint; this manifest
+# deploys that image as-is.
+# The node-local Cargo registry shares crate archives and the index only; crate
+# extraction is per-Pod, which is what keeps concurrent builds on one node from
+# racing on the same unpack marker.
+# Provision runner-env and sccache-s3 in the runner namespace before applying.
+# Their values are managed outside this repository. Configuration changes affect
+# newly created Pods; existing Pods retain their environment until replaced.
+# The AutoscalingRunnerSet and controller namespace RBAC are deployed together.
+# Update this configuration before applying a reviewed fleet change.
+---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
 metadata:
   name: actrium-linux
-  namespace: arc-runners
+  namespace: arc-runners-actrium
   labels:
-    # Required by the controller: it DELETES scale sets whose
-    # app.kubernetes.io/version label does not match its own build
-    # (same major.minor). Keep in sync with the installed controller
-    # chart version (README.md "ARC mode").
-    app.kubernetes.io/version: "0.14.2"
+    actions.github.com/organization: Actrium
+    app.kubernetes.io/version: 0.14.2
 spec:
-  githubConfigUrl: https://github.com/Actrium
-  # Pre-created secret holding github_app_id / github_app_installation_id /
-  # github_app_private_key. Must live in the SAME namespace as this resource.
   githubConfigSecret: actrium-arc-github-app
-  # The scale set name is always registered as a runner label. The extra
-  # labels below make the runners addressable via the standard
-  # `runs-on: [self-hosted, Linux, X64]` selectors used by the CI workflows.
-  runnerScaleSetName: actrium-linux
+  githubConfigUrl: https://github.com/Actrium
+  maxRunners: 16
+  minRunners: 10
   runnerScaleSetLabels:
-    - self-hosted
-    - Linux
-    - X64
-  # Scale to zero when idle; cap concurrent runner Pods at 10.
-  minRunners: 0
-  maxRunners: 10
+  - self-hosted
+  - Linux
+  - X64
+  runnerScaleSetName: actrium-linux
   template:
     spec:
-      # The runner image executes as uid 1001. Give that user ownership of
-      # the dynamically provisioned workspace PVC before the runner starts.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: arc-runner
+                operator: In
+                values:
+                - 'true'
+      containers:
+      # Per-Pod startup lives in the image entrypoint (pre-start sccache, then
+      # the runner agent); wasm-opt, sccache and the toolcache PATH are baked
+      # into the image, so no startup script is carried in this manifest.
+      - envFrom:
+        - configMapRef:
+            name: runner-env
+        - secretRef:
+            name: sccache-s3
+        image: harbor.actrium-registry.example/platform/actrium-runner@sha256:520ab9f2146303f9ceac34b5331f0395fe37183abaca328d1edf15c05b55bdce
+        name: runner
+        resources:
+          limits:
+            cpu: '12'
+            memory: 12Gi
+          requests:
+            cpu: '2'
+            memory: 4Gi
+        volumeMounts:
+        - mountPath: "/home/runner/actions-runner/_work"
+          name: work
+        - mountPath: "/home/runner/.cargo/registry"
+          name: cargo-registry
+        # Cargo unpacks .crate archives into registry/src and marks each
+        # finished unpack with a .cargo-ok file. Sharing that directory across
+        # the Pods on a node makes concurrent extractions of the same crate
+        # collide on the marker ("failed to unpack ... File exists (os error
+        # 17)") and fails the losing job, so only the archive cache and the
+        # index stay shared (hostPath above) and extraction is per-Pod.
+        - mountPath: "/home/runner/.cargo/registry/src"
+          name: cargo-registry-src
+      initContainers:
+      - command:
+        - sh
+        - "-c"
+        - install -d -o 1001 -g 1001 /home/runner/.cargo/registry /home/runner/.cargo/registry/cache /home/runner/.cargo/registry/index
+        image: harbor.actrium-registry.example/platform/actrium-runner@sha256:520ab9f2146303f9ceac34b5331f0395fe37183abaca328d1edf15c05b55bdce
+        name: fix-cargo-registry-ownership
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - mountPath: "/home/runner/.cargo/registry"
+          name: cargo-registry
       securityContext:
         fsGroup: 1001
-      # Uncomment if the GHCR package is private (default for packages
-      # linked to a private repo); create the secret once:
-      #   kubectl -n arc-runners create secret docker-registry ghcr-pull \
-      #     --docker-server=ghcr.io --docker-username=<user> \
-      #     --docker-password=<read:packages PAT>
-      # imagePullSecrets:
-      #   - name: ghcr-pull
-      #
-      # Internal deployments may redirect the image to a private registry;
-      # keep this manifest registry-neutral in the repo.
-      containers:
-        - name: runner
-          image: ghcr.io/actrium/runner:latest
-          # No imagePullPolicy override: the default for a :latest tag is
-          # Always, so rebuilt images take effect on the next Pod. Pin a
-          # digest (image: ...@sha256:...) for fully immutable deploys.
-          # The agent tarball's stock run.sh consumes the controller-injected
-          # ACTIONS_RUNNER_INPUT_JITCONFIG env and runs exactly one job.
-          command: ["/home/runner/actions-runner/run.sh"]
-          resources:
-            requests:
-              cpu: "4"
-              memory: 8Gi
-            limits:
-              cpu: "8"
-              memory: 16Gi
-          volumeMounts:
-            - name: work
-              # The agent is installed in /home/runner/actions-runner, and
-              # its default work directory is relative to that root.
-              mountPath: /home/runner/actions-runner/_work
       volumes:
-        # Per-job workspace volume so actions/checkout + cargo target do not
-        # fill the node's container rootfs. emptyDir (node-local disk) is a
-        # deliberate choice over an NFS-backed PVC: Rust builds mmap object
-        # files and `ld` does mmap writes — a network filesystem returns
-        # SIGBUS / vanishing object files under concurrent load (seen in
-        # practice: nextest fixture link step crashed with
-        # "ld terminated with signal 7 [Bus error]" on NFS). Local disk is
-        # also several times faster for compile I/O, needs no StorageClass,
-        # and is auto-reaped with the pod.
-        - name: work
-          emptyDir:
-            sizeLimit: 100Gi
+      - emptyDir:
+          sizeLimit: 100Gi
+        name: work
+      - hostPath:
+          path: "/var/openebs/cargo-registry"
+          type: DirectoryOrCreate
+        name: cargo-registry
+      # Per-Pod extraction directory (see the volumeMounts comment). Crates are
+      # re-extracted from the shared archive cache, so this costs CPU only and
+      # never network. Measured extraction for this workspace is ~1.3 GiB; the
+      # limit is a node-protection guard, not a working-set estimate.
+      - emptyDir:
+          sizeLimit: 20Gi
+        name: cargo-registry-src
 ---
-# RBAC the gha-runner-scale-set helm chart would normally create in the
-# runner namespace. Without it, the controller fails reconciles with
-# "failed to get kubernetes secret". Rules mirror the chart's
-# manager_role.yaml (pods/secrets/serviceaccounts/roles/rolebindings).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: arc-manager
-  namespace: arc-runners
+  namespace: arc-runners-actrium
 rules:
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["create", "delete", "get"]
-  - apiGroups: [""]
-    resources: ["pods/status"]
-    verbs: ["get"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create", "delete", "get", "list", "patch", "update"]
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["create", "delete", "get", "list", "patch", "update"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["rolebindings"]
-    verbs: ["create", "delete", "get", "patch", "update"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["roles"]
-    verbs: ["create", "delete", "get", "patch", "update"]
+- apiGroups:
+  - ''
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+- apiGroups:
+  - ''
+  resources:
+  - pods/status
+  verbs:
+  - get
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - ''
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: arc-manager-binding
-  namespace: arc-runners
+  namespace: arc-runners-actrium
 subjects:
-  - kind: ServiceAccount
-    name: arc-gha-rs-controller
-    namespace: arc-systems
+- kind: ServiceAccount
+  name: arc-gha-rs-controller
+  namespace: arc-systems
 roleRef:
+  apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: arc-manager
-  apiGroup: rbac.authorization.k8s.io
