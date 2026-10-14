@@ -13,6 +13,8 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
+      - name: Test SDK error message generation
+        run: python3 scripts/actr/tests/test_patch_error_messages.py
       - name: Validate Android build script
         run: scripts/actr/tests/kotlin-android-build-script.sh
 
@@ -93,13 +95,14 @@ jobs:
 
   gen-test:
     name: Kotlin Codegen Test
-    # High pool: the codegen job resolves one pinned Gradle 9.2.1 distribution
-    # plus crate downloads, and compiles Rust + Kotlin in parallel — the
-    # external cluster's egress and 4-16 CPU / SSD work volume cut both the
-    # download and compile phases.
+    # The codegen job resolves one pinned Gradle 9.2.1 distribution plus crate
+    # downloads, and compiles Rust + Kotlin in parallel. Keep the default
+    # mirror-first repositories (settings.gradle.kts): after #309 moved this
+    # job off the high fleet, either self-hosted fleet can claim it, and the
+    # kubekey fleet's egress to dl.google.com is unreliable (observed
+    # 2026-10-14 as AGP plugin-resolution failures).
     runs-on: [self-hosted, Linux, X64]
     env:
-      ACTR_GRADLE_REPOSITORIES: canonical
       # rustc-level compilation cache (in-cluster MinIO backend) instead of
       # Swatinem/rust-cache: on ephemeral ARC pods the rust-cache post-job
       # upload to the GitHub Actions cache blob store goes over the slow

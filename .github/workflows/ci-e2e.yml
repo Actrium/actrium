@@ -186,8 +186,8 @@ jobs:
     name: TypeScript E2E
     # Blocked until jco can componentize the V2 async host imports. The required
     # TypeScript source build remains covered by ci-typescript/ci-gate; re-enable
-    # this runtime E2E under #431 when the guarded componentization smoke test is
-    # green (upstream ComponentizeJS#335, local tracking #427).
+    # this runtime E2E under #50 when the guarded componentization smoke test is
+    # green (upstream ComponentizeJS#335, local tracking #54).
     if: ${{ false }}
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 90
@@ -228,7 +228,7 @@ jobs:
   web-browser-e2e:
     name: Web Browser E2E
     # tests/e2e/actr/web-browser/run.sh packages the same currently-unbuildable V2
-    # TypeScript workload as typescript-e2e. Re-enable under #431 after #427.
+    # TypeScript workload as typescript-e2e. Re-enable under #50 after #54.
     if: ${{ false }}
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 90
@@ -453,7 +453,7 @@ jobs:
     # This scenario packages the same currently-unbuildable V2 TypeScript WASM
     # workload as typescript-e2e. Keep it disabled at the job boundary so the
     # scheduled workflow does not consume a macOS runner before failing.
-    # Re-enable under #431 after #427.
+    # Re-enable under #50 after #54.
     if: ${{ false }}
     runs-on: macos-arm64-larger
     timeout-minutes: 240
@@ -669,7 +669,9 @@ jobs:
           ram-size: 4096M
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: bash tests/e2e/actr/kotlin-echo-app/run.sh
+          script: |
+            packages/actr-kotlin/gradlew -p packages/actr-kotlin :actr-kotlin:connectedDebugAndroidTest --no-daemon
+            bash tests/e2e/actr/kotlin-echo-app/run.sh
       - name: Upload sanitized diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4

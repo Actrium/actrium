@@ -19,45 +19,24 @@
 
 use actr_protocol::{ActrError, Classify, ConnectionNotReadyInfo, ErrorKind};
 
-/// Discriminate a protocol error into `(variant_code, user_message,
-/// optional service_name, optional connection_not_ready_info)`.
-///
-/// `connection_not_ready_info` is present when the error is `ConnectionNotReady`;
-/// `None` otherwise.
-fn discriminate(
-    e: &ActrError,
-) -> (
-    &'static str,
-    String,
-    Option<String>,
-    Option<&ConnectionNotReadyInfo>,
-) {
+/// Preserve classification and structured metadata separately from Display text.
+fn discriminate(e: &ActrError) -> (&'static str, Option<&str>, Option<&ConnectionNotReadyInfo>) {
     match e {
-        ActrError::Unavailable(msg) => ("Unavailable", msg.clone(), None, None),
-        ActrError::ConnectionNotReady(info) => {
-            ("ConnectionNotReady", info.to_string(), None, Some(info))
+        ActrError::Unavailable(_) => ("Unavailable", None, None),
+        ActrError::ConnectionNotReady(info) => ("ConnectionNotReady", None, Some(info)),
+        ActrError::TimedOut => ("TimedOut", None, None),
+        ActrError::NotFound(_) => ("NotFound", None, None),
+        ActrError::PermissionDenied(_) => ("PermissionDenied", None, None),
+        ActrError::InvalidArgument(_) => ("InvalidArgument", None, None),
+        ActrError::UnknownRoute(_) => ("UnknownRoute", None, None),
+        ActrError::DependencyNotFound { service_name, .. } => {
+            ("DependencyNotFound", Some(service_name), None)
         }
-        ActrError::TimedOut => ("TimedOut", "operation timed out".to_string(), None, None),
-        ActrError::NotFound(msg) => ("NotFound", msg.clone(), None, None),
-        ActrError::PermissionDenied(msg) => ("PermissionDenied", msg.clone(), None, None),
-        ActrError::InvalidArgument(msg) => ("InvalidArgument", msg.clone(), None, None),
-        ActrError::UnknownRoute(msg) => ("UnknownRoute", msg.clone(), None, None),
-        ActrError::DependencyNotFound {
-            service_name,
-            message,
-        } => (
-            "DependencyNotFound",
-            message.clone(),
-            Some(service_name.clone()),
-            None,
-        ),
-        ActrError::DecodeFailure(msg) => ("DecodeFailure", msg.clone(), None, None),
-        ActrError::NotImplemented(msg) => ("NotImplemented", msg.clone(), None, None),
-        ActrError::Internal(msg) => ("Internal", msg.clone(), None, None),
-        // `ActrError` is `#[non_exhaustive]`: unmapped future variants are
-        // surfaced under the generic Internal discriminator so the JS/TS
-        // boundary never panics.
-        other => ("Internal", other.to_string(), None, None),
+        ActrError::DecodeFailure(_) => ("DecodeFailure", None, None),
+        ActrError::NotImplemented(_) => ("NotImplemented", None, None),
+        ActrError::Internal(_) => ("Internal", None, None),
+        // Keep the existing fallback classification for unmapped variants.
+        _ => ("Internal", None, None),
     }
 }
 
@@ -135,8 +114,8 @@ fn build_payload(
 /// structured JSON payload.
 pub(crate) fn actr_error_to_napi(e: actr_protocol::ActrError) -> napi::Error {
     let kind = e.kind();
-    let (code, message, service_name, recovery_info) = discriminate(&e);
-    let payload = build_payload(kind, code, &message, service_name.as_deref(), recovery_info);
+    let (code, service_name, recovery_info) = discriminate(&e);
+    let payload = build_payload(kind, code, &e.to_string(), service_name, recovery_info);
     napi::Error::new(napi::Status::GenericFailure, payload)
 }
 
@@ -149,7 +128,13 @@ pub(crate) fn protocol_error_to_napi(e: actr_protocol::ActrError) -> napi::Error
 /// Pre-protocol config failure. Classified as `Client` (the caller gave us
 /// a bad manifest / config file).
 pub(crate) fn config_error_to_napi(e: actr_config::ConfigError) -> napi::Error {
-    let payload = build_payload(ErrorKind::Client, "Config", &e.to_string(), None, None);
+    let payload = build_payload(
+        ErrorKind::Client,
+        "Config",
+        &format!("config: {e}"),
+        None,
+        None,
+    );
     napi::Error::new(napi::Status::GenericFailure, payload)
 }
 
@@ -171,6 +156,48 @@ pub(crate) fn hyper_error_to_napi(e: actr_hyper::HyperError) -> napi::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_message_uses_the_ffi_config_prefix() {
+        let error = config_error_to_napi(actr_config::ConfigError::MissingField("package"));
+        assert!(
+            error
+                .reason
+                .contains(r#""message":"config: Missing required field: package""#)
+        );
+    }
+
+    #[test]
+    fn all_protocol_messages_use_display() {
+        let text = "\u{4e2d}\u{6587}\n\"quoted\"\\path";
+        let cases = [
+            ActrError::Unavailable(text.into()),
+            ActrError::ConnectionNotReady(ConnectionNotReadyInfo::new(0, 42)),
+            ActrError::ConnectionNotReady(ConnectionNotReadyInfo::without_retry_hint()),
+            ActrError::TimedOut,
+            ActrError::NotFound(text.into()),
+            ActrError::PermissionDenied(text.into()),
+            ActrError::InvalidArgument(text.into()),
+            ActrError::UnknownRoute(text.into()),
+            ActrError::DependencyNotFound {
+                service_name: "echo".into(),
+                message: text.into(),
+            },
+            ActrError::DecodeFailure(text.into()),
+            ActrError::NotImplemented(text.into()),
+            ActrError::Internal(text.into()),
+            ActrError::DeliveryUncertain {
+                operation_id: "op-1".into(),
+                cause: text.into(),
+            },
+            ActrError::Internal(String::new()),
+        ];
+        for error in cases {
+            let expected = format!(r#""message":"{}""#, json_escape(&error.to_string()));
+            let actual = actr_error_to_napi(error);
+            assert!(actual.reason.contains(&expected), "{}", actual.reason);
+        }
+    }
 
     #[test]
     fn dependency_not_found_includes_service_name() {
@@ -209,7 +236,10 @@ mod tests {
             r#"a"b"#.to_string(),
         ));
         let msg = err.reason.as_str();
-        assert!(msg.contains(r#""message":"a\"b""#), "escaped: {msg}");
+        assert!(
+            msg.contains(r#""message":"invalid argument: a\"b""#),
+            "escaped: {msg}"
+        );
     }
 
     #[test]
@@ -227,11 +257,36 @@ mod tests {
             msg.contains(r#""retry_after_ms":5880"#),
             "retry_after_ms: {msg}"
         );
+        assert!(
+            msg.contains(r#""message":"connection not ready: retry after 5880ms""#),
+            "message: {msg}"
+        );
         assert!(!msg.contains("peer"), "peer should not leak: {msg}");
         assert!(
             !msg.contains("session_id"),
             "session_id should not leak: {msg}"
         );
         assert!(!msg.contains("delivery"), "delivery should not leak: {msg}");
+    }
+
+    #[test]
+    fn connection_not_ready_without_hint_preserves_null_metadata() {
+        let err = actr_error_to_napi(ActrError::ConnectionNotReady(
+            ConnectionNotReadyInfo::without_retry_hint(),
+        ));
+        let msg = err.reason.as_str();
+        assert!(msg.contains(r#""kind":"Transient""#), "kind: {msg}");
+        assert!(
+            msg.contains(r#""code":"ConnectionNotReady""#),
+            "code: {msg}"
+        );
+        assert!(
+            msg.contains(r#""retry_after_ms":null"#),
+            "retry_after_ms: {msg}"
+        );
+        assert!(
+            msg.contains(r#""message":"connection not ready: no retry hint""#),
+            "message: {msg}"
+        );
     }
 }

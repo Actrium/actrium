@@ -131,8 +131,8 @@ rtc = { version = "0.21.0", default-features = false, features = ["crypto-ring"]
 rtc-rtp = "0.21.0"
 
 # === Loran server dependencies (compatibility crate names remain Actrix) ===
-turn_crate = { package = "turn", version = "0.11.0" }
-webrtc-util = "0.12.0"
+turn_crate = { package = "turn", version = "0.17.2" }
+webrtc-util = "0.17.2"
 tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
@@ -161,12 +161,14 @@ rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 
 # === WASM Runtime ===
-# Pinned to 48.0.3 for Component Model host execution. 48 requires rustc >=
-# 1.95 (workspace MSRV is 1.95, so exactly satisfied). 48.0.3 carries the
-# fixes for RUSTSEC-2026-0314 and RUSTSEC-2026-0316 (guests can panic the
-# host via filesystem datetime overflow), on top of the older chain
-# (GHSA-4ch3-9j33-3pmj, RUSTSEC-2026-0190/0223/0268/0269). Do NOT revert to
-# 46.x: 46.0.3 itself is affected by the two 09-24 advisories.
+# Pinned to 48.0.5 for Component Model host execution. 48 requires rustc >=
+# 1.95 (workspace MSRV is 1.95, so exactly satisfied). 48.0.5 carries the
+# fixes for RUSTSEC-2026-0327 (wasmtime) and RUSTSEC-2026-0321/0322/0323/0324
+# (wasmtime-wasi), all of which require >= 48.0.4, on top of 48.0.3's fixes
+# for RUSTSEC-2026-0314 and RUSTSEC-2026-0316 (guests can panic the host via
+# filesystem datetime overflow) and the older chain (GHSA-4ch3-9j33-3pmj,
+# RUSTSEC-2026-0190/0223/0268/0269). Do NOT revert to 46.x: 46.0.3 itself is
+# affected by the two 09-24 advisories.
 #
 # The `async` feature powers the host-side wasmtime fibers we rely on
 # (`instantiate_async` / `call_async`); `component-model-async` stays enabled
@@ -183,14 +185,14 @@ rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 # `default-features = false` keeps the feature set minimal: 48's default
 # additions (gc-*, wat, profiling, parallel-compilation, pooling-allocator,
 # wit-parser, ...) are not pulled in and are not needed.
-wasmtime = { version = "=48.0.3", default-features = false, features = [
+wasmtime = { version = "=48.0.5", default-features = false, features = [
     "runtime",
     "cranelift",
     "component-model",
     "component-model-async",
     "async",
 ] }
-wasmtime-wasi = "=48.0.3"
+wasmtime-wasi = "=48.0.5"
 
 # === Networking ===
 tokio-tungstenite = { version = "0.28.0", features = [

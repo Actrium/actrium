@@ -520,6 +520,12 @@ struct SignalingRouteKey {
     to: ActrId,
 }
 
+#[derive(Debug)]
+struct DeferredSignalingRoute {
+    local_id: super::signaling::SharedLocalId,
+    cancel: tokio_util::sync::CancellationToken,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DirectedSignalingFaultMetrics {
     pub delivered: usize,
@@ -552,8 +558,7 @@ struct DirectedSignalingFaultState {
     changed: tokio::sync::Notify,
     /// Cancellation is route-scoped: healing A-B must not cancel delayed
     /// signaling that belongs to A-C or any other independent peer link.
-    deferred_cancels:
-        Mutex<std::collections::HashMap<SignalingRouteKey, tokio_util::sync::CancellationToken>>,
+    deferred_cancels: Mutex<std::collections::HashMap<SignalingRouteKey, DeferredSignalingRoute>>,
     deferred_idle: tokio::sync::Notify,
     started_at: Instant,
     delivered: AtomicUsize,
@@ -594,6 +599,9 @@ pub struct DirectedSignalingFaultRegistry {
 }
 
 impl DirectedSignalingFaultRegistry {
+    /// Install a policy, including an explicit `Deliver` exception that
+    /// shadows broader rules even if they are installed later. Use
+    /// `clear_rule` to remove an exception and restore broader-rule fallback.
     pub fn set_rule(
         &self,
         from: ActrId,
@@ -601,11 +609,13 @@ impl DirectedSignalingFaultRegistry {
         class: SignalingMessageClass,
         rule: SignalingFaultRule,
     ) {
-        self.state
+        let key = SignalingFaultKey { from, to, class };
+        let mut rules = self
+            .state
             .rules
             .lock()
-            .expect("signaling fault registry lock poisoned")
-            .insert(SignalingFaultKey { from, to, class }, rule);
+            .expect("signaling fault registry lock poisoned");
+        rules.insert(key, rule);
     }
 
     /// Apply a rule only to the Nth message of one directed class stream.
@@ -618,17 +628,16 @@ impl DirectedSignalingFaultRegistry {
         rule: SignalingFaultRule,
     ) {
         assert!(ordinal > 0, "signaling ordinals are one-based");
-        self.state
+        let selector = SignalingNthFaultKey {
+            key: SignalingFaultKey { from, to, class },
+            ordinal,
+        };
+        let mut nth_rules = self
+            .state
             .nth_rules
             .lock()
-            .expect("signaling nth-rule lock poisoned")
-            .insert(
-                SignalingNthFaultKey {
-                    key: SignalingFaultKey { from, to, class },
-                    ordinal,
-                },
-                rule,
-            );
+            .expect("signaling nth-rule lock poisoned");
+        nth_rules.insert(selector, rule);
     }
 
     /// Apply a rule only to a named restart exchange/request.
@@ -640,17 +649,16 @@ impl DirectedSignalingFaultRegistry {
         exchange_id: impl Into<String>,
         rule: SignalingFaultRule,
     ) {
-        self.state
+        let selector = SignalingExchangeFaultKey {
+            key: SignalingFaultKey { from, to, class },
+            exchange_id: exchange_id.into(),
+        };
+        let mut exchange_rules = self
+            .state
             .exchange_rules
             .lock()
-            .expect("signaling exchange-rule lock poisoned")
-            .insert(
-                SignalingExchangeFaultKey {
-                    key: SignalingFaultKey { from, to, class },
-                    exchange_id: exchange_id.into(),
-                },
-                rule,
-            );
+            .expect("signaling exchange-rule lock poisoned");
+        exchange_rules.insert(selector, rule);
     }
 
     pub fn clear_rule(&self, from: &ActrId, to: &ActrId, class: SignalingMessageClass) {
@@ -716,22 +724,33 @@ impl DirectedSignalingFaultRegistry {
             .rules
             .lock()
             .expect("signaling fault registry lock poisoned")
-            .len()
+            .values()
+            .filter(|rule| **rule != SignalingFaultRule::Deliver)
+            .count()
             + self
                 .state
                 .nth_rules
                 .lock()
                 .expect("signaling nth-rule lock poisoned")
-                .len()
+                .values()
+                .filter(|rule| **rule != SignalingFaultRule::Deliver)
+                .count()
             + self
                 .state
                 .exchange_rules
                 .lock()
                 .expect("signaling exchange-rule lock poisoned")
-                .len()
+                .values()
+                .filter(|rule| **rule != SignalingFaultRule::Deliver)
+                .count()
     }
 
-    fn deferred_token(&self, from: &ActrId, to: &ActrId) -> tokio_util::sync::CancellationToken {
+    fn deferred_token(
+        &self,
+        from: &ActrId,
+        to: &ActrId,
+        local_id: &super::signaling::SharedLocalId,
+    ) -> tokio_util::sync::CancellationToken {
         self.state
             .deferred_cancels
             .lock()
@@ -740,7 +759,11 @@ impl DirectedSignalingFaultRegistry {
                 from: from.clone(),
                 to: to.clone(),
             })
-            .or_default()
+            .or_insert_with(|| DeferredSignalingRoute {
+                local_id: local_id.clone(),
+                cancel: Default::default(),
+            })
+            .cancel
             .clone()
     }
 
@@ -750,31 +773,29 @@ impl DirectedSignalingFaultRegistry {
             .deferred_cancels
             .lock()
             .expect("signaling deferred-cancel lock poisoned");
-        for route in [
-            SignalingRouteKey {
-                from: a.clone(),
-                to: b.clone(),
-            },
-            SignalingRouteKey {
-                from: b.clone(),
-                to: a.clone(),
-            },
-        ] {
-            if let Some(cancel) = cancels.remove(&route) {
-                cancel.cancel();
+        cancels.retain(|route, deferred| {
+            // A deferred send belongs to the same local transport after hard
+            // rebind adopts a new identity. Match either the original route
+            // or its current identity, while preserving unrelated peer links.
+            let current = deferred.local_id.get();
+            let matches = ((route.from == *a || current == *a) && route.to == *b)
+                || ((route.from == *b || current == *b) && route.to == *a);
+            if matches {
+                deferred.cancel.cancel();
             }
-        }
+            !matches
+        });
     }
 
     fn cancel_all_deferred(&self) {
-        for (_, cancel) in self
+        for (_, deferred) in self
             .state
             .deferred_cancels
             .lock()
             .expect("signaling deferred-cancel lock poisoned")
             .drain()
         {
-            cancel.cancel();
+            deferred.cancel.cancel();
         }
     }
 
@@ -991,6 +1012,16 @@ impl DirectedSignalingFaultRegistry {
             attempt,
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn rule_for_test(
+        &self,
+        from: &ActrId,
+        to: &ActrId,
+        message: &SignalingMessage,
+    ) -> SignalingFaultRule {
+        self.decision_and_record(from, to, message).rule
+    }
 }
 
 struct SignalingDecision {
@@ -1025,19 +1056,19 @@ fn signaling_identity(message: &SignalingMessage) -> (Option<String>, Option<u32
 
 pub(crate) struct DirectedSignalingTransport<T> {
     inner: Arc<T>,
-    local_id: ActrId,
+    local_id: super::signaling::SharedLocalId,
     faults: DirectedSignalingFaultRegistry,
 }
 
 impl<T> DirectedSignalingTransport<T> {
     pub(crate) fn new(
         inner: Arc<T>,
-        local_id: ActrId,
+        local_id: impl Into<super::signaling::SharedLocalId>,
         faults: DirectedSignalingFaultRegistry,
     ) -> Self {
         Self {
             inner,
-            local_id,
+            local_id: local_id.into(),
             faults,
         }
     }
@@ -1046,9 +1077,8 @@ impl<T> DirectedSignalingTransport<T> {
 #[async_trait::async_trait]
 impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTransport<T> {
     async fn send(&self, to: ActrId, message: SignalingMessage) -> Result<(), String> {
-        let decision = self
-            .faults
-            .decision_and_record(&self.local_id, &to, &message);
+        let local_id = self.local_id.get();
+        let decision = self.faults.decision_and_record(&local_id, &to, &message);
         match decision.rule {
             SignalingFaultRule::Deliver => {
                 self.faults.state.delivered.fetch_add(1, Ordering::Relaxed);
@@ -1061,7 +1091,7 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTr
                 self.faults.state.delayed.fetch_add(1, Ordering::Relaxed);
                 let inner = self.inner.clone();
                 let state = self.faults.state.clone();
-                let cancel = self.faults.deferred_token(&self.local_id, &to);
+                let cancel = self.faults.deferred_token(&local_id, &to, &self.local_id);
                 state.deferred_inflight.fetch_add(1, Ordering::AcqRel);
                 tokio::spawn(async move {
                     tokio::select! {
@@ -1078,7 +1108,7 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTr
                 self.faults.state.reordered.fetch_add(1, Ordering::Relaxed);
                 let inner = self.inner.clone();
                 let state = self.faults.state.clone();
-                let cancel = self.faults.deferred_token(&self.local_id, &to);
+                let cancel = self.faults.deferred_token(&local_id, &to, &self.local_id);
                 state.deferred_inflight.fetch_add(1, Ordering::AcqRel);
                 tokio::spawn(async move {
                     tokio::select! {

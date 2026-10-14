@@ -175,6 +175,12 @@ impl SharedLocalId {
     }
 }
 
+impl From<ActrId> for SharedLocalId {
+    fn from(id: ActrId) -> Self {
+        Self::new(id)
+    }
+}
+
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) mod in_memory;
 

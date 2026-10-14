@@ -43,6 +43,7 @@ android {
 
     defaultConfig {
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }
 
@@ -84,6 +85,9 @@ dependencies {
 
     // JNA for UniFFI bindings - use Android-compatible version
     implementation("net.java.dev.jna:jna:5.14.0@aar")
+
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.2")
 
     // Testing
     testImplementation(kotlin("test"))
