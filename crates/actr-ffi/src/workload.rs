@@ -1092,9 +1092,10 @@ mod tests {
             assert_eq!(dispatches[0].route_key, "echoapp.LocalEchoService.Send");
             assert_eq!(dispatches[0].payload, b"hello");
             assert!(!dispatches[0].request_id.is_empty());
-            assert_eq!(dispatches[0].timeout_ms, 30_000);
+            // Dispatch inherits the remaining deadline budget, not a fresh timeout.
+            assert!((1..=30_000).contains(&dispatches[0].timeout_ms));
             assert_eq!(dispatches[1].payload, b"empty");
-            assert_eq!(dispatches[1].timeout_ms, 5_000);
+            assert!((1..=5_000).contains(&dispatches[1].timeout_ms));
         }
 
         actr_ref.shutdown();
