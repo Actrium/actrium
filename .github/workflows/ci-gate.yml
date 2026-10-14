@@ -712,7 +712,7 @@ jobs:
         run: |
           npm ci
           npm run build
-      # ComponentizeJS#335 / #427: accept only the known async-func bindgen
+      # ComponentizeJS#335 / #54: accept only the known async-func bindgen
       # panic. Any unrelated componentization failure must still fail CI.
       - name: Componentize TypeScript EchoService workload
         run: bash .github/scripts/verify-typescript-componentize-blocker.sh
