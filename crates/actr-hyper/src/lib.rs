@@ -1137,7 +1137,7 @@ impl Node<Attached> {
         register_ok: actr_protocol::register_response::RegisterOk,
     ) -> HyperResult<Node<Registered>> {
         let service_spec = self.derived_service_spec()?;
-        let context = self.registration_context(service_spec);
+        let context = self.registration_context(service_spec)?;
         Ok(self.finish_registration(register_ok, context))
     }
 
@@ -1158,14 +1158,14 @@ impl Node<Attached> {
     fn registration_context(
         &self,
         service_spec: Option<ServiceSpec>,
-    ) -> crate::lifecycle::credential_manager::RegistrationContext {
+    ) -> HyperResult<crate::lifecycle::credential_manager::RegistrationContext> {
         use crate::lifecycle::credential_manager::RegistrationContext;
         let attachment = self
             .attachment
             .as_ref()
             .expect("Node<Attached> without attachment");
         let config = &attachment.node.config;
-        match attachment.verified.as_ref() {
+        Ok(match attachment.verified.as_ref() {
             Some(verified) => RegistrationContext::Package {
                 request: build_package_register_request(
                     verified,
@@ -1175,9 +1175,9 @@ impl Node<Attached> {
                 ),
             },
             None => RegistrationContext::Linked {
-                request: build_linked_register_request(config, service_spec),
+                request: build_linked_register_request(config, service_spec)?,
             },
-        }
+        })
     }
 
     fn finish_registration(
@@ -1221,7 +1221,7 @@ impl Node<Attached> {
         issuer_endpoint: &str,
         service_spec: Option<ServiceSpec>,
     ) -> HyperResult<Node<Registered>> {
-        let context = self.registration_context(service_spec.clone());
+        let context = self.registration_context(service_spec.clone())?;
         let attachment = self
             .attachment
             .as_ref()
@@ -1739,7 +1739,7 @@ async fn bootstrap_linked_credential_inner(
         issuer = issuer.with_client_key(key);
     }
 
-    let req = build_linked_register_request(config, service_spec);
+    let req = build_linked_register_request(config, service_spec)?;
     let response = issuer.register_linked(req).await?;
     match response.result {
         Some(register_response::Result::Success(ok)) => Ok(ok),
@@ -1786,18 +1786,17 @@ fn build_package_register_request(
 fn build_linked_register_request(
     config: &actr_config::RuntimeConfig,
     service_spec: Option<ServiceSpec>,
-) -> RegisterRequest {
-    let ws_address = if let Some(port) = config.websocket_listen_port {
-        let host = config
-            .websocket_advertised_host
-            .as_deref()
-            .unwrap_or("127.0.0.1");
-        Some(format!("ws://{}:{}", host, port))
-    } else {
-        None
+) -> HyperResult<RegisterRequest> {
+    let security = crate::wire::websocket::security::DirectSecurity::load(config)?;
+    // An ephemeral listen_port (0) has no bindable address here: the node
+    // pre-binds the listener and advertises the actual bound port when it
+    // starts. The bootstrap registration must not advertise port zero.
+    let ws_address = match config.websocket_listen_port {
+        Some(0) => None,
+        _ => security.advertised_url(config)?,
     };
 
-    RegisterRequest {
+    Ok(RegisterRequest {
         actr_type: config.actr_type().clone(),
         realm: config.realm.clone(),
         service_spec,
@@ -1806,7 +1805,7 @@ fn build_linked_register_request(
         ws_address,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         ..Default::default()
-    }
+    })
 }
 
 // ─── Helper functions (native-only) ──────────────────────────────────────────

@@ -195,6 +195,18 @@ impl ParserV1 {
             None => None,
         };
 
+        let mut websocket_security = raw.websocket.security;
+        for path in [
+            &mut websocket_security.tls_cert,
+            &mut websocket_security.tls_key,
+            &mut websocket_security.ca_cert,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            *path = self.resolve_manifest_path(path);
+        }
+
         Ok(RuntimeConfig {
             package,
             signaling_url,
@@ -210,6 +222,7 @@ impl ParserV1 {
             scripts: raw.scripts,
             webrtc: self.parse_webrtc(&raw.webrtc)?,
             websocket_listen_port: raw.websocket.listen_port,
+            websocket_security,
             websocket_advertised_host: raw.websocket.advertised_host,
             observability,
             config_dir: self.base_dir.clone(),
@@ -1110,6 +1123,48 @@ ca_cert_path = "certs/collector-ca.pem"
     ) -> crate::error::Result<RuntimeConfig> {
         let raw: RuntimeRawConfig = toml::from_str(toml_body).unwrap();
         ParserV1::new(config_path).parse_runtime(raw, runtime_test_package())
+    }
+
+    #[test]
+    fn direct_websocket_defaults_and_flat_tls_paths() {
+        let config_path = Path::new("/deployment/actr.toml");
+        let defaults = parse_runtime_str(config_path, RUNTIME_BASE).unwrap();
+        assert!(defaults.websocket_listen_port.is_none());
+        assert!(defaults.websocket_security.bind_address.is_loopback());
+        assert!(!defaults.websocket_security.allow_insecure);
+        let body = format!(
+            r#"{RUNTIME_BASE}
+[websocket]
+listen_port = 9443
+bind_address = "0.0.0.0"
+advertised_host = "peer.example.com"
+tls_cert = "certs/server.pem"
+tls_key = "/secrets/key.pem"
+ca_cert = "certs/realm.pem"
+"#
+        );
+        let parsed = parse_runtime_str(config_path, &body).unwrap();
+        assert_eq!(parsed.websocket_listen_port, Some(9443));
+        assert!(parsed.websocket_security.bind_address.is_unspecified());
+        assert_eq!(
+            parsed.websocket_security.tls_cert.unwrap(),
+            Path::new("/deployment/certs/server.pem")
+        );
+        assert_eq!(
+            parsed.websocket_security.tls_key.unwrap(),
+            Path::new("/secrets/key.pem")
+        );
+        assert_eq!(
+            parsed.websocket_security.ca_cert.unwrap(),
+            Path::new("/deployment/certs/realm.pem")
+        );
+        assert!(toml::from_str::<RuntimeRawConfig>(&body.replace("0.0.0.0", "localhost")).is_err());
+        assert!(
+            toml::from_str::<RuntimeRawConfig>(&format!(
+                "{RUNTIME_BASE}\n[websocket]\nallow_insecure = \"true\"\n"
+            ))
+            .is_err()
+        );
     }
 
     const RUNTIME_BASE: &str = r#"

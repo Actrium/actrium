@@ -231,6 +231,10 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         scripts: std::collections::HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
         websocket_listen_port: Some(9100),
+        websocket_security: actr_config::DirectWebSocketSecurity {
+            allow_insecure: true,
+            ..Default::default()
+        },
         websocket_advertised_host: Some("127.0.0.1".to_string()),
         observability: actr_config::ObservabilityConfig {
             filter_level: "info".to_string(),
@@ -251,7 +255,8 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
 #[test]
 fn linked_register_request_uses_linked_auth_mode() {
     let dir = TempDir::new().unwrap();
-    let req = build_linked_register_request(&linked_runtime_config(&dir), test_service_spec());
+    let req =
+        build_linked_register_request(&linked_runtime_config(&dir), test_service_spec()).unwrap();
 
     assert_eq!(req.auth_mode, Some(RegisterAuthMode::Linked as i32));
     assert_eq!(req.manifest_raw, None);
@@ -324,6 +329,31 @@ async fn registration_preserves_the_sent_request_for_credential_recovery() {
             assert_eq!(saved.ws_address.as_deref(), Some("ws://127.0.0.1:9100"));
         }
     }
+}
+
+#[tokio::test]
+async fn registration_rejects_invalid_direct_security_before_issuer_call() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/register")
+        .expect(0)
+        .create_async()
+        .await;
+    let dir = TempDir::new().unwrap();
+    let mut node = registration_test_node(&dir, false).await;
+    node.attachment
+        .as_mut()
+        .unwrap()
+        .node
+        .config
+        .websocket_security
+        .allow_insecure = false;
+    let result = node.register_with(&server.url(), test_service_spec()).await;
+    assert!(
+        result.is_err(),
+        "invalid TLS configuration must reject registration"
+    );
+    mock.assert_async().await;
 }
 
 #[cfg(feature = "test-utils")]
@@ -746,6 +776,10 @@ fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config:
         scripts: std::collections::HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
         websocket_listen_port: port,
+        websocket_security: actr_config::DirectWebSocketSecurity {
+            allow_insecure: true,
+            ..Default::default()
+        },
         websocket_advertised_host: host.map(|h| h.to_string()),
         observability: actr_config::ObservabilityConfig {
             filter_level: "info".into(),
@@ -765,18 +799,18 @@ fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config:
 
 #[test]
 fn build_linked_register_request_includes_ws_address_when_port_set() {
-    let cfg = runtime_config_with_ws(Some(8090), Some("example.com"));
-    let req = build_linked_register_request(&cfg, None);
+    let cfg = runtime_config_with_ws(Some(8090), Some("127.0.0.2"));
+    let req = build_linked_register_request(&cfg, None).unwrap();
     assert_eq!(req.actr_type, cfg.actr_type().clone());
     assert_eq!(req.realm, cfg.realm);
     assert_eq!(req.auth_mode, Some(RegisterAuthMode::Linked as i32));
-    assert_eq!(req.ws_address.as_deref(), Some("ws://example.com:8090"));
+    assert_eq!(req.ws_address.as_deref(), Some("ws://127.0.0.2:8090"));
 }
 
 #[test]
 fn build_linked_register_request_omits_ws_address_without_port() {
     let cfg = runtime_config_with_ws(None, None);
-    let req = build_linked_register_request(&cfg, None);
+    let req = build_linked_register_request(&cfg, None).unwrap();
     assert!(req.ws_address.is_none());
     // Default host fallback only applies when port is Some.
 }
@@ -784,8 +818,37 @@ fn build_linked_register_request_omits_ws_address_without_port() {
 #[test]
 fn build_linked_register_request_defaults_host_to_localhost() {
     let cfg = runtime_config_with_ws(Some(7000), None);
-    let req = build_linked_register_request(&cfg, None);
+    let req = build_linked_register_request(&cfg, None).unwrap();
     assert_eq!(req.ws_address.as_deref(), Some("ws://127.0.0.1:7000"));
+}
+
+#[test]
+fn direct_registration_validates_tls_and_advertised_authority() {
+    let mut cfg = runtime_config_with_ws(Some(9443), Some("peer.example.com"));
+    cfg.websocket_security = crate::wire::websocket::security::test_options();
+    cfg.websocket_security.bind_address = "0.0.0.0".parse().unwrap();
+    let req = build_linked_register_request(&cfg, None).unwrap();
+    assert_eq!(
+        req.ws_address.as_deref(),
+        Some("wss://peer.example.com:9443")
+    );
+    for host in [
+        "user@example.com",
+        "example.com/path",
+        "example.com:443",
+        "",
+        "[::]",
+    ] {
+        cfg.websocket_advertised_host = Some(host.into());
+        assert!(build_linked_register_request(&cfg, None).is_err(), "{host}");
+    }
+    cfg.websocket_advertised_host = None;
+    assert!(build_linked_register_request(&cfg, None).is_err());
+    cfg.websocket_security.bind_address = "::1".parse().unwrap();
+    let req = build_linked_register_request(&cfg, None).unwrap();
+    assert_eq!(req.ws_address.as_deref(), Some("wss://[::1]:9443"));
+    cfg.websocket_security = Default::default();
+    assert!(build_linked_register_request(&cfg, None).is_err());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

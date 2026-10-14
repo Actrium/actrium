@@ -1456,6 +1456,7 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         scripts: std::collections::HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
         websocket_listen_port: None,
+        websocket_security: Default::default(),
         websocket_advertised_host: None,
         observability: actr_config::ObservabilityConfig {
             filter_level: "info".to_string(),

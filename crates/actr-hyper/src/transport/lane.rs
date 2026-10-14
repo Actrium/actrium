@@ -34,14 +34,11 @@ use super::error::{NetworkError, NetworkResult, is_tungstenite_closed};
 use actr_protocol::PayloadType;
 use async_trait::async_trait;
 use futures_util::SinkExt;
-use futures_util::stream::SplitSink;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 // ── WebRTC DataChannel fragmentation constants ────────────────────────────────
 
@@ -476,8 +473,10 @@ pub(crate) fn decode_fragment_header(
 // ── Type alias ────────────────────────────────────────────────────────────────
 
 /// Type alias for WebSocket sink (shared across all PayloadTypes)
-pub(crate) type WsSink<S = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>> =
-    Arc<Mutex<Option<S>>>;
+type WsMessageSink = Box<
+    dyn futures_util::Sink<WsMessage, Error = tokio_tungstenite::tungstenite::Error> + Send + Unpin,
+>;
+pub(crate) type WsSink<S = WsMessageSink> = Arc<Mutex<Option<S>>>;
 
 // ── DataLane trait ────────────────────────────────────────────────────────────
 
@@ -891,9 +890,7 @@ impl DataLane for MpscLane {
 ///
 /// All PayloadTypes share the same underlying WebSocket connection,
 /// distinguished by a message header.
-pub(crate) struct WebSocketDataLane<
-    S = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>,
-> {
+pub(crate) struct WebSocketDataLane<S = WsMessageSink> {
     /// Shared Sink (all PayloadTypes share the same WebSocket connection)
     pub(crate) sink: WsSink<S>,
 

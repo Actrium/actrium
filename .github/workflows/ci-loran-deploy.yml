@@ -37,8 +37,13 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      - name: Install pinned Clippy toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --no-self-update
+
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo +1.97.1 clippy --all-targets --all-features
 
       - name: Build
         run: cargo build --all-features

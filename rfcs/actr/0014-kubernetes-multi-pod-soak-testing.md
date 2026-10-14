@@ -1,13 +1,13 @@
 # RFC-0014: actr Kubernetes multi-Pod soak testing
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-04
 - RFC PR: [Actrium/actrium#198](https://github.com/Actrium/actrium/pull/198)
 - Tracking issue: [#14](https://github.com/Actrium/actrium/issues/14)
 - Superseded by:
 - Related: [#270](https://github.com/Actrium/actr/issues/270), [#363](https://github.com/Actrium/actr/issues/363), [#383](https://github.com/Actrium/actr/issues/383), [#426](https://github.com/Actrium/actr/issues/426), [#567](https://github.com/Actrium/actr/issues/567), [#581](https://github.com/Actrium/actr/issues/581), [#583](https://github.com/Actrium/actr/issues/583), [#608](https://github.com/Actrium/actr/issues/608), [#609](https://github.com/Actrium/actr/issues/609), [#610](https://github.com/Actrium/actr/issues/610), [#622](https://github.com/Actrium/actr/pull/622)
 
-- Plan status: Proposed, serving as the implementation design and operational-validation baseline
+- Plan status: Accepted, serving as the implementation design and operational-validation baseline
 - Code baseline: `main`; every run fixes and records the actual checked-out commit SHA
 - RTC baseline: WebRTC 0.21, pinned by the `webrtc` and `rtc` 0.21.0 dependencies and implemented under `crates/actr-hyper/src/wire/webrtc/rtc/`
 - Execution environment: GitHub Actions, a self-hosted Kubernetes cluster, and no physical devices

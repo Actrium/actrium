@@ -2,6 +2,12 @@ name: CI (Kotlin)
 
 on:
   workflow_call:
+    inputs:
+      cli_web_runtime_artifact:
+        description: Generated CLI runtime artifact from the calling CI Gate run
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
 
 permissions:
@@ -41,6 +47,8 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           packages: "platforms;android-34 build-tools;34.0.0"
+      - name: Reuse image Gradle distribution
+        run: python3 tools/ci/runner/prepare-gradle-cache.py --wrapper-properties packages/actr-kotlin/gradle/wrapper/gradle-wrapper.properties
       - name: Kotlin lint (ktlint)
         working-directory: packages/actr-kotlin
         run: ./gradlew ktlintCheck --no-daemon
@@ -95,10 +103,10 @@ jobs:
 
   gen-test:
     name: Kotlin Codegen Test
-    # High pool: the codegen job resolves one pinned Gradle 9.2.1 distribution
-    # plus crate downloads, and compiles Rust + Kotlin in parallel — the
-    # external cluster's egress and 4-16 CPU / SSD work volume cut both the
-    # download and compile phases.
+    # Reuse the image's pinned Gradle distribution and compile Rust + Kotlin
+    # in parallel. Keep default mirror-first dependency repositories to avoid
+    # the self-hosted pool's known AGP download failures. Do not force
+    # ACTR_GRADLE_REPOSITORIES=canonical here.
     runs-on: [self-hosted, Linux, X64]
     env:
       # Use settings.gradle.kts's mirror-first repositories on this pool,
@@ -133,19 +141,38 @@ jobs:
           repo-token: ${{ github.token }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Cache wasm-pack binary
+        # Preserve the fleet image binaries and avoid restoring stale archives.
+        if: runner.environment != 'self-hosted' && inputs.cli_web_runtime_artifact == ''
         id: wasm-pack-cache
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/wasm-pack
-          key: wasm-pack-binary-v0.13.1
+          key: wasm-pack-binary-v2-${{ runner.os }}-0.15.0
       - name: Install wasm-pack
-        if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
         run: |
-          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz | tar xz -C /tmp
-          mv /tmp/wasm-pack-v0.13.1-x86_64-unknown-linux-musl/wasm-pack ~/.cargo/bin/
-          chmod +x ~/.cargo/bin/wasm-pack
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
+      - name: Download CLI web runtime assets
+        if: inputs.cli_web_runtime_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.cli_web_runtime_artifact }}
+          path: crates/actr-cli/assets/web-runtime
+      - name: Sync CLI source assets
+        if: inputs.cli_web_runtime_artifact != ''
+        run: |
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Generate CLI web runtime assets
+        if: inputs.cli_web_runtime_artifact == ''
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
+      - name: Reuse image Gradle distributions
+        run: |
+          python3 tools/ci/runner/prepare-gradle-cache.py --wrapper-properties packages/actr-kotlin/gradle/wrapper/gradle-wrapper.properties
+          python3 tools/ci/runner/prepare-gradle-cache.py --wrapper-properties tools/actr/protoc-gen/kotlin/gradle/wrapper/gradle-wrapper.properties
       - name: Cache Gradle build outputs
         uses: actions/cache@v4
         with:

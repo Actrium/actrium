@@ -37,7 +37,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
 
       - name: Check formatting
         working-directory: packages/actr-web
@@ -105,11 +109,21 @@ jobs:
 
       - name: Install wasm Component Model toolchain
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
+            cargo install wasm-component-ld --version 0.5.26 --locked --force
+          fi
+          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
+          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
+          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

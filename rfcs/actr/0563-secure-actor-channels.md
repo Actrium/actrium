@@ -3,12 +3,13 @@
 - Status: Proposed
 - Date: 2026-08-13
 - RFC PR: (to be added on submission)
-- Tracking issue: [#563](https://github.com/Actrium/actr/issues/563)
+- Tracking issue: [Actrium/actrium#81](https://github.com/Actrium/actrium/issues/81) (historical [Actrium/actr#563](https://github.com/Actrium/actr/issues/563))
 - Superseded by: None
-- Related: [#349 — encrypt peer direct WebSocket transport and prevent AId
-  credential replay](https://github.com/Actrium/actr/issues/349),
-  [#504 — Actr RTC / webrtc-rs architecture
-  RFC](https://github.com/Actrium/actr/issues/504),
+- Related: [Actrium/actrium#81 — encrypt peer direct WebSocket transport and
+  prevent AId credential replay](https://github.com/Actrium/actrium/issues/81)
+  (historical [Actrium/actr#349](https://github.com/Actrium/actr/issues/349)),
+  [RFC-0504 — Actr RTC / webrtc-rs architecture](./0504-webrtc-v020-rtc-controller-architecture.md),
+  [Actrium/actrium#306 — direct WebSocket trust](https://github.com/Actrium/actrium/issues/306),
   [RFC-0400 — event-driven connection lifecycle and
   recovery](./0400-event-driven-connection-lifecycle-and-recovery.md)
 

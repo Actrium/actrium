@@ -85,6 +85,11 @@ macro_rules! timer_inventory {
             pub(crate) const WEBSOCKET_ACCEPT_BACKOFF_DURATION: Duration =
                 Duration::from_millis(100);
 
+            /// Deadline for one inbound TLS + WebSocket upgrade handshake.
+            /// Lives beside its inventory entry for the same no-drift reason.
+            pub(crate) const WEBSOCKET_HANDSHAKE_TIMEOUT: Duration =
+                Duration::from_secs(10);
+
             $(
                 $(#[$entry_attr])*
                 #[allow(dead_code)] // Some entries are feature-gated in production.
@@ -526,6 +531,12 @@ timer_inventory! {
         duration: "NetworkFault::Delay duration", arm: "a test fault delays a signaling message",
         success: "delay elapses and the message is delivered", interrupt: "test cancellation",
         expiry: "deliver the delayed message", reset: "each delayed message", external: false
+    },
+    WEBSOCKET_HANDSHAKE => {
+        id: "websocket.handshake", owner: "websocket_server", category: FailureDeadline,
+        duration: "WEBSOCKET_HANDSHAKE_TIMEOUT (10s)", arm: "an inbound TCP connection acquires a handshake slot",
+        success: "TLS and WebSocket upgrade complete and connection is queued", interrupt: "server shutdown",
+        expiry: "drop the connection and release the handshake slot", reset: "each accepted connection", external: false
     },
     WEBSOCKET_ACCEPT_BACKOFF => {
         id: "websocket.accept_backoff", owner: "websocket_server", category: FailureBackoff,
