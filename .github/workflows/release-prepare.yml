@@ -56,7 +56,11 @@ jobs:
           version: ${{ vars.PROTOC_VERSION }}
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

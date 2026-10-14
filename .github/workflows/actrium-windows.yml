@@ -12,11 +12,10 @@
 #   package - the portable zip via scripts/actrium/package-windows.ps1 -SkipInstaller
 #             (no Inno Setup, no WebView2 bootstrapper download, so the job
 #             is deterministic and network-independent beyond registries),
-#             uploaded as a run artifact.
+#             reusing the verified DLL and uploaded as a run artifact.
 #
-# The Rust toolchain is pinned by rust-toolchain.toml (1.88); the
-# dtolnay/rust-toolchain step installs rustup's stable and the pin file then
-# governs the actual compiler cargo uses.
+# The DLL is built once with Rust 1.98.0. Both jobs use the same checked-out
+# commit; packaging downloads the bytes exercised by the verification harness.
 
 name: Windows Verify
 
@@ -108,6 +107,14 @@ jobs:
       - name: Build app (Release)
         run: dotnet build windows/Actro.Windows.csproj --configuration Release -p:NuGetAudit=false
 
+      - name: Upload verified actro_core.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: actro-core-windows-${{ github.sha }}
+          path: windows/native/actro_core.dll
+          if-no-files-found: error
+          retention-days: 1
+
   package:
     name: Portable zip
     runs-on: windows-latest
@@ -118,27 +125,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
-
-      - name: Setup protoc
-        uses: arduino/setup-protoc@v3
+      # The producer built this exact commit/profile and exercised its DLL
+      # through the real P/Invoke harness. Keep packaging on the tested bytes.
+      - name: Download verified actro_core.dll
+        uses: actions/download-artifact@v4
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          version: ${{ vars.PROTOC_VERSION }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: windows-verify
-
-      - name: Build actro_core.dll
-        run: cargo build --release -p actro-core
-
-      # dotnet publish flattens native/*.dll to the app root and
-      # package-windows.ps1 fails fast when actro_core.dll is absent there.
-      - name: Stage actro_core.dll for publish
-        shell: bash
-        run: cp target/release/actro_core.dll windows/native/
+          name: actro-core-windows-${{ github.sha }}
+          path: windows/native
 
       - name: Setup .NET SDK 8
         uses: actions/setup-dotnet@v4
@@ -148,6 +141,31 @@ jobs:
       - name: Package portable zip
         shell: pwsh
         run: ./scripts/actrium/package-windows.ps1 -SkipInstaller
+
+      - name: Verify packaged DLL matches the tested artifact
+        shell: pwsh
+        run: |
+          $expected = (Get-FileHash windows/native/actro_core.dll -Algorithm SHA256).Hash
+          $zips = @(Get-ChildItem dist/windows/*.zip -File -ErrorAction Stop)
+          if ($zips.Count -eq 0) { throw 'No portable zip was produced for DLL verification' }
+          foreach ($zip in $zips) {
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+            try {
+              $entry = $archive.GetEntry('actro_core.dll')
+              if ($null -eq $entry) { throw 'Portable zip is missing actro_core.dll' }
+              $stream = $entry.Open()
+              $hasher = [System.Security.Cryptography.SHA256]::Create()
+              try {
+                $actual = [System.BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '')
+                if ($actual -ne $expected) { throw 'Packaged DLL differs from the tested artifact' }
+              } finally {
+                $hasher.Dispose()
+                $stream.Dispose()
+              }
+            } finally {
+              $archive.Dispose()
+            }
+          }
 
       - name: Upload portable zip
         uses: actions/upload-artifact@v4

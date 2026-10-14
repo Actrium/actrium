@@ -34,6 +34,9 @@ cd packages/actr-web/examples/data-stream-peer-concurrent
 bash start.sh
 ```
 
+On Linux x86_64, put Python 3.11 or newer on PATH before building the web
+runtime. The pinned wasm-bindgen installer validates Cargo.lock with `tomllib`.
+
 Rebuild and sync the web runtime assets embedded by `actr-cli`:
 
 ```bash

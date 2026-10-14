@@ -159,11 +159,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/wasm-pack
-          key: cargo-tools-v1-${{ runner.os }}-wp0.13.1
+          key: cargo-tools-v2-${{ runner.os }}-wp0.15.0
 
       - name: Install wasm-pack
-        if: steps.cache-wasm-pack.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
 
       - name: Prepare prerelease version commit
         id: prepare
@@ -381,11 +384,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/wasm-pack
-          key: cargo-tools-v1-${{ runner.os }}-wp0.13.1
+          key: cargo-tools-v2-${{ runner.os }}-wp0.15.0
 
       - name: Install wasm-pack
-        if: steps.cache-wasm-pack.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
 
       - name: Package publishable crates
         env:

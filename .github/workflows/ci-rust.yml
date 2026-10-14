@@ -27,13 +27,7 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
-        # Existing advisories outside the WASM host are tracked separately:
-        # maxminddb (framework GeoIP), protobuf 2 (prometheus), rsa (TURN).
-        run: >-
-          cargo audit
-          --ignore RUSTSEC-2025-0132
-          --ignore RUSTSEC-2024-0437
-          --ignore RUSTSEC-2023-0071
+        run: cargo audit
 
   format:
     name: Format Check
@@ -97,10 +91,20 @@ jobs:
       #   wasm-tools is used for local inspection / `component wit`.
       - name: Install wasm Component Model toolchain
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
+            cargo install wasm-component-ld --version 0.5.26 --locked --force
+          fi
+          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
+          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
+          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Build workspace
@@ -119,10 +123,20 @@ jobs:
       # Phase 1 Component Model toolchain — see `build` job for rationale.
       - name: Install wasm Component Model toolchain
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
+            cargo install wasm-component-ld --version 0.5.26 --locked --force
+          fi
+          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
+          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
+          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Verify RFC-0400 timer inventory
