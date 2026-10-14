@@ -474,8 +474,7 @@ impl TestRtcControl {
 
     /// Send a correlated restart through the production signaling transport.
     /// The empty-session rejection must happen before SDP application.
-    #[cfg(test)]
-    pub(crate) fn send_restart_probe(&self, peer: &ActrId, exchange_id: &str) {
+    pub fn send_restart_probe(&self, peer: &ActrId, exchange_id: &str) {
         use crate::wire::webrtc::rtc::peer::reducer::SignalingMessage;
         use webrtc::peer_connection::{RTCSdpType, RTCSessionDescription};
         let mut desc = RTCSessionDescription::default();
