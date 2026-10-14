@@ -14,6 +14,12 @@ echo "Building Service Worker Host..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Avoid wasm-pack's job-time downloader on the Linux fleet's proxied egress.
+# Other platforms keep wasm-pack's native tool selection.
+if [ "$(uname -s)/$(uname -m)" = "Linux/x86_64" ]; then
+  bash "$SCRIPT_DIR/../../../../tools/ci/runner/install-wasm-bindgen.sh" ../../Cargo.lock
+fi
+
 # Ensure a writable temp directory for wasm-bindgen install.
 TMPDIR="${TMPDIR:-$(pwd)/.tmp}"
 export TMPDIR
