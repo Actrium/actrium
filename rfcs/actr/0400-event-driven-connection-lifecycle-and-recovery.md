@@ -1,9 +1,9 @@
 # RFC-0400: Event-driven connection lifecycle and recovery
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-18
-- RFC PR: [#401](https://github.com/Actrium/actr/pull/401)
-- Tracking issue: [#400](https://github.com/Actrium/actr/issues/400)
+- RFC PR: [Actrium/actr#401](https://github.com/Actrium/actr/pull/401)
+- Tracking issue: [Actrium/actrium#65](https://github.com/Actrium/actrium/issues/65) (historical [Actrium/actr#400](https://github.com/Actrium/actr/issues/400))
 - Superseded by: None
 - Related: [Implementation #399 (merged)](https://github.com/Actrium/actr/pull/399),
   [YASM](https://github.com/kookyleo/yasm)

@@ -1,6 +1,6 @@
 # RFC-0507: Framework-Owned Outbound Readiness Waiting and Safe Retry
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-31
 - Baseline: `Actrium/actrium/main@e2ec26d7de6042fa432fef27b5cf2f460a2200c0`
 - RFC PR: [Actrium/actrium#241](https://github.com/Actrium/actrium/pull/241) (historical [Actrium/actr#509](https://github.com/Actrium/actr/pull/509))
