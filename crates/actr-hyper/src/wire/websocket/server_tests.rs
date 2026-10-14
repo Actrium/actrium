@@ -87,8 +87,7 @@ async fn tls_listener_rejects_plaintext_and_clients_reject_untrusted_certificate
         );
         // A client with the default public-roots policy must reject the
         // private test CA.
-        let public_roots =
-            DirectSecurity::from_options(&Default::default(), None).unwrap();
+        let public_roots = DirectSecurity::from_options(&Default::default(), None).unwrap();
         let untrusted =
             WebSocketConnection::new(format!("wss://{addr}")).with_security(public_roots);
         assert!(untrusted.connect().await.is_err());

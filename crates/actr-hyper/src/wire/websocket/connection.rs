@@ -242,8 +242,7 @@ impl WebSocketConnection {
                 // for the operator's. The node's `DirectSecurity` must be
                 // attached via `with_security`.
                 return Err(NetworkError::ConfigurationError(
-                    "direct WebSocket wss:// connection has no TLS client roots configured"
-                        .into(),
+                    "direct WebSocket wss:// connection has no TLS client roots configured".into(),
                 ));
             }
             None => None,

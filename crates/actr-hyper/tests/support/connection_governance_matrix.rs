@@ -59,11 +59,9 @@ async fn same_identity_restart(role: TestRtcRole) {
             .harness()
             .peer(a)
             .hooks
-            .wait_state(
-                &pair.id(PairEndpoint::B),
-                RECOVERY_WAIT,
-                |state| !state.sendable,
-            )
+            .wait_state(&pair.id(PairEndpoint::B), RECOVERY_WAIT, |state| {
+                !state.sendable
+            })
             .await;
         assert!(
             retired.is_some(),

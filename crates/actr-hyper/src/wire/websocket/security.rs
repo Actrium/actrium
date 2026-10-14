@@ -159,11 +159,7 @@ impl DirectSecurity {
         self.advertise(config.websocket_advertised_host.as_deref(), port)
     }
 
-    fn advertise(
-        &self,
-        advertised_host: Option<&str>,
-        port: u16,
-    ) -> HyperResult<Option<String>> {
+    fn advertise(&self, advertised_host: Option<&str>, port: u16) -> HyperResult<Option<String>> {
         if port == 0 {
             return Err(config_error(
                 "direct WebSocket cannot advertise port 0; advertise the bound port",
