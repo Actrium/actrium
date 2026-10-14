@@ -937,6 +937,8 @@ internal object IntegrityCheckingUniffiLib {
     }
     external fun uniffi_actr_checksum_func_actr_error_is_retryable(
     ): Short
+    external fun uniffi_actr_checksum_func_actr_error_message(
+    ): Short
     external fun uniffi_actr_checksum_func_actr_error_kind(
     ): Short
     external fun uniffi_actr_checksum_func_actr_error_requires_dlq(
@@ -1253,6 +1255,8 @@ external fun uniffi_actr_fn_init_callback_vtable_workloadlifecyclebridge(`vtable
 ): Unit
 external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_actr_fn_func_actr_error_message(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -1389,13 +1393,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_actr_error_is_retryable() != 34175.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_func_actr_error_message() != 60098.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_func_actr_error_kind() != 40651.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_actr_error_requires_dlq() != 62057.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_actr_error_throw_for_test() != 53545.toShort()) {
+    if (lib.uniffi_actr_checksum_func_actr_error_throw_for_test() != 12923.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_set_log_callback() != 22627.toShort()) {
@@ -1431,7 +1438,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_register_media_track() != 43039.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_register_stream() != 56804.toShort()) {
+    if (lib.uniffi_actr_checksum_method_contextbridge_register_stream() != 32659.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_remove_media_track() != 43937.toShort()) {
@@ -1488,13 +1495,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_discover() != 21192.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_actrrefwrapper_get_rtc_peer_status() != 47575.toShort()) {
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_get_rtc_peer_status() != 25495.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down() != 50332.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_actrrefwrapper_list_rtc_peer_statuses() != 18889.toShort()) {
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_list_rtc_peer_statuses() != 7724.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency() != 33582.toShort()) {
@@ -1503,7 +1510,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_shutdown() != 60173.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_actrrefwrapper_subscribe_rtc_peer_status() != 51801.toShort()) {
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_subscribe_rtc_peer_status() != 11328.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_tell() != 38430.toShort()) {
@@ -1581,7 +1588,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_webrtcobserverbridge_on_disconnected() != 44359.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_webrtcobserverbridge_on_state_changed() != 48957.toShort()) {
+    if (lib.uniffi_actr_checksum_method_webrtcobserverbridge_on_state_changed() != 35507.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_websocketobserverbridge_on_connecting() != 31917.toShort()) {
@@ -6177,13 +6184,39 @@ public object FfiConverterTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebR
  * discriminants remain stable; Config is a binding-local pre-protocol error.
  */
 sealed class ActrException: kotlin.Exception() {
+    // Keep exception inspection safe before native loading or after linkage failure.
+    internal fun displayMessage(nativeMessage: (ActrException) -> String = ::actrErrorMessage): String {
+        try {
+            return nativeMessage(this)
+        } catch (_: LinkageError) {
+            // Includes UnsatisfiedLinkError, ExceptionInInitializerError and
+            // NoClassDefFoundError on subsequent access to a failed initializer.
+            return when (this) {
+                is Unavailable -> "unavailable: $msg"
+                is ConnectionNotReady -> "connection not ready: " +
+                    (info.retryAfterMs?.let { "retry after ${it}ms" } ?: "no retry hint")
+                is TimedOut -> "timed out"
+                is NotFound -> "not found: $msg"
+                is PermissionDenied -> "permission denied: $msg"
+                is InvalidArgument -> "invalid argument: $msg"
+                is UnknownRoute -> "unknown route: $msg"
+                is DependencyNotFound -> "dependency '$serviceName' not found: $detail"
+                is DecodeFailure -> "decode failure: $msg"
+                is NotImplemented -> "not implemented: $msg"
+                is Internal -> "internal error: $msg"
+                is Config -> "config: $msg"
+                is DeliveryUncertain -> "delivery uncertain for operation $operationId: $causeDetail"
+            }
+        }
+    }
+
     
     class Unavailable(
         
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class ConnectionNotReady(
@@ -6191,13 +6224,13 @@ sealed class ActrException: kotlin.Exception() {
         val `info`: ConnectionNotReadyInfo
         ) : ActrException() {
         override val message
-            get() = "info=${ `info` }"
+            get() = displayMessage()
     }
     
     class TimedOut(
         ) : ActrException() {
         override val message
-            get() = ""
+            get() = displayMessage()
     }
     
     class NotFound(
@@ -6205,7 +6238,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class PermissionDenied(
@@ -6213,7 +6246,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class InvalidArgument(
@@ -6221,7 +6254,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class UnknownRoute(
@@ -6229,7 +6262,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class DependencyNotFound(
@@ -6239,7 +6272,7 @@ sealed class ActrException: kotlin.Exception() {
         val `detail`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "serviceName=${ `serviceName` }, detail=${ `detail` }"
+            get() = displayMessage()
     }
     
     class DecodeFailure(
@@ -6247,7 +6280,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class NotImplemented(
@@ -6255,7 +6288,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class Internal(
@@ -6263,7 +6296,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     /**
@@ -6278,7 +6311,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
 
     /** The operation may have entered the transport; generic retry is unsafe. */
@@ -6289,7 +6322,7 @@ sealed class ActrException: kotlin.Exception() {
         val causeDetail: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "operationId=${ `operationId` }, cause=${ causeDetail }"
+            get() = displayMessage()
     }
     
 
@@ -9117,7 +9150,14 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
     }
     
 
-        /**
+        /** Rust Display text for an error, shared by SDK message properties. */
+fun actrErrorMessage(err: ActrException): kotlin.String =
+    FfiConverterString.lift(uniffiRustCall { status ->
+        UniffiLib.uniffi_actr_fn_func_actr_error_message(
+            FfiConverterTypeActrError.lower(err), status)
+    })
+
+/**
          * Fault-domain classification of `err` (see [`ErrorKind`]).
          */ fun `actrErrorKind`(`err`: ActrException): ErrorKind {
             return FfiConverterTypeErrorKind.lift(

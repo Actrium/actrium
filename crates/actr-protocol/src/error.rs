@@ -56,7 +56,10 @@ impl ConnectionNotReadyInfo {
 
 impl fmt::Display for ConnectionNotReadyInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "retry_after_ms={:?}", self.retry_after_ms)
+        match self.retry_after_ms {
+            Some(ms) => write!(f, "retry after {ms}ms"),
+            None => f.write_str("no retry hint"),
+        }
     }
 }
 
@@ -338,15 +341,23 @@ mod tests {
     #[test]
     fn connection_not_ready_info_display_includes_retry_hint() {
         let info = ConnectionNotReadyInfo::new(1200, 6000);
-        let s = format!("{info}");
-        assert!(s.contains("retry_after_ms=Some(4800)"));
+        assert_eq!(info.to_string(), "retry after 4800ms");
+        assert_eq!(info.retry_after_ms, Some(4800));
+        assert_eq!(
+            ActrError::ConnectionNotReady(info).to_string(),
+            "connection not ready: retry after 4800ms"
+        );
     }
 
     #[test]
     fn connection_not_ready_info_without_retry_hint_display() {
         let info = ConnectionNotReadyInfo::without_retry_hint();
-        let s = format!("{info}");
-        assert!(s.contains("retry_after_ms=None"));
+        assert_eq!(info.to_string(), "no retry hint");
+        assert_eq!(info.retry_after_ms, None);
+        assert_eq!(
+            ActrError::ConnectionNotReady(info).to_string(),
+            "connection not ready: no retry hint"
+        );
     }
 
     // ── ConnectionNotReady classification ────────────────────────────────
