@@ -631,6 +631,10 @@ impl WebSocketGate {
                                 tracing::warn!(
                                     "WS inbound connection credential verification failed, dropping connection"
                                 );
+                                // Tear the connection down explicitly: dropping
+                                // it must not leave the accepted socket and its
+                                // receive loop alive without authentication.
+                                let _ = conn.close().await;
                                 continue; // drop connection, wait for next one
                             }
                         }
@@ -638,6 +642,7 @@ impl WebSocketGate {
                             tracing::warn!(
                                 "WS inbound connection missing X-Actr-Credential, rejecting connection (auth_ctx configured)"
                             );
+                            let _ = conn.close().await;
                             continue;
                         }
                     }
@@ -656,6 +661,7 @@ impl WebSocketGate {
                     tracing::error!(
                         "WS auth_ctx not configured, rejecting connection (configuration error)"
                     );
+                    let _ = conn.close().await;
                 }
             }
 

@@ -1235,6 +1235,64 @@ async fn receive_loop_rejects_connection_with_tampered_credential() {
     );
 }
 
+/// A rejected connection must not leave its socket and receive loop running:
+/// the gate closes the connection explicitly so an unauthenticated peer
+/// cannot hold an unbounded number of open connections.
+#[tokio::test]
+async fn receive_loop_rejection_tears_down_the_socket() {
+    use futures_util::StreamExt as _;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+    let sk = signing_key(14);
+    let ctx = make_auth_ctx(&sk, 1, test_actor_id(999)).await;
+    let mut running = start_loop(Some(ctx)).await;
+
+    let peer = test_actor_id(441);
+    let mut credential = make_valid_credential(&sk, &peer, future_ts(), 1);
+    let mut sig = credential.signature.to_vec();
+    sig[0] ^= 0xFF;
+    credential.signature = sig.into();
+
+    // A real stream pair, so teardown is observable by the peer half.
+    let (server_io, client_io) = tokio::io::duplex(1024);
+    let server_stream = tokio_tungstenite::WebSocketStream::from_raw_socket(
+        server_io,
+        tokio_tungstenite::tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
+    let mut client = tokio_tungstenite::WebSocketStream::from_raw_socket(
+        client_io,
+        tokio_tungstenite::tungstenite::protocol::Role::Client,
+        None,
+    )
+    .await;
+    let conn =
+        crate::wire::websocket::connection::WebSocketConnection::from_server_stream(server_stream);
+
+    let source_id = actr_protocol::prost::Message::encode_to_vec(&peer);
+    running
+        .conn_tx
+        .send((conn, source_id, Some(credential)))
+        .await
+        .expect("loop must be consuming connections");
+    assert_eq!(running.probe.take_connect_starts(1).await, vec![peer]);
+
+    // The peer observes a Close frame or stream end instead of an idle open
+    // socket.
+    let observed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while let Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_))) = client.next().await {}
+    })
+    .await;
+    assert!(
+        observed.is_ok(),
+        "a rejected connection must be torn down, not left open"
+    );
+
+    drop(running.conn_tx);
+    await_loop_exit(running.mailbox).await;
+}
+
 /// Positive control for the three rejection tests above: with the same
 /// harness, a correctly signed credential *is* admitted and does fire
 /// `WebSocketConnected`. Without this, a bug that silently stopped firing
