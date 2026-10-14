@@ -71,6 +71,8 @@ impl Default for DefaultWireBuilderConfig {
 ///
 /// Creates WebRTC and/or WebSocket wire handles from configuration and supports attempting multiple connection types during the same creation pass.
 pub struct DefaultWireBuilder {
+    direct_security: crate::wire::websocket::security::DirectSecurity,
+
     /// RTC manager used to create peer wire handles when present.
     rtc_manager: Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
 
@@ -108,6 +110,7 @@ impl DefaultWireBuilder {
     /// - `config`: builder configuration
     pub fn new(config: DefaultWireBuilderConfig) -> Self {
         Self {
+            direct_security: Default::default(),
             rtc_manager: None,
             local_id_hex: config.local_id_hex.clone(),
             session_state: config.session_state.clone(),
@@ -117,6 +120,14 @@ impl DefaultWireBuilder {
             ws_session_counter: Arc::new(AtomicU64::new(0)),
             config,
         }
+    }
+
+    pub(crate) fn with_direct_security(
+        mut self,
+        security: crate::wire::websocket::security::DirectSecurity,
+    ) -> Self {
+        self.direct_security = security;
+        self
     }
 
     /// Set the RTC manager used to create and adopt peer connections.
@@ -393,7 +404,7 @@ impl WireBuilder for DefaultWireBuilder {
             check_cancelled(&cancel_token)?;
 
             if let Some(url) = self.resolve_websocket_url(dest).await {
-                tracing::debug!("🏭 [Factory] Create WebSocket Connect: {}", url);
+                tracing::debug!("🏭 [Factory] Create direct WebSocket connection");
                 let (local_id_hex, session_credential) =
                     if let Some(session_state) = &self.session_state {
                         let snapshot = session_state.snapshot().await;
@@ -404,7 +415,9 @@ impl WireBuilder for DefaultWireBuilder {
                     } else {
                         (self.local_id_hex.clone(), None)
                     };
-                let mut ws_conn = WebSocketConnection::new(url).with_local_id(local_id_hex);
+                let mut ws_conn = WebSocketConnection::new(url)
+                    .with_security(self.direct_security.clone())
+                    .with_local_id(local_id_hex);
 
                 // Attach the local credential so the peer `WebSocketGate` can verify the Ed25519 signature.
                 if let Some(credential) = session_credential {

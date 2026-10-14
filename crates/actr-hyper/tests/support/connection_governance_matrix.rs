@@ -50,6 +50,24 @@ async fn same_identity_restart(role: TestRtcRole) {
         Err(ActrError::TimedOut) => {}
         other => panic!("unexpected first operation outcome: {other:?}"),
     }
+    // When the first operation timed out, recovery is only genuine if the
+    // stale wire was observably retired: a regression that admits the stale
+    // wire and never retires it must not pass. The hook history keeps past
+    // non-sendable states, so this cannot race a completed reconnection.
+    if matches!(&result, Err(ActrError::TimedOut)) {
+        let retired = pair
+            .harness()
+            .peer(a)
+            .hooks
+            .wait_state(&pair.id(PairEndpoint::B), RECOVERY_WAIT, |state| {
+                !state.sendable
+            })
+            .await;
+        assert!(
+            retired.is_some(),
+            "first op timed out but the stale wire was never observably retired"
+        );
+    }
     // The first operation may already have entered the stale wire. Do not
     // replay it. Let recovery succeed or exhaust naturally, then issue a
     // distinct operation; no direct RTC connect/close is permitted here.
