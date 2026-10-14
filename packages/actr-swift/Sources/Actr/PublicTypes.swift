@@ -156,7 +156,7 @@ public enum ActrError: Error, Equatable, Hashable, LocalizedError, Sendable {
     case DeliveryUncertain(operationId: String, cause: String)
 
     public var errorDescription: String? {
-        String(reflecting: self)
+        ActrBindings.actrErrorMessage(err: bridge)
     }
 
     init(bridge: ActrBindings.ActrError) {
