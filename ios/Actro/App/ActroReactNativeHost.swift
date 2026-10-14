@@ -71,7 +71,7 @@ final class ActroReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegat
         // Release offline bundle. Not "main.jsbundle": that collides with the
         // RN default product and Xcode errors "Multiple commands produce …".
         // The name must match the --bundle-output file name produced by
-        // ios/Scripts/* (guarded by scripts/actrium/check-ios-jsbundle-name.sh).
+        // ios/Scripts/* (af, test-build.sh, upload-testflight.sh).
         return Bundle.main.url(forResource: "runtime", withExtension: "jsbundle")
         #endif
     }
