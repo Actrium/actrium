@@ -23,7 +23,7 @@ fi
 
 if grep -Fq "spidermonkey-embedding-splicer" "${componentize_log}" \
     && grep -Fq "not yet implemented" "${componentize_log}"; then
-    echo "::notice::Known V2 async componentization blocker accepted; tracked by #427 and upstream ComponentizeJS#335."
+    echo "::notice::Known V2 async componentization blocker accepted; tracked by #54 and upstream ComponentizeJS#335."
     exit 0
 fi
 

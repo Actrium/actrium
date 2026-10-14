@@ -662,6 +662,13 @@ pub(crate) struct Inner {
     /// Unified identity/credential snapshot for renewal and hard rebind.
     pub(crate) session_state: Option<SessionState>,
 
+    /// Test-only directed fault registries (`test-utils` builds only), set
+    /// by attach/link from [`crate::Node::with_test_faults`]. When present,
+    /// `start()` wraps the RTC factory and signaling transport with the
+    /// registries. Production builds never see this field.
+    #[cfg(feature = "test-utils")]
+    pub(crate) test_faults: Option<crate::wire::webrtc::test_runtime::TestFaultRegistries>,
+
     /// RTC connection manager (created after startup; RTC backend only).
     /// Backs the node-level RTC status query/list/subscribe APIs (S6-4).
     pub(crate) rtc_manager: Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
@@ -1456,6 +1463,10 @@ fn parse_length_prefixed_delivery_uncertain(message: &str) -> Option<ActrError> 
 fn parse_connection_not_ready_retry_hint(message: &str) -> Option<u64> {
     // ErrorResponse currently carries only a code and display string. Keep this
     // parser narrow and best-effort until the wire error payload grows typed details.
+    if let Some(rest) = message.strip_prefix("connection not ready: retry after ") {
+        return rest.strip_suffix("ms")?.parse().ok();
+    }
+    // Accept the previous Display form from older peers as well.
     let marker = "retry_after_ms=Some(";
     let start = message.find(marker)? + marker.len();
     let rest = &message[start..];
@@ -2485,6 +2496,8 @@ impl Inner {
             actor_id: None,
             credential_state: None,
             session_state: None,
+            #[cfg(feature = "test-utils")]
+            test_faults: None,
             rtc_manager: None,
             rtc_inbound_mailbox_slot: None,
             peer_transport: None,
@@ -2690,17 +2703,44 @@ impl Inner {
         // through `Hyper::register()`.
         let service_spec = None;
 
-        // If a WebSocket listen port is configured, build the advertised ws:// address
-        // to register with the signaling server so clients can discover it.
-        let ws_address = if let Some(port) = self.config.websocket_listen_port {
-            let host = self
-                .config
-                .websocket_advertised_host
-                .as_deref()
-                .unwrap_or("127.0.0.1");
-            Some(format!("ws://{}:{}", host, port))
-        } else {
-            None
+        // Validate TLS before advertising or sending reusable peer credentials.
+        let direct_security = crate::wire::websocket::security::DirectSecurity::load(&self.config)
+            .map_err(|e| ActrError::Internal(e.to_string()))?;
+
+        // Bind the direct WebSocket listener before registration so an
+        // ephemeral listen_port (0) advertises the actual bound port, and so a
+        // bind failure aborts startup instead of advertising an endpoint that
+        // nobody serves.
+        let ws_listener = match self.config.websocket_listen_port {
+            Some(listen_port) => {
+                tracing::info!(
+                    "🔌 WebSocket direct-connect mode enabled, binding port {}",
+                    listen_port
+                );
+                Some(
+                    crate::wire::websocket::WebSocketServer::bind(
+                        listen_port,
+                        direct_security.clone(),
+                    )
+                    .await?,
+                )
+            }
+            None => None,
+        };
+        let ws_address = match &ws_listener {
+            Some((server, _)) => {
+                let advertised = direct_security
+                    .advertised_url_for(&self.config, server.local_addr().port())
+                    .map_err(|e| ActrError::Internal(e.to_string()))?;
+                if advertised.is_some() && server.local_addr().ip().is_loopback() {
+                    tracing::warn!(
+                        "🔌 direct WebSocket listener is loopback-only ({}); peers on other hosts cannot reach it — set websocket.bind_address to a routable interface",
+                        server.local_addr()
+                    );
+                }
+                advertised
+            }
+            None => None,
         };
 
         if let Some(ref addr) = ws_address {
@@ -3055,6 +3095,7 @@ impl Inner {
                 buffer_config.validate().map_err(|error| {
                     ActrError::Internal(format!("invalid RTC resource configuration: {error}"))
                 })?;
+                let rtc_local_id = rtc::signaling::SharedLocalId::new(actor_id.clone());
                 let runtime_config = rtc::runtime::RtcRuntimeConfig::desktop_default()
                     .with_buffer_config(buffer_config.clone());
                 let ice_servers: Vec<webrtc::peer_connection::RTCIceServer> = self
@@ -3102,14 +3143,21 @@ impl Inner {
                 // Inventory marker: the four acceptance waits above are
                 // protocol-selection timers executed inside RTC's ICE agent.
                 let _ = crate::timer::ids::EXTERNAL_ICE_CANDIDATE_SELECTION;
-                let factory = Arc::new(
+                let factory =
                     rtc::factory::PeerConnectionFactory::new_with_configuration_and_wildcard_bind(
                         runtime_config,
                         rtc_configuration,
                     )
                     .with_turn_credential_provider(Arc::new(credential_state.clone()))
-                    .with_setting_engine(setting_engine),
-                );
+                    .with_setting_engine(setting_engine);
+                // Test-only seam: every generation built by this real Node
+                // consults the same directed RTC registry as the harness.
+                #[cfg(feature = "test-utils")]
+                let factory = match self.test_faults.as_ref() {
+                    Some(faults) => faults.wrap_factory(factory, rtc_local_id.clone()),
+                    None => factory,
+                };
+                let factory = Arc::new(factory);
 
                 // Create the RTC signaling channel + manager + router.
                 // CF-1: the local identity lives in a shared, rebind-updatable
@@ -3192,7 +3240,6 @@ impl Inner {
                     });
                     task_handles.push(turn_refresh_handle);
                 }
-                let rtc_local_id = rtc::signaling::SharedLocalId::new(actor_id.clone());
                 let rtc_transport = rtc::signaling::ws_transport::RtcSignalingTransport::new(
                     self.signaling_client.clone(),
                     rtc_local_id.clone(),
@@ -3206,10 +3253,23 @@ impl Inner {
                 // locks needs the manager to see the same map instance.
                 rtc_manager.set_signaling_dispatch_chains(rtc_router.dispatch_chains());
                 let router_shutdown = self.shutdown_token.child_token();
+                #[cfg(feature = "test-utils")]
+                let router_test_faults = self.test_faults.clone();
+                #[cfg(feature = "test-utils")]
+                let router_local_id = rtc_local_id.clone();
                 let router_handle = tokio::spawn(async move {
+                    let run_router = async move {
+                        #[cfg(feature = "test-utils")]
+                        if let Some(faults) = router_test_faults {
+                            let transport = faults.wrap_signaling(rtc_transport, router_local_id);
+                            rtc_router.run(transport, signaling_rx).await;
+                            return;
+                        }
+                        rtc_router.run(rtc_transport, signaling_rx).await;
+                    };
                     tokio::select! {
                         _ = router_shutdown.cancelled() => {}
-                        _ = rtc_router.run(rtc_transport, signaling_rx) => {}
+                        _ = run_router => {}
                     }
                 });
                 task_handles.push(router_handle);
@@ -3277,7 +3337,8 @@ impl Inner {
                 pending_requests: Some(pending_requests.clone()),
             };
             let wire_builder = {
-                let builder = DefaultWireBuilder::new(wire_builder_config);
+                let builder = DefaultWireBuilder::new(wire_builder_config)
+                    .with_direct_security(direct_security.clone());
                 let builder = builder.with_rtc_manager(rtc_manager.clone());
                 Arc::new(builder)
             };
@@ -3459,14 +3520,10 @@ impl Inner {
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // 1.7.6. WebSocket Server (direct-connect mode, optional)
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if let Some(listen_port) = self.config.websocket_listen_port {
-                tracing::info!(
-                    "🔌 WebSocket direct-connect mode enabled, binding port {}",
-                    listen_port
-                );
+            if let Some((ws_server, conn_rx)) = ws_listener {
                 use crate::key_cache::AisKeyCache;
+                use crate::wire::websocket::WebSocketGate;
                 use crate::wire::websocket::gate::WsAuthContext;
-                use crate::wire::websocket::{WebSocketGate, WebSocketServer};
 
                 // Build AisKeyCache and seed it with the signing key from the registration response
                 let ais_key_cache = AisKeyCache::new();
@@ -3498,56 +3555,47 @@ impl Inner {
                     signaling_client: self.signaling_client.clone(),
                 };
 
-                match WebSocketServer::bind(listen_port).await {
-                    Ok((ws_server, conn_rx)) => {
-                        ws_server.start(self.shutdown_token.clone());
-                        let ws_gate = Arc::new(WebSocketGate::new(
-                            conn_rx,
-                            outproc_gate.get_pending_requests(),
-                            data_chunk_registry.clone(),
-                            Some(auth_ctx),
-                        ));
+                // The listener was bound before registration so the advertised
+                // address carries the actual (possibly ephemeral) bound port.
+                ws_server.start(self.shutdown_token.clone());
+                let ws_gate = Arc::new(WebSocketGate::new(
+                    conn_rx,
+                    outproc_gate.get_pending_requests(),
+                    data_chunk_registry.clone(),
+                    Some(auth_ctx),
+                ));
 
-                        // Install the WebSocket peer-lifecycle hook.
-                        {
-                            let actor_id_for_hook = actor_id.clone();
-                            let credential_state_for_hook = credential_state.clone();
-                            // Snapshot taken after outproc_gate is live: ws
-                            // peer-lifecycle hook contexts can issue
-                            // Dest::Peer(_) calls.
-                            let ctx_builder_snapshot = self.bootstrap_ctx_builder();
-                            let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
-                                Arc::new(move || {
-                                    let snapshot = ctx_builder_snapshot.clone();
-                                    let actor_id = actor_id_for_hook.clone();
-                                    let credential_state = credential_state_for_hook.clone();
-                                    Box::pin(async move {
-                                        Some(snapshot.build_bootstrap(
-                                            &actor_id,
-                                            &credential_state.credential().await,
-                                        ))
-                                    })
-                                });
-                            let cb = crate::lifecycle::hooks::build_hook_callback(
-                                self.hook_observer.clone(),
-                                ctx_builder,
-                            );
-                            ws_gate.set_hook_callback(cb);
-                        }
-
-                        self.websocket_gate = Some(ws_gate);
-                        tracing::info!(
-                            "✅ WebSocketServer + WebSocketGate initialized (credential auth enabled)"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "❌ Failed to bind WebSocket server on port {}: {:?}",
-                            listen_port,
-                            e
-                        );
-                    }
+                // Install the WebSocket peer-lifecycle hook.
+                {
+                    let actor_id_for_hook = actor_id.clone();
+                    let credential_state_for_hook = credential_state.clone();
+                    // Snapshot taken after outproc_gate is live: ws
+                    // peer-lifecycle hook contexts can issue
+                    // Dest::Peer(_) calls.
+                    let ctx_builder_snapshot = self.bootstrap_ctx_builder();
+                    let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
+                        Arc::new(move || {
+                            let snapshot = ctx_builder_snapshot.clone();
+                            let actor_id = actor_id_for_hook.clone();
+                            let credential_state = credential_state_for_hook.clone();
+                            Box::pin(async move {
+                                Some(snapshot.build_bootstrap(
+                                    &actor_id,
+                                    &credential_state.credential().await,
+                                ))
+                            })
+                        });
+                    let cb = crate::lifecycle::hooks::build_hook_callback(
+                        self.hook_observer.clone(),
+                        ctx_builder,
+                    );
+                    ws_gate.set_hook_callback(cb);
                 }
+
+                self.websocket_gate = Some(ws_gate);
+                tracing::info!(
+                    "✅ WebSocketServer + WebSocketGate initialized (credential auth enabled)"
+                );
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

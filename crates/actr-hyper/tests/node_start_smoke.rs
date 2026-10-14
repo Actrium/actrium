@@ -5,6 +5,9 @@
 //! ~750-line async runtime bring-up). Existing integration tests bypass Node
 //! and construct coordinators directly, so `start` was previously uncovered.
 
+#[path = "support/direct_websocket.rs"]
+mod direct_websocket;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -120,6 +123,7 @@ fn runtime_config_with_type(
         scripts: HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
         websocket_listen_port: None,
+        websocket_security: direct_websocket::tls_options(),
         websocket_advertised_host: None,
         observability: actr_config::ObservabilityConfig {
             filter_level: "warn".to_string(),
@@ -234,7 +238,7 @@ async fn attached_node_exposes_gated_network_event_constructor() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn linked_node_advertises_websocket_listen_port() {
-    // Setting websocket_listen_port makes `start` build a ws:// address and
+    // Setting websocket_listen_port makes `start` build a wss:// address and
     // register it with the signaling server, and binds a WebSocketServer.
     let mut server = TestSignalingServer::start().await.expect("server start");
     let dir = TempDir::new().unwrap();
@@ -247,8 +251,8 @@ async fn linked_node_advertises_websocket_listen_port() {
     .unwrap();
 
     let mut cfg = runtime_config(&dir, &server, "WsAdvertised");
-    // Bind an ephemeral port; the advertised address is constructed from it.
-    cfg.websocket_listen_port = Some(0);
+    // Advertise a concrete port, as required by the direct WebSocket policy.
+    cfg.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg.websocket_advertised_host = Some("127.0.0.1".to_string());
 
     let ais = format!("http://127.0.0.1:{}/ais", server.port());
@@ -439,7 +443,7 @@ async fn two_nodes_connect_and_exchange_rpc() {
     .await
     .unwrap();
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(0);
+    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
     let ais = format!("http://127.0.0.1:{}/ais", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
@@ -509,7 +513,7 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
     .await
     .unwrap();
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(0);
+    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
     let ais = format!("http://127.0.0.1:{}/ais", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
@@ -1029,7 +1033,7 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
     .await
     .unwrap();
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoDiscNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(0);
+    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
     let ais = format!("http://127.0.0.1:{}/ais", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)

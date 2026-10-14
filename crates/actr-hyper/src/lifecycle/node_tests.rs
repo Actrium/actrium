@@ -397,10 +397,8 @@ fn connection_not_ready_has_distinct_wire_code() {
 
 #[test]
 fn connection_not_ready_wire_code_roundtrips_variant_and_retry_hint() {
-    let err = wire_code_to_actr_error(
-        10011,
-        "connection not ready: retry_after_ms=Some(4800)".to_string(),
-    );
+    let original = ActrError::ConnectionNotReady(ConnectionNotReadyInfo::new(1200, 6000));
+    let err = wire_code_to_actr_error(protocol_error_to_code(&original), original.to_string());
 
     match err {
         ActrError::ConnectionNotReady(info) => {
@@ -412,7 +410,8 @@ fn connection_not_ready_wire_code_roundtrips_variant_and_retry_hint() {
 
 #[test]
 fn connection_not_ready_wire_code_handles_missing_retry_hint() {
-    let err = wire_code_to_actr_error(10011, "connection not ready".to_string());
+    let original = ActrError::ConnectionNotReady(ConnectionNotReadyInfo::without_retry_hint());
+    let err = wire_code_to_actr_error(protocol_error_to_code(&original), original.to_string());
 
     match err {
         ActrError::ConnectionNotReady(info) => {
@@ -1017,8 +1016,23 @@ fn wire_code_to_actr_error_unknown_code_falls_back_to_unavailable() {
 #[test]
 fn parse_connection_not_ready_retry_hint_extracts_value() {
     assert_eq!(
+        parse_connection_not_ready_retry_hint("connection not ready: retry after 4800ms"),
+        Some(4800)
+    );
+    // Mixed-version peers may still send the previous Display form.
+    assert_eq!(
         parse_connection_not_ready_retry_hint("connection not ready: retry_after_ms=Some(4800)"),
         Some(4800)
+    );
+    assert_eq!(
+        parse_connection_not_ready_retry_hint("connection not ready: retry after 0ms"),
+        Some(0)
+    );
+    assert_eq!(
+        parse_connection_not_ready_retry_hint(
+            "connection not ready: retry after 18446744073709551615ms"
+        ),
+        Some(u64::MAX)
     );
 }
 
@@ -1026,6 +1040,15 @@ fn parse_connection_not_ready_retry_hint_extracts_value() {
 fn parse_connection_not_ready_retry_hint_returns_none_without_marker() {
     assert_eq!(parse_connection_not_ready_retry_hint("plain message"), None);
     assert_eq!(parse_connection_not_ready_retry_hint(""), None);
+    for message in [
+        "connection not ready: no retry hint",
+        "connection not ready: retry_after_ms=None",
+        "connection not ready: retry after 42",
+        "connection not ready: retry after invalidms",
+        "connection not ready: retry after 18446744073709551616ms",
+    ] {
+        assert_eq!(parse_connection_not_ready_retry_hint(message), None);
+    }
 }
 
 #[test]
@@ -1438,6 +1461,7 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         scripts: std::collections::HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
         websocket_listen_port: None,
+        websocket_security: Default::default(),
         websocket_advertised_host: None,
         observability: actr_config::ObservabilityConfig {
             filter_level: "info".to_string(),

@@ -916,9 +916,11 @@ async fn await_parked_local_description(h: &mut Harness, ops: &GatedSessionOps, 
 }
 
 /// Wait for the controller to report one specific critical-signaling gate
-/// decision, while the gate stays closed, skipping the decisions that earlier
-/// phases already produced (the initial negotiation's dispatches are all
-/// `Sent`).
+/// decision, skipping the decisions that earlier phases already produced (the
+/// initial negotiation's dispatches are all `Sent`). `gate_stays_closed`
+/// keeps the queue-empty assertion active while awaiting the closed-gate
+/// decision; after the gate reopens, a flush enqueues before reporting its
+/// outcome, so that assertion would race the intended delivery.
 ///
 /// The controller executes `SendSignaling` inline and the decision it makes is
 /// otherwise invisible: a dispatch that a closed gate retained and one that an
@@ -934,14 +936,17 @@ async fn await_dispatch_outcome(
     h: &mut Harness,
     wanted: SignalingDispatchOutcome,
     within: Duration,
+    gate_stays_closed: bool,
     what: &str,
 ) -> u64 {
     let deadline = Instant::now() + within;
     loop {
-        assert!(
-            h.signaling_rx.try_recv().is_err(),
-            "signaling escaped a closed signaling gate: {what}"
-        );
+        if gate_stays_closed {
+            assert!(
+                h.signaling_rx.try_recv().is_err(),
+                "signaling escaped a closed signaling gate: {what}"
+            );
+        }
         assert!(
             Instant::now() < deadline,
             "timed out waiting for {wanted:?}: {what}"
@@ -1045,6 +1050,7 @@ async fn gate_closed_retains_recovery_answer_until_signaling_returns() {
         &mut h,
         SignalingDispatchOutcome::Retained,
         WAIT,
+        true,
         "recovery Answer",
     )
     .await;
@@ -1058,6 +1064,7 @@ async fn gate_closed_retains_recovery_answer_until_signaling_returns() {
         &mut h,
         SignalingDispatchOutcome::RetainedFlushed,
         RETENTION_RELEASE_WAIT,
+        false,
         "gate reopen",
     )
     .await;

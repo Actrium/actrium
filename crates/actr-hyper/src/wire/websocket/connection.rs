@@ -1,5 +1,6 @@
 //! WebSocket transport connection implementation
 
+use super::security::DirectSecurity;
 use crate::transport::{
     ConnType, DataLane, NetworkError, NetworkResult, SecureCell, SecureChannelState,
     SecureDataLane, WebSocketDataLane, WireHandle, WsSink,
@@ -9,13 +10,25 @@ use async_trait::async_trait;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request as WsRequest;
 use tokio_tungstenite::tungstenite::http::Uri as WsUri;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::{Connector, WebSocketStream, connect_async_tls_with_config};
+use tokio_util::sync::CancellationToken;
+
+/// Cancels the dispatcher task when the last `WebSocketConnection` handle is
+/// dropped, so a connection dropped without `close()` (e.g. a credential
+/// rejection in the gate) cannot leave the socket and read loop alive.
+struct CancelOnDrop(CancellationToken);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
 
 /// WebSocket transmitting messagesprotocol
 ///
@@ -79,10 +92,11 @@ impl TransportMessage {
 }
 
 /// WebSocket transport connection
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct WebSocketConnection {
     /// URL
     url: String,
+    security: DirectSecurity,
     /// Local node identity (hex-encoded protobuf ActrId bytes), sent as X-Actr-Source-ID in handshake request for direct-connect mode
     local_id_hex: Option<String>,
     /// Local AIdCredential (base64-encoded), sent with X-Actr-Credential header during handshake for peer verification
@@ -102,6 +116,11 @@ pub(crate) struct WebSocketConnection {
     /// Secure-channel state owned by this physical WebSocket session (RFC-0563).
     /// Phase 2 constructs `LegacyBypass`; phase 3 drives the real handshake.
     secure: SecureCell,
+
+    /// Shared teardown signal: `close()` cancels it directly, and the guard
+    /// cancels it when the last handle drops. The dispatcher holds only the
+    /// token, so its own lifetime never keeps the connection open.
+    teardown: Arc<CancelOnDrop>,
 }
 
 impl WebSocketConnection {
@@ -119,6 +138,7 @@ impl WebSocketConnection {
     pub fn new(url: String) -> Self {
         Self {
             url: url.clone(),
+            security: DirectSecurity::default(),
             local_id_hex: None,
             credential_b64: None,
             sink: Arc::new(Mutex::new(None)), // initial begin as None
@@ -126,7 +146,13 @@ impl WebSocketConnection {
             lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
             connected: Arc::new(RwLock::new(false)),
             secure: SecureCell::new(SecureChannelState::LegacyBypass),
+            teardown: Arc::new(CancelOnDrop(CancellationToken::new())),
         }
+    }
+
+    pub(crate) fn with_security(mut self, security: DirectSecurity) -> Self {
+        self.security = security;
+        self
     }
 
     /// Set local node identity; automatically appends X-Actr-Source-ID header during handshake (used in direct-connect mode)
@@ -148,40 +174,85 @@ impl WebSocketConnection {
     /// inbound connections where the handshake has been completed by
     /// `WebSocketServer`, entering Ready state directly.
     ///
-    /// `server.rs` uses `accept_hdr_async(MaybeTlsStream::Plain(stream), ...)` to produce
-    /// `WebSocketStream<MaybeTlsStream<TcpStream>>`, identical to the client type, no conversion needed.
-    pub fn from_server_stream(ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
+    /// The generic stream accepts either server TLS or explicit loopback development TCP.
+    pub fn from_server_stream<S>(ws_stream: WebSocketStream<S>) -> Self
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
         let (sink, stream) = ws_stream.split();
 
-        let router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>> =
-            Arc::new(RwLock::new([None, None, None, None, None]));
+        let sink: WsSink = Arc::new(Mutex::new(Some(Box::new(sink))));
+        let secure = SecureCell::new(SecureChannelState::LegacyBypass);
+        let mut routes = [None, None, None, None, None];
+        let mut lanes = [None, None, None, None, None];
+        // The peer can send its first frame as soon as the upgrade completes,
+        // before credential verification and the gate's lane readers finish.
+        // Register bounded receive queues before starting the dispatcher.
+        for payload_type in [
+            PayloadType::RpcReliable,
+            PayloadType::RpcSignal,
+            PayloadType::StreamReliable,
+            PayloadType::StreamLatencyFirst,
+            PayloadType::MediaRtp,
+        ] {
+            let (tx, lane) = Self::make_lane(&sink, &secure, payload_type);
+            routes[payload_type as usize] = Some(tx);
+            lanes[payload_type as usize] = Some(lane);
+        }
+        let router = Arc::new(RwLock::new(routes));
         let connected = Arc::new(RwLock::new(true));
+        let teardown = Arc::new(CancelOnDrop(CancellationToken::new()));
 
-        Self::spawn_dispatcher(stream, router.clone(), connected.clone());
+        Self::spawn_dispatcher(
+            stream,
+            router.clone(),
+            connected.clone(),
+            teardown.0.clone(),
+        );
 
         tracing::info!("✅ WebSocketConnection created from server stream (already connected)");
 
         Self {
             url: String::from("<inbound>"),
+            security: DirectSecurity::default(),
             local_id_hex: None,
             credential_b64: None,
-            sink: Arc::new(Mutex::new(Some(sink))),
+            sink,
             router,
-            lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
+            lane_cache: Arc::new(RwLock::new(lanes)),
             connected,
-            secure: SecureCell::new(SecureChannelState::LegacyBypass),
+            secure,
+            teardown,
         }
     }
 
     /// establish Connect
     pub async fn connect(&self) -> NetworkResult<()> {
+        self.security.validate_url(&self.url)?;
+        // Dial the same normalized authority that the policy validated. In
+        // particular, never pass alternate numeric hosts to a DNS resolver.
+        let url = actr_config::Url::parse(&self.url)
+            .map_err(|_| NetworkError::InvalidArgument("invalid direct WebSocket URL".into()))?;
+        let is_tls = url.scheme() == "wss";
+        let url = url.to_string();
+        let connector = match self.security.client.clone() {
+            Some(client) => Some(Connector::Rustls(client)),
+            None if is_tls => {
+                // Fail closed: never substitute a default public-roots policy
+                // for the operator's. The node's `DirectSecurity` must be
+                // attached via `with_security`.
+                return Err(NetworkError::ConfigurationError(
+                    "direct WebSocket wss:// connection has no TLS client roots configured".into(),
+                ));
+            }
+            None => None,
+        };
         // 1. Establish WebSocket connection (direct-connect mode carries X-Actr-Source-ID header)
         let (ws_stream, _) = if let Some(ref hex_id) = self.local_id_hex {
             // tungstenite does not auto-complete WebSocket upgrade headers; all must be specified manually.
             // Missing any of (Host/Connection/Upgrade/Sec-WebSocket-Version/Sec-WebSocket-Key)
             // will cause the handshake to fail.
-            let uri: WsUri = self
-                .url
+            let uri: WsUri = url
                 .parse()
                 .map_err(|e| NetworkError::ConnectionError(format!("Invalid WS URI: {e}")))?;
             let host = uri
@@ -192,7 +263,7 @@ impl WebSocketConnection {
                 None => host.to_string(),
             };
             let mut builder = WsRequest::builder()
-                .uri(self.url.as_str())
+                .uri(url.as_str())
                 .header("Host", host_header)
                 .header("Connection", "Upgrade")
                 .header("Upgrade", "websocket")
@@ -207,36 +278,68 @@ impl WebSocketConnection {
             let request = builder.body(()).map_err(|e| {
                 NetworkError::ConnectionError(format!("WS request build failed: {e}"))
             })?;
-            connect_async(request).await?
+            connect_async_tls_with_config(request, None, false, connector).await
         } else {
-            connect_async(&self.url).await?
-        };
+            connect_async_tls_with_config(&url, None, false, connector).await
+        }
+        .map_err(|e| Self::classify_connect_error(e, &url))?;
         let (sink, stream) = ws_stream.split();
 
         // 2. update new sink
-        *self.sink.lock().await = Some(sink);
+        *self.sink.lock().await = Some(Box::new(sink));
         *self.connected.write().await = true;
 
         // 3. Startmessage dispatch device (in background task, not retain handle)
         let router = self.router.clone();
         let connected = self.connected.clone();
-        Self::spawn_dispatcher(stream, router, connected);
+        Self::spawn_dispatcher(stream, router, connected, self.teardown.0.clone());
 
         tracing::info!("✅ WebSocketConnection already Connect: {}", self.url);
 
         Ok(())
     }
 
+    /// Preserve the shared tungstenite classification (closed-like eviction,
+    /// typed HTTP statuses) while keeping the direct-transport context that
+    /// distinguishes these failures from signaling handshake errors.
+    fn classify_connect_error(
+        err: tokio_tungstenite::tungstenite::Error,
+        url: &str,
+    ) -> NetworkError {
+        match NetworkError::from(err) {
+            NetworkError::WebSocketClosed(m) => {
+                NetworkError::WebSocketClosed(format!("direct WebSocket {url}: {m}"))
+            }
+            NetworkError::WebSocketError(m) => {
+                NetworkError::WebSocketError(format!("direct WebSocket {url}: {m}"))
+            }
+            // Typed handshake failures (401/403/503) keep their verdict
+            // semantics untouched.
+            typed => typed,
+        }
+    }
+
     /// Startmessage dispatch device (in background task)
-    fn spawn_dispatcher(
-        mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    fn spawn_dispatcher<S>(
+        mut stream: SplitStream<WebSocketStream<S>>,
         router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>>,
         connected: Arc<RwLock<bool>>,
-    ) -> tokio::task::JoinHandle<()> {
+        shutdown: CancellationToken,
+    ) -> tokio::task::JoinHandle<()>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
         tokio::spawn(async move {
             tracing::debug!("📡 WebSocket dispatcher Start");
 
-            while let Some(msg_result) = stream.next().await {
+            loop {
+                let msg_result = tokio::select! {
+                    _ = shutdown.cancelled() => break,
+                    msg_result = stream.next() => match msg_result {
+                        Some(msg_result) => msg_result,
+                        None => break,
+                    },
+                };
                 match msg_result {
                     Ok(WsMessage::Binary(data)) => {
                         // decodemessage
@@ -286,6 +389,7 @@ impl WebSocketConnection {
                 }
             }
 
+            *connected.write().await = false;
             tracing::debug!("📡 WebSocket dispatcher rollback exit ");
         })
     }
@@ -370,23 +474,23 @@ impl WebSocketConnection {
             ));
         }
 
-        // Create receive channel
-        let (tx, rx) = mpsc::channel(100);
-
-        // Register route
+        let (tx, lane) = Self::make_lane(&self.sink, &self.secure, payload_type);
         self.register_route(payload_type, tx).await?;
-
-        // Get shared Sink
-        let sink = self.sink.clone();
-
-        // Create WebSocketDataLane, wrapped in `SecureDataLane` so the cached
-        // lane gates both outbound `send()` and the response-reader `recv()`
-        // on this session's `SecureCell` (RFC-0563 review point 3).
-        let lane: Arc<dyn DataLane> = Arc::new(SecureDataLane::new(
-            Arc::new(WebSocketDataLane::new(sink, payload_type, rx)),
-            self.secure.clone(),
-        ));
         Ok(lane)
+    }
+
+    // Keep cached lanes gated by the physical session's shared secure state.
+    fn make_lane(
+        sink: &WsSink,
+        secure: &SecureCell,
+        payload_type: PayloadType,
+    ) -> (mpsc::Sender<bytes::Bytes>, Arc<dyn DataLane>) {
+        let (tx, rx) = mpsc::channel(100);
+        let lane = Arc::new(SecureDataLane::new(
+            Arc::new(WebSocketDataLane::new(sink.clone(), payload_type, rx)),
+            secure.clone(),
+        ));
+        (tx, lane)
     }
 
     /// Close connection
@@ -396,6 +500,10 @@ impl WebSocketConnection {
         // method — RFC-0563 review point on shadowed terminal driving) marks
         // the session `Closed` and invalidates all wrapped `SecureDataLane`s.
         self.secure.drive_terminal(SecureChannelState::Closed);
+
+        // Stop the dispatcher promptly instead of waiting for the peer's
+        // Close echo; a non-cooperative peer must not keep the socket alive.
+        self.teardown.0.cancel();
 
         *self.connected.write().await = false;
 
@@ -474,3 +582,12 @@ impl WireHandle for WebSocketConnection {
 #[cfg(test)]
 #[path = "connection_tests.rs"]
 mod tests;
+
+impl std::fmt::Debug for WebSocketConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never format the reusable credential or credential-bearing request headers.
+        f.debug_struct("WebSocketConnection")
+            .field("secure", &self.secure)
+            .finish_non_exhaustive()
+    }
+}

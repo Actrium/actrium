@@ -243,6 +243,25 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"typescript_stream_e2e:{path}")
             continue
 
+        # These inputs must run the native checksum gate even without Rust edits.
+        # Fall through so the committed binding also selects its normal SDK job.
+        if path in (
+            "packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/actr.kt",
+            "scripts/actr/check-binding-checksums.py",
+        ):
+            targets["rust_core"] = True
+            reasons.append(f"binding_checksums:{path}")
+
+        if path in (
+            "scripts/actr/patch-error-messages.py",
+            "scripts/actr/tests/test_patch_error_messages.py",
+            "scripts/actr/tests/fixtures/ActrError.swift",
+        ):
+            targets["swift_binding"] = True
+            targets["kotlin_binding"] = True
+            reasons.append(f"sdk_error_messages:{path}")
+            continue
+
         if path.startswith(
             ("packages/actr-swift/", "packages/actr-cabi/swift/", "tools/actr/protoc-gen/swift/")
         ):

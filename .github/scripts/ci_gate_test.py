@@ -199,7 +199,7 @@ def test_blocked_typescript_component_e2e_jobs_share_disable_gate() -> None:
 
     for job in (typescript_job, web_browser_job, swift_ts_job):
         assert "if: ${{ false }}" in job
-        assert "#431" in job
+        assert "#50" in job
 
     assert "bash tests/e2e/actr/typescript-stream/run.sh" in typescript_job
     assert "bash tests/e2e/actr/web-browser/run.sh" in web_browser_job
@@ -217,7 +217,7 @@ def test_typescript_componentize_only_allows_known_upstream_failure() -> None:
 
     assert 'grep -Fq "spidermonkey-embedding-splicer"' in guard
     assert 'grep -Fq "not yet implemented"' in guard
-    assert "tracked by #427" in guard
+    assert "tracked by #54" in guard
     assert 'exit "${componentize_status}"' in guard
 
 

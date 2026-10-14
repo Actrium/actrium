@@ -34,16 +34,51 @@ fn prepare_admin_ui() {
     let source_dist = source_dir.join("dist");
     if source_dist.exists() {
         copy_tree(&source_dist, &output_dist).expect("failed to copy prebuilt Admin UI");
-        return;
-    }
-
-    if !try_build_admin_ui(&source_dir, &output_dir) {
+    } else if !try_build_admin_ui(&source_dir, &output_dir) {
         println!(
             "cargo:warning=Admin UI not built (no JS toolchain or build failed); \
              embedding empty dist. Run `pnpm build` in admin/web for a UI-enabled binary."
         );
-        fs::create_dir_all(output_dist).expect("failed to create empty Admin UI dist");
+        fs::create_dir_all(&output_dist).expect("failed to create empty Admin UI dist");
     }
+
+    write_asset_table(&output_dist).expect("failed to write Admin UI asset table");
+}
+
+/// Write `admin_assets.rs`: one `include_bytes!` entry per file under `dist`.
+///
+/// The files are referenced one by one rather than found by walking the
+/// directory at compile time, so they appear in the crate's dep-info and a
+/// distributed compiler (sccache-dist) ships them to the remote worker.
+#[cfg(feature = "admin-ui")]
+fn write_asset_table(dist: &Path) -> io::Result<()> {
+    fn collect(dir: &Path, root: &Path, out: &mut Vec<String>) -> io::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                collect(&path, root, out)?;
+            } else {
+                let relative = path.strip_prefix(root).expect("path is under dist");
+                out.push(relative.to_string_lossy().replace('\\', "/"));
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    collect(dist, dist, &mut files)?;
+    files.sort();
+
+    let mut table = String::from("pub static ADMIN_ASSETS: &[(&str, &[u8])] = &[\n");
+    for file in &files {
+        table.push_str(&format!(
+            "    ({file:?}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/admin-web/dist/\", {file:?}))),\n"
+        ));
+    }
+    table.push_str("];\n");
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is not set"));
+    fs::write(out_dir.join("admin_assets.rs"), table)
 }
 
 /// Attempt to build the Admin UI in Cargo's output directory.

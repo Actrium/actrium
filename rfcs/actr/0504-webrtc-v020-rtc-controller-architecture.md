@@ -1,8 +1,8 @@
 # RFC-0504: Actr RTC upgrade to webrtc-rs v0.20.0: new API adoption and architecture refactoring
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - RFC PR: [Actrium/actr#505](https://github.com/Actrium/actr/pull/505)
-- Tracking issue: [Actrium/actr#504](https://github.com/Actrium/actr/issues/504)
+- Tracking issue: [Actrium/actrium#33](https://github.com/Actrium/actrium/issues/33) (historical [Actrium/actr#504](https://github.com/Actrium/actr/issues/504))
 - Superseded by: None
 - Related: [Actrium/actr#495](https://github.com/Actrium/actr/pull/495), [webrtc-rs v0.20.0 release](https://github.com/webrtc-rs/webrtc/releases/tag/v0.20.0), [webrtc-rs v0.20.0 PeerConnection](https://github.com/webrtc-rs/webrtc/blob/v0.20.0/src/peer_connection/mod.rs), [webrtc-rs v0.20.0 DataChannel](https://github.com/webrtc-rs/webrtc/blob/v0.20.0/src/data_channel/mod.rs), [webrtc-rs v0.20.0 Runtime](https://github.com/webrtc-rs/webrtc/blob/v0.20.0/src/runtime/mod.rs), [webrtc-rs TURN/TCP issue #848](https://github.com/webrtc-rs/webrtc/issues/848)
 

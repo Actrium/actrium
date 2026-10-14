@@ -85,15 +85,18 @@ pub struct RuntimeConfig {
     /// Port for listening to inbound WebSocket connections (direct mode, optional)
     ///
     /// When configured, the node starts a WebSocket server on this port at startup.
-    /// Peer nodes can connect directly via `ws://<host>:<port>` without relaying.
+    /// Peer nodes can connect directly via `wss://<host>:<port>` without relaying.
     pub websocket_listen_port: Option<u16>,
+
+    /// TLS and development policy for peer direct WebSocket connections.
+    pub websocket_security: crate::raw::DirectWebSocketSecurity,
 
     /// WebSocket hostname or IP advertised to the signaling server
     ///
     /// Used together with `websocket_listen_port`. Reported to the signaling server
     /// during registration so that peer nodes know how to connect directly.
     ///
-    /// Defaults to "127.0.0.1" (suitable for local testing only).
+    /// Defaults to the bind address (loopback by default).
     pub websocket_advertised_host: Option<String>,
 
     /// Observability configuration (logging + tracing)
@@ -645,6 +648,7 @@ mod tests {
             scripts: HashMap::new(),
             webrtc: WebRtcConfig::default(),
             websocket_listen_port: None,
+            websocket_security: Default::default(),
             websocket_advertised_host: None,
             observability: ObservabilityConfig {
                 filter_level: "info".to_string(),
