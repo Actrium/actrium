@@ -32,20 +32,32 @@ async fn same_identity_restart(role: TestRtcRole) {
     pair.harness()
         .wait_for_signaling_registration(b, READY_WAIT)
         .await;
+    let first_operation_id = "first-after-same-id-peer-restart";
+    let fresh_operation_id = "new-operation-after-same-id-restart";
     let outcome = tokio::time::timeout(
         Duration::from_secs(20),
-        pair.rpc(
-            PairEndpoint::A,
-            PairEndpoint::B,
-            "first-after-same-id-peer-restart",
-        ),
+        pair.rpc(PairEndpoint::A, PairEndpoint::B, first_operation_id),
     )
     .await;
     let result = outcome.expect("first post-restart request must remain bounded");
     match &result {
         Ok(reply) => assert_eq!(reply.as_ref(), b"pong"),
         Err(ActrError::DeliveryUncertain { operation_id, .. }) => {
-            assert_eq!(operation_id, "first-after-same-id-peer-restart")
+            assert_eq!(operation_id, first_operation_id)
+        }
+        // The stale connection can be revoked before the operation enters
+        // the wire. This is a bounded pre-send failure, not a replay.
+        Err(ActrError::ConnectionNotReady(_)) => {
+            assert_eq!(
+                pair.harness().peer(b).request_count(first_operation_id),
+                0,
+                "a pre-send rejection must not execute on the restarted peer"
+            );
+            assert_eq!(
+                pair.harness().peer(a).pending_count().await,
+                0,
+                "a pre-send rejection must release its pending request"
+            );
         }
         Err(ActrError::TimedOut) => {}
         other => panic!("unexpected first operation outcome: {other:?}"),
@@ -92,16 +104,17 @@ async fn same_identity_restart(role: TestRtcRole) {
     };
     let fresh = if settled {
         Some(
-            pair.rpc(
-                PairEndpoint::A,
-                PairEndpoint::B,
-                "new-operation-after-same-id-restart",
-            )
-            .await,
+            pair.rpc(PairEndpoint::A, PairEndpoint::B, fresh_operation_id)
+                .await,
         )
     } else {
         None
     };
+    // Observe before teardown can clear pending state, and after recovery
+    // so a delayed replay of the rejected operation cannot escape detection.
+    let first_executions = pair.harness().peer(b).request_count(first_operation_id);
+    let fresh_executions = pair.harness().peer(b).request_count(fresh_operation_id);
+    let pending = pair.harness().peer(a).pending_count().await;
     pair.shutdown().await;
     assert!(
         settled,
@@ -111,6 +124,15 @@ async fn same_identity_restart(role: TestRtcRole) {
         matches!(fresh, Some(Ok(ref reply)) if reply.as_ref() == b"pong"),
         "new operation did not recover: {fresh:?}"
     );
+    if matches!(result, Err(ActrError::ConnectionNotReady(_))) {
+        assert_eq!(
+            first_executions, 0,
+            "a pre-send rejected operation must stay unexecuted after recovery"
+        );
+    }
+    assert!(first_executions <= 1, "the first operation must not replay");
+    assert_eq!(fresh_executions, 1, "the fresh operation must execute once");
+    assert_eq!(pending, 0, "completed calls must leave no pending requests");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

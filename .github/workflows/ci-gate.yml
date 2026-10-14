@@ -103,6 +103,91 @@ jobs:
             --head-sha "$HEAD_SHA" \
             --manual-full "$MANUAL_FULL"
 
+  cli_web_assets:
+    name: Prepare CLI Web Runtime
+    needs: determine
+    if: needs.determine.outputs.rust_core == 'true' || needs.determine.outputs.e2e_package_runtime == 'true' || needs.determine.outputs.web_binding == 'true' || needs.determine.outputs.kotlin_binding == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Install wasm-pack
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
+      - name: Cache CLI web runtime assets
+        # One fixed toolchain produces assets for every consumer, including MSRV.
+        # Keep the generated files separate from source-controlled HTML and JS.
+        id: cli-web-assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+            crates/actr-cli/assets/web-runtime/actr_sw_host.js
+            packages/actr-web/dist/sw
+          key: >-
+            cli-web-runtime-v4-rust1.98.0-wp0.15.0-wb0.2.126-${{ hashFiles(
+              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/config.toml',
+              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
+              'packages/actr-web/.cargo/config.toml', 'packages/actr-web/rust-toolchain*',
+              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
+              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
+              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
+              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
+      - name: Cache cold web-build dependencies
+        # Output-cache hits skip both this restore and its post-job save.
+        if: steps.cli-web-assets.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-web -> ../../target/bindings-web
+          cache-bin: false
+          shared-key: cli-web-assets
+      - name: Ensure wasm-bindgen CLI
+        if: steps.cli-web-assets.outputs.cache-hit != 'true'
+        run: bash tools/ci/runner/install-wasm-bindgen.sh packages/actr-web/Cargo.lock
+      - name: Generate CLI web runtime assets
+        run: |
+          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
+             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ] &&
+             [ -s packages/actr-web/dist/sw/actr_sw_host.d.ts ] &&
+             [ -s packages/actr-web/dist/sw/package.json ]; then
+            bash packages/actr-web/scripts/sync-cli-assets.sh
+          else
+            bash packages/actr-web/scripts/sync-cli-assets.sh --build
+          fi
+      - name: Upload CLI web runtime assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-web-runtime
+          path: |
+            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+            crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload sw-host runtime assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: sw-host-runtime
+          path: packages/actr-web/dist/sw/
+          if-no-files-found: error
+          retention-days: 1
+
   e2e_rust:
     name: Rust E2E Compile
     needs: determine
@@ -145,7 +230,7 @@ jobs:
 
   e2e_package_runtime:
     name: E2E Package Runtime
-    needs: determine
+    needs: [determine, cli_web_assets]
     if: needs.determine.outputs.e2e_package_runtime == 'true'
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 45
@@ -171,37 +256,24 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked --force
+        run: |
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: false
-      - name: Cache CLI web runtime assets
-        # Cache generated files only; HTML and the SW entry point stay in source.
-        # Include the web workspace and all monorepo path dependencies.
-        id: cli-web-assets
-        uses: actions/cache@v4
+      - name: Download CLI web runtime assets
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
-            crates/actr-cli/assets/web-runtime/actr_sw_host.js
-          key: >-
-            cli-web-runtime-v2-${{ hashFiles(
-              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
-              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
-              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
-              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
-              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
-              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
-              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
-      - name: Generate CLI web runtime assets
+          name: cli-web-runtime
+          path: crates/actr-cli/assets/web-runtime
+      - name: Sync CLI source assets
         run: |
-          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ]; then
-            bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
-          else
-            bash packages/actr-web/scripts/sync-cli-assets.sh --build
-          fi
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Run package runtime echo e2e (PR gate, MODE=path1)
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
 
@@ -219,17 +291,11 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
-        # Existing advisories outside the WASM host are tracked separately:
-        # maxminddb (framework GeoIP), protobuf 2 (prometheus), rsa (TURN).
-        run: >-
-          cargo audit
-          --ignore RUSTSEC-2025-0132
-          --ignore RUSTSEC-2024-0437
-          --ignore RUSTSEC-2023-0071
+        run: cargo audit
 
   rust:
     name: Rust
-    needs: determine
+    needs: [determine, cli_web_assets]
     if: needs.determine.outputs.rust_core == 'true'
     runs-on: [self-hosted, Linux, X64]
     permissions:
@@ -253,9 +319,8 @@ jobs:
           # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile
           # the wasm_actor_fixture Component under --all-features.
           targets: wasm32-wasip2
-          # rustfmt + clippy are not in the minimal profile; this job runs
-          # `cargo fmt --check` and clippy with -D warnings.
-          components: rustfmt,clippy
+          # rustfmt is not in the minimal profile; Clippy is pinned separately.
+          components: rustfmt
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: OTel payload-logging guard
@@ -277,6 +342,9 @@ jobs:
         run: |
           cmp crates/actr-framework/wit-v2/actr-workload.wit crates/actr-hyper/wit-v2/actr-workload.wit
       - name: Cache cargo-installed tools
+        # The fleet image already supplies the pinned tools. Restoring an old
+        # binary archive can overwrite them and force minutes of recompilation.
+        if: runner.environment != 'self-hosted'
         id: cargo-tools
         uses: actions/cache@v4
         with:
@@ -284,47 +352,33 @@ jobs:
             ~/.cargo/bin/wasm-pack
             ~/.cargo/bin/wasm-component-ld
             ~/.cargo/bin/wasm-tools
-          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
+          key: cargo-tools-v2-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
       - name: Install wasm-pack
         run: |
-          if ! command -v wasm-pack >/dev/null 2>&1; then
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
             cargo install wasm-pack --version 0.15.0 --locked --force
           fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
       - name: Install wasm Component Model toolchain
         run: |
-          if ! command -v wasm-component-ld >/dev/null 2>&1; then
+          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
             cargo install wasm-component-ld --version 0.5.26 --locked --force
           fi
-          if ! command -v wasm-tools >/dev/null 2>&1; then
+          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
+          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
             cargo install wasm-tools --version 1.253.0 --locked --force
           fi
-      - name: Cache CLI web runtime assets
-        # Cache generated files only; HTML and the SW entry point stay in source.
-        # Include the web workspace and all monorepo path dependencies.
-        id: cli-web-assets
-        uses: actions/cache@v4
+          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
+      - name: Download CLI web runtime assets
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
-            crates/actr-cli/assets/web-runtime/actr_sw_host.js
-          key: >-
-            cli-web-runtime-v2-${{ hashFiles(
-              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
-              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
-              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
-              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
-              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
-              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
-              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
-      - name: Generate CLI web runtime assets
+          name: cli-web-runtime
+          path: crates/actr-cli/assets/web-runtime
+      - name: Sync CLI source assets
         run: |
-          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ]; then
-            bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
-          else
-            bash packages/actr-web/scripts/sync-cli-assets.sh --build
-          fi
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Test Rust protoc plugin well-known types
@@ -351,13 +405,18 @@ jobs:
           python3 scripts/actr/check-binding-checksums.py \
             --library target/debug/libactr.so \
             --binding packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/actr.kt
+      - name: Install pinned Clippy toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --target wasm32-wasip2 --no-self-update
       - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        # Cargo rejects lint warnings without adding compiler flags.
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo +1.97.1 clippy --workspace --all-targets --all-features
 
 
   test:
     name: Test (Rust, ${{ matrix.shard }})
-    needs: determine
+    needs: [determine, cli_web_assets]
     if: needs.determine.outputs.rust_core == 'true'
     runs-on: [self-hosted, Linux, X64]
     permissions:
@@ -443,6 +502,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-targets: false
+          # Both shards read the same dependencies; only one compresses/saves.
+          save-if: ${{ matrix.shard == 'rest' }}
       - name: Run sccache-cache
         # rustc-level compilation cache backed by the GitHub Actions cache.
         # The workspace's full test-target set exceeds what rust-cache can
@@ -456,8 +517,13 @@ jobs:
         run: |
           install_binary() {
             local name="$1"
-            local url="$2"
-            local sha256="$3"
+            local expected="$2"
+            local url="$3"
+            local sha256="$4"
+            if "$HOME/.cargo/bin/$name" --version 2>/dev/null | grep -Eq "$expected"; then
+              echo "Reusing image $name"
+              return
+            fi
             local archive="$RUNNER_TEMP/$name.tar.gz"
             local extract_dir
             extract_dir=$(mktemp -d "$RUNNER_TEMP/$name.XXXXXX")
@@ -466,48 +532,33 @@ jobs:
             echo "$sha256  $archive" | sha256sum --check --status
             tar --extract --gzip --file "$archive" --strip-components=1 --directory "$extract_dir"
             install --mode=0755 "$extract_dir/$name" "$HOME/.cargo/bin/$name"
+            rm -rf "$archive" "$extract_dir"
+            "$HOME/.cargo/bin/$name" --version | grep -Eq "$expected"
           }
 
-          install_binary wasm-pack \
+          install_binary wasm-pack '^wasm-pack 0\.15\.0$' \
             https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
             "$WASM_PACK_SHA256"
-          install_binary wasm-component-ld \
+          install_binary wasm-component-ld '^wasm-component-ld 0\.5\.26$' \
             https://github.com/bytecodealliance/wasm-component-ld/releases/download/v0.5.26/wasm-component-ld-v0.5.26-x86_64-linux.tar.gz \
             "$WASM_COMPONENT_LD_SHA256"
-          install_binary wasm-tools \
+          install_binary wasm-tools '^wasm-tools 1\.253\.0( \(.*\))?$' \
             https://github.com/bytecodealliance/wasm-tools/releases/download/v1.253.0/wasm-tools-1.253.0-x86_64-linux.tar.gz \
             "$WASM_TOOLS_SHA256"
 
           wasm-pack --version
           wasm-component-ld --version
           wasm-tools --version
-      - name: Cache CLI web runtime assets
-        # Cache generated files only; HTML and the SW entry point stay in source.
-        # Include the web workspace and all monorepo path dependencies.
-        id: cli-web-assets
-        uses: actions/cache@v4
+      - name: Download CLI web runtime assets
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
-            crates/actr-cli/assets/web-runtime/actr_sw_host.js
-          key: >-
-            cli-web-runtime-v2-${{ hashFiles(
-              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
-              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
-              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
-              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
-              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
-              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
-              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
-      - name: Generate CLI web runtime assets
+          name: cli-web-runtime
+          path: crates/actr-cli/assets/web-runtime
+      - name: Sync CLI source assets
         run: |
-          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ]; then
-            bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
-          else
-            bash packages/actr-web/scripts/sync-cli-assets.sh --build
-          fi
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Free disk space
         # `cargo nextest run --workspace --all-features` builds every test
         # target into a cold target/ (cache-targets: false), which can exceed
@@ -524,13 +575,40 @@ jobs:
         # Prebuilt binary. Pin to a fixed release for reproducibility if
         # desired via `taiki-e/install-action@v2` with `tool: cargo-nextest@<ver>`.
         uses: taiki-e/install-action@cargo-nextest
-      - name: RFC-0507 live WebSocket no-replay gate
+      - name: Build rest test inventory and verify RFC-0507 acceptance
         if: matrix.shard == 'rest'
-        # Fail if the exact acceptance test disappears; its nextest override
-        # forbids retries. The full shard below retains all other safety gates.
-        run: >-
-          cargo nextest run -p actr-hyper --all-features --no-tests=fail
-          -E 'test(/^outbound::peer_gate::websocket_tests::live_websocket_partial_write_is_uncertain_without_replay$/)'
+        # Compile one workspace feature graph and reuse its binary metadata.
+        # Reuse bypasses a second Cargo build and build-script reruns.
+        # The acceptance test executes once with its retry-free override.
+        run: |
+          cargo metadata --format-version 1 --all-features --locked \
+            > "$RUNNER_TEMP/nextest-rest-cargo.json"
+          cargo nextest list --workspace --all-features \
+            --list-type binaries-only --message-format json \
+            > "$RUNNER_TEMP/nextest-rest-binaries.json"
+          cargo nextest list \
+            --cargo-metadata "$RUNNER_TEMP/nextest-rest-cargo.json" \
+            --binaries-metadata "$RUNNER_TEMP/nextest-rest-binaries.json" \
+            -E "not($REALTIME_BINARIES)" --message-format json \
+            > "$RUNNER_TEMP/nextest-rest-tests.json"
+          python3 - "$RUNNER_TEMP/nextest-rest-tests.json" <<'PY'
+          import json
+          import sys
+
+          acceptance = "outbound::peer_gate::websocket_tests::live_websocket_partial_write_is_uncertain_without_replay"
+          with open(sys.argv[1]) as source:
+              inventory = json.load(source)
+          selected = []
+          for suite in inventory["rust-suites"].values():
+              if suite["package-name"] != "actr-hyper" or suite["kind"] != "lib":
+                  continue
+              case = suite.get("testcases", {}).get(acceptance)
+              if case and not case["ignored"] and case["filter-match"]["status"] == "matches":
+                  selected.append(suite["binary-id"])
+          if len(selected) != 1:
+              raise SystemExit("RFC-0507 acceptance must be selected exactly once in the rest shard")
+          print(f"RFC-0507 acceptance selected in {selected[0]}; the rest suite runs it without retries")
+          PY
       - name: Run tests (nextest, ${{ matrix.shard }} shard)
         # Integration tests (tests/) get bounded retries via .config/nextest.toml.
         # --no-fail-fast: run the whole suite even when a test fails. With the
@@ -541,7 +619,10 @@ jobs:
           if [ "${{ matrix.shard }}" = realtime ]; then
             cargo nextest run --workspace --all-features --no-fail-fast -E "$REALTIME_BINARIES"
           else
-            cargo nextest run --workspace --all-features --no-fail-fast -E "not($REALTIME_BINARIES)"
+            cargo nextest run \
+              --cargo-metadata "$RUNNER_TEMP/nextest-rest-cargo.json" \
+              --binaries-metadata "$RUNNER_TEMP/nextest-rest-binaries.json" \
+              --no-fail-fast -E "not($REALTIME_BINARIES)"
           fi
       - name: Run doctests
         # nextest does not run doctests; keep them on the libtest harness.
@@ -553,7 +634,7 @@ jobs:
 
   rust_msrv:
     name: Rust MSRV (1.95)
-    needs: determine
+    needs: [determine, cli_web_assets]
     if: needs.determine.outputs.rust_core == 'true'
     runs-on: [self-hosted, Linux, X64]
     permissions:
@@ -587,6 +668,9 @@ jobs:
             sudo apt-get install -y pkg-config libssl-dev cmake
           fi
       - name: Cache cargo-installed tools
+        # The fleet image already supplies the pinned tools. Restoring an old
+        # binary archive can overwrite them and force minutes of recompilation.
+        if: runner.environment != 'self-hosted'
         id: cargo-tools
         uses: actions/cache@v4
         with:
@@ -594,47 +678,33 @@ jobs:
             ~/.cargo/bin/wasm-pack
             ~/.cargo/bin/wasm-component-ld
             ~/.cargo/bin/wasm-tools
-          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
+          key: cargo-tools-v2-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
       - name: Install wasm-pack
         run: |
-          if ! command -v wasm-pack >/dev/null 2>&1; then
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
             cargo install wasm-pack --version 0.15.0 --locked --force
           fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
       - name: Install wasm Component Model toolchain
         run: |
-          if ! command -v wasm-component-ld >/dev/null 2>&1; then
+          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
             cargo install wasm-component-ld --version 0.5.26 --locked --force
           fi
-          if ! command -v wasm-tools >/dev/null 2>&1; then
+          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
+          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
             cargo install wasm-tools --version 1.253.0 --locked --force
           fi
-      - name: Cache CLI web runtime assets
-        # Cache generated files only; HTML and the SW entry point stay in source.
-        # Include the web workspace and all monorepo path dependencies.
-        id: cli-web-assets
-        uses: actions/cache@v4
+          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
+      - name: Download CLI web runtime assets
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
-            crates/actr-cli/assets/web-runtime/actr_sw_host.js
-          key: >-
-            cli-web-runtime-v2-${{ hashFiles(
-              'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/**',
-              'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
-              'packages/actr-web/.cargo/**', 'packages/actr-web/rust-toolchain*',
-              'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
-              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
-              'crates/actr-framework/**', 'crates/actr-platform-traits/**',
-              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
-      - name: Generate CLI web runtime assets
+          name: cli-web-runtime
+          path: crates/actr-cli/assets/web-runtime
+      - name: Sync CLI source assets
         run: |
-          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ]; then
-            bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
-          else
-            bash packages/actr-web/scripts/sync-cli-assets.sh --build
-          fi
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+          test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
+          bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Build at MSRV (locked)
         run: cargo build --workspace --all-targets --all-features --locked
 
@@ -832,23 +902,28 @@ jobs:
         run: |
           cmp crates/actr-framework/wit-v2/actr-workload.wit crates/actr-hyper/wit-v2/actr-workload.wit
       - name: Cache cargo-installed tools
+        # The fleet image already supplies the pinned tools. Restoring an old
+        # binary archive can overwrite them and force minutes of recompilation.
+        if: runner.environment != 'self-hosted'
         id: cargo-tools
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/wasm-tools
             ~/.cargo/bin/wasm-pack
-          key: cargo-tools-v1-${{ runner.os }}-wt1.253.0-wp0.15.0
+          key: cargo-tools-v2-${{ runner.os }}-wt1.253.0-wp0.15.0
       - name: Install wasm-tools
         run: |
-          if ! command -v wasm-tools >/dev/null 2>&1; then
+          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
             cargo install wasm-tools --version 1.253.0 --locked --force
           fi
+          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
       - name: Install wasm-pack
         run: |
-          if ! command -v wasm-pack >/dev/null 2>&1; then
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
             cargo install wasm-pack --version 0.15.0 --locked --force
           fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
       - name: Verify TypeScript workload WIT drift
         run: |
           cmp crates/actr-framework/wit-v2/actr-workload.wit packages/actr-typescript/actr-workload/src/wit-v2/actr-workload.wit
@@ -979,13 +1054,15 @@ jobs:
 
   kotlin:
     name: Kotlin
-    needs: determine
+    needs: [determine, cli_web_assets]
     if: needs.determine.outputs.kotlin_binding == 'true'
     uses: ./.github/workflows/ci-kotlin.yml
+    with:
+      cli_web_runtime_artifact: cli-web-runtime
 
   web:
     name: Web
-    needs: determine
+    needs: [determine, cli_web_assets]
     if: needs.determine.outputs.web_binding == 'true'
     runs-on: [self-hosted, Linux, X64]
     permissions:
@@ -995,18 +1072,6 @@ jobs:
       RUST_BACKTRACE: 1
     steps:
       - uses: actions/checkout@v5
-      - name: Cache cargo-installed tools
-        id: cargo-tools
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/wasm-pack
-          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0
-      - name: Install wasm-pack
-        run: |
-          if ! command -v wasm-pack >/dev/null 2>&1; then
-            cargo install wasm-pack --version 0.15.0 --locked --force
-          fi
       - name: Check formatting
         working-directory: packages/actr-web
         run: cargo fmt --all -- --check
@@ -1015,11 +1080,17 @@ jobs:
         run: cargo check --workspace --target wasm32-unknown-unknown --locked
       - name: WIT codegen drift gate (Option U)
         run: cargo run -p actr-wit-compile-web -- --check
-      - name: Build sw-host runtime assets
-        working-directory: packages/actr-web/crates/sw-host
-        env:
-          ACTR_SKIP_CLI_ASSET_SYNC: "1"
-        run: bash build.sh
+      - name: Download sw-host runtime assets
+        uses: actions/download-artifact@v4
+        with:
+          name: sw-host-runtime
+          path: packages/actr-web/dist/sw
+      - name: Verify sw-host runtime assets
+        run: |
+          test -s packages/actr-web/dist/sw/actr_sw_host_bg.wasm
+          test -s packages/actr-web/dist/sw/actr_sw_host.js
+          test -s packages/actr-web/dist/sw/actr_sw_host.d.ts
+          test -s packages/actr-web/dist/sw/package.json
       - name: crates/actr-cli/assets sync drift gate
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --check --skip-sw-host
 
@@ -1154,7 +1225,6 @@ jobs:
         uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
-          components: clippy
       # protoc 29.3 ships in the self-hosted runner image; skip the
       # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
@@ -1173,8 +1243,12 @@ jobs:
       # Exercise the native RTC implementation in a dedicated job.
       - name: Check (WebRTC)
         run: cargo check -p actr-hyper --all-targets
+      - name: Install pinned Clippy toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --target wasm32-wasip2 --target wasm32-unknown-unknown --no-self-update
       - name: Clippy (WebRTC, deny warnings)
-        run: cargo clippy -p actr-hyper --all-targets -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
+        run: cargo +1.97.1 clippy -p actr-hyper --all-targets
       # nextest (not bare cargo test): the real-PC suites in this filter hit
       # CI-load handshake-timing flakes, and libtest would fail the whole job
       # on the first one without retries or running the rest. nextest picks up
@@ -1216,6 +1290,7 @@ jobs:
     needs:
       - identity
       - determine
+      - cli_web_assets
       - e2e_rust
       - e2e_package_runtime
       - audit
@@ -1248,6 +1323,7 @@ jobs:
       CSHARP_RESULT: ${{ needs.csharp.result }}
       WEB_RESULT: ${{ needs.web.result }}
       C_GO_WORKLOADS_RESULT: ${{ needs.c_go_workloads.result }}
+      CLI_WEB_ASSETS_RESULT: ${{ needs.cli_web_assets.result }}
       E2E_RUST_RESULT: ${{ needs.e2e_rust.result }}
       E2E_PACKAGE_RUNTIME_RESULT: ${{ needs.e2e_package_runtime.result }}
       TEST_RESULT: ${{ needs.test.result }}
@@ -1274,6 +1350,7 @@ jobs:
               "csharp": os.environ["CSHARP_RESULT"],
               "web": os.environ["WEB_RESULT"],
               "c_go_workloads": os.environ["C_GO_WORKLOADS_RESULT"],
+              "cli_web_assets": os.environ["CLI_WEB_ASSETS_RESULT"],
               "e2e_rust": os.environ["E2E_RUST_RESULT"],
               "e2e_package_runtime": os.environ["E2E_PACKAGE_RUNTIME_RESULT"],
               "test": os.environ["TEST_RESULT"],
