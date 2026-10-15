@@ -1602,6 +1602,12 @@ async fn create_transport_cancelled_by_close_action_does_not_leave_stale_dest() 
         let target = make_actor_id(2);
         let dest = Dest::peer(target);
 
+        // notify_waiters does not retain a permit for a future subscriber.
+        // Arm the observer before another runtime worker can start the build.
+        let creation_started = started.notified();
+        tokio::pin!(creation_started);
+        creation_started.as_mut().enable();
+
         let send_task = tokio::spawn({
             let transport = transport.clone();
             let dest = dest.clone();
@@ -1612,7 +1618,7 @@ async fn create_transport_cancelled_by_close_action_does_not_leave_stale_dest() 
             }
         });
 
-        tokio::time::timeout(Duration::from_secs(1), started.notified())
+        tokio::time::timeout(Duration::from_secs(1), creation_started)
             .await
             .expect("connection creation should start");
         assert!(
