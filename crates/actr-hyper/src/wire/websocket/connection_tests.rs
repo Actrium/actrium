@@ -699,6 +699,39 @@ async fn in_memory_pair() -> (
     (WebSocketConnection::from_server_stream(server), client)
 }
 
+#[tokio::test]
+async fn unsupported_media_frames_do_not_block_rpc() {
+    let (connection, mut peer) = in_memory_pair().await;
+    assert!(connection.get_lane(PayloadType::MediaRtp).await.is_err());
+    let lane = connection.get_lane(PayloadType::RpcReliable).await.unwrap();
+
+    // Exceed the normal route capacity without creating an unread media queue.
+    for _ in 0..128 {
+        peer.send(WsMessage::Binary(bytes::Bytes::from_static(
+            b"\x04\x00\x00\x00\x00",
+        )))
+        .await
+        .unwrap();
+    }
+    peer.send(WsMessage::Binary(bytes::Bytes::from_static(
+        b"\x00\x00\x00\x00\x05after",
+    )))
+    .await
+    .unwrap();
+
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), lane.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .as_ref(),
+        b"after"
+    );
+    assert!(connection.router.read().await[PayloadType::MediaRtp as usize].is_none());
+    assert!(connection.secure.state().is_sendable());
+    connection.close().await.unwrap();
+}
+
 #[tokio::test(start_paused = true)]
 async fn endless_peer_pressure_cannot_hide_a_stalled_reader() {
     let (connection, mut peer) = in_memory_pair().await;

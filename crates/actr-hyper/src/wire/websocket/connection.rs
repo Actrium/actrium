@@ -216,7 +216,6 @@ impl WebSocketConnection {
             PayloadType::RpcSignal,
             PayloadType::StreamReliable,
             PayloadType::StreamLatencyFirst,
-            PayloadType::MediaRtp,
         ] {
             let (tx, lane) = Self::make_lane(&sink, &secure, payload_type);
             routes[payload_type as usize] = Some(tx);
@@ -471,6 +470,11 @@ impl WebSocketConnection {
         &self,
         payload_type: PayloadType,
     ) -> NetworkResult<Arc<dyn DataLane>> {
+        if payload_type == PayloadType::MediaRtp {
+            return Err(NetworkError::NoRoute(
+                "MediaRtp is not supported by direct WebSocket connections".into(),
+            ));
+        }
         // Check connection status
         if !*self.connected.read().await {
             return Err(NetworkError::WebSocketClosed(
@@ -763,6 +767,12 @@ impl WebSocketSession {
                     // decodemessage
                     match TransportMessage::decode(&data) {
                         Ok(transport_msg) => {
+                            // Media uses its dedicated transport, not a WebSocket
+                            // data lane. Never enqueue frames for an unread route.
+                            if transport_msg.payload_type == PayloadType::MediaRtp {
+                                tracing::debug!("dropping unsupported WebSocket MediaRtp frame");
+                                continue;
+                            }
                             // Route to corresponding 's Lane (using array index reference)
                             let idx = transport_msg.payload_type as usize;
                             let tx = self.router.read().await[idx].clone();
