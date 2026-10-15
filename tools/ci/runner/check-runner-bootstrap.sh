@@ -1,14 +1,21 @@
 #!/bin/sh
 # Validate the common bootstrap and inherited toolcache before publishing.
 set -eu
-[ "$#" -eq 5 ] || { echo "Expected Python 3.11, Python 3.13, Node, JDK and Gradle URL pins" >&2; exit 1; }
+[ "$#" -eq 6 ] || { echo "Expected Python 3.11, Python 3.13, Node, JDK, Gradle URL and Rust pins" >&2; exit 1; }
 py311="$1"
 py313="$2"
 node_version="$3"
 jdk_version="$4"
 gradle_url="$5"
+rust_version="$6"
 rustc --version
 cargo --version
+test "$(rustc --version | cut -d ' ' -f 2)" = "$rust_version"
+test "$(cargo --version | cut -d ' ' -f 2)" = "$rust_version"
+rustup component list --installed | grep -q '^llvm-tools'
+rustup component list --installed | grep -q '^rust-src'
+rustup target list --installed | grep -Fxq wasm32-unknown-unknown
+rustup target list --installed | grep -Fxq wasm32-wasip2
 rustfmt --version
 cargo-clippy --version
 mold --version | grep -Fq 'mold 2.40.4'

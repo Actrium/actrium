@@ -44,15 +44,17 @@ The image includes the GitHub Actions agent, Rust and WebAssembly tools, hosted
 Python/Node/Java toolcaches, sccache, Binaryen, and zstd. Both image build paths
 verify pinned versions and artifact checksums.
 
-| Tool                                      | Version       |
-| ----------------------------------------- | ------------- |
-| wasm-bindgen and wasm-bindgen-test-runner | `0.2.126`     |
-| wasm-pack                                 | `0.15.0`      |
-| wasm-component-ld                         | `0.5.26`      |
-| wasm-tools                                | `1.253.0`     |
-| Binaryen                                  | `version_117` |
-| sccache                                   | `0.18.0`      |
-| zstd                                      | `1.5.7`       |
+| Tool                                     | Version                            |
+| ---------------------------------------- | ---------------------------------- |
+| Default Rust and Cargo                   | `1.99.0`                           |
+| Additional Rust toolchains               | `1.95.0` (MSRV), nightly (coverage)  |
+| wasm-bindgen and wasm-bindgen-test-runner | `0.2.126`                          |
+| wasm-pack                                | `0.15.0`                           |
+| wasm-component-ld                        | `0.5.26`                           |
+| wasm-tools                               | `1.253.0`                          |
+| Binaryen                                 | `version_117`                      |
+| sccache                                  | `0.18.0`                           |
+| zstd                                     | `1.5.7`                            |
 
 The installer pins must match the workflows and the web workspace lockfile.
 The zstd installer also provides `zstdmt`, `unzstd`, and `zstdcat` for Actions Cache.
@@ -66,6 +68,10 @@ An explicit container command is forwarded. Startup performs no tool downloads.
 `Dockerfile.incremental` requires a previously published plain runner image,
 pinned by digest, through `RUNNER_BASE_IMAGE`. It preserves the inherited
 layers and adds the same tool, entrypoint, and cache-worker changes.
+Both paths install Rust `1.99.0` with Clippy, rustfmt, rust-src, llvm-tools-preview,
+and the two WebAssembly targets. The incremental build removes the inherited
+floating stable toolchain after selecting the exact version. Shared bootstrap
+checks reject an image whose default Rust or Cargo version differs from the pin.
 
 Supply image references and any network configuration from the build environment:
 

@@ -137,10 +137,22 @@ RUN python3 /usr/local/bin/prepare-gradle-cache.py \
     --distribution-url "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
     --require-preseeded
 
+# Install the exact CI pin instead of inheriting the base's floating stable.
+# Keep the MSRV and nightly toolchains available for their dedicated jobs.
+ARG RUST_VERSION=1.99.0
+RUN set -eux; \
+    rustup toolchain install "${RUST_VERSION}" --profile minimal \
+        --component clippy --component rustfmt --component rust-src \
+        --component llvm-tools-preview \
+        --target wasm32-unknown-unknown --target wasm32-wasip2 \
+        --no-self-update; \
+    rustup default "${RUST_VERSION}"; \
+    rustup toolchain uninstall stable
+
 # Fail both build paths on the same missing capabilities or cache markers.
 COPY --chown=runner:runner check-runner-bootstrap.sh /tmp/check-runner-bootstrap.sh
 RUN sh /tmp/check-runner-bootstrap.sh "${PY311}" "${PY313}" "${NODE_VERSION}" "${JDK_VERSION}" \
-    "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+    "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" "${RUST_VERSION}" \
     && rm /tmp/check-runner-bootstrap.sh
 
 ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]

@@ -5,7 +5,7 @@
 #
 # This image is the execution environment for actr CI jobs running on
 # self-hosted Linux runners. It bundles the GitHub Actions runner agent,
-# the Rust toolchain pinned to the workspace MSRV, and the system
+# the Rust toolchain pinned by CI, the workspace MSRV, and the system
 # libraries the build needs, so a job can start without spending minutes
 # on `apt-get install` / `rustup` every run.
 #
@@ -22,11 +22,11 @@
 
 ARG UBUNTU_VERSION=22.04
 ARG RUNNER_VERSION=2.336.0
-# Pinned to the CI toolchain per #199 (repo-wide @1.98.0 pinning). Preinstalling
-# the exact version means `dtolnay/rust-toolchain@1.98.0` resolves locally on
+# Pinned to the CI toolchain per #199 (repo-wide @1.99.0 pinning). Preinstalling
+# the exact version means `dtolnay/rust-toolchain@1.99.0` resolves locally on
 # runner pods with no toolchain download; bump this together with the workflow
 # pins when the CI toolchain moves.
-ARG RUST_VERSION=1.98.0
+ARG RUST_VERSION=1.99.0
 ARG PROTOC_VERSION=29.3
 # Optional apt mirror override for builds behind a slow link to
 # archive.ubuntu.com (e.g. `--build-arg APT_MIRROR=mirrors.aliyun.com`).
@@ -160,8 +160,8 @@ ARG RUSTUP_UPDATE_ROOT=
 USER runner
 WORKDIR /home/runner
 
-# Rust toolchains. The default is the exact CI pin (1.98.0, see #199) so the
-# `dtolnay/rust-toolchain@1.98.0` Setup Rust steps on ARC resolve locally.
+# Rust toolchains. The default is the exact CI pin (1.99.0, see #199) so the
+# `dtolnay/rust-toolchain@1.99.0` Setup Rust steps on ARC resolve locally.
 # The MSRV toolchain (1.95.0) is preinstalled for the `rust_msrv` job; nightly
 # for the coverage-web-wasm `@nightly` job. Components: clippy + rustfmt +
 # rust-src (cargo doc/doctests) + llvm-tools-preview (coverage, ci-coverage.yml).
@@ -589,7 +589,7 @@ RUN set -eux; \
 # Both build paths use the same bootstrap and toolcache validation.
 COPY --chown=runner:runner check-runner-bootstrap.sh /tmp/check-runner-bootstrap.sh
 RUN sh /tmp/check-runner-bootstrap.sh "${PY311}" "${PY313}" "${NODE_VERSION}" "${JDK_VERSION}" \
-    "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+    "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" "${RUST_VERSION}" \
     && rm /tmp/check-runner-bootstrap.sh
 
 # The runner agent is registered at container start: ARC injects the JIT
