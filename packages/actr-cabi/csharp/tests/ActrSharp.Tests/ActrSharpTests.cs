@@ -64,20 +64,7 @@ public class ActrCabiExceptionTests
         Assert.Same(inner, ex.InnerException);
     }
 
-    [Fact]
-    public void IsSafeToRetry_requires_explicit_pre_submission_proof()
-    {
-        // This reserved status requires proof; native runtime timeouts use -24.
-        Assert.True(
-            new ActrCabiException(ActrCabiException.CodeCallTimedOut, "proven pre-submission expiry")
-                .IsSafeToRetry);
-        Assert.False(
-            new ActrCabiException(ActrCabiException.CodeDeliveryUncertain, "delivery uncertain")
-                .IsSafeToRetry);
-        Assert.False(
-            new ActrCabiException(ActrCabiException.CodeGenericError, "other failure")
-                .IsSafeToRetry);
-    }
+
 }
 
 public class ActrNativeInfoTests

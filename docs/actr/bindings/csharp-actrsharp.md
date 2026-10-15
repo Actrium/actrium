@@ -87,9 +87,8 @@ It therefore returns `ActrCabiException.CodeDeliveryUncertain` (`-24`), as does
 an explicit uncertain-delivery error from a peer Call. Do not replay either
 outcome automatically.
 
-`CodeCallTimedOut` (`-23`) is reserved for an expiry with explicit proof that
-nothing was submitted. The current C ABI Call path does not have that proof;
-its plain runtime `TimedOut` never produces `-23` or `IsSafeToRetry = true`.
+The C ABI currently provides no positive safe-to-retry status: an error alone
+cannot distinguish pre-send expiry from a timeout returned by workload code.
 When an uncertain error includes an operation ID, use it for reconciliation;
 a local workload timeout may not include one. Application-level idempotency or
 a status check is required before deciding whether to issue another operation.

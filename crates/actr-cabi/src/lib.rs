@@ -27,8 +27,8 @@ use actr_protocol::{ActrType, PayloadType};
 use bytes::Bytes;
 
 pub use crate::error::{
-    CALL_TIMED_OUT, DELIVERY_UNCERTAIN, HANDLE_INVALID, INVALID_UTF8, NULL_POINTER, PANIC,
-    REQUEST_ID_UNKNOWN, RT_INIT_FAILED, RT_NOT_INITIALIZED, SUCCESS, WORKLOAD_NOT_FOUND,
+    DELIVERY_UNCERTAIN, HANDLE_INVALID, INVALID_UTF8, NULL_POINTER, PANIC, REQUEST_ID_UNKNOWN,
+    RT_INIT_FAILED, RT_NOT_INITIALIZED, SUCCESS, WORKLOAD_NOT_FOUND,
 };
 use crate::error::{alloc_bytes, alloc_cstring, free_bytes, free_cstring};
 use crate::handle::{
@@ -46,8 +46,8 @@ const GENERIC_ERROR: i32 = -50;
 
 fn actr_ref_call_error_status(error: &actr_protocol::ActrError) -> i32 {
     match error {
-        // The local workload may have consumed or executed the request before
-        // HostTransport returns TimedOut. This error carries no pre-send proof.
+        // A workload can return TimedOut after executing an operation. The ABI
+        // has no provenance distinguishing that reply from pre-send expiry.
         actr_protocol::ActrError::TimedOut | actr_protocol::ActrError::DeliveryUncertain { .. } => {
             DELIVERY_UNCERTAIN
         }

@@ -1078,9 +1078,8 @@ high-cardinality peer metric implementation.
 - retain the existing low-latency semantics of `StreamLatencyFirst`;
 - the C ABI `actr_ref_call` callback conservatively reports a plain runtime
   `TimedOut` as uncertain delivery: its local workload may already have executed,
-  and the error carries no pre-submission proof. The explicit pre-submission
-  status is reserved; managed callers must not automatically replay an
-  untracked timeout;
+  and the error carries no pre-submission proof. Managed callers must not
+  automatically replay an untracked timeout;
 - PR-0507-6 completes the UniFFI Kotlin/Swift mapping and its classification
   tests; the mapping preserves the operation ID and cause and keeps
   `DeliveryUncertain` non-retryable;

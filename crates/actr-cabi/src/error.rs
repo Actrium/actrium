@@ -19,9 +19,6 @@ pub const HANDLE_INVALID: i32 = -21;
 /// `actr_host_respond_reverse_rpc` was called with a request_id that is
 /// unknown, already answered, or past its timeout.
 pub const REQUEST_ID_UNKNOWN: i32 = -22;
-/// Reserved for a deadline with explicit proof that no request was submitted.
-/// A plain runtime `TimedOut` does not carry that proof and uses DELIVERY_UNCERTAIN.
-pub const CALL_TIMED_OUT: i32 = -23;
 /// The call may have executed, including an untracked local workload timeout.
 pub const DELIVERY_UNCERTAIN: i32 = -24;
 pub const PANIC: i32 = -99;

@@ -37,10 +37,6 @@ typedef void (*actr_discover_callback)(int32_t status,
                                        const char* error_ptr, size_t error_len,
                                        void* user_data);
 
-/* CALL_TIMED_OUT is reserved for an explicitly proven pre-submission expiry.
- * actr_ref_call reports untracked runtime timeouts as DELIVERY_UNCERTAIN,
- * because the local workload may already have executed. Other errors use -50. */
-#define ACTR_CABI_CALL_TIMED_OUT (-23)
 #define ACTR_CABI_DELIVERY_UNCERTAIN (-24)
 
 /* Observer callback table. user_data is passed verbatim to every callback.
