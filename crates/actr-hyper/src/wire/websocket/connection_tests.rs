@@ -373,6 +373,77 @@ async fn retired_websocket_destination_is_rebuilt_for_later_work() {
     replacement.close().await.unwrap();
 }
 
+#[tokio::test(start_paused = true)]
+async fn receive_backpressure_progress_resets_stall_deadline() {
+    let (server, client) = tokio::io::duplex(64 * 1024);
+    let server = WebSocketStream::from_raw_socket(
+        server,
+        tokio_tungstenite::tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
+    let connection = WebSocketConnection::from_server_stream(server);
+    let lane = connection.get_lane(PayloadType::RpcReliable).await.unwrap();
+    let mut client = WebSocketStream::from_raw_socket(
+        client,
+        tokio_tungstenite::tungstenite::protocol::Role::Client,
+        None,
+    )
+    .await;
+
+    // Fill the production receive queue and keep more frames buffered on the
+    // wire. Every consumed message immediately starts another receive stall.
+    for sequence in 0u32..200 {
+        let mut frame = vec![PayloadType::RpcReliable as u8];
+        frame.extend_from_slice(&4u32.to_be_bytes());
+        frame.extend_from_slice(&sequence.to_be_bytes());
+        client.send(WsMessage::Binary(frame.into())).await.unwrap();
+    }
+    let peer = tokio::spawn(async move {
+        while let Some(Ok(frame)) = client.next().await {
+            if matches!(frame, WsMessage::Ping(_)) && client.flush().await.is_err() {
+                break;
+            }
+        }
+    });
+    let mut stall = connection.receive_stall.subscribe();
+    tokio::time::timeout(Duration::from_secs(1), stall.wait_for(Option::is_some))
+        .await
+        .unwrap()
+        .unwrap();
+    let started = Instant::now();
+    for expected in 0u32..30 {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(lane.recv().await.unwrap().as_ref(), &expected.to_be_bytes());
+        tokio::time::timeout(Duration::from_secs(1), stall.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        // The transient clear was coalesced with the next full queue. The
+        // retained timestamp must still record this round's consumer progress.
+        assert_eq!(*stall.borrow_and_update(), Some(Instant::now()));
+        assert!(connection.secure.state().is_sendable());
+    }
+    assert!(started.elapsed() > RECEIVE_BACKPRESSURE_TIMEOUT);
+
+    // Actual progress renews the budget, but heartbeat writes alone cannot.
+    let last_stall = (*stall.borrow()).unwrap();
+    tokio::time::timeout(
+        RECEIVE_BACKPRESSURE_TIMEOUT + Duration::from_secs(1),
+        connection.secure.wait_terminal(),
+    )
+    .await
+    .unwrap();
+    assert!(last_stall.elapsed() >= RECEIVE_BACKPRESSURE_TIMEOUT);
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+    assert!(!lane.is_healthy());
+    connection.close().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), peer)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 async fn backpressured_pair() -> (
     WebSocketConnection,
     WebSocketStream<MaybeTlsStream<TcpStream>>,
@@ -385,15 +456,18 @@ async fn backpressured_pair() -> (
         .register_route(PayloadType::RpcReliable, tx)
         .await
         .unwrap();
-    let mut blocked = connection.receive_blocked.subscribe();
+    let mut blocked = connection.receive_stall.subscribe();
     let mut frame = vec![PayloadType::RpcReliable as u8];
     frame.extend_from_slice(&6u32.to_be_bytes());
     frame.extend_from_slice(b"second");
     peer.send(WsMessage::Binary(frame.into())).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(1), blocked.wait_for(|value| *value))
-        .await
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        blocked.wait_for(|value| value.is_some()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     (connection, peer, rx)
 }
 
@@ -401,13 +475,16 @@ async fn drain_backpressure(
     connection: &WebSocketConnection,
     rx: &mut mpsc::Receiver<bytes::Bytes>,
 ) {
-    let mut blocked = connection.receive_blocked.subscribe();
+    let mut blocked = connection.receive_stall.subscribe();
     assert_eq!(rx.recv().await.unwrap().as_ref(), b"first");
     assert_eq!(rx.recv().await.unwrap().as_ref(), b"second");
-    tokio::time::timeout(Duration::from_secs(1), blocked.wait_for(|value| !*value))
-        .await
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        blocked.wait_for(|value| value.is_none()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
 }
 
 #[tokio::test]

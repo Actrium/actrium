@@ -133,6 +133,7 @@ package(actr-hyper) and kind(lib) and (
     test(/^wire::websocket::connection::tests::retired_websocket_destination_is_rebuilt_for_later_work$/) |
     test(/^wire::websocket::connection::tests::silent_peer_is_retired_without_a_call_deadline$/) |
     test(/^wire::websocket::connection::tests::receive_backpressure_preserves_messages_and_healthy_session$/) |
+    test(/^wire::websocket::connection::tests::receive_backpressure_progress_resets_stall_deadline$/) |
     test(/^wire::websocket::connection::tests::silent_peer_is_retired_during_receive_backpressure$/) |
     test(/^wire::websocket::connection::tests::pressure_heartbeats_do_not_extend_receive_backpressure_deadline$/) |
     test(/^wire::websocket::connection::tests::silent_peer_is_retired_after_receive_backpressure_clears$/) |

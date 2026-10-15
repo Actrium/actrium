@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, RwLock, mpsc, watch};
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request as WsRequest;
@@ -116,7 +117,8 @@ pub(crate) struct WebSocketConnection {
     /// Write end (Sink) - using Option to avoid initialization issues
     sink: WsSink,
     connect_gate: Arc<Mutex<()>>,
-    receive_blocked: watch::Sender<bool>,
+    /// Retain each stall's start even when watch coalesces clear/full updates.
+    receive_stall: watch::Sender<Option<Instant>>,
     peer_backpressure: watch::Sender<()>,
 
     /// message route by table: PayloadType -> Sender (using array index, 5 fixed elements, Bytes zero-copy)
@@ -157,7 +159,7 @@ impl WebSocketConnection {
             local_id_hex: None,
             credential_b64: None,
             connect_gate: Arc::new(Mutex::new(())),
-            receive_blocked: watch::channel(false).0,
+            receive_stall: watch::channel(None).0,
             peer_backpressure: watch::channel(()).0,
             sink: Arc::new(Mutex::new(None)), // initial begin as None
             router: Arc::new(RwLock::new([None, None, None, None, None])),
@@ -229,7 +231,7 @@ impl WebSocketConnection {
             local_id_hex: None,
             credential_b64: None,
             connect_gate: Arc::new(Mutex::new(())),
-            receive_blocked: watch::channel(false).0,
+            receive_stall: watch::channel(None).0,
             peer_backpressure: watch::channel(()).0,
             sink,
             router,
@@ -363,7 +365,7 @@ impl WebSocketConnection {
             lane_cache: self.lane_cache.clone(),
             connected: self.connected.clone(),
             secure: self.secure.clone(),
-            receive_blocked: self.receive_blocked.clone(),
+            receive_stall: self.receive_stall.clone(),
             peer_backpressure: self.peer_backpressure.clone(),
         };
         let shutdown = self.teardown.0.clone();
@@ -587,20 +589,20 @@ struct WebSocketSession {
     lane_cache: LaneCache<5>,
     connected: Arc<RwLock<bool>>,
     secure: SecureCell,
-    receive_blocked: watch::Sender<bool>,
+    receive_stall: watch::Sender<Option<Instant>>,
     peer_backpressure: watch::Sender<()>,
 }
 
 impl WebSocketSession {
     async fn probe(&self, mut pong_rx: watch::Receiver<u64>) {
         let mut sequence = 0u64;
-        let mut receive_blocked = self.receive_blocked.subscribe();
+        let mut receive_stall = self.receive_stall.subscribe();
         let mut peer_backpressure = self.peer_backpressure.subscribe();
         loop {
-            let locally_blocked = *receive_blocked.borrow_and_update();
+            let locally_blocked = receive_stall.borrow_and_update().is_some();
             if locally_blocked {
                 if self
-                    .wait_for_receive_capacity(&mut receive_blocked)
+                    .wait_for_receive_capacity(&mut receive_stall)
                     .await
                     .is_err()
                 {
@@ -644,7 +646,7 @@ impl WebSocketSession {
                 biased;
                 // A local stall also cancels an already outstanding probe. Even
                 // a stall that clears before this task wakes restarts the budget.
-                _ = receive_blocked.changed() => continue,
+                _ = receive_stall.changed() => continue,
                 // A fresh pressure heartbeat proves the peer is alive even if
                 // its application queue prevents reading our outstanding Ping.
                 // If heartbeats stop, the ordinary schedule/deadline expires.
@@ -661,36 +663,33 @@ impl WebSocketSession {
 
     async fn wait_for_receive_capacity(
         &self,
-        receive_blocked: &mut watch::Receiver<bool>,
+        receive_stall: &mut watch::Receiver<Option<Instant>>,
     ) -> Result<(), ()> {
-        let wait = async {
-            while *receive_blocked.borrow_and_update() {
-                // Keep the opposite watchdog alive while we cannot read its
-                // Ping, but never renew our own stall budget on a successful
-                // write. Ignore peer pressure notifications to avoid Ping storms.
-                let heartbeat = async {
-                    self.send_pressure_heartbeat().await?;
-                    crate::timer::sleep(crate::timer::ids::WEBSOCKET_PING_SCHEDULE, PING_INTERVAL)
-                        .await;
-                    Ok::<(), ()>(())
-                };
-                tokio::select! {
-                    biased;
-                    result = receive_blocked.changed() => result.map_err(|_| ())?,
-                    result = heartbeat => result?,
-                }
+        loop {
+            let Some(started) = *receive_stall.borrow_and_update() else {
+                return Ok(());
+            };
+            // A successful receive followed immediately by another full queue
+            // can coalesce into one watch update. Its timestamp still identifies
+            // the new stall, so progress cannot inherit the previous deadline.
+            let heartbeat = async {
+                self.send_pressure_heartbeat().await?;
+                crate::timer::sleep(crate::timer::ids::WEBSOCKET_PING_SCHEDULE, PING_INTERVAL)
+                    .await;
+                Ok::<(), ()>(())
+            };
+            tokio::select! {
+                biased;
+                result = receive_stall.changed() => result.map_err(|_| ())?,
+                // Every heartbeat uses the same absolute deadline until the
+                // receive queue accepts a message. Writes cannot renew it.
+                result = crate::timer::timeout_at(
+                    crate::timer::ids::WEBSOCKET_RECEIVE_BACKPRESSURE_DEADLINE,
+                    started + RECEIVE_BACKPRESSURE_TIMEOUT,
+                    heartbeat,
+                ) => result.map_err(|_| ())??,
             }
-            Ok(())
-        };
-        // One deadline wraps the entire stall, including every heartbeat and
-        // sink wait. A new budget is available only after receive pressure clears.
-        crate::timer::timeout(
-            crate::timer::ids::WEBSOCKET_RECEIVE_BACKPRESSURE_DEADLINE,
-            RECEIVE_BACKPRESSURE_TIMEOUT,
-            wait,
-        )
-        .await
-        .map_err(|_| ())?
+        }
     }
 
     async fn send_pressure_heartbeat(&self) -> Result<(), ()> {
@@ -732,9 +731,9 @@ impl WebSocketSession {
                                 let result = match tx.try_send(data) {
                                     Ok(()) => Ok(()),
                                     Err(mpsc::error::TrySendError::Full(data)) => {
-                                        self.receive_blocked.send_replace(true);
+                                        self.receive_stall.send_replace(Some(Instant::now()));
                                         let result = tx.send(data).await;
-                                        self.receive_blocked.send_replace(false);
+                                        self.receive_stall.send_replace(None);
                                         result
                                     }
                                     Err(mpsc::error::TrySendError::Closed(data)) => {

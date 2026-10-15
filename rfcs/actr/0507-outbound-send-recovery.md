@@ -344,6 +344,9 @@ responsive. If the queue does not resume accepting messages within the budget,
 the session is retired even when the peer is healthy; sustained consumer stalls
 are a bounded resource policy, not proof of peer failure. Temporary pressure
 preserves queued message order, and clearing it restores ordinary probes.
+Each new receive stall retains its start time, so accepting a message resets
+the stall budget even if a subsequent full-queue notification coalesces with
+the clear notification.
 Retirement cancels blocked writers and removes the stale route so later work can
 build a fresh connection. It never automatically replays uncertain operations.
 

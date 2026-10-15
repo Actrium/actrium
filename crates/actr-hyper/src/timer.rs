@@ -552,7 +552,7 @@ timer_inventory! {
     },
     WEBSOCKET_RECEIVE_BACKPRESSURE_DEADLINE => {
         id: "websocket.receive_backpressure_deadline", owner: "websocket_connection", category: FailureDeadline,
-        duration: "RECEIVE_BACKPRESSURE_TIMEOUT (120s)", arm: "watchdog observes a full local receive queue",
+        duration: "RECEIVE_BACKPRESSURE_TIMEOUT (120s) from the current receive stall start", arm: "local receive queue becomes full",
         success: "local receive queue resumes accepting messages", interrupt: "session retirement or pressure-heartbeat write failure",
         expiry: "retire the physical session even if pressure heartbeats can still be written", reset: "only after local receive pressure clears; heartbeats never renew this deadline", external: false
     },
