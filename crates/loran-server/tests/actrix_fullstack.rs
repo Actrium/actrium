@@ -1036,6 +1036,97 @@ fn graceful_shutdown(mut child: Child) {
 
 #[tokio::test]
 #[serial]
+async fn issuer_cors_uses_the_production_router() {
+    use reqwest::header::{
+        ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS,
+        ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS,
+        ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, ORIGIN,
+    };
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let client = reqwest::Client::new();
+    let origin = "http://localhost:5173";
+    for route in ["register", "renew", "reissue", "membership"] {
+        let url = format!("{}/issuer/{route}", harness.base_url());
+        let response = client
+            .request(reqwest::Method::OPTIONS, &url)
+            .header(ORIGIN, origin)
+            .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+            .header(
+                ACCESS_CONTROL_REQUEST_HEADERS,
+                "content-type,x-actr-client-proof",
+            )
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            response.status().is_success(),
+            "{route}: {}",
+            response.status()
+        );
+        let headers = response.headers();
+        assert_eq!(headers[ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        assert!(
+            headers[ACCESS_CONTROL_ALLOW_METHODS]
+                .to_str()
+                .unwrap()
+                .contains("POST")
+        );
+        let allowed = headers[ACCESS_CONTROL_ALLOW_HEADERS].to_str().unwrap();
+        assert!(allowed.contains("content-type"), "{route}: {allowed}");
+        assert!(
+            allowed.contains("x-actr-client-proof"),
+            "{route}: {allowed}"
+        );
+        assert!(!headers.contains_key(ACCESS_CONTROL_ALLOW_CREDENTIALS));
+
+        // Both protobuf and JSON requests retain CORS on handler errors;
+        // permission to reach the handler does not bypass authentication.
+        let response = client
+            .post(&url)
+            .header(ORIGIN, origin)
+            .header(
+                "content-type",
+                if route == "membership" {
+                    "application/json"
+                } else {
+                    "application/x-protobuf"
+                },
+            )
+            .header("x-actr-client-proof", "invalid-proof")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.headers()[ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        assert!(
+            response.headers()[ACCESS_CONTROL_EXPOSE_HEADERS]
+                .to_str()
+                .unwrap()
+                .contains("retry-after")
+        );
+        if route == "membership" {
+            assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        }
+    }
+    // The public Issuer policy must not expose the private admin API.
+    let response = client
+        .request(
+            reqwest::Method::OPTIONS,
+            format!("{}/admin/api/auth/login", harness.base_url()),
+        )
+        .header(ORIGIN, origin)
+        .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+        .header(ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::METHOD_NOT_ALLOWED);
+    assert!(!response.headers().contains_key(ACCESS_CONTROL_ALLOW_ORIGIN));
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
 async fn actrix_end_to_end_register_and_health() {
     let mut harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
 

@@ -18,8 +18,8 @@ use axum::{
     body::Bytes,
     extract::State,
     http::{
-        HeaderMap, HeaderValue, StatusCode,
-        header::{CONTENT_TYPE, RETRY_AFTER},
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
+        header::{ACCEPT, CONTENT_TYPE, RETRY_AFTER},
     },
     response::{IntoResponse, Json, Response},
     routing::post,
@@ -31,6 +31,7 @@ use platform::realm::{Realm as RealmEntity, RealmProfileRecord, acl::ActorAcl};
 use prost::Message;
 use serde_json::{Value, json};
 use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 
 /// Issuer service state
 #[derive(Clone)]
@@ -96,6 +97,20 @@ pub fn create_router(state: IssuerState) -> Router {
         .route("/membership", post(crate::membership::post_membership))
         .route("/health", axum::routing::get(health_check))
         .layer(ip_rate_limiter())
+        // These public APIs authenticate signed client proofs, not cookies.
+        // Browser clients may be hosted on any origin; keep CORS scoped to
+        // this router so it never exposes the admin/control plane.
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+                .allow_headers([
+                    CONTENT_TYPE,
+                    ACCEPT,
+                    HeaderName::from_static(CLIENT_PROOF_HEADER),
+                ])
+                .expose_headers([RETRY_AFTER]),
+        )
         .with_state(state)
 }
 

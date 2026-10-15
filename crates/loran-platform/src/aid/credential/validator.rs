@@ -197,6 +197,11 @@ mod tests {
     const KEY_ID: u32 = 9;
     const PROVIDER: &str = "provider.example";
 
+    // KEY_CACHE is process-global: every test runtime must keep using the
+    // same directory, which must outlive all of those runtimes and tests.
+    static CACHE_DIR: once_cell::sync::Lazy<tempfile::TempDir> =
+        once_cell::sync::Lazy::new(|| tempfile::tempdir().unwrap());
+
     fn now() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -236,8 +241,9 @@ mod tests {
 
     #[tokio::test]
     async fn check_binds_claims_to_the_requested_realm() {
-        let dir = tempfile::tempdir().unwrap();
-        AIdCredentialValidator::init(dir.path()).await.unwrap();
+        AIdCredentialValidator::init(CACHE_DIR.path())
+            .await
+            .unwrap();
         let key = SigningKey::from_bytes(&[7u8; 32]);
         AIdCredentialValidator::populate_key(REALM, KEY_ID, &key.verifying_key(), now() + 3600)
             .await
@@ -299,8 +305,9 @@ mod tests {
     #[tokio::test]
     async fn a_realm_key_does_not_verify_another_realms_credential() {
         // Same key id, same serial, same Actor type: only the Realm differs.
-        let dir = tempfile::tempdir().unwrap();
-        AIdCredentialValidator::init(dir.path()).await.unwrap();
+        AIdCredentialValidator::init(CACHE_DIR.path())
+            .await
+            .unwrap();
         let other = "p3n8w2rt@example.com";
         let key = SigningKey::from_bytes(&[8u8; 32]);
         AIdCredentialValidator::populate_key(other, 11, &key.verifying_key(), 0)

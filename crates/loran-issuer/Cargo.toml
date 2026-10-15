@@ -46,6 +46,7 @@ toml = { version = "0.8" }
 ## Rate limiting
 tower_governor = "0.8"
 tower = "0.5"
+tower-http = { version = "0.5", features = ["cors"] }
 governor = "0.10"
 
 

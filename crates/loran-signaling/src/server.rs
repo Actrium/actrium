@@ -31,11 +31,11 @@
 //!    - Used for fine-grained inter-service access control
 
 use actr_protocol::{
-    AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ErrorResponse, PeerToSignaling,
-    Ping, Pong, RegisterResponse, RelayDeliveryContext, RelayDeliveryResult, RelayDeliveryStatus,
-    RoleAssignment, RoleNegotiation, SIGNALING_ENVELOPE_VERSION, SignalingEnvelope,
-    SignalingToActr, actr_relay, actr_to_signaling, peer_to_signaling, register_response,
-    signaling_envelope, signaling_to_actr,
+    AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ErrorResponse, IdentityClaims,
+    PeerToSignaling, Ping, Pong, RegisterResponse, RelayDeliveryContext, RelayDeliveryResult,
+    RelayDeliveryStatus, RoleAssignment, RoleNegotiation, SIGNALING_ENVELOPE_VERSION,
+    SignalingEnvelope, SignalingToActr, actr_relay, actr_to_signaling, peer_to_signaling,
+    register_response, signaling_envelope, signaling_to_actr,
 };
 use futures_util::{SinkExt, StreamExt};
 use platform::aid::credential::validator::AIdCredentialValidator;
@@ -614,6 +614,25 @@ pub async fn handle_websocket_connection(
     url_identity: Option<(ActrId, ActrType, AIdCredential)>,
     webrtc_role: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    handle_websocket_connection_inner(
+        websocket,
+        server,
+        client_ip,
+        url_identity,
+        webrtc_role,
+        true,
+    )
+    .await
+}
+
+pub(crate) async fn handle_websocket_connection_inner(
+    websocket: WebSocket,
+    server: SignalingServerHandle,
+    client_ip: Option<std::net::IpAddr>,
+    url_identity: Option<(ActrId, ActrType, AIdCredential)>,
+    webrtc_role: Option<String>,
+    require_client_auth: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4().to_string();
     platform::recording::info!(
         "🔗 New WebSocket client connection: {} (IP: {:?})",
@@ -639,6 +658,7 @@ pub async fn handle_websocket_connection(
         None => (None, None, None),
     };
     let actor_id_for_registry = actor_id.clone().zip(actor_type);
+    let connection_credential = credential.clone();
     let connection_realm = actor_id.as_ref().map(|actor| actor.realm.clone());
     let stale_clients = {
         let mut clients_guard = server.clients.write().await;
@@ -714,6 +734,60 @@ pub async fn handle_websocket_connection(
                 ws_address,
             ) {
                 platform::recording::warn!("Failed to register actor in actor registry: {}", e);
+            }
+        }
+        // Authentication and the HTTP upgrade precede registration. A revoke
+        // or reissue can commit and its subscriber can finish in that gap.
+        // Once listed, subsequent revocations can find this connection; now
+        // recheck durable state before announcing it or accepting messages.
+        if require_client_auth {
+            let refused = match connection_credential
+                .as_ref()
+                .and_then(|credential| IdentityClaims::decode(credential.claims.as_ref()).ok())
+            {
+                Some(claims) => match platform::realm::membership::credential_refused(
+                    &actor_id_for_registry,
+                    &claims.client_key,
+                )
+                .await
+                {
+                    Ok(refused) => refused,
+                    Err(error) => {
+                        platform::recording::warn!("WebSocket Actor state recheck failed: {error}");
+                        true
+                    }
+                },
+                None => true,
+            };
+            if refused {
+                cleanup_client(&client_id, &server, CleanupMode::ExplicitUnregister).await;
+                // The subscriber may have removed the connection before the
+                // registry write above. Remove that late row too, while
+                // preserving any replacement connection's registration.
+                let clients = server.clients.read().await;
+                if !clients
+                    .values()
+                    .any(|client| client.actor_id.as_ref() == Some(&actor_id_for_registry))
+                {
+                    server
+                        .actor_registry
+                        .write()
+                        .await
+                        .unregister_actor_durable(&actor_id_for_registry)
+                        .await?;
+                    server
+                        .presence_manager
+                        .write()
+                        .await
+                        .unsubscribe_all(&actor_id_for_registry);
+                }
+                drop(clients);
+                let close_frame = axum::extract::ws::CloseFrame {
+                    code: axum::extract::ws::close_code::POLICY,
+                    reason: "client revoked or replaced".into(),
+                };
+                let _ = ws_sender.send(WsMessage::Close(Some(close_frame))).await;
+                return Ok(());
             }
         }
         // Notify presence subscribers about the new actor

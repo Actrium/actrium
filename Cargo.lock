@@ -593,6 +593,7 @@ dependencies = [
  "toml 0.8.23",
  "tonic",
  "tower",
+ "tower-http 0.5.2",
  "tower_governor",
  "tracing",
  "turn",

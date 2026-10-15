@@ -4432,12 +4432,17 @@ async fn test_a_revoked_key_disables_its_actors_until_the_member_reissues() {
     assert_eq!(claims.client_key, second.key_id);
     assert!(!membership::actor_disabled(&ok.actr_id).await.unwrap());
     for _ in 0..100 {
-        if inactive.matches_binding(&ok.actr_id.to_string_repr(), &second.key_id) {
+        // The follower publishes the new binding before clearing the disabled
+        // flag. Wait for both parts of that transition before authenticating.
+        if inactive.matches_binding(&ok.actr_id.to_string_repr(), &second.key_id)
+            && !inactive.contains_actor(&ok.actr_id.to_string_repr())
+        {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     assert!(inactive.matches_binding(&ok.actr_id.to_string_repr(), &second.key_id));
+    assert!(!inactive.contains_actor(&ok.actr_id.to_string_repr()));
     assert!(
         auth.auth_handle(&old_turn.username, "turn.test", source)
             .is_err()
@@ -4545,7 +4550,8 @@ async fn web_issuer_http_fixture() {
             let first_renew = first_renew.clone();
             let observed = observed.clone();
             async move {
-                if request.uri().path() != "/renew" {
+                if request.uri().path() != "/renew" || request.method() != axum::http::Method::POST
+                {
                     return next.run(request).await;
                 }
                 let (parts, body) = request.into_parts();
@@ -4554,14 +4560,17 @@ async fn web_issuer_http_fixture() {
                     ClientProof::parse_header(parts.headers[CLIENT_PROOF_HEADER].to_str().unwrap())
                         .unwrap();
                 observed.lock().unwrap().push((body.to_vec(), proof.nonce));
-                let response = next.run(Request::from_parts(parts, Body::from(body))).await;
+                let mut response = next.run(Request::from_parts(parts, Body::from(body))).await;
                 if response.status().is_success() && first_renew.swap(false, Ordering::SeqCst) {
                     // The operation committed and consumed the proof. Retrying
                     // needs the same body/attempt and a new signed nonce.
-                    (StatusCode::TOO_EARLY, [("retry-after", "0")]).into_response()
-                } else {
+                    // Preserve the production router's CORS response headers.
+                    *response.status_mut() = StatusCode::TOO_EARLY;
                     response
+                        .headers_mut()
+                        .insert("retry-after", "0".parse().unwrap());
                 }
+                response
             }
         }
     }));
@@ -4587,9 +4596,13 @@ async fn web_issuer_http_fixture() {
                 }
             }),
         );
-    // Only the loopback test fixture exposes these headers to the test runner.
+    // Fixture-only helper endpoints need their own CORS. Issuer requests must
+    // use the production router's policy, including its preflight handling.
     let app = app.layer(middleware::from_fn(
         |request: Request<Body>, next: middleware::Next| async move {
+            if !matches!(request.uri().path(), "/fixture" | "/stop") {
+                return next.run(request).await;
+            }
             let mut response = if request.method() == axum::http::Method::OPTIONS {
                 StatusCode::NO_CONTENT.into_response()
             } else {

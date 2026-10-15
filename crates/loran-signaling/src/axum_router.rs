@@ -2,6 +2,9 @@
 //!
 //! Provides an Axum Router adapter for SignalingServer
 
+#[cfg(test)]
+mod revocation_tests;
+
 use crate::server::SignalingServer;
 use actr_protocol::{AIdCredential, ActrId, ActrType, IdentityClaims};
 use anyhow::{Context as _, Result};
@@ -413,12 +416,13 @@ async fn handle_websocket(
     let server_handle = state.server.handle();
 
     // Call SignalingServer's WebSocket handler function
-    if let Err(e) = crate::handle_websocket_connection(
+    if let Err(e) = crate::server::handle_websocket_connection_inner(
         socket,
         server_handle,
         Some(client_ip),
         url_identity,
         webrtc_role,
+        state.require_url_auth,
     )
     .await
     {
