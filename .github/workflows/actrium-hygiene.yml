@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   large-and-vendored-files:
-    runs-on: ubuntu-latest
+    runs-on: actrium-linux-light
     steps:
       - name: Check out repository
         uses: actions/checkout@v7

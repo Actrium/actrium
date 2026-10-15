@@ -15,17 +15,18 @@ Provision these resources in the runner namespace before applying the manifest:
 
 The runner imports the first two resources through `envFrom`. Their values are
 managed outside this repository; do not commit the populated ConfigMap or Secret.
-The namespace, image, scheduling, and storage fields remain in the fleet manifest.
+The build-pool manifest retains its existing deployment configuration. The light
+pool uses the environment-neutral template and private renderer described below.
 
 The ConfigMap supplies the following keys:
 
-| Purpose | Keys |
-|---|---|
-| Compiler | `RUSTFLAGS`, `RUSTC_WRAPPER`, `CARGO_INCREMENTAL` |
-| Proxy | `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, `https_proxy`, `NO_PROXY`, `no_proxy` |
-| Cargo downloads | `CARGO_NET_RETRY`, `CARGO_HTTP_TIMEOUT` |
+| Purpose           | Keys                                                                                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Compiler          | `RUSTFLAGS`, `RUSTC_WRAPPER`, `CARGO_INCREMENTAL`                                                                                               |
+| Proxy             | `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, `https_proxy`, `NO_PROXY`, `no_proxy`                                                                |
+| Cargo downloads   | `CARGO_NET_RETRY`, `CARGO_HTTP_TIMEOUT`                                                                                                         |
 | Compilation cache | `SCCACHE_CACHE_SIZE`, `SCCACHE_CACHE_DIR`, `SCCACHE_ENDPOINT`, `SCCACHE_BUCKET`, `SCCACHE_REGION`, `SCCACHE_S3_USE_SSL`, `SCCACHE_IDLE_TIMEOUT` |
-| Actions cache | `ACTIONS_RESULTS_URL` |
+| Actions cache     | `ACTIONS_RESULTS_URL`                                                                                                                           |
 
 `envFrom` imports every key in a referenced resource. Keep the Secret restricted
 to the two required cache credential keys, and do not duplicate those keys in the
@@ -43,15 +44,15 @@ The image includes the GitHub Actions agent, Rust and WebAssembly tools, hosted
 Python/Node/Java toolcaches, sccache, Binaryen, and zstd. Both image build paths
 verify pinned versions and artifact checksums.
 
-| Tool | Version |
-|---|---|
-| wasm-bindgen and wasm-bindgen-test-runner | `0.2.126` |
-| wasm-pack | `0.15.0` |
-| wasm-component-ld | `0.5.26` |
-| wasm-tools | `1.253.0` |
-| Binaryen | `version_117` |
-| sccache | `0.18.0` |
-| zstd | `1.5.7` |
+| Tool                                      | Version       |
+| ----------------------------------------- | ------------- |
+| wasm-bindgen and wasm-bindgen-test-runner | `0.2.126`     |
+| wasm-pack                                 | `0.15.0`      |
+| wasm-component-ld                         | `0.5.26`      |
+| wasm-tools                                | `1.253.0`     |
+| Binaryen                                  | `version_117` |
+| sccache                                   | `0.18.0`      |
+| zstd                                      | `1.5.7`       |
 
 The installer pins must match the workflows and the web workspace lockfile.
 The zstd installer also provides `zstdmt`, `unzstd`, and `zstdcat` for Actions Cache.
@@ -178,6 +179,31 @@ and 32 CPU/64 GiB at sixteen runners, in addition to other workloads. CPU limits
 allow bursts; they do not reserve node capacity. Check allocatable resources,
 existing requests, Pod Pending/OOM events, and observed CPU throttling before
 raising concurrency. An overcommit ratio alone does not establish throttling.
+
+### Light CI pool
+
+Light-pool deployment templates, rendering tools, validation checks, and
+operational capacity policy are maintained in the separate
+`github-self-hosted-runner` operations repository under `light-runner/`.
+Application workflows use the deployed pool without those deployment files in
+this checkout.
+
+Use `runs-on: actrium-linux-light` for policy checks, formatting, shell-script
+checks, repository hygiene, bounded formal checks, version metadata, and release
+tag validation. Python codegen, TypeScript workload authoring, and Keel's
+VitePress docs build have also been validated within the 2 CPU / 4 GiB limit.
+Native builds, native dependency compilation, and integration suites stay on
+the build pool.
+The light set intentionally omits `self-hosted`, `Linux`, and `X64` aliases, so
+existing jobs selecting that generic label combination cannot run on it.
+
+After checkout, jobs using dependency caches or artifacts must invoke
+`./.github/actions/setup-light-runner` before their cache or artifact actions.
+The shared image's runner patch exposes GitHub's original results endpoint as
+`ACTIONS_RESULTS_ORL`; the composite action restores `ACTIONS_RESULTS_URL` for
+the light pool without injecting a deployment-specific cache endpoint. Keep
+this setup local to light jobs; the ordinary build pool retains its cache setup.
+Keel Docs explicitly selects Node.js 24 instead of relying on hosted-runner tools.
 
 ## Deploy, verify, and roll back
 

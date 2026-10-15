@@ -14,10 +14,13 @@ defaults:
 jobs:
   build:
     name: Build & Check
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Set up light runner
+        uses: ./.github/actions/setup-light-runner
 
       - name: Set up Python
         uses: actions/setup-python@v5
