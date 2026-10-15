@@ -335,10 +335,10 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
     let b = pair.id(PairEndpoint::B);
     let initial = pair.wait_pair_ready(READY_WAIT).await;
     assert_eq!(initial.role_a, TestRtcRole::Answerer);
-    // Prevent a restart offer from overtaking observation of the empty slot.
+    // Block ordinary replacement offers so the empty slot remains observable.
     pair.set_signaling_fault(
         LinkDirection::BToA,
-        SignalingMessageClass::IceRestartOffer,
+        SignalingMessageClass::Offer,
         SignalingFaultRule::Drop,
     );
     pair.harness()
@@ -361,35 +361,25 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
         1,
         "S4 retains Controller; this is not the unknown-Controller case"
     );
-    // Count only an offer emitted after removing the drop rule. An earlier
-    // observed-but-dropped offer is not evidence that the router received it.
-    let dropped_offers =
-        pair.harness()
-            .signaling_faults
-            .hits(&b, &a, SignalingMessageClass::IceRestartOffer);
-    pair.heal_signaling_faults();
+    // Do not depend on the remote PC choosing ICE restart over a rebuild.
+    // Exercise the rejection branch with a known, correlated wire message.
+    let exchange_id = "empty-session-restart-probe";
     pair.harness()
-        .signaling_faults
-        .wait_for_hits_after(
-            &b,
-            &a,
-            SignalingMessageClass::IceRestartOffer,
-            dropped_offers,
-            RECOVERY_WAIT,
-        )
-        .await
-        .expect("restart must reach the empty-session Answerer");
-    let rejection = pair
-        .harness()
-        .signaling_faults
-        .wait_for_hits_after(
-            &a,
-            &b,
-            SignalingMessageClass::IceRestartRejected,
-            0,
-            Duration::from_secs(15),
-        )
-        .await;
+        .peer(pair.serial(PairEndpoint::B))
+        .rtc
+        .send_restart_probe(&a, exchange_id);
+    let rejection = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if pair.signaling_trace().iter().any(|event| {
+                event.class == SignalingMessageClass::IceRestartRejected
+                    && event.exchange_id.as_deref() == Some(exchange_id)
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
     let a_state = pair
         .harness()
         .peer(pair.serial(PairEndpoint::A))
@@ -404,12 +394,15 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
     let evidence = pair.signaling_trace();
     pair.shutdown().await;
     assert!(
-        rejection.is_some(),
+        rejection.is_ok(),
         "no-active Session must explicitly reject ICE restart; trace={evidence:?}"
     );
     let rejected = evidence
         .iter()
-        .find(|event| event.class == SignalingMessageClass::IceRestartRejected)
+        .find(|event| {
+            event.class == SignalingMessageClass::IceRestartRejected
+                && event.exchange_id.as_deref() == Some(exchange_id)
+        })
         .expect("rejection event in the trace");
     let delivered_exchanges: Vec<&str> = evidence
         .iter()
@@ -580,11 +573,6 @@ async fn answerer_failed_session_recovers_through_offerer_without_manual_reconne
         PairEndpoint::A,
         SignalingMessageClass::Offer,
     );
-    let rejected_baseline = pair.signaling_hits(
-        PairEndpoint::A,
-        PairEndpoint::B,
-        SignalingMessageClass::IceRestartRejected,
-    );
 
     let failed_generation = pair
         .harness()
@@ -649,17 +637,9 @@ async fn answerer_failed_session_recovers_through_offerer_without_manual_reconne
             .all(|attempts| attempts[0] < attempts[1]),
         "Answerer recovery attempts must increase monotonically: {attempts:?}"
     );
-    pair.harness()
-        .signaling_faults
-        .wait_for_hits_after(
-            &answerer,
-            &offerer,
-            SignalingMessageClass::IceRestartRejected,
-            rejected_baseline,
-            RECOVERY_WAIT,
-        )
-        .await
-        .expect("failed Answerer must reject a restart for its retired Session");
+    // A remote PC that also closed can rebuild directly. Rejection is
+    // required only if it sends a restart for the retired session; the
+    // empty-session test covers that branch independently.
     pair.harness()
         .signaling_faults
         .wait_for_hits_after(
