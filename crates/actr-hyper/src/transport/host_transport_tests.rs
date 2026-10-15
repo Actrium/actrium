@@ -1,4 +1,5 @@
 use super::*;
+use actr_protocol::Classify;
 use std::time::Duration;
 
 fn envelope(request_id: &str) -> RpcEnvelope {
@@ -101,7 +102,11 @@ async fn send_request_times_out_without_response() {
         .send_request(PayloadType::RpcReliable, None, env)
         .await
         .unwrap_err();
-    assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
+    assert!(
+        matches!(err, ActrError::DeliveryUncertain { .. }),
+        "got {err:?}"
+    );
+    assert!(!err.is_retryable());
 }
 
 #[tokio::test]
@@ -113,7 +118,11 @@ async fn send_request_timeout_removes_pending_entry() {
         .send_request(PayloadType::RpcReliable, None, env)
         .await
         .unwrap_err();
-    assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
+    assert!(
+        matches!(err, ActrError::DeliveryUncertain { .. }),
+        "got {err:?}"
+    );
+    assert!(!err.is_retryable());
 
     // The timed-out entry must not linger: the map is empty and a late
     // completion is rejected as unknown.
@@ -184,7 +193,11 @@ async fn send_request_uses_one_deadline_across_channel_admission_and_response() 
         .await
         .expect("request task should not panic")
         .expect_err("request should time out at the original deadline");
-    assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
+    assert!(
+        matches!(err, ActrError::DeliveryUncertain { .. }),
+        "got {err:?}"
+    );
+    assert!(!err.is_retryable());
     assert_eq!(t.pending_len(), 0, "timeout must remove correlation state");
 }
 
@@ -327,6 +340,33 @@ async fn submitted_request_timeout_cannot_prove_non_delivery() {
     assert_eq!(consumed.request_id, "already-consumed");
     tokio::time::advance(Duration::from_millis(100)).await;
     let error = request.await.unwrap().unwrap_err();
-    assert!(matches!(error, ActrError::TimedOut));
+    assert!(
+        matches!(&error, ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "already-consumed")
+    );
+    assert!(!error.is_retryable());
     assert_eq!(transport.pending_len(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn request_deadline_before_queue_submission_is_retryable() {
+    let t = HostTransport::new();
+    for n in 0..1024 {
+        t.send_message(
+            PayloadType::RpcReliable,
+            None,
+            envelope(&format!("fill-{n}")),
+        )
+        .await
+        .unwrap();
+    }
+    let mut env = envelope("not-submitted");
+    env.timeout_ms = 100;
+    let error = t
+        .send_request(PayloadType::RpcReliable, None, env)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ActrError::TimedOut));
+    assert!(error.is_retryable());
+    assert_eq!(t.pending_len(), 0);
+    assert_eq!(t.reliable_rx.lock().await.len(), 1024);
 }

@@ -295,7 +295,7 @@ timer_inventory! {
         id: "outbound.host.request", owner: "host_transport", category: FailureDeadline,
         duration: "caller absolute RPC deadline", arm: "host request lane lookup starts",
         success: "lane admission, send, and response path completes", interrupt: "caller cancellation or completion",
-        expiry: "remove pending correlation and return timeout", reset: "new request only", external: false
+        expiry: "remove pending correlation; return TimedOut before local queue submission or DeliveryUncertain afterwards", reset: "new request only", external: false
     },
     OUTBOUND_TELL_DEADLINE => {
         id: "outbound.tell", owner: "outbound_gate", category: FailureDeadline,

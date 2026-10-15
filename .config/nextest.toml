@@ -144,6 +144,8 @@ package(actr-hyper) and kind(lib) and (
     test(/^transport::lane::tests::websocket_retirement_cancels_an_inflight_write_without_replay$/) |
     test(/^transport::lane::tests::websocket_retirement_before_writer_lock_is_proven_not_attempted$/) |
     test(/^transport::host_transport::tests::submitted_request_timeout_cannot_prove_non_delivery$/) |
+    test(/^transport::host_transport::tests::request_deadline_before_queue_submission_is_retryable$/) |
+    test(/^context::tests::cancelled_call_after_local_consumption_is_not_retryable$/) |
     test(/^transport::wire_pool::tests::terminal_websocket_is_not_a_live_candidate$/) |
     test(/^outbound::peer_gate::tests::call_deadline_after_submission_is_delivery_uncertain$/) |
     test(/^outbound::peer_gate::tests::call_deadline_mid_write_is_delivery_uncertain$/) |
