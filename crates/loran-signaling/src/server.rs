@@ -606,6 +606,22 @@ pub async fn disable_actor(server: &SignalingServerHandle, actor: &ActrId) {
     server.presence_manager.write().await.unsubscribe_all(actor);
 }
 
+/// Fail closed if a credential's durable binding changed since URL authentication.
+async fn client_credential_refused(actor: &ActrId, credential: Option<&AIdCredential>) -> bool {
+    let Some(claims) =
+        credential.and_then(|credential| IdentityClaims::decode(credential.claims.as_ref()).ok())
+    else {
+        return true;
+    };
+    match platform::realm::membership::credential_refused(actor, &claims.client_key).await {
+        Ok(refused) => refused,
+        Err(error) => {
+            platform::recording::warn!("WebSocket Actor state recheck failed: {error}");
+            true
+        }
+    }
+}
+
 /// Handle WebSocket connection
 pub async fn handle_websocket_connection(
     websocket: WebSocket,
@@ -662,6 +678,22 @@ pub(crate) async fn handle_websocket_connection_inner(
     let connection_realm = actor_id.as_ref().map(|actor| actor.realm.clone());
     let stale_clients = {
         let mut clients_guard = server.clients.write().await;
+
+        // Serialize this check with connection replacement. An old handshake
+        // must be rejected before it can remove, reroute, or close a healthy
+        // incumbent that connected using the new binding while it was delayed.
+        if require_client_auth
+            && let Some(actor) = actor_id.as_ref()
+            && client_credential_refused(actor, credential.as_ref()).await
+        {
+            drop(clients_guard);
+            let close_frame = axum::extract::ws::CloseFrame {
+                code: axum::extract::ws::close_code::POLICY,
+                reason: "client revoked or replaced".into(),
+            };
+            let _ = ws_sender.send(WsMessage::Close(Some(close_frame))).await;
+            return Ok(());
+        }
 
         // Remove existing connections for the same actor (to avoid stale mappings), and send a WS Close frame to let the old connection exit cleanly.
         let stale_clients = if let Some(ref aid) = actor_id {
@@ -741,24 +773,9 @@ pub(crate) async fn handle_websocket_connection_inner(
         // Once listed, subsequent revocations can find this connection; now
         // recheck durable state before announcing it or accepting messages.
         if require_client_auth {
-            let refused = match connection_credential
-                .as_ref()
-                .and_then(|credential| IdentityClaims::decode(credential.claims.as_ref()).ok())
-            {
-                Some(claims) => match platform::realm::membership::credential_refused(
-                    &actor_id_for_registry,
-                    &claims.client_key,
-                )
-                .await
-                {
-                    Ok(refused) => refused,
-                    Err(error) => {
-                        platform::recording::warn!("WebSocket Actor state recheck failed: {error}");
-                        true
-                    }
-                },
-                None => true,
-            };
+            let refused =
+                client_credential_refused(&actor_id_for_registry, connection_credential.as_ref())
+                    .await;
             if refused {
                 cleanup_client(&client_id, &server, CleanupMode::ExplicitUnregister).await;
                 // The subscriber may have removed the connection before the

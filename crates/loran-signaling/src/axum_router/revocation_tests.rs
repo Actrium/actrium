@@ -188,7 +188,9 @@ async fn revocation_or_rebinding_during_upgrade_closes_connection() {
         .unwrap();
     assert!(matches!(&closed, Message::Close(Some(frame)) if u16::from(frame.code) == 1008));
 
-    for (serial, rebind) in [(1, false), (3, true)] {
+    for (serial, rebind, replacement_first) in
+        [(1, false, false), (3, true, false), (5, true, true)]
+    {
         let (actor, credential, signer) = fixture(serial, &signing).await;
         // A cached row makes completion of the real revocation subscriber observable.
         let actor_type = IdentityClaims::decode(credential.claims.as_ref())
@@ -214,7 +216,7 @@ async fn revocation_or_rebinding_during_upgrade_closes_connection() {
         assert!(!handle.actor_id_index.read().await.contains_key(&actor));
         let replacement = if rebind {
             // Persist the same Actor-to-key transition as a credential reissue.
-            let device = SigningKey::from_bytes(&[44; 32]);
+            let device = SigningKey::from_bytes(&[44 + serial as u8; 32]);
             let key_id = client_key_id(&device.verifying_key().to_bytes());
             let pool = platform::storage::db::get_database().get_pool();
             sqlx::query("INSERT INTO realm_client_key (realm, key_id, public_key, member_id, registered_at) VALUES (?, ?, ?, ?, unixepoch())")
@@ -254,12 +256,6 @@ async fn revocation_or_rebinding_during_upgrade_closes_connection() {
                 .await
                 .unwrap()
         );
-        release.notify_one();
-        let (mut ws, _) = timeout(Duration::from_secs(3), connecting)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
         let ping = |credential: AIdCredential| {
             SignalingEnvelope {
                 envelope_version: actr_protocol::SIGNALING_ENVELOPE_VERSION,
@@ -275,6 +271,49 @@ async fn revocation_or_rebinding_during_upgrade_closes_connection() {
             }
             .encode_to_vec()
         };
+        let mut incumbent = if replacement_first {
+            let replacement = replacement.as_ref().unwrap();
+            let (mut ws, _) = connect_async(address(&base, &actor, replacement, false))
+                .await
+                .unwrap();
+            ws.send(Message::Binary(ping(replacement.clone()).into()))
+                .await
+                .unwrap();
+            let message = timeout(Duration::from_secs(3), ws.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let Message::Binary(bytes) = message else {
+                panic!("expected healthy incumbent: {message:?}");
+            };
+            let response = SignalingEnvelope::decode(bytes.as_ref()).unwrap();
+            assert!(matches!(
+                response.flow,
+                Some(signaling_envelope::Flow::ServerToActr(
+                    actr_protocol::SignalingToActr {
+                        payload: Some(signaling_to_actr::Payload::Pong(_)),
+                        ..
+                    }
+                ))
+            ));
+            Some(ws)
+        } else {
+            None
+        };
+        let incumbent_id = handle.actor_id_index.read().await.get(&actor).cloned();
+        let registry_type_before = handle
+            .actor_registry
+            .read()
+            .await
+            .get_actor_type(&actor)
+            .cloned();
+        release.notify_one();
+        let (mut ws, _) = timeout(Duration::from_secs(3), connecting)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
         // Sending immediately must never yield an authenticated Pong.
         let _ = ws
             .send(Message::Binary(ping(credential.clone()).into()))
@@ -288,22 +327,48 @@ async fn revocation_or_rebinding_during_upgrade_closes_connection() {
             matches!(&message, Message::Close(Some(frame)) if u16::from(frame.code) == 1008),
             "{message:?}"
         );
-        assert!(!handle.actor_id_index.read().await.contains_key(&actor));
-        assert!(
-            !handle
-                .clients
-                .read()
-                .await
-                .values()
-                .any(|client| client.actor_id.as_ref() == Some(&actor))
-        );
-        assert!(
+        if replacement_first {
+            assert_eq!(
+                handle.actor_id_index.read().await.get(&actor).cloned(),
+                incumbent_id,
+                "rejecting an obsolete handshake must preserve the incumbent's routing index"
+            );
+            assert!(
+                handle
+                    .clients
+                    .read()
+                    .await
+                    .contains_key(incumbent_id.as_ref().unwrap())
+            );
+            assert!(
+                handle
+                    .actor_registry
+                    .read()
+                    .await
+                    .get_actor_type(&actor)
+                    .is_some()
+            );
+        } else {
+            assert!(!handle.actor_id_index.read().await.contains_key(&actor));
+            assert!(
+                !handle
+                    .clients
+                    .read()
+                    .await
+                    .values()
+                    .any(|client| client.actor_id.as_ref() == Some(&actor))
+            );
+        }
+        // A rejected candidate must not publish a row or remove the current
+        // binding's existing discovery metadata (including a cached row).
+        assert_eq!(
             handle
                 .actor_registry
                 .read()
                 .await
                 .get_actor_type(&actor)
-                .is_none()
+                .cloned(),
+            registry_type_before
         );
         let fresh = connect_async(address(&base, &actor, &credential, false))
             .await
@@ -314,9 +379,14 @@ async fn revocation_or_rebinding_during_upgrade_closes_connection() {
         );
         if let Some(replacement) = replacement {
             // Only the obsolete credential is refused; the new binding works.
-            let (mut ws, _) = connect_async(address(&base, &actor, &replacement, false))
-                .await
-                .unwrap();
+            let mut ws = if let Some(ws) = incumbent.take() {
+                ws
+            } else {
+                connect_async(address(&base, &actor, &replacement, false))
+                    .await
+                    .unwrap()
+                    .0
+            };
             ws.send(Message::Binary(ping(replacement).into()))
                 .await
                 .unwrap();
