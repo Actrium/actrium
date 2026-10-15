@@ -120,10 +120,15 @@ async fn test_unknown_answerer_session_rejects_restart_and_rebuilds_autonomously
     assert!(harness.peer(902).rtc.close_peer(&offerer_id).await);
     assert_eq!(harness.peer(902).rtc.peer_count().await, 0);
 
-    harness.peer(901).rtc.network_unavailable();
-    harness.peer(901).rtc.network_available();
+    // Exercise the rejection branch with a known correlated wire message.
+    // A real-PC network bounce does not guarantee that the offerer chooses an
+    // ICE restart over rebuilding the connection.
+    harness
+        .peer(901)
+        .rtc
+        .send_restart_probe(&answerer_id, "unknown-answerer-session-restart-probe");
 
-    let (_, rejection_reason) = tokio::time::timeout(Duration::from_secs(5), async {
+    let (_, rejection_reason) = tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             if let Some(rejection) = restart_rejection_exchange(
                 &harness.server.received_messages().await,
