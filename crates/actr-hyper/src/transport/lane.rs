@@ -618,13 +618,12 @@ pub(crate) fn record_delivery_progress(cell: &DeliveryProgressCell, progress: De
 /// approached, so a cancellation is provably pre-send; a write still in
 /// flight classifies conservatively as `Unknown`.
 pub(crate) fn observed_delivery_progress(cell: &DeliveryProgressCell) -> Option<DeliveryProgress> {
-    cell.lock().ok().and_then(|guard| {
-        if guard.write_in_flight {
-            Some(DeliveryProgress::Unknown)
-        } else {
-            guard.completed
-        }
-    })
+    match cell.lock() {
+        Ok(guard) if guard.write_in_flight => Some(DeliveryProgress::Unknown),
+        Ok(guard) => guard.completed,
+        // Lost synchronization is never evidence that submission did not occur.
+        Err(_) => Some(DeliveryProgress::Unknown),
+    }
 }
 
 /// DataLane - Data transport channel trait

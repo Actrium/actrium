@@ -603,3 +603,19 @@ async fn websocket_retirement_before_writer_lock_is_proven_not_attempted() {
     assert!(attempt.result.is_err());
     drop(held);
 }
+
+#[test]
+fn poisoned_delivery_progress_is_always_uncertain() {
+    let cell = new_delivery_progress_cell();
+    record_delivery_progress(&cell, DeliveryProgress::SubmittedLocally);
+    let poisoned = cell.clone();
+    let panic = std::panic::catch_unwind(move || {
+        let _guard = poisoned.lock().unwrap();
+        panic!("poison delivery progress after submission");
+    });
+    assert!(panic.is_err());
+    assert_eq!(
+        observed_delivery_progress(&cell),
+        Some(DeliveryProgress::Unknown)
+    );
+}
