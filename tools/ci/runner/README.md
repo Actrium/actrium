@@ -200,8 +200,9 @@ with the matching label and verify the listener and runners register again.
 ## Capacity and scheduling
 
 Set min/max counts, requests, limits, node affinity, and storage for the destination
-pool before deployment. The example reserves at least 20 CPU/40 GiB for ten runners
-and 32 CPU/64 GiB at sixteen runners, in addition to other workloads. CPU limits
+pool before deployment. The manifest keeps a minimum of ten and a maximum of
+twenty runners. Resource requests total 20 CPU/40 GiB at ten runners and
+40 CPU/80 GiB at twenty runners, in addition to other workloads. CPU limits
 allow bursts; they do not reserve node capacity. Check allocatable resources,
 existing requests, Pod Pending/OOM events, and observed CPU throttling before
 raising concurrency. An overcommit ratio alone does not establish throttling.

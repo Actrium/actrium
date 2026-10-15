@@ -22,7 +22,7 @@ metadata:
 spec:
   githubConfigSecret: actrium-arc-github-app
   githubConfigUrl: https://github.com/Actrium
-  maxRunners: 16
+  maxRunners: 20
   minRunners: 10
   runnerScaleSetLabels:
   - self-hosted
@@ -49,7 +49,7 @@ spec:
             name: runner-env
         - secretRef:
             name: sccache-s3
-        image: harbor.zlibs.com/platform/actrium-runner@sha256:520ab9f2146303f9ceac34b5331f0395fe37183abaca328d1edf15c05b55bdce
+        image: harbor.zlibs.com/platform/actrium-runner@sha256:66df60a121f6b621b96cc8adece52f78c54278514cba979c75fb3e32561325fc
         name: runner
         resources:
           limits:
@@ -76,7 +76,7 @@ spec:
         - sh
         - "-c"
         - install -d -o 1001 -g 1001 /home/runner/.cargo/registry /home/runner/.cargo/registry/cache /home/runner/.cargo/registry/index
-        image: harbor.zlibs.com/platform/actrium-runner@sha256:520ab9f2146303f9ceac34b5331f0395fe37183abaca328d1edf15c05b55bdce
+        image: harbor.zlibs.com/platform/actrium-runner@sha256:66df60a121f6b621b96cc8adece52f78c54278514cba979c75fb3e32561325fc
         name: fix-cargo-registry-ownership
         securityContext:
           runAsUser: 0
