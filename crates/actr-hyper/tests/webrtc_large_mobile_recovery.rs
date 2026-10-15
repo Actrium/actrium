@@ -317,6 +317,7 @@ fn pause_next_multifragment_send_after(
 ) {
     let (event_tx, event_rx) = oneshot::channel();
     let event_tx = Arc::new(StdMutex::new(Some(event_tx)));
+    // Only one send pauses; notify_one retains a resume sent before it waits.
     let release = Arc::new(Notify::new());
     let paused = Arc::new(AtomicBool::new(false));
     let hook: WebRtcFragmentSendHook = {
@@ -479,7 +480,7 @@ async fn inflight_short_offline_recovers_original_request(case: RoleCase) {
         harness.simulate_disconnect();
         tokio::time::sleep(Duration::from_secs(1)).await;
         harness.simulate_reconnect();
-        release_send.notify_waiters();
+        release_send.notify_one();
         drop(hook_guard);
         let response = tokio::time::timeout(Duration::from_secs(30), request)
             .await
@@ -521,7 +522,7 @@ async fn inflight_network_type_switch_recovers_or_retries_once(case: RoleCase) {
             NetworkRecoveryAction::Restore
         );
         process_mobile_events(&harness, case, events).await;
-        release_send.notify_waiters();
+        release_send.notify_one();
         drop(hook_guard);
         let result = tokio::time::timeout(Duration::from_secs(32), request)
             .await
@@ -579,7 +580,7 @@ async fn inflight_long_offline_fails_bounded_then_retries(case: RoleCase) {
             "long offline should time out the in-flight request, got: {error}"
         );
         assert_pending_empty(&harness, direction.from_serial, &request_id).await;
-        release_send.notify_waiters();
+        release_send.notify_one();
         drop(hook_guard);
         harness.simulate_reconnect();
         let events = vec![
@@ -631,7 +632,7 @@ async fn inflight_short_background_survives_foreground_restore(case: RoleCase) {
             NetworkRecoveryAction::Restore
         );
         process_mobile_events(&harness, case, events).await;
-        release_send.notify_waiters();
+        release_send.notify_one();
         drop(hook_guard);
         expect_bounded_completion(request, &request_id, &data, &hash, Duration::from_secs(8)).await;
         assert_pending_empty(&harness, direction.from_serial, &request_id).await;
@@ -677,7 +678,7 @@ async fn inflight_long_background_is_bounded_and_retries(case: RoleCase) {
             NetworkRecoveryAction::ForceReconnect
         );
         process_mobile_events(&harness, case, events).await;
-        release_send.notify_waiters();
+        release_send.notify_one();
         drop(hook_guard);
         expect_bounded_completion(request, &request_id, &data, &hash, Duration::from_secs(12))
             .await;
@@ -750,7 +751,7 @@ async fn mobile_data_chunk_channel_close_reports_delivery_uncertain(case: RoleCa
             .close_lane(&target_id, PayloadType::StreamReliable)
             .await
             .expect("close active StreamReliable lane");
-        release_send.notify_waiters();
+        release_send.notify_one();
         drop(hook_guard);
         let result = tokio::time::timeout(Duration::from_secs(10), send)
             .await
@@ -813,7 +814,7 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
         wait_for_send_to_pause(event_rx, "long offline data stream").await;
         harness.simulate_disconnect();
         process_mobile_events(&harness, case, vec![offline_event(1)]).await;
-        release_send.notify_waiters();
+        release_send.notify_one();
         drop(hook_guard);
         let send_result = tokio::time::timeout(Duration::from_secs(20), send)
             .await
