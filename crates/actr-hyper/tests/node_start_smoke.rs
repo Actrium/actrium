@@ -1108,7 +1108,10 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
     assert!(
         matches!(
             err,
-            ActrError::ConnectionNotReady(_) | ActrError::Unavailable(_) | ActrError::TimedOut
+            ActrError::ConnectionNotReady(_)
+                | ActrError::Unavailable(_)
+                | ActrError::TimedOut
+                | ActrError::DeliveryUncertain { .. }
         ),
         "post-disconnect call should return a transport-class error, got {err:?}"
     );

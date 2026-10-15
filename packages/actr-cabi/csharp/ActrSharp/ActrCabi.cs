@@ -19,14 +19,16 @@ public sealed class ActrCabiException : Exception
     // -32, -33, -40, -41, -42) are distinct from every Rust callback status code so
     // a code alone identifies a managed-validation failure. The codes below
     // intentionally mirror Rust codes (-10 NULL_POINTER, -20 WORKLOAD_NOT_FOUND,
-    // -21 HANDLE_INVALID, -22 REQUEST_ID_UNKNOWN, -50 GENERIC_ERROR): the
-    // native surface surfaces these conditions synchronously (e.g.
-    // actr_workload_create returns null) and the managed wrapper uses the same
-    // code for the same condition for consistency.
+    // -21 HANDLE_INVALID, -22 REQUEST_ID_UNKNOWN, -23 CALL_TIMED_OUT,
+    // -24 DELIVERY_UNCERTAIN, -50 GENERIC_ERROR). The native surface reports
+    // these statuses through callbacks or synchronous validation failures, and
+    // the managed wrapper preserves each code for consistent caller handling.
     public const int CodeNullPointer = -10;
     public const int CodeWorkloadNotFound = -20;
     public const int CodeHandleInvalid = -21;
     public const int CodeRequestIdUnknown = -22;
+    public const int CodeCallTimedOut = -23;
+    public const int CodeDeliveryUncertain = -24;
     public const int CodeGenericError = -50;
     public const int CodeAbiMismatch = -30;
     public const int CodeActrMismatch = -31;
@@ -37,6 +39,14 @@ public sealed class ActrCabiException : Exception
     public const int CodeEntryMissing = -42;
 
     public int Code { get; }
+
+    /// <summary>
+    /// True only for the reserved status carrying explicit pre-submission proof.
+    /// Native Call currently reports ordinary runtime timeouts as
+    /// CodeDeliveryUncertain, since a local workload may already have executed.
+    /// A timeout alone is never sufficient evidence to replay automatically.
+    /// </summary>
+    public bool IsSafeToRetry => Code == CodeCallTimedOut;
 
     /// <summary>What ActrSharp expected (e.g. "abi=1", "actr=0.7.0").</summary>
     public string? Expected { get; init; }

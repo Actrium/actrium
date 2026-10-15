@@ -896,6 +896,8 @@ pub(crate) struct WebSocketDataLane<S = WsMessageSink> {
 
     /// PayloadType identifier (used to add message header when sending)
     payload_type: PayloadType,
+    /// Direct-session retirement cancels writers before the sink is dropped.
+    session: Option<super::SecureCell>,
 
     /// Receive channel (independent, routed by dispatcher, uses Bytes for zero-copy)
     rx: Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>,
@@ -907,6 +909,7 @@ impl<S> Clone for WebSocketDataLane<S> {
         Self {
             sink: Arc::clone(&self.sink),
             payload_type: self.payload_type,
+            session: self.session.clone(),
             rx: Arc::clone(&self.rx),
         }
     }
@@ -919,6 +922,11 @@ impl<S> std::fmt::Debug for WebSocketDataLane<S> {
 }
 
 impl<S> WebSocketDataLane<S> {
+    pub(crate) fn with_session(mut self, session: super::SecureCell) -> Self {
+        self.session = Some(session);
+        self
+    }
+
     /// Create WebSocket DataLane
     #[inline]
     pub(crate) fn new(
@@ -929,6 +937,7 @@ impl<S> WebSocketDataLane<S> {
         Self {
             sink,
             payload_type,
+            session: None,
             rx: Arc::new(Mutex::new(rx)),
         }
     }
@@ -969,35 +978,63 @@ where
     }
 
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
-        // 1. Encapsulate message (add PayloadType header)
-        let mut buf = Vec::with_capacity(5 + data.len());
+        let mut write_started = false;
+        let write = async {
+            // 1. Encapsulate message (add PayloadType header)
+            let mut buf = Vec::with_capacity(5 + data.len());
 
-        // 1 byte: payload_type
-        buf.push(self.payload_type as u8);
+            // 1 byte: payload_type
+            buf.push(self.payload_type as u8);
 
-        // 4 bytes: data length (big-endian)
-        let len = data.len() as u32;
-        buf.extend_from_slice(&len.to_be_bytes());
+            // 4 bytes: data length (big-endian)
+            let len = data.len() as u32;
+            buf.extend_from_slice(&len.to_be_bytes());
 
-        // N bytes: data (copy from Bytes to Vec)
-        buf.extend_from_slice(&data);
+            // N bytes: data (copy from Bytes to Vec)
+            buf.extend_from_slice(&data);
 
-        // 2. Send to WebSocket
-        let mut sink_opt = self.sink.lock().await;
-        if let Some(s) = sink_opt.as_mut() {
-            let attempt = map_websocket_send_result(s.send(WsMessage::Binary(buf.into())).await);
-            if attempt.result.is_ok() {
-                tracing::trace!(
-                    "WebSocket sent {} bytes (type={:?})",
-                    data.len(),
-                    self.payload_type
-                );
+            // 2. Send to WebSocket
+            let mut sink_opt = self.sink.lock().await;
+            if let Some(s) = sink_opt.as_mut() {
+                // Only entering the sink send can make delivery ambiguous.
+                // Waiting for the shared writer lock is still proven pre-send.
+                write_started = true;
+                let attempt =
+                    map_websocket_send_result(s.send(WsMessage::Binary(buf.into())).await);
+                if attempt.result.is_ok() {
+                    tracing::trace!(
+                        "WebSocket sent {} bytes (type={:?})",
+                        data.len(),
+                        self.payload_type
+                    );
+                }
+                attempt
+            } else {
+                SendAttemptResult::failed_pre_send(NetworkError::WebSocketClosed(
+                    "WebSocket not connected".to_string(),
+                ))
             }
-            attempt
+        };
+        let result = if let Some(session) = &self.session {
+            tokio::select! {
+                biased;
+                _ = session.wait_terminal() => None,
+                result = write => Some(result),
+            }
         } else {
-            SendAttemptResult::failed_pre_send(NetworkError::WebSocketClosed(
-                "WebSocket not connected".to_string(),
-            ))
+            Some(write.await)
+        };
+        match result {
+            Some(attempt) => attempt,
+            None => {
+                let error =
+                    NetworkError::WebSocketClosed("WebSocket session retired during send".into());
+                if write_started {
+                    SendAttemptResult::failed(error, DeliveryProgress::Unknown)
+                } else {
+                    SendAttemptResult::failed_pre_send(error)
+                }
+            }
         }
     }
 

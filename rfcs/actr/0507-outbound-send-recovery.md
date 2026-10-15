@@ -334,6 +334,19 @@ peer, so the framework does not replay the Call or convert this result into a
 retryable timeout. A caller that has an idempotency policy may start a new
 logical Call with a new operation ID.
 
+Direct WebSocket session liveness is independent of Call deadlines. An idle
+session sends a Ping after 15 seconds and allows 10 seconds for sink acquisition,
+writing, and a matching Pong. While a local application receive queue is full,
+the reader cannot observe control frames. The session sends pressure heartbeats
+instead, with a separate 120-second budget for that continuous receive stall.
+Successful heartbeat writes do not renew this budget or prove the peer is
+responsive. If the queue does not resume accepting messages within the budget,
+the session is retired even when the peer is healthy; sustained consumer stalls
+are a bounded resource policy, not proof of peer failure. Temporary pressure
+preserves queued message order, and clearing it restores ordinary probes.
+Retirement cancels blocked writers and removes the stale route so later work can
+build a fresh connection. It never automatically replays uncertain operations.
+
 #### Tell
 
 Tell uses the existing send budget, which covers readiness waiting and one
@@ -1060,6 +1073,11 @@ high-cardinality peer metric implementation.
 - `StreamReliable` success still means only local submission, not remote
   business completion;
 - retain the existing low-latency semantics of `StreamLatencyFirst`;
+- the C ABI `actr_ref_call` callback conservatively reports a plain runtime
+  `TimedOut` as uncertain delivery: its local workload may already have executed,
+  and the error carries no pre-submission proof. The explicit pre-submission
+  status is reserved; managed callers must not automatically replay an
+  untracked timeout;
 - PR-0507-6 completes the UniFFI Kotlin/Swift mapping and its classification
   tests; the mapping preserves the operation ID and cause and keeps
   `DeliveryUncertain` non-retryable;

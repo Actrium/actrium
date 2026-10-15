@@ -130,6 +130,23 @@ package(actr-hyper) and kind(lib) and (
     test(/^outbound::peer_gate::tests::stamp_envelope_direction_overwrites_missing_and_mismatched_values$/) |
     test(/^outbound::peer_gate::tests::blocked_projection_times_out_before_pending_registration_or_build$/) |
     test(/^outbound::peer_gate::tests::request_deadline_covers_preflight_wait$/) |
+    test(/^wire::websocket::connection::tests::retired_websocket_destination_is_rebuilt_for_later_work$/) |
+    test(/^wire::websocket::connection::tests::silent_peer_is_retired_without_a_call_deadline$/) |
+    test(/^wire::websocket::connection::tests::receive_backpressure_preserves_messages_and_healthy_session$/) |
+    test(/^wire::websocket::connection::tests::silent_peer_is_retired_during_receive_backpressure$/) |
+    test(/^wire::websocket::connection::tests::pressure_heartbeats_do_not_extend_receive_backpressure_deadline$/) |
+    test(/^wire::websocket::connection::tests::silent_peer_is_retired_after_receive_backpressure_clears$/) |
+    test(/^wire::websocket::connection::tests::two_actrium_peers_survive_receive_backpressure$/) |
+    test(/^wire::websocket::connection::tests::peer_backpressure_heartbeat_does_not_disable_liveness_forever$/) |
+    test(/^wire::websocket::connection::tests::matching_pongs_keep_an_idle_session_alive$/) |
+    test(/^wire::websocket::connection::tests::sink_contention_cannot_block_session_retirement$/) |
+    test(/^transport::lane::tests::websocket_retirement_cancels_an_inflight_write_without_replay$/) |
+    test(/^transport::lane::tests::websocket_retirement_before_writer_lock_is_proven_not_attempted$/) |
+    test(/^transport::host_transport::tests::submitted_request_timeout_cannot_prove_non_delivery$/) |
+    test(/^transport::wire_pool::tests::terminal_websocket_is_not_a_live_candidate$/) |
+    test(/^outbound::peer_gate::tests::call_deadline_after_submission_is_delivery_uncertain$/) |
+    test(/^outbound::peer_gate::tests::call_deadline_mid_write_is_delivery_uncertain$/) |
+    test(/^outbound::peer_gate::tests::call_deadline_before_write_is_timed_out$/) |
     test(/^outbound::peer_gate::tests::existing_only_without_transport_fails_without_build_or_retry$/) |
     test(/^outbound::peer_gate::tests::blocked_projection_rejects_media_operations_before_coordinator_access$/) |
     test(/^outbound::peer_gate::tests::existing_only_media_ops_fail_fast_without_a_session$/) |

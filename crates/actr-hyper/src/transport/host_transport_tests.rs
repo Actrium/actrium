@@ -306,3 +306,27 @@ fn default_impl_matches_new() {
     // Default must behave like new() (reliable channel present).
     let _t = HostTransport::default();
 }
+
+#[tokio::test(start_paused = true)]
+async fn submitted_request_timeout_cannot_prove_non_delivery() {
+    let transport = Arc::new(HostTransport::new());
+    let caller = transport.clone();
+    let request = tokio::spawn(async move {
+        let mut env = envelope("already-consumed");
+        env.timeout_ms = 100;
+        caller
+            .send_request(PayloadType::RpcReliable, None, env)
+            .await
+    });
+
+    // A workload can consume and act on this request before the caller expires.
+    let consumed = tokio::time::timeout(Duration::from_secs(1), transport.recv_reliable_raw())
+        .await
+        .expect("the request must reach the workload queue")
+        .unwrap();
+    assert_eq!(consumed.request_id, "already-consumed");
+    tokio::time::advance(Duration::from_millis(100)).await;
+    let error = request.await.unwrap().unwrap_err();
+    assert!(matches!(error, ActrError::TimedOut));
+    assert_eq!(transport.pending_len(), 0);
+}

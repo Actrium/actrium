@@ -883,6 +883,10 @@ async fn wait_for_transport_dest_count(
 
 fn is_expected_bounded_send_error(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
+    // A bounded Call can expire after submission without a response.
+    if message.starts_with("delivery uncertain for operation") {
+        return true;
+    }
     [
         "connection",
         "request timeout",
@@ -905,7 +909,6 @@ fn is_expected_bounded_send_error(message: &str) -> bool {
 
 fn is_expected_inflight_send_error(message: &str) -> bool {
     is_expected_bounded_send_error(message)
-        || message.starts_with("delivery uncertain for operation")
 }
 
 async fn send_data_chunk_bounded(

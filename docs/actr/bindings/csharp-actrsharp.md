@@ -79,6 +79,25 @@ await node.WaitShutdown();
 ActrCabiNode.ShutdownRuntime();
 ```
 
+## Outbound Call deadline migration
+
+`ActrCabiNode.Call` keeps its existing signature. An ordinary runtime timeout
+has no evidence that the local workload never received or executed the request.
+It therefore returns `ActrCabiException.CodeDeliveryUncertain` (`-24`), as does
+an explicit uncertain-delivery error from a peer Call. Do not replay either
+outcome automatically.
+
+`CodeCallTimedOut` (`-23`) is reserved for an expiry with explicit proof that
+nothing was submitted. The current C ABI Call path does not have that proof;
+its plain runtime `TimedOut` never produces `-23` or `IsSafeToRetry = true`.
+When an uncertain error includes an operation ID, use it for reconciliation;
+a local workload timeout may not include one. Application-level idempotency or
+a status check is required before deciding whether to issue another operation.
+
+A direct WebSocket session that stops answering liveness probes is retired
+within a bounded probe interval (15 seconds to send Ping plus 10 seconds for
+Pong); a later Call can establish a replacement route.
+
 ---
 
 ## Host stream sink & reverse RPC
@@ -143,6 +162,9 @@ Semantics and sharp edges:
   caller resolves with `TimedOut`. Cancelling the Rust caller removes its
   pending request immediately. A handler that throws or cannot copy its
   callback buffers answers with a *generic error* instead.
+  This process-local reverse-RPC timeout is separate from the outbound
+  `ActrCabiNode.Call` deadline behavior above and retains its existing
+  `TimedOut` result.
   `ActrCabiException.CodeRequestIdUnknown` (`-22`) means a respond referenced
   an unknown, already-answered, cancelled, or timed-out request id.
 - **Fidelity and delegate lifetime**: `StreamId`, payload, sequence,
