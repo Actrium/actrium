@@ -67,7 +67,7 @@ async fn guest_main() {
     // NOT present().await here (host `present` wiring is stage ②).
     let mut surf = Surface::new(64, 64);
     let px = surf.pixels_mut();
-    for chunk in px.chunks_exact_mut(4) {
+    for chunk in px.as_chunks_mut::<4>().0 {
         chunk[0] = 0xff; // R
         chunk[3] = 0xff; // A (straight-alpha)
     }

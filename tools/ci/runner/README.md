@@ -44,15 +44,17 @@ The image includes the GitHub Actions agent, Rust and WebAssembly tools, hosted
 Python/Node/Java toolcaches, sccache, Binaryen, and zstd. Both image build paths
 verify pinned versions and artifact checksums.
 
-| Tool                                      | Version       |
-| ----------------------------------------- | ------------- |
-| wasm-bindgen and wasm-bindgen-test-runner | `0.2.126`     |
-| wasm-pack                                 | `0.15.0`      |
-| wasm-component-ld                         | `0.5.26`      |
-| wasm-tools                                | `1.253.0`     |
-| Binaryen                                  | `version_117` |
-| sccache                                   | `0.18.0`      |
-| zstd                                      | `1.5.7`       |
+| Tool                                     | Version                            |
+| ---------------------------------------- | ---------------------------------- |
+| Default Rust and Cargo                   | `1.99.0`                           |
+| Additional Rust toolchains               | `1.95.0` (MSRV), nightly (coverage)  |
+| wasm-bindgen and wasm-bindgen-test-runner | `0.2.126`                          |
+| wasm-pack                                | `0.15.0`                           |
+| wasm-component-ld                        | `0.5.26`                           |
+| wasm-tools                               | `1.253.0`                          |
+| Binaryen                                 | `version_117`                      |
+| sccache                                  | `0.18.0`                           |
+| zstd                                     | `1.5.7`                            |
 
 The installer pins must match the workflows and the web workspace lockfile.
 The zstd installer also provides `zstdmt`, `unzstd`, and `zstdcat` for Actions Cache.
@@ -62,36 +64,73 @@ An explicit container command is forwarded. Startup performs no tool downloads.
 
 ## Build and publish
 
-`Dockerfile` builds the complete toolchain from the base operating system.
-`Dockerfile.incremental` requires a previously published plain runner image,
-pinned by digest, through `RUNNER_BASE_IMAGE`. It preserves the inherited
-layers and adds the same tool, entrypoint, and cache-worker changes.
+`Dockerfile` performs a clean build from an Ubuntu base. Rust, native tools,
+WebAssembly tools, Python, Node, Java, Android and Gradle have independent stages.
+Updating the Rust pin does not invalidate the language and SDK cache stages.
+The final stage copies only installed outputs with their final ownership; it
+never copies old toolchain layers or recursively changes toolcache ownership.
 
-Supply image references and any network configuration from the build environment:
+`Dockerfile.incremental` updates a digest-pinned existing runner. Both paths use
+shared installers and the `versions/` manifests for downloads and validation.
+Incremental updates cannot recover space from files in inherited layers; use a
+clean full build periodically to establish a compact new baseline.
+The incremental base must already provide the declared toolcache and SDK pins,
+including the Gradle/KtLint caches. Older incomplete bases need a full rebuild;
+the shared bootstrap checks reject missing capabilities before publication.
+
+Build context is `tools/ci/runner/`. Supply mirrors and network configuration from
+the operator environment; no registry credential belongs in a Dockerfile:
 
 ```bash
-docker build -t actrium-runner:dev \
+docker buildx build \
+  --build-arg BASE_IMAGE \
+  --build-arg BUILDKIT_SYNTAX \
+  --build-arg HTTP_PROXY --build-arg HTTPS_PROXY \
+  --build-arg http_proxy --build-arg https_proxy \
+  --build-arg APT_MIRROR --build-arg RUSTUP_DIST_SERVER \
+  --build-arg RUSTUP_UPDATE_ROOT --build-arg ZSTD_BUILD_JOBS \
+  --provenance=false --load -t "$RUNNER_IMAGE" \
   -f tools/ci/runner/Dockerfile tools/ci/runner/
 
 docker buildx build \
-  -f tools/ci/runner/Dockerfile.incremental \
-  --build-arg RUNNER_BASE_IMAGE \
+  --build-arg RUNNER_BASE_IMAGE --build-arg BUILDKIT_SYNTAX \
   --build-arg HTTP_PROXY --build-arg HTTPS_PROXY \
-  --provenance=false --load \
-  -t "$RUNNER_IMAGE" tools/ci/runner/
+  --provenance=false --load -t "$RUNNER_IMAGE" \
+  -f tools/ci/runner/Dockerfile.incremental tools/ci/runner/
 
 docker push "$RUNNER_IMAGE"
 ```
 
-Set `RUNNER_BASE_IMAGE` to an immutable image reference before the incremental
-build. `GITHUB_PROXY`, when used, is a release-URL prefix rather than an HTTP proxy.
-Use configured registry authentication and never print credentials in build logs.
+Mirror the Ubuntu base and Dockerfile frontend to an accessible registry when
+Docker Hub is unavailable. Set `BASE_IMAGE` and `BUILDKIT_SYNTAX` to the mirrored
+references pinned by digest. `GITHUB_PROXY`, when used, is a release-URL prefix.
 
-Both Dockerfiles invoke `check-runner-bootstrap.sh` for the same tool, cache-worker,
-Clippy, mold, and hosted-toolcache marker checks. The incremental build preserves
-its immutable base rather than repeating the full build's OS installation.
-Do not overwrite a deployed tag. Pin both runner and initContainer images by digest
-and verify that the fleet can pull the image before changing the manifest.
+BuildKit caches apt indexes/downloads and artifact archives outside the image.
+Rustup mounts only `downloads`; temporary extraction and installed toolchains
+share the image filesystem so component renames cannot cross mount boundaries. Gradle's preseeded home is also part of the image, not a cache mount,
+so ephemeral runners can use it offline. zstd defaults to the available CPU count;
+`ZSTD_BUILD_JOBS` limits its compilation parallelism when necessary. Existing Rust
+toolchains are reused, with only missing components/targets added. Incremental
+builds preserve an installed nightly; clean full builds refresh that channel.
+
+Both builds run `check-runner-bootstrap.sh` against the shared version manifests,
+including the default Rust/Cargo pin, MSRV/nightly, toolcache markers, Android SDK,
+Gradle/KtLint cache and Actions worker patch. The worker patch is idempotent but
+rejects malformed or ambiguous assemblies. No startup download is required.
+Do not overwrite a deployed tag. Verify a published digest before deployment.
+
+Every artifact download requires a fixed SHA-256, including cache hits. Missing
+or malformed pins fail before downloading; corrupt cached artifacts are fetched
+again and verified before cache publication. Run
+`sh tools/ci/runner/test-runner-install-lib.sh` to check rejection and cache paths
+without network access.
+
+Build-time agent diagnostics and Gradle daemon state are removed in the same
+layer that creates them, before the final image is published. The agent version
+check also clears proxy variables because it needs no network access. Runtime
+job diagnostics remain available normally. Incremental builds reject bases with
+retained diagnostic directories; use a clean full build instead. Deleting files
+in a later image layer does not remove information from inherited layers.
 
 ## Cache and build reuse
 
@@ -174,8 +213,9 @@ with the matching label and verify the listener and runners register again.
 ## Capacity and scheduling
 
 Set min/max counts, requests, limits, node affinity, and storage for the destination
-pool before deployment. The example reserves at least 20 CPU/40 GiB for ten runners
-and 32 CPU/64 GiB at sixteen runners, in addition to other workloads. CPU limits
+pool before deployment. The manifest keeps a minimum of ten and a maximum of
+twenty runners. Resource requests total 20 CPU/40 GiB at ten runners and
+40 CPU/80 GiB at twenty runners, in addition to other workloads. CPU limits
 allow bursts; they do not reserve node capacity. Check allocatable resources,
 existing requests, Pod Pending/OOM events, and observed CPU throttling before
 raising concurrency. An overcommit ratio alone does not establish throttling.
