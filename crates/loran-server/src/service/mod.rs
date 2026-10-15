@@ -17,6 +17,8 @@ pub mod grpc;
 pub mod http;
 pub mod ice;
 pub mod manager;
+#[cfg(test)]
+mod publisher_fixture;
 pub mod trace;
 
 use anyhow::Result;

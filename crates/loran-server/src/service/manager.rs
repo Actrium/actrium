@@ -353,6 +353,11 @@ impl ServiceManager {
             None
         };
 
+        #[cfg(test)]
+        let issuer_state = issuer_state
+            .map(super::publisher_fixture::configure)
+            .transpose()?;
+
         // As Realm Provider for its own domain, Loran signs Realm Profiles and
         // refreshes those of other domains in the background.
         let realm_profiles = crate::service::http::build_realm_profiles(&self.config).await?;

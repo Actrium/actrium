@@ -4,10 +4,10 @@ edition = 1
 path = "__PACKAGE_PATH__"
 
 [signaling]
-url = "ws://127.0.0.1:8081/signaling/ws"
+url = "ws://127.0.0.1:__HTTP_PORT__/signaling/ws"
 
 [issuer_endpoint]
-url = "http://127.0.0.1:8081/issuer"
+url = "http://127.0.0.1:__HTTP_PORT__/issuer"
 
 [deployment]
 realm = "__REALM__"
@@ -18,7 +18,7 @@ realm_client_key = "__REALM_CLIENT_KEY__"
 # which lives at the actrix base (PublisherRegistryService mounts /publisher), NOT under /issuer.
 # [issuer_endpoint] above keeps the /issuer suffix because /register is mounted there.
 kind = "registry"
-endpoint = "http://127.0.0.1:8081"
+endpoint = "http://127.0.0.1:__HTTP_PORT__"
 
 [discovery]
 visible = true
@@ -31,8 +31,8 @@ tracing_service_name = "package-runtime-echo-server"
 
 [webrtc]
 force_relay = false
-stun_urls = ["stun:127.0.0.1:3478"]
-turn_urls = ["turn:127.0.0.1:3478"]
+stun_urls = ["stun:127.0.0.1:__ICE_PORT__"]
+turn_urls = ["turn:127.0.0.1:__ICE_PORT__"]
 
 [acl]
 

@@ -7,8 +7,8 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 source "$SCRIPT_DIR/lib/common.sh"
 
-HTTP_PORT=8081
-ICE_PORT=3478
+HTTP_PORT="${HTTP_PORT:-8081}"
+ICE_PORT="${ICE_PORT:-3478}"
 REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="e2e.actrium.test"
@@ -20,10 +20,10 @@ CLIENT_GUEST_VERSION="0.1.0"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/package-runtime-echo"
-ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
-ACTRIX_TARGET_DIR="$E2E_TARGET_ROOT/actrix-bin"
-WORKSPACE_TARGET_DIR="$E2E_TARGET_ROOT/workspace"
-TEMP_SERVICE_TARGET_DIR="$E2E_TARGET_ROOT/temp-service"
+ACTR_TARGET_DIR="${ACTR_TARGET_DIR:-$E2E_TARGET_ROOT/actr-cli}"
+ACTRIX_TARGET_DIR="${ACTRIX_TARGET_DIR:-$E2E_TARGET_ROOT/actrix-bin}"
+WORKSPACE_TARGET_DIR="${WORKSPACE_TARGET_DIR:-$E2E_TARGET_ROOT/workspace}"
+TEMP_SERVICE_TARGET_DIR="${TEMP_SERVICE_TARGET_DIR:-$E2E_TARGET_ROOT/temp-service}"
 DEFAULT_MESSAGE="TmpFlow"
 
 BACKEND="cdylib"
@@ -144,20 +144,21 @@ build_local_actr_cli() {
     success "actr CLI ready: $ACTR_CLI_BIN"
 }
 
-# Build actrix from the branch source into a cache dir and use it, rather than
-# trusting an `actrix` found on PATH (which may be a stale install that doesn't
-# serve the /publisher-registry public routes or accept the current config schema). A caller
-# (CI) may pre-set ACTRIX_BIN to skip the build.
+# Build a test-only server whose injected transport serves the disposable
+# publisher's signed Profile. The production executable retains public HTTPS
+# discovery and has no fixture override, including in all-features builds.
 build_local_actrix() {
     if [ -n "${ACTRIX_BIN:-}" ] && [ -x "$ACTRIX_BIN" ]; then
-        success "Using caller-provided actrix: $ACTRIX_BIN"
+        "$ACTRIX_BIN" --list | grep -q '^package_runtime_fixture: test$' ||
+            fail "ACTRIX_BIN must be the actrix test binary containing package_runtime_fixture"
+        success "Using caller-provided actrix test fixture: $ACTRIX_BIN"
         return 0
     fi
     section "🔧 Building local actrix from source"
-    CARGO_TARGET_DIR="$ACTRIX_TARGET_DIR" cargo build \
+    CARGO_TARGET_DIR="$ACTRIX_TARGET_DIR" cargo test --no-run --message-format=json \
         --manifest-path "$REPO_ROOT/crates/loran-server/Cargo.toml" \
-        --bin actrix >/dev/null
-    ACTRIX_BIN="$ACTRIX_TARGET_DIR/debug/actrix"
+        --bin actrix >"$RUN_DIR/actrix-fixture-build.jsonl"
+    ACTRIX_BIN="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "actrix" and .profile.test == true and .executable != null) | .executable' "$RUN_DIR/actrix-fixture-build.jsonl" | tail -1)"
     [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
     export ACTRIX_BIN
     success "actrix ready: $ACTRIX_BIN"
@@ -179,7 +180,8 @@ start_actrix() {
 
     # ACTRIX_RUST_LOG lets modes capture the debug provenance marker.
     RUST_LOG="${ACTRIX_RUST_LOG:-${RUST_LOG:-info}}" \
-        "$ACTRIX_BIN" --config "$ACTRIX_CONFIG_PATH" >"$LOG_DIR/actrix.log" 2>&1 &
+        ACTR_PACKAGE_RUNTIME_FIXTURE=1 ACTR_PACKAGE_RUNTIME_CONFIG="$ACTRIX_CONFIG_PATH" \
+        "$ACTRIX_BIN" package_runtime_fixture --exact --ignored --nocapture >"$LOG_DIR/actrix.log" 2>&1 &
     ACTRIX_PID=$!
 
     if ! wait_for_http_ok "http://127.0.0.1:${HTTP_PORT}/signaling/health" 120; then
@@ -396,96 +398,14 @@ EOF
     success "Client guest package ready"
 }
 
-seed_client_registry_state() {
-    section "🗂️  Seeding client registry metadata"
-    python3 - "$ACTRIX_DB" "$CLIENT_GUEST_PACKAGE" "$CLIENT_GUEST_PUBLIC_KEY" <<'PY'
-import base64
-import hashlib
-import json
-import sqlite3
-import sys
-import time
-import zipfile
-
-import tomllib
-
-db_path, package_path, public_key_path = sys.argv[1:]
-now = int(time.time())
-key_expires_at = now + 365 * 24 * 3600
-
-with open(public_key_path, "r", encoding="utf-8") as fh:
-    public_key = json.load(fh)["public_key"]
-# Same key-id convention as the CLI/server (actr_pack::compute_key_id).
-key_bytes = base64.b64decode(public_key, validate=True)
-key_id = "actr-pub-" + hashlib.sha256(key_bytes).hexdigest()[:16]
-
-with zipfile.ZipFile(package_path, "r") as zf:
-    manifest = zf.read("manifest.toml").decode("utf-8")
-    signature = base64.b64encode(zf.read("manifest.sig")).decode("ascii")
-
-manifest_data = tomllib.loads(manifest)
-publisher = manifest_data["publisher"]
-name = manifest_data["name"]
-version = manifest_data["version"]
-target = manifest_data.get("binary", {}).get("target", "cdylib")
-type_str = f"{publisher}/{name}@{version}"
-
-conn = sqlite3.connect(db_path)
-try:
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT OR IGNORE INTO publisher
-            (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
-        VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
-        """,
-        (publisher, public_key, key_id, "e2e@local.actr", now, now, now, key_expires_at),
-    )
-    cur.execute(
-        """
-        UPDATE publisher
-           SET public_key = ?,
-               key_id = ?,
-               status = 'active',
-               updated_at = ?,
-               verified_at = ?,
-               key_expires_at = ?,
-               suspended_at = NULL,
-               revoked_at = NULL
-         WHERE name = ?
-        """,
-        (public_key, key_id, now, now, key_expires_at, publisher),
-    )
-    cur.execute("SELECT id FROM publisher WHERE name = ?", (publisher,))
-    publisher_id = cur.fetchone()[0]
-    cur.execute(
-        """
-        INSERT INTO publisher_package
-            (publisher_id, publisher, name, version, type_str, target, manifest, signature, status, published_at, revoked_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL)
-        ON CONFLICT(publisher, name, version, target) DO UPDATE SET
-            publisher_id = excluded.publisher_id,
-            type_str = excluded.type_str,
-            manifest = excluded.manifest,
-            signature = excluded.signature,
-            status = 'active',
-            published_at = excluded.published_at,
-            revoked_at = NULL
-        """,
-        (publisher_id, publisher, name, version, type_str, target, manifest, signature, now),
-    )
-    conn.commit()
-finally:
-    conn.close()
-PY
-
-    success "Client registry state seeded"
-}
-
+# The client package is verified by StaticTrust and registers as a development
+# identity. Only the service publisher is provisioned in the Registry.
 render_client_runtime_config() {
     render_template \
         "$SCRIPT_DIR/config/client-runtime.toml.tpl" \
         "$CLIENT_RUNTIME_PATH" \
+        "__HTTP_PORT__=$HTTP_PORT" \
+        "__ICE_PORT__=$ICE_PORT" \
         "__REALM__=$REALM" \
         "__ECHO_SERVICE_VERSION__=$SERVICE_VERSION" \
         "__REALM_CLIENT_KEY__=$REALM_CLIENT_KEY"
@@ -509,6 +429,7 @@ run_client_and_assert() {
     ) | \
         HOME="$client_home" \
         ECHO_ACTR_VERSION="$SERVICE_VERSION" \
+        ISSUER_ENDPOINT="http://127.0.0.1:${HTTP_PORT}/issuer" \
         CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
@@ -563,6 +484,7 @@ assert_removed_member_refused() {
     echo "quit" | \
         HOME="$client_home" \
         ECHO_ACTR_VERSION="$SERVICE_VERSION" \
+        ISSUER_ENDPOINT="http://127.0.0.1:${HTTP_PORT}/issuer" \
         CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
@@ -612,6 +534,8 @@ render_server_runtime() {
     render_template \
         "$SCRIPT_DIR/config/server-runtime.toml.tpl" \
         "$SERVER_RUNTIME_PATH" \
+        "__HTTP_PORT__=$HTTP_PORT" \
+        "__ICE_PORT__=$ICE_PORT" \
         "__PACKAGE_PATH__=$SERVICE_PACKAGE" \
         "__REALM__=$REALM" \
         "__REALM_CLIENT_KEY__=$REALM_OWNER_KEY"
@@ -721,7 +645,6 @@ mode_published() {
     # published service must also be online before the client guest lockfile is
     # generated. Reuse this server for the final echo round-trip.
     build_client_guest_package
-    seed_client_registry_state
     run_client_and_assert
     assert_removed_member_refused
     stop_server

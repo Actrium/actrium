@@ -471,6 +471,23 @@ impl TestRtcControl {
         generation
     }
 
+    /// Send a correlated restart through the production signaling transport.
+    /// The empty-session rejection must happen before SDP application.
+    pub fn send_restart_probe(&self, peer: &ActrId, exchange_id: &str) {
+        use crate::wire::webrtc::rtc::peer::reducer::SignalingMessage;
+        use webrtc::peer_connection::{RTCSdpType, RTCSessionDescription};
+        let mut desc = RTCSessionDescription::default();
+        desc.sdp_type = RTCSdpType::Offer;
+        desc.sdp = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n".into();
+        assert!(self.manager.try_send_signaling(
+            peer.clone(),
+            SignalingMessage::IceRestartOffer {
+                desc: Box::new(desc),
+                exchange_id: exchange_id.into(),
+            },
+        ));
+    }
+
     fn new(manager: Arc<RtcConnectionManager>) -> Self {
         Self { manager }
     }

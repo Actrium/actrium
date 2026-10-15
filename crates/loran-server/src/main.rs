@@ -40,6 +40,22 @@ use error::{Error, Result};
 /// Application launcher utilities
 struct ApplicationLauncher;
 
+/// Full server composition with an in-process publisher document fixture.
+/// This entry point and its fetcher do not exist in production binaries.
+#[cfg(test)]
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "started by package-runtime-echo/run.sh"]
+async fn package_runtime_fixture() {
+    assert_eq!(
+        std::env::var("ACTR_PACKAGE_RUNTIME_FIXTURE").as_deref(),
+        Ok("1")
+    );
+    let config = std::env::var("ACTR_PACKAGE_RUNTIME_CONFIG").expect("fixture config path");
+    ApplicationLauncher::run_application(Path::new(&config))
+        .await
+        .expect("package runtime fixture server");
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
