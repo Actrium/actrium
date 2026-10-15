@@ -1,0 +1,67 @@
+# Render with render-light-runner.py and operator-managed deployment settings.
+# Register only the scale-set name, so generic Linux jobs cannot select this pool.
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: actrium-linux-light
+  namespace: ${RUNNER_NAMESPACE}
+  labels:
+    actions.github.com/organization: ${RUNNER_GITHUB_ORGANIZATION}
+    app.kubernetes.io/version: ${ARC_CONTROLLER_VERSION}
+spec:
+  githubConfigSecret: ${RUNNER_GITHUB_CONFIG_SECRET}
+  githubConfigUrl: ${RUNNER_GITHUB_CONFIG_URL}
+  runnerScaleSetName: actrium-linux-light
+  minRunners: 4
+  maxRunners: 16
+  template:
+    metadata:
+      labels:
+        runner-pool: actrium-linux-light
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: actrium-linux-light
+                    operator: In
+                    values: ["true"]
+      # Sixteen runners across exactly four eligible nodes, with hard skew one,
+      # permit at most four per node. minDomains prevents failover concentration.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          minDomains: 4
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          nodeAffinityPolicy: Honor
+          nodeTaintsPolicy: Honor
+          labelSelector:
+            matchLabels:
+              runner-pool: actrium-linux-light
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - name: runner
+          image: ${RUNNER_IMAGE}
+          # Light jobs do not need the image entrypoint's compilation cache.
+          command: ["/home/runner/actions-runner/run.sh"]
+          envFrom:
+            - configMapRef:
+                name: ${RUNNER_LIGHT_ENV_CONFIGMAP}
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+              ephemeral-storage: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+              ephemeral-storage: 12Gi
+          volumeMounts:
+            - name: work
+              mountPath: /home/runner/actions-runner/_work
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: 10Gi

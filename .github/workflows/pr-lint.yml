@@ -14,11 +14,12 @@ concurrency:
 jobs:
   title:
     name: Validate PR title
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     steps:
       - name: Check conventional commit format
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
         run: |
-          TITLE="${{ github.event.pull_request.title }}"
           if echo "$TITLE" | grep -qE '^(feat|fix|chore|docs|style|refactor|test|ci|perf|build|revert)(\([^)]+\))?!?: '; then
             echo "✓ PR title follows Conventional Commits format"
             exit 0

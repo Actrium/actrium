@@ -16,7 +16,7 @@ permissions:
 jobs:
   script-check:
     name: Kotlin Android Script Check
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     steps:
       - uses: actions/checkout@v5
       - name: Test SDK error message generation
