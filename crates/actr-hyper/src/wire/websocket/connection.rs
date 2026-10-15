@@ -34,6 +34,7 @@ impl Drop for CancelOnDrop {
 
 const PING_INTERVAL: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 const PEER_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(120);
 type ProbeNonce = [u8; 16];
 // Bound one continuous local receive stall independently of successful writes.
@@ -373,16 +374,25 @@ impl WebSocketConnection {
         let shutdown = self.teardown.0.clone();
         tokio::spawn(async move {
             let (pong_tx, pong_rx) = watch::channel(None);
-            tokio::select! {
-                _ = shutdown.cancelled() => {},
-                _ = session.dispatch(stream, pong_tx) => {},
-                _ = session.probe(pong_rx) => {},
-                _ = session.secure.wait_terminal() => {},
-            }
-            session.secure.drive_terminal(SecureChannelState::Failed);
+            let graceful = tokio::select! {
+                _ = shutdown.cancelled() => true,
+                graceful = session.dispatch(stream, pong_tx) => graceful,
+                _ = session.probe(pong_rx) => false,
+                _ = session.secure.wait_terminal() => session.secure.state() == SecureChannelState::Closed,
+            };
+            session.secure.drive_terminal(if graceful {
+                SecureChannelState::Closed
+            } else {
+                SecureChannelState::Failed
+            });
             *session.connected.write().await = false;
-            // Terminal state cancels writers before the socket is dropped.
-            drop(session.sink.lock().await.take());
+            // Terminal state cancels application writers. Orderly shutdown
+            // attempts the Close frame, but never waits indefinitely to flush.
+            retire_sink(
+                &session.sink,
+                session.secure.state() == SecureChannelState::Closed,
+            )
+            .await;
             *session.router.write().await = [None, None, None, None, None];
             *session.lane_cache.write().await = [None, None, None, None, None];
         });
@@ -503,8 +513,11 @@ impl WebSocketConnection {
 
         *self.connected.write().await = false;
 
-        // Never wait for a graceful close on an unresponsive transport.
-        drop(self.sink.lock().await.take());
+        retire_sink(
+            &self.sink,
+            self.secure.state() == SecureChannelState::Closed,
+        )
+        .await;
 
         // clear blank route by table
         let mut router = self.router.write().await;
@@ -740,7 +753,8 @@ impl WebSocketSession {
         &self,
         mut stream: SplitStream<WebSocketStream<S>>,
         pong_tx: watch::Sender<Option<ProbeNonce>>,
-    ) where
+    ) -> bool
+    where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         while let Some(msg_result) = stream.next().await {
@@ -787,8 +801,8 @@ impl WebSocketSession {
                     }
                 }
                 Ok(WsMessage::Close(_)) => {
-                    tracing::info!("🔌 WebSocket Connect be pair end Close");
-                    break;
+                    tracing::info!("WebSocket peer initiated orderly close");
+                    return true;
                 }
                 Ok(WsMessage::Pong(payload)) => {
                     if let Ok(bytes) = ProbeNonce::try_from(payload.as_ref()) {
@@ -813,5 +827,25 @@ impl WebSocketSession {
         }
 
         tracing::debug!("📡 WebSocket dispatcher exited");
+        false
     }
+}
+
+/// Only one closer takes ownership of the sink; cancellation drops that owned
+/// socket even if an earlier frame or the Close frame cannot be flushed.
+async fn retire_sink(sink: &WsSink, graceful: bool) {
+    let close = async {
+        let socket = sink.lock().await.take();
+        if let Some(mut socket) = socket {
+            if graceful {
+                let _ = socket.close().await;
+            }
+        }
+    };
+    let _ = crate::timer::timeout(
+        crate::timer::ids::WEBSOCKET_CLOSE_DEADLINE,
+        CLOSE_TIMEOUT,
+        close,
+    )
+    .await;
 }

@@ -550,6 +550,12 @@ timer_inventory! {
         success: "Pong matching the current probe arrives, or pressure heartbeat is written", interrupt: "session retirement, local receive backpressure change, or peer pressure heartbeat",
         expiry: "retire the physical session and invalidate cached lanes", reset: "each probe", external: false
     },
+    WEBSOCKET_CLOSE_DEADLINE => {
+        id: "websocket.close_deadline", owner: "websocket_connection", category: FailureDeadline,
+        duration: "CLOSE_TIMEOUT (1s)", arm: "retire a direct WebSocket sink",
+        success: "Close frame flushed or failed socket dropped", interrupt: "close future cancellation",
+        expiry: "drop the owned sink without waiting for the peer", reset: "never", external: false
+    },
     WEBSOCKET_PROBE_CYCLE_DEADLINE => {
         id: "websocket.probe_cycle_deadline", owner: "websocket_connection", category: FailureDeadline,
         duration: "PING_INTERVAL + PROBE_TIMEOUT (25s)", arm: "direct WebSocket probe cycle starts",

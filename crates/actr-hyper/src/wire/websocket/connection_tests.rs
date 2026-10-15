@@ -767,3 +767,51 @@ async fn peer_pressure_with_round_trips_can_survive_grace_budget() {
     assert!(started.elapsed() > PEER_BACKPRESSURE_TIMEOUT);
     connection.close().await.unwrap();
 }
+
+#[tokio::test(start_paused = true)]
+async fn explicit_close_sends_a_close_frame() {
+    let (connection, mut peer) = in_memory_pair().await;
+    connection.close().await.unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), peer.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(frame, WsMessage::Close(_)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn peer_close_receives_an_orderly_reply() {
+    let (connection, mut peer) = in_memory_pair().await;
+    peer.send(WsMessage::Close(None)).await.unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), peer.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(frame, WsMessage::Close(_)));
+    assert_eq!(connection.secure.state(), SecureChannelState::Closed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn orderly_close_is_bounded_behind_a_blocked_write() {
+    let (connection, _nonreading_peer) = in_memory_pair().await;
+    let lane = connection.get_lane(PayloadType::RpcReliable).await.unwrap();
+    let writer = tokio::spawn(async move {
+        lane.send_with_progress(bytes::Bytes::from(vec![0; 1024 * 1024]))
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(!writer.is_finished());
+    tokio::time::timeout(CLOSE_TIMEOUT + Duration::from_secs(1), connection.close())
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = writer.await.unwrap();
+    assert!(outcome.result.is_err());
+    assert_eq!(
+        outcome.progress,
+        crate::transport::DeliveryProgress::Unknown
+    );
+    assert!(connection.sink.lock().await.is_none());
+}

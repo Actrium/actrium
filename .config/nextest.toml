@@ -140,6 +140,9 @@ package(actr-hyper) and kind(lib) and (
     test(/^wire::websocket::connection::tests::two_actrium_peers_survive_receive_backpressure$/) |
     test(/^wire::websocket::connection::tests::peer_backpressure_heartbeat_does_not_disable_liveness_forever$/) |
     test(/^wire::websocket::connection::tests::matching_pongs_keep_an_idle_session_alive$/) |
+    test(/^wire::websocket::connection::tests::explicit_close_sends_a_close_frame$/) |
+    test(/^wire::websocket::connection::tests::peer_close_receives_an_orderly_reply$/) |
+    test(/^wire::websocket::connection::tests::orderly_close_is_bounded_behind_a_blocked_write$/) |
     test(/^wire::websocket::connection::tests::endless_peer_pressure_cannot_hide_a_stalled_reader$/) |
     test(/^wire::websocket::connection::tests::peer_pressure_with_round_trips_can_survive_grace_budget$/) |
     test(/^wire::websocket::connection::tests::unsolicited_pongs_do_not_satisfy_liveness_challenges$/) |
