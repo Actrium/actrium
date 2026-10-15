@@ -1,0 +1,11 @@
+# GitHub does not permit secret teams to act as Code Owners. Keep this owner
+# list aligned with the members of the secret Actrium/core team.
+/.github/CODEOWNERS @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+/.github/workflows/ @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+/.github/scripts/ci_gate_test.py @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+
+# Release scripts execute inside workflows that can write repository contents.
+/scripts/actr/release-*.sh @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+/scripts/actr/detect-pre-release-label.sh @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+/scripts/actr/generate-changelog.py @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+/scripts/actr/tests/release-*.sh @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
