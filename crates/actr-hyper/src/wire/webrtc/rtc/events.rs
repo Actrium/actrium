@@ -354,11 +354,11 @@ struct StructuralByteLease {
 
 impl Drop for StructuralByteLease {
     fn drop(&mut self) {
-        let _ =
-            self.structural_bytes
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                    Some(current.saturating_sub(self.bytes))
-                });
+        let _ = self
+            .structural_bytes
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                Some(current.saturating_sub(self.bytes))
+            });
     }
 }
 
@@ -439,7 +439,7 @@ impl PeerEventMailbox {
                 let bytes = structural_event_bytes(&structural);
                 let reserved = self
                     .structural_bytes
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                         current
                             .checked_add(bytes)
                             .filter(|next| *next <= self.max_structural_bytes)

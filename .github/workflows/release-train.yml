@@ -319,7 +319,7 @@ jobs:
           ref: ${{ needs.context.outputs.target_branch }}
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
 
@@ -629,7 +629,7 @@ jobs:
           cache-dependency-path: packages/actr-typescript/package.json
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: ${{ matrix.target }}
 

@@ -34,11 +34,11 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
           # rustfmt is required by scripts/actr/release-train.sh (`cargo fmt
-          # --all` in the prepare checks). The pinned 1.98.0 toolchain is a
+          # --all` in the prepare checks). The pinned 1.99.0 toolchain is a
           # fresh `--profile minimal` install, unlike the runner-preinstalled
           # stable toolchain that used to carry rustfmt. clippy is not needed:
           # the prepare path only runs `cargo fmt --all` and `cargo check`.

@@ -239,12 +239,12 @@ impl TestClock {
     pub fn advance(&self, duration: Duration) {
         let delta = saturate_nanos(duration);
         self.nanos
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |current| Some(current.saturating_add(delta)),
             )
-            .expect("fetch_update closure never returns None");
+            .expect("try_update closure never returns None");
     }
 }
 

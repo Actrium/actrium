@@ -34,16 +34,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt,clippy
+
       - name: Format check
         run: cargo fmt --all -- --check
-
-      - name: Install pinned Clippy toolchain
-        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --no-self-update
 
       - name: Clippy
         env:
           CARGO_BUILD_WARNINGS: deny
-        run: cargo +1.97.1 clippy --all-targets --all-features
+        run: cargo +1.99.0 clippy --all-targets --all-features
 
       - name: Build
         run: cargo build --all-features
