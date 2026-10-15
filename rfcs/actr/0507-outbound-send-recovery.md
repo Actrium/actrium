@@ -347,6 +347,11 @@ preserves queued message order, and clearing it restores ordinary probes.
 Each new receive stall retains its start time, so accepting a message resets
 the stall budget even if a subsequent full-queue notification coalesces with
 the clear notification.
+A peer pressure heartbeat temporarily extends a probe's response budget, but
+requires fresh heartbeats within 25 seconds and grants at most 120 seconds
+without a matching unpredictable challenge Pong. Heartbeats cannot reset that
+absolute bound. An endpoint unable to read control frames for that entire grace
+period is retired even if it can still write pressure notifications.
 Retirement cancels blocked writers and removes the stale route so later work can
 build a fresh connection. It never automatically replays uncertain operations.
 

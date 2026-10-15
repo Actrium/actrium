@@ -34,6 +34,8 @@ impl Drop for CancelOnDrop {
 
 const PING_INTERVAL: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const PEER_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(120);
+type ProbeNonce = [u8; 16];
 // Bound one continuous local receive stall independently of successful writes.
 // A peer may still ACK TCP data while its application is unresponsive. Even a
 // healthy session is retired if its consumer cannot make progress for 2 minutes.
@@ -119,7 +121,7 @@ pub(crate) struct WebSocketConnection {
     connect_gate: Arc<Mutex<()>>,
     /// Retain each stall's start even when watch coalesces clear/full updates.
     receive_stall: watch::Sender<Option<Instant>>,
-    peer_backpressure: watch::Sender<()>,
+    peer_backpressure: watch::Sender<Option<Instant>>,
 
     /// message route by table: PayloadType -> Sender (using array index, 5 fixed elements, Bytes zero-copy)
     router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>>,
@@ -160,7 +162,7 @@ impl WebSocketConnection {
             credential_b64: None,
             connect_gate: Arc::new(Mutex::new(())),
             receive_stall: watch::channel(None).0,
-            peer_backpressure: watch::channel(()).0,
+            peer_backpressure: watch::channel(None).0,
             sink: Arc::new(Mutex::new(None)), // initial begin as None
             router: Arc::new(RwLock::new([None, None, None, None, None])),
             lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
@@ -232,7 +234,7 @@ impl WebSocketConnection {
             credential_b64: None,
             connect_gate: Arc::new(Mutex::new(())),
             receive_stall: watch::channel(None).0,
-            peer_backpressure: watch::channel(()).0,
+            peer_backpressure: watch::channel(None).0,
             sink,
             router,
             lane_cache: Arc::new(RwLock::new(lanes)),
@@ -370,7 +372,7 @@ impl WebSocketConnection {
         };
         let shutdown = self.teardown.0.clone();
         tokio::spawn(async move {
-            let (pong_tx, pong_rx) = watch::channel(0u64);
+            let (pong_tx, pong_rx) = watch::channel(None);
             tokio::select! {
                 _ = shutdown.cancelled() => {},
                 _ = session.dispatch(stream, pong_tx) => {},
@@ -590,72 +592,97 @@ struct WebSocketSession {
     connected: Arc<RwLock<bool>>,
     secure: SecureCell,
     receive_stall: watch::Sender<Option<Instant>>,
-    peer_backpressure: watch::Sender<()>,
+    peer_backpressure: watch::Sender<Option<Instant>>,
 }
 
 impl WebSocketSession {
-    async fn probe(&self, mut pong_rx: watch::Receiver<u64>) {
-        let mut sequence = 0u64;
+    async fn probe(&self, mut pong_rx: watch::Receiver<Option<ProbeNonce>>) {
         let mut receive_stall = self.receive_stall.subscribe();
         let mut peer_backpressure = self.peer_backpressure.subscribe();
+        let initial_pressure = *peer_backpressure.borrow_and_update();
+        let mut peer_deadline = initial_pressure.map(|seen| seen + PEER_BACKPRESSURE_TIMEOUT);
+        let mut peer_lease = initial_pressure.map(|seen| seen + PING_INTERVAL + PROBE_TIMEOUT);
         loop {
-            let locally_blocked = receive_stall.borrow_and_update().is_some();
-            if locally_blocked {
-                if self
-                    .wait_for_receive_capacity(&mut receive_stall)
+            if receive_stall.borrow_and_update().is_some() {
+                let wait = self.wait_for_receive_capacity(&mut receive_stall);
+                let result = if let Some(deadline) = peer_deadline {
+                    crate::timer::timeout_at(
+                        crate::timer::ids::WEBSOCKET_PEER_PRESSURE_DEADLINE,
+                        deadline,
+                        wait,
+                    )
                     .await
-                    .is_err()
-                {
-                    tracing::warn!(
-                        "direct WebSocket receive backpressure failed to clear; retiring session"
-                    );
+                    .unwrap_or(Err(()))
+                } else {
+                    wait.await
+                };
+                if result.is_err() {
+                    tracing::warn!("direct WebSocket receive pressure expired; retiring session");
                     return;
+                }
+                if peer_deadline.is_some() {
+                    peer_lease = Some(Instant::now() + PING_INTERVAL + PROBE_TIMEOUT);
                 }
                 continue;
             }
-            // Ignore pressure notifications already observed while locally
-            // blocked; only a newly received heartbeat renews the peer's lease.
-            peer_backpressure.borrow_and_update();
+            let nonce = *uuid::Uuid::new_v4().as_bytes();
+            let cycle_deadline = Instant::now() + PING_INTERVAL + PROBE_TIMEOUT;
             let cycle = async {
                 crate::timer::sleep(crate::timer::ids::WEBSOCKET_PING_SCHEDULE, PING_INTERVAL)
                     .await;
-                sequence += 1;
-                // Bound sink contention, Ping writing, and the matching Pong.
-                let probe = async {
-                    {
-                        let mut guard = self.sink.lock().await;
-                        let sink = guard.as_mut().ok_or(())?;
-                        sink.send(WsMessage::Ping(sequence.to_be_bytes().to_vec().into()))
-                            .await
-                            .map_err(|_| ())?;
-                    }
-                    pong_rx
-                        .wait_for(|value| *value == sequence)
+                {
+                    let mut guard = self.sink.lock().await;
+                    let sink = guard.as_mut().ok_or(())?;
+                    sink.send(WsMessage::Ping(nonce.to_vec().into()))
                         .await
                         .map_err(|_| ())?;
-                    Ok::<(), ()>(())
-                };
-                crate::timer::timeout(
-                    crate::timer::ids::WEBSOCKET_PROBE_DEADLINE,
-                    PROBE_TIMEOUT,
-                    probe,
-                )
-                .await
+                }
+                pong_rx
+                    .wait_for(|value| *value == Some(nonce))
+                    .await
+                    .map_err(|_| ())?;
+                Ok::<(), ()>(())
             };
-            tokio::select! {
-                biased;
-                // A local stall also cancels an already outstanding probe. Even
-                // a stall that clears before this task wakes restarts the budget.
-                _ = receive_stall.changed() => continue,
-                // A fresh pressure heartbeat proves the peer is alive even if
-                // its application queue prevents reading our outstanding Ping.
-                // If heartbeats stop, the ordinary schedule/deadline expires.
-                _ = peer_backpressure.changed() => continue,
-                result = cycle => {
-                    if !matches!(result, Ok(Ok(()))) {
-                        tracing::warn!("direct WebSocket liveness probe failed; retiring session");
+            tokio::pin!(cycle);
+            loop {
+                let (timer, deadline) = match peer_deadline {
+                    Some(deadline) => (
+                        crate::timer::ids::WEBSOCKET_PEER_PRESSURE_DEADLINE,
+                        deadline.min(peer_lease.unwrap_or(deadline)),
+                    ),
+                    None => (
+                        crate::timer::ids::WEBSOCKET_PROBE_CYCLE_DEADLINE,
+                        cycle_deadline,
+                    ),
+                };
+                tokio::select! {
+                    biased;
+                    // A stream of pressure frames cannot starve or renew this deadline.
+                    _ = crate::timer::sleep_until(timer, deadline) => {
+                        tracing::warn!("direct WebSocket liveness deadline expired; retiring session");
                         return;
-                    }
+                    },
+                    result = &mut cycle => {
+                        if result.is_err() { return; }
+                        // Only the unpredictable challenge response proves the
+                        // peer read this connection; pressure assertions do not.
+                        peer_deadline = None;
+                        peer_lease = None;
+                        break;
+                    },
+                    result = receive_stall.changed() => {
+                        if result.is_err() { return; }
+                        break;
+                    },
+                    result = peer_backpressure.changed() => {
+                        if result.is_err() { return; }
+                        if peer_deadline.is_none() {
+                            peer_deadline = Some(Instant::now() + PEER_BACKPRESSURE_TIMEOUT);
+                        }
+                        peer_lease = Some(Instant::now() + PING_INTERVAL + PROBE_TIMEOUT);
+                        // Keep the current probe alive so a recovered peer can
+                        // answer it; repeated heartbeats never restart the cycle.
+                    },
                 }
             }
         }
@@ -712,7 +739,7 @@ impl WebSocketSession {
     async fn dispatch<S>(
         &self,
         mut stream: SplitStream<WebSocketStream<S>>,
-        pong_tx: watch::Sender<u64>,
+        pong_tx: watch::Sender<Option<ProbeNonce>>,
     ) where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
@@ -764,15 +791,15 @@ impl WebSocketSession {
                     break;
                 }
                 Ok(WsMessage::Pong(payload)) => {
-                    if let Ok(bytes) = <[u8; 8]>::try_from(payload.as_ref()) {
-                        pong_tx.send_replace(u64::from_be_bytes(bytes));
+                    if let Ok(bytes) = ProbeNonce::try_from(payload.as_ref()) {
+                        pong_tx.send_replace(Some(bytes));
                     }
                 }
                 // tungstenite queues Pong automatically; the next read
                 // flushes it, including when no application response exists.
                 Ok(WsMessage::Ping(payload)) => {
                     if payload.as_ref() == RECEIVE_BACKPRESSURE_PING {
-                        self.peer_backpressure.send_replace(());
+                        self.peer_backpressure.send_replace(Some(Instant::now()));
                     }
                 }
                 Ok(_) => {

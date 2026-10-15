@@ -255,21 +255,22 @@ async fn silent_peer_is_retired_without_a_call_deadline() {
     assert!(connection.sink.lock().await.is_none());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn matching_pongs_keep_an_idle_session_alive() {
-    let (connection, mut peer) = connected_pair().await;
-    tokio::time::pause();
-    for sequence in 1u64..=3 {
+    let (connection, mut peer) = in_memory_pair().await;
+    let mut previous = None;
+    for _ in 0..3 {
         let frame = tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, peer.next())
             .await
             .unwrap()
             .unwrap()
             .unwrap();
-        assert_eq!(
-            frame,
-            WsMessage::Ping(sequence.to_be_bytes().to_vec().into())
-        );
-        // Flush tungstenite's automatic Pong; no business response is sent.
+        let WsMessage::Ping(payload) = frame else {
+            panic!("expected a Ping");
+        };
+        assert_eq!(payload.len(), 16);
+        assert_ne!(previous.as_ref(), Some(&payload));
+        previous = Some(payload);
         peer.flush().await.unwrap();
         assert!(connection.secure.state().is_sendable());
     }
@@ -446,10 +447,10 @@ async fn receive_backpressure_progress_resets_stall_deadline() {
 
 async fn backpressured_pair() -> (
     WebSocketConnection,
-    WebSocketStream<MaybeTlsStream<TcpStream>>,
+    WebSocketStream<tokio::io::DuplexStream>,
     mpsc::Receiver<bytes::Bytes>,
 ) {
-    let (connection, mut peer) = connected_pair().await;
+    let (connection, mut peer) = in_memory_pair().await;
     let (tx, rx) = mpsc::channel(1);
     tx.send(bytes::Bytes::from_static(b"first")).await.unwrap();
     connection
@@ -487,16 +488,13 @@ async fn drain_backpressure(
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn receive_backpressure_preserves_messages_and_healthy_session() {
     let (connection, mut peer, mut rx) = backpressured_pair().await;
-    tokio::time::pause();
     // Keep the application queue full across several heartbeat intervals while
     // letting a healthy peer read and answer each control Ping.
-    for _ in 0..3 {
-        tokio::time::advance(PING_INTERVAL).await;
-        tokio::time::resume();
-        let frame = tokio::time::timeout(PROBE_TIMEOUT, peer.next())
+    for _ in 0..4 {
+        let frame = tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, peer.next())
             .await
             .unwrap()
             .unwrap()
@@ -507,7 +505,6 @@ async fn receive_backpressure_preserves_messages_and_healthy_session() {
         );
         peer.flush().await.unwrap();
         tokio::task::yield_now().await;
-        tokio::time::pause();
         assert!(connection.secure.state().is_sendable());
     }
     drain_backpressure(&connection, &mut rx).await;
@@ -527,7 +524,7 @@ async fn receive_backpressure_preserves_messages_and_healthy_session() {
         let WsMessage::Ping(payload) = frame else {
             panic!("expected a liveness or pressure Ping");
         };
-        if payload.len() == 8 {
+        if payload.len() == 16 {
             normal_probes += 1;
         } else {
             assert_eq!(payload.as_ref(), RECEIVE_BACKPRESSURE_PING);
@@ -536,7 +533,6 @@ async fn receive_backpressure_preserves_messages_and_healthy_session() {
         tokio::task::yield_now().await;
         assert!(connection.secure.state().is_sendable());
     }
-    tokio::time::resume();
     connection.close().await.unwrap();
 }
 
@@ -621,7 +617,7 @@ async fn silent_peer_is_retired_after_receive_backpressure_clears() {
     assert_eq!(connection.secure.state(), SecureChannelState::Failed);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn two_actrium_peers_survive_receive_backpressure() {
     let (connection, peer, mut rx) = backpressured_pair().await;
     let peer = WebSocketConnection::from_server_stream(peer);
@@ -630,22 +626,17 @@ async fn two_actrium_peers_survive_receive_backpressure() {
         .await
         .unwrap()
         .unwrap();
-    tokio::time::pause();
     // Each notification proves the opposite dispatcher actually read a new
     // heartbeat. Cover several full probe budgets with both watchdogs active.
     for _ in 0..5 {
-        tokio::time::advance(PING_INTERVAL).await;
-        tokio::time::resume();
-        tokio::time::timeout(PROBE_TIMEOUT, heartbeats.changed())
+        tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, heartbeats.changed())
             .await
             .unwrap()
             .unwrap();
         assert!(connection.secure.state().is_sendable());
         assert!(peer.secure.state().is_sendable());
         tokio::task::yield_now().await;
-        tokio::time::pause();
     }
-    tokio::time::resume();
     drain_backpressure(&connection, &mut rx).await;
     let lane = peer.get_lane(PayloadType::RpcReliable).await.unwrap();
     lane.send(bytes::Bytes::from_static(b"third"))
@@ -686,4 +677,93 @@ async fn peer_backpressure_heartbeat_does_not_disable_liveness_forever() {
     .await
     .unwrap();
     assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+}
+
+async fn in_memory_pair() -> (
+    WebSocketConnection,
+    WebSocketStream<tokio::io::DuplexStream>,
+) {
+    let (server, client) = tokio::io::duplex(64 * 1024);
+    let server = WebSocketStream::from_raw_socket(
+        server,
+        tokio_tungstenite::tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
+    let client = WebSocketStream::from_raw_socket(
+        client,
+        tokio_tungstenite::tungstenite::protocol::Role::Client,
+        None,
+    )
+    .await;
+    (WebSocketConnection::from_server_stream(server), client)
+}
+
+#[tokio::test(start_paused = true)]
+async fn endless_peer_pressure_cannot_hide_a_stalled_reader() {
+    let (connection, mut peer) = in_memory_pair().await;
+    let mut pressure = connection.peer_backpressure.subscribe();
+    peer.send(WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into()))
+        .await
+        .unwrap();
+    pressure.changed().await.unwrap();
+    let started = Instant::now();
+    // Write fresh pressure Pings but never read or answer our challenge.
+    for _ in 0..11 {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        peer.send(WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into()))
+            .await
+            .unwrap();
+        assert!(connection.secure.state().is_sendable());
+    }
+    tokio::time::timeout(Duration::from_secs(11), connection.secure.wait_terminal())
+        .await
+        .unwrap();
+    assert!(started.elapsed() <= PEER_BACKPRESSURE_TIMEOUT + Duration::from_secs(1));
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unsolicited_pongs_do_not_satisfy_liveness_challenges() {
+    let (connection, mut peer) = in_memory_pair().await;
+    for _ in 0..4 {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        // A zero nonce cannot match a UUID v4 challenge; counter Pongs are
+        // also rejected because their eight-byte payload has the wrong shape.
+        peer.send(WsMessage::Pong(vec![0; 16].into()))
+            .await
+            .unwrap();
+        peer.send(WsMessage::Pong(1u64.to_be_bytes().to_vec().into()))
+            .await
+            .unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(6), connection.secure.wait_terminal())
+        .await
+        .unwrap();
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn peer_pressure_with_round_trips_can_survive_grace_budget() {
+    let (connection, mut peer) = in_memory_pair().await;
+    let started = Instant::now();
+    for _ in 0..10 {
+        peer.send(WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into()))
+            .await
+            .unwrap();
+        loop {
+            let frame = tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, peer.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            if matches!(frame, WsMessage::Ping(_)) {
+                peer.flush().await.unwrap();
+                break;
+            }
+        }
+        assert!(connection.secure.state().is_sendable());
+    }
+    assert!(started.elapsed() > PEER_BACKPRESSURE_TIMEOUT);
+    connection.close().await.unwrap();
 }

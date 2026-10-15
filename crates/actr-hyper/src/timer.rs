@@ -550,6 +550,18 @@ timer_inventory! {
         success: "Pong matching the current probe arrives, or pressure heartbeat is written", interrupt: "session retirement, local receive backpressure change, or peer pressure heartbeat",
         expiry: "retire the physical session and invalidate cached lanes", reset: "each probe", external: false
     },
+    WEBSOCKET_PROBE_CYCLE_DEADLINE => {
+        id: "websocket.probe_cycle_deadline", owner: "websocket_connection", category: FailureDeadline,
+        duration: "PING_INTERVAL + PROBE_TIMEOUT (25s)", arm: "direct WebSocket probe cycle starts",
+        success: "matching challenge Pong arrives", interrupt: "session retirement or local pressure",
+        expiry: "retire the session", reset: "a new cycle after a valid Pong or local pressure clears", external: false
+    },
+    WEBSOCKET_PEER_PRESSURE_DEADLINE => {
+        id: "websocket.peer_pressure_deadline", owner: "websocket_connection", category: FailureDeadline,
+        duration: "PEER_BACKPRESSURE_TIMEOUT (120s)", arm: "first peer pressure heartbeat without round-trip proof",
+        success: "matching challenge Pong arrives", interrupt: "session retirement",
+        expiry: "retire the session despite further pressure heartbeats", reset: "only a matching challenge Pong", external: false
+    },
     WEBSOCKET_RECEIVE_BACKPRESSURE_DEADLINE => {
         id: "websocket.receive_backpressure_deadline", owner: "websocket_connection", category: FailureDeadline,
         duration: "RECEIVE_BACKPRESSURE_TIMEOUT (120s) from the current receive stall start", arm: "local receive queue becomes full",
