@@ -30,6 +30,7 @@ fn pause_after_first_fragment() -> (
 ) {
     let (event_tx, event_rx) = oneshot::channel();
     let event_tx = Arc::new(StdMutex::new(Some(event_tx)));
+    // Only one send pauses; notify_one retains a resume sent before it waits.
     let release = Arc::new(Notify::new());
     let hook: WebRtcFragmentSendHook = {
         let event_tx = event_tx.clone();
@@ -1215,7 +1216,7 @@ async fn p15_inflight_fragmented_message_is_integral_or_bounded(
         .await;
     let (offerer, answerer) = stable_recovery_endpoints(&initial);
     reconnect_from_offerer(&pair, offerer, answerer).await;
-    release.notify_waiters();
+    release.notify_one();
     drop(hook_guard);
 
     let outcome = tokio::time::timeout(Duration::from_secs(25), request)
@@ -1274,7 +1275,7 @@ async fn p15_inflight_fragmented_message_is_integral_or_bounded(
     pair.foreground(PairEndpoint::A, Duration::from_secs(65))
         .await;
     reconnect_from_offerer(&pair, offerer, answerer).await;
-    data_release.notify_waiters();
+    data_release.notify_one();
     drop(data_hook_guard);
     let data_outcome = tokio::time::timeout(Duration::from_secs(20), data_send)
         .await
