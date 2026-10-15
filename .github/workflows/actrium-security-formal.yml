@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   proof-suite:
-    runs-on: ubuntu-latest
+    runs-on: actrium-linux-light
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -25,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Install z3
         run: pip install "z3-solver>=4.12"

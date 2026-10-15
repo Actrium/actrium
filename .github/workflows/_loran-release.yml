@@ -19,7 +19,7 @@ env:
 jobs:
   validate:
     name: Validate Loran server release tag
-    runs-on: ubuntu-latest
+    runs-on: actrium-linux-light
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag_sha: ${{ steps.release.outputs.tag_sha }}

@@ -31,7 +31,7 @@ jobs:
 
   format:
     name: Format Check
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     permissions:
       contents: read
       actions: read
@@ -58,7 +58,7 @@ jobs:
 
   payload-logging:
     name: OTel payload-logging guard
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     permissions:
       contents: read
       actions: read

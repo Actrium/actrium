@@ -11,6 +11,7 @@ on:
       - "keel/package.json"
       - "keel/package-lock.json"
       - ".github/workflows/keel-docs.yml"
+      - ".github/actions/setup-light-runner/**"
   pull_request:
     branches: [main]
     paths:
@@ -18,6 +19,7 @@ on:
       - "keel/package.json"
       - "keel/package-lock.json"
       - ".github/workflows/keel-docs.yml"
+      - ".github/actions/setup-light-runner/**"
   workflow_dispatch:
 
 permissions:
@@ -25,7 +27,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: actrium-linux-light
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -34,6 +36,14 @@ jobs:
           # lastUpdated reads git blame; a shallow clone would stamp every
           # page with the merge commit instead of the authoring commit.
           fetch-depth: 0
+
+      - name: Set up light runner
+        uses: ./.github/actions/setup-light-runner
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
       - name: Install dependencies
         working-directory: keel

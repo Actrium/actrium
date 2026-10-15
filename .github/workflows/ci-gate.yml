@@ -23,7 +23,7 @@ concurrency:
 jobs:
   identity:
     name: Commit Identity Privacy
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     permissions:
       contents: read
     steps:
@@ -47,7 +47,7 @@ jobs:
 
   determine:
     name: Determine Affected Targets
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     outputs:
       mode: ${{ steps.targets.outputs.mode }}
       changed_files_json: ${{ steps.targets.outputs.changed_files_json }}
@@ -413,7 +413,6 @@ jobs:
           CARGO_BUILD_WARNINGS: deny
         run: cargo +1.97.1 clippy --workspace --all-targets --all-features
 
-
   test:
     name: Test (Rust, ${{ matrix.shard }})
     needs: [determine, cli_web_assets]
@@ -753,11 +752,13 @@ jobs:
     name: TypeScript Workload
     needs: determine
     if: needs.determine.outputs.ts_workload == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Set up light runner
+        uses: ./.github/actions/setup-light-runner
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -791,7 +792,7 @@ jobs:
     name: Python Codegen
     needs: determine
     if: needs.determine.outputs.python_codegen == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     permissions:
       contents: read
     defaults:
@@ -799,6 +800,8 @@ jobs:
         working-directory: tools/actr/protoc-gen/python
     steps:
       - uses: actions/checkout@v5
+      - name: Set up light runner
+        uses: ./.github/actions/setup-light-runner
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -1258,7 +1261,7 @@ jobs:
 
   cjk:
     name: Language Policy
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     if: always()
     permissions:
       contents: read
@@ -1285,7 +1288,7 @@ jobs:
 
   gate:
     name: Gate
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     if: always()
     needs:
       - identity

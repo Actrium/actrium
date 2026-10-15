@@ -96,7 +96,9 @@ permissions:
 jobs:
   resolve-actrsharp:
     name: Resolve ActrSharp dry-run context
-    runs-on: ubuntu-latest
+    runs-on: actrium-linux-light
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.context.outputs.version }}
       release_sha: ${{ steps.context.outputs.release_sha }}
