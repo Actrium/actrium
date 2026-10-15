@@ -182,54 +182,11 @@ raising concurrency. An overcommit ratio alone does not establish throttling.
 
 ### Light CI pool
 
-`autoscaling-runner-set-light.yaml.tmpl` defines `actrium-linux-light` alongside
-the build pool. Deployment-specific values are supplied privately at render time;
-do not apply the template directly or commit a rendered manifest. The pool reuses
-the operator-selected GitHub App Secret and controller RBAC. Its ConfigMap contains
-only the required proxy settings. It imports no compilation-cache credentials or
-node-local Cargo storage, and starts the runner agent without the cache entrypoint.
-
-Supply these seven string settings in an operator-managed JSON file outside the
-checkout, or through environment variables when `--config` is omitted:
-
-| Setting                       | Purpose                                           |
-| ----------------------------- | ------------------------------------------------- |
-| `RUNNER_IMAGE`                | Published image reference pinned with `@sha256:`  |
-| `RUNNER_NAMESPACE`            | Existing runner namespace                         |
-| `RUNNER_GITHUB_ORGANIZATION`  | GitHub organization label                         |
-| `RUNNER_GITHUB_CONFIG_URL`    | GitHub organization configuration URL             |
-| `RUNNER_GITHUB_CONFIG_SECRET` | Existing GitHub App Secret name                   |
-| `RUNNER_LIGHT_ENV_CONFIGMAP`  | Proxy-only ConfigMap name                         |
-| `ARC_CONTROLLER_VERSION`      | Installed compatible ARC controller chart version |
-
-```bash
-python3 tools/ci/runner/render-light-runner.py \
-  --config "$RUNNER_LIGHT_CONFIG_FILE" \
-  --output "$RUNNER_LIGHT_MANIFEST"
-
-kubectl --context "$RUNNER_CONTEXT" apply --dry-run=server \
-  -f "$RUNNER_LIGHT_MANIFEST"
-```
-
-The renderer requires every setting, rejects mutable image tags and unexpected
-keys, writes atomically with owner-only permissions, and prints no deployment
-values. Protect the external settings file with the same permissions. Compare the
-rendered specification with the intended deployment before applying it. Converting
-the source to this template does not require changing an existing scale set or
-restarting its Pods.
-
-Select exactly four eligible nodes with the `actrium-linux-light=true` node
-label. Storage nodes may be selected only for an explicitly authorized light-only
-validation, with storage health monitored during the check. The pool has four warm
-runners and a maximum of sixteen. Hard hostname spreading with `maxSkew: 1` and
-`minDomains: 4` bounds each node to four runners; if a node becomes unavailable,
-the scheduler leaves excess runners Pending rather than concentrating them on
-the remaining nodes. Do not raise `maxRunners` above sixteen without revisiting
-this bound. Existing Pods are not redistributed by topology spreading.
-
-Each runner requests and limits 2 CPUs and 4 GiB of memory, with a 10 GiB
-workspace and 12 GiB ephemeral-storage limit. At four runners, a node commits
-8 CPUs and 16 GiB of memory to this pool. These limits do not isolate disk I/O.
+Light-pool deployment templates, rendering tools, validation checks, and
+operational capacity policy are maintained in the separate
+`github-self-hosted-runner` operations repository under `light-runner/`.
+Application workflows use the deployed pool without those deployment files in
+this checkout.
 
 Use `runs-on: actrium-linux-light` for policy checks, formatting, shell-script
 checks, repository hygiene, bounded formal checks, version metadata, and release
@@ -247,11 +204,6 @@ The shared image's runner patch exposes GitHub's original results endpoint as
 the light pool without injecting a deployment-specific cache endpoint. Keep
 this setup local to light jobs; the ordinary build pool retains its cache setup.
 Keel Docs explicitly selects Node.js 24 instead of relying on hosted-runner tools.
-
-Validate a new deployment by temporarily setting `minRunners: 16`, checking four
-registered runners per selected node and none on other nodes, then restoring
-`minRunners: 4`. Complete a routed CI job and inspect control-plane latency and
-node pressure before considering the migration verified.
 
 ## Deploy, verify, and roll back
 
