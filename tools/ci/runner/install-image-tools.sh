@@ -50,7 +50,7 @@ case "$1" in
         if ! protoc --version 2>/dev/null | grep -Fxq "libprotoc $PROTOC_VERSION"; then
             download_artifact \
                 "$(github_url "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-linux-x86_64.zip")" \
-                '' "$work/protoc.zip"
+                "$PROTOC_SHA256" "$work/protoc.zip"
             unzip -oq "$work/protoc.zip" -d /usr/local
         fi
         if ! mold --version 2>/dev/null | grep -Fq "mold $MOLD_VERSION"; then

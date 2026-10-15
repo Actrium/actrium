@@ -119,6 +119,12 @@ Gradle/KtLint cache and Actions worker patch. The worker patch is idempotent but
 rejects malformed or ambiguous assemblies. No startup download is required.
 Do not overwrite a deployed tag. Verify a published digest before deployment.
 
+Every artifact download requires a fixed SHA-256, including cache hits. Missing
+or malformed pins fail before downloading; corrupt cached artifacts are fetched
+again and verified before cache publication. Run
+`sh tools/ci/runner/test-runner-install-lib.sh` to check rejection and cache paths
+without network access.
+
 Build-time agent diagnostics and Gradle daemon state are removed in the same
 layer that creates them, before the final image is published. The agent version
 check also clears proxy variables because it needs no network access. Runtime

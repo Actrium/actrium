@@ -25,11 +25,12 @@ export JAVA_HOME="$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/$JDK_VERSION/x64"
 install_python() {
     version="$1"
     tag="$2"
+    sha="$3"
     destination="$RUNNER_TOOL_CACHE/Python/$version/x64"
     mkdir -p "$destination"
     download_artifact \
         "$(github_url "https://github.com/actions/python-versions/releases/download/$tag/python-$version-linux-22.04-x64.tar.gz")" \
-        '' "$work/python-$version.tar.gz"
+        "$sha" "$work/python-$version.tar.gz"
     tar -xzf "$work/python-$version.tar.gz" -C "$destination"
     ln -sf python3 "$destination/bin/python"
     ln -sf pip3 "$destination/bin/pip"
@@ -39,15 +40,15 @@ install_python() {
 
 case "$1" in
     python)
-        install_python "$PY311" "$PY311_TAG"
-        install_python "$PY313" "$PY313_TAG"
+        install_python "$PY311" "$PY311_TAG" "$PY311_SHA256"
+        install_python "$PY313" "$PY313_TAG" "$PY313_SHA256"
         ln -s "$RUNNER_TOOL_CACHE/Python/$PY311/x64" "$RUNNER_TOOL_CACHE/current/python"
         ;;
     node)
         destination="$RUNNER_TOOL_CACHE/node/$NODE_VERSION/x64"
         mkdir -p "$destination"
         download_artifact "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.gz" \
-            '' "$work/node.tar.gz"
+            "$NODE_SHA256" "$work/node.tar.gz"
         tar -xzf "$work/node.tar.gz" --strip-components=1 -C "$destination"
         touch "$RUNNER_TOOL_CACHE/node/$NODE_VERSION/x64.complete"
         ln -s "$destination" "$RUNNER_TOOL_CACHE/current/node"
@@ -58,7 +59,7 @@ case "$1" in
         version_file=$(printf '%s' "$JDK_VERSION" | tr '+' '_')
         download_artifact \
             "$(github_url "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-$version_tag/OpenJDK17U-jdk_x64_linux_hotspot_$version_file.tar.gz")" \
-            '' "$work/java.tar.gz"
+            "$JDK_SHA256" "$work/java.tar.gz"
         mkdir -p "$JAVA_HOME"
         tar -xzf "$work/java.tar.gz" --strip-components=1 -C "$JAVA_HOME"
         touch "$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/$JDK_VERSION/x64.complete"
@@ -68,7 +69,7 @@ case "$1" in
     android)
         download_artifact \
             "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS}_latest.zip" \
-            '' "$work/android.zip"
+            "$CMDLINE_TOOLS_SHA256" "$work/android.zip"
         mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
         unzip -q "$work/android.zip" -d "$ANDROID_SDK_ROOT/cmdline-tools"
         mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
