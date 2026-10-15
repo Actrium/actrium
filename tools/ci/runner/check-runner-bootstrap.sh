@@ -57,7 +57,10 @@ test -w "$RUNNER_TOOL_CACHE"
 test -w "$ANDROID_SDK_ROOT"
 test -x /usr/local/bin/runner-entrypoint.sh
 sh -n /usr/local/bin/runner-entrypoint.sh
-"$HOME/actions-runner/bin/Runner.Listener" --version | grep -Fxq "$RUNNER_VERSION"
+# A local version check needs no proxy and must not log operator proxy settings.
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY \
+    -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
+    "$HOME/actions-runner/bin/Runner.Listener" --version | grep -Fxq "$RUNNER_VERSION"
 python3 - <<'PY_CHECK'
 from pathlib import Path
 worker = Path('/home/runner/actions-runner/bin/Runner.Worker.dll').read_bytes()

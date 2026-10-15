@@ -66,7 +66,8 @@ FROM java-cache AS gradle-cache
 ARG GRADLE_DIST_PROXY=
 COPY prepare-gradle-cache.py ktlint-preseed.gradle /tmp/runner-install/
 RUN --mount=type=cache,id=actrium-runner-downloads,target=/var/cache/runner-downloads,uid=1001,gid=1001,sharing=shared \
-    RUNNER_DOWNLOAD_CACHE=/var/cache/runner-downloads sh /tmp/runner-install/install-toolcache.sh gradle
+    RUNNER_DOWNLOAD_CACHE=/var/cache/runner-downloads sh /tmp/runner-install/install-toolcache.sh gradle \
+    && rm -rf "$GRADLE_USER_HOME/daemon"
 
 FROM base AS rust-toolchain
 ARG RUST_VERSION
@@ -136,7 +137,9 @@ ENV RUSTUP_DIST_SERVER=${RUSTUP_DIST_SERVER} RUSTUP_UPDATE_ROOT=${RUSTUP_UPDATE_
     RUNNER_MANUALLY_TRAP_SIG=1 ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT=1
 USER runner
 WORKDIR /home/runner
-RUN sh /usr/local/share/actrium-runner/check-runner-bootstrap.sh
+# Remove diagnostics before committing the layer, rather than hiding them later.
+RUN sh /usr/local/share/actrium-runner/check-runner-bootstrap.sh \
+    && rm -rf "$HOME/actions-runner/_diag" "$GRADLE_USER_HOME/daemon"
 ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]
 LABEL org.opencontainers.image.title="actrium-runner" \
       org.opencontainers.image.description="Actrium self-hosted GitHub Actions runner (Linux)" \

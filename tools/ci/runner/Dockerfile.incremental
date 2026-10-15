@@ -9,6 +9,10 @@ ARG GITHUB_PROXY=
 ARG RUST_VERSION
 ARG ZSTD_BUILD_JOBS=
 USER root
+# Dirty inherited layers require a full rebuild; deleting files cannot sanitize them.
+RUN if [ -d /home/runner/actions-runner/_diag ] || [ -d /home/runner/.gradle/daemon ]; then \
+        echo 'Build a clean full runner image before incremental updates' >&2; exit 1; \
+    fi
 COPY runner-install-lib.sh install-image-tools.sh install-zstd.sh /tmp/runner-install/
 COPY versions/native.env /tmp/runner-install/versions/native.env
 RUN --mount=type=cache,id=actrium-runner-downloads,target=/var/cache/runner-downloads,uid=1001,gid=1001,sharing=shared \
@@ -26,5 +30,6 @@ RUN --mount=type=cache,id=actrium-runner-rust-downloads,target=/home/runner/.rus
 RUN python3 /tmp/runner-cache-patch.py && rm /tmp/runner-cache-patch.py
 COPY check-runner-bootstrap.sh /usr/local/share/actrium-runner/
 COPY versions/ /usr/local/share/actrium-runner/versions/
-RUN sh /usr/local/share/actrium-runner/check-runner-bootstrap.sh
+RUN sh /usr/local/share/actrium-runner/check-runner-bootstrap.sh \
+    && rm -rf "$HOME/actions-runner/_diag" "$GRADLE_USER_HOME/daemon"
 ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]

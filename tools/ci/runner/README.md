@@ -119,6 +119,13 @@ Gradle/KtLint cache and Actions worker patch. The worker patch is idempotent but
 rejects malformed or ambiguous assemblies. No startup download is required.
 Do not overwrite a deployed tag. Verify a published digest before deployment.
 
+Build-time agent diagnostics and Gradle daemon state are removed in the same
+layer that creates them, before the final image is published. The agent version
+check also clears proxy variables because it needs no network access. Runtime
+job diagnostics remain available normally. Incremental builds reject bases with
+retained diagnostic directories; use a clean full build instead. Deleting files
+in a later image layer does not remove information from inherited layers.
+
 ## Cache and build reuse
 
 Cargo archives and the registry index share node-local storage. Each Pod extracts
