@@ -334,9 +334,18 @@ peer, so the framework does not replay the Call or convert this result into a
 retryable timeout. A caller that has an idempotency policy may start a new
 logical Call with a new operation ID.
 
+In-process Calls apply the same submission boundary: expiry before the
+cancellation-safe mpsc send succeeds is retryable; expiry after queue submission
+is `DeliveryUncertain`, even if the workload has not yet replied. Scope
+cancellation after dispatch starts is also conservative about execution.
+
 Direct WebSocket session liveness is independent of Call deadlines. An idle
 session sends a Ping after 15 seconds and allows 10 seconds for sink acquisition,
-writing, and a matching Pong. While a local application receive queue is full,
+writing, and a matching Pong. The probe budget includes writer-lock contention:
+a congested but live connection may be retired when it cannot complete the
+probe within the budget. This is a bounded resource policy, not proof of death.
+All payload queues share one TCP reader; a full stream queue can therefore
+block RPC and control frames as well. While a local application receive queue is full,
 the reader cannot observe control frames. The session sends pressure heartbeats
 instead, with a separate 120-second budget for that continuous receive stall.
 Successful heartbeat writes do not renew this budget or prove the peer is
@@ -353,7 +362,9 @@ without a matching unpredictable challenge Pong. Heartbeats cannot reset that
 absolute bound. An endpoint unable to read control frames for that entire grace
 period is retired even if it can still write pressure notifications.
 Retirement cancels blocked writers and removes the stale route so later work can
-build a fresh connection. It never automatically replays uncertain operations.
+build a fresh connection. It never automatically replays uncertain operations. Orderly shutdown attempts
+a WebSocket Close frame within one second; failed liveness probes drop the
+transport immediately rather than waiting for a Close exchange.
 
 #### Tell
 

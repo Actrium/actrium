@@ -533,10 +533,10 @@ impl WebSocketGate {
                                                 );
                                                 match ActrId::decode(&src[..]) {
                                                     Ok(sender_id) => {
-                                                        // Per-lane task: a full StreamReliable
-                                                        // queue blocks only this stream lane, not
-                                                        // the RPC lanes (unlike the WebRTC single
-                                                        // receive loop).
+                                                        // Dispatch tasks are per lane, but bounded
+                                                        // queues share one TCP reader. A full lane
+                                                        // can backpressure RPC/control frames too;
+                                                        // the session watchdog bounds that stall.
                                                         registry
                                                             .dispatch(chunk, sender_id, pt)
                                                             .await;

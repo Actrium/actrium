@@ -45,6 +45,7 @@ retries = 0
 filter = '''
 package(actr-hyper) and kind(lib) and (
     test(/^transport::lane::tests::websocket_without_a_sink_is_proven_not_attempted$/) |
+    test(/^transport::lane::tests::poisoned_delivery_progress_is_always_uncertain$/) |
     test(/^transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable$/) |
     test(/^transport::lane::tests::default_send_with_progress_classifies_by_error_shape$/) |
     test(/^transport::lane::tests::test_encode_decode_fragment_header_single$/) |
