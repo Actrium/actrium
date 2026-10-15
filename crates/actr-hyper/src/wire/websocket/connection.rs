@@ -119,6 +119,7 @@ pub(crate) struct WebSocketConnection {
     credential_b64: Option<String>,
     /// Write end (Sink) - using Option to avoid initialization issues
     sink: WsSink,
+    /// Serialize session publication against explicit close completion.
     connect_gate: Arc<Mutex<()>>,
     /// Retain each stall's start even when watch coalesces clear/full updates.
     receive_stall: watch::Sender<Option<Instant>>,
@@ -251,6 +252,19 @@ impl WebSocketConnection {
         // One object owns one physical session. Redial uses a fresh object,
         // so an old watchdog can never retire a replacement socket.
         let _connect = self.connect_gate.lock().await;
+        tokio::select! {
+            biased;
+            _ = self.teardown.0.cancelled() => Err(NetworkError::WebSocketClosed(
+                "WebSocket closed during connect".into(),
+            )),
+            _ = self.secure.wait_terminal() => Err(NetworkError::WebSocketClosed(
+                "WebSocket session retired during connect".into(),
+            )),
+            result = self.connect_session() => result,
+        }
+    }
+
+    async fn connect_session(&self) -> NetworkResult<()> {
         if self.secure.state().is_terminal() {
             return Err(NetworkError::WebSocketClosed(
                 "WebSocket session retired".into(),
@@ -515,6 +529,9 @@ impl WebSocketConnection {
         // Close echo; a non-cooperative peer must not keep the socket alive.
         self.teardown.0.cancel();
 
+        // Cancellation first releases a dial or publication blocked at any
+        // await. Sharing its gate prevents connect from completing after close.
+        let _connect = self.connect_gate.lock().await;
         *self.connected.write().await = false;
 
         retire_sink(

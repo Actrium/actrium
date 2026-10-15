@@ -848,3 +848,68 @@ async fn orderly_close_is_bounded_behind_a_blocked_write() {
     );
     assert!(connection.sink.lock().await.is_none());
 }
+
+#[tokio::test]
+async fn close_cancels_an_inflight_handshake() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = WebSocketConnection::new(format!("ws://{}", listener.local_addr().unwrap()))
+        .with_security(DirectSecurity::insecure_loopback());
+    let opening = tokio::spawn({
+        let connection = connection.clone();
+        async move { connection.connect().await }
+    });
+    // Keep TCP open without answering the WebSocket upgrade.
+    let (_unresponsive_peer, _) = listener.accept().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), connection.close())
+        .await
+        .expect("close must cancel a pending upgrade")
+        .unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), opening)
+        .await
+        .expect("the cancelled dial must finish")
+        .unwrap();
+    assert!(matches!(result, Err(NetworkError::WebSocketClosed(_))));
+    assert!(!*connection.connected.read().await);
+    assert!(connection.sink.lock().await.is_none());
+}
+
+#[tokio::test]
+async fn close_cancels_pending_session_publication() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = WebSocketConnection::new(format!("ws://{}", listener.local_addr().unwrap()))
+        .with_security(DirectSecurity::insecure_loopback());
+    let opening = tokio::spawn({
+        let connection = connection.clone();
+        async move { connection.connect().await }
+    });
+    let (server, _) = listener.accept().await.unwrap();
+    // The initial connected check has passed. Pause publication after the
+    // handshake installs its sink but before it can mark the session ready.
+    let publication = connection.connected.write().await;
+    let _peer = tokio_tungstenite::accept_async(server).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while connection.sink.lock().await.is_none() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the handshake must install its sink before the readiness write");
+    let closing = tokio::spawn({
+        let connection = connection.clone();
+        async move { connection.close().await }
+    });
+    let result = tokio::time::timeout(Duration::from_secs(5), opening)
+        .await
+        .expect("close must cancel the blocked readiness publication")
+        .unwrap();
+    assert!(matches!(result, Err(NetworkError::WebSocketClosed(_))));
+    drop(publication);
+    tokio::time::timeout(Duration::from_secs(5), closing)
+        .await
+        .expect("close must complete after the cancelled publisher releases its gate")
+        .unwrap()
+        .unwrap();
+    assert_eq!(connection.secure.state(), SecureChannelState::Closed);
+    assert!(!*connection.connected.read().await);
+    assert!(connection.sink.lock().await.is_none());
+}

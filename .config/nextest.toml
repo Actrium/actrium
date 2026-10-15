@@ -133,6 +133,8 @@ package(actr-hyper) and kind(lib) and (
     test(/^outbound::peer_gate::tests::request_deadline_covers_preflight_wait$/) |
     test(/^wire::websocket::connection::tests::retired_websocket_destination_is_rebuilt_for_later_work$/) |
     test(/^wire::websocket::connection::tests::unsupported_media_frames_do_not_block_rpc$/) |
+    test(/^wire::websocket::connection::tests::close_cancels_an_inflight_handshake$/) |
+    test(/^wire::websocket::connection::tests::close_cancels_pending_session_publication$/) |
     test(/^wire::websocket::connection::tests::silent_peer_is_retired_without_a_call_deadline$/) |
     test(/^wire::websocket::connection::tests::receive_backpressure_preserves_messages_and_healthy_session$/) |
     test(/^wire::websocket::connection::tests::receive_backpressure_progress_resets_stall_deadline$/) |
