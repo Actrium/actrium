@@ -68,9 +68,9 @@ post_realm_management() {
 realm_fixture_join() {
     local label="$1" invite_file="$2" key_file="$3" result_file="$4"
     local request="$RUN_DIR/join-${label}-request.json"
-    jq -n --arg invite "$invite_file" --arg key "$key_file" --arg label "$label" \
+    jq -n --arg invite "$invite_file" --arg key "$key_file" --arg client_label "$label" \
         --arg result "$result_file" \
-        '{invite_file:$invite,key_file:$key,label:$label,result_file:$result}' >"$request"
+        '{invite_file:$invite,key_file:$key,"label":$client_label,result_file:$result}' >"$request" || return
     ACTR_REALM_E2E_REQUEST="$request" "$REALM_CLI_FIXTURE" \
         --exact commands::realm_members::tests::realm_runtime_join_fixture \
         --ignored --nocapture >"$LOG_DIR/join-${label}.log" 2>&1
