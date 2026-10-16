@@ -12,7 +12,7 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
         var savedAtUnixSeconds: Int64
     }
 
-    private static let logger = Logger(subsystem: "io.actrium.actro", category: "BrowserSyncCredentials")
+    private static let logger = Logger(subsystem: "io.actrium", category: "BrowserSyncCredentials")
 
     private let deviceIdKey = "com.actrium.actro.browserSync.deviceId"
     // Legacy plaintext UserDefaults key. The session (including the access

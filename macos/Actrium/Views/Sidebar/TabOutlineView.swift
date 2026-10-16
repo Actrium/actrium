@@ -64,8 +64,8 @@ enum TabOutlineItem: Equatable, Hashable {
 // MARK: - Pasteboard Type
 
 extension NSPasteboard.PasteboardType {
-    static let tabOutlineItem = NSPasteboard.PasteboardType("com.actro.tabOutlineItem")
-    static let tabCrossWindowData = NSPasteboard.PasteboardType("com.actro.tabCrossWindowData")
+    static let tabOutlineItem = NSPasteboard.PasteboardType("io.actrium.tabOutlineItem")
+    static let tabCrossWindowData = NSPasteboard.PasteboardType("io.actrium.tabCrossWindowData")
 }
 
 // Notification for cross-window tab transfer

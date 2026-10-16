@@ -5,7 +5,7 @@
 	<!-- App Groups for XPC Broker -->
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.io.actrium.actro</string>
+		<string>group.io.actrium</string>
 	</array>
 
 	<!-- App Sandbox (disabled for development) -->
@@ -28,7 +28,7 @@
 	<!-- Allow connecting to broker Mach service -->
 	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
 	<array>
-		<string>group.io.actrium.actro.broker</string>
+		<string>group.io.actrium.broker</string>
 	</array>
 
 	<!-- Allow JIT Compilation (Required for WebKit JavaScript) -->

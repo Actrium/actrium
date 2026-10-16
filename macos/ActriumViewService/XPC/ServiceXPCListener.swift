@@ -162,8 +162,8 @@ public final class ServiceXPCListener: NSObject {
         }
 
         // Use host PID for process isolation if known
-        let notificationName = hostProcessId.map { "com.actro.xpcEndpoint.\($0)" }
-            ?? "com.actro.xpcEndpoint"
+        let notificationName = hostProcessId.map { "io.actrium.xpcEndpoint.\($0)" }
+            ?? "io.actrium.xpcEndpoint"
 
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
@@ -229,7 +229,7 @@ public final class ServiceXPCListener: NSObject {
         }
 
         // Use host PID for process isolation
-        let notificationName = "com.actro.serviceState.\(hostPid)"
+        let notificationName = "io.actrium.serviceState.\(hostPid)"
 
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),

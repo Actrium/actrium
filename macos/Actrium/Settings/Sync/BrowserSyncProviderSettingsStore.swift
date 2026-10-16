@@ -54,7 +54,7 @@ final class BrowserSyncProviderSettingsStore {
         "oneDrive",
     ]
 
-    private static let logger = Logger(subsystem: "io.actrium.actro", category: "BrowserSyncProviderSettings")
+    private static let logger = Logger(subsystem: "io.actrium", category: "BrowserSyncProviderSettings")
 
     private let fileURL: URL
     private let bookmarkKey = "com.actrium.actro.browserSync.providerFolderBookmark"

@@ -20,7 +20,7 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
     private let lock = NSLock()
     private var _state: IPCTransportState = .disconnected
     private var connections: [String: NSXPCConnection] = [:]
-    private var connectionQueue = DispatchQueue(label: "com.actro.xpc.connection")
+    private var connectionQueue = DispatchQueue(label: "io.actrium.xpc.connection")
 
     /// Stored endpoints for anonymous listener connections
     private var endpoints: [String: NSXPCListenerEndpoint] = [:]
@@ -67,7 +67,7 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
 
     /// Setup listener for endpoint notifications from Service
     private func setupEndpointListener() {
-        let notificationName = "com.actro.xpcEndpoint.\(hostProcessId)"
+        let notificationName = "io.actrium.xpcEndpoint.\(hostProcessId)"
 
         DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(notificationName),
@@ -79,7 +79,7 @@ public final class XPCConnectionTransport: NSObject, IPCTransport, @unchecked Se
 
         // Also listen for generic endpoint notifications (before host PID is known)
         DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.xpcEndpoint"),
+            forName: NSNotification.Name("io.actrium.xpcEndpoint"),
             object: nil,
             queue: .main
         ) { [weak self] notification in

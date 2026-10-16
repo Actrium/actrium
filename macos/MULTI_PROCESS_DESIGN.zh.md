@@ -624,7 +624,7 @@ Actrium/
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>io.actrium.actro.tabrenderer</string>
+    <string>io.actrium.tabrenderer</string>
 
     <key>CFBundleName</key>
     <string>ActriumTabRenderer</string>
@@ -733,11 +733,11 @@ Debug > Attach to Process > ActriumTabRenderer
 ```swift
 // Helper 端使用 OSLog
 import os.log
-let logger = Logger(subsystem: "io.actrium.actro.tabrenderer", category: "Render")
+let logger = Logger(subsystem: "io.actrium.tabrenderer", category: "Render")
 logger.info("Frame rendered in \(duration)ms")
 
 // 查看日志
-log stream --predicate 'subsystem == "io.actrium.actro.tabrenderer"'
+log stream --predicate 'subsystem == "io.actrium.tabrenderer"'
 ```
 
 ### 11.3 崩溃报告

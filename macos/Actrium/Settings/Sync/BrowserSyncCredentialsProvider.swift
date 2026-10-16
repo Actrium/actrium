@@ -37,7 +37,7 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
         var savedAtUnixSeconds: Int64
     }
 
-    private static let logger = Logger(subsystem: "io.actrium.actro", category: "BrowserSyncCredentials")
+    private static let logger = Logger(subsystem: "io.actrium", category: "BrowserSyncCredentials")
 
     // Legacy plaintext UserDefaults keys. The session (including the access
     // token) now lives in the Keychain; these keys are only read once for

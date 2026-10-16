@@ -102,7 +102,7 @@ Native Windows WebView2 browser shell for Actrium.
   allowlisting, and navigation scheme allowlisting.
 - `src/ActriumCore.cs` is the only Windows C# entrypoint for the Rust ActriumCore C
   ABI.
-- `src/HostBridgeProtocol.cs` owns the Windows-local `actro.host.*` JSON
+- `src/HostBridgeProtocol.cs` owns the Windows-local `actrium.host.*` JSON
   protocol, source allowlist, request dispatch, response shape, and payload DTOs.
 - `src/HostMessageBridge.cs` owns the WebView2 wrapper for that protocol: script
   injection, `WebMessageReceived`, and JSON responses back to the page.
@@ -226,7 +226,7 @@ or persist this snapshot, which keeps temporary window placement from replacing
 the user's primary browser window state.
 
 The host message bridge is deliberately small. It injects `window.actriumHost`,
-accepts only allowlisted `actro.host.*` requests from trusted local/dev WebView2
+accepts only allowlisted `actrium.host.*` requests from trusted local/dev WebView2
 sources, returns the core status payload through the C# `ActriumCore` adapter, and
 delegates `openTab`, `closeTab`, `selectTab`, `navigate`, `getTabs`, and
 `getActiveTab` to `MainForm`. The protocol dispatcher is separated from the

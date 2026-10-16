@@ -57,7 +57,7 @@ final class IPCSocketPathTests: XCTestCase {
         let received = expectation(description: "broker receives renderer host event")
 
         broker.onHostEvent = { name, json, tabId in
-            XCTAssertEqual(name, "com.actro.openHistoryItem")
+            XCTAssertEqual(name, "io.actrium.openHistoryItem")
             XCTAssertEqual(tabId, "tab-1")
             XCTAssertTrue(json.contains("history-1"))
             received.fulfill()
@@ -66,7 +66,7 @@ final class IPCSocketPathTests: XCTestCase {
         try broker.start()
         try renderer.connect()
         try renderer.sendHostEvent(
-            name: "com.actro.openHistoryItem",
+            name: "io.actrium.openHistoryItem",
             userInfoJSON: #"{"itemId":"history-1"}"#,
             tabId: "tab-1"
         )

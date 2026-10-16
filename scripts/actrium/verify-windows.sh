@@ -1359,15 +1359,15 @@ else
 fi
 
 for host_method in \
-  'actro\.host\.getCoreStatus' \
-  'actro\.host\.openTab' \
-  'actro\.host\.closeTab' \
-  'actro\.host\.selectTab' \
-	  'actro\.host\.navigate' \
-	  'actro\.host\.getTabs' \
-	  'actro\.host\.getActiveTab' \
-	  'actro\.host\.removeBookmark' \
-	  'actro\.host\.removeHistoryEntry'
+  'actrium\.host\.getCoreStatus' \
+  'actrium\.host\.openTab' \
+  'actrium\.host\.closeTab' \
+  'actrium\.host\.selectTab' \
+	  'actrium\.host\.navigate' \
+	  'actrium\.host\.getTabs' \
+	  'actrium\.host\.getActiveTab' \
+	  'actrium\.host\.removeBookmark' \
+	  'actrium\.host\.removeHistoryEntry'
 do
   if ! rg -q "$host_method" windows/src/HostMessageBridge.cs windows/src/HostBridgeProtocol.cs; then
     print_failure "Windows host bridge does not expose method: $host_method"

@@ -259,7 +259,7 @@ over restoring the saved tab snapshot.
 
 The first concrete page/host connection is split between
 `HostBridgeProtocol.cs` and `HostMessageBridge.cs`. The protocol file owns the
-`actro.host.*` JSON request/response shape, dispatcher, payload DTOs, and source
+`actrium.host.*` JSON request/response shape, dispatcher, payload DTOs, and source
 allowlist; the WebView2 bridge injects `window.actriumHost`, handles
 `WebMessageReceived`, and writes JSON responses through `PostWebMessageAsJson`.
 The allowlist contains core status, tab lifecycle, tab selection, tab

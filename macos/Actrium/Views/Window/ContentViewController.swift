@@ -170,7 +170,7 @@ private struct ContentAreaView: View {
             historyVM.clearHistory()
         }
         // Handle internal URI navigation (e.g., actro://bookmarks/tags/{tagId})
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.actro.openURI"))) { notification in
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("io.actrium.openURI"))) { notification in
             guard let userInfo = notification.userInfo,
                   let uri = userInfo["uri"] as? String else { return }
 

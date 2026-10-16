@@ -3703,9 +3703,9 @@ var tests = new (string Name, Func<Task> Run)[]
             dispatcher,
             """
             {
-              "type": "actro.host.request",
+              "type": "actrium.host.request",
               "id": "bad-params",
-              "method": "actro.host.navigate",
+              "method": "actrium.host.navigate",
               "params": "not-an-object"
             }
             """);

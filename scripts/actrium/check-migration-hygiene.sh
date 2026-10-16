@@ -51,6 +51,25 @@ old_product_matches=$(
     $common_globs 2>/dev/null || true
 )
 
+check_apple_application_identity() {
+  project=$1
+  expected=$2
+  count=$(rg -c -F "PRODUCT_BUNDLE_IDENTIFIER = ${expected};" "$project" || true)
+  if [ "$count" = 2 ]; then
+    print_ok "$project uses $expected in Debug and Release"
+  else
+    print_matches_failure "Apple application identity is not Actrium" "$project must use $expected in both configurations"
+  fi
+}
+
+check_apple_application_identity ios/Actrium.xcodeproj/project.pbxproj "io.actrium.ios"
+check_apple_application_identity macos/Actrium.xcodeproj/project.pbxproj "io.actrium"
+if rg -q -F 'applicationId = "io.actrium"' android/android/app/build.gradle; then
+  print_ok "Android application ID is io.actrium"
+else
+  print_matches_failure "Android application identity is not Actrium" "android/android/app/build.gradle must use applicationId io.actrium"
+fi
+
 if [ -n "$old_product_matches" ]; then
   print_matches_failure "old product or repository names remain in first-party files" "$old_product_matches"
 else

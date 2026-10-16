@@ -103,7 +103,7 @@ protocol HelperToServiceProtocol {
 /// Factory for creating XPC interfaces
 enum ActriumServiceXPCInterface {
     /// Service name (must match CFBundleIdentifier in Info.plist)
-    static let serviceName = "io.actrium.actro.service"
+    static let serviceName = "io.actrium.service"
 
     /// Interface for Actrium -> Service communication
     static func serviceInterface() -> NSXPCInterface {

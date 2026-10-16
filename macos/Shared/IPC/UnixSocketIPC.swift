@@ -50,7 +50,7 @@ class IPCServer {
     private var clientSocket: Int32 = -1
     private let socketPath: String?
     private let connectedSocket: Int32?
-    private let queue = DispatchQueue(label: "io.actrium.actro.ipc.server")
+    private let queue = DispatchQueue(label: "io.actrium.ipc.server")
     private let sendLock = NSLock()
     private var isRunning = false
 
@@ -250,7 +250,7 @@ class IPCClient {
     private var socket: Int32 = -1
     private let socketPath: String?
     private let connectedSocket: Int32?
-    private let queue = DispatchQueue(label: "io.actrium.actro.ipc.client")
+    private let queue = DispatchQueue(label: "io.actrium.ipc.client")
     private let sendLock = NSLock()
     private var isConnected = false
 

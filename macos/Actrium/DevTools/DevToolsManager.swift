@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 import os.log
 
-private let devToolsLog = OSLog(subsystem: "com.actro.devtools", category: "DevTools")
+private let devToolsLog = OSLog(subsystem: "io.actrium.devtools", category: "DevTools")
 
 /// DevTools display mode
 enum DevToolsDisplayMode: String, CaseIterable {
@@ -1043,7 +1043,7 @@ class DevToolsManager: ObservableObject {
             "code": code
         ]
         DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.evaluateScript"),
+            NSNotification.Name("io.actrium.evaluateScript"),
             object: nil,
             userInfo: userInfo,
             deliverImmediately: true

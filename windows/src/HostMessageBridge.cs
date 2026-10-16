@@ -62,7 +62,7 @@ internal sealed class HostMessageBridge
           const request = (method, params) => {
             const id = `${Date.now()}-${nextId++}`;
             const message = {
-              type: "actro.host.request",
+              type: "actrium.host.request",
               id,
               method,
               params: params ?? null,
@@ -76,7 +76,7 @@ internal sealed class HostMessageBridge
 
           window.chrome.webview.addEventListener("message", (event) => {
             const response = event.data;
-            if (!response || response.type !== "actro.host.response") {
+            if (!response || response.type !== "actrium.host.response") {
               return;
             }
 
@@ -99,25 +99,25 @@ internal sealed class HostMessageBridge
             writable: false,
             value: Object.freeze({
               protocolVersion: 1,
-              getCoreStatus: () => request("actro.host.getCoreStatus"),
-              openTab: (params) => request("actro.host.openTab", params),
+              getCoreStatus: () => request("actrium.host.getCoreStatus"),
+              openTab: (params) => request("actrium.host.openTab", params),
               closeTab: (params) => request(
-                "actro.host.closeTab",
+                "actrium.host.closeTab",
                 typeof params === "string" ? { tabId: params } : params,
               ),
-              selectTab: (tabId) => request("actro.host.selectTab", { tabId }),
+              selectTab: (tabId) => request("actrium.host.selectTab", { tabId }),
               navigate: (params) => request(
-                "actro.host.navigate",
+                "actrium.host.navigate",
                 typeof params === "string" ? { url: params } : params,
               ),
-              getTabs: () => request("actro.host.getTabs"),
-              getActiveTab: () => request("actro.host.getActiveTab"),
+              getTabs: () => request("actrium.host.getTabs"),
+              getActiveTab: () => request("actrium.host.getActiveTab"),
               removeBookmark: (params) => request(
-                "actro.host.removeBookmark",
+                "actrium.host.removeBookmark",
                 typeof params === "string" ? { address: params } : params,
               ),
               removeHistoryEntry: (params) => request(
-                "actro.host.removeHistoryEntry",
+                "actrium.host.removeHistoryEntry",
                 typeof params === "string" ? { address: params } : params,
               ),
             }),

@@ -403,7 +403,7 @@ struct SelfDrawnToolbarView: View {
                 viewModel.shouldAutoFocusAddressBar = false
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.actro.dismissAddressBarFocus"))) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("io.actrium.dismissAddressBarFocus"))) { _ in
             exitEditingMode()
         }
     }

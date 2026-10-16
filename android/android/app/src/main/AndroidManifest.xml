@@ -157,7 +157,7 @@
             android:exported="true"
             android:label="@string/app_name"
             android:launchMode="singleTask"
-            android:taskAffinity="io.actrium.actro"
+            android:taskAffinity="${applicationId}"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- WeChat addresses the callback using the installed application ID. -->
         <activity-alias

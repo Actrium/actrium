@@ -23,7 +23,7 @@ final class BrowserDataRepository {
     // kind; within a session it reflects the last round's provider error
     // classification. Serialized through an actor-free serial queue because
     // the local-folder cycle can be invoked from concurrent UI actions.
-    private let providerStateQueue = DispatchQueue(label: "io.actrium.actro.browserSync.localFolderProvider")
+    private let providerStateQueue = DispatchQueue(label: "io.actrium.browserSync.localFolderProvider")
     private var lastProviderErrorKindStorage: String?
 
     private init() {

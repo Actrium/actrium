@@ -218,7 +218,7 @@ struct BookmarkEditSheet: View {
         // URI scheme: actro://bookmarks/tags/{tagId}
         let uri = "actro://bookmarks/tags/\(tag.id.uuidString)"
         NotificationCenter.default.post(
-            name: NSNotification.Name("com.actro.openURI"),
+            name: NSNotification.Name("io.actrium.openURI"),
             object: nil,
             userInfo: ["uri": uri, "tagId": tag.id.uuidString, "tagName": tag.name]
         )

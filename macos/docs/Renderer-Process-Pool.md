@@ -199,7 +199,7 @@ The completion of the migration requires that it be met simultaneously:
 ## 10. Signing and Platform Boundary
 
 This machine has developed certificates for this machine Helper Do a nested signature with the main program and run a validation.Xcode Autosignature still needs new
-Bundle ID `io.actrium.actro.renderer` Create provisioning profile; This is account side set.
+Bundle ID `io.actrium.renderer` Create provisioning profile; This is account side set.
 Not affecting the manual development of a signature or architecture itself.
 
 `CAContext`, `CALayerHost` With Current ViewBridge Same as the one. macOS Private framework capacity, not suitable

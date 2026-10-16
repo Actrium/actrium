@@ -31,7 +31,7 @@ export APPLE_ID="your-apple-id@example.com"
 
 Edit `Scripts/ExportOptions.plist`, replace:
 - `YOUR_TEAM_ID` → Yours. Team ID
-- `com.actrium.actro` → Yours. Bundle ID
+- `com.example.actrium` → Yours. Bundle ID
 
 Edit `Scripts/upload-testflight.sh` I'm not sure. 165 Line:
 - `DEVELOPMENT_TEAM="YOUR_TEAM_ID"` → Yours. Team ID
