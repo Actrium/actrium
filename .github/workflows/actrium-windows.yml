@@ -14,7 +14,7 @@
 #             is deterministic and network-independent beyond registries),
 #             reusing the verified DLL and uploaded as a run artifact.
 #
-# The DLL is built once with Rust 1.98.0. Both jobs use the same checked-out
+# The DLL is built once with Rust 1.99.0. Both jobs use the same checked-out
 # commit; packaging downloads the bytes exercised by the verification harness.
 
 name: Windows Verify
@@ -71,7 +71,7 @@ jobs:
         run: bash scripts/actrium/check-windows-layout.sh
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
 
       - name: Setup protoc
         uses: arduino/setup-protoc@v3

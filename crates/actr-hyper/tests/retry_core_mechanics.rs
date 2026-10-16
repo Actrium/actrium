@@ -52,7 +52,7 @@ fn network_event(sequence: u64, available: bool, wifi: bool, cellular: bool) -> 
         },
     }
 }
-use actr_protocol::{ActrId, PayloadType, RpcEnvelope};
+use actr_protocol::{ActrError, ActrId, Classify, PayloadType, RpcEnvelope};
 use async_trait::async_trait;
 use bytes::Bytes;
 
@@ -1217,25 +1217,25 @@ async fn request_timeout_then_late_old_response_does_not_complete_new_request() 
         .expect("old request task should not panic")
         .expect_err("old request should time out before any response arrives");
     assert!(
-        (old_error.to_string().contains("Request timeout")
-            || old_error.to_string().contains("timed out")),
-        "old request should fail with explicit timeout, got: {old_error}"
+        matches!(&old_error, ActrError::DeliveryUncertain { operation_id, .. }
+            if operation_id == "rc25-old-request"),
+        "submitted old request should report uncertain delivery, got: {old_error}"
     );
     assert_eq!(
         gate.pending_count().await,
         0,
         "timed-out request must be removed from pending map"
     );
-    wait_for_dest_count(
-        &transport,
-        0,
-        "old request timeout cleanup should finish before starting the new request",
-    )
-    .await;
+    assert!(!old_error.is_retryable());
+    assert_eq!(
+        transport.dest_count().await,
+        1,
+        "a Call deadline must preserve the transport for the next request"
+    );
     wait_until_not_closing(
         &transport,
         &dest,
-        "old request timeout cleanup should leave the destination open for new sends",
+        "a Call deadline should leave the destination open for new sends",
     )
     .await;
 
@@ -1698,9 +1698,11 @@ async fn cleanup_during_inflight_rpc_is_bounded_and_next_rpc_is_clean() {
         .expect("RPC task should not panic")
         .expect_err("in-flight RPC without response should fail boundedly");
     assert!(
-        (err.to_string().contains("Request timeout") || err.to_string().contains("timed out")),
-        "in-flight RPC should fail with an explicit deadline error, got: {err}"
+        matches!(&err, ActrError::DeliveryUncertain { operation_id, .. }
+            if operation_id == "cleanup-inflight-rpc"),
+        "submitted request should report uncertain delivery, got: {err}"
     );
+    assert!(!err.is_retryable());
     assert_eq!(
         gate.pending_count().await,
         0,
@@ -1809,14 +1811,16 @@ async fn timeout_cleanup_without_wire_identity_does_not_close_replacement_transp
         .expect("stale no-identity task should not panic")
         .expect_err("stale no-identity request should time out");
     assert!(
-        (err.to_string().contains("Request timeout") || err.to_string().contains("timed out")),
-        "stale no-identity request should fail with timeout, got: {err}"
+        matches!(&err, ActrError::DeliveryUncertain { operation_id, .. }
+            if operation_id == "no-identity-stale"),
+        "submitted request should report uncertain delivery, got: {err}"
     );
+    assert!(!err.is_retryable());
 
     wait_for_dest_count(
         &transport,
         1,
-        "timeout cleanup for stale transport must not close the replacement transport",
+        "a stale Call deadline must not close the replacement transport",
     )
     .await;
     wait_until_not_closing(
@@ -1911,15 +1915,17 @@ async fn request_timeout_does_not_close_replaced_webrtc_session() {
         .expect("stale-session task should not panic")
         .expect_err("stale-session request should time out");
     assert!(
-        (err.to_string().contains("Request timeout") || err.to_string().contains("timed out")),
-        "stale-session request should fail with timeout, got: {err}"
+        matches!(&err, ActrError::DeliveryUncertain { operation_id, .. }
+            if operation_id == "stale-session-timeout"),
+        "submitted request should report uncertain delivery, got: {err}"
     );
+    assert!(!err.is_retryable());
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(
         transport.dest_count().await,
         1,
-        "timeout cleanup for session 1 must not close the replacement session"
+        "a session 1 Call deadline must not close the replacement session"
     );
 
     assert!(

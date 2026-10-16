@@ -8,7 +8,8 @@
 //! scope's hierarchical `CancellationToken` and absolute deadline are
 //! inherited by nested guest calls (each hop gets a fresh request id and
 //! `min(parent deadline, now + timeout)`), so descendant host-awaits return
-//! `TimedOut` promptly and admission points reject work that never started.
+//! promptly; Calls preserve uncertainty after dispatch and admission points
+//! reject work that never started.
 //!
 //! Cancellation is cooperative and scoped per root: it never poisons an
 //! executor runner (that policy stays reserved for real reply-channel
@@ -40,7 +41,7 @@ const STATE_CANCELLED: u8 = 2;
 /// Why a scope left the pending state. Diagnostics only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancelReason {
-    /// The absolute deadline expired (maps to `ActrError::TimedOut`).
+    /// The absolute deadline expired; the caller classifies delivery separately.
     DeadlineExpired,
     /// The owning caller's future was dropped or bailed out with an error.
     CallerDropped,
@@ -178,7 +179,7 @@ impl RequestScope {
 
     /// Record cancellation and fire the token (idempotent; a completed
     /// scope stays completed). Descendant host-awaits observe the token and
-    /// unwind with `TimedOut`.
+    /// unwind promptly without claiming that submitted work did not execute.
     pub(crate) fn cancel(&self, reason: CancelReason) {
         if self
             .state

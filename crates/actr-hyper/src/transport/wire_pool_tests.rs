@@ -1380,3 +1380,36 @@ async fn held_lane_over_terminal_wire_surfaces_connection_closed() {
     );
     assert!(result.unwrap_err().is_closed_like());
 }
+
+#[tokio::test]
+async fn terminal_websocket_is_not_a_live_candidate() {
+    let pool = WirePool::new(fast_retry());
+    let wire = Arc::new(SecuredMockWire::new(
+        ConnType::WebSocket,
+        SecureChannelState::LegacyBypass,
+    ));
+    let cell = wire.secure.clone();
+    let mut ready = pool.watch_ready();
+    pool.add_connection(wire).await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !ready.borrow_and_update().contains(&ConnType::WebSocket) {
+            ready.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert!(pool.has_live_candidate(&[ConnType::WebSocket]).await);
+    cell.drive_terminal(SecureChannelState::Failed);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while ready.borrow_and_update().contains(&ConnType::WebSocket) {
+            ready.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !pool.has_live_candidate(&[ConnType::WebSocket]).await,
+        "PeerTransport must be able to evict this destination and redial"
+    );
+    pool.close_all().await;
+}

@@ -23,7 +23,7 @@ concurrency:
 jobs:
   identity:
     name: Commit Identity Privacy
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     permissions:
       contents: read
     steps:
@@ -47,7 +47,7 @@ jobs:
 
   determine:
     name: Determine Affected Targets
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     outputs:
       mode: ${{ steps.targets.outputs.mode }}
       changed_files_json: ${{ steps.targets.outputs.changed_files_json }}
@@ -118,7 +118,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - name: Use runner sccache
@@ -152,7 +152,7 @@ jobs:
             crates/actr-cli/assets/web-runtime/actr_sw_host.js
             packages/actr-web/dist/sw
           key: >-
-            cli-web-runtime-v4-rust1.98.0-wp0.15.0-wb0.2.126-${{ hashFiles(
+            cli-web-runtime-v4-rust1.99.0-wp0.15.0-wb0.2.126-${{ hashFiles(
               'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/config.toml',
               'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
               'packages/actr-web/.cargo/config.toml', 'packages/actr-web/rust-toolchain*',
@@ -251,7 +251,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - name: Install Linux e2e dependencies
@@ -299,7 +299,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
@@ -326,7 +326,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile
           # the wasm_actor_fixture Component under --all-features.
@@ -418,13 +418,12 @@ jobs:
             --library target/debug/libactr.so \
             --binding packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/actr.kt
       - name: Install pinned Clippy toolchain
-        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --target wasm32-wasip2 --no-self-update
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy --target wasm32-wasip2 --no-self-update
       - name: Clippy (deny warnings)
         # Cargo rejects lint warnings without adding compiler flags.
         env:
           CARGO_BUILD_WARNINGS: deny
-        run: cargo +1.97.1 clippy --workspace --all-targets --all-features
-
+        run: cargo +1.99.0 clippy --workspace --all-targets --all-features
 
   test:
     name: Test (Rust, ${{ matrix.shard }})
@@ -493,7 +492,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile the
           # wasm_actor_fixture Component under --all-features (wasm-engine).
@@ -765,11 +764,13 @@ jobs:
     name: TypeScript Workload
     needs: determine
     if: needs.determine.outputs.ts_workload == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Set up light runner
+        uses: ./.github/actions/setup-light-runner
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -803,7 +804,7 @@ jobs:
     name: Python Codegen
     needs: determine
     if: needs.determine.outputs.python_codegen == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     permissions:
       contents: read
     defaults:
@@ -811,6 +812,8 @@ jobs:
         working-directory: tools/actr/protoc-gen/python
     steps:
       - uses: actions/checkout@v5
+      - name: Set up light runner
+        uses: ./.github/actions/setup-light-runner
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -981,7 +984,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
@@ -1234,7 +1237,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
       # protoc 29.3 ships in the self-hosted runner image; skip the
@@ -1256,11 +1259,11 @@ jobs:
       - name: Check (WebRTC)
         run: cargo check -p actr-hyper --all-targets
       - name: Install pinned Clippy toolchain
-        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --target wasm32-wasip2 --target wasm32-unknown-unknown --no-self-update
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy --target wasm32-wasip2 --target wasm32-unknown-unknown --no-self-update
       - name: Clippy (WebRTC, deny warnings)
         env:
           CARGO_BUILD_WARNINGS: deny
-        run: cargo +1.97.1 clippy -p actr-hyper --all-targets
+        run: cargo +1.99.0 clippy -p actr-hyper --all-targets
       # nextest (not bare cargo test): the real-PC suites in this filter hit
       # CI-load handshake-timing flakes, and libtest would fail the whole job
       # on the first one without retries or running the rest. nextest picks up
@@ -1270,7 +1273,7 @@ jobs:
 
   cjk:
     name: Language Policy
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     if: always()
     permissions:
       contents: read
@@ -1297,7 +1300,7 @@ jobs:
 
   gate:
     name: Gate
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     if: always()
     needs:
       - identity

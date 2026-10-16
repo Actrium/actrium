@@ -338,6 +338,8 @@ impl HostTransport {
         deadline: RpcDeadline,
     ) -> actr_protocol::ActorResult<Bytes> {
         deadline.ensure_remaining()?;
+        let request_id = envelope.request_id.clone();
+        let mut submitted = false;
         let operation = async {
             // Register the pending entry before any awaited setup.  The RAII
             // guard removes it if lane lookup, channel admission, response
@@ -353,6 +355,10 @@ impl HostTransport {
                 .await
                 .map_err(ActrError::from)?;
 
+            // Tokio mpsc send is cancellation-safe: until it returns success,
+            // a cancelled send cannot have enqueued this request.
+            submitted = true;
+
             // The outer timeout owns the combined send + response budget;
             // do not start another relative timeout here.
             pending.recv().await
@@ -366,6 +372,10 @@ impl HostTransport {
         .await
         {
             Ok(result) => result,
+            Err(_) if submitted => Err(ActrError::DeliveryUncertain {
+                operation_id: request_id,
+                cause: "local Call deadline elapsed after queue submission".into(),
+            }),
             Err(_) => Err(ActrError::TimedOut),
         }
     }

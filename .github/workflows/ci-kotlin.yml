@@ -16,7 +16,7 @@ permissions:
 jobs:
   script-check:
     name: Kotlin Android Script Check
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     steps:
       - uses: actions/checkout@v5
       - name: Test SDK error message generation
@@ -120,7 +120,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
       - name: Setup Java

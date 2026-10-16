@@ -314,7 +314,7 @@ fn acquire(
     denied: &AtomicU64,
     label: &'static str,
 ) -> WasmResult<QuotaPermit> {
-    let result = counter(kind).fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+    let result = counter(kind).try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
         current.checked_add(amount).filter(|next| *next <= limit)
     });
     match result {

@@ -10,8 +10,10 @@ use async_trait::async_trait;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc, watch};
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Request as WsRequest;
@@ -29,6 +31,20 @@ impl Drop for CancelOnDrop {
         self.0.cancel();
     }
 }
+
+const PING_INTERVAL: Duration = Duration::from_secs(15);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
+const PEER_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(120);
+type ProbeNonce = [u8; 16];
+// Bound one continuous local receive stall independently of successful writes.
+// A peer may still ACK TCP data while its application is unresponsive. Even a
+// healthy session is retired if its consumer cannot make progress for 2 minutes.
+const RECEIVE_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(120);
+// A peer whose bounded application queue is full cannot read a normal Ping.
+// Repeated control frames prove it is still alive without buffering more data.
+// This is a lease refreshed by each frame, never a permanent watchdog disable.
+const RECEIVE_BACKPRESSURE_PING: &[u8] = b"actr:receive-backpressure:v1";
 
 /// WebSocket transmitting messagesprotocol
 ///
@@ -103,6 +119,11 @@ pub(crate) struct WebSocketConnection {
     credential_b64: Option<String>,
     /// Write end (Sink) - using Option to avoid initialization issues
     sink: WsSink,
+    /// Serialize session publication against explicit close completion.
+    connect_gate: Arc<Mutex<()>>,
+    /// Retain each stall's start even when watch coalesces clear/full updates.
+    receive_stall: watch::Sender<Option<Instant>>,
+    peer_backpressure: watch::Sender<Option<Instant>>,
 
     /// message route by table: PayloadType -> Sender (using array index, 5 fixed elements, Bytes zero-copy)
     router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>>,
@@ -141,6 +162,9 @@ impl WebSocketConnection {
             security: DirectSecurity::default(),
             local_id_hex: None,
             credential_b64: None,
+            connect_gate: Arc::new(Mutex::new(())),
+            receive_stall: watch::channel(None).0,
+            peer_backpressure: watch::channel(None).0,
             sink: Arc::new(Mutex::new(None)), // initial begin as None
             router: Arc::new(RwLock::new([None, None, None, None, None])),
             lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
@@ -193,7 +217,6 @@ impl WebSocketConnection {
             PayloadType::RpcSignal,
             PayloadType::StreamReliable,
             PayloadType::StreamLatencyFirst,
-            PayloadType::MediaRtp,
         ] {
             let (tx, lane) = Self::make_lane(&sink, &secure, payload_type);
             routes[payload_type as usize] = Some(tx);
@@ -203,31 +226,53 @@ impl WebSocketConnection {
         let connected = Arc::new(RwLock::new(true));
         let teardown = Arc::new(CancelOnDrop(CancellationToken::new()));
 
-        Self::spawn_dispatcher(
-            stream,
-            router.clone(),
-            connected.clone(),
-            teardown.0.clone(),
-        );
-
         tracing::info!("✅ WebSocketConnection created from server stream (already connected)");
 
-        Self {
+        let connection = Self {
             url: String::from("<inbound>"),
             security: DirectSecurity::default(),
             local_id_hex: None,
             credential_b64: None,
+            connect_gate: Arc::new(Mutex::new(())),
+            receive_stall: watch::channel(None).0,
+            peer_backpressure: watch::channel(None).0,
             sink,
             router,
             lane_cache: Arc::new(RwLock::new(lanes)),
             connected,
             secure,
             teardown,
-        }
+        };
+        connection.spawn_session(stream);
+        connection
     }
 
     /// establish Connect
     pub async fn connect(&self) -> NetworkResult<()> {
+        // One object owns one physical session. Redial uses a fresh object,
+        // so an old watchdog can never retire a replacement socket.
+        let _connect = self.connect_gate.lock().await;
+        tokio::select! {
+            biased;
+            _ = self.teardown.0.cancelled() => Err(NetworkError::WebSocketClosed(
+                "WebSocket closed during connect".into(),
+            )),
+            _ = self.secure.wait_terminal() => Err(NetworkError::WebSocketClosed(
+                "WebSocket session retired during connect".into(),
+            )),
+            result = self.connect_session() => result,
+        }
+    }
+
+    async fn connect_session(&self) -> NetworkResult<()> {
+        if self.secure.state().is_terminal() {
+            return Err(NetworkError::WebSocketClosed(
+                "WebSocket session retired".into(),
+            ));
+        }
+        if *self.connected.read().await {
+            return Ok(());
+        }
         self.security.validate_url(&self.url)?;
         // Dial the same normalized authority that the policy validated. In
         // particular, never pass alternate numeric hosts to a DNS resolver.
@@ -286,13 +331,19 @@ impl WebSocketConnection {
         let (sink, stream) = ws_stream.split();
 
         // 2. update new sink
-        *self.sink.lock().await = Some(Box::new(sink));
+        {
+            let mut slot = self.sink.lock().await;
+            if self.secure.state().is_terminal() {
+                return Err(NetworkError::WebSocketClosed(
+                    "WebSocket closed during connect".into(),
+                ));
+            }
+            *slot = Some(Box::new(sink));
+        }
         *self.connected.write().await = true;
 
         // 3. Startmessage dispatch device (in background task, not retain handle)
-        let router = self.router.clone();
-        let connected = self.connected.clone();
-        Self::spawn_dispatcher(stream, router, connected, self.teardown.0.clone());
+        self.spawn_session(stream);
 
         tracing::info!("✅ WebSocketConnection already Connect: {}", self.url);
 
@@ -319,79 +370,45 @@ impl WebSocketConnection {
         }
     }
 
-    /// Startmessage dispatch device (in background task)
-    fn spawn_dispatcher<S>(
-        mut stream: SplitStream<WebSocketStream<S>>,
-        router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>>,
-        connected: Arc<RwLock<bool>>,
-        shutdown: CancellationToken,
-    ) -> tokio::task::JoinHandle<()>
+    /// Run liveness and receive work without retaining the connection's drop guard.
+    fn spawn_session<S>(&self, stream: SplitStream<WebSocketStream<S>>)
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
+        let session = WebSocketSession {
+            sink: self.sink.clone(),
+            router: self.router.clone(),
+            lane_cache: self.lane_cache.clone(),
+            connected: self.connected.clone(),
+            secure: self.secure.clone(),
+            receive_stall: self.receive_stall.clone(),
+            peer_backpressure: self.peer_backpressure.clone(),
+        };
+        let shutdown = self.teardown.0.clone();
         tokio::spawn(async move {
-            tracing::debug!("📡 WebSocket dispatcher Start");
-
-            loop {
-                let msg_result = tokio::select! {
-                    _ = shutdown.cancelled() => break,
-                    msg_result = stream.next() => match msg_result {
-                        Some(msg_result) => msg_result,
-                        None => break,
-                    },
-                };
-                match msg_result {
-                    Ok(WsMessage::Binary(data)) => {
-                        // decodemessage
-                        match TransportMessage::decode(&data) {
-                            Ok(transport_msg) => {
-                                // Route to corresponding 's Lane (using array index reference)
-                                let idx = transport_msg.payload_type as usize;
-                                let router_guard = router.read().await;
-                                if let Some(tx) = &router_guard[idx] {
-                                    // convert exchange as Bytes (zero-copy)
-                                    let data = bytes::Bytes::from(transport_msg.data);
-                                    if let Err(e) = tx.send(data).await {
-                                        tracing::warn!(
-                                            "❌ WebSocket message route by failure (type={:?}): {}",
-                                            transport_msg.payload_type,
-                                            e
-                                        );
-                                    }
-                                } else {
-                                    tracing::warn!(
-                                        "⚠️ WebSocket received not RegisterType'smessage: {:?}",
-                                        transport_msg.payload_type
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("❌ WebSocket message decodefailure: {}", e);
-                            }
-                        }
-                    }
-                    Ok(WsMessage::Close(_)) => {
-                        tracing::info!("🔌 WebSocket Connect be pair end Close");
-                        *connected.write().await = false;
-                        break;
-                    }
-                    Ok(WsMessage::Ping(_)) | Ok(WsMessage::Pong(_)) => {
-                        // ignore center skipmessage
-                    }
-                    Ok(_) => {
-                        tracing::debug!("⚠️ Received non-binary WebSocket message, ignoring");
-                    }
-                    Err(e) => {
-                        tracing::error!("❌ WebSocket Error: {}", e);
-                        *connected.write().await = false;
-                        break;
-                    }
-                }
-            }
-
-            *connected.write().await = false;
-            tracing::debug!("📡 WebSocket dispatcher rollback exit ");
-        })
+            let (pong_tx, pong_rx) = watch::channel(None);
+            let graceful = tokio::select! {
+                _ = shutdown.cancelled() => true,
+                graceful = session.dispatch(stream, pong_tx) => graceful,
+                _ = session.probe(pong_rx) => false,
+                _ = session.secure.wait_terminal() => session.secure.state() == SecureChannelState::Closed,
+            };
+            session.secure.drive_terminal(if graceful {
+                SecureChannelState::Closed
+            } else {
+                SecureChannelState::Failed
+            });
+            *session.connected.write().await = false;
+            // Terminal state cancels application writers. Orderly shutdown
+            // attempts the Close frame, but never waits indefinitely to flush.
+            retire_sink(
+                &session.sink,
+                session.secure.state() == SecureChannelState::Closed,
+            )
+            .await;
+            *session.router.write().await = [None, None, None, None, None];
+            *session.lane_cache.write().await = [None, None, None, None, None];
+        });
     }
 
     /// Register PayloadType route by
@@ -467,6 +484,11 @@ impl WebSocketConnection {
         &self,
         payload_type: PayloadType,
     ) -> NetworkResult<Arc<dyn DataLane>> {
+        if payload_type == PayloadType::MediaRtp {
+            return Err(NetworkError::NoRoute(
+                "MediaRtp is not supported by direct WebSocket connections".into(),
+            ));
+        }
         // Check connection status
         if !*self.connected.read().await {
             return Err(NetworkError::WebSocketClosed(
@@ -487,7 +509,9 @@ impl WebSocketConnection {
     ) -> (mpsc::Sender<bytes::Bytes>, Arc<dyn DataLane>) {
         let (tx, rx) = mpsc::channel(100);
         let lane = Arc::new(SecureDataLane::new(
-            Arc::new(WebSocketDataLane::new(sink.clone(), payload_type, rx)),
+            Arc::new(
+                WebSocketDataLane::new(sink.clone(), payload_type, rx).with_session(secure.clone()),
+            ),
             secure.clone(),
         ));
         (tx, lane)
@@ -505,14 +529,16 @@ impl WebSocketConnection {
         // Close echo; a non-cooperative peer must not keep the socket alive.
         self.teardown.0.cancel();
 
+        // Cancellation first releases a dial or publication blocked at any
+        // await. Sharing its gate prevents connect from completing after close.
+        let _connect = self.connect_gate.lock().await;
         *self.connected.write().await = false;
 
-        // Close WebSocket (Send Close message)
-        let mut sink_opt = self.sink.lock().await;
-        if let Some(sink) = sink_opt.as_mut() {
-            let _ = sink.close().await;
-        }
-        *sink_opt = None;
+        retire_sink(
+            &self.sink,
+            self.secure.state() == SecureChannelState::Closed,
+        )
+        .await;
 
         // clear blank route by table
         let mut router = self.router.write().await;
@@ -590,4 +616,263 @@ impl std::fmt::Debug for WebSocketConnection {
             .field("secure", &self.secure)
             .finish_non_exhaustive()
     }
+}
+
+/// Shared I/O state held by session tasks, excluding credentials and the drop guard.
+struct WebSocketSession {
+    sink: WsSink,
+    router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>>,
+    lane_cache: LaneCache<5>,
+    connected: Arc<RwLock<bool>>,
+    secure: SecureCell,
+    receive_stall: watch::Sender<Option<Instant>>,
+    peer_backpressure: watch::Sender<Option<Instant>>,
+}
+
+impl WebSocketSession {
+    async fn probe(&self, mut pong_rx: watch::Receiver<Option<ProbeNonce>>) {
+        let mut receive_stall = self.receive_stall.subscribe();
+        let mut peer_backpressure = self.peer_backpressure.subscribe();
+        let initial_pressure = *peer_backpressure.borrow_and_update();
+        let mut peer_deadline = initial_pressure.map(|seen| seen + PEER_BACKPRESSURE_TIMEOUT);
+        let mut peer_lease = initial_pressure.map(|seen| seen + PING_INTERVAL + PROBE_TIMEOUT);
+        loop {
+            if receive_stall.borrow_and_update().is_some() {
+                let wait = self.wait_for_receive_capacity(&mut receive_stall);
+                let result = if let Some(deadline) = peer_deadline {
+                    crate::timer::timeout_at(
+                        crate::timer::ids::WEBSOCKET_PEER_PRESSURE_DEADLINE,
+                        deadline,
+                        wait,
+                    )
+                    .await
+                    .unwrap_or(Err(()))
+                } else {
+                    wait.await
+                };
+                if result.is_err() {
+                    tracing::warn!("direct WebSocket receive pressure expired; retiring session");
+                    return;
+                }
+                if peer_deadline.is_some() {
+                    peer_lease = Some(Instant::now() + PING_INTERVAL + PROBE_TIMEOUT);
+                }
+                continue;
+            }
+            let nonce = *uuid::Uuid::new_v4().as_bytes();
+            let cycle_deadline = Instant::now() + PING_INTERVAL + PROBE_TIMEOUT;
+            let cycle = async {
+                crate::timer::sleep(crate::timer::ids::WEBSOCKET_PING_SCHEDULE, PING_INTERVAL)
+                    .await;
+                {
+                    let mut guard = self.sink.lock().await;
+                    let sink = guard.as_mut().ok_or(())?;
+                    sink.send(WsMessage::Ping(nonce.to_vec().into()))
+                        .await
+                        .map_err(|_| ())?;
+                }
+                pong_rx
+                    .wait_for(|value| *value == Some(nonce))
+                    .await
+                    .map_err(|_| ())?;
+                Ok::<(), ()>(())
+            };
+            tokio::pin!(cycle);
+            loop {
+                let (timer, deadline) = match peer_deadline {
+                    Some(deadline) => (
+                        crate::timer::ids::WEBSOCKET_PEER_PRESSURE_DEADLINE,
+                        deadline.min(peer_lease.unwrap_or(deadline)),
+                    ),
+                    None => (
+                        crate::timer::ids::WEBSOCKET_PROBE_CYCLE_DEADLINE,
+                        cycle_deadline,
+                    ),
+                };
+                tokio::select! {
+                    biased;
+                    // A stream of pressure frames cannot starve or renew this deadline.
+                    _ = crate::timer::sleep_until(timer, deadline) => {
+                        tracing::warn!("direct WebSocket liveness deadline expired; retiring session");
+                        return;
+                    },
+                    result = &mut cycle => {
+                        if result.is_err() { return; }
+                        // Only the unpredictable challenge response proves the
+                        // peer read this connection; pressure assertions do not.
+                        peer_deadline = None;
+                        peer_lease = None;
+                        break;
+                    },
+                    result = receive_stall.changed() => {
+                        if result.is_err() { return; }
+                        break;
+                    },
+                    result = peer_backpressure.changed() => {
+                        if result.is_err() { return; }
+                        if peer_deadline.is_none() {
+                            peer_deadline = Some(Instant::now() + PEER_BACKPRESSURE_TIMEOUT);
+                        }
+                        peer_lease = Some(Instant::now() + PING_INTERVAL + PROBE_TIMEOUT);
+                        // Keep the current probe alive so a recovered peer can
+                        // answer it; repeated heartbeats never restart the cycle.
+                    },
+                }
+            }
+        }
+    }
+
+    async fn wait_for_receive_capacity(
+        &self,
+        receive_stall: &mut watch::Receiver<Option<Instant>>,
+    ) -> Result<(), ()> {
+        loop {
+            let Some(started) = *receive_stall.borrow_and_update() else {
+                return Ok(());
+            };
+            // A successful receive followed immediately by another full queue
+            // can coalesce into one watch update. Its timestamp still identifies
+            // the new stall, so progress cannot inherit the previous deadline.
+            let heartbeat = async {
+                self.send_pressure_heartbeat().await?;
+                crate::timer::sleep(crate::timer::ids::WEBSOCKET_PING_SCHEDULE, PING_INTERVAL)
+                    .await;
+                Ok::<(), ()>(())
+            };
+            tokio::select! {
+                biased;
+                result = receive_stall.changed() => result.map_err(|_| ())?,
+                // Every heartbeat uses the same absolute deadline until the
+                // receive queue accepts a message. Writes cannot renew it.
+                result = crate::timer::timeout_at(
+                    crate::timer::ids::WEBSOCKET_RECEIVE_BACKPRESSURE_DEADLINE,
+                    started + RECEIVE_BACKPRESSURE_TIMEOUT,
+                    heartbeat,
+                ) => result.map_err(|_| ())??,
+            }
+        }
+    }
+
+    async fn send_pressure_heartbeat(&self) -> Result<(), ()> {
+        let write = async {
+            let mut guard = self.sink.lock().await;
+            let sink = guard.as_mut().ok_or(())?;
+            sink.send(WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into()))
+                .await
+                .map_err(|_| ())
+        };
+        crate::timer::timeout(
+            crate::timer::ids::WEBSOCKET_PROBE_DEADLINE,
+            PROBE_TIMEOUT,
+            write,
+        )
+        .await
+        .map_err(|_| ())?
+    }
+
+    async fn dispatch<S>(
+        &self,
+        mut stream: SplitStream<WebSocketStream<S>>,
+        pong_tx: watch::Sender<Option<ProbeNonce>>,
+    ) -> bool
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        while let Some(msg_result) = stream.next().await {
+            match msg_result {
+                Ok(WsMessage::Binary(data)) => {
+                    // decodemessage
+                    match TransportMessage::decode(&data) {
+                        Ok(transport_msg) => {
+                            // Media uses its dedicated transport, not a WebSocket
+                            // data lane. Never enqueue frames for an unread route.
+                            if transport_msg.payload_type == PayloadType::MediaRtp {
+                                tracing::debug!("dropping unsupported WebSocket MediaRtp frame");
+                                continue;
+                            }
+                            // Route to corresponding 's Lane (using array index reference)
+                            let idx = transport_msg.payload_type as usize;
+                            let tx = self.router.read().await[idx].clone();
+                            if let Some(tx) = tx {
+                                // convert exchange as Bytes (zero-copy)
+                                let data = bytes::Bytes::from(transport_msg.data);
+                                let result = match tx.try_send(data) {
+                                    Ok(()) => Ok(()),
+                                    Err(mpsc::error::TrySendError::Full(data)) => {
+                                        self.receive_stall.send_replace(Some(Instant::now()));
+                                        let result = tx.send(data).await;
+                                        self.receive_stall.send_replace(None);
+                                        result
+                                    }
+                                    Err(mpsc::error::TrySendError::Closed(data)) => {
+                                        Err(mpsc::error::SendError(data))
+                                    }
+                                };
+                                if let Err(e) = result {
+                                    tracing::warn!(
+                                        "❌ WebSocket message route by failure (type={:?}): {}",
+                                        transport_msg.payload_type,
+                                        e
+                                    );
+                                }
+                            } else {
+                                tracing::warn!(
+                                    "⚠️ WebSocket received not RegisterType'smessage: {:?}",
+                                    transport_msg.payload_type
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("❌ WebSocket message decodefailure: {}", e);
+                        }
+                    }
+                }
+                Ok(WsMessage::Close(_)) => {
+                    tracing::info!("WebSocket peer initiated orderly close");
+                    return true;
+                }
+                Ok(WsMessage::Pong(payload)) => {
+                    if let Ok(bytes) = ProbeNonce::try_from(payload.as_ref()) {
+                        pong_tx.send_replace(Some(bytes));
+                    }
+                }
+                // tungstenite queues Pong automatically; the next read
+                // flushes it, including when no application response exists.
+                Ok(WsMessage::Ping(payload)) => {
+                    if payload.as_ref() == RECEIVE_BACKPRESSURE_PING {
+                        self.peer_backpressure.send_replace(Some(Instant::now()));
+                    }
+                }
+                Ok(_) => {
+                    tracing::debug!("⚠️ Received non-binary WebSocket message, ignoring");
+                }
+                Err(e) => {
+                    tracing::error!("❌ WebSocket Error: {}", e);
+                    break;
+                }
+            }
+        }
+
+        tracing::debug!("📡 WebSocket dispatcher exited");
+        false
+    }
+}
+
+/// Only one closer takes ownership of the sink; cancellation drops that owned
+/// socket even if an earlier frame or the Close frame cannot be flushed.
+async fn retire_sink(sink: &WsSink, graceful: bool) {
+    let close = async {
+        let socket = sink.lock().await.take();
+        if let Some(mut socket) = socket {
+            if graceful {
+                let _ = socket.close().await;
+            }
+        }
+    };
+    let _ = crate::timer::timeout(
+        crate::timer::ids::WEBSOCKET_CLOSE_DEADLINE,
+        CLOSE_TIMEOUT,
+        close,
+    )
+    .await;
 }

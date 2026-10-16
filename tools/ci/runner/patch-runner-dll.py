@@ -34,6 +34,9 @@ def main() -> None:
         raise SystemExit(f"replacement must keep the byte length: {OLD} -> {NEW}")
 
     count = data.count(old)
+    if count == 0 and data.count(new) == 1:
+        print(f"cache patch already verified in {DLL}")
+        return
     if count != 1:
         raise SystemExit(
             f"expected exactly 1 occurrence of {OLD} in {DLL}, found {count}; "

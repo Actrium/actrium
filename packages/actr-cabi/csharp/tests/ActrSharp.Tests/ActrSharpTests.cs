@@ -63,6 +63,8 @@ public class ActrCabiExceptionTests
         Assert.Equal(ActrCabiException.CodeArchMismatch, ex.Code);
         Assert.Same(inner, ex.InnerException);
     }
+
+
 }
 
 public class ActrNativeInfoTests

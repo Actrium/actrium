@@ -40,10 +40,6 @@ futures-util = "0.3.31"
 opus = "0.3.1"
 audiopus_sys = { version = "0.2", features = ["static"] }
 
-# OpenSSL (vendored for cross-compilation)
-openssl = { version = "0.10", features = ["vendored"] }
-openssl-sys = { version = "0.9", features = ["vendored"] }
-
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
 log = "0.4"

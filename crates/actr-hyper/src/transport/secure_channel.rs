@@ -207,6 +207,17 @@ impl SecureCell {
         current
     }
 
+    /// Wait for physical-session retirement without treating a rekey as death.
+    pub(crate) async fn wait_terminal(&self) {
+        loop {
+            let epoch = self.epoch();
+            if self.state().is_terminal() {
+                return;
+            }
+            self.wait_after(epoch).await;
+        }
+    }
+
     /// Wait until the epoch advances past `observed_epoch`. Mirrors
     /// `DataChannelStateSignal::wait_after` to close the `Notify` registration
     /// window: a transition landing between the generation check and arming the

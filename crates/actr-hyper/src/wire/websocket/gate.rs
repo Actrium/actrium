@@ -181,23 +181,31 @@ impl WebSocketGate {
         frame.extend_from_slice(&len.to_be_bytes());
         frame.extend_from_slice(&payload_buf);
 
-        let mut sink_guard = sink.lock().await;
-        match sink_guard.as_mut() {
-            Some(s) => {
-                s.send(WsMessage::Binary(frame.into())).await.map_err(|e| {
-                    ActrError::Unavailable(format!("WebSocketGate: send_response failed: {e}"))
-                })?;
-                tracing::debug!(
-                    peer = %peer,
-                    request_id = %envelope.request_id,
-                    "WebSocketGate: response sent via inbound connection"
-                );
-                Ok(true)
-            }
-            None => {
-                tracing::warn!(peer = %peer, "WebSocketGate: inbound sink gone, cannot send response");
-                Ok(false)
-            }
+        tokio::select! {
+            biased;
+            _ = secure.wait_terminal() => Err(ActrError::Unavailable(
+                "WebSocket session retired during response send".into(),
+            )),
+            result = async {
+                let mut sink_guard = sink.lock().await;
+                match sink_guard.as_mut() {
+                    Some(s) => {
+                        s.send(WsMessage::Binary(frame.into())).await.map_err(|e| {
+                            ActrError::Unavailable(format!("WebSocketGate: send_response failed: {e}"))
+                        })?;
+                        tracing::debug!(
+                            peer = %peer,
+                            request_id = %envelope.request_id,
+                            "WebSocketGate: response sent via inbound connection"
+                        );
+                        Ok(true)
+                    }
+                    None => {
+                        tracing::warn!(peer = %peer, "WebSocketGate: inbound sink gone, cannot send response");
+                        Ok(false)
+                    }
+                }
+            } => result,
         }
     }
 
@@ -563,10 +571,10 @@ impl WebSocketGate {
                                                 );
                                                 match ActrId::decode(&src[..]) {
                                                     Ok(sender_id) => {
-                                                        // Per-lane task: a full StreamReliable
-                                                        // queue blocks only this stream lane, not
-                                                        // the RPC lanes (unlike the WebRTC single
-                                                        // receive loop).
+                                                        // Dispatch tasks are per lane, but bounded
+                                                        // queues share one TCP reader. A full lane
+                                                        // can backpressure RPC/control frames too;
+                                                        // the session watchdog bounds that stall.
                                                         registry
                                                             .dispatch(chunk, sender_id, pt)
                                                             .await;

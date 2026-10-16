@@ -536,7 +536,7 @@ async fn typed_call_honors_caller_timeout() {
         .unwrap_err();
 
     assert!(
-        matches!(err, ActrError::TimedOut),
+        matches!(err, ActrError::DeliveryUncertain { .. }),
         "typed call must propagate its timeout to the transport, got {err:?}"
     );
 }
@@ -690,4 +690,41 @@ async fn realm_unavailable_maps_to_permission_denied_on_both_readiness_paths() {
         matches!(err, ActrError::PermissionDenied(_)),
         "deadline path: got {err:?}"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancelled_call_after_local_consumption_is_not_retryable() {
+    use actr_protocol::Classify;
+    let transport = Arc::new(HostTransport::new());
+    let mut context = runtime_context_with_host_transport(ActrId::default(), transport.clone());
+    let scope = crate::request_scope::RequestScope::root_at(
+        tokio::time::Instant::now() + Duration::from_secs(10),
+    );
+    context.scope = Some(scope.clone());
+    let call = tokio::spawn(async move {
+        context
+            .call_raw(
+                &Dest::Workload,
+                "test.cancel".into(),
+                PayloadType::RpcReliable,
+                Bytes::from_static(b"request"),
+                1_000,
+            )
+            .await
+    });
+    let consumed = transport.recv_reliable_raw().await.unwrap();
+    scope.cancel(crate::request_scope::CancelReason::CallerDropped);
+    let error = call.await.unwrap().unwrap_err();
+    assert!(
+        matches!(&error, ActrError::DeliveryUncertain { operation_id, .. }
+        if operation_id == &consumed.request_id)
+    );
+    assert!(!error.is_retryable());
+    let late = transport
+        .complete_response(&consumed.request_id, Bytes::new())
+        .await;
+    assert!(matches!(
+        late,
+        Err(crate::transport::NetworkError::InvalidArgument(_))
+    ));
 }

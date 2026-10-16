@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr-config"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "actr-protocol",
  "chrono",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "actr-hyper"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "actr-protocol",
  "base64",
@@ -106,7 +106,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "async-trait",
  "hex",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "anyhow",
  "base64",
@@ -138,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "actr-service-compat"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "actr-ts"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -454,13 +454,13 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.89"
+version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.118",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -3503,7 +3503,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",

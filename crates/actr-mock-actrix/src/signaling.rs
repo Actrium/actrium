@@ -618,7 +618,7 @@ async fn handle_actr_relay(
 
         if state
             .ice_restart_request_drop_count
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
                 if count > 0 { Some(count - 1) } else { None }
             })
             .is_ok()
@@ -669,7 +669,7 @@ async fn handle_actr_relay(
     if let Some(actr_relay::Payload::IceCandidate(_)) = relay.payload.as_ref()
         && state
             .ice_candidate_drop_count
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
                 if count > 0 { Some(count - 1) } else { None }
             })
             .is_ok()
@@ -682,7 +682,7 @@ async fn handle_actr_relay(
         && sd.r#type == actr_protocol::session_description::Type::Offer as i32
         && state
             .offer_drop_count
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
                 if count > 0 { Some(count - 1) } else { None }
             })
             .is_ok()

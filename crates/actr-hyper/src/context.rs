@@ -467,21 +467,36 @@ impl RuntimeContext {
 
         let gate = self.select_gate(target)?;
         let target_id = self.extract_target_id(target);
-        let send = gate.send_request_with_type(target_id, payload_type, envelope, deadline);
-        // Cooperative cancellation: cancelling the root drops this future
-        // from above, and a scope cancelled while we wait unwinds here with
-        // `TimedOut` instead of running out the caller's full budget.
+        let request_id = envelope.request_id.clone();
+        let mut send_started = false;
+        let send = async {
+            send_started = true;
+            gate.send_request_with_type(target_id, payload_type, envelope, deadline)
+                .await
+        };
+        // A cancelled scope cannot prove that an already-polled dispatch did
+        // not execute. Only cancellation before dispatch remains retryable.
         let result = tokio::select! {
             biased;
-            _ = scope.token().cancelled() => Err(ActrError::TimedOut),
-            response = send => response,
+            _ = scope.token().cancelled() => None,
+            response = send => Some(response),
         };
+        let result = result.unwrap_or_else(|| {
+            if send_started {
+                Err(ActrError::DeliveryUncertain {
+                    operation_id: request_id,
+                    cause: "Call scope cancelled after dispatch may have started".into(),
+                })
+            } else {
+                Err(ActrError::TimedOut)
+            }
+        });
         match result {
             Ok(bytes) => {
                 guard.disarm();
                 Ok(bytes)
             }
-            Err(error @ ActrError::TimedOut) => {
+            Err(error) if matches!(error, ActrError::TimedOut) || scope.deadline_passed() => {
                 guard.cancel_with(crate::request_scope::CancelReason::DeadlineExpired);
                 Err(error)
             }

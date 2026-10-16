@@ -25,7 +25,6 @@ jobs:
           cache: "npm"
           cache-dependency-path: packages/actr-typescript/package.json
 
-
       - name: Install dependencies
         working-directory: packages/actr-typescript
         run: npm install
@@ -52,9 +51,12 @@ jobs:
 
   workload:
     name: TypeScript Workload Authoring Check
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: actrium-linux-light
     steps:
       - uses: actions/checkout@v5
+
+      - name: Set up light runner
+        uses: ./.github/actions/setup-light-runner
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

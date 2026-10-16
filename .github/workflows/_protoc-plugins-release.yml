@@ -19,7 +19,7 @@ env:
 jobs:
   validate:
     name: Validate protoc plugins release tag
-    runs-on: ubuntu-latest
+    runs-on: actrium-linux-light
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag_sha: ${{ steps.release.outputs.tag_sha }}
@@ -86,7 +86,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           persist-credentials: false
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
@@ -167,7 +167,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           persist-credentials: false
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
@@ -330,7 +330,16 @@ jobs:
   publish:
     name: Upload protoc plugin assets
     if: inputs.publish
-    needs: [validate, build-rust, build-swift, build-web, build-kotlin, build-typescript, build-python]
+    needs:
+      [
+        validate,
+        build-rust,
+        build-swift,
+        build-web,
+        build-kotlin,
+        build-typescript,
+        build-python,
+      ]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -359,7 +368,17 @@ jobs:
   report:
     name: Collect protoc plugins release state
     if: always()
-    needs: [validate, build-rust, build-swift, build-web, build-kotlin, build-typescript, build-python, publish]
+    needs:
+      [
+        validate,
+        build-rust,
+        build-swift,
+        build-web,
+        build-kotlin,
+        build-typescript,
+        build-python,
+        publish,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: Report

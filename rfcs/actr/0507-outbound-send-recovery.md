@@ -334,6 +334,38 @@ peer, so the framework does not replay the Call or convert this result into a
 retryable timeout. A caller that has an idempotency policy may start a new
 logical Call with a new operation ID.
 
+In-process Calls apply the same submission boundary: expiry before the
+cancellation-safe mpsc send succeeds is retryable; expiry after queue submission
+is `DeliveryUncertain`, even if the workload has not yet replied. Scope
+cancellation after dispatch starts is also conservative about execution.
+
+Direct WebSocket session liveness is independent of Call deadlines. An idle
+session sends a Ping after 15 seconds and allows 10 seconds for sink acquisition,
+writing, and a matching Pong. The probe budget includes writer-lock contention:
+a congested but live connection may be retired when it cannot complete the
+probe within the budget. This is a bounded resource policy, not proof of death.
+All payload queues share one TCP reader; a full stream queue can therefore
+block RPC and control frames as well. While a local application receive queue is full,
+the reader cannot observe control frames. The session sends pressure heartbeats
+instead, with a separate 120-second budget for that continuous receive stall.
+Successful heartbeat writes do not renew this budget or prove the peer is
+responsive. If the queue does not resume accepting messages within the budget,
+the session is retired even when the peer is healthy; sustained consumer stalls
+are a bounded resource policy, not proof of peer failure. Temporary pressure
+preserves queued message order, and clearing it restores ordinary probes.
+Each new receive stall retains its start time, so accepting a message resets
+the stall budget even if a subsequent full-queue notification coalesces with
+the clear notification.
+A peer pressure heartbeat temporarily extends a probe's response budget, but
+requires fresh heartbeats within 25 seconds and grants at most 120 seconds
+without a matching unpredictable challenge Pong. Heartbeats cannot reset that
+absolute bound. An endpoint unable to read control frames for that entire grace
+period is retired even if it can still write pressure notifications.
+Retirement cancels blocked writers and removes the stale route so later work can
+build a fresh connection. It never automatically replays uncertain operations. Orderly shutdown attempts
+a WebSocket Close frame within one second; failed liveness probes drop the
+transport immediately rather than waiting for a Close exchange.
+
 #### Tell
 
 Tell uses the existing send budget, which covers readiness waiting and one
@@ -1060,6 +1092,10 @@ high-cardinality peer metric implementation.
 - `StreamReliable` success still means only local submission, not remote
   business completion;
 - retain the existing low-latency semantics of `StreamLatencyFirst`;
+- the C ABI `actr_ref_call` callback conservatively reports a plain runtime
+  `TimedOut` as uncertain delivery: its local workload may already have executed,
+  and the error carries no pre-submission proof. Managed callers must not
+  automatically replay an untracked timeout;
 - PR-0507-6 completes the UniFFI Kotlin/Swift mapping and its classification
   tests; the mapping preserves the operation ID and cause and keeps
   `DeliveryUncertain` non-retryable;

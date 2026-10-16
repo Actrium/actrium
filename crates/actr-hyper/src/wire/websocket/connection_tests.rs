@@ -1,4 +1,6 @@
 use super::*;
+use tokio::net::TcpStream;
+use tokio_tungstenite::MaybeTlsStream;
 
 #[test]
 fn test_transport_message_decode() {
@@ -203,4 +205,706 @@ async fn inbound_stream_buffers_the_first_frame_before_lane_readers_start() {
     let lane = conn.get_lane(PayloadType::RpcReliable).await.unwrap();
     assert_eq!(lane.recv().await.unwrap().as_ref(), b"first");
     conn.close().await.unwrap();
+}
+
+async fn connected_pair() -> (
+    WebSocketConnection,
+    WebSocketStream<MaybeTlsStream<TcpStream>>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (client, server) = tokio::join!(TcpStream::connect(address), listener.accept());
+    let client = WebSocketStream::from_raw_socket(
+        MaybeTlsStream::Plain(client.unwrap()),
+        tokio_tungstenite::tungstenite::protocol::Role::Client,
+        None,
+    )
+    .await;
+    let server = WebSocketStream::from_raw_socket(
+        MaybeTlsStream::Plain(server.unwrap().0),
+        tokio_tungstenite::tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
+    (WebSocketConnection::from_server_stream(server), client)
+}
+
+#[tokio::test]
+async fn silent_peer_is_retired_without_a_call_deadline() {
+    let (connection, _silent_peer) = connected_pair().await;
+    let lane = connection.get_lane(PayloadType::RpcReliable).await.unwrap();
+    tokio::time::pause();
+    // Keep the peer socket open but never poll it: no FIN/RST and no Pong.
+    tokio::time::timeout(
+        PING_INTERVAL + PROBE_TIMEOUT + Duration::from_secs(1),
+        connection.secure.wait_terminal(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+    assert!(!lane.is_healthy());
+    let attempt = lane
+        .send_with_progress(bytes::Bytes::from_static(b"later call"))
+        .await;
+    assert_eq!(
+        attempt.progress,
+        crate::transport::DeliveryProgress::NotAttempted
+    );
+    assert!(attempt.proven_pre_send);
+    tokio::task::yield_now().await;
+    assert!(connection.sink.lock().await.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn matching_pongs_keep_an_idle_session_alive() {
+    let (connection, mut peer) = in_memory_pair().await;
+    let mut previous = None;
+    for _ in 0..3 {
+        let frame = tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, peer.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let WsMessage::Ping(payload) = frame else {
+            panic!("expected a Ping");
+        };
+        assert_eq!(payload.len(), 16);
+        assert_ne!(previous.as_ref(), Some(&payload));
+        previous = Some(payload);
+        peer.flush().await.unwrap();
+        assert!(connection.secure.state().is_sendable());
+    }
+    connection.close().await.unwrap();
+    assert!(connection.sink.lock().await.is_none());
+}
+
+#[tokio::test]
+async fn sink_contention_cannot_block_session_retirement() {
+    let (connection, _silent_peer) = connected_pair().await;
+    let guard = connection.sink.lock().await;
+    tokio::time::pause();
+    tokio::time::timeout(
+        PING_INTERVAL + PROBE_TIMEOUT + Duration::from_secs(1),
+        connection.secure.wait_terminal(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+    drop(guard);
+    tokio::task::yield_now().await;
+    assert!(connection.sink.lock().await.is_none());
+}
+
+#[cfg(feature = "test-utils")]
+#[tokio::test]
+async fn retired_websocket_destination_is_rebuilt_for_later_work() {
+    use crate::transport::{Dest, PeerTransport, WireBuilder};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Builder {
+        next: Mutex<Option<WebSocketConnection>>,
+        builds: AtomicUsize,
+    }
+    #[async_trait]
+    impl WireBuilder for Builder {
+        async fn create_connections(&self, _: &Dest) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![Arc::new(
+                self.next.lock().await.take().expect("fresh wire"),
+            )])
+        }
+    }
+    let local = actr_protocol::ActrId {
+        realm: "test@example.com".into(),
+        serial_number: 1,
+    };
+    let mut target = local.clone();
+    target.serial_number = 2;
+    let dest = Dest::peer(target);
+    let (old, _silent_peer) = connected_pair().await;
+    let builder = Arc::new(Builder {
+        next: Mutex::new(Some(old.clone())),
+        builds: AtomicUsize::new(0),
+    });
+    let transport = PeerTransport::new(local, builder.clone());
+    transport
+        .send(&dest, PayloadType::RpcReliable, b"original")
+        .await
+        .unwrap();
+    let mut revisions = transport.watch_transports_revision();
+    tokio::time::pause();
+    tokio::time::timeout(
+        PING_INTERVAL + PROBE_TIMEOUT + Duration::from_secs(1),
+        async {
+            while transport.watch_ready_for(&dest).await.is_some() {
+                revisions.changed().await.unwrap();
+            }
+        },
+    )
+    .await
+    .unwrap();
+    assert!(old.secure.state().is_terminal());
+    assert!(
+        old.connect().await.is_err(),
+        "retired objects cannot replace their socket"
+    );
+    tokio::time::resume();
+
+    let (replacement, mut peer) = connected_pair().await;
+    *builder.next.lock().await = Some(replacement.clone());
+    transport
+        .send(&dest, PayloadType::RpcReliable, b"later work")
+        .await
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(1), peer.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let WsMessage::Binary(data) = frame else {
+        panic!("expected only the new application frame")
+    };
+    assert_eq!(TransportMessage::decode(&data).unwrap().data, b"later work");
+    assert_eq!(builder.builds.load(Ordering::SeqCst), 2);
+    replacement.close().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn receive_backpressure_progress_resets_stall_deadline() {
+    let (server, client) = tokio::io::duplex(64 * 1024);
+    let server = WebSocketStream::from_raw_socket(
+        server,
+        tokio_tungstenite::tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
+    let connection = WebSocketConnection::from_server_stream(server);
+    let lane = connection.get_lane(PayloadType::RpcReliable).await.unwrap();
+    let mut client = WebSocketStream::from_raw_socket(
+        client,
+        tokio_tungstenite::tungstenite::protocol::Role::Client,
+        None,
+    )
+    .await;
+
+    // Fill the production receive queue and keep more frames buffered on the
+    // wire. Every consumed message immediately starts another receive stall.
+    for sequence in 0u32..200 {
+        let mut frame = vec![PayloadType::RpcReliable as u8];
+        frame.extend_from_slice(&4u32.to_be_bytes());
+        frame.extend_from_slice(&sequence.to_be_bytes());
+        client.send(WsMessage::Binary(frame.into())).await.unwrap();
+    }
+    let peer = tokio::spawn(async move {
+        while let Some(Ok(frame)) = client.next().await {
+            if matches!(frame, WsMessage::Ping(_)) && client.flush().await.is_err() {
+                break;
+            }
+        }
+    });
+    let mut stall = connection.receive_stall.subscribe();
+    tokio::time::timeout(Duration::from_secs(1), stall.wait_for(Option::is_some))
+        .await
+        .unwrap()
+        .unwrap();
+    let started = Instant::now();
+    for expected in 0u32..30 {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(lane.recv().await.unwrap().as_ref(), &expected.to_be_bytes());
+        tokio::time::timeout(Duration::from_secs(1), stall.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        // The transient clear was coalesced with the next full queue. The
+        // retained timestamp must still record this round's consumer progress.
+        assert_eq!(*stall.borrow_and_update(), Some(Instant::now()));
+        assert!(connection.secure.state().is_sendable());
+    }
+    assert!(started.elapsed() > RECEIVE_BACKPRESSURE_TIMEOUT);
+
+    // Actual progress renews the budget, but heartbeat writes alone cannot.
+    let last_stall = (*stall.borrow()).unwrap();
+    tokio::time::timeout(
+        RECEIVE_BACKPRESSURE_TIMEOUT + Duration::from_secs(1),
+        connection.secure.wait_terminal(),
+    )
+    .await
+    .unwrap();
+    assert!(last_stall.elapsed() >= RECEIVE_BACKPRESSURE_TIMEOUT);
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+    assert!(!lane.is_healthy());
+    connection.close().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), peer)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+async fn backpressured_pair() -> (
+    WebSocketConnection,
+    WebSocketStream<tokio::io::DuplexStream>,
+    mpsc::Receiver<bytes::Bytes>,
+) {
+    let (connection, mut peer) = in_memory_pair().await;
+    let (tx, rx) = mpsc::channel(1);
+    tx.send(bytes::Bytes::from_static(b"first")).await.unwrap();
+    connection
+        .register_route(PayloadType::RpcReliable, tx)
+        .await
+        .unwrap();
+    let mut blocked = connection.receive_stall.subscribe();
+    let mut frame = vec![PayloadType::RpcReliable as u8];
+    frame.extend_from_slice(&6u32.to_be_bytes());
+    frame.extend_from_slice(b"second");
+    peer.send(WsMessage::Binary(frame.into())).await.unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        blocked.wait_for(|value| value.is_some()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    (connection, peer, rx)
+}
+
+async fn drain_backpressure(
+    connection: &WebSocketConnection,
+    rx: &mut mpsc::Receiver<bytes::Bytes>,
+) {
+    let mut blocked = connection.receive_stall.subscribe();
+    assert_eq!(rx.recv().await.unwrap().as_ref(), b"first");
+    assert_eq!(rx.recv().await.unwrap().as_ref(), b"second");
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        blocked.wait_for(|value| value.is_none()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn receive_backpressure_preserves_messages_and_healthy_session() {
+    let (connection, mut peer, mut rx) = backpressured_pair().await;
+    // Keep the application queue full across several heartbeat intervals while
+    // letting a healthy peer read and answer each control Ping.
+    for _ in 0..4 {
+        let frame = tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, peer.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            frame,
+            WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into())
+        );
+        peer.flush().await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(connection.secure.state().is_sendable());
+    }
+    drain_backpressure(&connection, &mut rx).await;
+    // Leave time paused and let Tokio advance to the watchdog's next timer.
+    // This also gives the watchdog a chance to observe the cleared queue before
+    // the next interval elapses, avoiding a race with manually advancing time.
+    // Reading resumes without losing or reordering queued messages; fresh
+    // matching Pongs keep the same physical session alive afterwards.
+    let mut normal_probes = 0;
+    // Stay alive beyond the original pressure deadline after the queue drains.
+    while normal_probes < 6 {
+        let frame = tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, peer.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let WsMessage::Ping(payload) = frame else {
+            panic!("expected a liveness or pressure Ping");
+        };
+        if payload.len() == 16 {
+            normal_probes += 1;
+        } else {
+            assert_eq!(payload.as_ref(), RECEIVE_BACKPRESSURE_PING);
+        }
+        peer.flush().await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(connection.secure.state().is_sendable());
+    }
+    connection.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn silent_peer_is_retired_during_receive_backpressure() {
+    let (connection, mut peer, _rx) = backpressured_pair().await;
+    // Observe the first heartbeat so the stall budget is armed before pausing.
+    let frame = tokio::time::timeout(Duration::from_secs(1), peer.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        frame,
+        WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into())
+    );
+    // Keep both the full application queue and the peer socket open. The peer
+    // never flushes its Pong or reads again, but small heartbeat writes succeed.
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    tokio::time::timeout(
+        RECEIVE_BACKPRESSURE_TIMEOUT + Duration::from_secs(1),
+        connection.secure.wait_terminal(),
+    )
+    .await
+    .unwrap();
+    assert!(started.elapsed() >= RECEIVE_BACKPRESSURE_TIMEOUT - Duration::from_secs(1));
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+    tokio::task::yield_now().await;
+    assert!(connection.sink.lock().await.is_none());
+}
+
+#[tokio::test]
+async fn pressure_heartbeats_do_not_extend_receive_backpressure_deadline() {
+    let (connection, mut peer, _rx) = backpressured_pair().await;
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    let mut heartbeats = 0;
+    tokio::time::timeout(
+        RECEIVE_BACKPRESSURE_TIMEOUT + Duration::from_secs(1),
+        async {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = connection.secure.wait_terminal() => break,
+                    frame = peer.next() => {
+                        assert_eq!(
+                            frame.unwrap().unwrap(),
+                            WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into())
+                        );
+                        heartbeats += 1;
+                        peer.flush().await.unwrap();
+                    }
+                }
+            }
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        heartbeats >= 2,
+        "cover renewal attempts across heartbeat cycles"
+    );
+    assert!(started.elapsed() >= RECEIVE_BACKPRESSURE_TIMEOUT - Duration::from_secs(1));
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+}
+
+#[tokio::test]
+async fn silent_peer_is_retired_after_receive_backpressure_clears() {
+    let (connection, _silent_peer, mut rx) = backpressured_pair().await;
+    tokio::time::pause();
+    tokio::time::advance(PING_INTERVAL + PROBE_TIMEOUT).await;
+    tokio::task::yield_now().await;
+    assert!(connection.secure.state().is_sendable());
+    drain_backpressure(&connection, &mut rx).await;
+    tokio::time::timeout(
+        PING_INTERVAL + PROBE_TIMEOUT + Duration::from_secs(1),
+        connection.secure.wait_terminal(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn two_actrium_peers_survive_receive_backpressure() {
+    let (connection, peer, mut rx) = backpressured_pair().await;
+    let peer = WebSocketConnection::from_server_stream(peer);
+    let mut heartbeats = peer.peer_backpressure.subscribe();
+    tokio::time::timeout(Duration::from_secs(1), heartbeats.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    // Each notification proves the opposite dispatcher actually read a new
+    // heartbeat. Cover several full probe budgets with both watchdogs active.
+    for _ in 0..5 {
+        tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, heartbeats.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(connection.secure.state().is_sendable());
+        assert!(peer.secure.state().is_sendable());
+        tokio::task::yield_now().await;
+    }
+    drain_backpressure(&connection, &mut rx).await;
+    let lane = peer.get_lane(PayloadType::RpcReliable).await.unwrap();
+    lane.send(bytes::Bytes::from_static(b"third"))
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .as_ref(),
+        b"third"
+    );
+    assert!(connection.secure.state().is_sendable());
+    assert!(peer.secure.state().is_sendable());
+    connection.close().await.unwrap();
+    peer.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn peer_backpressure_heartbeat_does_not_disable_liveness_forever() {
+    let (connection, mut peer) = connected_pair().await;
+    let mut heartbeats = connection.peer_backpressure.subscribe();
+    peer.send(WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into()))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), heartbeats.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    // The peer remains open but neither renews its pressure indication nor
+    // answers normal probes. The last heartbeat must have a bounded lifetime.
+    tokio::time::pause();
+    tokio::time::timeout(
+        PING_INTERVAL + PROBE_TIMEOUT + Duration::from_secs(1),
+        connection.secure.wait_terminal(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+}
+
+async fn in_memory_pair() -> (
+    WebSocketConnection,
+    WebSocketStream<tokio::io::DuplexStream>,
+) {
+    let (server, client) = tokio::io::duplex(64 * 1024);
+    let server = WebSocketStream::from_raw_socket(
+        server,
+        tokio_tungstenite::tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
+    let client = WebSocketStream::from_raw_socket(
+        client,
+        tokio_tungstenite::tungstenite::protocol::Role::Client,
+        None,
+    )
+    .await;
+    (WebSocketConnection::from_server_stream(server), client)
+}
+
+#[tokio::test]
+async fn unsupported_media_frames_do_not_block_rpc() {
+    let (connection, mut peer) = in_memory_pair().await;
+    assert!(connection.get_lane(PayloadType::MediaRtp).await.is_err());
+    let lane = connection.get_lane(PayloadType::RpcReliable).await.unwrap();
+
+    // Exceed the normal route capacity without creating an unread media queue.
+    for _ in 0..128 {
+        peer.send(WsMessage::Binary(bytes::Bytes::from_static(
+            b"\x04\x00\x00\x00\x00",
+        )))
+        .await
+        .unwrap();
+    }
+    peer.send(WsMessage::Binary(bytes::Bytes::from_static(
+        b"\x00\x00\x00\x00\x05after",
+    )))
+    .await
+    .unwrap();
+
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), lane.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .as_ref(),
+        b"after"
+    );
+    assert!(connection.router.read().await[PayloadType::MediaRtp as usize].is_none());
+    assert!(connection.secure.state().is_sendable());
+    connection.close().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn endless_peer_pressure_cannot_hide_a_stalled_reader() {
+    let (connection, mut peer) = in_memory_pair().await;
+    let mut pressure = connection.peer_backpressure.subscribe();
+    peer.send(WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into()))
+        .await
+        .unwrap();
+    pressure.changed().await.unwrap();
+    let started = Instant::now();
+    // Write fresh pressure Pings but never read or answer our challenge.
+    for _ in 0..11 {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        peer.send(WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into()))
+            .await
+            .unwrap();
+        assert!(connection.secure.state().is_sendable());
+    }
+    tokio::time::timeout(Duration::from_secs(11), connection.secure.wait_terminal())
+        .await
+        .unwrap();
+    assert!(started.elapsed() <= PEER_BACKPRESSURE_TIMEOUT + Duration::from_secs(1));
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unsolicited_pongs_do_not_satisfy_liveness_challenges() {
+    let (connection, mut peer) = in_memory_pair().await;
+    for _ in 0..4 {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        // A zero nonce cannot match a UUID v4 challenge; counter Pongs are
+        // also rejected because their eight-byte payload has the wrong shape.
+        peer.send(WsMessage::Pong(vec![0; 16].into()))
+            .await
+            .unwrap();
+        peer.send(WsMessage::Pong(1u64.to_be_bytes().to_vec().into()))
+            .await
+            .unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(6), connection.secure.wait_terminal())
+        .await
+        .unwrap();
+    assert_eq!(connection.secure.state(), SecureChannelState::Failed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn peer_pressure_with_round_trips_can_survive_grace_budget() {
+    let (connection, mut peer) = in_memory_pair().await;
+    let started = Instant::now();
+    for _ in 0..10 {
+        peer.send(WsMessage::Ping(RECEIVE_BACKPRESSURE_PING.to_vec().into()))
+            .await
+            .unwrap();
+        loop {
+            let frame = tokio::time::timeout(PING_INTERVAL + PROBE_TIMEOUT, peer.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            if matches!(frame, WsMessage::Ping(_)) {
+                peer.flush().await.unwrap();
+                break;
+            }
+        }
+        assert!(connection.secure.state().is_sendable());
+    }
+    assert!(started.elapsed() > PEER_BACKPRESSURE_TIMEOUT);
+    connection.close().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn explicit_close_sends_a_close_frame() {
+    let (connection, mut peer) = in_memory_pair().await;
+    connection.close().await.unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), peer.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(frame, WsMessage::Close(_)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn peer_close_receives_an_orderly_reply() {
+    let (connection, mut peer) = in_memory_pair().await;
+    peer.send(WsMessage::Close(None)).await.unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), peer.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(frame, WsMessage::Close(_)));
+    assert_eq!(connection.secure.state(), SecureChannelState::Closed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn orderly_close_is_bounded_behind_a_blocked_write() {
+    let (connection, _nonreading_peer) = in_memory_pair().await;
+    let lane = connection.get_lane(PayloadType::RpcReliable).await.unwrap();
+    let writer = tokio::spawn(async move {
+        lane.send_with_progress(bytes::Bytes::from(vec![0; 1024 * 1024]))
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(!writer.is_finished());
+    tokio::time::timeout(CLOSE_TIMEOUT + Duration::from_secs(1), connection.close())
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = writer.await.unwrap();
+    assert!(outcome.result.is_err());
+    assert_eq!(
+        outcome.progress,
+        crate::transport::DeliveryProgress::Unknown
+    );
+    assert!(connection.sink.lock().await.is_none());
+}
+
+#[tokio::test]
+async fn close_cancels_an_inflight_handshake() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = WebSocketConnection::new(format!("ws://{}", listener.local_addr().unwrap()))
+        .with_security(DirectSecurity::insecure_loopback());
+    let opening = tokio::spawn({
+        let connection = connection.clone();
+        async move { connection.connect().await }
+    });
+    // Keep TCP open without answering the WebSocket upgrade.
+    let (_unresponsive_peer, _) = listener.accept().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), connection.close())
+        .await
+        .expect("close must cancel a pending upgrade")
+        .unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), opening)
+        .await
+        .expect("the cancelled dial must finish")
+        .unwrap();
+    assert!(matches!(result, Err(NetworkError::WebSocketClosed(_))));
+    assert!(!*connection.connected.read().await);
+    assert!(connection.sink.lock().await.is_none());
+}
+
+#[tokio::test]
+async fn close_cancels_pending_session_publication() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = WebSocketConnection::new(format!("ws://{}", listener.local_addr().unwrap()))
+        .with_security(DirectSecurity::insecure_loopback());
+    let opening = tokio::spawn({
+        let connection = connection.clone();
+        async move { connection.connect().await }
+    });
+    let (server, _) = listener.accept().await.unwrap();
+    // The initial connected check has passed. Pause publication after the
+    // handshake installs its sink but before it can mark the session ready.
+    let publication = connection.connected.write().await;
+    let _peer = tokio_tungstenite::accept_async(server).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while connection.sink.lock().await.is_none() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the handshake must install its sink before the readiness write");
+    let closing = tokio::spawn({
+        let connection = connection.clone();
+        async move { connection.close().await }
+    });
+    let result = tokio::time::timeout(Duration::from_secs(5), opening)
+        .await
+        .expect("close must cancel the blocked readiness publication")
+        .unwrap();
+    assert!(matches!(result, Err(NetworkError::WebSocketClosed(_))));
+    drop(publication);
+    tokio::time::timeout(Duration::from_secs(5), closing)
+        .await
+        .expect("close must complete after the cancelled publisher releases its gate")
+        .unwrap()
+        .unwrap();
+    assert_eq!(connection.secure.state(), SecureChannelState::Closed);
+    assert!(!*connection.connected.read().await);
+    assert!(connection.sink.lock().await.is_none());
 }

@@ -29,7 +29,7 @@ hex = "0.4"
 url = "2"
 
 # Internal dependencies
-platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.5" }
+platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.6" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

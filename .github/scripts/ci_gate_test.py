@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -14,6 +15,7 @@ CI_CSHARP_E2E_WORKFLOW = ROOT / ".github/workflows/ci-csharp-e2e.yml"
 CI_TYPESCRIPT_WORKFLOW = ROOT / ".github/workflows/ci-typescript.yml"
 RELEASE_TRAIN_WORKFLOW = ROOT / ".github/workflows/release-train.yml"
 RELEASE_TRAIN_VERIFY_WORKFLOW = ROOT / ".github/workflows/release-train-verify.yml"
+RELEASE_PREPARE_WORKFLOW = ROOT / ".github/workflows/release-prepare.yml"
 RELEASE_TRAIN_SCRIPT = ROOT / "scripts/actr/release-train.sh"
 PUBLISH_ACTRSHARP_WORKFLOW = ROOT / ".github/workflows/publish-actrsharp.yml"
 GO_WORKLOAD_BUILD = ROOT / "examples/actr/go/echo-workload/build.sh"
@@ -277,6 +279,91 @@ def test_release_train_verifies_ci_gate_triggered() -> None:
     assert "actions/workflows/ci-gate.yml/runs" in gate_job
     assert "head_sha=${RELEASE_SHA}" in gate_job
     assert "we do NOT block on" in gate_job
+
+
+def _workflow_grants_pull_request_write(workflow: Path) -> bool:
+    """Return whether a workflow grants the token write access to pull requests.
+
+    GitHub accepts scalar and inline-map permission syntax in addition to the
+    usual indented map. Keep this check dependency-free so CI can run it before
+    installing any Python packages.
+    """
+
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(
+            r"^(?P<indent>\s*)['\"]?permissions['\"]?:\s*(?P<value>.*)$", line
+        )
+        if not match:
+            continue
+
+        value = match.group("value").split("#", 1)[0].strip()
+        if re.fullmatch(r"['\"]?write-all['\"]?", value):
+            return True
+
+        inline = re.fullmatch(r"\{(?P<body>.*)\}", value)
+        if inline and re.search(
+            r"(?:^|,)\s*['\"]?pull-requests['\"]?\s*:\s*['\"]?write['\"]?\s*(?:,|$)",
+            inline.group("body"),
+        ):
+            return True
+
+        permission_indent = len(match.group("indent"))
+        for child in lines[index + 1 :]:
+            if not child.strip() or child.lstrip().startswith("#"):
+                continue
+            child_indent = len(child) - len(child.lstrip())
+            if child_indent <= permission_indent:
+                break
+            if re.match(
+                r"^\s*['\"]?pull-requests['\"]?\s*:\s*['\"]?write['\"]?\s*(?:#.*)?$",
+                child,
+            ):
+                return True
+
+    return False
+
+
+def test_only_release_prepare_can_write_pull_requests() -> None:
+    workflow_files = sorted(
+        path
+        for suffix in ("*.yml", "*.yaml")
+        for path in (ROOT / ".github/workflows").glob(suffix)
+    )
+    writers = sorted(
+        workflow.name
+        for workflow in workflow_files
+        if _workflow_grants_pull_request_write(workflow)
+    )
+
+    assert writers == [RELEASE_PREPARE_WORKFLOW.name]
+
+
+def test_pull_request_permission_scanner_handles_supported_syntax() -> None:
+    variants = {
+        "scalar.yml": "permissions: write-all\n",
+        "inline.yaml": "permissions: { contents: read, pull-requests: write }\n",
+        "job.yml": "jobs:\n  release:\n    permissions:\n      pull-requests: write\n",
+        "quoted.yaml": '"permissions": {"pull-requests": "write"}\n',
+    }
+
+    with tempfile.TemporaryDirectory() as directory:
+        for filename, contents in variants.items():
+            workflow = Path(directory) / filename
+            workflow.write_text(contents, encoding="utf-8")
+            assert _workflow_grants_pull_request_write(workflow)
+
+        safe_workflow = Path(directory) / "safe.yml"
+        safe_workflow.write_text(
+            "permissions:\n"
+            "  contents: read\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "      - run: echo 'pull-requests: write'\n",
+            encoding="utf-8",
+        )
+        assert not _workflow_grants_pull_request_write(safe_workflow)
 
 
 def test_release_train_reuses_actrsharp_workflow() -> None:
@@ -902,6 +989,8 @@ if __name__ == "__main__":
     test_pr_gate_swift_uses_macos_only_xcframework()
     test_release_train_has_valid_publish_steps()
     test_release_train_verifies_ci_gate_triggered()
+    test_only_release_prepare_can_write_pull_requests()
+    test_pull_request_permission_scanner_handles_supported_syntax()
     test_release_train_reuses_actrsharp_workflow()
     test_csharp_pr_gate_uses_light_fixture_and_nightly_keeps_full_matrix()
     test_release_train_forwards_release_context()

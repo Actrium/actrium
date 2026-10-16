@@ -2,8 +2,11 @@
 # Install the wasm-bindgen CLI matching the web workspace lockfile.
 set -eu
 
-version=0.2.126
-sha256=064948d58e2d6c0a745216477a639ba696216d6309aaa902939d1b865b1d869d
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$script_dir/versions/wasm.env"
+. "$script_dir/runner-install-lib.sh"
+version="$WASM_BINDGEN_VERSION"
+sha256="$WASM_BINDGEN_SHA256"
 install_dir=${WASM_BINDGEN_INSTALL_DIR:-${CARGO_HOME:-$HOME/.cargo}/bin}
 
 # Image builds use the pinned default; jobs also check it against their source.
@@ -45,9 +48,7 @@ url="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${version}/w
 if [ -n "${GITHUB_PROXY:-}" ]; then
     url="${GITHUB_PROXY%/}/${url}"
 fi
-curl --fail --location --retry 3 --retry-all-errors --connect-timeout 20 \
-    --max-time 180 -o "$download_dir/archive.tar.gz" "$url"
-echo "$sha256  $download_dir/archive.tar.gz" | sha256sum --check --status
+download_artifact "$url" "$sha256" "$download_dir/archive.tar.gz"
 tar -xzf "$download_dir/archive.tar.gz" --strip-components=1 -C "$download_dir"
 mkdir -p "$install_dir"
 for binary in wasm-bindgen wasm-bindgen-test-runner; do
