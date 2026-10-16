@@ -27,8 +27,8 @@ use actr_protocol::{ActrType, PayloadType};
 use bytes::Bytes;
 
 pub use crate::error::{
-    HANDLE_INVALID, INVALID_UTF8, NULL_POINTER, PANIC, REQUEST_ID_UNKNOWN, RT_INIT_FAILED,
-    RT_NOT_INITIALIZED, SUCCESS, WORKLOAD_NOT_FOUND,
+    DELIVERY_UNCERTAIN, HANDLE_INVALID, INVALID_UTF8, NULL_POINTER, PANIC, REQUEST_ID_UNKNOWN,
+    RT_INIT_FAILED, RT_NOT_INITIALIZED, SUCCESS, WORKLOAD_NOT_FOUND,
 };
 use crate::error::{alloc_bytes, alloc_cstring, free_bytes, free_cstring};
 use crate::handle::{
@@ -43,6 +43,17 @@ use crate::observer::{CabiObserver, ObserverCallbacks};
 
 /// Generic framework/runtime error not covered by a specific code.
 const GENERIC_ERROR: i32 = -50;
+
+fn actr_ref_call_error_status(error: &actr_protocol::ActrError) -> i32 {
+    match error {
+        // A workload can return TimedOut after executing an operation. The ABI
+        // has no provenance distinguishing that reply from pre-send expiry.
+        actr_protocol::ActrError::TimedOut | actr_protocol::ActrError::DeliveryUncertain { .. } => {
+            DELIVERY_UNCERTAIN
+        }
+        _ => GENERIC_ERROR,
+    }
+}
 
 // ── C callback typedefs ─────────────────────────────────────────────────────
 
@@ -799,7 +810,12 @@ pub unsafe extern "C" fn actr_ref_call(
                             free_bytes(ptr, len);
                         }
                     }
-                    Err(e) => emit_call_error(GENERIC_ERROR, e, callback, ud as *mut c_void),
+                    Err(e) => emit_call_error(
+                        actr_ref_call_error_status(&e),
+                        e,
+                        callback,
+                        ud as *mut c_void,
+                    ),
                 }
             },
             move |code| emit_call_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
@@ -1240,4 +1256,28 @@ pub unsafe extern "C" fn actr_release_actr_ref(handle: *mut c_void) {
     catch_unwind_void(|| {
         drop_actr_ref(handle);
     });
+}
+
+#[cfg(test)]
+mod call_error_status_tests {
+    use super::*;
+
+    #[test]
+    fn untracked_call_deadlines_have_uncertain_delivery_status() {
+        assert_eq!(
+            actr_ref_call_error_status(&actr_protocol::ActrError::TimedOut),
+            DELIVERY_UNCERTAIN
+        );
+        assert_eq!(
+            actr_ref_call_error_status(&actr_protocol::ActrError::DeliveryUncertain {
+                operation_id: "op-1".into(),
+                cause: "send was submitted".into(),
+            }),
+            DELIVERY_UNCERTAIN
+        );
+        assert_eq!(
+            actr_ref_call_error_status(&actr_protocol::ActrError::Unavailable("offline".into())),
+            GENERIC_ERROR
+        );
+    }
 }

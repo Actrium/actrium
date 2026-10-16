@@ -509,3 +509,113 @@ fn try_insert_duplicate_fragment_consumes_no_budget() {
     // Budget still holds only one copy: 16 (dup) + 32 == 48 == per-message cap.
     assert!(buf.try_insert(1, 1, 2, frag(32)).unwrap().is_some());
 }
+
+#[tokio::test]
+async fn websocket_retirement_cancels_an_inflight_write_without_replay() {
+    use crate::transport::{SecureCell, SecureChannelState};
+    use futures_util::Sink;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    struct StuckSink(Arc<tokio::sync::Notify>);
+    impl Sink<WsMessage> for StuckSink {
+        type Error = tokio_tungstenite::tungstenite::Error;
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn start_send(self: Pin<&mut Self>, _: WsMessage) -> Result<(), Self::Error> {
+            self.0.notify_one();
+            Ok(())
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Pending
+        }
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Pending
+        }
+    }
+
+    let submitted = Arc::new(tokio::sync::Notify::new());
+    let sink = Arc::new(Mutex::new(Some(StuckSink(submitted.clone()))));
+    let session = SecureCell::new(SecureChannelState::LegacyBypass);
+    let lane = WebSocketDataLane::new(sink.clone(), PayloadType::RpcReliable, mpsc::channel(1).1)
+        .with_session(session.clone());
+    let send =
+        tokio::spawn(async move { lane.send_with_progress(Bytes::from_static(b"call")).await });
+    submitted.notified().await;
+    session.drive_terminal(SecureChannelState::Failed);
+    let attempt = tokio::time::timeout(std::time::Duration::from_secs(1), send)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(attempt.progress, DeliveryProgress::Unknown);
+    assert!(!attempt.proven_pre_send);
+    assert!(attempt.result.is_err());
+    assert!(
+        sink.try_lock().is_ok(),
+        "retirement must release the writer lock"
+    );
+}
+
+#[tokio::test]
+async fn websocket_retirement_before_writer_lock_is_proven_not_attempted() {
+    use crate::transport::{SecureCell, SecureChannelState};
+    use futures_util::Sink;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+
+    struct CountingSink(Arc<AtomicUsize>);
+    impl Sink<WsMessage> for CountingSink {
+        type Error = tokio_tungstenite::tungstenite::Error;
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn start_send(self: Pin<&mut Self>, _: WsMessage) -> Result<(), Self::Error> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    let writes = Arc::new(AtomicUsize::new(0));
+    let sink = Arc::new(Mutex::new(Some(CountingSink(writes.clone()))));
+    let session = SecureCell::new(SecureChannelState::LegacyBypass);
+    let lane = WebSocketDataLane::new(sink.clone(), PayloadType::RpcReliable, mpsc::channel(1).1)
+        .with_session(session.clone());
+    let held = sink.lock().await;
+    let send = lane.send_with_progress(Bytes::from_static(b"queued call"));
+    tokio::pin!(send);
+    // Poll until the real send future is waiting for the occupied writer lock.
+    assert!(futures_util::poll!(send.as_mut()).is_pending());
+    session.drive_terminal(SecureChannelState::Failed);
+    let attempt = tokio::time::timeout(std::time::Duration::from_secs(1), send)
+        .await
+        .expect("retirement must cancel lock acquisition");
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
+    assert!(attempt.proven_pre_send);
+    assert!(attempt.result.is_err());
+    drop(held);
+}
+
+#[test]
+fn poisoned_delivery_progress_is_always_uncertain() {
+    let cell = new_delivery_progress_cell();
+    record_delivery_progress(&cell, DeliveryProgress::SubmittedLocally);
+    let poisoned = cell.clone();
+    let panic = std::panic::catch_unwind(move || {
+        let _guard = poisoned.lock().unwrap();
+        panic!("poison delivery progress after submission");
+    });
+    assert!(panic.is_err());
+    assert_eq!(
+        observed_delivery_progress(&cell),
+        Some(DeliveryProgress::Unknown)
+    );
+}

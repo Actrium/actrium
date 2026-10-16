@@ -37,6 +37,8 @@ typedef void (*actr_discover_callback)(int32_t status,
                                        const char* error_ptr, size_t error_len,
                                        void* user_data);
 
+#define ACTR_CABI_DELIVERY_UNCERTAIN (-24)
+
 /* Observer callback table. user_data is passed verbatim to every callback.
  * The on_error msg_ptr is valid ONLY for the duration of the callback; copy
  * before returning. */
@@ -117,7 +119,10 @@ int32_t actr_node_register(void* attached_handle,
 int32_t actr_node_start(void* registered_handle,
                        actr_handle_callback callback, void* user_data);
 
-/* ActrRef */
+/* ActrRef. On `actr_ref_call`, an untracked timeout or uncertain submission
+ * reports ACTR_CABI_DELIVERY_UNCERTAIN. The request may already have executed;
+ * do not replay it automatically. A plain runtime timeout is not evidence
+ * that nothing was submitted. */
 int32_t actr_ref_call(void* ref_handle,
                       const char* route_key_ptr, size_t route_key_len,
                       const uint8_t* payload_ptr, size_t payload_len,
