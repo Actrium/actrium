@@ -21,9 +21,9 @@ use url::Url;
 use crate::commands::discovery::StandaloneDiscoverConfig;
 use crate::commands::{
     BuildCommand, CheckCommand, CompletionCommand, ConfigCommand, DepsArgs, DlqArgs, DocCommand,
-    GenCommand, InitCommand, LogsCommand, PkgArgs, PsCommand, RealmArgs, RegistryArgs,
-    RegistryCommand, RestartCommand, RmCommand, RunCommand, StartCommand, StopCommand,
-    VersionCommand,
+    GenCommand, InitCommand, LogsCommand, PkgArgs, PsCommand, PublisherArgs, RealmArgs,
+    RegistryArgs, RegistryCommand, RestartCommand, RmCommand, RunCommand, StartCommand,
+    StopCommand, VersionCommand,
 };
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ConfigManager, ConfigRequirement,
@@ -41,7 +41,7 @@ use crate::core::{
         Commands are grouped by audience:\n  \
         development:  init / gen / build / check / doc\n  \
         runtime:      run / ps / logs / start / stop / restart / rm\n  \
-        resources:    deps / pkg / registry / dlq / realm\n  \
+        resources:    deps / pkg / registry / dlq / realm / publisher\n  \
         meta:         config / version / completion",
     version,
     disable_version_flag = true
@@ -96,6 +96,8 @@ pub enum Commands {
     Dlq(DlqArgs),
     /// Realm signing key holder's tool (keys, Realm management requests)
     Realm(RealmArgs),
+    /// Publisher Profile keys and signed domain metadata
+    Publisher(PublisherArgs),
 
     // ── meta ──
     /// Manage project configuration
@@ -127,6 +129,7 @@ impl Commands {
             Commands::Registry(c) => c,
             Commands::Dlq(c) => c,
             Commands::Realm(c) => c,
+            Commands::Publisher(c) => c,
             Commands::Config(c) => c,
             Commands::Version(c) => c,
             Commands::Completion(c) => c,

@@ -173,8 +173,8 @@ pub struct ReissueRequestArgs {
 
 #[derive(Args, Debug)]
 pub struct RegisterPublisherArgs {
-    /// Key file, in the `actr realm keygen` format, of an `active`
-    /// `profile_signing_keys` entry of the Publisher Profile
+    /// Active Publisher Profile key from `actr publisher profile keygen`
+    /// (also accepts the realm keygen format)
     #[arg(long, value_name = "FILE")]
     pub key: PathBuf,
     /// Publisher ID: the normalized domain whose `/.well-known/actr` carries
