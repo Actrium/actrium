@@ -33,11 +33,11 @@ pub mod actr_bridge_contract {
     pub const ASK_SERVICE_ATTACH_ROUTE_KEY: &str = "ask.AskService.Attach";
     pub const ASK_SERVICE_PREPARE_ATTACHMENT_UPLOAD_ROUTE_KEY: &str =
         "ask.AskService.PrepareAttachmentUpload";
-    pub const ASK_LOCAL_SERVICE_SEND_TEXT_ROUTE_KEY: &str = "actro.AskLocalService.SendText";
+    pub const ASK_LOCAL_SERVICE_SEND_TEXT_ROUTE_KEY: &str = "actrium.AskLocalService.SendText";
     pub const ASK_LOCAL_SERVICE_START_SEND_VOICE_ROUTE_KEY: &str =
-        "actro.AskLocalService.StartSendVoice";
+        "actrium.AskLocalService.StartSendVoice";
     pub const ASK_LOCAL_SERVICE_SEND_VOICE_CHUNK_ROUTE_KEY: &str =
-        "actro.AskLocalService.SendVoiceChunk";
+        "actrium.AskLocalService.SendVoiceChunk";
     pub const IOS_ASK_SERVICE_PROMPT_TIMEOUT_MS: u32 = 20_000;
     pub const IOS_ASK_SERVICE_PREPARE_ATTACHMENT_UPLOAD_TIMEOUT_MS: u32 = 20_000;
     pub const ANDROID_ASK_SERVICE_PROMPT_TIMEOUT_MS: u32 = 300_000;
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn actr_bridge_contract_uses_actro_local_service_routes() {
+    fn actr_bridge_contract_uses_actrium_local_service_routes() {
         use actr_bridge_contract as contract;
 
         assert_eq!(contract::MODULE_NAME, "ActrBridge");
@@ -298,15 +298,15 @@ mod tests {
         );
         assert_eq!(
             contract::ASK_LOCAL_SERVICE_SEND_TEXT_ROUTE_KEY,
-            "actro.AskLocalService.SendText"
+            "actrium.AskLocalService.SendText"
         );
         assert_eq!(
             contract::ASK_LOCAL_SERVICE_START_SEND_VOICE_ROUTE_KEY,
-            "actro.AskLocalService.StartSendVoice"
+            "actrium.AskLocalService.StartSendVoice"
         );
         assert_eq!(
             contract::ASK_LOCAL_SERVICE_SEND_VOICE_CHUNK_ROUTE_KEY,
-            "actro.AskLocalService.SendVoiceChunk"
+            "actrium.AskLocalService.SendVoiceChunk"
         );
         assert_eq!(contract::IOS_ASK_SERVICE_PROMPT_TIMEOUT_MS, 20_000);
         assert_eq!(
@@ -373,8 +373,8 @@ mod tests {
 
     #[test]
     fn parse_actr_actor_type_splits_existing_wire_format() {
-        let actor_type = parse_actr_actor_type(" actro + app_server ").unwrap();
-        assert_eq!(actor_type.manufacturer, "actro");
+        let actor_type = parse_actr_actor_type(" actrium + app_server ").unwrap();
+        assert_eq!(actor_type.manufacturer, "actrium");
         assert_eq!(actor_type.name, "app_server");
         assert_eq!(actor_type.version, "");
     }
@@ -382,9 +382,9 @@ mod tests {
     #[test]
     fn parse_actr_actor_type_rejects_ambiguous_or_empty_values() {
         assert!(parse_actr_actor_type("").is_none());
-        assert!(parse_actr_actor_type("actro").is_none());
+        assert!(parse_actr_actor_type("actrium").is_none());
         assert!(parse_actr_actor_type("+server").is_none());
-        assert!(parse_actr_actor_type("actro+").is_none());
-        assert!(parse_actr_actor_type("actro+server+extra").is_none());
+        assert!(parse_actr_actor_type("actrium+").is_none());
+        assert!(parse_actr_actor_type("actrium+server+extra").is_none());
     }
 }

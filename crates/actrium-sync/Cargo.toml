@@ -1,5 +1,5 @@
 [package]
-name = "actro-sync-server"
+name = "actrium-sync-server"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
@@ -7,7 +7,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-actro-core = { path = "../actrium-core" }
+actrium-core = { path = "../actrium-core" }
 rusqlite = "0.32"
 serde_json = "1"
 thiserror = "2"

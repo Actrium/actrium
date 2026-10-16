@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// The action Escape performs, ordered by precedence. Escape cannot be a

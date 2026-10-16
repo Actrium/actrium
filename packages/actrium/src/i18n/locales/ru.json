@@ -23,7 +23,7 @@
     "networkCheckInfo": "Ошибка сети, пожалуйста, проверьте подключение"
   },
   "actr": {
-    "appTitle": "Actro ActroRuntime",
+    "appTitle": "Actrium ActriumRuntime",
     "input": {
       "placeholder": "Пожалуйста, введите",
       "holdToSpeak": "Удерживать для записи",
@@ -104,7 +104,7 @@
       "shareSaveFailed": "Не удалось сохранить изображение. Повторите попытку.",
       "shareSavePermissionDeniedTitle": "Недостаточно прав",
       "shareSavePermissionDenied": "Нет разрешения на доступ.",
-      "shareFooter": "Карточка вопросов и ответов от Actro",
+      "shareFooter": "Карточка вопросов и ответов от Actrium",
       "shareAiFooter": "Этот ответ сгенерирован ИИ",
       "shareAiDisclaimer": "Содержимое только для справки. Пожалуйста, проверяйте информацию.",
       "submit": "Отправить",
@@ -181,7 +181,7 @@
       "realtime": "В реальном времени",
       "parentChild": "Семейный отдых",
       "culture": "Исследование культуры",
-      "officialService": "Служба поддержки Actro",
+      "officialService": "Служба поддержки Actrium",
       "scanHint": "Сканировать QR-код приложения"
     },
     "auth": {
@@ -254,7 +254,7 @@
       "deleteAccount": "Удалить аккаунт",
       "deleteAccountConfirm": "Подтвердить удаление аккаунта? Это действие необратимо, все данные аккаунта будут удалены навсегда.",
       "logoutAccount": "Выйти из аккаунта",
-      "aboutActro": "О Actro",
+      "aboutActrium": "О Actrium",
       "userAgreement": "Пользовательское соглашение",
       "privacyPolicy": "Политика конфиденциальности",
       "icp": "Регистрация ICP",

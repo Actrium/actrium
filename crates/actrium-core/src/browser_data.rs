@@ -5339,7 +5339,7 @@ pub fn home_session_snapshot() -> BrowserSessionSnapshot {
         active_tab_index: 0,
         tabs: vec![BrowserSessionTab {
             id: stable_session_tab_id(0, HOME_ADDRESS),
-            title: "Actro".to_string(),
+            title: "Actrium".to_string(),
             address: HOME_ADDRESS.to_string(),
         }],
     }
@@ -7537,7 +7537,7 @@ pub fn browser_storage_sync_cloud_store_contract() -> BrowserStorageSyncCloudSto
                 "Enumerate object metadata under a prefix, optionally using a provider page cursor.",
                 "prefix plus optional BrowserStorageSyncCloudListPage",
                 "BrowserStorageSyncCloudListResult",
-                "Providers without native prefix listing must emulate it within the Actro root path.",
+                "Providers without native prefix listing must emulate it within the Actrium root path.",
             ),
             cloud_store_operation(
                 "read",
@@ -7568,7 +7568,7 @@ pub fn browser_storage_sync_cloud_store_contract() -> BrowserStorageSyncCloudSto
             cloud_store_metadata(
                 "path",
                 true,
-                "Provider-local path under the Actro browser sync root.",
+                "Provider-local path under the Actrium browser sync root.",
                 &["Actro/BrowserSync/manifest.json"],
             ),
             cloud_store_metadata(
@@ -7580,7 +7580,7 @@ pub fn browser_storage_sync_cloud_store_contract() -> BrowserStorageSyncCloudSto
             cloud_store_metadata(
                 "contentHash",
                 false,
-                "Provider hash or Actro-computed digest used to skip unchanged reads.",
+                "Provider hash or Actrium-computed digest used to skip unchanged reads.",
                 &["sha256", "md5", "driveMd5Checksum"],
             ),
             cloud_store_metadata(
@@ -7602,7 +7602,7 @@ pub fn browser_storage_sync_cloud_store_contract() -> BrowserStorageSyncCloudSto
                 "Rust adapter crate",
                 "Google Drive, OneDrive, Dropbox, WebDAV, S3/GCS, local folders when supported by OpenDAL features",
                 &[
-                    "Keep OpenDAL out of actro-core unless the final dependency budget allows it.",
+                    "Keep OpenDAL out of actrium-core unless the final dependency budget allows it.",
                     "Translate OpenDAL metadata into BrowserStorageSyncCloudObjectMetadata.",
                 ],
             ),
@@ -7641,7 +7641,7 @@ pub fn browser_storage_sync_cloud_store_contract() -> BrowserStorageSyncCloudSto
             "Provider conflicts never become product data conflicts directly; they trigger reread/merge/retry, while browser-record conflicts remain governed by the Rust merge policy."
                 .to_string(),
         product_constraint:
-            "Actro browser clients must not require or embed an Actro-operated browser sync server."
+            "Actrium browser clients must not require or embed an Actrium-operated browser sync server."
                 .to_string(),
     }
 }
@@ -7653,7 +7653,7 @@ pub fn browser_storage_sync_cloud_provider_adapter_contract() -> Value {
         "cloudDataModelVersion": BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_VERSION,
         "contractName": "BrowserStorageSyncCloudProviderAdapter",
         "planType": "cloudProviderAdapterPlan",
-        "purpose": "Normalize how a concrete cloud provider adapter maps the user-owned provider object space onto Actro browser sync files before provider IO begins.",
+        "purpose": "Normalize how a concrete cloud provider adapter maps the user-owned provider object space onto Actrium browser sync files before provider IO begins.",
         "inputSnapshotFields": [
             {
                 "name": "providerKind",
@@ -7669,7 +7669,7 @@ pub fn browser_storage_sync_cloud_provider_adapter_contract() -> Value {
             {
                 "name": "rootPath",
                 "required": false,
-                "description": "Provider-visible Actro browser sync root. It must resolve to Actro/BrowserSync inside the user-owned provider space."
+                "description": "Provider-visible Actrium browser sync root. It must resolve to Actro/BrowserSync inside the user-owned provider space."
             },
             {
                 "name": "capabilities",
@@ -7692,17 +7692,17 @@ pub fn browser_storage_sync_cloud_provider_adapter_contract() -> Value {
             "pathRules": [
                 "All adapter-visible paths are UTF-8 slash-separated object keys under Actro/BrowserSync.",
                 "Provider file ids, record names, drive ids, inode ids, and local absolute paths are metadata only; they must not become sync record identity.",
-                "Adapters must reject or remap dot segments, backslashes, empty path segments, and objects outside the Actro browser sync root before provider IO."
+                "Adapters must reject or remap dot segments, backslashes, empty path segments, and objects outside the Actrium browser sync root before provider IO."
             ]
         },
         "operationBoundary": "Platform/provider adapters execute concrete SDK IO in coarse rounds, then pass bytes, revisions, receipts, or errors through Rust planners. Do not expose list/read/write/delete as tiny cross-FFI calls for product adapters.",
         "productionReadinessRules": [
-            "Provider rootPath must match the Actro browser sync root.",
+            "Provider rootPath must match the Actrium browser sync root.",
             "Provider revision metadata and conditional writes are required for optimistic conflict recovery.",
             "Prefix list, paged list, read-if-changed, app-folder, and conditional delete can be emulated when advertised as degraded capabilities.",
             "Memory/test fixtures may be sync-capable for tests but are not production-ready providers."
         ],
-        "productConstraint": "Actro browser sync uses user-owned provider files, not an Actro-operated browser sync server or first-party provider account registry."
+        "productConstraint": "Actrium browser sync uses user-owned provider files, not an Actrium-operated browser sync server or first-party provider account registry."
     })
 }
 
@@ -7889,7 +7889,7 @@ pub fn browser_storage_sync_cloud_provider_connection_contract() -> Value {
             {
                 "name": "providerAccountId",
                 "required": false,
-                "description": "Provider-owned account or storage identity. It is diagnostic only; Actro has no first-party browser-sync account registry."
+                "description": "Provider-owned account or storage identity. It is diagnostic only; Actrium has no first-party browser-sync account registry."
             },
             {
                 "name": "connectionState",
@@ -7906,7 +7906,7 @@ pub fn browser_storage_sync_cloud_provider_connection_contract() -> Value {
             {
                 "name": "cloudStoreReady",
                 "required": false,
-                "description": "Whether the selected provider adapter can access the Actro browser sync root. Can be derived from capabilityPreflight."
+                "description": "Whether the selected provider adapter can access the Actrium browser sync root. Can be derived from capabilityPreflight."
             },
             {
                 "name": "capabilityPreflight",
@@ -7939,7 +7939,7 @@ pub fn browser_storage_sync_cloud_provider_connection_contract() -> Value {
             "recoveryRequired"
         ],
         "policyBoundary": "Rust owns status classification and scheduler/provider/user action names. Platforms own OAuth, system account prompts, secure credential storage, provider SDK execution, and user-facing wording.",
-        "productConstraint": "No Actro product server allocates provider account or device membership; shared cloud files plus Rust-planned manifest/device documents are the browser sync substrate."
+        "productConstraint": "No Actrium product server allocates provider account or device membership; shared cloud files plus Rust-planned manifest/device documents are the browser sync substrate."
     })
 }
 
@@ -7990,7 +7990,7 @@ pub fn browser_storage_sync_cloud_provider_error_policy() -> Value {
             "providerRecoveryRequired"
         ],
         "policyBoundary": "Provider adapters execute concrete SDK calls in coarse native/provider rounds and pass failed operations to Rust as a batch. Rust owns canonical error kinds, retry/reread/recovery actions, and scheduler/provider/user action names.",
-        "productConstraint": "Provider errors are classified for user-owned cloud files only; this must not introduce an Actro-operated browser sync service or first-party provider account registry."
+        "productConstraint": "Provider errors are classified for user-owned cloud files only; this must not introduce an Actrium-operated browser sync service or first-party provider account registry."
     })
 }
 
@@ -8050,7 +8050,7 @@ pub fn browser_storage_sync_cloud_store_capability_preflight(
     if !capabilities.supports_prefix_list {
         degraded_capabilities.push("supportsPrefixList".to_string());
         warnings.push(
-            "Provider adapter must emulate prefix listing under the Actro browser sync root."
+            "Provider adapter must emulate prefix listing under the Actrium browser sync root."
                 .to_string(),
         );
     }
@@ -8070,7 +8070,7 @@ pub fn browser_storage_sync_cloud_store_capability_preflight(
     if !capabilities.supports_app_folder {
         degraded_capabilities.push("supportsAppFolder".to_string());
         warnings.push(
-            "Provider setup must choose or create an Actro browser sync folder without app-folder isolation."
+            "Provider setup must choose or create an Actrium browser sync folder without app-folder isolation."
                 .to_string(),
         );
     }
@@ -9802,7 +9802,7 @@ fn browser_storage_sync_cloud_provider_adapter_required_prefixes()
             prefix: BROWSER_STORAGE_SYNC_CLOUD_DEVICES_PREFIX.to_string(),
             required: true,
             list_policy: "Reserved for device membership documents; providers usually read direct paths instead of listing every device.".to_string(),
-            provider_mapping: "Map to a provider folder/prefix under the Actro browser sync root.".to_string(),
+            provider_mapping: "Map to a provider folder/prefix under the Actrium browser sync root.".to_string(),
         },
         BrowserStorageSyncCloudProviderAdapterPrefixPlan {
             prefix_kind: "logs".to_string(),
@@ -9968,7 +9968,7 @@ pub fn browser_storage_sync_cloud_data_model() -> BrowserStorageSyncCloudDataMod
             "Providers read manifest.json and pass it with local cursors to browserStorageSyncCloudPullPlanJson; Rust returns collection-level readSnapshot/listLogs operations, while providers execute cloud IO in one native/provider layer and pass snapshot/log bytes to browserStorageSyncCloudPullApplyPlanJson for remote-apply planning."
                 .to_string(),
         membership_policy:
-            "Device membership is cloud data in manifest.json plus devices/<device-id>.json; browserStorageSyncCloudMembershipPlanJson is the source of truth for join/revoke write planning, and no Actro account/device service allocates or revokes devices."
+            "Device membership is cloud data in manifest.json plus devices/<device-id>.json; browserStorageSyncCloudMembershipPlanJson is the source of truth for join/revoke write planning, and no Actrium account/device service allocates or revokes devices."
                 .to_string(),
         log_policy:
             "Each log object contains records for exactly one collection; platform adapters write bytes through BrowserStorageSyncCloudStore and Rust normalizes the payload."
@@ -10139,7 +10139,7 @@ pub fn normalize_browser_storage_sync_cloud_device_document(
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
         scope: normalize_sync_text(&device.scope, &fallback_scope, MAX_SYNC_ID_LENGTH),
         device_id,
-        display_name: normalize_sync_text(&device.display_name, "Actro Device", MAX_TITLE_LENGTH),
+        display_name: normalize_sync_text(&device.display_name, "Actrium Device", MAX_TITLE_LENGTH),
         platform: normalize_sync_text(&device.platform, "unknown", MAX_SYNC_TEXT_LENGTH)
             .to_ascii_lowercase(),
         app_version: normalize_optional_sync_text(device.app_version, MAX_SYNC_TEXT_LENGTH),
@@ -13067,7 +13067,7 @@ pub async fn browser_storage_sync_cloud_execute_planned_reads<S: BrowserStorageS
                                     &operation.read_reason,
                                     operation.collection.as_deref(),
                                     "invalidDocument",
-                                    "Cloud snapshot object is not valid Actro browser sync JSON.",
+                                    "Cloud snapshot object is not valid Actrium browser sync JSON.",
                                     false,
                                 );
                             }
@@ -13175,7 +13175,7 @@ pub async fn browser_storage_sync_cloud_execute_planned_reads<S: BrowserStorageS
                                                     ),
                                                     operation.collection.as_deref(),
                                                     "invalidDocument",
-                                                    "Cloud log object is not valid Actro browser sync JSON.",
+                                                    "Cloud log object is not valid Actrium browser sync JSON.",
                                                     false,
                                                 );
                                         }
@@ -13371,7 +13371,7 @@ async fn browser_storage_sync_cloud_read_snapshot_prefix_for_retention<
                                 read_snapshot_reason,
                                 collection.as_deref(),
                                 "invalidDocument",
-                                "Cloud snapshot object is not valid Actro browser sync JSON.",
+                                "Cloud snapshot object is not valid Actrium browser sync JSON.",
                                 false,
                             );
                         }
@@ -13510,7 +13510,7 @@ async fn browser_storage_sync_cloud_read_log_prefix_for_retention<
                             read_log_reason,
                             collection.as_deref(),
                             "invalidDocument",
-                            "Cloud log object is not valid Actro browser sync JSON.",
+                            "Cloud log object is not valid Actrium browser sync JSON.",
                             false,
                         );
                     }
@@ -18191,7 +18191,7 @@ fn browser_storage_sync_cloud_store_capability_preflight_plan(
         capabilities,
         required_min_object_bytes: MIN_BROWSER_STORAGE_SYNC_CLOUD_OBJECT_BYTES,
         result_policy:
-            "Preflight provider-neutral cloud store capabilities before concrete adapters start browser sync. Rust owns the safety gate for optimistic revisions, Actro root-path setup, object-size limits, and adapter-emulation warnings while provider SDK calls and account UI stay platform-owned."
+            "Preflight provider-neutral cloud store capabilities before concrete adapters start browser sync. Rust owns the safety gate for optimistic revisions, Actrium root-path setup, object-size limits, and adapter-emulation warnings while provider SDK calls and account UI stay platform-owned."
                 .to_string(),
     }
 }
@@ -18640,7 +18640,7 @@ fn browser_storage_sync_cloud_default_device_document(
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
         scope: normalize_sync_text(scope, "default", MAX_SYNC_ID_LENGTH),
         device_id: normalize_sync_text(device_id, "unknown-device", MAX_SYNC_ID_LENGTH),
-        display_name: "Actro Device".to_string(),
+        display_name: "Actrium Device".to_string(),
         platform: "unknown".to_string(),
         app_version: None,
         status: BROWSER_STORAGE_SYNC_CLOUD_DEVICE_STATUS_ACTIVE.to_string(),
@@ -19371,7 +19371,7 @@ fn browser_storage_sync_cloud_validate_store_object_path(
     let path = browser_storage_sync_cloud_normalize_store_path(path)?;
     if path == BROWSER_STORAGE_SYNC_CLOUD_ROOT_PATH || path.ends_with('/') {
         return Err(BrowserStorageSyncCloudStoreError::invalid_path(
-            "Cloud object path must identify a file under the Actro browser sync root.",
+            "Cloud object path must identify a file under the Actrium browser sync root.",
         ));
     }
     Ok(path)
@@ -19400,14 +19400,14 @@ fn browser_storage_sync_cloud_normalize_store_path(
         || path.len() > MAX_SYNC_URL_LENGTH
     {
         return Err(BrowserStorageSyncCloudStoreError::invalid_path(
-            "Cloud object paths must be relative non-empty paths under the Actro browser sync root.",
+            "Cloud object paths must be relative non-empty paths under the Actrium browser sync root.",
         ));
     }
     if path != BROWSER_STORAGE_SYNC_CLOUD_ROOT_PATH
         && !path.starts_with(&format!("{BROWSER_STORAGE_SYNC_CLOUD_ROOT_PATH}/"))
     {
         return Err(BrowserStorageSyncCloudStoreError::invalid_path(
-            "Cloud object path is outside the Actro browser sync root.",
+            "Cloud object path is outside the Actrium browser sync root.",
         ));
     }
     if path
@@ -20192,7 +20192,7 @@ fn browser_storage_sync_cloud_read_manifest_for_push_round(
     let manifest = match json {
         Some(json) => {
             parse_optional_browser_storage_sync_cloud_manifest(&json).ok_or_else(|| {
-                "Cloud manifest object is not valid Actro browser sync JSON.".to_string()
+                "Cloud manifest object is not valid Actrium browser sync JSON.".to_string()
             })?
         }
         None => None,
@@ -20213,7 +20213,7 @@ fn browser_storage_sync_cloud_read_device_for_push_round(
     let device = match json {
         Some(json) => {
             parse_optional_browser_storage_sync_cloud_device_document(&json).ok_or_else(|| {
-                "Cloud device object is not valid Actro browser sync JSON.".to_string()
+                "Cloud device object is not valid Actrium browser sync JSON.".to_string()
             })?
         }
         None => None,
@@ -32420,7 +32420,7 @@ mod tests {
                 .map(|duration| duration.as_nanos())
                 .unwrap_or(0);
             let path = std::env::temp_dir().join(format!(
-                "actro-core-{label}-{}-{unique}",
+                "actrium-core-{label}-{}-{unique}",
                 std::process::id()
             ));
             let _ = std::fs::remove_dir_all(&path);
@@ -39306,7 +39306,7 @@ mod tests {
             contract["productConstraint"]
                 .as_str()
                 .unwrap()
-                .contains("not an Actro-operated browser sync server")
+                .contains("not an Actrium-operated browser sync server")
         );
     }
 
@@ -39360,7 +39360,7 @@ mod tests {
         assert_eq!(degraded_plan["productionReady"], json!(true));
 
         let mut wrong_root_capabilities = browser_storage_sync_cloud_local_folder_capabilities();
-        wrong_root_capabilities.root_path = "ActroWrong/BrowserSync".to_string();
+        wrong_root_capabilities.root_path = "ActriumWrong/BrowserSync".to_string();
         let setup_plan =
             serde_json::from_str::<Value>(&browser_storage_sync_cloud_provider_adapter_plan_json(
                 &serialize_json(&wrong_root_capabilities),
@@ -39437,7 +39437,7 @@ mod tests {
             contract["productConstraint"]
                 .as_str()
                 .unwrap()
-                .contains("No Actro product server")
+                .contains("No Actrium product server")
         );
     }
 
@@ -42032,7 +42032,7 @@ mod tests {
             contract["membershipPolicy"]
                 .as_str()
                 .unwrap()
-                .contains("no Actro account/device service")
+                .contains("no Actrium account/device service")
         );
         assert!(
             contract["readPlanningPolicy"]
@@ -43016,7 +43016,7 @@ mod tests {
 
         assert_eq!(device["scope"], json!("profile-a"));
         assert_eq!(device["deviceId"], json!("device-a"));
-        assert_eq!(device["displayName"], json!("Actro Device"));
+        assert_eq!(device["displayName"], json!("Actrium Device"));
         assert_eq!(device["platform"], json!("macos"));
         assert_eq!(device["status"], json!("revoked"));
         assert_eq!(device["capabilities"], json!(["cloudStore"]));

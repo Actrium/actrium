@@ -4,7 +4,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           主进程 (Actro.app)                                │
+│                           主进程 (Actrium.app)                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 1. BrowserViewModel 接收 .actr 包                                            │
 │    ├─ 验证 Manifest、签名及 payload 摘要                                     │
@@ -14,8 +14,8 @@
 │    ├─ 读取 manifest.toml 声明的 Workload 入口                                │
 │    └─ appendRuntimeTab() → tabs.append(newTab)                               │
 │                                                                             │
-│ 3. UnifiedActroView 渲染                                                    │
-│    └─ ActroView                                                             │
+│ 3. UnifiedActriumView 渲染                                                    │
+│    └─ ActriumView                                                             │
 │        └─ ForEach(tabs) → TabCardView                                        │
 │            └─ MultiProcessTabView                                            │
 │                                                                             │
@@ -31,7 +31,7 @@
                          stdin (JSON config)
                                     ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        渲染进程 (ActroTabRenderer.app)                       │
+│                        渲染进程 (ActriumTabRenderer.app)                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 1. TabRendererAppDelegate.applicationDidFinishLaunching                      │
 │    ├─ 解析命令行参数 (--tab-id, --width, --height, --background)              │
@@ -79,7 +79,7 @@
 **Symptom**: `onAppear` followed immediately by `onDisappear`
 **Cause**: SwiftUI view recreation when `@ObservedObject` properties change
 **Attempted Fix**:
-- Removed `@ObservedObject var viewModel` from `ActroView` and `TabCardView`
+- Removed `@ObservedObject var viewModel` from `ActriumView` and `TabCardView`
 - Added 1 second delay before switching to focus mode
 
 ### Issue 2: IOSurface Shows Only Background Color
@@ -105,12 +105,12 @@
 ## Files Involved
 
 ### Main Process
-- `Actro/Views/UnifiedActroView.swift` - Main actro view
-- `Actro/Views/MainContentView/BrowserViewModel.swift` - Tab management
-- `Actro/MultiProcess/IOSurfaceHostView.swift` - IOSurface display
-- `Actro/MultiProcess/TabProcessManager.swift` - Process management
+- `Actrium/Views/UnifiedActriumView.swift` - Main actrium view
+- `Actrium/Views/MainContentView/BrowserViewModel.swift` - Tab management
+- `Actrium/MultiProcess/IOSurfaceHostView.swift` - IOSurface display
+- `Actrium/MultiProcess/TabProcessManager.swift` - Process management
 
 ### Renderer Process
-- `ActroTabRenderer/TabRendererAppDelegate.swift` - App entry point
-- `ActroTabRenderer/TabRendererService.swift` - Rendering logic
-- `ActroTabRenderer/RendererReactNativeHost.swift` - React Native setup
+- `ActriumTabRenderer/TabRendererAppDelegate.swift` - App entry point
+- `ActriumTabRenderer/TabRendererService.swift` - Rendering logic
+- `ActriumTabRenderer/RendererReactNativeHost.swift` - React Native setup

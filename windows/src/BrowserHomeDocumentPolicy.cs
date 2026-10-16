@@ -1,12 +1,12 @@
 using System.Net;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class BrowserHomeDocumentPolicy
 {
-    public const string Title = "Actro";
+    public const string Title = "Actrium";
 
-    public static string BuildDocument(ActroCoreStatus coreStatus)
+    public static string BuildDocument(ActriumCoreStatus coreStatus)
     {
         var productName = WebUtility.HtmlEncode(coreStatus.ProductName);
         var coreSummary = coreStatus.IsAvailable
@@ -60,13 +60,13 @@ internal static class BrowserHomeDocumentPolicy
                   return;
                 }
 
-                if (!window.actroHost || !window.actroHost.getCoreStatus) {
+                if (!window.actriumHost || !window.actriumHost.getCoreStatus) {
                   detail.textContent = `${detail.textContent}\nHost bridge is not available.`;
                   return;
                 }
 
                 try {
-                  const status = await window.actroHost.getCoreStatus();
+                  const status = await window.actriumHost.getCoreStatus();
                   const coreState = status.isAvailable ? "ready" : "fallback";
                   detail.textContent = `Host bridge ${coreState}: ${status.productName}, contract ${status.supportedContractName}@v${status.supportedContractVersion}, schemas ${status.coreSchemaVersion}/${status.runtimeSchemaVersion}.`;
                 } catch (error) {

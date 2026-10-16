@@ -22,9 +22,9 @@ internal files directory because Vosk requires a filesystem path.
 before extraction, and generates:
 
 ```text
-app/build/generated/actro-binary-assets/asr/assets/model/asr/{en,zh}
+app/build/generated/actrium-binary-assets/asr/assets/model/asr/{en,zh}
 ```
 
 Verified archives are cached under
-`$GRADLE_USER_HOME/caches/actro-binary-assets`. Gradle `--offline` builds work
+`$GRADLE_USER_HOME/caches/actrium-binary-assets`. Gradle `--offline` builds work
 after that cache has been warmed and fail with an actionable error otherwise.

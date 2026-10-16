@@ -4,7 +4,7 @@ This document only describes two related to voice input controller hookand curre
 
 ## 1. `useAppVoiceController`
 
-Documents:[`useAppVoiceController.ts`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actro-runtime/src/runtime-host/features/input/hooks/useAppVoiceController.ts)
+Documents:[`useAppVoiceController.ts`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actrium-runtime/src/runtime-host/features/input/hooks/useAppVoiceController.ts)
 
 Duties:
 
@@ -32,7 +32,7 @@ Applied scene:
 
 ## 2. `useAppSpeechRecognitionController`
 
-Documents:[`useAppSpeechRecognitionController.ts`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actro-runtime/src/runtime-host/features/input/hooks/useAppSpeechRecognitionController.ts)
+Documents:[`useAppSpeechRecognitionController.ts`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actrium-runtime/src/runtime-host/features/input/hooks/useAppSpeechRecognitionController.ts)
 
 Duties:
 
@@ -57,7 +57,7 @@ Current `AppInput` What's used is `useAppSpeechRecognitionController`.
 
 Access location:
 
-- Documents:[`AppInput.shared.tsx`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actro-runtime/src/runtime-host/features/input/AppInput.shared.tsx)
+- Documents:[`AppInput.shared.tsx`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actrium-runtime/src/runtime-host/features/input/AppInput.shared.tsx)
 
 Current act(s):
 
@@ -71,7 +71,7 @@ Current act(s):
 
 ## 4. If we want to resume original voicemail transmission
 
-The recovery point is mainly in the [`AppInput.shared.tsx`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actro-runtime/src/runtime-host/features/input/AppInput.shared.tsx):
+The recovery point is mainly in the [`AppInput.shared.tsx`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actrium-runtime/src/runtime-host/features/input/AppInput.shared.tsx):
 
 - The one that's currently connected to the `useAppSpeechRecognitionController` Change back. `useAppVoiceController`
 - And re-do it. `useAppMessageFlow` Returning voice sessions pass back

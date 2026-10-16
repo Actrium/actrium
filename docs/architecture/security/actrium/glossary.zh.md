@@ -5,7 +5,7 @@
 | 术语 | 含义 |
 | --- | --- |
 | Actr | Actor 通信、身份、运行与协议框架 |
-| Actro | 以 Tab 承载 Actor 应用的宿主 |
+| Actrium | 以 Tab 承载 Actor 应用的宿主 |
 | Keel | 受约束的 Guest / Host 工作负载模型 |
 | Actor | 唯一规范节点；宏观通信与执行边界 |
 | ActorId | 实例稳定、可认证身份 |
@@ -36,7 +36,7 @@
 | Workspace | 数据空间；不自动是 Actor，同 Principal 不自动授权 |
 | TCB | 失陷会破坏相应保障的组件集合 |
 | CONTROLLED / UNKNOWN / UNCONTROLLED | 出口事实，不是产品第四色 |
-| 绿 / 黄 / 红 | Actro 顶层隐私标记；绿只保证当前就绪切面 |
+| 绿 / 黄 / 红 | Actrium 顶层隐私标记；绿只保证当前就绪切面 |
 | 数据世代 | 应用数据取得时的 `ActorStateId`；旧数据适用取得时声明与当前声明的交集 |
 | Ready | 已发布快照仍对应当前指针，且全部图成员 `ACTIVE`；展示颜色的前提 |
 | EncGraph | 应用图的规范字节编码；对带标签节点／边集合单射 |

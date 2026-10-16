@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Packages the Actro Windows client (portable zip + per-user installer).
+# Packages the Actrium Windows client (portable zip + per-user installer).
 #
 # This is the repo entry point; the real pipeline lives in
 # scripts/actrium/package-windows.ps1 because packaging must run on a Windows host
@@ -9,8 +9,8 @@
 # Windows machine instead of failing cryptically.
 #
 # Outputs (under dist/windows/, gitignored):
-#   - Actro-<version>-win-x64.zip           portable, run Actro.exe in place
-#   - Actro-<version>-win-x64-setup.exe     per-user installer (needs Inno
+#   - Actrium-<version>-win-x64.zip           portable, run Actrium.exe in place
+#   - Actrium-<version>-win-x64-setup.exe     per-user installer (needs Inno
 #                                           Setup 6; skipped with a warning
 #                                           when ISCC.exe is absent)
 #
@@ -21,7 +21,7 @@
 # installed binaries and shortcuts but deliberately leaves the user's
 # profile data (%LOCALAPPDATA%\Actrium\Actro\Windows and the WebView2
 # browsing profile) in place; the policy is documented in
-# windows/packaging/actro-installer.iss.
+# windows/packaging/actrium-installer.iss.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"

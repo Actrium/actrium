@@ -5,12 +5,12 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
-"$SCRIPT_DIR/ensure-actro-runtime.sh"
+"$SCRIPT_DIR/ensure-actrium-runtime.sh"
 
 # Global Cleanup
 echo "🧹 Global cleanup of old builders and dependencies..."
 rm -rf build
-rm -rf ActroRuntime/node_modules
+rm -rf ActriumRuntime/node_modules
 rm -rf Pods
 
 # Cleaning Watchman and Metro Cache
@@ -21,7 +21,7 @@ fi
 
 # Installation Dependence
 echo "📦 Install React Native Dependency..."
-cd ActroRuntime
+cd ActriumRuntime
 
 if command -v yarn &> /dev/null; then
     echo "📦 Use yarn Installation Dependence (Priority)..."
@@ -42,8 +42,8 @@ pod install
 # Cleaning
 echo "🧹 Clear old build..."
 xcodebuild clean \
-    -workspace Actro.xcworkspace \
-    -scheme "Actro"
+    -workspace Actrium.xcworkspace \
+    -scheme "Actrium"
 
 # Install Swift Package Manager Dependency
 # xcodebuild -resolvePackageDependencies

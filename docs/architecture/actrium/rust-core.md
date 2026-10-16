@@ -1,6 +1,6 @@
 # Rust Core Boundary
 
-Actro targets macOS, iOS, Android, and Windows. Native non-UI logic should move
+Actrium targets macOS, iOS, Android, and Windows. Native non-UI logic should move
 into Rust when it is shared, stateful, security-sensitive, protocol-oriented, or
 likely to diverge across platform rewrites. It should also move when leaving it
 in platform code creates repeated cross-layer hops for deterministic non-UI
@@ -57,27 +57,27 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   dispatch.
 - Apple apps group the heaviest runtime key usage under local Swift adapters
   such as `RuntimeBridgeContract` and `RuntimeOpenTabContract`. Remaining direct
-  `ActroCore` imports should stay near native module, repository, or domain-model
+  `ActriumCore` imports should stay near native module, repository, or domain-model
   boundaries; new SwiftUI/UIKit view code should prefer those adapters instead
   of calling generated FFI helpers directly.
 - iOS RN tab and user-info modules now consume local Swift contracts; their Rust
   helper calls live in nearby model/manager boundary files. Keep following that
   pattern when another RN module gains a real native manager boundary.
 - Apple ACTR package manifest reading uses the shared
-  `AppleActrPackageManifestReader` helper in the `ActroCore` Swift package.
+  `AppleActrPackageManifestReader` helper in the `ActriumCore` Swift package.
   Target-local `ActrPackageManifestReader` adapters only map that shared result
   into platform-local manifest info for `BrowserViewModel`.
 - TTS, Email, and ASR native modules may keep direct Rust bridge-contract imports
   while the module itself is the real platform boundary. Add a local adapter only
   when another manager/view layer starts consuming the same Rust values.
 - Windows C# code consumes the Rust core through a single adapter,
-  `windows/src/ActroCore.cs`, backed by the minimal C ABI in
-  `crates/actrium-core/include/actro_core.h`. UI files must not add their own
+  `windows/src/ActriumCore.cs`, backed by the minimal C ABI in
+  `crates/actrium-core/include/actrium_core.h`. UI files must not add their own
   `DllImport` calls; `npm run check:rust-boundary` guards that.
 - Windows WebView2 page/host messaging is split between
   `windows/src/HostBridgeProtocol.cs` and
   `windows/src/HostMessageBridge.cs`. The protocol dispatcher may
-  call the local `ActroCore` adapter for stable metadata or other durable non-UI
+  call the local `ActriumCore` adapter for stable metadata or other durable non-UI
   payloads. Its tab and navigation methods delegate back to `MainForm`; WebView
   lifecycle, page routing, tab activation, and high-volume UI events stay out of
   Rust.
@@ -105,7 +105,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   `BrowserHistoryStore.cs`, `BrowserBookmarkStore.cs`, and
   `BrowserSessionStore.cs` delegate whole-snapshot normalization (canonical
   addresses, titles, dedupe, ordering, caps, stable session tab ids) to
-  ActroCore through `ActroCore.cs` and persist the Rust output verbatim; the
+  ActriumCore through `ActriumCore.cs` and persist the Rust output verbatim; the
   local C# rules survive only as a degraded fallback when the native DLL is
   absent. `NavigationPolicy.TryNormalizeAddress` remains address-bar input
   parsing and is no longer reapplied on the persistence path. Apple
@@ -503,7 +503,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   `BrowserStorageSyncMemoryCloudStore`,
   `BrowserStorageSyncLocalFolderCloudStore`, and planned write/delete executors
   for provider-operation tests. The local-folder store is a coarse file-backed
-  fixture that maps cloud object paths under a local Actro root and uses content
+  fixture that maps cloud object paths under a local Actrium root and uses content
   hashes as optimistic revisions; it is not exposed as per-operation native FFI.
   That keeps revision conflict handling, content hash metadata, receipt/error
   mapping, real filesystem IO coverage, and compaction/push write execution
@@ -679,12 +679,12 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   owner fields, session owner/surface fields, cursor tables, dirty export, and tombstone writes. Android currently validates this
   through instrumentation APK compilation locally, with the same test body
   runnable on a connected device or emulator. Apple now has a shared package adapter,
-  `packages/actrium-platform/apple/ActroCore/Sources/ActroCore/AppleBrowserStorageDatabase.swift`,
+  `packages/actrium-platform/apple/ActriumCore/Sources/ActriumCore/AppleBrowserStorageDatabase.swift`,
   which consumes the same Rust schema/SQL through `AppleSQLiteDatabase` for
   future macOS/iOS browser history, bookmark, and session persistence, including
   `browser_schema_meta` helpers used by platform one-time import flags. Android
   now has the matching app-local
-  `android/android/app/src/main/java/io/actrium/actro/data/database/BrowserStorageDatabase.kt`
+  `android/android/app/src/main/java/io/actrium/app/data/database/BrowserStorageDatabase.kt`
   adapter, which consumes the same Rust schema/SQL through Android
   `SQLiteDatabase` without merging it into the existing Room active-list
   database. The existing macOS/iOS app `HistoryRepository` /
@@ -693,7 +693,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   the shared browser database. Platform database handles, Room/SQLite
   execution, migration timing, and UI workflows remain platform-owned.
 - macOS now has a first product call path into that browser storage contract:
-  `macos/Actro/Database/BrowserDataRepository.swift` writes
+  `macos/Actrium/Database/BrowserDataRepository.swift` writes
   successful http/https page visits, web bookmarks, and browser-page session
   snapshots through `AppleBrowserStorageDatabase`. `HistoryViewModel` and
   `BookmarkViewModel` also merge shared browser history/bookmark rows back into
@@ -705,7 +705,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   ACTR tabs, and tab groups. Do not store `actro://`, ACTR package, or system
   tabs in the browser page schema.
 - iOS now has the matching first product call path through
-  `ios/Actro/Database/BrowserDataRepository.swift`. It records
+  `ios/Actrium/Database/BrowserDataRepository.swift`. It records
   http/https `HistoryItem` visits from `HistoryViewModel`, writes browser-page
   session snapshots from `BrowserViewModel.saveTabs()`, projects the current
   native tab `isBookmarked` snapshot into browser bookmarks, and merges shared
@@ -720,7 +720,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   replacement for `UserDefaults.persistedTabs` or any richer RN-side bookmark
   model.
 - Android now has the matching product projection in
-  `android/android/app/src/main/java/io/actrium/actro/data/repository/BrowserDataRepository.kt`.
+  `android/android/app/src/main/java/io/actrium/app/data/repository/BrowserDataRepository.kt`.
   Phone `MainViewModel` and tablet `TabletViewModel` keep Room-backed
   `ActiveModel` as the complete native tab source, while the repository records
   http/https tab updates as browser history and snapshots the current
@@ -758,7 +758,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
 - Windows search engine settings live in
   `windows/src/BrowserSearchEnginePolicy.cs`,
   `windows/src/BrowserSearchSettingsStore.cs`, and `MainForm.cs`.
-  `BrowserSearchEnginePolicy.cs` adapts ActroCore's shared browser search
+  `BrowserSearchEnginePolicy.cs` adapts ActriumCore's shared browser search
   contract to Windows with a local fallback when the native DLL is absent.
   Engine menu routing and selected-engine persistence stay Windows-owned until a
   product-wide preferences schema exists.
@@ -776,7 +776,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   `windows/src/BrowserHomeDocumentPolicy.cs` and `MainForm.cs`.
   Generated `actro://home` HTML, safe status text rendering, and the decision to
   show the document are WebView2 shell UX. Rust only supplies stable core
-  metadata through the local `ActroCore.cs` adapter.
+  metadata through the local `ActriumCore.cs` adapter.
 - Windows WebView2 process-failure handling lives in
   `windows/src/BrowserProcessFailurePolicy.cs` and `MainForm.cs`.
   Status text, renderer/frame reload classification, and tab recovery attempts
@@ -882,11 +882,11 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   shared algorithm.
 - `npm run check:rust-boundary` protects the RN/UI boundary files that already
   moved behind local adapters. It is intentionally narrow; it should not become a
-  blanket ban on `ActroCore` imports at real parser, persistence, model, ACTR,
+  blanket ban on `ActriumCore` imports at real parser, persistence, model, ACTR,
   ASR, TTS, Email, or package-loading boundaries.
 - Swift adapters should return platform-local DTOs when their callers do not need
   Rust-generated types. Otherwise the generated type leaks across the boundary
-  and the caller still has to import `ActroCore` just to read fields.
+  and the caller still has to import `ActriumCore` just to read fields.
 - Existing Rust-owned helpers should continue to be judged by whether they reduce
   drift across platform protocols or simplify a durable non-UI rule. If a helper
   only turns a small local UI decision into a platform -> Rust -> platform hop,
@@ -982,7 +982,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
    - RN runtime repository SQL, app status constants, message type constants, and
      message progress values are also Rust-owned in `runtime_persistence.rs`.
      Platform code still owns database lifecycle and error behavior. Apple
-     targets share sqlite3 handle/statement glue in the `ActroCore` Swift
+     targets share sqlite3 handle/statement glue in the `ActriumCore` Swift
      package; Rust can own selected typed parameter vectors when their ordering
      and normalization are part of the shared persistence contract.
 
@@ -1019,19 +1019,19 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
 
 ## Migration Order
 
-1. Build `actro-core` as the canonical Rust contract crate.
-2. Bind `actro-core` through UniFFI for native shells; keep JSON/TypeScript
+1. Build `actrium-core` as the canonical Rust contract crate.
+2. Bind `actrium-core` through UniFFI for native shells; keep JSON/TypeScript
    adapters as generated consumers of the same Rust contract rather than a
    separate source of truth.
 3. Replace TS/Swift/Kotlin manifest and bridge validators with calls into
-   `actro-core`.
+   `actrium-core`.
 4. Move shared persistence and vault logic once domain types are consumed.
 5. Keep vault cryptography in its own Rust crate because it has a
    security-sensitive dependency and release surface.
 
-## Current Actro Core FFI Surface
+## Current Actrium Core FFI Surface
 
-`actro-core` now exports a small UniFFI API that is intentionally focused on
+`actrium-core` now exports a small UniFFI API that is intentionally focused on
 high-confidence shared logic:
 
 - `parse_actr_manifest` and `validate_actr_manifest`
@@ -1143,10 +1143,10 @@ stable local adapter:
 
 That adapter re-exports the generated source artifact:
 
-- `packages/actrium/src/runtime-host/generated/actroCoreContract.ts`
+- `packages/actrium/src/runtime-host/generated/actriumCoreContract.ts`
 
 The generator lives in `crates/actrium-core/src/bin/generate-ts-contracts.rs` and
-uses `actro-core` constants/types for:
+uses `actrium-core` constants/types for:
 
 - supported ACTR contract name/version and gate messages
 - `SystemAppType` values and built-in app metadata
@@ -1254,8 +1254,8 @@ contract rules.
 macOS and iOS consume UniFFI-generated Swift through shared local Swift
 Packages instead of copying generated Swift into app targets:
 
-- `packages/actrium-platform/apple/ActroCore`
-- `packages/actrium-platform/apple/ActroVault`
+- `packages/actrium-platform/apple/ActriumCore`
+- `packages/actrium-platform/apple/ActriumVault`
 
 This keeps each UniFFI module's generated helper symbols isolated.
 Each crate's `build-xcframework.sh` produces a multi-platform XCFramework with
@@ -1265,23 +1265,23 @@ binding into the matching package.
 The macOS and iOS `DatabaseManager` implementations keep database path,
 initialization, schema setup order, and platform migrations in the app targets,
 but now delegate low-level SQLite connection/query glue to
-`AppleSQLiteDatabase` in the `ActroCore` Swift package. They still source schema
-statements and default tag seed values from Rust-owned `ActroCore` contracts.
+`AppleSQLiteDatabase` in the `ActriumCore` Swift package. They still source schema
+statements and default tag seed values from Rust-owned `ActriumCore` contracts.
 This makes the database contract a Rust-owned cross-platform primitive while
 keeping Apple sqlite3 binding code shared without moving app storage lifecycle
 into Rust.
 
 The macOS and iOS `Tag` models now source protected system-tag seeds and default
-tag color palettes from `ActroCore`. macOS `AppSourceType` also parses persisted
-raw values and displays source labels through `ActroCore`, while keeping a local
+tag color palettes from `ActriumCore`. macOS `AppSourceType` also parses persisted
+raw values and displays source labels through `ActriumCore`, while keeping a local
 Swift enum shape for Codable and database compatibility.
 
 The macOS and iOS `HistoryRepository` and `TagRepository` implementations now
-also source their repository SQL from `ActroCore` through
+also source their repository SQL from `ActriumCore` through
 `CoreHistoryRepositorySqlInfo` and `CoreTagRepositorySqlInfo`. Rust owns the
 query shape, table/column names, ordering, and insert/update/delete statement
 text for those repositories. Their history item and tag row-shape mapping also
-flows through `ActroCore`, including history title-search parameter
+flows through `ActriumCore`, including history title-search parameter
 normalization and tag `is_system` integer-to-boolean normalization. Apple Swift
 still owns SQLite handles and statement execution through the shared
 `AppleSQLiteDatabase` helper, while app repositories own UUID/URL/Date
@@ -1294,41 +1294,41 @@ logic cannot silently drift. Extract them into a shared Apple source/package onl
 when that removes more complexity than the extra module/model boundary adds.
 
 Apple history/tag writes now also source their ordered bind-parameter vectors
-from `ActroCore` through `CoreSqlValueInfo`. Rust owns the visit/tag insert and
+from `ActriumCore` through `CoreSqlValueInfo`. Rust owns the visit/tag insert and
 tag update parameter order and primitive value normalization; `AppleSQLiteDatabase`
 performs the final sqlite3 binding calls for both app targets.
 
 The macOS-only `BookmarkRepository` and `AppRepository` now follow the same
 boundary through `CoreBookmarkRepositorySqlInfo` and
 `CoreAppRepositorySqlInfo`. Their bookmark and installed-app row-shape mapping
-also flows through `ActroCore`, including bookmark/app search parameter
+also flows through `ActriumCore`, including bookmark/app search parameter
 normalization, installed-app required-field validation, source type
 normalization, and `is_pinned` integer-to-boolean normalization. macOS keeps tag
 lookups, duplicate handling orchestration, SQLite execution, UUID/URL/Date
 conversion, and error behavior local.
 
 macOS bookmark/app writes now also source their ordered bind-parameter vectors
-from `ActroCore`. Rust owns bookmark insert/update parameter order, installed
+from `ActriumCore`. Rust owns bookmark insert/update parameter order, installed
 app insert/update parameter order, boolean normalization, optional field
 normalization, and app source type validation. macOS keeps duplicate handling,
 tag relation writes, SQLite execution, UUID/URL/Date conversion, and error
 behavior local.
 
 The macOS and iOS `BrowserViewModel.readManifestJSON` implementations now use
-`ActroCore.parseActrPackageManifest` for the main ACTR manifest path, including
+`ActriumCore.parseActrPackageManifest` for the main ACTR manifest path, including
 contract gating, app id normalization, permissions, visibility defaults, system
 app type parsing, and theme/background color normalization. Swift still reads
 legacy `layout.leftPanel/rightPanel` script names because that fallback is a
 loader compatibility detail for older packages.
 
-iOS links the same `ActroCore` and `ActroVault` Swift Package products as
-macOS. Its schema/default-tag and ACTR manifest call sites now use `ActroCore`;
+iOS links the same `ActriumCore` and `ActriumVault` Swift Package products as
+macOS. Its schema/default-tag and ACTR manifest call sites now use `ActriumCore`;
 vault call sites remain pending until iOS exposes the vault feature.
 
-`ActroCore` also exposes `createPackageIntegrityPlan`,
+`ActriumCore` also exposes `createPackageIntegrityPlan`,
 `normalizeIntegrityAlgorithm`, `normalizeIntegrityPath`, and
 `normalizeSha256Hex` to Apple clients. The shared
-`AppleActrPackageManifestReader` helper in the `ActroCore` Swift package uses
+`AppleActrPackageManifestReader` helper in the `ActriumCore` Swift package uses
 that Rust-owned integrity plan, keeps Apple file IO and CryptoKit SHA-256
 hashing in one place, and rejects missing, outside-root, or mismatched files.
 ACTR packages without manifest-level integrity metadata remain a no-op, and the
@@ -1342,7 +1342,7 @@ to platform DTOs such as macOS `SystemTabType`. `BrowserViewModel` receives
 platform-local `ActrPackageManifestInfo` and keeps package loading decisions in
 Swift.
 
-iOS runtime bridge call sites have started consuming the same `ActroCore`
+iOS runtime bridge call sites have started consuming the same `ActriumCore`
 bridge contract. `TabModule`, `TabEventEmitter`, and the iOS
 `BrowserViewModel` now use Rust-owned canonical key helpers and simple tab
 payload constructors for tab ids, title/icon/app URL/status fields, unread and
@@ -1375,7 +1375,7 @@ fallbacks, contract metadata, permissions, history-system-app data,
 `additionalProps`, and UIKit layout values that should remain platform-owned.
 
 macOS tab bundle fingerprints now delegate their stable hashing rule to
-`ActroCore.stableContentFingerprint`. The Rust helper owns only the
+`ActriumCore.stableContentFingerprint`. The Rust helper owns only the
 deterministic SHA-256-prefix contract used to name script bundles/process
 groups; macOS still owns `TabContentType`, Web/RN/native routing, XPC service
 selection, and lifecycle orchestration in Swift.
@@ -1416,7 +1416,7 @@ fullscreen enter/exit, tab bookmark changes, and global-search input changes.
 iOS-only tab lifecycle events such as opened/closed/switched/updated remain
 local until another platform or Windows adapter needs the same event surface.
 
-iOS `ActrBridge` now consumes `ActroCore.actrBridgeContract()` for the
+iOS `ActrBridge` now consumes `ActriumCore.actrBridgeContract()` for the
 ActrBridge module name, stream-event name, request/result field names,
 stream callback payload keys, stream type values, stream status literals,
 stream chunk acknowledgement status, attachment upload/result metadata keys, and
@@ -1424,7 +1424,7 @@ promise error codes used by the RN bridge. Swift still owns Actr SDK service
 lifecycle, Protobuf request/response mapping, attachment chunk file IO, prompt
 RPC timeout selection, promise handling, and React Native event emission.
 
-iOS `ActrBridge` also calls `ActroCore.parseActrActorType(raw:)` to validate
+iOS `ActrBridge` also calls `ActriumCore.parseActrActorType(raw:)` to validate
 and split the RN `actorType` wire string before constructing the Swift SDK
 `ActrType`. Rust owns the exact `manufacturer+name` parsing rule and rejects
 ambiguous or empty values; Swift still owns actor system creation, discovery,
@@ -1445,7 +1445,7 @@ dedicated local Gradle module:
 
 - `packages/actrium-platform/android`
 
-The Android app includes it as `:actro-native-kotlin`. Generated Kotlin lives
+The Android app includes it as `:actrium-native-kotlin`. Generated Kotlin lives
 under `src/main/kotlin/uniffi/*`; Android shared libraries live under
 `src/main/jniLibs/{arm64-v8a,x86_64}`. Each Rust crate owns its Android build
 script:
@@ -1453,11 +1453,11 @@ script:
 - `crates/actrium-core/build-android.sh`
 - `crates/actrium-vault/build-android.sh`
 
-The generated UniFFI Kotlin expects `libuniffi_actro_core.so` and
-`libuniffi_actro_vault.so`, so the scripts copy those loader-name aliases next
+The generated UniFFI Kotlin expects `libuniffi_actrium_core.so` and
+`libuniffi_actrium_vault.so`, so the scripts copy those loader-name aliases next
 to the canonical Cargo outputs.
 
-The stable `io.actrium.actro.rust.ActroCore` facade also exposes ACTR integrity
+The stable `io.actrium.app.rust.ActroCore` facade also exposes ACTR integrity
 plan and normalization helpers. Android does not currently have a separate
 native ACTR package loader; ACTR package loading runs through the shared RN
 runtime, which already consumes the Rust-generated TypeScript contract.
@@ -1474,7 +1474,7 @@ path, but future Android native repository screens and Windows adapters should
 reuse the same Rust-owned parameter contract instead of copying Swift/Kotlin/C#
 literal orderings.
 
-Android ASR now delegates pure speech rules to `ActroCore`: language-code to
+Android ASR now delegates pure speech rules to `ActriumCore`: language-code to
 bundled Vosk model directory mapping, model asset/storage path planning, ready
 marker naming, final-result JSON `text` extraction, and partial-result JSON
 `partial` extraction. It also delegates segmented Chinese ASR final-result
@@ -1488,25 +1488,25 @@ RN `SpeechRecognitionService` now also consume the Rust-owned ASR bridge
 contract for module/event names, result payload keys, and promise error codes.
 
 Android `AppStatus` now sources its runtime wire values and exact
-`alive`/`dead` validation from `ActroCore`. The Kotlin enum remains UI-friendly
+`alive`/`dead` validation from `ActriumCore`. The Kotlin enum remains UI-friendly
 for adapter comparisons, while the persisted Room string and RN bridge status
 payloads use Rust-owned runtime status constants.
 
 Android active tab persistence now delegates row/model shape rules to
-`ActroCore` through `ActiveTabInfo` and `ActiveTabRowInfo`. Rust owns the
+`ActriumCore` through `ActiveTabInfo` and `ActiveTabRowInfo`. Rust owns the
 persisted-row to active-tab mapping, status canonicalization and default
 fallback, transient `panelVisible = false` restore behavior, and stable
 `sortOrder` assignment for saved active lists. Android still owns Room
 annotations, DAO execution, coroutine dispatch, and the UI-facing model class.
 
 Android phone and tablet `updateTabInfo` bridge handling now delegates the
-active-tab update patch to `ActroCore` through `RuntimeTabUpdateInfo`. Rust owns
+active-tab update patch to `ActriumCore` through `RuntimeTabUpdateInfo`. Rust owns
 the field-preserving merge semantics and status canonicalization/defaulting for
 RN tab update events. Android still owns extraction from `Map<String, Any?>`,
 state-list mutation, and UI model storage.
 
 Android phone and tablet `openTab` bridge handling now delegates branch
-classification and parameter-filter policy to `ActroCore` through
+classification and parameter-filter policy to `ActriumCore` through
 `RuntimeOpenTabPlanInfo`. Rust owns the normal app, system page, and tablet
 system tab branch kind; canonical `tabId`, `systemAppType`, and
 `tabSystemAppType` key names; and the parameter keys each branch strips before
@@ -1514,7 +1514,7 @@ building root props. Android still owns extraction from `Map<String, Any?>`,
 `Bundle` construction, UUID generation for tablet system tabs without a
 provided id, StateFlow mutation, and UI navigation.
 
-Android's simple runtime bridge payloads now also flow through `ActroCore`.
+Android's simple runtime bridge payloads now also flow through `ActriumCore`.
 Rust owns the canonical key names and field-presence rules for tab unread
 updates, tab bookmark status updates, native-to-runtime bookmark events,
 fullscreen tab events, extension-panel visibility events, and container-size
@@ -1526,7 +1526,7 @@ tab fullscreen enter/exit, tab bookmark changes, extension-panel visibility,
 container-size changes, and global-search input changes. Android-only
 update-bookmark/update-set events remain local.
 
-Android `ActrBridge` now consumes `ActroCore.actrBridgeContract()` for the
+Android `ActrBridge` now consumes `ActriumCore.actrBridgeContract()` for the
 native module name, stream-event name, request/result field names, status
 literals, and promise error codes used by the RN bridge. Android still owns
 ReadableMap extraction, WritableMap construction, coroutine dispatch,
@@ -1534,7 +1534,7 @@ ReadableMap extraction, WritableMap construction, coroutine dispatch,
 also exposes attachment upload/result keys for iOS/RN parity; Android does not
 currently implement the attachment-upload native methods.
 
-Android `ActroDataStreamCallback` now consumes the same contract for stream
+Android `ActriumDataStreamCallback` now consumes the same contract for stream
 event payload keys, metadata entry keys, stream type values, and stream status
 values. Android stream events now emit string `type` values matching iOS and RN
 (`text`/`voice`) instead of Kotlin enum ordinals; Android still owns chunk
@@ -1546,7 +1546,7 @@ dispatch, its current 300-second prompt timeout, protobuf forwarding, and
 `ContextBridge` stream IO.
 
 Android `ActrBridge.initializeService` now calls
-`ActroCore.parseActrActorType()` and passes the resulting
+`ActriumCore.parseActrActorType()` and passes the resulting
 `ActrActorTypeInfo` into `ActrManager`. Rust owns the `manufacturer+name`
 validation and trimming behavior, while Android still owns Actr system
 creation, network monitor setup, discovery, and platform SDK `ActrType`
@@ -1555,22 +1555,22 @@ construction.
 Android Room compile-time persistence constants now come from Rust-generated
 Kotlin source:
 
-- `android/android/app/src/main/java/io/actrium/actro/generated/ActroAndroidPersistenceContract.kt`
+- `android/android/app/src/main/java/io/actrium/app/generated/ActriumAndroidPersistenceContract.kt`
 
 The generator lives in `crates/actrium-core/src/bin/generate-android-contracts.rs`
-and projects `actro-core` constants for the Room database name/version,
+and projects `actrium-core` constants for the Room database name/version,
 `active_list` table name, column names, and DAO query SQL. Android annotations
 still need Kotlin `const val`s, so this generated source is the boundary between
 Rust-owned schema/query contracts and platform-owned Room execution.
 
 Android React Native initial props now delegate tab/root props contract shaping
-to `ActroCore` through `RuntimeTabInfo` and `RuntimeRootPropsInfo`. Rust owns
+to `ActriumCore` through `RuntimeTabInfo` and `RuntimeRootPropsInfo`. Rust owns
 the single-tab root shape, default runtime tab fields, panel visibility
 defaults, current-tab id selection, optional `appUrl` propagation, and the
 shared tab/root props wire keys used by `TabBundleUtils`. Android still owns
 `Bundle` construction and React RootView lifecycle.
 
-Android system page initial props now also flow through `ActroCore` via
+Android system page initial props now also flow through `ActriumCore` via
 `RuntimeSystemRootPropsInfo`. Rust owns canonical system app type values for the
 Android bundle constructors and preserves the existing `tab.systemAppType` plus
 `singleTabMode` shape. Android system-page bundle construction, current-tab id
@@ -1598,12 +1598,12 @@ checks, `WritableMap` construction, and actual event dispatch.
 
 ## Rust Binding Artifact Policy
 
-Use `scripts/actrium/build-actro-rust-bindings.sh` as the repository-level entrypoint for
+Use `scripts/actrium/build-actrium-rust-bindings.sh` as the repository-level entrypoint for
 local or CI regeneration:
 
 - `runtime` regenerates the React Native TypeScript contract module from
-  `actro-core`.
-- `apple` builds `ActroCore` and `ActroVault` XCFrameworks and refreshes their
+  `actrium-core`.
+- `apple` builds `ActriumCore` and `ActriumVault` XCFrameworks and refreshes their
   Swift files in `packages/actrium-platform/apple/*`.
 - `android` builds the generated Kotlin bindings and JNI libraries in
   `packages/actrium-platform/android`, and regenerates the Android app's
@@ -1612,8 +1612,8 @@ local or CI regeneration:
 
 Heavy binary slices are local build artifacts and are ignored by git:
 
-- `crates/actrium-core/ActroCore.xcframework/**/libactro_core.a`
-- `crates/actrium-vault/ActroVault.xcframework/**/libactro_vault.a`
+- `crates/actrium-core/ActriumCore.xcframework/**/libactrium_core.a`
+- `crates/actrium-vault/ActriumVault.xcframework/**/libactrium_vault.a`
 - `packages/actrium-platform/android/src/main/jniLibs/**/*.so`
 
 Lightweight package manifests, generated Swift/Kotlin/TypeScript binding
@@ -1627,10 +1627,10 @@ This keeps large binary blobs out of normal source commits.
 ## Next Rust Candidates
 
 1. **Native repository adapters**
-   - `actro-core` now owns native core schema/default seeds plus RN runtime
+   - `actrium-core` now owns native core schema/default seeds plus RN runtime
      schema, migrations, repository query SQL, sort orders, and runtime state
      constants. Android app status wire values and active-list row/model shape
-     rules also come from `actro-core`; Android RN initial props are now shaped
+     rules also come from `actrium-core`; Android RN initial props are now shaped
      through Rust-owned runtime tab/root props contracts, including system page
      root props. Apple history/tag repository SQL is also Rust-owned through
      `core_history_repository_sql` and `core_tag_repository_sql`; macOS
@@ -1654,7 +1654,7 @@ This keeps large binary blobs out of normal source commits.
      execution adapter is introduced.
 
 2. **Native bridge event payloads**
-   - `actro-core` now owns Android `updateTabInfo` active-tab patch semantics
+   - `actrium-core` now owns Android `updateTabInfo` active-tab patch semantics
      through `runtime_tab_update_from_fields` and
      `active_tab_apply_runtime_update`. `openTab` route classification is
      intentionally local to native bridge adapters after the anti-fragmentation
@@ -1717,7 +1717,7 @@ This keeps large binary blobs out of normal source commits.
      contract is simpler than local code.
 
 3. **ASR post-processing split**
-   - `actro-core` now owns ASR language/model-dir mapping, bundled model
+   - `actrium-core` now owns ASR language/model-dir mapping, bundled model
      asset/storage path planning, ready-marker naming, Vosk final and partial
      JSON result parsing, segmented Chinese final-result punctuation rules, and
      Android ASR native bridge module/event/result/error-code contracts.
@@ -1731,16 +1731,16 @@ This keeps large binary blobs out of normal source commits.
      hopping.
 
 4. **Remaining native package integrity wiring**
-   - `actro-core` now exposes manifest integrity planning through both the RN
+   - `actrium-core` now exposes manifest integrity planning through both the RN
      generated TypeScript contract and native UniFFI. RN plus macOS/iOS now
      execute file hashing against that shared plan. The next step is wiring the
      future Windows loader, plus any future Android native loader if one appears,
      to the same contract. Extract the Apple Swift helper only if more Apple
      loader call sites appear.
 
-## Current Actro Vault FFI Surface
+## Current Actrium Vault FFI Surface
 
-`actro-vault` exports the non-UI vault contract that platform shells can call
+`actrium-vault` exports the non-UI vault contract that platform shells can call
 without taking ownership of cryptographic details:
 
 - `generate_vault_salt_base64`

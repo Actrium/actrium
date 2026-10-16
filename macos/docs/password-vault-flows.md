@@ -3,11 +3,11 @@
 Password Vault module.
 
 Documents:
-- `Actro/Settings/Security/VaultManager.swift` — Core status machine, encryption,Keychain, auto-lock, hint Storage
-- `Actro/Settings/Security/SetupMasterPasswordView.swift` — First setting password UI
-- `Actro/Settings/Security/UnlockVaultView.swift` — Unlock UI(Show) hint)
-- `Actro/Settings/Security/PasswordField.swift` — Reversible password input component + PasswordStrength enum
-- `Actro/Settings/PasswordSettingsView.swift` — Unlocked management page (substance list,Security section(Class change)
+- `Actrium/Settings/Security/VaultManager.swift` — Core status machine, encryption,Keychain, auto-lock, hint Storage
+- `Actrium/Settings/Security/SetupMasterPasswordView.swift` — First setting password UI
+- `Actrium/Settings/Security/UnlockVaultView.swift` — Unlock UI(Show) hint)
+- `Actrium/Settings/Security/PasswordField.swift` — Reversible password input component + PasswordStrength enum
+- `Actrium/Settings/PasswordSettingsView.swift` — Unlocked management page (substance list,Security section(Class change)
 
 ---
 

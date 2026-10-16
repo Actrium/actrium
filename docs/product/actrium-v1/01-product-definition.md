@@ -2,7 +2,7 @@
 
 ## 1. Product vision
 
-Actro To... Actor The program becomes a product form that ordinary users can understand, install, create, open and restore.
+Actrium To... Actor The program becomes a product form that ordinary users can understand, install, create, open and restore.
 
 Users see familiar browsers:
 
@@ -22,7 +22,7 @@ The developers see the bound little program platform:
 
 ## 2. Current issues
 
-If you don't freeze the model first,Actro It is easy to carry both browsers, plugin systems, remote desktops, raw application containers and Actor Multiple semantics such as debuggers, which eventually leads to the following problems:
+If you don't freeze the model first,Actrium It is easy to carry both browsers, plugin systems, remote desktops, raw application containers and Actor Multiple semantics such as debuggers, which eventually leads to the following problems:
 
 - Tab, pages, plugins,Actor, Service and Workspace (b) Life cycle coverage;
 - The front desk code is both clear. Keel Bridge, and it could be bypassed by direct access to the original module or Actor Networks;
@@ -77,11 +77,11 @@ Provide information on process discovery, classification, audit, risk labelling 
 
 ### 4.1 New instance
 
-> As a user, I typed or clicked on one `service` Parameters `actr://` Address,Actro The program should be validated, the permissions displayed and the Workspace Select, create a local Service, and rephrase the address to reconnect. Service - The address.
+> As a user, I typed or clicked on one `service` Parameters `actr://` Address,Actrium The program should be validated, the permissions displayed and the Workspace Select, create a local Service, and rephrase the address to reconnect. Service - The address.
 
 ### 4.2 Connection already exists
 
-> As a user, I opened the tape. `service=<ActorId>` The address is on the page of the article.Actro Only the example can be connected; if it is offline or I have no access, it must be clearly reported and no other one can be built“It looks the same.”Example.
+> As a user, I opened the tape. `service=<ActorId>` The address is on the page of the article.Actrium Only the example can be connected; if it is offline or I have no access, it must be clearly reported and no other one can be built“It looks the same.”Example.
 
 ### 4.3 Close & & Restore
 
@@ -93,11 +93,11 @@ Provide information on process discovery, classification, audit, risk labelling 
 
 ### 4.5 Local development
 
-> As a developer, I can come from the locals. `.actr` File or development HTTPS Origin Load unpublished programs, but Actro It must be clearly marked.“Development sources”and forbids it to pretend to be a validated domain name Publisher.
+> As a developer, I can come from the locals. `.actr` File or development HTTPS Origin Load unpublished programs, but Actrium It must be clearly marked.“Development sources”and forbids it to pretend to be a validated domain name Publisher.
 
 ### 4.6 Realm With Network
 
-> As a user, I don't need to fill in a letter and TURN Address;Actro Based on trusted Realm Profile Select the endpoint and short-term certificate, while showing me the current Realm And connect.
+> As a user, I don't need to fill in a letter and TURN Address;Actrium Based on trusted Realm Profile Select the endpoint and short-term certificate, while showing me the current Realm And connect.
 
 ### 4.7 More Actor Privacy status
 
@@ -176,7 +176,7 @@ Tab, Front Actor, Guest It's all re-established;Workspace Tie, state of operatio
 
 ### 7.4 The exact version is unchangeable
 
-`publisher/program@version` ♪ Once I'm in the middle of Actro Accept, you must be permanently the same. package digest.
+`publisher/program@version` ♪ Once I'm in the middle of Actrium Accept, you must be permanently the same. package digest.
 
 ### 7.5 Default Minimum Capabilities
 
@@ -225,7 +225,7 @@ v1 It's not the sign that's made.“Can show one Keel Page”The following close
 2. User Create Workspace-bound Service.
 3. Addressbar In situs Accessed ActorId the address of the connection.
 4. Front Only callable by a declared contract Service.
-5. Close, restart Actro And then it's the same. Service ActorId Restore.
+5. Close, restart Actrium And then it's the same. Service ActorId Restore.
 6. The same exact version is still valid when running offline.
 7. Service Not online, not authorized,Realm There are different and operational errors when the incompatibility and the package are not compatible.
 8. Guest Excess of authority, time, memory or breakdown does not result in other Tab Business status is damaged.

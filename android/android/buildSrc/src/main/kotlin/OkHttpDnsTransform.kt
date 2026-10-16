@@ -62,7 +62,7 @@ abstract class OkHttpDnsTransform : AsmClassVisitorFactory<OkHttpDnsTransform.Pa
                 // We need to be here. builder Call Up .dns(new CellularDns())
 
                 // 1. NEW CellularDns
-                mv.visitTypeInsn(NEW, "io/actrium/actro/core/CellularDns")
+                mv.visitTypeInsn(NEW, "io/actrium/app/core/CellularDns")
                 // The inn.: [builder, cellularDns]
 
                 // 2. DUP - Copy CellularDns Reference for construction functions
@@ -72,7 +72,7 @@ abstract class OkHttpDnsTransform : AsmClassVisitorFactory<OkHttpDnsTransform.Pa
                 // 3. INVOKESPECIAL - Call CellularDns No Quadratic Functions
                 mv.visitMethodInsn(
                     INVOKESPECIAL,
-                    "io/actrium/actro/core/CellularDns",
+                    "io/actrium/app/core/CellularDns",
                     "<init>",
                     "()V",
                     false

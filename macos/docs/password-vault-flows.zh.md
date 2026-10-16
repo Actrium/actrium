@@ -3,11 +3,11 @@
 Password Vault 模块的完整逻辑流程文档。
 
 涉及文件：
-- `Actro/Settings/Security/VaultManager.swift` — 核心状态机、加密、Keychain、auto-lock、hint 存储
-- `Actro/Settings/Security/SetupMasterPasswordView.swift` — 首次设置密码 UI
-- `Actro/Settings/Security/UnlockVaultView.swift` — 解锁 UI（显示 hint）
-- `Actro/Settings/Security/PasswordField.swift` — 可复用密码输入组件 + PasswordStrength enum
-- `Actro/Settings/PasswordSettingsView.swift` — 已解锁管理页（凭据列表、Security section、改密码）
+- `Actrium/Settings/Security/VaultManager.swift` — 核心状态机、加密、Keychain、auto-lock、hint 存储
+- `Actrium/Settings/Security/SetupMasterPasswordView.swift` — 首次设置密码 UI
+- `Actrium/Settings/Security/UnlockVaultView.swift` — 解锁 UI（显示 hint）
+- `Actrium/Settings/Security/PasswordField.swift` — 可复用密码输入组件 + PasswordStrength enum
+- `Actrium/Settings/PasswordSettingsView.swift` — 已解锁管理页（凭据列表、Security section、改密码）
 
 ---
 

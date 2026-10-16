@@ -103,7 +103,7 @@ New equipment only `42` Can not get folder: %s: %s
 - - Which group of letters?
 - Realm 42 Is it with the other one? Realm 42 Conflict.
 
-Actro v1 And that's why we're asking for the target. ActorId Bring your own authority;indicative format:
+Actrium v1 And that's why we're asking for the target. ActorId Bring your own authority;indicative format:
 
 ```text
 2af01@42~dns:team.example/notes.example:team-notes:1.4.2
@@ -159,9 +159,9 @@ These borders depend on:
 
 It's not for preservation. Service Business status.
 
-## 5. Actro Is there an internal order?
+## 5. Actrium Is there an internal order?
 
-Actro Internal:
+Actrium Internal:
 
 - Actr signaling client;
 - Realm Profile resolver;
@@ -170,7 +170,7 @@ Actro Internal:
 - Local Realm It's... loopback/embedded signaling;
 - Diagnosis and status UI.
 
-Actro Not writing death:
+Actrium Not writing death:
 
 - (a) The only global courier server;
 - (a) Single public interest organizations;
@@ -229,7 +229,7 @@ Credential claims This should include:
 The alternative client certificate contains a separate:
 
 - platform app attestation;
-- Actro Issue Signature/Version;
+- Actrium Issue Signature/Version;
 - device management claim;
 - attestation nonce and the duration.
 
@@ -241,7 +241,7 @@ Service Actor Long-term private key and ActorId Generate in creation/Issued and 
 
 The following operation must be maintained ActorId:
 
-- Actro/Service (a) Relaunching the process;
+- Actrium/Service (a) Relaunching the process;
 - credential Regular renewal;
 - renewal token Re-certification after loss, provided it proves the same long-term key;
 - signaling reconnect;
@@ -292,7 +292,7 @@ The remote certification party decides whether to trust it according to its own 
 3. principal/device Completed login or invitation;
 4. Realm Issuance membership credential;
 5. Device secure storage key/refresh material;
-6. Actro Create Realm record.
+6. Actrium Create Realm record.
 
 ### 7.2 Actor Registration
 

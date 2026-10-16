@@ -1,7 +1,7 @@
 // System app types (built-in apps like chrome:// pages)
-import type { SystemAppType as ActroCoreSystemAppType } from './coreContract';
+import type { SystemAppType as ActriumCoreSystemAppType } from './coreContract';
 
-export type SystemAppType = ActroCoreSystemAppType;
+export type SystemAppType = ActriumCoreSystemAppType;
 
 // History item passed from native
 export type HistoryItemData = {

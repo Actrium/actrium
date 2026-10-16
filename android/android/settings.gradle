@@ -31,15 +31,15 @@ autolinkConfigFile.text = autolinkOutput
 extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   ex.autolinkLibrariesFromConfigFile(autolinkConfigFile)
 }
-rootProject.name = 'actro'
+rootProject.name = 'actrium'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
 
 include ':actr-kotlin'
 project(':actr-kotlin').projectDir = file('../../../../packages/actr-kotlin')
 
-include ':actro-native-kotlin'
-project(':actro-native-kotlin').projectDir = file('../../../../packages/actrium-platform/android')
+include ':actrium-native-kotlin'
+project(':actrium-native-kotlin').projectDir = file('../../../../packages/actrium-platform/android')
 
 include ':react-native-safe-area-context'
 project(':react-native-safe-area-context').projectDir = file('../node_modules/react-native-safe-area-context/android')

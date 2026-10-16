@@ -176,7 +176,7 @@ export const SettingsMain = ({
       {/* Page Title */}
       {hasNativeNavigationBar ? (
         <PhoneNavigationBar
-          title="Actro"
+          title="Actrium"
           showLargeTitle={true}
           style={[
             styles.headerOverlay,
@@ -239,8 +239,8 @@ export const SettingsMain = ({
           />
           <View style={styles.itemDivider} />
           <SettingsItem
-            icon="actro_gray"
-            label={t('actr.settings.aboutActro')}
+            icon="actrium_gray"
+            label={t('actr.settings.aboutActrium')}
             value={appVersionText}
             onPress={onAboutPress}
           />
@@ -255,7 +255,7 @@ export const SettingsMain = ({
         {isBrowserSyncAvailable && (
           <View style={styles.groupCard}>
             <SettingsItem
-              icon="actro_gray"
+              icon="actrium_gray"
               label={t('actr.settings.browserSync')}
               value={browserSyncStatusText}
               showChevron={false}

@@ -6,7 +6,7 @@
     android:layout_height="54dp"
     android:clipChildren="false">
 
-    <io.actrium.actro.tablet.ReverseCornerView
+    <io.actrium.app.tablet.ReverseCornerView
         android:id="@+id/rcvBottomRight"
         android:layout_width="20dp"
         android:layout_height="20dp"

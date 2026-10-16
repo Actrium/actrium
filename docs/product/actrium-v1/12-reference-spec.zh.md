@@ -146,60 +146,60 @@ size = 1832000
 description = "Workspace-bound team notes"
 license = "Apache-2.0"
 
-[actro]
+[actrium]
 schema_version = 1
-min_actro_version = "1.0.0"
+min_actrium_version = "1.0.0"
 front_host_api = "^1.0"
 service_host_api = "^1.0"
 
-[actro.front]
+[actrium.front]
 guest_runtime = "keel-js"
 guest_entry = "ui/guest.bundle.js"
 keel_api = "^1.0"
 contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:<digest>"
 
-[actro.service]
+[actrium.service]
 primary_contract = "proto/primary-service.proto"
 protocol_fingerprint = "sha256:<digest>"
 
-[actro.service.workspace]
+[actrium.service.workspace]
 requirement = "required"
 provisioning = "user-selected"
 access = "read-write"
 providers = ["managed-store", "local-folder", "cloud-drive"]
 lease = "exclusive-writer"
 
-[actro.session]
+[actrium.session]
 attachment_policy = "exclusive"
 lease_seconds = 45
 heartbeat_seconds = 15
 
-[actro.privacy]
+[actrium.privacy]
 schema_version = 1
 data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
-[[actro.privacy.actor_egress]]
+[[actrium.privacy.actor_egress]]
 actr_type = "notes.example:index-worker:1.4.2"
 required = false
 data_classes = ["private"]
 
-[actro.permissions.front]
+[actrium.permissions.front]
 capabilities = [
   "primary-service",
   "host:clipboard.write",
   "host:notifications"
 ]
 
-[actro.permissions.service]
+[actrium.permissions.service]
 capabilities = [
   "workspace:read-write",
   "net:https://api.notes.example",
   "actor:call:notes.example:index-worker:1"
 ]
 
-[actro.components]
+[actrium.components]
 allow = [
   "View",
   "Text",
@@ -210,14 +210,14 @@ allow = [
   "ImageAsset"
 ]
 
-[actro.resources.front]
+[actrium.resources.front]
 heap_bytes = 67108864
 js_turn_timeout_ms = 100
 max_render_nodes = 10000
 max_batch_ops = 5000
 max_rpc_concurrency = 32
 
-[actro.resources.service]
+[actrium.resources.service]
 memory_bytes = 268435456
 max_mailbox = 4096
 max_rpc_concurrency = 128
@@ -245,12 +245,12 @@ path = "manifest.lock.toml"
 hash = "<sha256>"
 ```
 
-正式 schema 需要决定如何让 Actr 基础 manifest 保持向后兼容，并确保 `[actro]` 字段也位于 manifest signature 覆盖范围内。
+正式 schema 需要决定如何让 Actr 基础 manifest 保持向后兼容，并确保 `[actrium]` 字段也位于 manifest signature 覆盖范围内。
 
 Native Capsule workload 另需：
 
 ```toml
-[actro.native_capsule]
+[actrium.native_capsule]
 profile = "privacy-closed-v1"
 network = "broker-only"
 workspace = "broker-only"
@@ -305,7 +305,7 @@ ipc = ["actr.capability.v1"]
 }
 ```
 
-Actro 不能只信这个文件；安装分析结果必须与它一致。
+Actrium 不能只信这个文件；安装分析结果必须与它一致。
 
 ## 6. Realm Profile
 
@@ -489,7 +489,7 @@ Guest 只能看到最小化的用户可见摘要：
   "privacy": {
     "color": "green",
     "ready": true,
-    "policyId": "actro.consumer.default",
+    "policyId": "actrium.consumer.default",
     "workloadKind": "wasm-component",
     "applicationStateId": "…",
     "expiresAt": "2026-07-29T12:01:15Z"
@@ -736,15 +736,15 @@ closed
 
 | 术语 | 定义 |
 |---|---|
-| Actro | Actrium 程序浏览器与宿主平台 |
+| Actrium | Actrium 程序浏览器与宿主平台 |
 | Actr | Actor 通信、身份、发现和 workload runtime 框架 |
 | Keel | 沙箱化动态原生 UI 的 Host/Guest runtime |
 | Program | Publisher 命名空间内的程序 |
 | Program Release | `publisher/program@version` 对应的不可变包 |
 | Publisher | 以规范化 DNS 域名标识的发布者 |
-| `.actr` package | Actr 签名 workload 包；在 Actro 中同时携带 Service 与 Keel Guest 资源 |
+| `.actr` package | Actr 签名 workload 包；在 Actrium 中同时携带 Service 与 Keel Guest 资源 |
 | Tab | 用户交互容器 |
-| Front Actor | 每个 resident app Tab 的短生命周期、Actro 固定 Native workload Actor |
+| Front Actor | 每个 resident app Tab 的短生命周期、Actrium 固定 Native workload Actor |
 | Keel Guest | Publisher 唯一可定制的前台代码 |
 | Primary Service | Front 唯一绑定的有状态业务 Actor |
 | Auxiliary Actor | 由 Primary Service 编排的后台 Actor |

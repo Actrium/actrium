@@ -2,10 +2,10 @@
 
 ## 1. Information architecture
 
-Actro The primary product sector consists of five components:
+Actrium The primary product sector consists of five components:
 
 ```text
-Actro Shell
+Actrium Shell
 ├── Tab With Address Bar
 ├── Program Catalog(Processor library)
 ├── Service Inventory(Examples repository)
@@ -72,7 +72,7 @@ Just... `Ready` And apply the conclusion to `CONTROLLED` . Yellow does not equal
 
 ## 3. First Start
 
-Actro The following configurations were completed for the first start:
+Actrium The following configurations were completed for the first start:
 
 1. Yes. OS Create a device key in a secure storage;
 2. Create a Belt `local:<installation-id>` authority Local Realm;
@@ -81,20 +81,20 @@ Actro The following configurations were completed for the first start:
 5. Presentation Program Catalog and Service Inventory (b) Distinction;
 6. Default to close anonymous telemetry and development mode.
 
-Local Realm Allow offline running of the machine Front with ServiceBut it's... URI Just in there. Actro Installs a parseable device. Cross-device connection requires a first handing Service Move to Belt DNS authority Networking of the Internet Realm.
+Local Realm Allow offline running of the machine Front with ServiceBut it's... URI Just in there. Actrium Installs a parseable device. Cross-device connection requires a first handing Service Move to Belt DNS authority Networking of the Internet Realm.
 
 ## 4. Installer
 
 ### 4.1 From Marketplace
 
 1. User-opening program details;
-2. Actro Show Publisher, version,digest, powers,Workspace (a) Modes and market audit status;
-3. Actro From Publisher HTTPS Inlet parsing and downloading `.actr`;
+2. Actrium Show Publisher, version,digest, powers,Workspace (a) Modes and market audit status;
+3. Actrium From Publisher HTTPS Inlet parsing and downloading `.actr`;
 4. Verify HTTPS, Publisher key, bag signature,digestCompatibility and compression restrictions;
 5. Records Program Release;
 6. Cache program only, not automatically created Service, unless the user clicks“Create instance”.
 
-Marketplace The downloaded address returned is not the ultimate source of trust;Actro We have to go back. Publisher Valid metadata or verifications Publisher Signature and digest.
+Marketplace The downloaded address returned is not the ultimate source of trust;Actrium We have to go back. Publisher Valid metadata or verifications Publisher Signature and digest.
 
 ### 4.2 From `actr://` URI
 
@@ -122,7 +122,7 @@ Local `.actr` Package:
 ```mermaid
 sequenceDiagram
     actor U as User
-    participant A as Actro Shell
+    participant A as Actrium Shell
     participant P as Package Resolver
     participant M as Service Manager
     participant S as Service Actor
@@ -207,7 +207,7 @@ Page display:
 
 ## 7. Tab Behaviour
 
-Actro UI There are two types of them. Tab:
+Actrium UI There are two types of them. Tab:
 
 - **Shell Navigation Tab**: Install, create confirmation, error details,Program and Service managing pages;it does not represent application running, so it can not be Front Actor.
 - **Resident App Tab**: in loading, running or suspended application page; one must be present at any given time live Front ActorAnd... Front Completed Attach There's one right after. Primary Service.
@@ -267,7 +267,7 @@ Guest Collapse cannot automatically restart Service.Service The crash shows a se
 
 ### 8.1 Two types of collection
 
-Actro A clear distinction must be made between:
+Actrium A clear distinction must be made between:
 
 - **Program Template Collection**: Not included `service`, each time you open it, you create a new instance.
 - **Example Collection**: Ham `service`Back to the same Service.
@@ -394,7 +394,7 @@ Development mode does not change official URI and official Publisher Rule of tru
 
 ## 14. Realm, equipment and identity experience
 
-Actro The identity page supports at least:
+Actrium The identity page supports at least:
 
 - Add Realm: Login, equipment registration and registration through an organizational domain name or one-time invitation Profile (b) Fixed;
 - Re-accreditation:credential Pause new ones when due or when asked by the administrator Attach, preserve local data and guide recovery;
@@ -433,18 +433,18 @@ Only copy instance URI No change. ACL. Expire, used, revoked and Realm The misma
 - Front The interactive capabilities of cameras, microphones, clipboard, etc., are requested on a first-time basis, optional“This session only”;
 - Administrator policy You can refuse or restrain in advance. scopeBut not in UI Concealed as user consent;
 - Undo duration grant I'm not sure.Host It has to be terminated immediately. capability handle; and to end its continued use;
-- Far Service The host-level privileges are managed by remote host(s); local Actro Only the result of the signed declaration can be shown, and no other host can be modified for the user OS Permissions.
+- Far Service The host-level privileges are managed by remote host(s); local Actrium Only the result of the signed declaration can be shown, and no other host can be modified for the user OS Permissions.
 
 ## 17. Far Service Sources and management of borders
 
-v1 It's... Create Intent Only in the current Actro Supported Local Service Host Up. Faraway Service Access through: Inventory:
+v1 It's... Create Intent Only in the current Actrium Supported Local Service Host Up. Faraway Service Access through: Inventory:
 
 - Opened already Attach URI;
 - Accept Service (a) Invitations;
 - Encryption from the same user Inventory Sync the example address;
 - Vivid import of signed Service Metadata.
 
-Actro Only a separate host at the far end management capability , and only if you are able to start, stop, migrate or clear remotely Service;or only provided Attach, request authorization and view the verifiable status.iOS/Android Go, go, go!“Long-term online”The common server host and cloud movement does not belong to the mobile side. Actro v1 Client range.
+Actrium Only a separate host at the far end management capability , and only if you are able to start, stop, migrate or clear remotely Service;or only provided Attach, request authorization and view the verifiable status.iOS/Android Go, go, go!“Long-term online”The common server host and cloud movement does not belong to the mobile side. Actrium v1 Client range.
 
 ## 18. Guest Navigation syntax
 
@@ -462,7 +462,7 @@ Guest Can't just rewrite it. Shell Address Bar, only callable `host:navigate`:
 The official tool chain should provide a repetitious process:
 
 ```text
-actro init
+actrium init
 → Prepared Keel Guest, Service Component with contract
 → build
 → validate(schema, capability, hash)

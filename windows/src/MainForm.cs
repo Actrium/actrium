@@ -7,7 +7,7 @@ using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class MainForm : Form
 {
@@ -1598,7 +1598,7 @@ internal sealed class MainForm : Form
         tab.Address = NavigationPolicy.HomeAddress;
         tab.Title = BrowserHomeDocumentPolicy.Title;
         tab.IsShowingErrorPage = false;
-        NavigateGeneratedDocument(tab, BrowserHomeDocumentPolicy.BuildDocument(ActroCore.LoadStatus()));
+        NavigateGeneratedDocument(tab, BrowserHomeDocumentPolicy.BuildDocument(ActriumCore.LoadStatus()));
         SyncActiveTabUi();
         SyncSidebar();
     }
@@ -2806,7 +2806,7 @@ internal sealed class MainForm : Form
     private HostBridgeActions CreateHostBridgeActions()
     {
         return new HostBridgeActions(
-            ActroCore.LoadStatus,
+            ActriumCore.LoadStatus,
             OpenTabFromHostAsync,
             CloseTabFromHostAsync,
             SelectTabFromHostAsync,

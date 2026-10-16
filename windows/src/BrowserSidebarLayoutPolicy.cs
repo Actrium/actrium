@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Pure geometry rules for the vertical tab sidebar: its width is clamped

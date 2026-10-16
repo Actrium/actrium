@@ -23,7 +23,7 @@
     "networkCheckInfo": "Erreur réseau, veuillez vérifier votre connexion"
   },
   "actr": {
-    "appTitle": "Actro ActroRuntime",
+    "appTitle": "Actrium ActriumRuntime",
     "input": {
       "placeholder": "Veuillez saisir",
       "holdToSpeak": "Maintenir pour parler",
@@ -104,7 +104,7 @@
       "shareSaveFailed": "Échec de l'enregistrement de l'image. Veuillez réessayer.",
       "shareSavePermissionDeniedTitle": "Autorisation insuffisante",
       "shareSavePermissionDenied": "Aucun droit d'accès.",
-      "shareFooter": "Une carte Q&R de Actro",
+      "shareFooter": "Une carte Q&R de Actrium",
       "shareAiFooter": "Cette réponse a été générée par l'IA",
       "shareAiDisclaimer": "Le contenu est à titre indicatif seulement. Veuillez l'examiner attentivement.",
       "submit": "Soumettre",
@@ -181,7 +181,7 @@
       "realtime": "En temps réel",
       "parentChild": "Loisirs en famille",
       "culture": "Exploration culturelle",
-      "officialService": "Service client Actro",
+      "officialService": "Service client Actrium",
       "scanHint": "Scanner le QR code de l'application"
     },
     "auth": {
@@ -254,7 +254,7 @@
       "deleteAccount": "Supprimer le compte",
       "deleteAccountConfirm": "Confirmer la suppression du compte ? Cette action est irréversible et toutes les données du compte seront définitivement supprimées.",
       "logoutAccount": "Déconnexion du compte",
-      "aboutActro": "À propos d'Actro",
+      "aboutActrium": "À propos d'Actrium",
       "userAgreement": "Accord de l'Utilisateur",
       "privacyPolicy": "Politique de Confidentialité",
       "icp": "Enregistrement ICP",

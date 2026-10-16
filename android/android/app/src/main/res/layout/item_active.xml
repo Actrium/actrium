@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<io.actrium.actro.view.RoundedCornerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<io.actrium.app.view.RoundedCornerLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/fl_active"
     android:layout_width="match_parent"
@@ -32,7 +32,7 @@
             android:layout_width="32dp"
             android:layout_height="32dp">
 
-            <io.actrium.actro.view.RoundedCornerLayout
+            <io.actrium.app.view.RoundedCornerLayout
                 android:layout_width="32dp"
                 android:layout_height="32dp"
                 app:cornerRadius="16dp">
@@ -43,7 +43,7 @@
                     android:layout_height="match_parent"
                     android:background="@drawable/app_icon_bg"
                     android:scaleType="centerCrop" />
-            </io.actrium.actro.view.RoundedCornerLayout>
+            </io.actrium.app.view.RoundedCornerLayout>
             <!-- Unread Marked Circle Points -->
             <View
                 android:id="@+id/vUnreadBadge"
@@ -86,4 +86,4 @@
             android:src="@drawable/ic_delete"
             app:tint="@color/icon_1" />
     </LinearLayout>
-</io.actrium.actro.view.RoundedCornerLayout>
+</io.actrium.app.view.RoundedCornerLayout>

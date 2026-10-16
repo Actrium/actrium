@@ -1,4 +1,4 @@
-# Actro Multi-Process Rendering - 阶段性总结
+# Actrium Multi-Process Rendering - 阶段性总结
 
 > 历史实验记录。现行路径见 [Renderer-Process-Pool.md](Renderer-Process-Pool.md)。
 >
@@ -33,7 +33,7 @@ ViewBridge 是 Apple 内部用于跨进程视图嵌入的私有框架。macOS �
 **实现思路**：
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Main Process (Actro)                    │
+│                     Main Process (Actrium)                    │
 │  ┌─────────────────┐    ┌─────────────────────────────────┐ │
 │  │   TabManager    │───▶│        NSRemoteView             │ │
 │  │                 │    │  (displays remote view via XPC) │ │
@@ -59,7 +59,7 @@ ViewBridge 是 Apple 内部用于跨进程视图嵌入的私有框架。macOS �
 4. 与现有 XPC 架构的集成
 
 **预期改动文件**：
-- 新增 `Actro/MultiProcess/RemoteViewHost.swift` - NSRemoteView 封装
+- 新增 `Actrium/MultiProcess/RemoteViewHost.swift` - NSRemoteView 封装
 - 修改 XPC 服务 Info.plist - 添加 ViewBridge 配置
 - 可能需要创建新的 XPC 服务 target
 
@@ -67,7 +67,7 @@ ViewBridge 是 Apple 内部用于跨进程视图嵌入的私有框架。macOS �
 
 ## 目标
 
-实现 Actro macOS 应用的多进程架构，将 React Native 渲染放在独立进程中执行，主进程通过 IPC 显示渲染结果。
+实现 Actrium macOS 应用的多进程架构，将 React Native 渲染放在独立进程中执行，主进程通过 IPC 显示渲染结果。
 
 **核心诉求：**
 - 进程隔离：React Native 崩溃不影响主进程

@@ -91,7 +91,7 @@
 
 - Actr 持有跨实现的 Actor 主体、能力效果、通道、保障图和聚合规范；
 - Keel 持有 Guest / Host 能力 Profile 与测试；
-- Actro 持有 Tab 映射、平台 TCB 和用户交互；
+- Actrium 持有 Tab 映射、平台 TCB 和用户交互；
 - Realm、Workspace 和机密计算服务各自持有部署 Profile 与现场证据。
 
 本目录先作为统一结论入口。拆分时必须保留稳定要求 ID 和交叉链接，避免再出现两套并行语义。

@@ -41,7 +41,7 @@ Subsystem/keel-guest-examples/**/unified-app.js
 *.temp
 Subsystem/bun.lock
 Subsystem/package-lock.json
-Packages/ActroIPC/.build/
+Packages/ActriumIPC/.build/
 
 # Code coverage
 *.profraw

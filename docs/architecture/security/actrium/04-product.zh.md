@@ -1,6 +1,6 @@
-# Actro 产品标记与交互
+# Actrium 产品标记与交互
 
-本章只规定 Actro 如何把通用模型呈现给用户，不给通用 Actor 图增加根、终端或 Edge 特例。
+本章只规定 Actrium 如何把通用模型呈现给用户，不给通用 Actor 图增加根、终端或 Edge 特例。
 
 成熟度：`Specified`。
 
@@ -8,11 +8,11 @@
 
 每个 Tab 通常绑定一个 Front Actor。Front Actor 是产品入口，不是安全根。
 
-Actro 必须从它出发找到所属的完整无根应用图，显示该图当前 `ApplicationAssurance`，而不是只显示前台节点。依赖当前断线、空闲或没有任务，不能把它移出图。多个 Tab 落到同一连通图时，显示同一份应用状态。图结构变化后停止沿用旧状态。
+Actrium 必须从它出发找到所属的完整无根应用图，显示该图当前 `ApplicationAssurance`，而不是只显示前台节点。依赖当前断线、空闲或没有任务，不能把它移出图。多个 Tab 落到同一连通图时，显示同一份应用状态。图结构变化后停止沿用旧状态。
 
 Tab 可以提供逐层查看 Actor、效果、目标、证据和依据的导航，但不改变底层计算。
 
-Actro Tab 若以 Native Actor 承载固定 Keel Host 加用户可编写的 Keel Guest，最终有效能力声明必须覆盖整个 Tab 进程。Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。不能只评估 Guest。
+Actrium Tab 若以 Native Actor 承载固定 Keel Host 加用户可编写的 Keel Guest，最终有效能力声明必须覆盖整个 Tab 进程。Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。不能只评估 Guest。
 
 ## 2. 三色
 
@@ -80,17 +80,17 @@ Host 应提供真实内容采样，帮助核对开发者说明。用户或其选
 
 | ID | 要求 |
 | --- | --- |
-| `ACTRO-SEC-UX-001` | Tab 显示 Front Actor 所属完整应用图的当前保障 |
-| `ACTRO-SEC-UX-002` | Front Actor 只做产品定位，不做通用图根 |
-| `ACTRO-SEC-UX-003` | 顶层只用本章定义的绿 / 黄 / 红 |
-| `ACTRO-SEC-UX-004` | 风险接受不改颜色 |
-| `ACTRO-SEC-UX-005` | 用户配置行为规则，不能直接覆盖计算结果 |
-| `ACTRO-SEC-UX-006` | 无法识别的行为不得命中可信规则 |
-| `ACTRO-SEC-UX-007` | 输入授权与隐私标记分开呈现 |
-| `ACTRO-SEC-UX-008` | 结论变弱时必须解释并取得风险接受后再恢复相关工作 |
-| `ACTRO-SEC-UX-009` | 无效 Actr 通道不得提供用户绕过 |
-| `ACTRO-SEC-UX-010` | 用户必须能查看原因、证据、作用范围并撤销信任或风险接受 |
-| `ACTRO-SEC-UX-011` | 绿色只解释为当前就绪切面，不得写成「曾经存在一个全图同时世界」 |
-| `ACTRO-SEC-UX-012` | 不得提供在同一评定上下文中挑选较绿验证者的交互 |
-| `ACTRO-SEC-UX-013` | 配置或能力变化后，须能说明新声明只作用于新数据 |
-| `ACTRO-SEC-UX-014` | 信任非 Actor 目标的交互必须呈现为「认可数据离开保障范围」，不得表述为该目标已被验证 |
+| `ACTRIUM-SEC-UX-001` | Tab 显示 Front Actor 所属完整应用图的当前保障 |
+| `ACTRIUM-SEC-UX-002` | Front Actor 只做产品定位，不做通用图根 |
+| `ACTRIUM-SEC-UX-003` | 顶层只用本章定义的绿 / 黄 / 红 |
+| `ACTRIUM-SEC-UX-004` | 风险接受不改颜色 |
+| `ACTRIUM-SEC-UX-005` | 用户配置行为规则，不能直接覆盖计算结果 |
+| `ACTRIUM-SEC-UX-006` | 无法识别的行为不得命中可信规则 |
+| `ACTRIUM-SEC-UX-007` | 输入授权与隐私标记分开呈现 |
+| `ACTRIUM-SEC-UX-008` | 结论变弱时必须解释并取得风险接受后再恢复相关工作 |
+| `ACTRIUM-SEC-UX-009` | 无效 Actr 通道不得提供用户绕过 |
+| `ACTRIUM-SEC-UX-010` | 用户必须能查看原因、证据、作用范围并撤销信任或风险接受 |
+| `ACTRIUM-SEC-UX-011` | 绿色只解释为当前就绪切面，不得写成「曾经存在一个全图同时世界」 |
+| `ACTRIUM-SEC-UX-012` | 不得提供在同一评定上下文中挑选较绿验证者的交互 |
+| `ACTRIUM-SEC-UX-013` | 配置或能力变化后，须能说明新声明只作用于新数据 |
+| `ACTRIUM-SEC-UX-014` | 信任非 Actor 目标的交互必须呈现为「认可数据离开保障范围」，不得表述为该目标已被验证 |

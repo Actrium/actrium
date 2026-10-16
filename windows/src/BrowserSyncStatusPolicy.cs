@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 // Renders the scheduler's browser sync status JSON as the one-line status
 // message. All display wording lives in BrowserStrings (status.sync.*);

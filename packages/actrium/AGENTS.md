@@ -1,11 +1,11 @@
-# Actro Runtime (ActroRuntime) Operational nuclear architecture
+# Actrium Runtime (ActriumRuntime) Operational nuclear architecture
 
-`ActroRuntime` It is the cross-platform business logic centre of the project. It exists as a stand-alone warehouse and does not depend on a specific project. Native UI, but by standard. Bridge Communication with the host shell.
+`ActriumRuntime` It is the cross-platform business logic centre of the project. It exists as a stand-alone warehouse and does not depend on a specific project. Native UI, but by standard. Bridge Communication with the host shell.
 
 ## 1. Core module division
 
 ```
-ActroRuntime/src/
+ActriumRuntime/src/
 ├── TabRouter.tsx          # Top route route: to be distributed RuntimeApp (Plugin) or SystemApp (Internal Functions)
 ├── runtime-host/             # Core Host Logic
 │   ├── RuntimeApp.tsx        #   More Tab Manage and global monitoring of delivery

@@ -1,5 +1,5 @@
 {
-  "name": "actro-android",
+  "name": "actrium-android",
   "version": "0.0.1",
   "private": true,
   "scripts": {
@@ -10,7 +10,7 @@
     "postinstall": "patch-package",
     "start": "react-native start",
     "dev": "node scripts/dev-start.js",
-    "actro-runtime": "ln -sfn ../packages/actrium actro-runtime",
+    "actrium-runtime": "ln -sfn ../packages/actrium actrium-runtime",
     "test": "jest --passWithNoTests"
   },
   "dependencies": {
