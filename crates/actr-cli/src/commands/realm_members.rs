@@ -576,6 +576,41 @@ mod tests {
 
     const REALM: &str = "k7m2q9xh@acme.com";
 
+    mod e2e_documents {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/e2e/actr/package-runtime-echo/fixtures/documents.rs"
+        ));
+    }
+
+    /// Drives the real Profile resolver and join handler against the running
+    /// E2E Issuer. Only public-document transport uses the virtual-domain map.
+    #[tokio::test]
+    #[ignore = "started by package-runtime-echo/lib/realm-scenarios.sh"]
+    async fn realm_runtime_join_fixture() -> Result<()> {
+        let request: Value =
+            serde_json::from_slice(&std::fs::read(std::env::var("ACTR_REALM_E2E_REQUEST")?)?)?;
+        let invite_path = request["invite_file"].as_str().context("invite_file")?;
+        let invite_text = std::fs::read_to_string(invite_path)?;
+        let invite = RealmInvite::decode(&invite_text)?;
+        let profile =
+            realm_profile(&invite.realm, invite.profile.as_ref(), e2e_documents::fetch).await?;
+        let args = JoinArgs {
+            invite: invite_text,
+            output: request["key_file"].as_str().context("key_file")?.into(),
+            issuer: None,
+            provider: None,
+            label: Some(request["label"].as_str().context("label")?.into()),
+            force: false,
+        };
+        let joined = join_with(&args, e2e_documents::fetch).await?;
+        std::fs::write(
+            request["result_file"].as_str().context("result_file")?,
+            serde_json::to_vec(&serde_json::json!({ "joined": joined, "profile": profile }))?,
+        )?;
+        Ok(())
+    }
+
     /// A membership endpoint that verifies `join` with its own key and any
     /// other request with the key that joined, and echoes the request.
     async fn serve() -> String {

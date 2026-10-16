@@ -108,14 +108,21 @@ impl IceService for TurnService {
             .relay_port_bounds()
             .map_err(|error| anyhow::anyhow!(error))?;
 
+        // The disposable Realm E2E relays between private addresses. This
+        // exception does not exist in production binaries or ordinary tests.
+        #[cfg(test)]
+        let allow_private_relay_peers = std::env::var("ACTR_PACKAGE_RUNTIME_FIXTURE").as_deref()
+            == Ok("1")
+            && std::env::var_os("ACTR_REALM_E2E_DOCUMENTS").is_some();
+        #[cfg(not(test))]
+        let allow_private_relay_peers = false;
         let turn_server = match turn::create_turn_server(
             socket.clone(),
             &self.config.bind.ice.advertised_ip,
             &realm,
             relay_port_range,
             auth_handler,
-            // Production relay must never reach loopback/private/metadata peers.
-            false,
+            allow_private_relay_peers,
         )
         .await
         {

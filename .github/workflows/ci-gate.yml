@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop, "release-*"]
   pull_request:
-    branches: [main, "release-*"]
+    branches: [main, "release-*", "feat/realm-multi-instance"]
   workflow_dispatch:
     inputs:
       full_run:
@@ -245,7 +245,7 @@ jobs:
     needs: [determine, cli_web_assets]
     if: needs.determine.outputs.e2e_package_runtime == 'true'
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 45
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
@@ -288,6 +288,8 @@ jobs:
           bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Run package runtime echo e2e (PR gate, MODE=published)
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
+      - name: Run provider and external domain Realm runtime E2E
+        run: bash tests/e2e/actr/package-runtime-echo/realm-matrix.sh
 
   audit:
     name: Dependency Audit
