@@ -47,7 +47,7 @@ fn top_level_has_expected_commands() {
         );
     }
     // Resource groups
-    for name in ["deps", "pkg", "registry", "dlq", "realm"] {
+    for name in ["deps", "pkg", "registry", "dlq", "realm", "publisher"] {
         assert!(names.contains(&name.to_string()), "missing group `{name}`");
     }
     // Meta
