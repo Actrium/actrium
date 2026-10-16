@@ -508,12 +508,13 @@ impl WirePool {
     pub(crate) async fn has_live_candidate(&self, conn_types: &[ConnType]) -> bool {
         let conns = self.connections.read().await;
 
-        conn_types.iter().any(|conn_type| {
-            matches!(
-                &conns[conn_type.as_index()],
-                Some(WireStatus::Ready(_)) | Some(WireStatus::Connecting(_))
-            )
-        })
+        conn_types
+            .iter()
+            .any(|conn_type| match &conns[conn_type.as_index()] {
+                Some(WireStatus::Ready(conn)) => !conn.secure_channel_state().is_terminal(),
+                Some(WireStatus::Connecting(_)) => true,
+                _ => false,
+            })
     }
 
     /// Mark a connection as closed/failed

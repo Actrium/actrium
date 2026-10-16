@@ -49,43 +49,6 @@ async fn test_has_dest() {
     assert!(!mgr.has_dest(&dest).await);
 }
 
-#[tokio::test]
-async fn close_transport_if_current_replaced_instance_does_not_mark_closing() {
-    let local_id = ActrId::default();
-    let factory = create_test_factory();
-    let mgr = PeerTransport::new(local_id, factory);
-    let dest = Dest::host();
-
-    let old_transport = Arc::new(
-        DestTransport::new(dest.clone(), vec![])
-            .await
-            .expect("old transport should be created"),
-    );
-    let current_transport = Arc::new(
-        DestTransport::new(dest.clone(), vec![])
-            .await
-            .expect("current transport should be created"),
-    );
-    let old_ref = DestTransportRef::new(&old_transport, None);
-
-    mgr.transports
-        .write()
-        .await
-        .insert(dest.clone(), DestState::Connected(current_transport));
-
-    let closed = mgr
-        .close_transport_if_current(&dest, &old_ref)
-        .await
-        .expect("stale instance close should not fail");
-
-    assert!(!closed);
-    assert_eq!(mgr.dest_count().await, 1);
-    assert!(
-        !mgr.is_closing(&dest).await,
-        "stale no-op close must not mark the replacement transport closing"
-    );
-}
-
 // ── transport lifecycle and retry behavior ──────────────────────────────────
 
 /// Minimal wire that succeeds on `connect` and counts `close` calls.
@@ -1075,7 +1038,7 @@ async fn all_failed_before_first_ready_evicts_destination() {
     assert_eq!(wire.close_count.load(Ordering::SeqCst), 1);
 }
 
-// ── SentTransportSlot: selection-time recording for timeout reclaim ──
+// ── SentTransportSlot: selection-time recording ──
 
 /// Lane whose send never resolves — models a half-open wire (no FIN).
 #[derive(Debug)]
@@ -1131,10 +1094,8 @@ impl WireBuilder for HangingWireFactory {
     }
 }
 
-/// A wire send that never resolves must still leave the selected transport in
-/// the slot: that is what lets a tell/stream deadline reclaim the exact
-/// instance through the guarded close instead of an unguarded
-/// `close_transport`.
+/// A wire send that never resolves must still record transport selection
+/// before the pending send is cancelled.
 #[tokio::test]
 async fn send_with_identity_records_transport_before_wire_send_resolves() {
     let manager = Arc::new(PeerTransport::new(
@@ -1174,22 +1135,11 @@ async fn send_with_identity_records_transport_before_wire_send_resolves() {
         recorded.wire_identity.is_none(),
         "a send that never resolved records no wire identity"
     );
-    let recorded_transport = recorded
-        .transport
-        .upgrade()
-        .expect("recorded transport still alive in the manager");
-    let mapped = manager
-        .get_or_create_transport(&dest)
-        .await
-        .expect("destination transport exists");
-    assert!(
-        Arc::ptr_eq(&mapped, &recorded_transport),
-        "the recorded instance is the one the manager still maps"
-    );
+    assert_eq!(manager.dest_count().await, 1);
 }
 
-/// After a successful send the slot carries the wire identity, so the
-/// request/response reclaim keeps its session-guarded precision.
+/// After a successful send the slot carries the wire identity, preserving
+/// session-specific request/response correlation.
 #[tokio::test]
 async fn send_with_identity_records_wire_identity_after_send_resolves() {
     let identity = WireIdentity::WebSocket {

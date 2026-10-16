@@ -1,5 +1,6 @@
 use super::*;
 use crate::transport::HostTransport;
+use actr_protocol::Classify;
 
 fn gate() -> HostGate {
     HostGate::new(Arc::new(HostTransport::new()))
@@ -23,7 +24,11 @@ async fn send_request_with_type_reliable_times_out_without_response() {
         .send_request_with_type(&ActrId::default(), PayloadType::RpcReliable, None, env)
         .await
         .unwrap_err();
-    assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
+    assert!(
+        matches!(&err, ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "req-1"),
+        "got {err:?}"
+    );
+    assert!(!err.is_retryable());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -32,7 +32,7 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 #[cfg(any(test, feature = "test-utils"))]
 use tokio::sync::oneshot;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::watch;
 
 /// Build a stable caller-correlatable identity for one DataChunk. Stream IDs
 /// identify the logical stream; the sequence suffix distinguishes chunks that
@@ -1189,6 +1189,7 @@ impl PeerGate {
             .await
     }
 
+    #[allow(clippy::too_many_arguments)] // Carries cancellation-safe delivery progress.
     async fn send_with_retry_record_identity_for_operation(
         &self,
         dest: &Dest,
@@ -1197,6 +1198,7 @@ impl PeerGate {
         admission: SendAdmission,
         record: Option<&SentTransportSlot>,
         operation_id: &str,
+        progress_sink: Option<&DeliveryProgressCell>,
     ) -> ActorResult<DestTransportRef> {
         let policy = payload_type.retry_policy();
         self.send_with_retry_policy_record_identity(
@@ -1207,6 +1209,7 @@ impl PeerGate {
             admission,
             record,
             Some(operation_id),
+            progress_sink,
             None::<fn(Option<WireIdentity>)>,
         )
         .await
@@ -1230,6 +1233,7 @@ impl PeerGate {
             admission,
             None,
             operation_id,
+            None,
             None::<fn(Option<WireIdentity>)>,
         )
         .await
@@ -1335,10 +1339,9 @@ impl PeerGate {
     }
 
     /// Retry only completed, proven `NotAttempted` failures. The retry loop
-    /// intentionally has no progress sink: ambiguous (`Unknown`) results
-    /// return before backoff, while timeout-sensitive one-way sends use the
-    /// progress-aware `send_once_with_admission` path. This keeps a retry from
-    /// overwriting an earlier delivery fact with a later attempt.
+    /// shares cancellation-safe progress with the Call deadline. Only a proven
+    /// pre-send failure can start another attempt; an ambiguous result returns
+    /// before backoff and cannot be overwritten by a later attempt.
     #[allow(clippy::too_many_arguments)] // Keeps retry context explicit at this internal boundary.
     async fn send_with_retry_policy_record_identity(
         &self,
@@ -1349,6 +1352,7 @@ impl PeerGate {
         mut admission: SendAdmission,
         record: Option<&SentTransportSlot>,
         operation_id: Option<&str>,
+        progress_sink: Option<&DeliveryProgressCell>,
         mut on_first_attempt_resolved: Option<impl FnMut(Option<WireIdentity>) + Send>,
     ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
@@ -1357,7 +1361,7 @@ impl PeerGate {
         loop {
             admission = self.tighten_with_current_projection(admission)?;
             let send_attempt = self
-                .attempt_send(dest, payload_type, data, admission, record, None)
+                .attempt_send(dest, payload_type, data, admission, record, progress_sink)
                 .await;
             if attempt_count == 0 {
                 if let Some(callback) = on_first_attempt_resolved.as_mut() {
@@ -1408,86 +1412,6 @@ impl PeerGate {
                         }
                         return Err(e);
                     }
-                }
-            }
-        }
-    }
-
-    async fn close_timed_out_request_transport(
-        transport_manager: Arc<PeerTransport>,
-        dest: Dest,
-        target: ActrId,
-        sent_transport: Option<DestTransportRef>,
-    ) {
-        let Some(sent_transport) = sent_transport else {
-            tracing::warn!(
-                peer = ?target,
-                "Request timed out before a sent transport was recorded; closing transport"
-            );
-            if let Err(e) = transport_manager.close_transport(&dest).await {
-                tracing::warn!(
-                    peer = ?target,
-                    "Failed to close transport after request timeout: {}",
-                    e
-                );
-            }
-            return;
-        };
-
-        match sent_transport.wire_identity.clone() {
-            Some(WireIdentity::WebRtc {
-                peer_id,
-                session_id,
-            }) => {
-                tracing::warn!(
-                    peer = ?target,
-                    session_id,
-                    "Request timed out after send; closing stale transport if WebRTC session still matches"
-                );
-                match transport_manager
-                    .close_transport_if_webrtc_session(&dest, &peer_id, session_id)
-                    .await
-                {
-                    Ok(true) => tracing::debug!(
-                        peer = ?target,
-                        session_id,
-                        "Closed timed-out request transport for matching WebRTC session"
-                    ),
-                    Ok(false) => tracing::debug!(
-                        peer = ?target,
-                        session_id,
-                        "Skipped timed-out request transport close because WebRTC session was replaced"
-                    ),
-                    Err(e) => tracing::warn!(
-                        peer = ?target,
-                        session_id,
-                        "Failed to close stale transport after request timeout: {}",
-                        e
-                    ),
-                }
-            }
-            Some(WireIdentity::WebSocket { .. }) | None => {
-                tracing::warn!(
-                    peer = ?target,
-                    "Request timed out after send without wire identity; closing transport if instance still matches"
-                );
-                match transport_manager
-                    .close_transport_if_current(&dest, &sent_transport)
-                    .await
-                {
-                    Ok(true) => tracing::debug!(
-                        peer = ?target,
-                        "Closed timed-out request transport for matching instance"
-                    ),
-                    Ok(false) => tracing::debug!(
-                        peer = ?target,
-                        "Skipped timed-out request transport close because instance was replaced"
-                    ),
-                    Err(e) => tracing::warn!(
-                        peer = ?target,
-                        "Failed to close stale transport after request timeout: {}",
-                        e
-                    ),
                 }
             }
         }
@@ -1556,9 +1480,7 @@ impl PeerGate {
         // envelopes must not bypass the documented byte ceilings.
         let data = Self::serialize_envelope(&envelope);
         let payload_bytes = data.len();
-        let sent_transport = Arc::new(Mutex::new(None));
-        let sent_transport_for_send = Arc::clone(&sent_transport);
-        let mut send_started = false;
+        let progress_cell = new_delivery_progress_cell();
 
         let result = crate::timer::timeout_at(
             crate::timer::ids::PEER_REQUEST_DEADLINE,
@@ -1575,9 +1497,8 @@ impl PeerGate {
                 // changes the caller's timing semantics). The remaining
                 // budget is still bounded by `ensure_remaining` at
                 // registration and by the request deadline itself: a request
-                // committed with a thin slice simply races its own deadline,
-                // and the timeout arm tears down exactly the transport it was
-                // submitted to.
+                // committed with a thin slice simply races its own deadline;
+                // once submitted, an expired deadline reports uncertainty.
 
                 // The RAII guard removes pending state on send failure,
                 // response-channel closure, timeout, or caller cancellation.
@@ -1585,7 +1506,6 @@ impl PeerGate {
                     .pending_requests
                     .register(request_id.clone(), target.clone());
                 deadline.ensure_remaining()?;
-                send_started = true;
 
                 let sent = self
                     .send_with_retry_record_identity_for_operation(
@@ -1593,8 +1513,9 @@ impl PeerGate {
                         payload_type,
                         &data,
                         admission,
-                        Some(&sent_transport_for_send),
+                        None,
                         &request_id,
+                        Some(&progress_cell),
                     )
                     .await?;
                 if !self
@@ -1617,37 +1538,19 @@ impl PeerGate {
         match result {
             Ok(inner) => inner,
             Err(_) => {
-                // Deadline expired — return TimedOut (retryable) rather than
-                // Unavailable so callers and language bindings can distinguish
-                // "request never reached the server" from "server did not reply
-                // in time".
-                //
-                // Deliberate asymmetry vs Tell/DataChunk: a request that
-                // timed out after submission stays retryable because this
-                // arm force-closes the transport it was submitted to
-                // (`close_timed_out_request_transport`) — a caller retry
-                // cannot double-deliver on the stale wire, and the pending
-                // response correlation is reclaimed rather than left
-                // ambiguous. One-way Tell/DataChunk sends have no such
-                // correlation handle to reclaim and no dedup on the far
-                // side, so those surfaces are terminal `DeliveryUncertain`
-                // after an ambiguous submission instead.
-                if send_started {
-                    let transport_manager = self.transport_manager.clone();
-                    let stale_dest = dest.clone();
-                    let stale_target = target.clone();
-                    let sent_transport = sent_transport.lock().await.clone();
-                    tokio::spawn(async move {
-                        Self::close_timed_out_request_transport(
-                            transport_manager,
-                            stale_dest,
-                            stale_target,
-                            sent_transport,
-                        )
-                        .await;
-                    });
+                // A local deadline cannot undo remote execution. Keep the
+                // healthy route available to other operations and distinguish
+                // a pre-send timeout from an in-flight or submitted Call.
+                // Dropping the pending guard above already removed correlation.
+                match observed_delivery_progress(&progress_cell) {
+                    None | Some(DeliveryProgress::NotAttempted) => Err(ActrError::TimedOut),
+                    Some(DeliveryProgress::SubmittedLocally) | Some(DeliveryProgress::Unknown) => {
+                        Err(Self::delivery_uncertain_error(
+                            Some(&request_id),
+                            "call deadline elapsed after transport submission may have started",
+                        ))
+                    }
                 }
-                Err(ActrError::TimedOut)
             }
         }
     }
@@ -1686,6 +1589,7 @@ impl PeerGate {
             SendAdmission::ExistingOnly,
             None,
             &envelope.request_id,
+            None,
         )
         .await
         .map(|_| ())
@@ -1818,6 +1722,7 @@ impl PeerGate {
             admission,
             None,
             &envelope.request_id,
+            None,
         )
         .await
         .map(|_| ())
@@ -2514,6 +2419,45 @@ mod tests {
         drop(preflight_guard);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn call_deadline_after_submission_is_delivery_uncertain() {
+        let (gate, transport, _projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::Normal);
+        let target = test_actor_id(2);
+        let request_id = "call-response-deadline";
+
+        // The lane accepts the request, but no response is injected.
+        let error = gate
+            .send_request_with_type(
+                &target,
+                PayloadType::RpcReliable,
+                RpcEnvelope {
+                    request_id: request_id.to_string(),
+                    timeout_ms: 100,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("a submitted Call without a response must expire");
+
+        assert!(matches!(
+            &error,
+            ActrError::DeliveryUncertain { operation_id, .. } if operation_id == request_id
+        ));
+        assert!(!error.is_retryable());
+        assert_eq!(gate.pending_requests.len(), 0);
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+        tokio::task::yield_now().await;
+        assert_eq!(transport.dest_count().await, 1);
+
+        // A missing response does not invalidate the route for other work.
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("the same route must remain usable after a Call deadline");
+        assert_eq!(builds.load(Ordering::SeqCst), 1);
+        assert_eq!(sends.load(Ordering::SeqCst), 2);
+    }
+
     #[tokio::test]
     async fn existing_only_without_transport_fails_without_build_or_retry() {
         let (gate, _transport, _projection_tx, builds, sends) =
@@ -2838,8 +2782,7 @@ mod tests {
         // The projection clears only after most of the 200ms budget is gone.
         // There is deliberately no proportional admission floor for requests:
         // the ~20ms residual budget is usable, the request is committed, and
-        // the deadline arm tears down exactly the transport it was submitted
-        // to when the response does not arrive in time.
+        // the deadline reports uncertain delivery when no response arrives.
         tokio::spawn(async move {
             crate::timer::sleep(
                 crate::timer::ids::PEER_TEST_EVENT_DELAY,
@@ -2864,7 +2807,12 @@ mod tests {
             .await
             .expect_err("the response wait still races the residual budget");
 
-        assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
+        assert!(
+            matches!(&error, ActrError::DeliveryUncertain { operation_id, .. }
+                if operation_id == "admission-floor"),
+            "got {error:?}"
+        );
+        assert!(!error.is_retryable());
         assert_eq!(
             sends.load(Ordering::SeqCst),
             1,
@@ -2873,7 +2821,7 @@ mod tests {
         assert_eq!(
             gate.pending_count().await,
             0,
-            "no pending entry may be registered below the admission floor"
+            "the expired request must leave no pending entry"
         );
     }
 
@@ -3563,6 +3511,63 @@ mod tests {
         ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
             Ok(vec![Arc::new(PendingWebSocketWire)])
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn call_deadline_mid_write_is_delivery_uncertain() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(PendingWireBuilder),
+        ));
+        let gate = PeerGate::for_test(transport.clone());
+        let request_id = "call-write-deadline";
+        let error = gate
+            .send_request_with_type(
+                &test_actor_id(2),
+                PayloadType::RpcReliable,
+                RpcEnvelope {
+                    request_id: request_id.to_string(),
+                    timeout_ms: 100,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("an in-flight lane write must expire as uncertain");
+
+        assert!(matches!(
+            &error,
+            ActrError::DeliveryUncertain { operation_id, .. } if operation_id == request_id
+        ));
+        assert!(!error.is_retryable());
+        assert_eq!(gate.pending_requests.len(), 0);
+        tokio::task::yield_now().await;
+        assert_eq!(transport.dest_count().await, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn call_deadline_before_write_is_timed_out() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(LanelessPendingWireBuilder),
+        ));
+        let gate = PeerGate::for_test(transport.clone());
+        let error = gate
+            .send_request_with_type(
+                &test_actor_id(2),
+                PayloadType::RpcReliable,
+                RpcEnvelope {
+                    request_id: "call-lane-deadline".to_string(),
+                    timeout_ms: 100,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("lane acquisition must be bounded by the Call deadline");
+
+        assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
+        assert_eq!(gate.pending_requests.len(), 0);
+        tokio::task::yield_now().await;
+        assert_eq!(transport.dest_count().await, 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

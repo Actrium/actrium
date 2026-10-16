@@ -289,13 +289,13 @@ timer_inventory! {
         id: "outbound.peer.request", owner: "peer_gate", category: FailureDeadline,
         duration: "caller absolute RPC deadline", arm: "peer request preflight starts",
         success: "preflight, send, and response path completes", interrupt: "caller cancellation or completion",
-        expiry: "close an implicated transport only after send starts and return timeout", reset: "new request only", external: false
+        expiry: "remove pending correlation; return TimedOut before submission or DeliveryUncertain after possible submission; preserve the transport", reset: "new request only", external: false
     },
     HOST_REQUEST_DEADLINE => {
         id: "outbound.host.request", owner: "host_transport", category: FailureDeadline,
         duration: "caller absolute RPC deadline", arm: "host request lane lookup starts",
         success: "lane admission, send, and response path completes", interrupt: "caller cancellation or completion",
-        expiry: "remove pending correlation and return timeout", reset: "new request only", external: false
+        expiry: "remove pending correlation; return TimedOut before local queue submission or DeliveryUncertain afterwards", reset: "new request only", external: false
     },
     OUTBOUND_TELL_DEADLINE => {
         id: "outbound.tell", owner: "outbound_gate", category: FailureDeadline,
@@ -537,6 +537,42 @@ timer_inventory! {
         duration: "WEBSOCKET_HANDSHAKE_TIMEOUT (10s)", arm: "an inbound TCP connection acquires a handshake slot",
         success: "TLS and WebSocket upgrade complete and connection is queued", interrupt: "server shutdown",
         expiry: "drop the connection and release the handshake slot", reset: "each accepted connection", external: false
+    },
+    WEBSOCKET_PING_SCHEDULE => {
+        id: "websocket.ping_schedule", owner: "websocket_connection", category: ProtocolSchedule,
+        duration: "PING_INTERVAL (15s)", arm: "direct WebSocket session established, matching Pong or peer pressure heartbeat received, or local receive pressure clears",
+        success: "schedule elapses", interrupt: "session retirement, local receive backpressure change, or peer pressure heartbeat",
+        expiry: "send a connection-local Ping probe or local receive-pressure heartbeat", reset: "after each successful probe or pressure heartbeat", external: false
+    },
+    WEBSOCKET_PROBE_DEADLINE => {
+        id: "websocket.probe_deadline", owner: "websocket_connection", category: FailureDeadline,
+        duration: "PROBE_TIMEOUT (10s)", arm: "direct WebSocket Ping probe or pressure heartbeat starts before sink acquisition",
+        success: "Pong matching the current probe arrives, or pressure heartbeat is written", interrupt: "session retirement, local receive backpressure change, or peer pressure heartbeat",
+        expiry: "retire the physical session and invalidate cached lanes", reset: "each probe", external: false
+    },
+    WEBSOCKET_CLOSE_DEADLINE => {
+        id: "websocket.close_deadline", owner: "websocket_connection", category: FailureDeadline,
+        duration: "CLOSE_TIMEOUT (1s)", arm: "retire a direct WebSocket sink",
+        success: "Close frame flushed or failed socket dropped", interrupt: "close future cancellation",
+        expiry: "drop the owned sink without waiting for the peer", reset: "never", external: false
+    },
+    WEBSOCKET_PROBE_CYCLE_DEADLINE => {
+        id: "websocket.probe_cycle_deadline", owner: "websocket_connection", category: FailureDeadline,
+        duration: "PING_INTERVAL + PROBE_TIMEOUT (25s)", arm: "direct WebSocket probe cycle starts",
+        success: "matching challenge Pong arrives", interrupt: "session retirement or local pressure",
+        expiry: "retire the session", reset: "a new cycle after a valid Pong or local pressure clears", external: false
+    },
+    WEBSOCKET_PEER_PRESSURE_DEADLINE => {
+        id: "websocket.peer_pressure_deadline", owner: "websocket_connection", category: FailureDeadline,
+        duration: "PEER_BACKPRESSURE_TIMEOUT (120s)", arm: "first peer pressure heartbeat without round-trip proof",
+        success: "matching challenge Pong arrives", interrupt: "session retirement",
+        expiry: "retire the session despite further pressure heartbeats", reset: "only a matching challenge Pong", external: false
+    },
+    WEBSOCKET_RECEIVE_BACKPRESSURE_DEADLINE => {
+        id: "websocket.receive_backpressure_deadline", owner: "websocket_connection", category: FailureDeadline,
+        duration: "RECEIVE_BACKPRESSURE_TIMEOUT (120s) from the current receive stall start", arm: "local receive queue becomes full",
+        success: "local receive queue resumes accepting messages", interrupt: "session retirement or pressure-heartbeat write failure",
+        expiry: "retire the physical session even if pressure heartbeats can still be written", reset: "only after local receive pressure clears; heartbeats never renew this deadline", external: false
     },
     WEBSOCKET_ACCEPT_BACKOFF => {
         id: "websocket.accept_backoff", owner: "websocket_server", category: FailureBackoff,

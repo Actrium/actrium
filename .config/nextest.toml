@@ -45,6 +45,7 @@ retries = 0
 filter = '''
 package(actr-hyper) and kind(lib) and (
     test(/^transport::lane::tests::websocket_without_a_sink_is_proven_not_attempted$/) |
+    test(/^transport::lane::tests::poisoned_delivery_progress_is_always_uncertain$/) |
     test(/^transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable$/) |
     test(/^transport::lane::tests::default_send_with_progress_classifies_by_error_shape$/) |
     test(/^transport::lane::tests::test_encode_decode_fragment_header_single$/) |
@@ -130,6 +131,35 @@ package(actr-hyper) and kind(lib) and (
     test(/^outbound::peer_gate::tests::stamp_envelope_direction_overwrites_missing_and_mismatched_values$/) |
     test(/^outbound::peer_gate::tests::blocked_projection_times_out_before_pending_registration_or_build$/) |
     test(/^outbound::peer_gate::tests::request_deadline_covers_preflight_wait$/) |
+    test(/^wire::websocket::connection::tests::retired_websocket_destination_is_rebuilt_for_later_work$/) |
+    test(/^wire::websocket::connection::tests::unsupported_media_frames_do_not_block_rpc$/) |
+    test(/^wire::websocket::connection::tests::close_cancels_an_inflight_handshake$/) |
+    test(/^wire::websocket::connection::tests::close_cancels_pending_session_publication$/) |
+    test(/^wire::websocket::connection::tests::silent_peer_is_retired_without_a_call_deadline$/) |
+    test(/^wire::websocket::connection::tests::receive_backpressure_preserves_messages_and_healthy_session$/) |
+    test(/^wire::websocket::connection::tests::receive_backpressure_progress_resets_stall_deadline$/) |
+    test(/^wire::websocket::connection::tests::silent_peer_is_retired_during_receive_backpressure$/) |
+    test(/^wire::websocket::connection::tests::pressure_heartbeats_do_not_extend_receive_backpressure_deadline$/) |
+    test(/^wire::websocket::connection::tests::silent_peer_is_retired_after_receive_backpressure_clears$/) |
+    test(/^wire::websocket::connection::tests::two_actrium_peers_survive_receive_backpressure$/) |
+    test(/^wire::websocket::connection::tests::peer_backpressure_heartbeat_does_not_disable_liveness_forever$/) |
+    test(/^wire::websocket::connection::tests::matching_pongs_keep_an_idle_session_alive$/) |
+    test(/^wire::websocket::connection::tests::explicit_close_sends_a_close_frame$/) |
+    test(/^wire::websocket::connection::tests::peer_close_receives_an_orderly_reply$/) |
+    test(/^wire::websocket::connection::tests::orderly_close_is_bounded_behind_a_blocked_write$/) |
+    test(/^wire::websocket::connection::tests::endless_peer_pressure_cannot_hide_a_stalled_reader$/) |
+    test(/^wire::websocket::connection::tests::peer_pressure_with_round_trips_can_survive_grace_budget$/) |
+    test(/^wire::websocket::connection::tests::unsolicited_pongs_do_not_satisfy_liveness_challenges$/) |
+    test(/^wire::websocket::connection::tests::sink_contention_cannot_block_session_retirement$/) |
+    test(/^transport::lane::tests::websocket_retirement_cancels_an_inflight_write_without_replay$/) |
+    test(/^transport::lane::tests::websocket_retirement_before_writer_lock_is_proven_not_attempted$/) |
+    test(/^transport::host_transport::tests::submitted_request_timeout_cannot_prove_non_delivery$/) |
+    test(/^transport::host_transport::tests::request_deadline_before_queue_submission_is_retryable$/) |
+    test(/^context::tests::cancelled_call_after_local_consumption_is_not_retryable$/) |
+    test(/^transport::wire_pool::tests::terminal_websocket_is_not_a_live_candidate$/) |
+    test(/^outbound::peer_gate::tests::call_deadline_after_submission_is_delivery_uncertain$/) |
+    test(/^outbound::peer_gate::tests::call_deadline_mid_write_is_delivery_uncertain$/) |
+    test(/^outbound::peer_gate::tests::call_deadline_before_write_is_timed_out$/) |
     test(/^outbound::peer_gate::tests::existing_only_without_transport_fails_without_build_or_retry$/) |
     test(/^outbound::peer_gate::tests::blocked_projection_rejects_media_operations_before_coordinator_access$/) |
     test(/^outbound::peer_gate::tests::existing_only_media_ops_fail_fast_without_a_session$/) |
