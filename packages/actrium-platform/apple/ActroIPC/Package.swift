@@ -20,7 +20,7 @@ let package = Package(
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ],
             swiftSettings: [
-                // Disable MainActor default isolation for this package
+                // Check explicit actor isolation and cross-thread transport ownership.
                 .enableExperimentalFeature("StrictConcurrency"),
             ]
         ),

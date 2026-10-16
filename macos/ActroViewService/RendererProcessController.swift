@@ -5,13 +5,14 @@ import Foundation
 import QuartzCore
 
 /// Entry-point and lifecycle owner for a manually spawned Renderer Helper.
+@MainActor
 final class RendererProcessController {
-    static let rendererIdArgument = "--renderer-id"
-    static let fingerprintArgument = "--fingerprint"
-    static let ipcStdinArgument = "--ipc-stdin"
-    static let hostPidArgument = "--host-pid"
+    nonisolated static let rendererIdArgument = "--renderer-id"
+    nonisolated static let fingerprintArgument = "--fingerprint"
+    nonisolated static let ipcStdinArgument = "--ipc-stdin"
+    nonisolated static let hostPidArgument = "--host-pid"
 
-    static var isRendererProcess: Bool {
+    nonisolated static var isRendererProcess: Bool {
         ProcessInfo.processInfo.arguments.contains(rendererIdArgument)
     }
 
@@ -19,36 +20,41 @@ final class RendererProcessController {
     /// that case the legacy distributed-notification fallback must not run,
     /// even if the Broker has already disconnected.
     @discardableResult
-    static func sendHostEvent(name: String, userInfo: [String: Any] = [:]) -> Bool {
+    nonisolated static func sendHostEvent(name: String, userInfo: [String: Any] = [:]) -> Bool {
         guard isRendererProcess else { return false }
         guard JSONSerialization.isValidJSONObject(userInfo),
               let data = try? JSONSerialization.data(withJSONObject: userInfo),
-              let json = String(data: data, encoding: .utf8),
-              let controller = RendererProcessLifetime.shared.controller else {
+            let json = String(data: data, encoding: .utf8)
+        else {
             return true
         }
-        do {
-            try controller.connection.sendHostEvent(name: name, userInfoJSON: json)
-        } catch {
-            NSLog("ActroRenderer host event failed: %@ (%@)", name, error.localizedDescription)
+        // React Native may call from its module queue. Only immutable values
+        // cross to the renderer's main-actor lifecycle and callback state.
+        DispatchQueue.main.async {
+            guard let controller = RendererProcessLifetime.shared.controller else { return }
+            do {
+                try controller.connection.sendHostEvent(name: name, userInfoJSON: json)
+            } catch {
+                NSLog("ActroRenderer host event failed: %@ (%@)", name, error.localizedDescription)
+            }
         }
         return true
     }
 
     @discardableResult
-    static func sendConsoleLog(level: String, source: String, message: String) -> Bool {
+    nonisolated static func sendConsoleLog(level: String, source: String, message: String) -> Bool {
         guard isRendererProcess else { return false }
-        guard let controller = RendererProcessLifetime.shared.controller else {
-            return true
-        }
-        do {
-            try controller.connection.sendConsoleLog(
-                level: level,
-                message: message,
-                source: source
-            )
-        } catch {
-            NSLog("ActroRenderer console forwarding failed: %@", error.localizedDescription)
+        DispatchQueue.main.async {
+            guard let controller = RendererProcessLifetime.shared.controller else { return }
+            do {
+                try controller.connection.sendConsoleLog(
+                    level: level,
+                    message: message,
+                    source: source
+                )
+            } catch {
+                NSLog("ActroRenderer console forwarding failed: %@", error.localizedDescription)
+            }
         }
         return true
     }
@@ -343,12 +349,14 @@ final class RendererProcessController {
 }
 
 /// Keeps the top-level controller alive for the lifetime of NSApplication.
+@MainActor
 private final class RendererProcessLifetime {
     static let shared = RendererProcessLifetime()
     var controller: RendererProcessController?
 }
 
 /// One Tab root and its remotely hosted CoreAnimation context.
+@MainActor
 private final class RendererTabSurface {
     let tabId: String
     let entry: TabViewControllerEntry
@@ -448,11 +456,14 @@ private final class RendererTabSurface {
                 object: nil,
                 queue: .main
             ) { [weak self] notification in
-                guard let self else { return }
-                if let view = notification.object as? NSView, view.window !== self.window {
-                    return
+                // NotificationCenter delivers this observer on OperationQueue.main.
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let view = notification.object as? NSView, view.window !== self.window {
+                        return
+                    }
+                    self.scheduleAccessibilityPublish()
                 }
-                self.scheduleAccessibilityPublish()
             }
             accessibilityObservers.append(observer)
         }
