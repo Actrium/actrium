@@ -389,8 +389,8 @@ and does not list a Realm inventory. `links` declares that `https://acme.com/i/<
 https form of a Realm link (Actr Authority Discovery §4.6); the prefix is chosen by the domain and
 has no default. The signaling, ice-config, and similar entries under `services` serve that
 authority itself and have nothing to do with the Realms under that domain; accessing a Realm only
-ever uses the Realm Provider named in its own Realm Profile, and no other Realm Provider may be
-used when that Realm Profile is unavailable, invalid, or retired. A Realm Provider's own descriptor
+ever uses the Realm Infra Provider named in its own Realm Profile, and no other Realm Infra Provider may be
+used when that Realm Profile is unavailable, invalid, or retired. A Realm Infra Provider's own descriptor
 (`https://provider.example/.well-known/actr`) separately publishes its management-request endpoint
 via a `realm-management` link (protocol `actr-realm-management/1`).
 
@@ -471,12 +471,12 @@ Sample:
 exactly `realm.name`, and where the Realm Profile is stored does not affect its validity. An
 existing Realm Profile signed by a key that was later retired remains valid until superseded by a
 higher `sequence`. A Realm Profile carries no expiry; rollback protection relies solely on
-`sequence`. `provider.id` is the Realm Provider's normalized DNS authority and is immutable for the
+`sequence`. `provider.id` is the Realm Infra Provider's normalized DNS authority and is immutable for the
 life of the Realm. Multiple signaling endpoints sharing a `control_plane_id` are replicas or
-failover entry points of the same Realm Provider presence/control plane, not v1 federation.
+failover entry points of the same Realm Infra Provider presence/control plane, not v1 federation.
 `package` gives the package the instance runs (§3); upgrading the program means publishing a Realm
 Profile with a different `package` and a higher `sequence`. Rotating the Realm issuer key or
-changing endpoints under the same Realm Provider likewise means publishing a Realm Profile with a
+changing endpoints under the same Realm Infra Provider likewise means publishing a Realm Profile with a
 higher `sequence`; retiring publishes a new Realm Profile with `status` set to `retired`, valid
 forever after.
 
@@ -631,7 +631,7 @@ REALM_DOMAIN_UNTRUSTED
 REALM_SIGNING_KEY_CHANGED
 REALM_PROFILE_UNAVAILABLE
 REALM_PROFILE_INVALID
-REALM_PROVIDER_MISMATCH
+REALM_INFRA_PROVIDER_MISMATCH
 REALM_PROFILE_ROLLBACK
 REALM_RETIRED
 REALM_LOGIN_REQUIRED

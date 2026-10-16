@@ -15,7 +15,7 @@ use crate::storage::db::get_database;
 /// Realm lifecycle status.
 ///
 /// `pending` waits for its first Realm Profile, `active` serves Actors, and
-/// `retired` is final: the row stays as the Realm Provider tombstone so the
+/// `retired` is final: the row stays as the Realm Infra Provider tombstone so the
 /// name is never reused. The operator's local suspend switch is `enabled`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Display, EnumString)]
 #[serde(rename_all = "lowercase")]
@@ -390,7 +390,7 @@ fn validate_name(name: &str) -> Result<(), RealmError> {
         .map_err(|e| RealmError::ValidationError(format!("invalid realm name: {e}")))?;
     if uri.is_local() {
         return Err(RealmError::ValidationError(
-            "a local Realm (.actr.alt) is not hosted by a Realm Provider".to_string(),
+            "a local Realm (.actr.alt) is not hosted by a Realm Infra Provider".to_string(),
         ));
     }
     Ok(())

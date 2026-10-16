@@ -943,12 +943,12 @@ impl ActrixConfig {
         );
 
         // Issuer always issues the TURN credential carried by RegisterOk, so the
-        // Realm/provider secret is required whenever either Issuer or TURN runs.
+        // Realm Infra Provider secret is required whenever either Issuer or TURN runs.
         if self.is_turn_enabled() || self.is_issuer_enabled() {
             validate_secret_hygiene("turn.turn_secret", &self.turn.turn_secret, 32, &mut errors);
         }
 
-        // Issuer, Signaling and TURN bind credentials to the Realm Provider ID.
+        // Issuer, Signaling and TURN bind credentials to the Realm Infra Provider ID.
         if (self.is_issuer_enabled()
             || self.is_signaling_enabled()
             || self.is_turn_enabled()
