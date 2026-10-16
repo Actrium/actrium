@@ -420,13 +420,12 @@ pub fn inspect_actor_package_bounded(
     let mut payload_names = BTreeSet::new();
     for index in 0..archive.len() {
         let entry = archive.by_index(index)?;
+        let name = entry.name()?.into_owned();
         if entry.compression() != CompressionMethod::Stored {
             return Err(PackError::InvalidPackage(format!(
-                "ZIP entry `{}` must use STORE compression",
-                entry.name()
+                "ZIP entry `{name}` must use STORE compression"
             )));
         }
-        let name = entry.name().to_string();
         validate_archive_name(&name)?;
         if !archive_names.insert(name.clone()) {
             return Err(PackError::InvalidPackage(format!(
