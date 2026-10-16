@@ -3,20 +3,20 @@ set -euo pipefail
 
 fail=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ACTRO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$ACTRO_DIR/../../.." && pwd)"
-RUNTIME_DIR="${ACTRO_RUNTIME_PATH:-$REPO_ROOT/packages/actrium}"
+ACTRIUM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$ACTRIUM_DIR/../../.." && pwd)"
+RUNTIME_DIR="${ACTRIUM_RUNTIME_PATH:-$REPO_ROOT/packages/actrium}"
 
 echo "[log-check] Checking Swift print(...) usage..."
-if rg -n "\bprint\s*\(" Actro --glob '!**/Pods/**' >/dev/null 2>&1; then
-  echo "[log-check] ERROR: Found Swift print(...) usage in Actro/"
-  rg -n "\bprint\s*\(" Actro --glob '!**/Pods/**' || true
+if rg -n "\bprint\s*\(" Actrium --glob '!**/Pods/**' >/dev/null 2>&1; then
+  echo "[log-check] ERROR: Found Swift print(...) usage in Actrium/"
+  rg -n "\bprint\s*\(" Actrium --glob '!**/Pods/**' || true
   fail=1
 else
   echo "[log-check] OK: no Swift print(...)"
 fi
 
-echo "[log-check] Checking Actro runtime console.* usage (via node script)..."
+echo "[log-check] Checking Actrium runtime console.* usage (via node script)..."
 if [ -f "$RUNTIME_DIR/scripts/check-logs.js" ]; then
   ( cd "$RUNTIME_DIR" && node scripts/check-logs.js ) || fail=1
 else

@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class BrowserStorageSyncCredentialStore : IBrowserStorageSyncCredentialsProvider
 {
@@ -350,7 +350,7 @@ internal sealed class BrowserStorageSyncCredentialStore : IBrowserStorageSyncCre
     // degrading to a hand-copied C# endpoint.
     private static string DefaultEnvironment()
     {
-        var environment = ActroCore.LoadAuthEnvironmentProd();
+        var environment = ActriumCore.LoadAuthEnvironmentProd();
         return string.IsNullOrWhiteSpace(environment)
             ? throw new InvalidOperationException(
                 "Default auth environment from the Rust core is empty.")
@@ -359,7 +359,7 @@ internal sealed class BrowserStorageSyncCredentialStore : IBrowserStorageSyncCre
 
     private static string DefaultBaseUrl(string environment)
     {
-        var baseUrl = ActroCore.LoadAuthAccountBaseUrl(environment);
+        var baseUrl = ActriumCore.LoadAuthAccountBaseUrl(environment);
         return string.IsNullOrWhiteSpace(baseUrl)
             ? throw new InvalidOperationException(
                 $"Auth account base URL from the Rust core is empty for environment '{environment}'.")

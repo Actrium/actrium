@@ -456,6 +456,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "actrium-core"
+version = "0.0.0"
+dependencies = [
+ "actr-pack",
+ "actr-protocol",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "uniffi 0.29.5",
+ "url",
+]
+
+[[package]]
+name = "actrium-sync-server"
+version = "0.0.0"
+dependencies = [
+ "actrium-core",
+ "rusqlite",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tiny_http",
+]
+
+[[package]]
+name = "actrium-vault"
+version = "0.0.0"
+dependencies = [
+ "aes-gcm",
+ "base64",
+ "pbkdf2",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "uniffi 0.29.5",
+]
+
+[[package]]
 name = "actrix"
 version = "0.10.6"
 dependencies = [
@@ -807,46 +847,6 @@ dependencies = [
  "uuid",
  "webrtc",
  "webrtc-util",
-]
-
-[[package]]
-name = "actro-core"
-version = "0.0.0"
-dependencies = [
- "actr-pack",
- "actr-protocol",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "uniffi 0.29.5",
- "url",
-]
-
-[[package]]
-name = "actro-sync-server"
-version = "0.0.0"
-dependencies = [
- "actro-core",
- "rusqlite",
- "serde_json",
- "thiserror 2.0.18",
- "tiny_http",
-]
-
-[[package]]
-name = "actro-vault"
-version = "0.0.0"
-dependencies = [
- "aes-gcm",
- "base64",
- "pbkdf2",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "uniffi 0.29.5",
 ]
 
 [[package]]

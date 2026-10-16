@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 // Renders the Connection row of the Browser Data Sync settings dialog. The
 // Rust connection contract owns the classification and user-action

@@ -47,7 +47,7 @@ export default function BookmarksPhoneView({
 
   const headerNode = hasNativeNavigationBar ? (
     <PhoneNavigationBar
-      title='Actro'
+      title='Actrium'
       showLargeTitle={true}
       style={[styles.headerOverlay, { height: navigationBarHeight }]}
     />

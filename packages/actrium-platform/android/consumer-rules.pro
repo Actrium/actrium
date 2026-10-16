@@ -1,4 +1,4 @@
 # Keep generated UniFFI/JNA bindings and native entrypoints.
--keep class uniffi.actro_core.** { *; }
--keep class uniffi.actro_vault.** { *; }
+-keep class uniffi.actrium_core.** { *; }
+-keep class uniffi.actrium_vault.** { *; }
 -keep class com.sun.jna.** { *; }

@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed record BrowserStorageSyncHttpRequest(
     string Method,
@@ -136,7 +136,7 @@ internal sealed class BrowserStorageSyncClient
         }
 
         var response = await transport.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        var transportResultJson = ActroCore.BuildBrowserStorageSyncCycleTransportResultJson(
+        var transportResultJson = ActriumCore.BuildBrowserStorageSyncCycleTransportResultJson(
             response.StatusCode,
             response.BodyJson,
             response.ErrorMessage ?? string.Empty);
@@ -298,7 +298,7 @@ internal sealed class BrowserStorageSyncClient
         }
 
         string cycleRoundJson;
-        cycleRoundJson = ActroCore.BuildBrowserStorageSyncCloudLocalFolderCycleRoundJson(
+        cycleRoundJson = ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCycleRoundJson(
             rootDir,
             pushRequestJson,
             database.SyncCursorsJson(scope),
@@ -449,7 +449,7 @@ internal sealed class BrowserStorageSyncClient
         }
 
         string membershipRoundJson;
-        membershipRoundJson = ActroCore.RunBrowserStorageSyncCloudLocalFolderMembershipRoundJson(
+        membershipRoundJson = ActriumCore.RunBrowserStorageSyncCloudLocalFolderMembershipRoundJson(
             safeRootDir,
             safeRequestJson);
 
@@ -702,14 +702,14 @@ internal sealed class BrowserStorageSyncClient
     private static JsonObject? BuildLocalFolderCapabilityPreflight(long observedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudLocalFolderCapabilityPreflightJson(
+            ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCapabilityPreflightJson(
                 observedAtUnixSeconds)) as JsonObject;
     }
 
     private static JsonObject? BuildLocalFolderCompatibilityPreflight(string rootDir, long observedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
+            ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
                 rootDir,
                 observedAtUnixSeconds)) as JsonObject;
     }
@@ -721,7 +721,7 @@ internal sealed class BrowserStorageSyncClient
         long generatedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.RunBrowserStorageSyncCloudLocalFolderCleanupRoundJson(
+            ActriumCore.RunBrowserStorageSyncCloudLocalFolderCleanupRoundJson(
                 rootDir,
                 cursorsJson,
                 deviceId,
@@ -734,7 +734,7 @@ internal sealed class BrowserStorageSyncClient
         long generatedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.RunBrowserStorageSyncCloudLocalFolderCompactionRoundJson(
+            ActriumCore.RunBrowserStorageSyncCloudLocalFolderCompactionRoundJson(
                 rootDir,
                 deviceId,
                 generatedAtUnixSeconds)) as JsonObject;
@@ -745,7 +745,7 @@ internal sealed class BrowserStorageSyncClient
         long observedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudSchemaRolloutPlanJson(
+            ActriumCore.BuildBrowserStorageSyncCloudSchemaRolloutPlanJson(
                 compatibilityPreflight?.ToJsonString(JsonOptions) ?? string.Empty,
                 observedAtUnixSeconds)) as JsonObject;
     }
@@ -755,7 +755,7 @@ internal sealed class BrowserStorageSyncClient
         long observedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudSchemaMigrationPlaybookJson(
+            ActriumCore.BuildBrowserStorageSyncCloudSchemaMigrationPlaybookJson(
                 schemaRolloutPlan?.ToJsonString(JsonOptions) ?? string.Empty,
                 observedAtUnixSeconds)) as JsonObject;
     }
@@ -767,7 +767,7 @@ internal sealed class BrowserStorageSyncClient
         long observedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudLocalFolderRecoverySnapshotRoundJson(
+            ActriumCore.BuildBrowserStorageSyncCloudLocalFolderRecoverySnapshotRoundJson(
                 rootDir,
                 schemaMigrationPlaybook?.ToJsonString(JsonOptions) ?? string.Empty,
                 compatibilityPreflight?.ToJsonString(JsonOptions) ?? string.Empty,
@@ -777,7 +777,7 @@ internal sealed class BrowserStorageSyncClient
     private static JsonObject? BuildCloudCycleStatusPolicy(string cycleRoundJson, uint retryAttempt)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudCycleStatusPolicyJson(
+            ActriumCore.BuildBrowserStorageSyncCloudCycleStatusPolicyJson(
                 cycleRoundJson,
                 retryAttempt)) as JsonObject;
     }
@@ -790,7 +790,7 @@ internal sealed class BrowserStorageSyncClient
         }
 
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudCycleScheduleStateJson(
+            ActriumCore.BuildBrowserStorageSyncCloudCycleScheduleStateJson(
                 statusPolicy.ToJsonString(JsonOptions),
                 observedAtUnixSeconds)) as JsonObject;
     }
@@ -803,7 +803,7 @@ internal sealed class BrowserStorageSyncClient
         }
 
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudMembershipStatusPolicyJson(
+            ActriumCore.BuildBrowserStorageSyncCloudMembershipStatusPolicyJson(
                 membershipRound.ToJsonString(JsonOptions),
                 retryAttempt)) as JsonObject;
     }
@@ -816,7 +816,7 @@ internal sealed class BrowserStorageSyncClient
         }
 
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudMembershipScheduleStateJson(
+            ActriumCore.BuildBrowserStorageSyncCloudMembershipScheduleStateJson(
                 statusPolicy.ToJsonString(JsonOptions),
                 observedAtUnixSeconds)) as JsonObject;
     }
@@ -829,7 +829,7 @@ internal sealed class BrowserStorageSyncClient
         }
 
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudMembershipAttemptPlanJson(
+            ActriumCore.BuildBrowserStorageSyncCloudMembershipAttemptPlanJson(
                 membershipRound.ToJsonString(JsonOptions),
                 retryAttempt,
                 observedAtUnixSeconds)) as JsonObject;
@@ -842,7 +842,7 @@ internal sealed class BrowserStorageSyncClient
         uint maxAttempts)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudMembershipLoopPlanJson(
+            ActriumCore.BuildBrowserStorageSyncCloudMembershipLoopPlanJson(
                 $"[{membershipRoundJson}]",
                 retryAttempt,
                 observedAtUnixSeconds,
@@ -885,7 +885,7 @@ internal sealed class BrowserStorageSyncClient
         }
 
         var classification = JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
+            ActriumCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
                 payload.ToJsonString(JsonOptions),
                 retryAttempt,
                 observedAtUnixSeconds)) as JsonObject;
@@ -901,7 +901,7 @@ internal sealed class BrowserStorageSyncClient
         JsonObject? providerErrorClassification = null)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudProviderDiagnosticsJson(
+            ActriumCore.BuildBrowserStorageSyncCloudProviderDiagnosticsJson(
                 capabilityPreflight?.ToJsonString(JsonOptions) ?? string.Empty,
                 compatibilityPreflight?.ToJsonString(JsonOptions) ?? string.Empty,
                 providerErrorClassification?.ToJsonString(JsonOptions) ?? string.Empty,
@@ -917,7 +917,7 @@ internal sealed class BrowserStorageSyncClient
         long observedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudObservabilityEventJson(
+            ActriumCore.BuildBrowserStorageSyncCloudObservabilityEventJson(
                 providerDiagnostics?.ToJsonString(JsonOptions) ?? string.Empty,
                 attemptPlan?.ToJsonString(JsonOptions) ?? string.Empty,
                 loopPlan?.ToJsonString(JsonOptions) ?? string.Empty,
@@ -930,7 +930,7 @@ internal sealed class BrowserStorageSyncClient
         long observedAtUnixSeconds)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudCycleAttemptPlanJson(
+            ActriumCore.BuildBrowserStorageSyncCloudCycleAttemptPlanJson(
                 cycleRoundJson,
                 retryAttempt,
                 observedAtUnixSeconds)) as JsonObject;
@@ -943,7 +943,7 @@ internal sealed class BrowserStorageSyncClient
         uint maxAttempts)
     {
         return JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudCycleLoopPlanJson(
+            ActriumCore.BuildBrowserStorageSyncCloudCycleLoopPlanJson(
                 $"[{cycleRoundJson}]",
                 retryAttempt,
                 observedAtUnixSeconds,

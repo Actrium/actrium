@@ -316,6 +316,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
+      RUSTUP_TOOLCHAIN: 1.99.0
       # Fail the build if crates/actr-hyper/build.rs can't compile the wasm fixture
       # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
       # compiling the fixture tests out.
@@ -325,14 +326,18 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile
-          # the wasm_actor_fixture Component under --all-features.
-          targets: wasm32-wasip2
-          # rustfmt is not in the minimal profile; Clippy is pinned separately.
-          components: rustfmt
+      - name: Verify preinstalled Rust toolchain
+        run: |
+          # The self-hosted image owns toolchain installation; never download here.
+          if ! {
+            rustup run 1.99.0 rustc --version &&
+            rustup run 1.99.0 rustfmt --version &&
+            rustup run 1.99.0 cargo-clippy --version &&
+            rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-wasip2;
+          }; then
+            echo "::error::Self-hosted runner image must provide Rust 1.99.0, rustfmt, Clippy, and wasm32-wasip2."
+            exit 1
+          fi
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: OTel payload-logging guard
@@ -417,8 +422,6 @@ jobs:
           python3 scripts/actr/check-binding-checksums.py \
             --library target/debug/libactr.so \
             --binding packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/actr.kt
-      - name: Install pinned Clippy toolchain
-        run: rustup toolchain install 1.99.0 --profile minimal --component clippy --target wasm32-wasip2 --no-self-update
       - name: Clippy (deny warnings)
         # Cargo rejects lint warnings without adding compiler flags.
         env:
@@ -1234,12 +1237,21 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
+      RUSTUP_TOOLCHAIN: 1.99.0
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Verify preinstalled Rust toolchain
+        run: |
+          # The self-hosted image owns toolchain installation; never download here.
+          if ! {
+            rustup run 1.99.0 rustc --version &&
+            rustup run 1.99.0 cargo-clippy --version &&
+            rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-wasip2 &&
+            rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-unknown-unknown;
+          }; then
+            echo "::error::Self-hosted runner image must provide Rust 1.99.0, Clippy, and wasm32-wasip2, wasm32-unknown-unknown."
+            exit 1
+          fi
       # protoc 29.3 ships in the self-hosted runner image; skip the
       # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
@@ -1258,8 +1270,6 @@ jobs:
       # Exercise the native RTC implementation in a dedicated job.
       - name: Check (WebRTC)
         run: cargo check -p actr-hyper --all-targets
-      - name: Install pinned Clippy toolchain
-        run: rustup toolchain install 1.99.0 --profile minimal --component clippy --target wasm32-wasip2 --target wasm32-unknown-unknown --no-self-update
       - name: Clippy (WebRTC, deny warnings)
         env:
           CARGO_BUILD_WARNINGS: deny

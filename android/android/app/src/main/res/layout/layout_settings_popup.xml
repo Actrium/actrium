@@ -11,7 +11,7 @@
         android:background="#80000000" />
 
     <!-- The window contents container. You can add your own contents here. -->
-    <io.actrium.actro.view.RoundedCornerLayout xmlns:app="http://schemas.android.com/apk/res-auto"
+    <io.actrium.app.view.RoundedCornerLayout xmlns:app="http://schemas.android.com/apk/res-auto"
         android:layout_width="600dp"
         android:layout_height="600dp"
         android:layout_gravity="center"
@@ -21,5 +21,5 @@
             android:id="@+id/llContent"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
-    </io.actrium.actro.view.RoundedCornerLayout>
+    </io.actrium.app.view.RoundedCornerLayout>
 </FrameLayout>

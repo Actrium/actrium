@@ -13,7 +13,7 @@ This guide explains how askit integrates with keel to enable sandboxed Guest exe
 
 askit provides:
 - Unified APIs that work identically in both Host and Guest
-- Pre-built UI components optimized for the Actro platform
+- Pre-built UI components optimized for the Actrium platform
 - Automatic message routing and bridging
 
 ```

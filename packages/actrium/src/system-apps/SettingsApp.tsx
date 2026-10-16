@@ -7,18 +7,18 @@ import { useTranslation } from 'react-i18next';
 import DeviceInfo from 'react-native-device-info';
 import { SettingsMain } from './settings/SettingsMain';
 import { AccountDetail } from './settings/AccountDetail';
-import { AboutActro } from './settings/AboutActro';
+import { AboutActrium } from './settings/AboutActrium';
 import { NotificationSettingsPage } from './settings/NotificationSettings';
 import { LoginModal } from './auth/LoginModal';
 import { useUserStore } from '../runtime-host/store/useUserStore';
 import { useAuthTaskStore } from '../runtime-host/store/useAuthTaskStore';
 import { createFeedbackAction, createLogoutAction, createDeleteAccountAction } from './settings/actions';
-import type { AboutPageKey } from './settings/AboutActro';
+import type { AboutPageKey } from './settings/AboutActrium';
 import { AuthRepository } from '../repository/AuthRepository';
 import { authApi, CURRENT_ENV } from '../api/auth';
 
 const SETTINGS_CLIENT_ID = '02094310-3454-4929-80b5-8ee85d09f34b';
-export type SettingsPage = 'main' | 'accountDetail' | 'aboutActro' | 'notificationSettings';
+export type SettingsPage = 'main' | 'accountDetail' | 'aboutActrium' | 'notificationSettings';
 
 // Page Toggle Animation Length
 const SLIDE_DURATION = 300;
@@ -50,7 +50,7 @@ const parseSettingsDeepLinkPayload = (
 
   return {
     page:
-      page === 'main' || page === 'accountDetail' || page === 'aboutActro' || page === 'notificationSettings'
+      page === 'main' || page === 'accountDetail' || page === 'aboutActrium' || page === 'notificationSettings'
         ? page
         : undefined,
     aboutPage:
@@ -280,7 +280,7 @@ export default function SettingsApp({
             onAccountPress={() => navigateTo('accountDetail')}
             onAboutPress={() => {
               setAboutInitialPage(undefined);
-              navigateTo('aboutActro');
+              navigateTo('aboutActrium');
             }}
             onNotificationPress={() => navigateTo('notificationSettings')}
             onFeedbackPress={handleFeedbackPress}
@@ -299,9 +299,9 @@ export default function SettingsApp({
             isTablet={isTablet}
           />
         );
-      case 'aboutActro':
+      case 'aboutActrium':
         return (
-          <AboutActro
+          <AboutActrium
             onBack={goBack}
             isTablet={isTablet}
             initialPage={aboutInitialPage}

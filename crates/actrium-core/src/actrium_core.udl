@@ -1,0 +1,1469 @@
+namespace actrium_core {
+    /// Parse and validate an actr-package/2 TOML manifest.
+    [Throws=CoreError]
+    ActrPackageManifestInfo parse_actr_package_manifest(string source);
+
+    /// Validate an actr-package/2 TOML manifest without returning normalized fields.
+    [Throws=CoreError]
+    void validate_actr_package_manifest(string source);
+
+    /// Evaluate a contract tuple using the current Actrium host compatibility rules.
+    ContractGateInfo evaluate_contract(string? name, u32 version);
+
+    /// Extract the app id from URLs containing `/with/{appId}`.
+    string? extract_app_id_from_url(string url);
+
+    /// Collapse repeated slashes in a filesystem-like path.
+    string normalize_path(string path);
+
+    /// Return a normalized relative path from `base_dir` to `absolute_path`.
+    string relative_path_from(string absolute_path, string base_dir);
+
+    /// Return whether the path points to a known ACTR asset extension.
+    boolean is_asset_path(string path);
+
+    /// Normalize and validate a manifest integrity algorithm.
+    string? normalize_integrity_algorithm(string raw);
+
+    /// Normalize and validate a manifest integrity file path.
+    string? normalize_integrity_path(string path);
+
+    /// Normalize and validate a SHA-256 hex digest.
+    string? normalize_sha256_hex(string hash);
+
+    /// Build the stable 16-character content fingerprint used by host shells.
+    string stable_content_fingerprint(string input);
+
+    /// Build the payload integrity verification plan from a TOML manifest.
+    [Throws=CoreError]
+    PackageIntegrityPlanInfo? create_actr_integrity_plan(string manifest_toml);
+
+    /// Parse a system app type into the canonical wire string, if known.
+    string? parse_system_app_type(string raw);
+
+    /// Return title and about: URL metadata for a system app type.
+    [Throws=CoreError]
+    SystemAppInfo system_app_info(string raw);
+
+    /// Return the canonical bookmarks system app type.
+    string system_app_type_bookmarks();
+
+    /// Return the canonical settings system app type.
+    string system_app_type_settings();
+
+    /// Return the canonical global search system app type.
+    string system_app_type_global_search();
+
+    /// Parse an app source type into the canonical wire string, if known.
+    string? parse_app_source_type(string raw);
+
+    /// Return display metadata for an app source type.
+    [Throws=CoreError]
+    AppSourceTypeInfo app_source_type_info(string raw);
+
+    /// Return the canonical downloaded app source type.
+    string app_source_type_downloaded();
+
+    /// Return the canonical local development app source type.
+    string app_source_type_local_dev();
+
+    /// Return the canonical default browser search engine id.
+    string browser_search_engine_default_id();
+
+    /// Return supported browser search engines.
+    sequence<BrowserSearchEngineInfo> browser_search_engines();
+
+    /// Return metadata for a browser search engine, falling back to the default.
+    BrowserSearchEngineInfo browser_search_engine_info(string? engine_id);
+
+    /// Normalize a browser search engine id, falling back to the default.
+    string browser_search_engine_normalize_id(string? engine_id);
+
+    /// Build the browser search URL for a query and search engine.
+    string browser_search_url(string query, string? engine_id);
+
+    /// Return the shared browser data snapshot contract.
+    BrowserDataContractInfo browser_data_contract();
+
+    /// Normalize a browser history snapshot JSON document.
+    string browser_history_snapshot_normalize_json(string snapshot_json);
+
+    /// Normalize a browser bookmark snapshot JSON document.
+    string browser_bookmark_snapshot_normalize_json(string snapshot_json);
+
+    /// Normalize a browser session snapshot JSON document.
+    string browser_session_snapshot_normalize_json(string snapshot_json);
+
+    /// Return the default browser session snapshot JSON document.
+    string browser_session_home_snapshot_json();
+
+    /// Return the shared browser storage schema contract.
+    BrowserStorageSchemaInfo browser_storage_schema();
+
+    /// Return the shared browser storage schema version.
+    u32 browser_storage_schema_version();
+
+    /// Return the shared browser storage database name.
+    string browser_storage_database_name();
+
+    /// Return SQL statements for the shared browser storage schema.
+    sequence<string> browser_storage_schema_statements();
+
+    /// Return the shared browser storage incremental schema migration plan JSON.
+    string browser_storage_schema_migration_plan_json();
+
+    /// Return table names for the shared browser storage schema.
+    sequence<string> browser_storage_table_names();
+
+    /// Return shared browser storage repository SQL.
+    BrowserStorageRepositorySqlInfo browser_storage_repository_sql();
+
+    /// Return shared browser storage sync SQL.
+    BrowserStorageSyncSqlInfo browser_storage_sync_sql();
+
+    /// Return the shared browser storage data model contract.
+    string browser_storage_data_model_json();
+
+    /// Return the shared browser storage sync conflict policy contract.
+    string browser_storage_sync_conflict_policy_json();
+
+    /// Return the shared browser storage sync collection merge policy contract.
+    string browser_storage_sync_merge_policy_json();
+
+    /// Return the shared browser storage address canonicalization policy contract.
+    string browser_storage_address_canonicalization_policy_json();
+
+    /// Canonicalize persisted browser storage addresses in a single batch.
+    string browser_storage_canonicalize_addresses_json(string addresses_json);
+
+    /// Return the shared bookmark folder tree integrity policy contract.
+    string browser_storage_bookmark_folder_tree_integrity_policy_json();
+
+    /// Build a bookmark folder tree integrity plan in a single batch.
+    string browser_storage_bookmark_folder_tree_integrity_plan_json(string folders_json);
+
+    /// Return the shared bookmark restore placement policy contract.
+    string browser_storage_bookmark_restore_placement_policy_json();
+
+    /// Build a bookmark restore placement plan in a single batch.
+    string browser_storage_bookmark_restore_placement_plan_json(string bookmarks_json);
+
+    /// Return the shared bookmark ownership/source resolution policy contract.
+    string browser_storage_bookmark_ownership_policy_json();
+
+    /// Build a bookmark ownership/source resolution plan in a single batch.
+    string browser_storage_bookmark_ownership_plan_json(string bookmarks_json);
+
+    /// Return the shared history visit aggregation policy contract.
+    string browser_storage_history_visit_aggregation_policy_json();
+
+    /// Build history page aggregates from history visits in a single batch.
+    string browser_storage_history_visit_aggregation_plan_json(string visits_json);
+
+    /// Return the shared session tab ordering policy contract.
+    string browser_storage_session_tab_ordering_policy_json();
+
+    /// Build a contiguous session tab ordering plan in a single batch.
+    string browser_storage_session_tab_ordering_plan_json(string tabs_json);
+
+    /// Build a session tab stable-id normalization plan in a single batch.
+    string browser_storage_session_tab_id_plan_json(string tabs_json);
+
+    /// Return the shared session active-tab consistency policy contract.
+    string browser_storage_session_active_tab_consistency_policy_json();
+
+    /// Build a session active-tab consistency plan in a single batch.
+    string browser_storage_session_active_tab_consistency_plan_json(string sessions_json);
+
+    /// Return the shared history/session retention pruning policy contract.
+    string browser_storage_retention_pruning_policy_json();
+
+    /// Build a history/session retention pruning plan in a single batch.
+    string browser_storage_retention_pruning_plan_json(string records_json);
+
+    /// Normalize a browser storage sync batch JSON payload.
+    string normalize_browser_storage_sync_batch_json(string batch_json);
+
+    /// Build a browser storage sync batch JSON payload from dirty native SQL rows.
+    string browser_storage_sync_batch_from_dirty_rows_json(
+        string scope,
+        string device_id,
+        i64 generated_at_unix_seconds,
+        string rows_json
+    );
+
+    /// Build a browser storage sync push request JSON payload from dirty native SQL rows.
+    string browser_storage_sync_push_request_from_dirty_rows_json(
+        string scope,
+        string device_id,
+        i64 generated_at_unix_seconds,
+        string rows_json
+    );
+
+    /// Normalize a browser storage sync ack batch JSON payload.
+    string normalize_browser_storage_sync_ack_batch_json(string ack_json);
+
+    /// Normalize browser storage sync cursor JSON payloads.
+    string normalize_browser_storage_sync_cursors_json(string cursors_json);
+
+    /// Return an empty browser storage sync batch JSON payload.
+    string empty_browser_storage_sync_batch_json(string scope, string device_id, i64 generated_at_unix_seconds);
+
+    /// Build a browser storage sync push request JSON payload.
+    string browser_storage_sync_push_request_json(string batch_json);
+
+    /// Build a browser storage sync pull request JSON payload.
+    string browser_storage_sync_pull_request_json(
+        string scope,
+        string device_id,
+        i64 generated_at_unix_seconds,
+        string cursors_json,
+        u32 max_records_per_collection
+    );
+
+    /// Build a browser storage sync cycle response JSON payload.
+    string browser_storage_sync_cycle_response_json(string remote_batch_json, string ack_json);
+
+    /// Normalize a browser storage sync cycle response JSON payload.
+    string normalize_browser_storage_sync_cycle_response_json(string response_json);
+
+    /// Build the client-side apply/ack execution plan for a sync cycle response.
+    string browser_storage_sync_client_cycle_plan_json(string response_json);
+
+    /// Build the ack batch that is safe to apply after remote rows were applied locally.
+    string browser_storage_sync_client_ack_batch_after_remote_apply_json(
+        string response_json,
+        string remote_apply_result_json
+    );
+
+    /// Adjudicate one applied sync cycle response into the platform-facing result envelope.
+    string browser_storage_sync_client_cycle_apply_result_json(
+        string response_json,
+        string remote_apply_result_json,
+        boolean ack_applied
+    );
+
+    /// Return the shared browser storage sync transport contract.
+    string browser_storage_sync_transport_contract_json();
+
+    /// Return the shared browser storage cloud provider object-store contract.
+    string browser_storage_sync_cloud_store_contract_json();
+
+    /// Return the Rust-owned provider adapter object-space contract.
+    string browser_storage_sync_cloud_provider_adapter_contract_json();
+
+    /// Return the Rust-owned provider connection/session status contract.
+    string browser_storage_sync_cloud_provider_connection_contract_json();
+
+    /// Return the Rust-owned provider error classification policy.
+    string browser_storage_sync_cloud_provider_error_policy_json();
+
+    /// Build the provider adapter object-space readiness plan.
+    string browser_storage_sync_cloud_provider_adapter_plan_json(
+        string adapter_snapshot_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Preflight provider cloud-store capabilities before browser sync starts.
+    string browser_storage_sync_cloud_store_capability_preflight_json(
+        string capabilities_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Classify provider connection/session, store readiness, and membership readiness.
+    string browser_storage_sync_cloud_provider_connection_status_policy_json(
+        string provider_snapshot_json,
+        u32 retry_attempt,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Normalize a persisted browser sync provider-settings snapshot (schema,
+    /// provider-kind whitelist, absolute-root rule, configured determination).
+    string normalize_browser_sync_provider_settings_json(
+        string settings_json,
+        boolean is_root_absolute,
+        i64 observed_at_unix_seconds,
+        string fresh_device_id
+    );
+
+    /// Classify provider SDK/native error batches for retry, reread, and recovery.
+    string browser_storage_sync_cloud_provider_error_classification_json(
+        string provider_errors_json,
+        u32 retry_attempt,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Return the Rust-owned local-folder cloud-store capabilities.
+    string browser_storage_sync_cloud_local_folder_capabilities_json();
+
+    /// Preflight the Rust-owned local-folder cloud-store capabilities.
+    string browser_storage_sync_cloud_local_folder_capability_preflight_json(
+        i64 observed_at_unix_seconds
+    );
+
+    /// Preflight cloud-file compatibility by reading the Rust-owned local-folder store once.
+    string browser_storage_sync_cloud_local_folder_compatibility_preflight_json(
+        string root_dir,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Return the Rust-owned cloud-drive browser sync data model contract.
+    string browser_storage_sync_cloud_data_model_json();
+
+    /// Build a default cloud-drive browser sync manifest JSON payload.
+    string browser_storage_sync_cloud_default_manifest_json(
+        string scope,
+        string device_id,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Normalize a cloud-drive browser sync manifest JSON payload.
+    string normalize_browser_storage_sync_cloud_manifest_json(
+        string manifest_json,
+        string fallback_scope,
+        string fallback_device_id,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Normalize a cloud-drive browser sync device JSON payload.
+    string normalize_browser_storage_sync_cloud_device_json(
+        string device_json,
+        string fallback_scope,
+        string fallback_device_id,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Build a cloud-drive browser sync log object JSON payload from a sync batch.
+    string browser_storage_sync_cloud_log_object_json(
+        string collection,
+        i64 sequence,
+        string batch_json
+    );
+
+    /// Normalize a cloud-drive browser sync log object JSON payload.
+    string normalize_browser_storage_sync_cloud_log_object_json(string log_json);
+
+    /// Build a cloud-drive browser sync snapshot object JSON payload from a sync batch.
+    string browser_storage_sync_cloud_snapshot_object_json(
+        string collection,
+        i64 generated_at_unix_seconds,
+        string batch_json
+    );
+
+    /// Normalize a cloud-drive browser sync snapshot object JSON payload.
+    string normalize_browser_storage_sync_cloud_snapshot_object_json(string snapshot_json);
+
+    /// Classify whether a cloud-drive browser sync document can be read/written by this client.
+    string browser_storage_sync_cloud_compatibility_status_json(
+        string document_kind,
+        string document_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Classify a batch of provider-read cloud-drive browser sync documents before adapters continue.
+    string browser_storage_sync_cloud_compatibility_preflight_json(
+        string documents_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Plan client/cloud-file schema rollout from a Rust-owned compatibility preflight.
+    string browser_storage_sync_cloud_schema_rollout_plan_json(
+        string compatibility_preflight_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Plan the explicit cloud-file schema migration playbook from a Rust-owned rollout plan.
+    string browser_storage_sync_cloud_schema_migration_playbook_json(
+        string schema_rollout_plan_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Plan provider recovery snapshots before explicit cloud-file migration or repair.
+    string browser_storage_sync_cloud_recovery_snapshot_plan_json(
+        string schema_migration_playbook_json,
+        string compatibility_preflight_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Classify provider recovery snapshot write receipts before migration or repair continues.
+    string browser_storage_sync_cloud_recovery_snapshot_result_plan_json(
+        string recovery_snapshot_plan_json,
+        string write_results_json,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Run one local-folder provider recovery snapshot round through Rust.
+    string browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(
+        string root_dir,
+        string schema_migration_playbook_json,
+        string compatibility_preflight_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Build an ordered cloud-drive provider write plan for device membership join/revoke.
+    string browser_storage_sync_cloud_membership_plan_json(
+        string request_json
+    );
+
+    /// Classify provider write receipts for a cloud-drive device membership plan.
+    string browser_storage_sync_cloud_membership_result_plan_json(
+        string membership_plan_json,
+        string write_results_json,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Run one cloud-drive device membership round against a Rust-owned local-folder provider store.
+    string browser_storage_sync_cloud_local_folder_membership_round_json(
+        string root_dir,
+        string request_json
+    );
+
+    /// Run one cloud-drive compaction round against a Rust-owned local-folder provider store.
+    string browser_storage_sync_cloud_local_folder_compaction_round_json(
+        string root_dir,
+        string device_id,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Run one cloud-drive high-watermark cleanup round against a Rust-owned local-folder provider store.
+    string browser_storage_sync_cloud_local_folder_cleanup_round_json(
+        string root_dir,
+        string cursors_json,
+        string device_id,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Run one cloud-drive recovery-snapshot retention round against a Rust-owned local-folder provider store.
+    string browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+        string root_dir,
+        u32 retain_snapshots,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Build an ordered cloud-drive provider write plan for a browser sync push.
+    string browser_storage_sync_cloud_push_plan_json(
+        string manifest_json,
+        string manifest_revision,
+        string device_json,
+        string device_revision,
+        string push_request_json
+    );
+
+    /// Summarize cloud-drive push write results and build the local ack/retry plan.
+    string browser_storage_sync_cloud_push_result_plan_json(
+        string push_plan_json,
+        string write_results_json,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Build a cloud-drive provider read plan for a browser sync pull.
+    string browser_storage_sync_cloud_pull_plan_json(
+        string manifest_json,
+        string device_id,
+        string cursors_json,
+        i64 generated_at_unix_seconds,
+        u32 max_log_objects_per_collection
+    );
+
+    /// Build a remote-apply plan from cloud-drive browser sync pull read results.
+    string browser_storage_sync_cloud_pull_apply_plan_json(
+        string manifest_json,
+        string device_id,
+        string cursors_json,
+        string snapshots_json,
+        string logs_json,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Build follow-up provider list/read operations from cloud pull pagination cursors.
+    string browser_storage_sync_cloud_pull_continuation_plan_json(
+        string pull_plan_json,
+        string read_results_json,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Describe the Rust-owned cloud high-watermark and retention status policy.
+    string browser_storage_sync_cloud_high_watermark_policy_json();
+
+    /// Build a batched cloud high-watermark/retention status plan from manifest, snapshot, log, and local cursor state.
+    string browser_storage_sync_cloud_high_watermark_plan_json(
+        string manifest_json,
+        string snapshots_json,
+        string logs_json,
+        string cursors_json,
+        string device_id,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Summarize high-watermark cleanup delete results and build retry/reread decisions.
+    string browser_storage_sync_cloud_cleanup_result_plan_json(
+        string high_watermark_plan_json,
+        string delete_results_json,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Build a cloud-drive provider write/delete plan for snapshot/log compaction.
+    string browser_storage_sync_cloud_compaction_plan_json(
+        string manifest_json,
+        string manifest_revision,
+        string snapshots_json,
+        string logs_json,
+        string device_id,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Summarize cloud-drive compaction write/delete results and build retry/cleanup decisions.
+    string browser_storage_sync_cloud_compaction_result_plan_json(
+        string compaction_plan_json,
+        string write_results_json,
+        string delete_results_json,
+        i64 generated_at_unix_seconds
+    );
+
+    /// Flatten a cloud-drive cycle round result into native-executable client steps.
+    string browser_storage_sync_cloud_cycle_client_plan_json(
+        string cycle_round_json
+    );
+
+    /// Adjudicate the native execution of one cloud cycle client plan into the result envelope.
+    string browser_storage_sync_cloud_cycle_client_apply_result_json(
+        string cycle_round_json,
+        string step_results_json,
+        string remote_apply_result_json
+    );
+
+    /// Classify a cloud-drive cycle round for native schedulers and provider recovery UX.
+    string browser_storage_sync_cloud_cycle_status_policy_json(
+        string cycle_round_json,
+        u32 retry_attempt
+    );
+
+    /// Classify a cloud-drive membership round for connect/revoke UX and provider recovery.
+    string browser_storage_sync_cloud_membership_status_policy_json(
+        string membership_round_json,
+        u32 retry_attempt
+    );
+
+    /// Build platform-consumable cloud-drive cycle schedule state from a cloud status policy.
+    string browser_storage_sync_cloud_cycle_schedule_state_json(
+        string status_policy_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Build platform-consumable cloud-drive membership schedule state from a membership status policy.
+    string browser_storage_sync_cloud_membership_schedule_state_json(
+        string status_policy_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Summarize provider capability, cloud-file compatibility, provider errors, cycle status, and schedule state for sync UI diagnostics.
+    string browser_storage_sync_cloud_provider_diagnostics_json(
+        string capability_preflight_json,
+        string compatibility_preflight_json,
+        string provider_error_classification_json,
+        string cycle_status_policy_json,
+        string schedule_state_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Build a local/exportable cloud-drive sync observability event from diagnostics and cycle plans.
+    string browser_storage_sync_cloud_observability_event_json(
+        string provider_diagnostics_json,
+        string attempt_plan_json,
+        string loop_plan_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Compose cloud-drive cycle client/status/schedule state into one attempt plan.
+    string browser_storage_sync_cloud_cycle_attempt_plan_json(
+        string cycle_round_json,
+        u32 retry_attempt,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Compose cloud-drive membership status/schedule state into one connect/revoke attempt plan.
+    string browser_storage_sync_cloud_membership_attempt_plan_json(
+        string membership_round_json,
+        u32 retry_attempt,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Plan a bounded cloud-drive membership loop from already-produced connect/revoke rounds.
+    string browser_storage_sync_cloud_membership_loop_plan_json(
+        string membership_rounds_json,
+        u32 retry_attempt,
+        i64 observed_at_unix_seconds,
+        u32 max_attempts
+    );
+
+    /// Plan a bounded cloud-drive cycle loop from already-produced cycle rounds.
+    string browser_storage_sync_cloud_cycle_loop_plan_json(
+        string cycle_rounds_json,
+        u32 retry_attempt,
+        i64 observed_at_unix_seconds,
+        u32 max_attempts
+    );
+
+    /// Run one cloud-drive sync cycle against a Rust-owned local-folder provider store.
+    string browser_storage_sync_cloud_local_folder_cycle_round_json(
+        string root_dir,
+        string push_request_json,
+        string cursors_json,
+        string device_id,
+        i64 generated_at_unix_seconds,
+        u32 max_log_objects_per_collection
+    );
+
+    /// Build a platform-executable browser storage sync cycle HTTP request plan.
+    string browser_storage_sync_cycle_request_plan_json(
+        string base_url,
+        string access_token,
+        string push_request_json,
+        string cursors_json
+    );
+
+    /// Classify an HTTP/RPC sync cycle transport result.
+    string browser_storage_sync_cycle_transport_result_json(
+        i32 status_code,
+        string response_json,
+        string error_message
+    );
+
+    /// Build the product-level browser storage sync status/retry policy.
+    string browser_storage_sync_status_policy_json(
+        string classification,
+        boolean should_retry,
+        string client_action,
+        u32 retry_attempt
+    );
+
+    /// Build platform-consumable browser storage sync schedule state from a status policy.
+    string browser_storage_sync_schedule_state_json(
+        string status_policy_json,
+        i64 observed_at_unix_seconds
+    );
+
+    /// Build product-visible browser storage sync scheduler status from a platform snapshot.
+    string browser_storage_sync_scheduler_status_json(string scheduler_snapshot_json);
+
+    /// Build a browser storage sync ack execution plan JSON payload.
+    string browser_storage_sync_ack_plan_json(string ack_json);
+
+    /// Build a browser storage remote apply execution plan JSON payload.
+    string browser_storage_sync_remote_apply_plan_json(string batch_json);
+
+    /// Summarize native browser storage remote apply execution results.
+    string browser_storage_sync_remote_apply_result_json(string plan_json, string result_json);
+
+    /// Build a browser storage server-side merge execution plan from a push request.
+    string browser_storage_sync_server_merge_plan_json(string push_request_json);
+
+    /// Summarize browser storage server-side merge execution results and build an ack batch.
+    string browser_storage_sync_server_merge_result_json(string plan_json, string result_json);
+
+    /// Return the host-supported contract name.
+    string supported_contract_name();
+
+    /// Return the host-supported contract version.
+    u32 supported_contract_version();
+
+    /// Return the canonical Actrium core SQLite schema version.
+    u32 core_schema_version();
+
+    /// Return all SQL statements needed to create or migrate the core schema.
+    sequence<string> core_schema_statements();
+
+    /// Return canonical table names owned by the core schema.
+    sequence<string> core_schema_table_names();
+
+    /// Return default tags that should be seeded after schema creation.
+    sequence<DefaultTagInfo> default_tags();
+
+    /// Return default system tags that should be protected by native clients.
+    sequence<DefaultTagInfo> default_system_tags();
+
+    /// Return default colors used when creating user tags.
+    sequence<string> default_tag_colors();
+
+    /// Return SQL used by native history repositories.
+    CoreHistoryRepositorySqlInfo core_history_repository_sql();
+
+    /// Convert a native history SQL row into the shared history item shape.
+    CoreHistoryItemInfo core_history_item_from_row(CoreHistoryItemRowInfo row);
+
+    /// Return ordered bind values for native history insert.
+    sequence<CoreSqlValueInfo> core_history_insert_visit_params(
+        string id,
+        string title,
+        string? app_url,
+        string? app_id,
+        i64 visit_time_seconds
+    );
+
+    /// Return the SQL LIKE parameter used by native history title search.
+    string? core_history_search_title_param(string query);
+
+    /// Return SQL used by native tag repositories.
+    CoreTagRepositorySqlInfo core_tag_repository_sql();
+
+    /// Convert a native tag SQL row into the shared tag shape.
+    CoreTagInfo core_tag_from_row(CoreTagRowInfo row);
+
+    /// Return ordered bind values for native tag insert.
+    sequence<CoreSqlValueInfo> core_tag_insert_params(
+        string id,
+        string name,
+        string? color,
+        boolean is_system
+    );
+
+    /// Return ordered bind values for native tag update.
+    sequence<CoreSqlValueInfo> core_tag_update_params(
+        string name,
+        string? color,
+        string id
+    );
+
+    /// Return SQL used by native bookmark repositories.
+    CoreBookmarkRepositorySqlInfo core_bookmark_repository_sql();
+
+    /// Convert a native bookmark SQL row into the shared bookmark shape.
+    CoreBookmarkInfo core_bookmark_from_row(CoreBookmarkRowInfo row);
+
+    /// Return ordered bind values for native bookmark insert.
+    sequence<CoreSqlValueInfo> core_bookmark_insert_params(CoreBookmarkInfo bookmark);
+
+    /// Return ordered bind values for native bookmark update.
+    sequence<CoreSqlValueInfo> core_bookmark_update_params(CoreBookmarkInfo bookmark);
+
+    /// Return SQL LIKE parameters used by native bookmark search.
+    sequence<string> core_bookmark_search_params(string query);
+
+    /// Return SQL used by native app repositories.
+    CoreAppRepositorySqlInfo core_app_repository_sql();
+
+    /// Convert a native installed-app SQL row into the shared installed-app shape.
+    CoreInstalledAppInfo? core_installed_app_from_row(CoreInstalledAppRowInfo row);
+
+    /// Return ordered bind values for native installed-app insert.
+    [Throws=CoreError]
+    sequence<CoreSqlValueInfo> core_installed_app_insert_params(CoreInstalledAppInfo app);
+
+    /// Return ordered bind values for native installed-app update.
+    [Throws=CoreError]
+    sequence<CoreSqlValueInfo> core_installed_app_update_params(CoreInstalledAppInfo app);
+
+    /// Return SQL LIKE parameters used by native app search.
+    sequence<string> core_app_search_params(string query);
+
+    /// Return the canonical runtime app status for live apps.
+    string runtime_app_status_alive();
+
+    /// Return the canonical runtime app status for stopped apps.
+    string runtime_app_status_dead();
+
+    /// Return the default runtime app status.
+    string default_runtime_app_status();
+
+    /// Return the canonical runtime app status string, if `value` is known.
+    string? normalize_runtime_app_status(string value);
+
+    /// Convert a persisted active-tab row into the platform active-tab model.
+    ActiveTabInfo active_tab_from_row(ActiveTabRowInfo row);
+
+    /// Convert a platform active-tab model into a persisted active-tab row.
+    ActiveTabRowInfo active_tab_to_row(ActiveTabInfo tab, i32 sort_order);
+
+    /// Convert active-tab models into persisted rows with stable sort order.
+    sequence<ActiveTabRowInfo> active_tab_rows_from_tabs(sequence<ActiveTabInfo> tabs);
+
+    /// Build a normalized runtime tab update patch from native bridge fields.
+    RuntimeTabUpdateInfo? runtime_tab_update_from_fields(
+        string? tab_id,
+        string? title,
+        string? icon,
+        string? app_url,
+        string? status
+    );
+
+    /// Return canonical bridge payload keys shared by runtime tab events.
+    string runtime_bridge_tab_id_key();
+    string runtime_bridge_title_key();
+    string runtime_bridge_icon_key();
+    string runtime_bridge_app_url_key();
+    string runtime_bridge_status_key();
+    string runtime_bridge_unread_key();
+    string runtime_bridge_marked_key();
+    string runtime_bridge_is_bookmarked_key();
+    string runtime_bridge_visible_key();
+    string runtime_bridge_container_width_key();
+    string runtime_bridge_container_height_key();
+    string runtime_tab_entered_fullscreen_event_name();
+    string runtime_tab_exited_fullscreen_event_name();
+    string runtime_tab_bookmark_changed_event_name();
+    string runtime_extension_panel_visible_change_event_name();
+    string runtime_container_size_change_event_name();
+    string runtime_search_input_changed_event_name();
+    string runtime_auth_context_client_id_key();
+    string runtime_auth_context_app_id_key();
+    string runtime_auth_context_tab_id_key();
+    string runtime_auth_context_app_url_key();
+    string auth_environment_dev();
+    string auth_environment_beta();
+    string auth_environment_prod();
+    string auth_environment_from_url(string url);
+    string auth_environment_from_app_url(string url);
+    string auth_environment_storage_suffix(string environment);
+    string auth_account_base_url(string environment);
+    string auth_resource_uploader_base_url(string environment);
+    string auth_access_control_path(string app_id, string user_id);
+    string auth_client_app_path(string app_id);
+    string auth_resource_upload_token_path();
+    string? auth_access_control_url_from_app_url(
+        string app_url,
+        string app_id,
+        string user_id
+    );
+    boolean auth_is_authorized_code(i32 code);
+    string auth_access_control_status(boolean success, boolean has_code, i32 code);
+    boolean auth_api_response_success(i32 code);
+    boolean auth_is_client_app_not_found_code(i32 code);
+    boolean auth_is_client_app_not_found_message(string message);
+    string runtime_login_result_event_name();
+    string runtime_login_result_type_key();
+    string runtime_login_result_code_key();
+    string runtime_login_result_id_token_key();
+    string runtime_login_result_error_key();
+    string runtime_login_result_message_key();
+    string runtime_login_type_wechat();
+    string runtime_login_type_apple();
+    string runtime_login_type_google();
+    string runtime_tab_props_unified_script_key();
+    string runtime_tab_props_right_panel_default_visible_key();
+    string runtime_tab_props_id_key();
+    string runtime_tab_props_background_color_key();
+    string runtime_tab_props_reload_key_key();
+    string runtime_tab_props_html_content_key();
+    string runtime_root_props_tab_key();
+    string runtime_root_props_tabs_key();
+    string runtime_root_props_single_tab_mode_key();
+    string runtime_root_props_current_tab_id_key();
+    string runtime_root_props_is_left_panel_visible_key();
+    string runtime_root_props_is_right_panel_visible_key();
+
+    /// Build a normalized tab unread payload from native bridge fields.
+    RuntimeTabUnreadInfo? runtime_tab_unread_from_fields(
+        string? tab_id,
+        boolean? unread
+    );
+
+    /// Build a normalized tab bookmark-status payload from native bridge fields.
+    RuntimeTabBookmarkStatusInfo? runtime_tab_bookmark_status_from_fields(
+        string? tab_id,
+        boolean? marked
+    );
+
+    /// Build the native-to-runtime tab bookmark event payload.
+    RuntimeTabBookmarkEventInfo runtime_tab_bookmark_event(
+        string tab_id,
+        boolean is_bookmarked
+    );
+
+    /// Build the native-to-runtime tab fullscreen event payload.
+    RuntimeTabFullscreenEventInfo runtime_tab_fullscreen_event(string tab_id);
+
+    /// Build the native-to-runtime extension panel visibility event payload.
+    RuntimeExtensionPanelVisibleEventInfo runtime_extension_panel_visible_event(
+        string tab_id,
+        boolean visible
+    );
+
+    /// Build the native-to-runtime container size event payload.
+    RuntimeContainerSizeChangeEventInfo runtime_container_size_change_event(
+        i32 container_width,
+        i32 container_height
+    );
+
+    /// Convert an active-tab model into the React Native runtime tab props shape.
+    RuntimeTabInfo runtime_tab_from_active_tab(ActiveTabInfo tab);
+
+    /// Build single-tab React Native runtime root props from active-tab models.
+    RuntimeRootPropsInfo runtime_root_props_from_active_tabs(
+        ActiveTabInfo tab,
+        sequence<ActiveTabInfo> tabs,
+        i32 container_height,
+        i32 container_width
+    );
+
+    /// Build single-tab React Native runtime root props from prebuilt runtime tabs.
+    RuntimeRootPropsInfo runtime_root_props_from_runtime_tabs(
+        RuntimeTabInfo tab,
+        sequence<RuntimeTabInfo> tabs,
+        boolean is_left_panel_visible,
+        boolean is_right_panel_visible,
+        i32 container_height,
+        i32 container_width,
+        string? app_url
+    );
+
+    /// Build the current Android-compatible single system page root props.
+    [Throws=CoreError]
+    RuntimeSystemRootPropsInfo runtime_system_root_props(string system_app_type);
+
+    /// Return the canonical ActrBridge native module/event/payload contract.
+    ActrBridgeContractInfo actr_bridge_contract();
+
+    /// Parse an Actor type in `publisher/program@version` form.
+    [Throws=CoreError]
+    ActrActorTypeInfo parse_actr_actor_type(string raw);
+
+    /// Map a BCP-47-ish ASR language code to an available bundled model dir.
+    string asr_model_language_dir(string language);
+
+    /// Build the platform ASR model loading path plan for a language.
+    AsrModelPlanInfo asr_model_plan(string language);
+
+    /// Return the canonical Android ASR native module/event/payload contract.
+    AsrBridgeContractInfo asr_bridge_contract();
+
+    /// Return the canonical TTS native module/event/options/payload contract.
+    TtsBridgeContractInfo tts_bridge_contract();
+
+    /// Return the canonical Email native module/method/error contract.
+    EmailBridgeContractInfo email_bridge_contract();
+
+    /// Return the canonical UserInfo native module/method/event/payload contract.
+    UserInfoBridgeContractInfo user_info_bridge_contract();
+
+    /// Parse Vosk getResult/getFinalResult JSON and return the `text` field.
+    string parse_vosk_result_text(string json);
+
+    /// Parse Vosk getPartialResult JSON and return the `partial` field.
+    string parse_vosk_partial_text(string json);
+
+    /// Build final Chinese ASR text from platform-provided segmentation terms.
+    string post_process_zh_asr_segments(
+        string text,
+        sequence<AsrSegmentInfo> segments
+    );
+};
+
+dictionary ActrPackageManifestInfo {
+    string name;
+    string version;
+    string? description;
+    string? app_id;
+    string? icon;
+    string entry;
+    boolean left_panel_default_visible;
+    boolean right_panel_default_visible;
+    string? contract_name;
+    u32? contract_version;
+    sequence<string> permissions;
+    string? system_app_type;
+    string? theme_color;
+};
+
+enum ContractGateStatus {
+    "Ok",
+    "Compat",
+    "Blocked",
+};
+
+dictionary ContractGateInfo {
+    ContractGateStatus status;
+    string? blocked_reason;
+};
+
+dictionary AsrBridgeContractInfo {
+    string module_name;
+    string result_event_name;
+    string error_event_name;
+    string error_init;
+    string error_feed;
+    string error_stop;
+    string key_text;
+    string key_is_final;
+};
+
+dictionary TtsBridgeContractInfo {
+    string module_name;
+    string event_start;
+    string event_pause;
+    string event_resume;
+    string event_finish;
+    string event_error;
+    string key_rate;
+    string key_pitch_multiplier;
+    string key_volume;
+    string key_language;
+    string key_voice_identifier;
+    string key_cancelled;
+    string key_message;
+};
+
+dictionary EmailBridgeContractInfo {
+    string module_name;
+    string method_compose_email;
+    string uri_scheme_mailto;
+    string error_invalid_recipients;
+    string error_open_failed;
+};
+
+dictionary UserInfoBridgeContractInfo {
+    string module_name;
+    string method_get_current_user_info;
+    string method_login_with_type;
+    string event_user_info_changed;
+    string event_login_status_changed;
+    string event_user_logout;
+    string key_id;
+    string key_login_api_url;
+    string key_user_info;
+    string key_user_identity;
+    string key_session_token;
+    string key_created_at;
+    string key_updated_at;
+    string key_request_context;
+    string key_is_logged_in;
+};
+
+dictionary ActrBridgeContractInfo {
+    string module_name;
+    string stream_event_name;
+    string status_connected;
+    string stream_type_text;
+    string stream_type_voice;
+    string stream_type_attachment_result;
+    i32 stream_status_ok;
+    i32 stream_status_error;
+    string stream_metadata_eos_key;
+    string stream_metadata_aos_key;
+    string stream_metadata_terminal_value;
+    u32 attachment_result_timeout_ms;
+    u32 attachment_chunk_size_bytes;
+    string attachment_checksum_algorithm_md5;
+    i32 attachment_status_code_ok;
+    i32 attachment_type_unknown;
+    i32 attachment_type_image;
+    i32 attachment_type_document;
+    i32 attachment_type_audio;
+    i32 attachment_type_video;
+    i32 attachment_type_other;
+    i32 attachment_upload_status_unknown;
+    i32 attachment_upload_status_completed;
+    i32 attachment_upload_status_failed;
+    string ask_service_prompt_route_key;
+    string ask_service_attach_route_key;
+    string ask_service_prepare_attachment_upload_route_key;
+    string ask_local_service_send_text_route_key;
+    string ask_local_service_start_send_voice_route_key;
+    string ask_local_service_send_voice_chunk_route_key;
+    u32 ios_ask_service_prompt_timeout_ms;
+    u32 ios_ask_service_prepare_attachment_upload_timeout_ms;
+    u32 android_ask_service_prompt_timeout_ms;
+    u32 android_ask_service_attach_timeout_ms;
+    u32 android_ask_local_service_rpc_timeout_ms;
+    string error_invalid_input;
+    string error_unknown;
+    string error_prompt_request;
+    string error_not_connected;
+    string error_actr;
+    string error_generic;
+    string key_tab_id;
+    string key_actor_type;
+    string key_path;
+    string key_status;
+    string key_message_id;
+    string key_session_id;
+    string key_text;
+    string key_message;
+    string key_stream_id;
+    string key_stream_id_upper;
+    string key_text_response_stream_id;
+    string key_voice_response_stream_id;
+    string key_attachment_ids;
+    string key_location;
+    string key_latitude;
+    string key_longitude;
+    string key_address;
+    string key_place_name;
+    string key_file_data;
+    string key_attachment_id;
+    string key_checksum;
+    string key_checksum_algorithm;
+    string key_size_bytes;
+    string key_result_stream_id;
+    string key_id;
+    string key_filename;
+    string key_type;
+    string key_status_code;
+    string key_error_message;
+    string key_question_id;
+    string key_chunk_id;
+    string key_metadata;
+    string key_metadata_key;
+    string key_metadata_value;
+    string key_sequence;
+    string key_timestamp_ms;
+};
+
+dictionary ActrActorTypeInfo {
+    string publisher;
+    string name;
+    string version;
+};
+
+dictionary SystemAppInfo {
+    string kind;
+    string title;
+    string about_url;
+};
+
+dictionary AppSourceTypeInfo {
+    string kind;
+    string display_name;
+};
+
+dictionary BrowserSearchEngineInfo {
+    string id;
+    string display_name;
+    string search_url_prefix;
+};
+
+dictionary BrowserDataContractInfo {
+    u32 schema_version;
+    u32 max_history_items;
+    u32 max_bookmark_items;
+    u32 max_session_tabs;
+    u32 max_title_length;
+    string home_address;
+    string history_address;
+    string bookmarks_address;
+};
+
+dictionary BrowserStorageSchemaInfo {
+    u32 schema_version;
+    string database_name;
+    sequence<string> table_names;
+    sequence<string> statements;
+};
+
+dictionary BrowserStorageRepositorySqlInfo {
+    string upsert_history_page;
+    string insert_history_visit;
+    string select_history_recent;
+    string delete_history_by_address;
+    string delete_all_history;
+    string upsert_bookmark;
+    string select_bookmarks_recent;
+    string delete_bookmark_by_address;
+    string delete_bookmark_by_id;
+    string delete_all_bookmarks;
+    string upsert_session;
+    string select_session;
+    string delete_session_tabs;
+    string insert_session_tab;
+    string select_session_tabs;
+};
+
+dictionary BrowserStorageSyncSqlInfo {
+    string select_dirty_history_pages;
+    string select_dirty_history_visits;
+    string select_dirty_bookmark_folders;
+    string select_dirty_bookmarks;
+    string select_dirty_sessions;
+    string select_dirty_session_tabs;
+    string apply_remote_history_page;
+    string apply_remote_history_visit;
+    string apply_remote_bookmark_folder;
+    string apply_remote_bookmark;
+    string apply_remote_session;
+    string apply_remote_session_tab;
+    string mark_history_page_synced;
+    string mark_history_visit_synced;
+    string mark_bookmark_folder_synced;
+    string mark_bookmark_synced;
+    string mark_session_synced;
+    string mark_session_tab_synced;
+    string upsert_sync_cursor;
+    string select_sync_cursors_for_scope;
+};
+
+dictionary DefaultTagInfo {
+    string name;
+    string color;
+    boolean is_system;
+};
+
+dictionary AsrSegmentInfo {
+    string word;
+    string? nature;
+};
+
+dictionary AsrModelPlanInfo {
+    string language_dir;
+    string asset_path;
+    string storage_relative_path;
+    string ready_marker;
+};
+
+dictionary CoreSqlValueInfo {
+    string kind;
+    string? text;
+    i64? integer;
+    f64? real;
+};
+
+dictionary CoreHistoryRepositorySqlInfo {
+    string insert_visit;
+    string select_recent;
+    string select_all;
+    string search_by_title;
+    string delete_by_id;
+    string delete_all;
+};
+
+dictionary CoreHistoryItemRowInfo {
+    string id;
+    string title;
+    string? app_url;
+    string? app_id;
+    i64 visit_time_seconds;
+};
+
+dictionary CoreHistoryItemInfo {
+    string id;
+    string title;
+    string? app_url;
+    string? app_id;
+    i64 visit_time_seconds;
+};
+
+dictionary CoreTagRepositorySqlInfo {
+    string count_all;
+    string select_all;
+    string select_user;
+    string insert_tag;
+    string update_tag;
+    string delete_user_tag_by_id;
+    string select_by_bookmark_id;
+    string delete_bookmark_tags_by_bookmark_id;
+    string insert_bookmark_tag;
+    string insert_or_ignore_bookmark_tag;
+    string delete_bookmark_tag;
+};
+
+dictionary CoreTagRowInfo {
+    string id;
+    string name;
+    string? color;
+    i64 is_system_value;
+};
+
+dictionary CoreTagInfo {
+    string id;
+    string name;
+    string? color;
+    boolean is_system;
+};
+
+dictionary CoreBookmarkRepositorySqlInfo {
+    string insert_bookmark;
+    string update_bookmark;
+    string delete_by_id;
+    string select_all;
+    string select_by_tag;
+    string search_by_title_or_notes;
+    string count_by_app_url;
+    string select_by_app_url;
+    string update_last_used;
+    string delete_null_app_url;
+    string delete_duplicates_by_app_url;
+    string delete_bookmark_tags;
+    string delete_all;
+    string vacuum;
+};
+
+dictionary CoreBookmarkRowInfo {
+    string id;
+    string title;
+    string? app_url;
+    string? app_id;
+    i64 created_at_seconds;
+    i64? last_used_at_seconds;
+    string? publisher;
+    string? notes;
+    string? favicon;
+};
+
+dictionary CoreBookmarkInfo {
+    string id;
+    string title;
+    string? app_url;
+    string? app_id;
+    i64 created_at_seconds;
+    i64? last_used_at_seconds;
+    string? publisher;
+    string? notes;
+    string? favicon;
+};
+
+dictionary CoreAppRepositorySqlInfo {
+    string insert_or_replace_app;
+    string update_app;
+    string delete_by_id;
+    string delete_by_bundle_id;
+    string select_all;
+    string select_by_source_type;
+    string select_pinned;
+    string select_by_bundle_id;
+    string select_by_id;
+    string count_by_bundle_id;
+    string update_last_used_by_bundle_id;
+    string toggle_pinned_by_id;
+    string search_by_name_description_or_bundle_id;
+    string delete_all;
+    string vacuum;
+};
+
+dictionary CoreInstalledAppRowInfo {
+    string? id;
+    string? name;
+    string? bundle_id;
+    string? version;
+    string? description;
+    string? source_type;
+    string? source_path;
+    string? icon;
+    i64? installed_at_seconds;
+    i64? last_used_at_seconds;
+    i64 is_pinned_value;
+};
+
+dictionary CoreInstalledAppInfo {
+    string id;
+    string name;
+    string bundle_id;
+    string? version;
+    string? description;
+    string source_type;
+    string source_path;
+    string? icon;
+    i64 installed_at_seconds;
+    i64? last_used_at_seconds;
+    boolean is_pinned;
+};
+
+dictionary PackageIntegrityFilePlanInfo {
+    string path;
+    string expected_hash;
+};
+
+dictionary PackageIntegrityPlanInfo {
+    string algorithm;
+    sequence<PackageIntegrityFilePlanInfo> files;
+};
+
+dictionary ActiveTabInfo {
+    string id;
+    string name;
+    string icon;
+    string screenshot;
+    boolean has_unread;
+    string url;
+    boolean is_marked;
+    boolean panel_visible;
+    string status;
+};
+
+dictionary ActiveTabRowInfo {
+    string id;
+    string name;
+    string icon;
+    string screenshot;
+    boolean has_unread;
+    string url;
+    boolean is_marked;
+    string status;
+    i32 sort_order;
+};
+
+dictionary RuntimeTabUpdateInfo {
+    string tab_id;
+    string? title;
+    string? icon;
+    string? app_url;
+    string? status;
+};
+
+dictionary RuntimeTabUnreadInfo {
+    string tab_id;
+    boolean unread;
+};
+
+dictionary RuntimeTabBookmarkStatusInfo {
+    string tab_id;
+    boolean marked;
+};
+
+dictionary RuntimeTabBookmarkEventInfo {
+    string tab_id;
+    boolean is_bookmarked;
+};
+
+dictionary RuntimeTabFullscreenEventInfo {
+    string tab_id;
+};
+
+dictionary RuntimeExtensionPanelVisibleEventInfo {
+    string tab_id;
+    boolean visible;
+};
+
+dictionary RuntimeContainerSizeChangeEventInfo {
+    i32 container_width;
+    i32 container_height;
+};
+
+dictionary RuntimeTabInfo {
+    string unified_script;
+    boolean right_panel_default_visible;
+    string id;
+    string background_color;
+    i32 reload_key;
+    string html_content;
+    string title;
+};
+
+dictionary RuntimeRootPropsInfo {
+    RuntimeTabInfo tab;
+    boolean is_left_panel_visible;
+    sequence<RuntimeTabInfo> tabs;
+    boolean single_tab_mode;
+    boolean is_right_panel_visible;
+    string current_tab_id;
+    i32 container_height;
+    i32 container_width;
+    string? app_url;
+};
+
+dictionary RuntimeSystemTabInfo {
+    string system_app_type;
+};
+
+dictionary RuntimeSystemRootPropsInfo {
+    RuntimeSystemTabInfo tab;
+    boolean single_tab_mode;
+};
+
+[Error]
+enum CoreError {
+    "InvalidJson",
+    "MissingField",
+    "UnsupportedContract",
+    "ContractTooNew",
+    "UnknownSystemAppType",
+    "UnknownAppSourceType",
+    "InvalidActrActorType",
+};

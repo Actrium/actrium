@@ -87,4 +87,4 @@ export class Logger {
   }
 }
 
-export const logger = new Logger('actro-runtime');
+export const logger = new Logger('actrium-runtime');

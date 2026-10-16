@@ -4,7 +4,7 @@
 
 ## 1. `useAppVoiceController`
 
-文件：[`useAppVoiceController.ts`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actro-runtime/src/runtime-host/features/input/hooks/useAppVoiceController.ts)
+文件：[`useAppVoiceController.ts`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actrium-runtime/src/runtime-host/features/input/hooks/useAppVoiceController.ts)
 
 职责：
 
@@ -32,7 +32,7 @@
 
 ## 2. `useAppSpeechRecognitionController`
 
-文件：[`useAppSpeechRecognitionController.ts`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actro-runtime/src/runtime-host/features/input/hooks/useAppSpeechRecognitionController.ts)
+文件：[`useAppSpeechRecognitionController.ts`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actrium-runtime/src/runtime-host/features/input/hooks/useAppSpeechRecognitionController.ts)
 
 职责：
 
@@ -57,7 +57,7 @@
 
 接入位置：
 
-- 文件：[`AppInput.shared.tsx`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actro-runtime/src/runtime-host/features/input/AppInput.shared.tsx)
+- 文件：[`AppInput.shared.tsx`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actrium-runtime/src/runtime-host/features/input/AppInput.shared.tsx)
 
 当前行为：
 
@@ -71,7 +71,7 @@
 
 ## 4. 如果要恢复原始语音消息发送
 
-恢复点主要在 [`AppInput.shared.tsx`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actro-runtime/src/runtime-host/features/input/AppInput.shared.tsx)：
+恢复点主要在 [`AppInput.shared.tsx`](/Users/toupitutuetoudada/Desktop/work/github/ipad/actrium-runtime/src/runtime-host/features/input/AppInput.shared.tsx)：
 
 - 把当前接入的 `useAppSpeechRecognitionController` 改回 `useAppVoiceController`
 - 同时重新把 `useAppMessageFlow` 返回的语音会话能力传回去

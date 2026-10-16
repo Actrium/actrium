@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class BrowserHistoryStore
 {
@@ -155,7 +155,7 @@ internal sealed class BrowserHistoryStore
         // Unparseable or missing core output is contract drift and must fail
         // loudly.
         var snapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions);
-        var normalizedJson = ActroCore.NormalizeBrowserHistorySnapshotJson(snapshotJson);
+        var normalizedJson = ActriumCore.NormalizeBrowserHistorySnapshotJson(snapshotJson);
         try
         {
             return JsonSerializer.Deserialize<BrowserHistorySnapshot>(normalizedJson, JsonOptions)

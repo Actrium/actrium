@@ -1,8 +1,8 @@
-# Actro Android 客户端
+# Actrium Android 客户端
 
 ## 项目概述
 
-Actro Android 是 Actro 浏览器客户端的 Android 外壳，采用 **Kotlin 原生壳 + React Native 业务层** 的混合架构。原生壳负责多 Tab 窗口管理和系统级能力，RN 层（`packages/actrium`）承载全部业务 UI 和逻辑。
+Actrium Android 是 Actrium 浏览器客户端的 Android 外壳，采用 **Kotlin 原生壳 + React Native 业务层** 的混合架构。原生壳负责多 Tab 窗口管理和系统级能力，RN 层（`packages/actrium`）承载全部业务 UI 和逻辑。
 
 ## 仓库结构
 
@@ -10,7 +10,7 @@ Actro Android 是 Actro 浏览器客户端的 Android 外壳，采用 **Kotlin �
 android/
 ├── android/                  # Android 原生壳 (Kotlin)
 │   ├── app/                  #   主应用模块
-│   │   └── src/main/java/com/actro/android/
+│   │   └── src/main/java/com/actrium/android/
 │   │       ├── MainActivity.kt        # 入口 Activity，管理多 Tab RN 容器
 │   │       ├── MainApplication.kt     # Application，注册 RN Package
 │   │       ├── MainViewModel.kt       # Tab 生命周期 ViewModel
@@ -20,10 +20,10 @@ android/
 │   │           └── UserInfoModule.kt  # RN NativeModule：用户信息
 │   └── settings.gradle       # Gradle 项目配置（含 autolink + 手动 include）
 │
-├── actro-runtime -> ../../../packages/actrium
+├── actrium-runtime -> ../../../packages/actrium
 │                              # React Native 业务层软链，源码归位到 monorepo packages
 │
-├── index.js                  # RN 入口，注册 actro-runtime 为根组件
+├── index.js                  # RN 入口，注册 actrium-runtime 为根组件
 ├── metro.config.js           # Metro 打包配置（双 node_modules 去重）
 ├── package.json              # 根依赖（RN 原生库在此声明以支持 autolink）
 └── babel.config.js
@@ -33,7 +33,7 @@ android/
 
 ```
 packages/
-├── actro-runtime/  # 共享 React Native 业务运行时
+├── actrium-runtime/  # 共享 React Native 业务运行时
 ├── askit/          # 共享 TS 工具库
 ├── keel/           # Keel 插件沙箱引擎
 ```

@@ -1,11 +1,11 @@
 using System.Net;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class BrowserNavigationErrorPolicy
 {
     public const string DefaultTitle = "Navigation failed";
-    public const string DefaultMessage = "Actro could not open this page.";
+    public const string DefaultMessage = "Actrium could not open this page.";
     public const string UnknownAddress = "Unknown address";
     public const string UnknownStatus = "Unknown error";
 

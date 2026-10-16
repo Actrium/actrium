@@ -40,10 +40,10 @@ coverage.lcov
 # Actrium native build and staging outputs
 crates/actrium-core/generated/
 crates/actrium-core/xcframework-staging/
-crates/actrium-core/ActroCore.xcframework/**/libactro_core.a
+crates/actrium-core/ActriumCore.xcframework/**/libactrium_core.a
 crates/actrium-vault/generated/
 crates/actrium-vault/xcframework-staging/
-crates/actrium-vault/ActroVault.xcframework/**/libactro_vault.a
+crates/actrium-vault/ActriumVault.xcframework/**/libactrium_vault.a
 windows/bin/
 windows/obj/
 windows/native/*.dll

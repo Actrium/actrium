@@ -19,17 +19,17 @@ set -o pipefail  # Exit when Pipe Command Failed
 # ==============================================================================
 
 # Project Configuration
-PROJECT_NAME="Actro"
-WORKSPACE_PATH="Actro.xcworkspace"
-SCHEME="Actro"
+PROJECT_NAME="Actrium"
+WORKSPACE_PATH="Actrium.xcworkspace"
+SCHEME="Actrium"
 CONFIGURATION="Release"
 
 # Path Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build"
-ARCHIVE_PATH="$BUILD_DIR/Actro.xcarchive"
-EXPORT_PATH="$BUILD_DIR/Actro-IPA"
+ARCHIVE_PATH="$BUILD_DIR/Actrium.xcarchive"
+EXPORT_PATH="$BUILD_DIR/Actrium-IPA"
 EXPORT_OPTIONS_PATH="$SCRIPT_DIR/ExportOptions.plist"
 
 # Load local configuration
@@ -113,13 +113,13 @@ else
 fi
 
 # Check if in the root directory
-if [ ! -f "$PROJECT_ROOT/Actro.xcworkspace/contents.xcworkspacedata" ]; then
-    log_error "Not found Actro.xcworkspace, please ensure that the project root directory is implemented"
+if [ ! -f "$PROJECT_ROOT/Actrium.xcworkspace/contents.xcworkspacedata" ]; then
+    log_error "Not found Actrium.xcworkspace, please ensure that the project root directory is implemented"
     exit 1
 fi
 
 log_success "Precheck complete"
-"$SCRIPT_DIR/ensure-actro-runtime.sh"
+"$SCRIPT_DIR/ensure-actrium-runtime.sh"
 
 # ==============================================================================
 # Clear old build
@@ -130,7 +130,7 @@ log_step "Clear old build"
 # Global Cleanup
 log_info "Cleans up old build and dependencies..."
 rm -rf "$BUILD_DIR"
-rm -rf "$PROJECT_ROOT/ActroRuntime/node_modules"
+rm -rf "$PROJECT_ROOT/ActriumRuntime/node_modules"
 rm -rf "$PROJECT_ROOT/Pods"
 
 # Cleaning Watchman and Metro Cache
@@ -171,7 +171,7 @@ log_info "Current Version: $VERSION"
 
 log_step "Install React Native Dependency"
 
-cd "$PROJECT_ROOT/ActroRuntime"
+cd "$PROJECT_ROOT/ActriumRuntime"
 
 if command -v yarn &> /dev/null; then
     log_info "Use yarn Installation Dependence..."
@@ -194,17 +194,17 @@ log_success "React Native Reliance on installation completed"
 
 log_step "Pack up. React Native Bundle"
 
-cd "$PROJECT_ROOT/ActroRuntime"
+cd "$PROJECT_ROOT/ActriumRuntime"
 
 # Run Packing Commands
-# --bundle-output Output To Actro Root directory, matching ActroReactNativeFactoryDelegate.bundleURL Reference Logic
-# --assets-dest Output To Actro Root directory, generate assets/ Folder Level
+# --bundle-output Output To Actrium Root directory, matching ActriumReactNativeFactoryDelegate.bundleURL Reference Logic
+# --assets-dest Output To Actrium Root directory, generate assets/ Folder Level
 node node_modules/react-native/scripts/bundle.js \
     --platform ios \
     --dev false \
     --entry-file index.ts \
-    --bundle-output "$PROJECT_ROOT/Actro/runtime.jsbundle" \
-    --assets-dest "$PROJECT_ROOT/Actro"
+    --bundle-output "$PROJECT_ROOT/Actrium/runtime.jsbundle" \
+    --assets-dest "$PROJECT_ROOT/Actrium"
 
 cd "$PROJECT_ROOT"
 

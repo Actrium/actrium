@@ -6,7 +6,7 @@ if [ "$#" -eq 0 ]; then
   exit 64
 fi
 
-log_file=$(mktemp "${TMPDIR:-/tmp}/actro-xcodebuild.XXXXXX") || exit 1
+log_file=$(mktemp "${TMPDIR:-/tmp}/actrium-xcodebuild.XXXXXX") || exit 1
 
 "$@" >"$log_file" 2>&1
 status=$?

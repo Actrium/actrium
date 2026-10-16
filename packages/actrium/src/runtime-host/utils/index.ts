@@ -2,7 +2,7 @@ import React from 'react';
 import type { TabConfig } from '../types';
 import {
   evaluateContract,
-  extractAppIdFromUrl as extractActroCoreAppIdFromUrl,
+  extractAppIdFromUrl as extractActriumCoreAppIdFromUrl,
 } from '../coreContract';
 import { DevToolsBridge, BoxModelData } from '../libs/devTools';
 
@@ -157,7 +157,7 @@ export function extractBoxModelFromStyle(
  * Ignores query parameters and hashes.
  */
 export function extractAppIdFromUrl(url: string): string | null {
-  return extractActroCoreAppIdFromUrl(url);
+  return extractActriumCoreAppIdFromUrl(url);
 }
 
 /**

@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Linq;
 using Microsoft.Data.Sqlite;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class BrowserStorageDatabase
 {
@@ -374,7 +374,7 @@ internal sealed class BrowserStorageDatabase
     {
         try
         {
-            var planJson = ActroCore.BuildBrowserStorageSyncRemoteApplyPlanJson(batchJson);
+            var planJson = ActriumCore.BuildBrowserStorageSyncRemoteApplyPlanJson(batchJson);
             return string.Equals(planJson, "null", StringComparison.Ordinal)
                 ? "null"
                 : ApplyRemoteSyncPlan(planJson);
@@ -403,7 +403,7 @@ internal sealed class BrowserStorageDatabase
                 plan.GeneratedAtUnixSeconds,
                 ExecuteRemoteApplyPlan(plan));
             var resultJson = JsonSerializer.Serialize(resultBatch, JsonOptions);
-            return ActroCore.BuildBrowserStorageSyncRemoteApplyResultJson(planJson, resultJson);
+            return ActriumCore.BuildBrowserStorageSyncRemoteApplyResultJson(planJson, resultJson);
         }
         catch (JsonException)
         {
@@ -413,7 +413,7 @@ internal sealed class BrowserStorageDatabase
 
     public bool ApplySyncAckBatch(string ackJson)
     {
-        var planJson = ActroCore.BuildBrowserStorageSyncAckPlanJson(ackJson);
+        var planJson = ActriumCore.BuildBrowserStorageSyncAckPlanJson(ackJson);
         return !string.Equals(planJson, "null", StringComparison.Ordinal)
             && ApplySyncAckPlan(planJson);
     }
@@ -435,7 +435,7 @@ internal sealed class BrowserStorageDatabase
     {
         try
         {
-            var cyclePlanJson = ActroCore.BuildBrowserStorageSyncClientCyclePlanJson(responseJson);
+            var cyclePlanJson = ActriumCore.BuildBrowserStorageSyncClientCyclePlanJson(responseJson);
             if (string.Equals(cyclePlanJson, "null", StringComparison.Ordinal))
             {
                 return "null";
@@ -463,7 +463,7 @@ internal sealed class BrowserStorageDatabase
                 remoteApplyResultJson = ApplyRemoteSyncPlan(remoteApplyPlanJson);
             }
 
-            var ackJson = ActroCore.BuildBrowserStorageSyncClientAckBatchAfterRemoteApplyJson(
+            var ackJson = ActriumCore.BuildBrowserStorageSyncClientAckBatchAfterRemoteApplyJson(
                 responseJson,
                 remoteApplyResultJson);
             if (string.Equals(ackJson, "null", StringComparison.Ordinal))
@@ -472,7 +472,7 @@ internal sealed class BrowserStorageDatabase
             }
 
             var ackApplied = ApplySyncAckBatch(ackJson);
-            return ActroCore.BuildBrowserStorageSyncClientCycleApplyResultJson(
+            return ActriumCore.BuildBrowserStorageSyncClientCycleApplyResultJson(
                 responseJson,
                 remoteApplyResultJson,
                 ackApplied);
@@ -487,7 +487,7 @@ internal sealed class BrowserStorageDatabase
     {
         try
         {
-            var clientPlanJson = ActroCore.BuildBrowserStorageSyncCloudCycleClientPlanJson(cycleRoundJson);
+            var clientPlanJson = ActriumCore.BuildBrowserStorageSyncCloudCycleClientPlanJson(cycleRoundJson);
             if (string.Equals(clientPlanJson, "null", StringComparison.Ordinal))
             {
                 return "null";
@@ -542,7 +542,7 @@ internal sealed class BrowserStorageDatabase
                 }
             }
 
-            return ActroCore.BuildBrowserStorageSyncCloudCycleClientApplyResultJson(
+            return ActriumCore.BuildBrowserStorageSyncCloudCycleClientApplyResultJson(
                 cycleRoundJson,
                 JsonSerializer.Serialize(stepResults, JsonOptions),
                 remoteApplyResultJson);
@@ -561,7 +561,7 @@ internal sealed class BrowserStorageDatabase
     {
         try
         {
-            return ActroCore.BuildBrowserStorageSyncBatchFromDirtyRowsJson(
+            return ActriumCore.BuildBrowserStorageSyncBatchFromDirtyRowsJson(
                 scope,
                 deviceId,
                 generatedAtUnixSeconds ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -579,7 +579,7 @@ internal sealed class BrowserStorageDatabase
         long? generatedAtUnixSeconds = null,
         int limitPerCollection = 200)
     {
-        return ActroCore.BuildBrowserStorageSyncPushRequestFromDirtyRowsJson(
+        return ActriumCore.BuildBrowserStorageSyncPushRequestFromDirtyRowsJson(
             scope,
             deviceId,
             generatedAtUnixSeconds ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
@@ -631,7 +631,7 @@ internal sealed class BrowserStorageDatabase
             return "null";
         }
 
-        return ActroCore.BuildBrowserStorageSyncCycleRequestPlanJson(
+        return ActriumCore.BuildBrowserStorageSyncCycleRequestPlanJson(
             baseUrl,
             accessToken,
             pushRequestJson,
@@ -1023,7 +1023,7 @@ internal sealed class BrowserStorageDatabase
             index = tab.Index,
             address = tab.Address,
         });
-        var planJson = ActroCore.BuildBrowserStorageSessionTabIdPlanJson(
+        var planJson = ActriumCore.BuildBrowserStorageSessionTabIdPlanJson(
             JsonSerializer.Serialize(request));
 
         try
@@ -1115,7 +1115,7 @@ internal sealed class BrowserStorageDatabase
         // and must fail loudly instead of degrading silently.
         public static BrowserStorageContract Load()
         {
-            var schema = ActroCore.LoadBrowserStorageSchema();
+            var schema = ActriumCore.LoadBrowserStorageSchema();
             IReadOnlyList<string>? schemaStatements;
             BrowserStorageRepositorySqlContract? repositorySql;
             BrowserStorageMigrationPlanContract? migrationPlan;
@@ -1128,7 +1128,7 @@ internal sealed class BrowserStorageDatabase
                     schema.RepositorySqlJson,
                     JsonOptions);
                 migrationPlan = JsonSerializer.Deserialize<BrowserStorageMigrationPlanContract>(
-                    ActroCore.LoadBrowserStorageSchemaMigrationPlanJson(),
+                    ActriumCore.LoadBrowserStorageSchemaMigrationPlanJson(),
                     JsonOptions);
             }
             catch (JsonException error)
@@ -1343,7 +1343,7 @@ internal sealed class BrowserStorageDatabase
             try
             {
                 syncSql = JsonSerializer.Deserialize<BrowserStorageSyncSqlContract>(
-                    ActroCore.LoadBrowserStorageSyncSqlJson(),
+                    ActriumCore.LoadBrowserStorageSyncSqlJson(),
                     JsonOptions);
             }
             catch (JsonException error)

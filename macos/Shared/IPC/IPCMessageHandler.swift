@@ -1,6 +1,6 @@
 //
 //  IPCMessageHandler.swift
-//  Actro
+//  Actrium
 //
 //  High-level IPC message handling with async/await support.
 //
@@ -8,14 +8,14 @@
 import Foundation
 import SwiftProtobuf
 
-// MARK: - IPC Connection (Actro side)
+// MARK: - IPC Connection (Actrium side)
 
 /// Manages IPC connection to a Helper process
 class IPCConnection {
     private let server: IPCServer
     private let tabId: String
     private let filesystemSocketPath: String?
-    private var pendingRequests: [UInt32: CheckedContinuation<Actro_Ipc_IPCMessage, Error>] = [:]
+    private var pendingRequests: [UInt32: CheckedContinuation<Actrium_Ipc_IPCMessage, Error>] = [:]
     private var nextRequestId: UInt32 = 1
     private let lock = NSLock()
 
@@ -82,8 +82,8 @@ class IPCConnection {
 
     /// Load content in the Helper
     func loadContent(type: String, content: String, backgroundColor: String) async throws -> Bool {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.loadContent = Actro_Ipc_LoadContentRequest()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.loadContent = Actrium_Ipc_LoadContentRequest()
         msg.loadContent.contentType = type
         msg.loadContent.content = content
         msg.loadContent.backgroundColor = backgroundColor
@@ -100,8 +100,8 @@ class IPCConnection {
 
     /// Update viewport size
     func updateViewport(width: Double, height: Double) throws {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.updateViewport = Actro_Ipc_UpdateViewportRequest()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.updateViewport = Actrium_Ipc_UpdateViewportRequest()
         msg.updateViewport.width = width
         msg.updateViewport.height = height
 
@@ -109,8 +109,8 @@ class IPCConnection {
     }
 
     /// Send input event
-    func sendInputEvent(_ event: Actro_Ipc_InputEvent) throws {
-        var msg = Actro_Ipc_IPCMessage()
+    func sendInputEvent(_ event: Actrium_Ipc_InputEvent) throws {
+        var msg = Actrium_Ipc_IPCMessage()
         msg.inputEvent = event
 
         try sendOneWay(msg)
@@ -118,8 +118,8 @@ class IPCConnection {
 
     /// Execute JavaScript
     func executeJS(_ code: String) async throws -> String {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.executeJs = Actro_Ipc_ExecuteJSRequest()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.executeJs = Actrium_Ipc_ExecuteJSRequest()
         msg.executeJs.code = code
 
         let response = try await sendRequest(msg)
@@ -134,8 +134,8 @@ class IPCConnection {
 
     /// Get current IOSurface ID
     func getSurfaceID() async throws -> UInt32 {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.getSurfaceID = Actro_Ipc_GetSurfaceIDRequest()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.getSurfaceID = Actrium_Ipc_GetSurfaceIDRequest()
 
         let response = try await sendRequest(msg)
         guard case .surfaceIDResponse(let resp) = response.payload else {
@@ -145,9 +145,9 @@ class IPCConnection {
     }
 
     /// Get metrics
-    func getMetrics() async throws -> Actro_Ipc_MetricsResponse {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.getMetrics = Actro_Ipc_GetMetricsRequest()
+    func getMetrics() async throws -> Actrium_Ipc_MetricsResponse {
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.getMetrics = Actrium_Ipc_GetMetricsRequest()
 
         let response = try await sendRequest(msg)
         guard case .metricsResponse(let resp) = response.payload else {
@@ -158,8 +158,8 @@ class IPCConnection {
 
     /// Terminate Helper
     func terminate(reason: String) {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.terminate = Actro_Ipc_TerminateRequest()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.terminate = Actrium_Ipc_TerminateRequest()
         msg.terminate.reason = reason
 
         try? sendOneWay(msg)
@@ -167,7 +167,7 @@ class IPCConnection {
 
     // MARK: - Private
 
-    private func sendRequest(_ message: Actro_Ipc_IPCMessage) async throws -> Actro_Ipc_IPCMessage {
+    private func sendRequest(_ message: Actrium_Ipc_IPCMessage) async throws -> Actrium_Ipc_IPCMessage {
         var msg = message
 
         lock.lock()
@@ -205,14 +205,14 @@ class IPCConnection {
         }
     }
 
-    private func sendOneWay(_ message: Actro_Ipc_IPCMessage) throws {
+    private func sendOneWay(_ message: Actrium_Ipc_IPCMessage) throws {
         let data = try message.serializedData()
         try server.send(data)
     }
 
     private func handleMessage(_ data: Data) {
         do {
-            let msg = try Actro_Ipc_IPCMessage(serializedData: data)
+            let msg = try Actrium_Ipc_IPCMessage(serializedData: data)
 
             // Check if it's a response to a pending request
             if msg.id != 0 {
@@ -260,17 +260,17 @@ class IPCConnection {
 
 // MARK: - IPC Helper Connection (Helper side)
 
-/// Manages IPC connection from Helper to Actro
+/// Manages IPC connection from Helper to Actrium
 class IPCHelperConnection {
     private let client: IPCClient
     private let tabId: String
 
-    var onLoadContent: ((Actro_Ipc_LoadContentRequest, @escaping (Bool, String?) -> Void) -> Void)?
+    var onLoadContent: ((Actrium_Ipc_LoadContentRequest, @escaping (Bool, String?) -> Void) -> Void)?
     var onUpdateViewport: ((Double, Double) -> Void)?
-    var onInputEvent: ((Actro_Ipc_InputEvent) -> Void)?
+    var onInputEvent: ((Actrium_Ipc_InputEvent) -> Void)?
     var onExecuteJS: ((String, @escaping (Bool, String?, String?) -> Void) -> Void)?
     var onGetSurfaceID: ((@escaping (UInt32) -> Void) -> Void)?
-    var onGetMetrics: ((@escaping (Actro_Ipc_MetricsResponse) -> Void) -> Void)?
+    var onGetMetrics: ((@escaping (Actrium_Ipc_MetricsResponse) -> Void) -> Void)?
     var onTerminate: ((String) -> Void)?
     var onDisconnected: (() -> Void)?
 
@@ -298,7 +298,7 @@ class IPCHelperConnection {
         }
     }
 
-    /// Connect to Actro
+    /// Connect to Actrium
     func connect() throws {
         try client.connect()
     }
@@ -308,12 +308,12 @@ class IPCHelperConnection {
         client.disconnect()
     }
 
-    // MARK: - Send Messages to Actro
+    // MARK: - Send Messages to Actrium
 
     /// Send ready notification
     func sendReady(surfaceId: UInt32, width: UInt32, height: UInt32) throws {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.ready = Actro_Ipc_ReadyResponse()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.ready = Actrium_Ipc_ReadyResponse()
         msg.ready.surfaceID = surfaceId
         msg.ready.width = width
         msg.ready.height = height
@@ -323,8 +323,8 @@ class IPCHelperConnection {
 
     /// Send surface updated notification
     func sendSurfaceUpdated(surfaceId: UInt32) throws {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.surfaceUpdated = Actro_Ipc_SurfaceUpdated()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.surfaceUpdated = Actrium_Ipc_SurfaceUpdated()
         msg.surfaceUpdated.surfaceID = surfaceId
 
         try send(msg)
@@ -332,8 +332,8 @@ class IPCHelperConnection {
 
     /// Send title changed notification
     func sendTitleChanged(_ title: String) throws {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.titleChanged = Actro_Ipc_TitleChanged()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.titleChanged = Actrium_Ipc_TitleChanged()
         msg.titleChanged.title = title
 
         try send(msg)
@@ -341,8 +341,8 @@ class IPCHelperConnection {
 
     /// Send navigation request
     func sendNavigationRequest(url: String, newTab: Bool) throws {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.navigationRequest = Actro_Ipc_NavigationRequest()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.navigationRequest = Actrium_Ipc_NavigationRequest()
         msg.navigationRequest.url = url
         msg.navigationRequest.newTab = newTab
 
@@ -351,8 +351,8 @@ class IPCHelperConnection {
 
     /// Send console log
     func sendConsoleLog(level: String, message: String, source: String) throws {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.consoleLog = Actro_Ipc_ConsoleLog()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.consoleLog = Actrium_Ipc_ConsoleLog()
         msg.consoleLog.level = level
         msg.consoleLog.message = message
         msg.consoleLog.source = source
@@ -361,8 +361,8 @@ class IPCHelperConnection {
     }
 
     func sendHostEvent(name: String, userInfoJSON: String, tabId: String = "") throws {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.hostEvent = Actro_Ipc_HostEvent()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.hostEvent = Actrium_Ipc_HostEvent()
         msg.hostEvent.name = name
         msg.hostEvent.userInfoJson = userInfoJSON
         msg.hostEvent.tabID = tabId
@@ -371,8 +371,8 @@ class IPCHelperConnection {
 
     /// Send crash report
     func sendCrash(reason: String) throws {
-        var msg = Actro_Ipc_IPCMessage()
-        msg.crashReport = Actro_Ipc_CrashReport()
+        var msg = Actrium_Ipc_IPCMessage()
+        msg.crashReport = Actrium_Ipc_CrashReport()
         msg.crashReport.reason = reason
 
         try send(msg)
@@ -380,12 +380,12 @@ class IPCHelperConnection {
 
     // MARK: - Private
 
-    private func send(_ message: Actro_Ipc_IPCMessage) throws {
+    private func send(_ message: Actrium_Ipc_IPCMessage) throws {
         let data = try message.serializedData()
         try client.send(data)
     }
 
-    private func sendResponse(requestId: UInt32, _ message: Actro_Ipc_IPCMessage) throws {
+    private func sendResponse(requestId: UInt32, _ message: Actrium_Ipc_IPCMessage) throws {
         var msg = message
         msg.id = requestId
         try send(msg)
@@ -393,14 +393,14 @@ class IPCHelperConnection {
 
     private func handleMessage(_ data: Data) {
         do {
-            let msg = try Actro_Ipc_IPCMessage(serializedData: data)
+            let msg = try Actrium_Ipc_IPCMessage(serializedData: data)
             let requestId = msg.id
 
             switch msg.payload {
             case .loadContent(let req):
                 onLoadContent?(req) { [weak self] success, error in
-                    var resp = Actro_Ipc_IPCMessage()
-                    resp.loadContentResponse = Actro_Ipc_LoadContentResponse()
+                    var resp = Actrium_Ipc_IPCMessage()
+                    resp.loadContentResponse = Actrium_Ipc_LoadContentResponse()
                     resp.loadContentResponse.requestID = requestId
                     resp.loadContentResponse.success = success
                     resp.loadContentResponse.errorMessage = error ?? ""
@@ -415,8 +415,8 @@ class IPCHelperConnection {
 
             case .executeJs(let req):
                 onExecuteJS?(req.code) { [weak self] success, result, error in
-                    var resp = Actro_Ipc_IPCMessage()
-                    resp.executeJsResponse = Actro_Ipc_ExecuteJSResponse()
+                    var resp = Actrium_Ipc_IPCMessage()
+                    resp.executeJsResponse = Actrium_Ipc_ExecuteJSResponse()
                     resp.executeJsResponse.requestID = requestId
                     resp.executeJsResponse.success = success
                     resp.executeJsResponse.result = result ?? ""
@@ -426,8 +426,8 @@ class IPCHelperConnection {
 
             case .getSurfaceID:
                 onGetSurfaceID? { [weak self] surfaceId in
-                    var resp = Actro_Ipc_IPCMessage()
-                    resp.surfaceIDResponse = Actro_Ipc_SurfaceIDResponse()
+                    var resp = Actrium_Ipc_IPCMessage()
+                    resp.surfaceIDResponse = Actrium_Ipc_SurfaceIDResponse()
                     resp.surfaceIDResponse.requestID = requestId
                     resp.surfaceIDResponse.surfaceID = surfaceId
                     try? self?.sendResponse(requestId: requestId, resp)
@@ -435,7 +435,7 @@ class IPCHelperConnection {
 
             case .getMetrics:
                 onGetMetrics? { [weak self] metrics in
-                    var resp = Actro_Ipc_IPCMessage()
+                    var resp = Actrium_Ipc_IPCMessage()
                     resp.metricsResponse = metrics
                     resp.metricsResponse.requestID = requestId
                     try? self?.sendResponse(requestId: requestId, resp)

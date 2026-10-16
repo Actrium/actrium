@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed record BrowserStorageSyncCredentials(
     string BaseUrl,
@@ -380,7 +380,7 @@ internal sealed class BrowserStorageSyncCoordinator
         string clientAction,
         uint retryAttempt)
     {
-        return JsonNodeFromObjectJson(ActroCore.BuildBrowserStorageSyncStatusPolicyJson(
+        return JsonNodeFromObjectJson(ActriumCore.BuildBrowserStorageSyncStatusPolicyJson(
             classification,
             shouldRetry,
             clientAction,
@@ -393,7 +393,7 @@ internal sealed class BrowserStorageSyncCoordinator
         JsonObject statusPolicy,
         long observedAtUnixSeconds)
     {
-        return JsonNodeFromObjectJson(ActroCore.BuildBrowserStorageSyncScheduleStateJson(
+        return JsonNodeFromObjectJson(ActriumCore.BuildBrowserStorageSyncScheduleStateJson(
             statusPolicy.ToJsonString(JsonOptions),
             observedAtUnixSeconds)) as JsonObject
             ?? throw new InvalidOperationException(

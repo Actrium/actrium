@@ -23,7 +23,7 @@
     "networkCheckInfo": "ネットワークエラー。接続を確認してください"
   },
   "actr": {
-    "appTitle": "Actro ActroRuntime",
+    "appTitle": "Actrium ActriumRuntime",
     "input": {
       "placeholder": "入力してください",
       "holdToSpeak": "長押しして話す",
@@ -104,7 +104,7 @@
       "shareSaveFailed": "画像の保存に失敗しました。もう一度お試しください。",
       "shareSavePermissionDeniedTitle": "権限が不足しています",
       "shareSavePermissionDenied": "アクセス権限がありません。",
-      "shareFooter": "ActroからのQ&Aカード",
+      "shareFooter": "ActriumからのQ&Aカード",
       "shareAiFooter": "この回答はAIによって生成されました",
       "shareAiDisclaimer": "内容は参考用です。注意してご確認ください。",
       "submit": "送信",
@@ -181,7 +181,7 @@
       "realtime": "リアルタイム状況",
       "parentChild": "親子レジャー",
       "culture": "文化探索",
-      "officialService": "Actro 公式カスタマーサポート",
+      "officialService": "Actrium 公式カスタマーサポート",
       "scanHint": "アプリQRコードをスキャン"
     },
     "auth": {
@@ -254,7 +254,7 @@
       "deleteAccount": "アカウント削除",
       "deleteAccountConfirm": "アカウントを削除しますか？この操作は取り消せず、アカウントデータは完全に削除されます。",
       "logoutAccount": "アカウントからログアウト",
-      "aboutActro": "Actro について",
+      "aboutActrium": "Actrium について",
       "userAgreement": "利用規約",
       "privacyPolicy": "プライバシーポリシー",
       "icp": "ICP 登録",

@@ -88,10 +88,10 @@ echo "📁 Check Project Files..."
 echo ""
 
 # Inspection Workspace
-if [ -f "Actro.xcworkspace/contents.xcworkspacedata" ]; then
+if [ -f "Actrium.xcworkspace/contents.xcworkspacedata" ]; then
     check_ok "Workspace Existence"
 else
-    check_error "Actro.xcworkspace Cannot initialise Evolution's mail component."
+    check_error "Actrium.xcworkspace Cannot initialise Evolution's mail component."
 fi
 
 # Inspection Pods
@@ -102,22 +102,22 @@ else
     echo "          Run: pod install"
 fi
 
-# Inspection ActroRuntime symlink
-if [ -L "ActroRuntime" ] && [ -d "ActroRuntime" ]; then
-    check_ok "ActroRuntime symlink Configured"
-elif [ -e "ActroRuntime" ]; then
-    check_error "ActroRuntime It exists, but it doesn't work. symlink"
+# Inspection ActriumRuntime symlink
+if [ -L "ActriumRuntime" ] && [ -d "ActriumRuntime" ]; then
+    check_ok "ActriumRuntime symlink Configured"
+elif [ -e "ActriumRuntime" ]; then
+    check_error "ActriumRuntime It exists, but it doesn't work. symlink"
 else
-    check_warning "ActroRuntime symlink Not created"
-    echo "          Run: ./Scripts/ensure-actro-runtime.sh"
+    check_warning "ActriumRuntime symlink Not created"
+    echo "          Run: ./Scripts/ensure-actrium-runtime.sh"
 fi
 
 # Inspection React Native Dependency
-if [ -d "ActroRuntime/node_modules" ]; then
+if [ -d "ActriumRuntime/node_modules" ]; then
     check_ok "React Native Reliance installed"
 else
     check_warning "React Native Dependence on uninstalled"
-    echo "          Run: cd ActroRuntime && bun install"
+    echo "          Run: cd ActriumRuntime && bun install"
 fi
 
 # Inspection ExportOptions.plist
@@ -179,7 +179,7 @@ if command -v agvtool &> /dev/null; then
 fi
 
 # Inspection Team ID
-TEAM_ID=$(grep -A 1 "DEVELOPMENT_TEAM" Actro.xcodeproj/project.pbxproj | grep "=" | head -n 1 | cut -d'"' -f2 || echo "")
+TEAM_ID=$(grep -A 1 "DEVELOPMENT_TEAM" Actrium.xcodeproj/project.pbxproj | grep "=" | head -n 1 | cut -d'"' -f2 || echo "")
 if [ -n "$TEAM_ID" ] && [ "$TEAM_ID" != "" ]; then
     check_ok "Team ID: $TEAM_ID"
 else
@@ -187,7 +187,7 @@ else
 fi
 
 # Inspection Bundle ID
-BUNDLE_ID=$(grep -A 1 "PRODUCT_BUNDLE_IDENTIFIER" Actro.xcodeproj/project.pbxproj | grep "=" | head -n 1 | cut -d'"' -f2 || echo "")
+BUNDLE_ID=$(grep -A 1 "PRODUCT_BUNDLE_IDENTIFIER" Actrium.xcodeproj/project.pbxproj | grep "=" | head -n 1 | cut -d'"' -f2 || echo "")
 if [ -n "$BUNDLE_ID" ] && [ "$BUNDLE_ID" != "" ]; then
     check_ok "Bundle ID: $BUNDLE_ID"
 else

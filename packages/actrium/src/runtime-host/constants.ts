@@ -1,4 +1,4 @@
-import { SUPPORTED_CONTRACT as ACTRO_CORE_SUPPORTED_CONTRACT } from './coreContract';
+import { SUPPORTED_CONTRACT as ACTRIUM_CORE_SUPPORTED_CONTRACT } from './coreContract';
 
 export const LAYOUT = {
   LEFT_PANEL_WIDTH: 240,
@@ -11,6 +11,6 @@ export const LAYOUT = {
 
 export const CHAT_HEADER_HEIGHT = 70;
 
-export const SUPPORTED_CONTRACT = ACTRO_CORE_SUPPORTED_CONTRACT;
+export const SUPPORTED_CONTRACT = ACTRIUM_CORE_SUPPORTED_CONTRACT;
 
 export const PERMISSION_MODE: 'allow' | 'warn' | 'deny' = 'warn';

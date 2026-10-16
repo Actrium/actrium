@@ -3,7 +3,7 @@
 ## B1. Search Engine Fallback
 
 **Files:**
-- `Actro/Views/MainContentView/BrowserViewModel.swift` — update `parseURL()`
+- `Actrium/Views/MainContentView/BrowserViewModel.swift` — update `parseURL()`
 
 **Implementation:**
 1. In `parseURL()`, when input is not a valid URL (no "." or has spaces):
@@ -17,8 +17,8 @@
 ## B2. Configurable Default Search Engine (Settings)
 
 **Files:**
-- `Actro/Settings/SearchEngineSettings.swift` (new)
-- `Actro/Settings/SettingsView.swift` — add General tab
+- `Actrium/Settings/SearchEngineSettings.swift` (new)
+- `Actrium/Settings/SettingsView.swift` — add General tab
 
 **Implementation:**
 1. Enum `SearchEngine: String, CaseIterable` with name, searchTemplate, icon

@@ -1,4 +1,4 @@
-# Actro Multi-Process Rendering - Summary of the period
+# Actrium Multi-Process Rendering - Summary of the period
 
 > History. See the current path. [Renderer-Process-Pool.md](Renderer-Process-Pool.md).
 >
@@ -33,7 +33,7 @@ ViewBridge Yes. Apple Internally used private frame embedded in the cross-proces
 **Realising the idea**:
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Main Process (Actro)                    │
+│                     Main Process (Actrium)                    │
 │  ┌─────────────────┐    ┌─────────────────────────────────┐ │
 │  │   TabManager    │───▶│        NSRemoteView             │ │
 │  │                 │    │  (displays remote view via XPC) │ │
@@ -59,7 +59,7 @@ ViewBridge Yes. Apple Internally used private frame embedded in the cross-proces
 4. Compared to existing XPC Integration of the structure
 
 **Expected changes in documents**:
-- Add `Actro/MultiProcess/RemoteViewHost.swift` - NSRemoteView Encapsulate
+- Add `Actrium/MultiProcess/RemoteViewHost.swift` - NSRemoteView Encapsulate
 - Modify XPC Services Info.plist - Add ViewBridge Configure
 - It may need to create a new one XPC Services target
 
@@ -67,7 +67,7 @@ ViewBridge Yes. Apple Internally used private frame embedded in the cross-proces
 
 ## Objective
 
-Achieved Actro macOS The applied multi-process architecture will React Native Rendering it to the independent process, the main process is through IPC Displays the rendering result.
+Achieved Actrium macOS The applied multi-process architecture will React Native Rendering it to the independent process, the main process is through IPC Displays the rendering result.
 
 **Core claims:**
 - Process isolation:React Native The crash does not affect the main process

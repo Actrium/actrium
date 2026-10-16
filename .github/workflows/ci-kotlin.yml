@@ -119,10 +119,12 @@ jobs:
       RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: wasm32-unknown-unknown
+      - name: Verify preinstalled Rust
+        run: |
+          rustup run 1.99.0 rustc --version
+          rustup target list --toolchain 1.99.0 --installed |
+            grep -Fxq wasm32-unknown-unknown
+          echo "RUSTUP_TOOLCHAIN=1.99.0" >> "$GITHUB_ENV"
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
