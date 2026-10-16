@@ -32,7 +32,16 @@ async fn post_request(State(state): State<Arc<ManagementState>>, body: Bytes) ->
         &state.profiles,
         &state.config,
         &body,
-        |url: String| async move { fetcher.get(&url).await },
+        |url: String| async move {
+            #[cfg(test)]
+            if std::env::var_os("ACTR_REALM_E2E_DOCUMENTS").is_some() {
+                return e2e_documents::fetch(url)
+                    .await
+                    .map(Arc::from)
+                    .map_err(|error| platform::net::FetchError::new(error.to_string()));
+            }
+            fetcher.get(&url).await
+        },
     )
     .await;
     // Replies can carry a Realm admin token.
@@ -65,4 +74,12 @@ pub fn router(profiles: Arc<RealmProfiles>, config: RealmConfig) -> Router {
         .layer(DefaultBodyLimit::max(128 * 1024))
         .layer(issuer::ratelimit::ip_rate_limiter())
         .with_state(state)
+}
+
+#[cfg(test)]
+mod e2e_documents {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/e2e/actr/package-runtime-echo/fixtures/documents.rs"
+    ));
 }

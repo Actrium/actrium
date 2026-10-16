@@ -6,6 +6,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/realm-scenarios.sh"
+
+# Keep the provenance matrix independent of the Realm creation matrix.
+REALM_MODE="${REALM_MODE:-legacy}"
+case "$REALM_MODE" in
+    legacy|provider|external) ;;
+    *) fail "Unknown REALM_MODE: $REALM_MODE" ;;
+esac
 
 HTTP_PORT="${HTTP_PORT:-8081}"
 ICE_PORT="${ICE_PORT:-3478}"
@@ -64,6 +72,9 @@ case "$MODE" in
     published|unpublished|rotation) ;;
     *) fail "Unknown MODE: $MODE" ;;
 esac
+if [ "$REALM_MODE" != legacy ] && [ "$MODE" != published ]; then
+    fail "Formal Realm scenarios require MODE=published"
+fi
 
 for cmd in cargo curl jq sqlite3 python3 perl rustc lsof timeout; do
     require_cmd "$cmd"
@@ -95,6 +106,7 @@ CLIENT_GUEST_PACKAGE="$DIST_DIR/${CLIENT_PUBLISHER}-pkg-runtime-echo-client-gues
 CLIENT_GUEST_PUBLIC_KEY="$DIST_DIR/public-key.json"
 
 mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT"
+umask 077
 
 ACTRIX_PID=""
 SERVER_PID=""
@@ -130,7 +142,9 @@ cleanup() {
         echo "Artifacts preserved at: $RUN_DIR"
     fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 run_actr() {
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" "$ACTR_CLI_BIN" "$@"
@@ -175,8 +189,15 @@ render_runtime_configs() {
 
 start_actrix() {
     section "🚀 Starting local actrix"
-    kill_listener tcp "$HTTP_PORT"
-    kill_listener udp "$ICE_PORT"
+    if [ "$REALM_MODE" != legacy ]; then
+        if lsof -tiTCP:"$HTTP_PORT" -sTCP:LISTEN >/dev/null 2>&1 \
+            || lsof -tiUDP:"$ICE_PORT" >/dev/null 2>&1; then
+            fail "Realm E2E ports are occupied; set HTTP_PORT and ICE_PORT to unused ports"
+        fi
+    else
+        kill_listener tcp "$HTTP_PORT"
+        kill_listener udp "$ICE_PORT"
+    fi
 
     # ACTRIX_RUST_LOG lets modes capture the debug provenance marker.
     RUST_LOG="${ACTRIX_RUST_LOG:-${RUST_LOG:-info}}" \
@@ -409,6 +430,7 @@ render_client_runtime_config() {
         "__REALM__=$REALM" \
         "__ECHO_SERVICE_VERSION__=$SERVICE_VERSION" \
         "__REALM_CLIENT_KEY__=$REALM_CLIENT_KEY"
+    apply_verified_realm_config "$CLIENT_RUNTIME_PATH"
 }
 
 run_client_and_assert() {
@@ -539,6 +561,7 @@ render_server_runtime() {
         "__PACKAGE_PATH__=$SERVICE_PACKAGE" \
         "__REALM__=$REALM" \
         "__REALM_CLIENT_KEY__=$REALM_OWNER_KEY"
+    apply_verified_realm_config "$SERVER_RUNTIME_PATH"
 }
 
 # Launch actr run fully isolated — independent HOME and --hyper-dir.
@@ -646,6 +669,12 @@ mode_published() {
     # generated. Reuse this server for the final echo round-trip.
     build_client_guest_package
     run_client_and_assert
+    if [ "$REALM_MODE" != legacy ]; then
+        stop_server
+        start_server_isolated "$home_dir" "$hyper_dir" "server-restarted.log"
+        expect_server_started "server-restarted.log"
+        run_client_and_assert
+    fi
     assert_removed_member_refused
     stop_server
 }
@@ -763,7 +792,7 @@ PY
 # Main
 # ============================================================================
 
-section "🧪 Package Runtime Echo E2E (MODE=${MODE})"
+section "🧪 Package Runtime Echo E2E (MODE=${MODE}, REALM_MODE=${REALM_MODE})"
 echo "Run directory: $RUN_DIR"
 echo "Backend:       $BACKEND"
 echo "Message:       $TEST_INPUT"
@@ -772,6 +801,7 @@ echo "Actrix binary: $ACTRIX_BIN"
 render_runtime_configs
 build_local_actr_cli
 build_local_actrix
+if [ "$REALM_MODE" != legacy ]; then prepare_realm_scenario; fi
 # Modes that assert the provenance need the debug-level "Package provenance
 # verified" marker in actrix.log.
 case "$MODE" in
@@ -780,10 +810,11 @@ esac
 start_actrix
 login_admin
 wait_for_signer
-ensure_realm
+if [ "$REALM_MODE" = legacy ]; then ensure_realm; fi
 provision_publisher_keychain
 scaffold_service_guest
 build_service_package
+if [ "$REALM_MODE" != legacy ]; then create_profile_realm; fi
 
 case "$MODE" in
     published)   mode_published ;;
@@ -791,5 +822,7 @@ case "$MODE" in
     rotation)    mode_rotation ;;
 esac
 
+if [ "$REALM_MODE" != legacy ]; then retire_profile_realm; fi
+
 echo ""
-success "Package runtime echo E2E (MODE=${MODE}) completed successfully"
+success "Package runtime echo E2E (MODE=${MODE}, REALM_MODE=${REALM_MODE}) completed successfully"

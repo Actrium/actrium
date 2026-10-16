@@ -48,6 +48,8 @@ jobs:
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Run package runtime echo e2e
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
+      - name: Run provider and external domain Realm runtime E2E
+        run: bash tests/e2e/actr/package-runtime-echo/realm-matrix.sh
 
   # The standalone Rust echo e2e (`cargo test --test e2e_rust_echo`) was
   # superseded by `package-runtime-echo` once the Rust service template moved
