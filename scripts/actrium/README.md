@@ -5,6 +5,18 @@ Repository automation lives here.
 Keep platform-specific scripts close to the app or package that owns them unless
 the script is used across multiple top-level areas.
 
+- `check-product-names.py` prevents retired product names from returning in
+  tracked and non-ignored source files, symlink targets, and paths. Binary file
+  contents and the historical source archive checklist are excluded. The
+  `product-name-allowlist.json` inventory temporarily permits exact identifiers
+  in specific files, with fixed occurrence counts, while PR #288 completes the
+  application identity, storage, URL, endpoint, and runtime contract cutover.
+  Removed references must also be removed from the inventory; new references
+  and increased counts fail the check. The inventory is reviewed source data,
+  not an automatically refreshed baseline. Do not add directory-wide exclusions
+  or regenerate it to accept new failures. Run
+  `python3 scripts/actrium/check-product-names.py` locally; repository hygiene CI
+  runs the same command on pull requests and pushes to the main branch.
 - `build-actrium-rust-bindings.sh` rebuilds local native outputs for Actrium Rust
   client crates. Use `apple`, `android`, or `all` to regenerate XCFrameworks,
   Swift binding sources, Kotlin bindings, Android JNI libraries, and
