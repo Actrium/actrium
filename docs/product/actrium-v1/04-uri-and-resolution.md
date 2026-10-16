@@ -159,7 +159,7 @@ actr://notes.example/team-notes@1.4.2/today?service=2af01%4042~dns%3Ateam.exampl
 
 ### 6.2 `realm`
 
-v1 Official ActorId It must be carried. Realm authority♪ And so ♪ Attach URI No second position parameter is required.Actro From `service` Undo Realm:
+v1 Official ActorId It must be carried. Realm authority♪ And so ♪ Attach URI No second position parameter is required.Actrium From `service` Undo Realm:
 
 ```text
 2af01@42~dns:team.example/notes.example:team-notes:1.4.2
@@ -172,7 +172,7 @@ v1 Official ActorId It must be carried. Realm authority♪ And so ♪ Attach URI
 
 Legacy Attach The resolution must be upgraded to a component after success authority It's... v1 ActorId, from the regularization URI Remove `realm`. Can't let `realm` with `service` It constitutes two potentially contradictory sources of positioning over time.
 
-Local Realm ActorId Use `local:<installation-id>` authority. it can be reconnected in the machine with precision, but not deciphered by other equipment;Actro This must be disabled“Copy portable link”Not forger. DNS Realm.
+Local Realm ActorId Use `local:<installation-id>` authority. it can be reconnected in the machine with precision, but not deciphered by other equipment;Actrium This must be disabled“Copy portable link”Not forger. DNS Realm.
 
 ### 6.3 Attach The hard rules
 
@@ -216,11 +216,11 @@ Fragment For Only Guest , do not participate:
 - (a) The package version;
 - Actor Identification.
 
-Actro Not allowed in fragment Upload bearer invite. Invitation and authorization through independence Realm/Service Process complete.
+Actrium Not allowed in fragment Upload bearer invite. Invitation and authorization through independence Realm/Service Process complete.
 
 ## 8. Normative
 
-Actro Before preserving history, collections and copying links, the following must be done:
+Actrium Before preserving history, collections and copying links, the following must be done:
 
 1. scheme (a) Lowercase;
 2. Publisher and Realm Turn to lowercase IDNA A-label;
@@ -273,7 +273,7 @@ Must use replace, not push:
 - Refresh It has to connect to new Service;
 - History Only the address of the final instance is recorded.
 
-If Service Created but URI The #GazaTalkPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPoped that the #PopPopPopPopPopPopPopPopPopPopPopPopPopPopPopPopPopPedPopedPopPopPopedPopedPopedPopPopPopPopedPopedPopPopPopPopPopPopPopPedPopPopPopPopPopPopPopPopPopPPopPopPActro It has to be from `creation_intent_id` The result of the restoration is that it cannot be created again.
+If Service Created but URI The #GazaTalkPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPressPoped that the #PopPopPopPopPopPopPopPopPopPopPopPopPopPopPopPopPopPedPopedPopPopPopedPopedPopedPopPopPopPopedPopedPopPopPopPopPopPopPopPedPopPopPopPopPopPopPopPopPopPPopPopPActrium It has to be from `creation_intent_id` The result of the restoration is that it cannot be created again.
 
 ## 11. Development URI
 

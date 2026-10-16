@@ -1,12 +1,12 @@
 # Browser Sync Cloud Drive Architecture
 
-Actro browser sync should use the user's own cloud storage as the product
-sync medium. Actro should not operate a browser sync service for the normal
+Actrium browser sync should use the user's own cloud storage as the product
+sync medium. Actrium should not operate a browser sync service for the normal
 product path. If a user wants cross-device browser history, bookmarks, and
 sessions, they connect the same cloud drive account on each device, such as
 iCloud Drive, Google Drive, OneDrive, or another provider-backed file store.
 
-The browser client must not embed a sync server. Actro is not trying to be
+The browser client must not embed a sync server. Actrium is not trying to be
 Google Chrome with a first-party browser account backend; it is a browser client
 that can read and write user-owned cloud files when the user chooses to sync.
 
@@ -30,7 +30,7 @@ production architecture.
 
 Each cloud provider should implement the same platform-local store boundary:
 
-- `list(prefix)`: enumerate Actro browser sync objects and provider metadata.
+- `list(prefix)`: enumerate Actrium browser sync objects and provider metadata.
 - `read(path)`: fetch bytes plus revision metadata such as ETag, file version,
   or modification generation.
 - `write(path, bytes, expectedRevision)`: optimistic write with conflict
@@ -76,7 +76,7 @@ membership status. Rust returns stable classifications such as `ready`,
 action, user action, retry timing, and diagnostic reasons. This keeps provider
 status priority rules shared across Apple, Android, Windows, and future
 providers without moving OAuth, secure credential storage, SDK calls, or UI
-wording into Rust, and without introducing an Actro browser-sync account
+wording into Rust, and without introducing an Actrium browser-sync account
 service.
 `browser_storage_sync_cloud_provider_error_policy_json()` and
 `browser_storage_sync_cloud_provider_error_classification_json()` define the
@@ -291,7 +291,7 @@ provider or a UI binding; it lets OpenDAL, iCloud, Google Drive, OneDrive, and
 local-folder adapters validate the same revision, conflict, receipt, and error
 mapping rules without each platform inventing a parallel test drive.
 `BrowserStorageSyncLocalFolderCloudStore` is the first file-backed Rust store
-for the same boundary. It maps cloud object paths onto a local Actro folder,
+for the same boundary. It maps cloud object paths onto a local Actrium folder,
 uses content hashes as optimistic revisions, and exercises real filesystem
 list/read/write/delete behavior for provider compatibility tests. It is still a
 coarse injected-store fixture, not a per-operation FFI surface; product
@@ -516,20 +516,20 @@ reason groups, so provider adapters do not rescan every attempt for status UI.
 Provider SDK calls and native SQLite execution still stay outside Rust.
 
 Provider connection and device membership are therefore provider/cloud-file
-work, not a first-party Actro account service. Provider sign-in, OAuth or
+work, not a first-party Actrium account service. Provider sign-in, OAuth or
 system account refresh, and secure token storage remain platform/provider
 responsibilities. Device membership is cloud data: a device writes
 `devices/<device-id>.json` and participates through `manifest.json`; revocation
 disables or removes that device in the manifest or disconnects provider access.
-No Actro product server allocates device identity.
+No Actrium product server allocates device identity.
 
 ## Cloud Data Shape
 
-The cloud folder should be a provider-owned Actro app directory, not a public
+The cloud folder should be a provider-owned Actrium app directory, not a public
 web endpoint. The first durable layout should be explicit and append-friendly:
 
 ```text
-Actro/
+Actrium/
   BrowserSync/
     manifest.json
     devices/
@@ -555,7 +555,7 @@ for push write ordering and manifest head updates; provider adapters should not
 invent parallel document shapes or write-order rules.
 `browser_storage_sync_cloud_store_capability_preflight_json` is the source of
 truth for provider readiness gates: adapters should not independently decide
-whether missing optimistic revisions, an incorrect Actro root folder, small
+whether missing optimistic revisions, an incorrect Actrium root folder, small
 object limits, or list/read/delete emulation can safely proceed.
 `browser_storage_sync_cloud_membership_plan_json` is the source of truth for
 cloud device membership join/revoke writes: provider adapters should not
@@ -647,8 +647,8 @@ or quota failures.
 
 The exact file names can evolve, but the constraints should not:
 
-- No central Actro server is required to allocate revisions.
-- No Actro browser app starts or embeds a local sync service.
+- No central Actrium server is required to allocate revisions.
+- No Actrium browser app starts or embeds a local sync service.
 - Device-generated operations must have stable IDs, monotonic per-device
   sequence numbers, and deterministic merge ordering.
 - Provider revision metadata is used for optimistic retries, not as the
@@ -873,7 +873,7 @@ core scaffolding, not as the final transport:
 ## Open Decisions
 
 - Whether iCloud uses iCloud Drive files, CloudKit records, or both.
-- Whether Google Drive stores data in the appDataFolder or a visible Actro
+- Whether Google Drive stores data in the appDataFolder or a visible Actrium
   folder.
 - Whether cloud sync is encrypted before upload, and where the user-controlled
   key comes from.

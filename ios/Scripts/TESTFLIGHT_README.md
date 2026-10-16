@@ -66,7 +66,7 @@ DEVELOPMENT_TEAM="YOUR_TEAM_ID"  # It's yours. Team ID
 
 ### 3. Ensure that the project is configured correctly
 
-Inspection `Actro.xcodeproj/project.pbxproj` , and the version number settings:
+Inspection `Actrium.xcodeproj/project.pbxproj` , and the version number settings:
 - Marketing Version (CFBundleShortVersionString)
 - Current Project Version (CFBundleVersion)
 
@@ -107,9 +107,9 @@ Edit configuration area at top of script:
 
 ```bash
 # Project Configuration
-PROJECT_NAME="Actro"
-WORKSPACE_PATH="Actro.xcworkspace"
-SCHEME="Actro"
+PROJECT_NAME="Actrium"
+WORKSPACE_PATH="Actrium.xcworkspace"
+SCHEME="Actrium"
 CONFIGURATION="Release"
 ```
 
@@ -168,7 +168,7 @@ jobs:
 
 **Solutions:**
 ```bash
-cd ActroRuntime
+cd ActriumRuntime
 rm -rf node_modules
 bun install
 ```

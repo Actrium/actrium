@@ -1,4 +1,4 @@
-# Actro iPhone Analysis and Resolution of Tab Performance Problems
+# Actrium iPhone Analysis and Resolution of Tab Performance Problems
 
 > This document is mainly from **iPhone End** Perspective analysis.iPad End Use Focus/Overview Mode Switch,iPhone End Use `.sheet` Fullscreen Expand + TabView Bottom navigation, with different interactive paths, but bottom memory problems are consistent.
 
@@ -25,7 +25,7 @@ User selects a tab from the tab list page →
   .sheet(item: $fullscreenTab) Popup Full Screen →
     PhoneBrowserView(tab) →
       SingleTabRootView(tab) →
-        ActroReactNativeHost.shared.viewForTab(tabId, props) →
+        ActriumReactNativeHost.shared.viewForTab(tabId, props) →
           viewCache[tabId] Cache RCTRootView
 
 User exit fullscreen (%1)RN (b) A side notice or gesture) →
@@ -43,16 +43,16 @@ User exit fullscreen (%1)RN (b) A side notice or gesture) →
 
 ### 3.1 Every one. Tab It's... RCTRootView Permanent Memory (core issues)
 
-**Status**: `ActroReactNativeHost.viewCache` It's a strong reference dictionary. Every one that's been opened. Tab It's... `RCTRootView` Never be released.
+**Status**: `ActriumReactNativeHost.viewCache` It's a strong reference dictionary. Every one that's been opened. Tab It's... `RCTRootView` Never be released.
 
 ```
-ActroReactNativeHost.swift:88
+ActriumReactNativeHost.swift:88
 private var viewCache: [UUID: RCTRootView] = [:]
 
 // Just... closeTab I'm just cleaning up.
 BrowserViewModel.swift:437-438
 func closeTab(id: UUID) {
-    ActroReactNativeHost.shared.removeViewForTab(tabId: id)
+    ActriumReactNativeHost.shared.removeViewForTab(tabId: id)
     ...
 }
 ```
@@ -194,7 +194,7 @@ var props: [String: Any] = [
 
 **Why? 2-3 That's enough.**: iPhone At the same time, only 1 The user's most common switch mode is"Exit A → Open B → Cut back. A", 2-3 A cache covers this back and forth. Unused old labels are automatically released, and avoided."10 All Tabs Memory"Problem.
 
-**Adaptation `ActroReactNativeHost`**:
+**Adaptation `ActriumReactNativeHost`**:
 
 ```swift
 // Current: Infinite Cache
@@ -327,7 +327,7 @@ func downsampledSnapshot(_ image: UIImage, targetSize: CGSize) -> UIImage {
 }
 ```
 
-**- I'm not.**: LRU Managed by `ActroReactNativeHost` Automatically, without manual release. When you exit the full screen, you will only need to intercept the snapshot:
+**- I'm not.**: LRU Managed by `ActriumReactNativeHost` Automatically, without manual release. When you exit the full screen, you will only need to intercept the snapshot:
 
 ```swift
 .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
@@ -413,7 +413,7 @@ func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
 func handleMemoryWarning() {
     // 1. Release all inactive Tab It's... RootView
     for tab in tabs where tab.id != currentTabId {
-        ActroReactNativeHost.shared.removeViewForTab(tabId: tab.id)
+        ActriumReactNativeHost.shared.removeViewForTab(tabId: tab.id)
     }
     // 2. Release a copy of the snapshot memory (reduced disk copy, loaded as required)
     tabSnapshots.removeAll()

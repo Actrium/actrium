@@ -1,5 +1,5 @@
 /**
- * TabRouter - Top-level routing for Actro tabs
+ * TabRouter - Top-level routing for Actrium tabs
  *
  * Routes to:
  * - RuntimeApp: for .actr plugin tabs (via keel Engine)

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 // Outcome of the local-folder acceptance pipeline. BlockedReasonKey is a
 // stable token the settings dialog maps through BrowserStrings

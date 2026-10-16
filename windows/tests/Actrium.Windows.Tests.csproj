@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Actrium.Windows.Tests</AssemblyName>
+    <RootNamespace>Actrium.Windows.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.*" />
+    <!-- DPAPI protection for the browser sync credential file; not part of
+         the .NET 8 shared framework. Non-Windows test hosts never reach the
+         DPAPI calls (the store writes a plain envelope there). -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests exercise the real Rust core library: a missing library is a
+         test failure, not a silent skip. The dylib glob covers macOS hosts
+         running the same suite through verify:windows. -->
+    <Content Include="..\native\*.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\native\*.dylib" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\src\ActriumCore.cs" Link="ActriumCore.cs" />
+    <Compile Include="..\src\BrowserAddressInputPolicy.cs" Link="BrowserAddressInputPolicy.cs" />
+    <Compile Include="..\src\BrowserBrowsingDataPolicy.cs" Link="BrowserBrowsingDataPolicy.cs" />
+    <Compile Include="..\src\BrowserClosedTabStack.cs" Link="BrowserClosedTabStack.cs" />
+    <Compile Include="..\src\BrowserContentBlockingPolicy.cs" Link="BrowserContentBlockingPolicy.cs" />
+    <Compile Include="..\src\BrowserContentBlockingStore.cs" Link="BrowserContentBlockingStore.cs" />
+    <Compile Include="..\src\BrowserDocumentStylePolicy.cs" Link="BrowserDocumentStylePolicy.cs" />
+    <Compile Include="..\src\BrowserDownloadPolicy.cs" Link="BrowserDownloadPolicy.cs" />
+    <Compile Include="..\src\BrowserEscapePolicy.cs" Link="BrowserEscapePolicy.cs" />
+    <Compile Include="..\src\BrowserExternalProtocolPolicy.cs" Link="BrowserExternalProtocolPolicy.cs" />
+    <Compile Include="..\src\BrowserFindPolicy.cs" Link="BrowserFindPolicy.cs" />
+    <Compile Include="..\src\BrowserGlyphs.cs" Link="BrowserGlyphs.cs" />
+    <Compile Include="..\src\BrowserBookmarksDocumentPolicy.cs" Link="BrowserBookmarksDocumentPolicy.cs" />
+    <Compile Include="..\src\BrowserBookmarkStore.cs" Link="BrowserBookmarkStore.cs" />
+    <Compile Include="..\src\BrowserHistoryDocumentPolicy.cs" Link="BrowserHistoryDocumentPolicy.cs" />
+    <Compile Include="..\src\BrowserHistoryStore.cs" Link="BrowserHistoryStore.cs" />
+    <Compile Include="..\src\BrowserHomeDocumentPolicy.cs" Link="BrowserHomeDocumentPolicy.cs" />
+    <Compile Include="..\src\BrowserLocalListDocumentPolicy.cs" Link="BrowserLocalListDocumentPolicy.cs" />
+    <Compile Include="..\src\BrowserMenuCommand.cs" Link="BrowserMenuCommand.cs" />
+    <Compile Include="..\src\BrowserMenuModel.cs" Link="BrowserMenuModel.cs" />
+    <Compile Include="..\src\BrowserNavigationErrorPolicy.cs" Link="BrowserNavigationErrorPolicy.cs" />
+    <Compile Include="..\src\BrowserPageActionPolicy.cs" Link="BrowserPageActionPolicy.cs" />
+    <Compile Include="..\src\BrowserPdfPolicy.cs" Link="BrowserPdfPolicy.cs" />
+    <Compile Include="..\src\BrowserPermissionPolicy.cs" Link="BrowserPermissionPolicy.cs" />
+    <Compile Include="..\src\BrowserProfilePolicy.cs" Link="BrowserProfilePolicy.cs" />
+    <Compile Include="..\src\BrowserProcessFailurePolicy.cs" Link="BrowserProcessFailurePolicy.cs" />
+    <Compile Include="..\src\BrowserSearchEnginePolicy.cs" Link="BrowserSearchEnginePolicy.cs" />
+    <Compile Include="..\src\BrowserSearchSettingsStore.cs" Link="BrowserSearchSettingsStore.cs" />
+    <Compile Include="..\src\BrowserSessionStore.cs" Link="BrowserSessionStore.cs" />
+    <Compile Include="..\src\BrowserSidebarLayoutPolicy.cs" Link="BrowserSidebarLayoutPolicy.cs" />
+    <Compile Include="..\src\BrowserStartupSettingsStore.cs" Link="BrowserStartupSettingsStore.cs" />
+    <Compile Include="..\src\BrowserStorageDatabase.cs" Link="BrowserStorageDatabase.cs" />
+    <Compile Include="..\src\BrowserStorageSyncClient.cs" Link="BrowserStorageSyncClient.cs" />
+    <Compile Include="..\src\BrowserStorageSyncCoordinator.cs" Link="BrowserStorageSyncCoordinator.cs" />
+    <Compile Include="..\src\BrowserStorageSyncCredentialStore.cs" Link="BrowserStorageSyncCredentialStore.cs" />
+    <Compile Include="..\src\BrowserStorageSyncScheduler.cs" Link="BrowserStorageSyncScheduler.cs" />
+    <Compile Include="..\src\BrowserStrings.cs" Link="BrowserStrings.cs" />
+    <Compile Include="..\src\BrowserSyncFolderPreflight.cs" Link="BrowserSyncFolderPreflight.cs" />
+    <Compile Include="..\src\BrowserSyncProviderConnectionPlanner.cs" Link="BrowserSyncProviderConnectionPlanner.cs" />
+    <Compile Include="..\src\BrowserSyncProviderDiagnosticsFormatter.cs" Link="BrowserSyncProviderDiagnosticsFormatter.cs" />
+    <Compile Include="..\src\BrowserSyncProviderSettingsStore.cs" Link="BrowserSyncProviderSettingsStore.cs" />
+    <Compile Include="..\src\BrowserSyncProviderStatusFormatter.cs" Link="BrowserSyncProviderStatusFormatter.cs" />
+    <Compile Include="..\src\BrowserSyncStatusPolicy.cs" Link="BrowserSyncStatusPolicy.cs" />
+    <Compile Include="..\src\BrowserTabOverviewPolicy.cs" Link="BrowserTabOverviewPolicy.cs" />
+    <Compile Include="..\src\BrowserTheme.cs" Link="BrowserTheme.cs" />
+    <Compile Include="..\src\BrowserThemeSelectionPolicy.cs" Link="BrowserThemeSelectionPolicy.cs" />
+    <Compile Include="..\src\BrowserToolbarLayoutPolicy.cs" Link="BrowserToolbarLayoutPolicy.cs" />
+    <Compile Include="..\src\BrowserWindowStateStore.cs" Link="BrowserWindowStateStore.cs" />
+    <Compile Include="..\src\BrowserZoomPolicy.cs" Link="BrowserZoomPolicy.cs" />
+    <Compile Include="..\src\HostBridgeProtocol.cs" Link="HostBridgeProtocol.cs" />
+    <Compile Include="..\src\NavigationPolicy.cs" Link="NavigationPolicy.cs" />
+    <Compile Include="..\src\WindowsAppPaths.cs" Link="WindowsAppPaths.cs" />
+    <Compile Include="..\src\WindowsStartupOptions.cs" Link="WindowsStartupOptions.cs" />
+  </ItemGroup>
+</Project>

@@ -1,9 +1,9 @@
 #!/bin/bash
 # ============================================================================
-# Actro Full Pipeline Test Script
+# Actrium Full Pipeline Test Script
 #
 # 1. Kill old processes
-# 2. Rebuild: keel guest-bundle -> runtime.jsbundle -> Actro.app
+# 2. Rebuild: keel guest-bundle -> runtime.jsbundle -> Actrium.app
 # 3. Launch app, collect logs for N seconds
 # 4. Kill, parse & filter logs
 # 5. Generate categorised report
@@ -14,14 +14,14 @@ set -euo pipefail
 # ---- Configuration --------------------------------------------------------
 WAIT_SECS="${1:-8}"                       # How long to let the app run (default 8s)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ACTRO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$ACTRO_DIR/../../.." && pwd)"
-KEEL_DIR="${ACTRO_KEEL_PATH:-$REPO_ROOT/packages/keel}"
-IPC_LOG="/tmp/actro_ipc_debug.log"
-SYSLOG_RAW="/tmp/actro_syslog_raw.txt"
-REPORT="/tmp/actro_pipeline_report_$(date +%Y%m%d_%H%M%S).txt"
-DERIVED_DATA=$(xcodebuild -workspace "$ACTRO_DIR/Actro.xcworkspace" -scheme Actro -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $3}')
-APP_PATH="${ACTRO_APP_PATH:-${DERIVED_DATA}/Actro.app}"
+ACTRIUM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$ACTRIUM_DIR/../../.." && pwd)"
+KEEL_DIR="${ACTRIUM_KEEL_PATH:-$REPO_ROOT/packages/keel}"
+IPC_LOG="/tmp/actrium_ipc_debug.log"
+SYSLOG_RAW="/tmp/actrium_syslog_raw.txt"
+REPORT="/tmp/actrium_pipeline_report_$(date +%Y%m%d_%H%M%S).txt"
+DERIVED_DATA=$(xcodebuild -workspace "$ACTRIUM_DIR/Actrium.xcworkspace" -scheme Actrium -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $3}')
+APP_PATH="${ACTRIUM_APP_PATH:-${DERIVED_DATA}/Actrium.app}"
 
 # ANSI colors (only for terminal, not in report file)
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -33,7 +33,7 @@ header(){ printf "\n${BOLD}=== %s ===${NC}\n" "$*"; }
 
 # ---- Step 0: Pre-flight ---------------------------------------------------
 header "Step 0: Pre-flight"
-echo "ACTRO_DIR  = $ACTRO_DIR"
+echo "ACTRIUM_DIR  = $ACTRIUM_DIR"
 echo "KEEL_DIR    = $KEEL_DIR"
 echo "APP_PATH    = $APP_PATH"
 echo "WAIT_SECS   = $WAIT_SECS"
@@ -41,14 +41,14 @@ echo "REPORT      = $REPORT"
 
 # ---- Step 1: Kill old processes -------------------------------------------
 header "Step 1: Kill old processes"
-pkill -9 -f 'Actro\.app/Contents/MacOS/Actro' 2>/dev/null && info "Killed Actro.app" || info "No Actro running"
-pkill -9 -f 'ActroViewService' 2>/dev/null && info "Killed ActroViewService" || info "No ActroViewService running"
+pkill -9 -f 'Actrium\.app/Contents/MacOS/Actrium' 2>/dev/null && info "Killed Actrium.app" || info "No Actrium running"
+pkill -9 -f 'ActriumViewService' 2>/dev/null && info "Killed ActriumViewService" || info "No ActriumViewService running"
 sleep 0.5
 
 # Double-check
-if pgrep -f 'Actro\.app/Contents/MacOS/Actro' >/dev/null 2>&1; then
-    warn "Actro still alive, sending SIGKILL again..."
-    pkill -9 -f 'Actro\.app/Contents/MacOS/Actro' 2>/dev/null || true
+if pgrep -f 'Actrium\.app/Contents/MacOS/Actrium' >/dev/null 2>&1; then
+    warn "Actrium still alive, sending SIGKILL again..."
+    pkill -9 -f 'Actrium\.app/Contents/MacOS/Actrium' 2>/dev/null || true
     sleep 1
 fi
 
@@ -73,7 +73,7 @@ fi
 
 # 2b. All jsbundles (system + actr — both share Engine.ts)
 info "Building runtime.jsbundle..."
-ACTR_OUT=$(cd "$ACTRO_DIR" && ./scripts/bundle-actro-runtime.sh --target all 2>&1)
+ACTR_OUT=$(cd "$ACTRIUM_DIR" && ./scripts/bundle-actrium-runtime.sh --target all 2>&1)
 if echo "$ACTR_OUT" | grep -q 'Done!'; then
     ACTR_SIZE=$(echo "$ACTR_OUT" | grep -oE 'Size: [0-9A-Za-z.]+' | head -1)
     ok "runtime.jsbundle built ($ACTR_SIZE)"
@@ -83,15 +83,15 @@ else
     exit 1
 fi
 
-# 2c. Actro.app (xcodebuild)
-info "Building Actro.app (xcodebuild)..."
-BUILD_LOG="/tmp/actro_xcode_build.log"
-xcodebuild -workspace "$ACTRO_DIR/Actro.xcworkspace" -scheme Actro \
+# 2c. Actrium.app (xcodebuild)
+info "Building Actrium.app (xcodebuild)..."
+BUILD_LOG="/tmp/actrium_xcode_build.log"
+xcodebuild -workspace "$ACTRIUM_DIR/Actrium.xcworkspace" -scheme Actrium \
     -configuration Debug build 2>&1 > "$BUILD_LOG"
 if tail -5 "$BUILD_LOG" | grep -q 'BUILD SUCCEEDED'; then
-    ok "Actro.app built"
+    ok "Actrium.app built"
 else
-    fail "Actro.app build failed:"
+    fail "Actrium.app build failed:"
     tail -20 "$BUILD_LOG"
     exit 1
 fi
@@ -102,15 +102,15 @@ header "Step 3: Launch & collect logs (${WAIT_SECS}s)"
 # Touch IPC log file so tail -f has something to follow
 touch "$IPC_LOG"
 
-# Start system log stream (Actro main + XPC service)
+# Start system log stream (Actrium main + XPC service)
 /usr/bin/log stream \
-    --predicate 'process CONTAINS "Actro" OR process CONTAINS "ActroViewService" OR process CONTAINS "RCTViewService"' \
+    --predicate 'process CONTAINS "Actrium" OR process CONTAINS "ActriumViewService" OR process CONTAINS "RCTViewService"' \
     --style compact --level debug \
     > "$SYSLOG_RAW" 2>&1 &
 SYSLOG_PID=$!
 
 # Launch app
-info "Opening Actro.app..."
+info "Opening Actrium.app..."
 open "$APP_PATH"
 
 # Show live IPC log progress
@@ -127,8 +127,8 @@ echo ""
 
 # ---- Step 4: Kill & collect -----------------------------------------------
 header "Step 4: Stop processes"
-pkill -f 'Actro\.app/Contents/MacOS/Actro' 2>/dev/null || true
-pkill -f 'ActroViewService' 2>/dev/null || true
+pkill -f 'Actrium\.app/Contents/MacOS/Actrium' 2>/dev/null || true
+pkill -f 'ActriumViewService' 2>/dev/null || true
 kill "$SYSLOG_PID" 2>/dev/null || true
 sleep 0.5
 info "All processes stopped."
@@ -138,14 +138,14 @@ header "Step 5: Generating report"
 
 {
     echo "============================================================"
-    echo "  Actro Full Pipeline Test Report"
+    echo "  Actrium Full Pipeline Test Report"
     echo "  Generated: $(date '+%Y-%m-%d %H:%M:%S')"
     echo "  Run duration: ${WAIT_SECS}s"
     echo "============================================================"
     echo ""
 
     # -----------------------------------------------------------------
-    # Section A: JS-side logs (from /tmp/actro_ipc_debug.log)
+    # Section A: JS-side logs (from /tmp/actrium_ipc_debug.log)
     # -----------------------------------------------------------------
     echo "============================================================"
     echo "  A. JS-SIDE LOGS (IPC debug log)"
@@ -202,8 +202,8 @@ header "Step 5: Generating report"
     echo "  B. XPC SERVICE NATIVE LOGS (actr-only)"
     echo "============================================================"
     if [ -f "$SYSLOG_RAW" ] && [ -s "$SYSLOG_RAW" ]; then
-        # Whitelist: only keep lines with actr/Actro app-specific keywords
-        grep -E 'ActroViewService|RCTViewService' "$SYSLOG_RAW" 2>/dev/null \
+        # Whitelist: only keep lines with actr/Actrium app-specific keywords
+        grep -E 'ActriumViewService|RCTViewService' "$SYSLOG_RAW" 2>/dev/null \
             | grep -iE 'Keel|actr|tabConfig|ViewBridge|RCTRoot|NativeLog|ensureBridge|createRoot|registerPending|applyConfig|bootstrap|pendingTab|ServiceXPC|hostProcess|containerSize|listenerReady|serviceReady|serviceState|serviceDidBecome|handleTab|pendingEntry|ipcLog|\[SVC\]|\[HOST\]|\[JS\]' \
             | head -60 || echo "  (none)"
     else
@@ -212,14 +212,14 @@ header "Step 5: Generating report"
     echo ""
 
     # -----------------------------------------------------------------
-    # Section C: Host-side Actro logs from syslog
+    # Section C: Host-side Actrium logs from syslog
     # -----------------------------------------------------------------
     echo "============================================================"
-    echo "  C. HOST-SIDE ACTRO LOGS (actr-only)"
+    echo "  C. HOST-SIDE ACTRIUM LOGS (actr-only)"
     echo "============================================================"
     if [ -f "$SYSLOG_RAW" ] && [ -s "$SYSLOG_RAW" ]; then
-        # Whitelist: only keep Actro host process lines with app-specific keywords
-        grep -E 'Actro\[' "$SYSLOG_RAW" 2>/dev/null \
+        # Whitelist: only keep Actrium host process lines with app-specific keywords
+        grep -E 'Actrium\[' "$SYSLOG_RAW" 2>/dev/null \
             | grep -iE 'Keel|actr|tabConfig|ViewBridge|RCTRoot|IPC|XPC|Service|ensureBridge|bootstrap|listenerReady|serviceReady|serviceState|UnifiedRN|coordinator|containerSize|hostProcess|allocateService|prewarm|pendingTab|\[HOST\]|\[JS\]' \
             | head -100 || echo "  (none)"
     else
@@ -237,7 +237,7 @@ header "Step 5: Generating report"
         grep -iE 'mouse|click|onPress|touchStart|touchEnd|gestureRecognizer' "$IPC_LOG" 2>/dev/null | head -30 || echo "  (none)"
     fi
     if [ -f "$SYSLOG_RAW" ]; then
-        grep -E 'Actro\[|ActroViewService' "$SYSLOG_RAW" 2>/dev/null \
+        grep -E 'Actrium\[|ActriumViewService' "$SYSLOG_RAW" 2>/dev/null \
             | grep -iE 'mouseDown|mouseUp|touchHandler|hitTest|onPress|gestureRecognizer' \
             | head -20 || echo "  (none from syslog)"
     fi
@@ -318,7 +318,7 @@ header "Step 5: Generating report"
     fi
 
     # E8. XPC Service process running (syslog evidence)
-    if grep -q 'ActroViewService\|RCTViewService' "$SYSLOG_RAW" 2>/dev/null; then
+    if grep -q 'ActriumViewService\|RCTViewService' "$SYSLOG_RAW" 2>/dev/null; then
         echo "  [OK]   XPC Service process was active"
     else
         echo "  [WARN] No XPC Service syslog evidence"

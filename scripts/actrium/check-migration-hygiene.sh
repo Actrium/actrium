@@ -86,8 +86,8 @@ fi
 old_macos_app_scheme_matches=$(
   # shellcheck disable=SC2086
   rg -n --hidden '(askw|askwURL)' \
-    macos/Actro \
-    macos/ActroTests \
+    macos/Actrium \
+    macos/ActriumTests \
     macos/AGENTS.md \
     crates/actrium-core/src \
     $common_globs 2>/dev/null || true
@@ -100,76 +100,76 @@ else
 fi
 
 macos_bundle_identity_failures=""
-if ! rg -U -q '<key>CFBundleDisplayName</key>[[:space:]]*<string>Actro</string>' macos/Actro/Info.plist; then
-  macos_bundle_identity_failures="${macos_bundle_identity_failures}macos/Actro/Info.plist CFBundleDisplayName must be Actro
+if ! rg -U -q '<key>CFBundleDisplayName</key>[[:space:]]*<string>Actrium</string>' macos/Actrium/Info.plist; then
+  macos_bundle_identity_failures="${macos_bundle_identity_failures}macos/Actrium/Info.plist CFBundleDisplayName must be Actrium
 "
 fi
 
-if ! rg -U -q '<key>CFBundleName</key>[[:space:]]*<string>Actro</string>' macos/Actro/Info.plist; then
-  macos_bundle_identity_failures="${macos_bundle_identity_failures}macos/Actro/Info.plist CFBundleName must be Actro
+if ! rg -U -q '<key>CFBundleName</key>[[:space:]]*<string>Actrium</string>' macos/Actrium/Info.plist; then
+  macos_bundle_identity_failures="${macos_bundle_identity_failures}macos/Actrium/Info.plist CFBundleName must be Actrium
 "
 fi
 
-if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<string>actro</string>' macos/Actro/Info.plist; then
-  macos_bundle_identity_failures="${macos_bundle_identity_failures}macos/Actro/Info.plist must register the actro URL scheme
+if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<string>actro</string>' macos/Actrium/Info.plist; then
+  macos_bundle_identity_failures="${macos_bundle_identity_failures}macos/Actrium/Info.plist must register the actro URL scheme
 "
 fi
 
 if [ -n "$macos_bundle_identity_failures" ]; then
-  print_matches_failure "macOS bundle identity is not Actro" "$macos_bundle_identity_failures"
+  print_matches_failure "macOS bundle identity is not Actrium" "$macos_bundle_identity_failures"
 else
-  print_ok "macOS bundle identity is Actro"
+  print_ok "macOS bundle identity is Actrium"
 fi
 
 ios_bundle_identity_failures=""
-if ! rg -U -q '<key>CFBundleDisplayName</key>[[:space:]]*<string>Actro</string>' ios/Actro/Info.plist; then
-  ios_bundle_identity_failures="${ios_bundle_identity_failures}ios/Actro/Info.plist CFBundleDisplayName must be Actro
+if ! rg -U -q '<key>CFBundleDisplayName</key>[[:space:]]*<string>Actrium</string>' ios/Actrium/Info.plist; then
+  ios_bundle_identity_failures="${ios_bundle_identity_failures}ios/Actrium/Info.plist CFBundleDisplayName must be Actrium
 "
 fi
 
-if ! rg -U -q '<key>CFBundleName</key>[[:space:]]*<string>Actro</string>' ios/Actro/Info.plist; then
-  ios_bundle_identity_failures="${ios_bundle_identity_failures}ios/Actro/Info.plist CFBundleName must be Actro
+if ! rg -U -q '<key>CFBundleName</key>[[:space:]]*<string>Actrium</string>' ios/Actrium/Info.plist; then
+  ios_bundle_identity_failures="${ios_bundle_identity_failures}ios/Actrium/Info.plist CFBundleName must be Actrium
 "
 fi
 
-if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<string>actro</string>' ios/Actro/Info.plist; then
-  ios_bundle_identity_failures="${ios_bundle_identity_failures}ios/Actro/Info.plist must register the actro URL scheme
+if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<string>actro</string>' ios/Actrium/Info.plist; then
+  ios_bundle_identity_failures="${ios_bundle_identity_failures}ios/Actrium/Info.plist must register the actro URL scheme
 "
 fi
 
 for host in go.actrium.example go-actrium.actrium-beta.example go-actrium.actrium-dev.example; do
   for file in \
-    ios/Actro/Models/ActroUniversalLink.swift \
-    ios/Actro/Actro.entitlements
+    ios/Actrium/Models/ActriumUniversalLink.swift \
+    ios/Actrium/Actrium.entitlements
   do
     if ! rg -q -F "$host" "$file" 2>/dev/null; then
-      ios_bundle_identity_failures="${ios_bundle_identity_failures}${file} must include ${host} for Actro links
+      ios_bundle_identity_failures="${ios_bundle_identity_failures}${file} must include ${host} for Actrium links
 "
     fi
   done
 done
 
 if [ -n "$ios_bundle_identity_failures" ]; then
-  print_matches_failure "iOS app identity or Actro links are incomplete" "$ios_bundle_identity_failures"
+  print_matches_failure "iOS app identity or Actrium links are incomplete" "$ios_bundle_identity_failures"
 else
-  print_ok "iOS app identity and Actro links are complete"
+  print_ok "iOS app identity and Actrium links are complete"
 fi
 
 android_app_json_failures=""
-if ! rg -q '"name": "actro"' android/app.json 2>/dev/null; then
-  android_app_json_failures="${android_app_json_failures}android/app.json must register the React Native component as actro
+if ! rg -q '"name": "actrium"' android/app.json 2>/dev/null; then
+  android_app_json_failures="${android_app_json_failures}android/app.json must register the React Native component as actrium
 "
 fi
 
-if ! rg -q '"displayName": "Actro"' android/app.json 2>/dev/null; then
-  android_app_json_failures="${android_app_json_failures}android/app.json must display the app as Actro
+if ! rg -q '"displayName": "Actrium"' android/app.json 2>/dev/null; then
+  android_app_json_failures="${android_app_json_failures}android/app.json must display the app as Actrium
 "
 fi
 
 if [ -n "$android_app_json_failures" ]; then
-  print_matches_failure "Android React Native app identity is not Actro" "$android_app_json_failures"
+  print_matches_failure "Android React Native app identity is not Actrium" "$android_app_json_failures"
 else
-  print_ok "Android React Native app identity is Actro"
+  print_ok "Android React Native app identity is Actrium"
 fi
 
 old_path_matches=$(
@@ -245,29 +245,29 @@ fi
 
 android_datastream_failures=""
 if [ -e "android/android/app/src/main/java/io/actr/datastreamapp" ]; then
-  android_datastream_failures="${android_datastream_failures}android/android/app/src/main/java/io/actr/datastreamapp should not exist; use io/actrium/actro/datastream
+  android_datastream_failures="${android_datastream_failures}android/android/app/src/main/java/io/actr/datastreamapp should not exist; use io/actrium/app/datastream
 "
 fi
 
-if [ ! -f "android/android/app/src/main/java/io/actrium/actro/datastream/UnifiedWorkload.kt" ]; then
-  android_datastream_failures="${android_datastream_failures}android/android/app/src/main/java/io/actrium/actro/datastream/UnifiedWorkload.kt is missing
+if [ ! -f "android/android/app/src/main/java/io/actrium/app/datastream/UnifiedWorkload.kt" ]; then
+  android_datastream_failures="${android_datastream_failures}android/android/app/src/main/java/io/actrium/app/datastream/UnifiedWorkload.kt is missing
 "
 fi
 
-if [ ! -f "android/android/app/src/main/java/io/actrium/actro/datastream/generated/unified_actor.kt" ]; then
-  android_datastream_failures="${android_datastream_failures}android/android/app/src/main/java/io/actrium/actro/datastream/generated/unified_actor.kt is missing
+if [ ! -f "android/android/app/src/main/java/io/actrium/app/datastream/generated/unified_actor.kt" ]; then
+  android_datastream_failures="${android_datastream_failures}android/android/app/src/main/java/io/actrium/app/datastream/generated/unified_actor.kt is missing
 "
 fi
 
 if [ -n "$android_datastream_failures" ]; then
-  print_matches_failure "Android datastream package layout is not under Actro" "$android_datastream_failures"
+  print_matches_failure "Android datastream package layout is not under Actrium" "$android_datastream_failures"
 else
-  print_ok "Android datastream package layout is under Actro"
+  print_ok "Android datastream package layout is under Actrium"
 fi
 
 macos_layout_failures=""
-if [ ! -d "packages/actrium-platform/apple/ActroIPC" ]; then
-  macos_layout_failures="${macos_layout_failures}packages/actrium-platform/apple/ActroIPC is missing
+if [ ! -d "packages/actrium-platform/apple/ActriumIPC" ]; then
+  macos_layout_failures="${macos_layout_failures}packages/actrium-platform/apple/ActriumIPC is missing
 "
 fi
 
@@ -282,12 +282,12 @@ if [ -e "macos/RCTNApps" ] || [ -L "macos/RCTNApps" ]; then
 fi
 
 if [ -e "macos/.generated/rctnapp-assets" ]; then
-  macos_layout_failures="${macos_layout_failures}macos/.generated/rctnapp-assets should not exist; use .generated/actro-runtime-assets
+  macos_layout_failures="${macos_layout_failures}macos/.generated/rctnapp-assets should not exist; use .generated/actrium-runtime-assets
 "
 fi
 
-if [ -e "macos/Packages/ActroIPC" ] || [ -L "macos/Packages/ActroIPC" ]; then
-  macos_layout_failures="${macos_layout_failures}macos/Packages/ActroIPC should not exist; use packages/actrium-platform/apple/ActroIPC directly
+if [ -e "macos/Packages/ActriumIPC" ] || [ -L "macos/Packages/ActriumIPC" ]; then
+  macos_layout_failures="${macos_layout_failures}macos/Packages/ActriumIPC should not exist; use packages/actrium-platform/apple/ActriumIPC directly
 "
 fi
 
@@ -345,8 +345,8 @@ fi
 
 temporary_worktree_matches=""
 for temp_worktree in \
-  .import/actro/apps \
-  .import/actro/packages
+  .import/actrium/apps \
+  .import/actrium/packages
 do
   if [ -e "$temp_worktree" ] || [ -L "$temp_worktree" ]; then
     temporary_worktree_matches="${temporary_worktree_matches}${temp_worktree}
@@ -355,9 +355,9 @@ do
 done
 
 if [ -n "$temporary_worktree_matches" ]; then
-  print_matches_failure "temporary Actro import trees remain" "$temporary_worktree_matches"
+  print_matches_failure "temporary Actrium import trees remain" "$temporary_worktree_matches"
 else
-  print_ok "temporary Actro import trees are absent"
+  print_ok "temporary Actrium import trees are absent"
 fi
 
 if [ "$failures" -ne 0 ]; then

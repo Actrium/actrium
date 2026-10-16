@@ -1,6 +1,6 @@
 using System.Windows.Forms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Compact application menu (Chrome/Edge three-dot style): a themed

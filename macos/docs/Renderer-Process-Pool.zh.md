@@ -1,11 +1,11 @@
-# Actro Renderer Process Pool
+# Actrium Renderer Process Pool
 
 ## 1. 目标
 
 将当前按构建脚本复制 `RCTViewService0...3.xpc` 的 ViewBridge 架构替换为
 Chrome 风格的 Broker/Renderer 架构：
 
-- 安装包中只包含一个 `ActroRenderer.app` Helper；
+- 安装包中只包含一个 `ActriumRenderer.app` Helper；
 - Broker 可以多次启动同一份 Helper 可执行文件；
 - 每个 Helper 实例拥有独立地址空间、Hermes VM、React Native Host 和沙箱；
 - 大型二进制及资源不随池容量复制；
@@ -20,7 +20,7 @@ Chrome 风格的 Broker/Renderer 架构：
    Tab 保持独立 RN root、属性和渲染表面。
 3. 不同普通 fingerprint 使用不同 Renderer 进程，互不共享可变运行状态。
 4. Tab 关闭时只销毁该 Tab 的 root；Renderer 内最后一个 Tab 关闭后进入空闲状态。
-5. Renderer 崩溃不能终止 Actro 或其他 Renderer；受影响 Tab 可重新加载。
+5. Renderer 崩溃不能终止 Actrium 或其他 Renderer；受影响 Tab 可重新加载。
 6. Focus/Overview 切换不重建 Renderer，仍通过实时尺寸与属性更新完成。
 7. StartPage、History、Bookmarks、ACTR 脚本及左右面板属性保持原有数据结构。
 8. 鼠标、键盘、滚轮、缩放手势和窗口 resize 必须路由到正确 Tab。
@@ -28,14 +28,14 @@ Chrome 风格的 Broker/Renderer 架构：
 ## 3. 进程模型
 
 ```text
-Actro.app
+Actrium.app
 └── RendererProcessPool（Broker）
-    ├── system.*  ──> ActroRenderer PID A
+    ├── system.*  ──> ActriumRenderer PID A
     │                 ├── Tab root 1 + CAContext 1
     │                 └── Tab root 2 + CAContext 2
-    ├── fingerprint X -> ActroRenderer PID B
+    ├── fingerprint X -> ActriumRenderer PID B
     │                 └── Tab root 3 + CAContext 3
-    └── fingerprint Y -> ActroRenderer PID C
+    └── fingerprint Y -> ActriumRenderer PID C
                       └── Tab root 4 + CAContext 4
 ```
 
@@ -63,14 +63,14 @@ Broker 为每个 Renderer 创建一对匿名 Unix `socketpair`。Broker 保留�
 Helper：
 
 ```text
-ActroRenderer
+ActriumRenderer
   --renderer-id <UUID>
   --fingerprint <fingerprint>
   --ipc-stdin
   --host-pid <PID>
 ```
 
-通信使用已有 `ActroIPC` 的长度前缀 Protobuf 帧。一个 Renderer 连接复用所有
+通信使用已有 `ActriumIPC` 的长度前缀 Protobuf 帧。一个 Renderer 连接复用所有
 Tab 消息，因此所有 Tab 级消息必须携带 `tab_id`。socket 启用 `SO_NOSIGPIPE`，
 写入串行化并处理 partial write / `EINTR`，关闭对端只返回错误，不会用
 `SIGPIPE` 杀死进程。
@@ -132,17 +132,17 @@ idle -> launching -> ready -> busy
 - Helper 退出时，Broker 先清理全部映射，再通知受影响 Tab；宿主最多自动重试三次，
   使用原始配置在替代 Renderer 上恢复。
 - critical memory pressure 下只回收没有 Tab 的 warm Renderer，不迁移活跃 Tab。
-- Actro 退出时向每个 Helper 发送 terminate 并结束子进程。
+- Actrium 退出时向每个 Helper 发送 terminate 并结束子进程。
 
 ## 7. 打包
 
 目标结构：
 
 ```text
-Actro.app
-├── Contents/MacOS/Actro
-├── Contents/Helpers/ActroRenderer.app
-│   ├── Contents/MacOS/ActroRenderer
+Actrium.app
+├── Contents/MacOS/Actrium
+├── Contents/Helpers/ActriumRenderer.app
+│   ├── Contents/MacOS/ActriumRenderer
 │   ├── Contents/Frameworks/hermes.framework
 │   └── Contents/Resources/system.jsbundle
 └── Contents/Resources/...
@@ -164,8 +164,8 @@ Bundle 中；主程序不再链接 RN/Hermes。运行 N 个实例时，磁盘仍
 
 完成迁移需要同时满足：
 
-1. 干净 Debug 构建和相关 ActroTests 通过。
-2. App 内没有 `RCTViewService*.xpc`，只有一个 `ActroRenderer.app`。
+1. 干净 Debug 构建和相关 ActriumTests 通过。
+2. App 内没有 `RCTViewService*.xpc`，只有一个 `ActriumRenderer.app`。
 3. 打开 system app 与普通 fingerprint 时观察到不同 Renderer PID。
 4. 同 fingerprint 两个 Tab 映射到同一 PID、不同 contextId。
 5. Focus/Overview、resize、鼠标、键盘、滚轮、面板切换可用。
@@ -176,7 +176,7 @@ Bundle 中；主程序不再链接 RN/Hermes。运行 N 个实例时，磁盘仍
 ## 9. 本次验证结果
 
 - 全新 DerivedData 的无签名 Debug 构建成功。
-- `ActroIPC` 传输测试 5/5 通过，覆盖多路 Tab、HostEvent 和关闭对端不触发
+- `ActriumIPC` 传输测试 5/5 通过，覆盖多路 Tab、HostEvent 和关闭对端不触发
   `SIGPIPE`。
 - URL 路由与进程池策略测试通过；策略包含硬件核数边界、`system.*` 归一化、
   普通 fingerprint 精确共享和跨身份禁止共享。
@@ -187,7 +187,7 @@ Bundle 中；主程序不再链接 RN/Hermes。运行 N 个实例时，磁盘仍
   JIT 和网络客户端 entitlement 生效。
 - 旧 Debug App 约 347 MiB；新 Debug App 为 143,144 KiB（约 139.8 MiB），减少约
   60%。安装内容为
-  0 个 `.xpc`、1 个 `ActroRenderer.app`、1 个 `system.jsbundle`。
+  0 个 `.xpc`、1 个 `ActriumRenderer.app`、1 个 `system.jsbundle`。
 - ACTR / Keel Guest 本轮验收范围只到宿主视图结构、装载链路和 fingerprint 隔离边界；
   其应用内部行为留给后续格式调整后再做完整适配。
 - 薄 Helper 当前不链接移动端页面才使用的 WebView、DeviceInfo、Reanimated 和
@@ -203,10 +203,10 @@ Bundle ID `io.actrium.actro.renderer` 创建 provisioning profile；这是账号
 不影响手动开发签名或架构本身。
 
 `CAContext`、`CALayerHost` 与当前 ViewBridge 一样属于 macOS 私有框架能力，不适合
-Mac App Store。Actro 当前已使用私有 ViewBridge，因此本次迁移不新增发布渠道类别，
+Mac App Store。Actrium 当前已使用私有 ViewBridge，因此本次迁移不新增发布渠道类别，
 但必须在支持的 macOS 版本上做运行探测和失败降级。
 
-Chrome Remote Cocoa 的完整 AX 代理没有可引用的成熟开源库。Actro 用最小实现：
+Chrome Remote Cocoa 的完整 AX 代理没有可引用的成熟开源库。Actrium 用最小实现：
 Renderer 导出 `AccessibilityTree`，`RendererSurfaceHostView` 作为 AX 分组暴露
 子节点，动作经 `accessibility_action` 回传。键盘焦点仍走输入 IPC。没有远程
 完整 AX API 覆盖（自定义参数、滚动区域细节、实时文本选择范围）。

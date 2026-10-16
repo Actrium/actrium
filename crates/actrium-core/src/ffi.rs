@@ -2990,8 +2990,11 @@ mod tests {
         let bing = browser_search_engine_info(Some("bing".to_string()));
         assert_eq!(bing.display_name, "Bing");
         assert_eq!(
-            browser_search_url("actro browser".to_string(), Some("duckduckgo".to_string())),
-            "https://duckduckgo.com/?q=actro%20browser"
+            browser_search_url(
+                "actrium browser".to_string(),
+                Some("duckduckgo".to_string())
+            ),
+            "https://duckduckgo.com/?q=actrium%20browser"
         );
         assert_eq!(
             browser_search_url("a&b=c".to_string(), Some("google".to_string())),
@@ -3356,7 +3359,7 @@ mod tests {
             provider_connection_contract
                 .contains(r#""planType":"cloudProviderConnectionStatusPolicy""#)
         );
-        assert!(provider_connection_contract.contains("No Actro product server"));
+        assert!(provider_connection_contract.contains("No Actrium product server"));
 
         let provider_error_policy = browser_storage_sync_cloud_provider_error_policy_json();
         assert!(provider_error_policy.contains(r#""planType":"cloudProviderErrorClassification""#));
@@ -3594,7 +3597,7 @@ mod tests {
         assert!(cloud_observability_event.contains(r#""redactedExportAllowed":true"#));
 
         let local_folder_root = std::env::temp_dir().join(format!(
-            "actro-core-ffi-local-folder-cycle-{}",
+            "actrium-core-ffi-local-folder-cycle-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&local_folder_root);
@@ -4315,15 +4318,15 @@ mod tests {
         );
         assert_eq!(
             contract.ask_local_service_send_text_route_key,
-            "actro.AskLocalService.SendText"
+            "actrium.AskLocalService.SendText"
         );
         assert_eq!(
             contract.ask_local_service_start_send_voice_route_key,
-            "actro.AskLocalService.StartSendVoice"
+            "actrium.AskLocalService.StartSendVoice"
         );
         assert_eq!(
             contract.ask_local_service_send_voice_chunk_route_key,
-            "actro.AskLocalService.SendVoiceChunk"
+            "actrium.AskLocalService.SendVoiceChunk"
         );
         assert_eq!(contract.ios_ask_service_prompt_timeout_ms, 20_000);
         assert_eq!(
@@ -4413,20 +4416,20 @@ mod tests {
 
     #[test]
     fn ffi_parse_actr_actor_type_returns_sdk_parts() {
-        let actor_type = parse_actr_actor_type(" actro + app_server ".to_string()).unwrap();
+        let actor_type = parse_actr_actor_type(" actrium + app_server ".to_string()).unwrap();
 
-        assert_eq!(actor_type.manufacturer, "actro");
+        assert_eq!(actor_type.manufacturer, "actrium");
         assert_eq!(actor_type.name, "app_server");
         assert_eq!(actor_type.version, "");
     }
 
     #[test]
     fn ffi_parse_actr_actor_type_rejects_invalid_wire_values() {
-        let error = parse_actr_actor_type("actro+server+extra".to_string()).unwrap_err();
+        let error = parse_actr_actor_type("actrium+server+extra".to_string()).unwrap_err();
 
         assert!(matches!(
             error,
-            CoreError::InvalidActrActorType(raw) if raw == "actro+server+extra"
+            CoreError::InvalidActrActorType(raw) if raw == "actrium+server+extra"
         ));
     }
 

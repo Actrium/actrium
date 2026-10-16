@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Text;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Shared stylesheet for internal (actro://) documents: one :root block of

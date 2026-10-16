@@ -1,4 +1,4 @@
-# Actro XPC Multi-Process Architecture
+# Actrium XPC Multi-Process Architecture
 
 > 历史文档。现行路径见 [Renderer-Process-Pool.md](Renderer-Process-Pool.md)。安装包不再包含 `RCTViewService*.xpc`。
 
@@ -12,7 +12,7 @@ Tab : ViewBridgeConnection : RCTRootView = 1 : 1 : 1
 
 每个 Tab 独立拥有完整的渲染链路：
 - 一个 `ViewBridgeHostView` (Host 端连接)
-- 一个 `ActroServiceViewController` (Service 端实例)
+- 一个 `ActriumServiceViewController` (Service 端实例)
 - 一个 `RCTRootView` (React Native 渲染视图)
 
 **无论前台还是后台，每个 Tab 保持独立渲染状态。**
@@ -26,7 +26,7 @@ Tab : ViewBridgeConnection : RCTRootView = 1 : 1 : 1
 
 ## Overview
 
-Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程，实现：
+Actrium 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程，实现：
 - 进程隔离：RN 崩溃不影响主进程
 - 资源复用：相同应用共享 RCTBridge（但各 Tab 独立 RCTRootView）
 - 并行渲染：多个 Tab 可同时渲染
@@ -35,7 +35,7 @@ Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程�
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                 Host App (Actro)                                    │
+│                                 Host App (Actrium)                                    │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                      │
 │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
@@ -108,7 +108,7 @@ Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程�
 │  │  │                           │    │  │   │         │    │  │   │         │    │  │
 │  │  ▼                           ▼    │  │   ▼         │    │  │   ▼         │    │  │
 │  │ ┌──────────────┐  ┌──────────────┐│  │┌──────────┐ │    │  │┌──────────┐ │    │  │
-│  │ │ActroService │  │ActroService ││  ││ActroSvc │ │    │  ││ActroSvc │ │    │  │
+│  │ │ActriumService │  │ActriumService ││  ││ActriumSvc │ │    │  ││ActriumSvc │ │    │  │
 │  │ │ViewController│  │ViewController││  ││VC (TabC) │ │    │  ││VC (TabD) │ │    │  │
 │  │ │   (TabA)     │  │   (TabB)     ││  │└──────────┘ │    │  │└──────────┘ │    │  │
 │  │ │              │  │              ││  │             │    │  │             │    │  │
@@ -128,7 +128,7 @@ Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程�
 
 | Host 端 | ViewBridge | Service 端 |
 |---------|------------|------------|
-| Tab (tabId: UUID) | ViewBridgeHostView | ActroServiceViewController |
+| Tab (tabId: UUID) | ViewBridgeHostView | ActriumServiceViewController |
 | ViewBridgeCoordinator | NSRemoteViewController | RCTRootView |
 
 每个 Tab 的 `tabId` 贯穿整个链路，用于资源管理和消息路由。
@@ -138,7 +138,7 @@ Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程�
 同一个 XPC Service 进程内：
 - 共享一个 `ServiceReactNativeHost` 单例（管理 RCTBridge）
 - 共享一个 `RCTBridge` (JS Runtime)
-- 每个 Tab 独立的 `ActroServiceViewController` 实例
+- 每个 Tab 独立的 `ActriumServiceViewController` 实例
 - 每个 Tab 独立的 `RCTRootView`（由各自的 ViewController 持有）
 
 ## Slot Allocation Strategy
@@ -161,7 +161,7 @@ Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程�
 ## IPC Communication
 
 Transport: `DistributedNotificationCenter`
-Protocol: Protobuf (定义在 `Shared/IPC/actro_ipc.proto`)
+Protocol: Protobuf (定义在 `Shared/IPC/actrium_ipc.proto`)
 
 ### Messages
 
@@ -175,7 +175,7 @@ Protocol: Protobuf (定义在 `Shared/IPC/actro_ipc.proto`)
 ### Key: tabId (UUID)
 
 所有消息均包含 `tab_id` 字段，用于：
-1. Service 内部路由到正确的 ActroServiceViewController
+1. Service 内部路由到正确的 ActriumServiceViewController
 2. Host 端匹配到正确的 ViewBridgeCoordinator
 3. 资源生命周期管理
 
@@ -183,9 +183,9 @@ Protocol: Protobuf (定义在 `Shared/IPC/actro_ipc.proto`)
 
 | File | 说明 |
 |------|------|
-| `Shared/IPC/actro_ipc.proto` | Protobuf 定义（含 XPC 消息） |
-| `Actro/MultiProcess/XPCServicePool.swift` | 进程池管理 |
-| `Actro/MultiProcess/ViewBridgeHostView.swift` | Host 端 ViewBridge 封装 |
-| `ActroViewService/ActroServiceViewController.swift` | Service 端 ViewController |
+| `Shared/IPC/actrium_ipc.proto` | Protobuf 定义（含 XPC 消息） |
+| `Actrium/MultiProcess/XPCServicePool.swift` | 进程池管理 |
+| `Actrium/MultiProcess/ViewBridgeHostView.swift` | Host 端 ViewBridge 封装 |
+| `ActriumViewService/ActriumServiceViewController.swift` | Service 端 ViewController |
 | `scripts/generate_xpc_pool.sh` | Build Phase 脚本，生成 4 个 XPC service |
 | `docs/XPC-Architecture.md` | 本文档 |

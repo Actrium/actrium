@@ -23,7 +23,7 @@
     "networkCheckInfo": "网络错误，请检查网络连接"
   },
   "actr": {
-    "appTitle": "Actro ActroRuntime",
+    "appTitle": "Actrium ActriumRuntime",
     "input": {
       "placeholder": "请输入",
       "holdToSpeak": "按住说话",
@@ -104,7 +104,7 @@
       "shareSaveFailed": "保存失败，请重试",
       "shareSavePermissionDeniedTitle": "权限不足",
       "shareSavePermissionDenied": "无权限访问",
-      "shareFooter": "来自 Actro 的一问一答",
+      "shareFooter": "来自 Actrium 的一问一答",
       "shareAiFooter": "本答案由 AI 生成",
       "shareAiDisclaimer": "内容仅供参考，请仔细甄别",
       "submit": "提交",
@@ -181,7 +181,7 @@
       "realtime": "实时动态",
       "parentChild": "亲子游玩",
       "culture": "文化探索",
-      "officialService": "Actro 官方客服",
+      "officialService": "Actrium 官方客服",
       "scanHint": "扫描应用二维码"
     },
     "auth": {
@@ -254,7 +254,7 @@
       "deleteAccount": "删除账号",
       "deleteAccountConfirm": "确认删除账号？此操作不可撤销，账号数据将被永久清除。",
       "logoutAccount": "退出账号",
-      "aboutActro": "关于 Actro",
+      "aboutActrium": "关于 Actrium",
       "userAgreement": "用户协议",
       "privacyPolicy": "隐私政策",
       "icp": "ICP 备案",

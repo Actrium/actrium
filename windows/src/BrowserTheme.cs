@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// The single source for chrome palette, typography and pixel metrics.

@@ -2,7 +2,7 @@
 
 ## 1. Feasibility conclusions
 
-Overall **It's possible, but not just change. Actro UI**.
+Overall **It's possible, but not just change. Actrium UI**.
 
 The existing technology accumulation already covers most of the“Mechanisms”:
 
@@ -12,7 +12,7 @@ The existing technology accumulation already covers most of the“Mechanisms”:
 - Actr Yes. Linked, NativeCdylib and WASM workload;
 - Actr `.actr` Signed, signed,hash, resources and dependencies;
 - Keel Existing Host/Guest, Bridge, contracts,JS sandbox and native component trees;
-- Actro Existing cross-platform Shell, Tab, share the running time and local sustainability base.
+- Actrium Existing cross-platform Shell, Tab, share the running time and local sustainability base.
 
 What is really missing is product-level invariacies and some key syntaxes:
 
@@ -64,7 +64,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 
 - `actr://` URI schema (a) with the test vector;
 - Publisher Profile/Release schema;
-- Actro manifest extension schema;
+- Actrium manifest extension schema;
 - Realm Profile schema;
 - persistent Actor identity lifecycle ADR;
 - Front–Service session proto;
@@ -77,7 +77,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 
 ### Exit Conditions
 
-- Actro, Actr, Keel Maintainer signatures for core nonvariable;
+- Actrium, Actr, Keel Maintainer signatures for core nonvariable;
 - schema (a) Version fields;
 - create/attach/identity mismatch It's... golden tests Freezing;
 - None“It's a decision. ActorId Stable”The problem of the suspense.
@@ -118,7 +118,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - Same Service Re-starting,credential Extension,hard re-auth, signaling failover Back ID No change;
 - Realm It's a replacement. signaling endpoint;
 - ActorId reclaim Yes. key proof and conflict protection;
-- legacy ephemeral identity The path will not be taken Actro Service Use;
+- legacy ephemeral identity The path will not be taken Actrium Service Use;
 - Host It's practical. workload and Actor edge Generate Authenticable evidenceNo, no, no. Actor Can not hide the controlled side.
 
 ## 5. P1-B: Publisher with package
@@ -130,7 +130,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - domain/IDNA normalizer;
 - key history/rotation store;
 - package digest pinning;
-- Actro manifest extension;
+- Actrium manifest extension;
 - Guest/contract/assets Inclusion `.actr` resource hash;
 - content-addressed cache;
 - zip safety policy;
@@ -140,8 +140,8 @@ Turn the syntax of the product in this document into a cross-storey testable con
 ### Actr package Changes
 
 - manufacturer Allow Normative Publisher domain;
-- manifest Add Backwards Compatible `[actro]` section;
-- verifier Output typed Actro metadata;
+- manifest Add Backwards Compatible `[actrium]` section;
+- verifier Output typed Actrium metadata;
 - binary Only support is allowed kind;
 - resource hash, lock and proto Maintain;
 - package signing key id Intercept Publisher Profile.
@@ -155,7 +155,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 
 ## 6. P2-A: Front Runtime with Keel
 
-### Actro
+### Actrium
 
 - Every Tab Front Actor manager;
 - fixed linked/native workload;
@@ -180,7 +180,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - Safe Component schema Extension points;
 - Disables default hidden network components.
 
-### ActroSafeComponents
+### ActriumSafeComponents
 
 - View/Text/Scroll/Input/Button/List/Image (a) The minimum set;
 - props/event schema;

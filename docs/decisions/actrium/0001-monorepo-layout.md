@@ -6,13 +6,13 @@ Accepted.
 
 ## Context
 
-Actro needs to contain multiple client projects: macOS first, then the iOS and
-Android first versions, followed by Windows. Actro already contains native app
+Actrium needs to contain multiple client projects: macOS first, then the iOS and
+Android first versions, followed by Windows. Actrium already contains native app
 code, XPC services, Rust FFI libraries, React Native runtime host code, Android
 Kotlin code, and guest app examples.
 
 Putting all of that under a single flat app directory would make later platform
-work depend on Actro-specific paths.
+work depend on Actrium-specific paths.
 
 ## Decision
 

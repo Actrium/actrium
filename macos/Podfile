@@ -1,5 +1,5 @@
-ACTRO_RUNTIME_RELATIVE_PATH = '../packages/actrium'
-ACTRO_RUNTIME_PATH = File.expand_path(ACTRO_RUNTIME_RELATIVE_PATH, __dir__)
+ACTRIUM_RUNTIME_RELATIVE_PATH = '../packages/actrium'
+ACTRIUM_RUNTIME_PATH = File.expand_path(ACTRIUM_RUNTIME_RELATIVE_PATH, __dir__)
 require 'fileutils'
 
 # CocoaPods 1.16 can intermittently pass a valid pnpm-backed Pathname to
@@ -21,11 +21,11 @@ class ::Pathname
 end
 # Keep react-native-macos path RELATIVE. RN CocoaPods helpers assume `path` is relative and will
 # incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
-REACT_NATIVE_MACOS_PATH = File.join(ACTRO_RUNTIME_RELATIVE_PATH, 'node_modules/react-native-macos')
+REACT_NATIVE_MACOS_PATH = File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/react-native-macos')
 
 # Require react_native_pods via a stable absolute path.
-require File.join(ACTRO_RUNTIME_PATH, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
-require File.join(ACTRO_RUNTIME_PATH, 'node_modules', 'keel', 'scripts', 'keel_post_install')
+require File.join(ACTRIUM_RUNTIME_PATH, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
+require File.join(ACTRIUM_RUNTIME_PATH, 'node_modules', 'keel', 'scripts', 'keel_post_install')
 
 prepare_react_native_project!
 
@@ -33,30 +33,30 @@ prepare_react_native_project!
 ENV['KEEL_SANDBOX_ENGINE'] = 'jsc'
 
 # Shared React Native configuration
-def use_actro_react_native
+def use_actrium_react_native
   use_react_native!(
     path: REACT_NATIVE_MACOS_PATH,
     hermes_enabled: true,
-    app_path: ACTRO_RUNTIME_PATH
+    app_path: ACTRIUM_RUNTIME_PATH
   )
 
   # keel native sandbox (JSI) - Guest uses JSC engine
-  pod 'KeelSandboxNative', :path => File.join(ACTRO_RUNTIME_RELATIVE_PATH, 'node_modules/keel')
+  pod 'KeelSandboxNative', :path => File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/keel')
 end
 
-target 'Actro' do
+target 'Actrium' do
   platform :macos, '14.0'
 end
 
-target 'ActroTests' do
+target 'ActriumTests' do
   platform :macos, '14.0'
-  use_actro_react_native
+  use_actrium_react_native
 end
 
 # Homogeneous browser-style Renderer Helper with React Native
-target 'ActroRenderer' do
+target 'ActriumRenderer' do
   platform :macos, '14.0'
-  use_actro_react_native
+  use_actrium_react_native
 end
 
 post_install do |installer|
@@ -67,7 +67,7 @@ post_install do |installer|
   # CocoaPods 1.16 does not always expose Yoga's nested headers when the
   # React Native macOS source is reached through pnpm symlinks.
   yoga_source = File.join(
-    ACTRO_RUNTIME_PATH,
+    ACTRIUM_RUNTIME_PATH,
     'node_modules',
     'react-native-macos',
     'ReactCommon',
@@ -85,7 +85,7 @@ post_install do |installer|
   end
 
   react_common_root = File.join(
-    ACTRO_RUNTIME_PATH,
+    ACTRIUM_RUNTIME_PATH,
     'node_modules',
     'react-native-macos',
     'ReactCommon'
@@ -99,8 +99,8 @@ post_install do |installer|
     FileUtils.ln_sf(source, File.join(header_root, header_name))
   end
 
-  # NOTE: hermes.framework embedding for ActroViewService XPC target is done via
-  # a manually-added build phase in Actro.xcodeproj (not via CocoaPods).
+  # NOTE: hermes.framework embedding for ActriumViewService XPC target is done via
+  # a manually-added build phase in Actrium.xcodeproj (not via CocoaPods).
   # CocoaPods' xcodeproj gem doesn't support Xcode 26's PBXFileSystemSynchronizedRootGroup,
   # so we can't programmatically modify the user project from post_install.
 

@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// The single command-to-glyph table for the toolbar icon font. Every

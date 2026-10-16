@@ -52,7 +52,7 @@ ProgramReleaseId = publisher/program@version
 - Keel Guest 入口；
 - Front–Service 契约；
 - 申请的能力和组件；
-- Keel/Actro/Actr ABI 兼容范围；
+- Keel/Actrium/Actr ABI 兼容范围；
 - 资源配额；
 - Workspace 模式；
 - Publisher 签名信息。
@@ -75,7 +75,7 @@ Service 不是“程序类型”，也不是可随意替换的负载均衡候选
 
 一个 resident app Tab 对应的短生命周期交互 Actor：
 
-- workload 由 Actro 固定；
+- workload 由 Actrium 固定；
 - 内含 Keel Host、Actr client、capability broker 和生命周期管理；
 - 加载经过验证的 Keel Guest；
 - 只持有绑定 Service 的受限 capability；
@@ -84,7 +84,7 @@ Service 不是“程序类型”，也不是可随意替换的负载均衡候选
 
 ### 2.5 Tab
 
-Actro Shell 中的用户交互容器。Tab 保存本地浏览状态，例如：
+Actrium Shell 中的用户交互容器。Tab 保存本地浏览状态，例如：
 
 - 本地 `tab_id`；
 - 当前规范化 `actr://` URI；
@@ -143,7 +143,7 @@ Primary Service Actor 1 ── 0..1 Workspace
 如果 Service 永远只能属于某一个具体 Front Actor，就会立即产生矛盾：
 
 - 关闭 Tab 后 Service 是否必须删除；
-- Actro 重启后新 Front Actor 如何连接；
+- Actrium 重启后新 Front Actor 如何连接；
 - Front 崩溃是否导致 Workspace 失去所有者；
 - 从收藏重新打开为何不能继续原实例；
 - 同一实例迁移到新设备后为何必须改身份。
@@ -157,7 +157,7 @@ Primary Service Actor 1 ── 0..1 Workspace
 Program Manifest 声明：
 
 ```toml
-[actro.session]
+[actrium.session]
 attachment_policy = "exclusive"
 ```
 
@@ -212,7 +212,7 @@ Service ActorId 必须满足：
 <serial_hex>@<realm_id>~dns:<realm-domain>/<publisher>:<program>:<version>
 ```
 
-本地 Realm 使用 `local:<installation-id>` authority。最终 wire/text 编码由 Actr ADR 冻结，但不能退回“只给一个 realm_id，再靠 Actro 私下猜 Realm”的语义。
+本地 Realm 使用 `local:<installation-id>` authority。最终 wire/text 编码由 Actr ADR 冻结，但不能退回“只给一个 realm_id，再靠 Actrium 私下猜 Realm”的语义。
 
 同时，其生命周期语义必须从“本次注册地址”升级为“可续租的持久逻辑 Actor 身份”。
 
@@ -234,13 +234,13 @@ ActorId 可以进入地址栏、历史和收藏，但不能单独授予访问权
 ServiceInstanceId → current ActorId
 ```
 
-Actro 本地数据库可以有纯存储用途的 `record_id`，但它不是网络身份，也不出现在共享 URL 中。
+Actrium 本地数据库可以有纯存储用途的 `record_id`，但它不是网络身份，也不出现在共享 URL 中。
 
 ## 5. 状态归属
 
 | 状态 | 权威所有者 | 说明 |
 |---|---|---|
-| Tab 排列、前进/后退 | Actro Shell | 可同步，丢失不应破坏业务状态 |
+| Tab 排列、前进/后退 | Actrium Shell | 可同步，丢失不应破坏业务状态 |
 | Guest UI 临时状态 | Front Actor / Keel Guest | suspend 可快照，崩溃后允许重建 |
 | 当前绑定 Service ActorId | Tab Session | 来自规范化 URI |
 | 业务状态 | Service Actor | 不放在 Front |
@@ -249,7 +249,7 @@ Actro 本地数据库可以有纯存储用途的 `record_id`，但它不是网�
 | Program Release metadata | Program Catalog | 以 coordinate + digest 为主键 |
 | Actor 长期私钥 | 安全存储 | 不进入普通 SQLite |
 | Realm membership credential | 安全存储 | 短期、可续期、可撤销 |
-| 权限授予 | Actro Permission Store | 绑定 publisher/program/major/digest/Workspace 范围 |
+| 权限授予 | Actrium Permission Store | 绑定 publisher/program/major/digest/Workspace 范围 |
 | ActorAssurance | 验证者（issuer ≠ subject） | 针对准确 `ActorStateId` 的节点结论 |
 | ApplicationAssurance | 应用评定者 | 无根图当前切面的汇聚结论；展示还须 Ready |
 
@@ -259,7 +259,7 @@ Actro 本地数据库可以有纯存储用途的 `record_id`，但它不是网�
 
 ### 6.1 创建
 
-无 `service` 的 URI 是 Create Intent。Actro：
+无 `service` 的 URI 是 Create Intent。Actrium：
 
 1. 解析并验证 Program Release；
 2. 选择 Realm 与 Workspace；
@@ -305,12 +305,12 @@ Guest 不直接获得：
 
 ## 8. 系统程序
 
-Actro Shell 的地址栏、Tab strip、权限弹窗和安全信息属于 Shell，不是普通 Tab 内容。
+Actrium Shell 的地址栏、Tab strip、权限弹窗和安全信息属于 Shell，不是普通 Tab 内容。
 
 历史、收藏、Program Catalog、Service Inventory 等可见页面应采用以下两种方式之一：
 
 1. 作为 Shell 原生管理面板，不进入普通应用 Tab；或
-2. 作为 Actro 自有、签名的系统 Program，仍遵守 Front–Service 模型。
+2. 作为 Actrium 自有、签名的系统 Program，仍遵守 Front–Service 模型。
 
 不得为系统页面暴露一套第三方不可用的隐式 Guest 权限。系统级能力必须由不同签名等级和显式 Host policy 授予。
 

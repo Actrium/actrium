@@ -2,7 +2,7 @@
 
 ## 1. 可行性结论
 
-总体为 **可行，但不是只改 Actro UI**。
+总体为 **可行，但不是只改 Actrium UI**。
 
 现有技术积累已经覆盖大部分“机制”：
 
@@ -12,7 +12,7 @@
 - Actr 有 Linked、NativeCdylib 和 WASM workload；
 - Actr `.actr` 已有签名、hash、资源和依赖锁；
 - Keel 已有 Host/Guest、Bridge、契约、JS sandbox 和原生组件树；
-- Actro 已有跨平台 Shell、Tab、共享运行时和本地持久化基础。
+- Actrium 已有跨平台 Shell、Tab、共享运行时和本地持久化基础。
 
 真正缺少的是产品级不变量与若干关键语义：
 
@@ -64,7 +64,7 @@ flowchart LR
 
 - `actr://` URI schema 与测试向量；
 - Publisher Profile/Release schema；
-- Actro manifest extension schema；
+- Actrium manifest extension schema；
 - Realm Profile schema；
 - persistent Actor identity lifecycle ADR；
 - Front–Service session proto；
@@ -77,7 +77,7 @@ flowchart LR
 
 ### 退出条件
 
-- Actro、Actr、Keel 维护者对核心不变量签字；
+- Actrium、Actr、Keel 维护者对核心不变量签字；
 - schema 有版本字段；
 - create/attach/identity mismatch 的 golden tests 冻结；
 - 无“先实现再决定 ActorId 是否稳定”的悬空问题。
@@ -118,7 +118,7 @@ flowchart LR
 - 同一 Service 在进程重启、credential 续期、hard re-auth、signaling failover 后 ID 不变；
 - Realm 可以替换 signaling endpoint；
 - ActorId reclaim 有 key proof 和冲突保护；
-- legacy ephemeral identity 路径不会被 Actro Service 使用；
+- legacy ephemeral identity 路径不会被 Actrium Service 使用；
 - Host 能为实际 workload 和 Actor edge 生成可验证 evidence，恶意 Actor 不能隐藏受控调用边。
 
 ## 5. P1-B：Publisher 与 package
@@ -130,7 +130,7 @@ flowchart LR
 - domain/IDNA normalizer；
 - key history/rotation store；
 - package digest pinning；
-- Actro manifest extension；
+- Actrium manifest extension；
 - Guest/contract/assets 纳入 `.actr` resource hash；
 - content-addressed cache；
 - zip safety policy；
@@ -140,8 +140,8 @@ flowchart LR
 ### Actr package 改动
 
 - manufacturer 允许规范化 Publisher domain；
-- manifest 增加向后兼容的 `[actro]` section；
-- verifier 输出 typed Actro metadata；
+- manifest 增加向后兼容的 `[actrium]` section；
+- verifier 输出 typed Actrium metadata；
 - binary 只允许支持 kind；
 - resource hash、lock 和 proto 保持；
 - package signing key id 对接 Publisher Profile。
@@ -155,7 +155,7 @@ flowchart LR
 
 ## 6. P2-A：Front Runtime 与 Keel
 
-### Actro
+### Actrium
 
 - 每 Tab Front Actor manager；
 - fixed linked/native workload；
@@ -180,7 +180,7 @@ flowchart LR
 - Safe Component schema 扩展点；
 - 禁止默认隐式网络组件。
 
-### ActroSafeComponents
+### ActriumSafeComponents
 
 - View/Text/Scroll/Input/Button/List/Image 等最小集；
 - props/event schema；

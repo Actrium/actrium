@@ -27,7 +27,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public final class PrepareAndroidBinaryAssets {
-    private static final String MARKER_FILE = ".actro-binary-assets.lock";
+    private static final String MARKER_FILE = ".actrium-binary-assets.lock";
 
     private record Artifact(
             String id,
@@ -276,7 +276,7 @@ public final class PrepareAndroidBinaryAssets {
                     .build();
             HttpRequest request = HttpRequest.newBuilder(artifact.url())
                     .timeout(Duration.ofMinutes(15))
-                    .header("User-Agent", "actro-android-binary-assets/1")
+                    .header("User-Agent", "actrium-android-binary-assets/1")
                     .GET()
                     .build();
             HttpResponse<InputStream> response =

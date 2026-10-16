@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Pure grid geometry for the tab overview surface: how many card columns

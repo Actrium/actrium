@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Single flat table for user-visible chrome strings: window titles, status
@@ -18,8 +18,8 @@ internal static class BrowserStrings
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             // Window titles
-            ["window.title.product"] = "Actro",
-            ["window.title.privateProduct"] = "Actro Private",
+            ["window.title.product"] = "Actrium",
+            ["window.title.privateProduct"] = "Actrium Private",
             ["window.title.documentFormat"] = "{0} - {1}",
 
             // Tabs
@@ -167,12 +167,12 @@ internal static class BrowserStrings
             ["dialog.syncSettings.providerOneDrive"] = "OneDrive",
             ["dialog.syncSettings.providerComingLater"] = "coming later",
             ["dialog.syncSettings.providerDisabledFormat"] = "{0} ({1})",
-            ["dialog.syncSettings.providerFooter"] = "Actro syncs through storage you own. Choose a folder that your cloud drive app already keeps in sync (for example an iCloud Drive or OneDrive folder).",
+            ["dialog.syncSettings.providerFooter"] = "Actrium syncs through storage you own. Choose a folder that your cloud drive app already keeps in sync (for example an iCloud Drive or OneDrive folder).",
             ["dialog.syncSettings.folderSection"] = "Sync folder",
             ["dialog.syncSettings.folderRow"] = "Folder",
             ["dialog.syncSettings.folderNotSelected"] = "No folder selected",
             ["dialog.syncSettings.chooseFolder"] = "Choose Folder...",
-            ["dialog.syncSettings.chooseFolderDescription"] = "Choose the folder Actro syncs browser data through.",
+            ["dialog.syncSettings.chooseFolderDescription"] = "Choose the folder Actrium syncs browser data through.",
             ["dialog.syncSettings.disconnect"] = "Disconnect",
             ["dialog.syncSettings.statusSection"] = "Status",
             ["dialog.syncSettings.connectionRow"] = "Connection",
@@ -190,9 +190,9 @@ internal static class BrowserStrings
             // blocked-reason token (BrowserSyncFolderPreflight).
             ["dialog.syncSettings.folderBlockedDetailFormat"] = "{0} ({1})",
             ["dialog.syncSettings.folderBlocked.folderMissing"] = "The selected folder does not exist.",
-            ["dialog.syncSettings.folderBlocked.folderNotWritable"] = "Actro cannot write to the selected folder.",
+            ["dialog.syncSettings.folderBlocked.folderNotWritable"] = "Actrium cannot write to the selected folder.",
             ["dialog.syncSettings.folderBlocked.capabilityBlocked"] = "The Local Folder provider is not ready to sync.",
-            ["dialog.syncSettings.folderBlocked.adapterBlocked"] = "This folder cannot host the Actro browser sync storage.",
+            ["dialog.syncSettings.folderBlocked.adapterBlocked"] = "This folder cannot host the Actrium browser sync storage.",
             ["dialog.syncSettings.folderBlocked.compatibilityBlocked"] = "The sync data already in this folder is not compatible with this app.",
 
             // Connection row states. Classification and user-action keys
@@ -269,7 +269,7 @@ internal static class BrowserStrings
             ["dialog.savePdf.filter"] = "PDF files|*.pdf|All files|*.*",
 
             // Startup failure surface
-            ["error.startupWebView"] = "Actro Windows failed to start WebView2.",
+            ["error.startupWebView"] = "Actrium Windows failed to start WebView2.",
         };
 
     /// <summary>Every table entry, exposed for exhaustive harness checks.</summary>

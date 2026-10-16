@@ -6,7 +6,7 @@
 # naming when they land; this file deliberately does not try to cover them.
 #
 # Two jobs, both on windows-latest:
-#   verify  - layout contract, actro_core.dll build, the full rg-based +
+#   verify  - layout contract, actrium_core.dll build, the full rg-based +
 #             P/Invoke test harness (scripts/actrium/verify-windows.sh, zero-warning
 #             gate), and a Release build of the app.
 #   package - the portable zip via scripts/actrium/package-windows.ps1 -SkipInstaller
@@ -83,15 +83,15 @@ jobs:
         with:
           shared-key: windows-verify
 
-      - name: Build actro_core.dll
-        run: cargo build --release -p actro-core
+      - name: Build actrium_core.dll
+        run: cargo build --release -p actrium-core
 
       # Both csprojs copy windows/native/*.dll into their output;
-      # the harness makes real P/Invoke calls into actro_core, so the DLL
+      # the harness makes real P/Invoke calls into actrium_core, so the DLL
       # must be staged before any dotnet step.
-      - name: Stage actro_core.dll for the app and tests
+      - name: Stage actrium_core.dll for the app and tests
         shell: bash
-        run: cp target/release/actro_core.dll windows/native/
+        run: cp target/release/actrium_core.dll windows/native/
 
       - name: Setup .NET SDK 8
         uses: actions/setup-dotnet@v4
@@ -105,13 +105,13 @@ jobs:
         run: bash scripts/actrium/verify-windows.sh
 
       - name: Build app (Release)
-        run: dotnet build windows/Actro.Windows.csproj --configuration Release -p:NuGetAudit=false
+        run: dotnet build windows/Actrium.Windows.csproj --configuration Release -p:NuGetAudit=false
 
-      - name: Upload verified actro_core.dll
+      - name: Upload verified actrium_core.dll
         uses: actions/upload-artifact@v4
         with:
-          name: actro-core-windows-${{ github.sha }}
-          path: windows/native/actro_core.dll
+          name: actrium-core-windows-${{ github.sha }}
+          path: windows/native/actrium_core.dll
           if-no-files-found: error
           retention-days: 1
 
@@ -127,10 +127,10 @@ jobs:
 
       # The producer built this exact commit/profile and exercised its DLL
       # through the real P/Invoke harness. Keep packaging on the tested bytes.
-      - name: Download verified actro_core.dll
+      - name: Download verified actrium_core.dll
         uses: actions/download-artifact@v4
         with:
-          name: actro-core-windows-${{ github.sha }}
+          name: actrium-core-windows-${{ github.sha }}
           path: windows/native
 
       - name: Setup .NET SDK 8
@@ -145,14 +145,14 @@ jobs:
       - name: Verify packaged DLL matches the tested artifact
         shell: pwsh
         run: |
-          $expected = (Get-FileHash windows/native/actro_core.dll -Algorithm SHA256).Hash
+          $expected = (Get-FileHash windows/native/actrium_core.dll -Algorithm SHA256).Hash
           $zips = @(Get-ChildItem dist/windows/*.zip -File -ErrorAction Stop)
           if ($zips.Count -eq 0) { throw 'No portable zip was produced for DLL verification' }
           foreach ($zip in $zips) {
             $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
             try {
-              $entry = $archive.GetEntry('actro_core.dll')
-              if ($null -eq $entry) { throw 'Portable zip is missing actro_core.dll' }
+              $entry = $archive.GetEntry('actrium_core.dll')
+              if ($null -eq $entry) { throw 'Portable zip is missing actrium_core.dll' }
               $stream = $entry.Open()
               $hasher = [System.Security.Cryptography.SHA256]::Create()
               try {
@@ -170,6 +170,6 @@ jobs:
       - name: Upload portable zip
         uses: actions/upload-artifact@v4
         with:
-          name: actro-windows-portable-zip
+          name: actrium-windows-portable-zip
           path: dist/windows/*.zip
           if-no-files-found: error

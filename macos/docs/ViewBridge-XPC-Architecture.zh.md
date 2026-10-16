@@ -4,11 +4,11 @@
 
 ## 1. 架构概述
 
-Actro 使用 ViewBridge (macOS 私有框架) 实现跨进程视图渲染，将 React Native 内容运行在独立的 XPC Service 进程中。
+Actrium 使用 ViewBridge (macOS 私有框架) 实现跨进程视图渲染，将 React Native 内容运行在独立的 XPC Service 进程中。
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Actro Host App                          │
+│                        Actrium Host App                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
 │  │   SwiftUI View  │  │  MetroManager   │  │ XPCServicePool  │ │
 │  │   (TabPanel)    │  │  (Port: 动态)   │  │  (4 slots)      │ │
@@ -28,7 +28,7 @@ Actro 使用 ViewBridge (macOS 私有框架) 实现跨进程视图渲染，将 R
 │                    XPC Service Process                          │
 │              (RCTViewService0/1/2/3.xpc)                        │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │ ActroService   │  │ ServiceReact    │  │   RCTBridge     │ │
+│  │ ActriumService   │  │ ServiceReact    │  │   RCTBridge     │ │
 │  │ ViewController  │  │ NativeHost      │  │  (共享实例)      │ │
 │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
 │           │                    │                    │           │
@@ -51,7 +51,7 @@ Actro 使用 ViewBridge (macOS 私有框架) 实现跨进程视图渲染，将 R
 
 ## 2. 关键组件
 
-### 2.1 Host 端 (Actro App)
+### 2.1 Host 端 (Actrium App)
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
@@ -66,11 +66,11 @@ Actro 使用 ViewBridge (macOS 私有框架) 实现跨进程视图渲染，将 R
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| `ActroServiceViewController` | ActroServiceViewController.swift | 动态注册的 NSServiceViewController |
-| `ServiceReactNativeHost` | ActroServiceViewController.swift | 管理共享 RCTBridge 和 per-Tab RCTRootView |
-| `TabViewControllerEntry` | ActroServiceViewController.swift | 单个 Tab 的 ViewController 和 RCTRootView |
-| `ResizableContainerView` | ActroServiceViewController.swift | 可调整尺寸的容器，响应 ViewBridge 尺寸同步 |
-| `MetroConfig` | ActroServiceViewController.swift | 存储从 Host 接收的 Metro 配置 |
+| `ActriumServiceViewController` | ActriumServiceViewController.swift | 动态注册的 NSServiceViewController |
+| `ServiceReactNativeHost` | ActriumServiceViewController.swift | 管理共享 RCTBridge 和 per-Tab RCTRootView |
+| `TabViewControllerEntry` | ActriumServiceViewController.swift | 单个 Tab 的 ViewController 和 RCTRootView |
+| `ResizableContainerView` | ActriumServiceViewController.swift | 可调整尺寸的容器，响应 ViewBridge 尺寸同步 |
+| `MetroConfig` | ActriumServiceViewController.swift | 存储从 Host 接收的 Metro 配置 |
 
 ## 3. 尺寸计算 (关键数据)
 
@@ -97,12 +97,12 @@ viewportSize.height / cardHeight = scale
 
 ### 3.3 渲染模式
 
-| 模式 | ViewBridge 渲染尺寸 | Actro Transform | 最终显示尺寸 |
+| 模式 | ViewBridge 渲染尺寸 | Actrium Transform | 最终显示尺寸 |
 |------|---------------------|------------------|--------------|
 | Overview | cardSize (187x126) | scale=1 | 187x126 |
 | Focus | viewportSize (589x398) | scale=3.154 | 589x398 |
 
-**关键发现**：ViewBridge XPC 在独立进程渲染，不受 Host 端 Actro Transform 影响。Focus 模式必须让 XPC Service 用 viewportSize 渲染，否则内容会模糊。
+**关键发现**：ViewBridge XPC 在独立进程渲染，不受 Host 端 Actrium Transform 影响。Focus 模式必须让 XPC Service 用 viewportSize 渲染，否则内容会模糊。
 
 ## 4. 通信机制
 
@@ -150,7 +150,7 @@ sequenceDiagram
     participant VBHostView as ViewBridgeHostView<br/>(NSView)
     participant RemoteVC as NSRemoteView<br/>Controller
     participant DNC as Distributed<br/>NotificationCenter
-    participant ServiceVC as ActroService<br/>ViewController
+    participant ServiceVC as ActriumService<br/>ViewController
     participant Container as Resizable<br/>ContainerView
     participant RNHost as ServiceReact<br/>NativeHost
     participant RCTRoot as RCTRootView
@@ -237,7 +237,7 @@ sequenceDiagram
     Note over SwiftUI,RCTRoot: === 问题区域: Focus 模式 ===
 
     rect rgb(255, 200, 200)
-        Note over SwiftUI,VBHostView: Actro Transform 应用 scaleEffect(3.154)
+        Note over SwiftUI,VBHostView: Actrium Transform 应用 scaleEffect(3.154)
         SwiftUI->>SwiftUI: .scaleEffect(scale) 放大 TabPanel
         Note right of SwiftUI: ⚠️ scaleEffect 对 NSViewRepresentable<br/>不生效，导致 ViewBridge<br/>内容显示异常
     end
@@ -247,7 +247,7 @@ sequenceDiagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ 1. Actro App 启动                                              │
+│ 1. Actrium App 启动                                              │
 │    - CrashHandler.setup()                                       │
 │    - TabProcessManager 初始化                                    │
 │    - XPCNotificationBridge 初始化                                │
@@ -270,7 +270,7 @@ sequenceDiagram
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ 4. XPC Service 启动                                             │
-│    - registerActroServiceViewController() 动态注册类            │
+│    - registerActriumServiceViewController() 动态注册类            │
 │    - ServiceReactNativeHost.shared 初始化                        │
 │    - setupTabConfigListener() 设置通知监听                       │
 │    - postXPCServiceReady() 通知 Host                            │
@@ -366,17 +366,17 @@ React Native 内容在 Focus 模式下无法正确显示。具体表现：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Actro Transform                          │
+│                        Actrium Transform                          │
 │   - Overview 模式: scale = 1.0                                   │
 │   - Focus 模式: scale = viewportSize / cardSize ≈ 3.154         │
 │                                                                  │
-│   问题：Actro Transform 会放大 TabPanel，但 NSViewRepresentable │
+│   问题：Actrium Transform 会放大 TabPanel，但 NSViewRepresentable │
 │         (ViewBridge) 不会被 scaleEffect 正确缩放                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 **关键发现**: `scaleEffect` 对 `NSViewRepresentable` 不生效（macOS 限制）。
-这导致无法像 SwiftUI 原生视图那样通过 scaleEffect 预缩小来抵消 Actro Transform 的放大。
+这导致无法像 SwiftUI 原生视图那样通过 scaleEffect 预缩小来抵消 Actrium Transform 的放大。
 
 ### 8.4 尝试过的方案
 
@@ -384,7 +384,7 @@ React Native 内容在 Focus 模式下无法正确显示。具体表现：
 
 ```swift
 // 思路：Focus 模式用 viewportSize 渲染，scaleEffect 缩小到 cardSize，
-//       Actro Transform 再放大回 viewportSize
+//       Actrium Transform 再放大回 viewportSize
 ViewBridgeMultiProcessTabView(containerSize: viewportSize)
     .scaleEffect(cardWidth / viewportSize.width)  // ≈ 0.317
 ```
@@ -394,14 +394,14 @@ ViewBridgeMultiProcessTabView(containerSize: viewportSize)
 #### 方案 B: 始终以 cardSize 渲染 ❌
 
 ```swift
-// 思路：ViewBridge 始终以 cardSize 渲染，由 Actro Transform 负责放大
+// 思路：ViewBridge 始终以 cardSize 渲染，由 Actrium Transform 负责放大
 ViewBridgeMultiProcessTabView(containerSize: cardSize)
 // 不使用 scaleEffect
 ```
 
 **结果**:
 - Overview 模式：内容正确显示 ✓
-- Focus 模式：Actro Transform 放大后内容模糊/不显示 ❌
+- Focus 模式：Actrium Transform 放大后内容模糊/不显示 ❌
 
 **观察**: 拖动窗口时能偶尔看到闪烁的画面，说明内容确实在渲染
 
@@ -447,7 +447,7 @@ ViewBridgeMultiProcessTabView(containerSize: renderSize)
 Web 内容（WKWebView）也面临相同问题，其解决方案是 **FocusedWebOverlay**：
 
 ```swift
-// Focus 模式下，Web 内容在 Actro Transform 之外独立渲染
+// Focus 模式下，Web 内容在 Actrium Transform 之外独立渲染
 if case .focus(let tabId) = mode, case .web(let url) = tab.contentType {
     FocusedWebOverlay(
         tab: tab,
@@ -459,7 +459,7 @@ if case .focus(let tabId) = mode, case .web(let url) = tab.contentType {
 ```
 
 关键点：
-1. Focus 模式下的 Web 内容**不在 Actro Transform 内**
+1. Focus 模式下的 Web 内容**不在 Actrium Transform 内**
 2. 使用 `WebViewHolderManager` 管理持久化的 WKWebView 实例
 3. Overview 和 Focus 共享同一个 WKWebView，只是位置不同
 
@@ -467,7 +467,7 @@ if case .focus(let tabId) = mode, case .web(let url) = tab.contentType {
 
 #### 方向 1: FocusedReactNativeOverlay
 
-类似 Web 内容，创建独立的 overlay 在 Actro Transform 之外渲染：
+类似 Web 内容，创建独立的 overlay 在 Actrium Transform 之外渲染：
 
 ```swift
 if case .focus(let tabId) = mode, case .reactNative = tab.contentType {
@@ -483,14 +483,14 @@ if case .focus(let tabId) = mode, case .reactNative = tab.contentType {
 - ViewBridge 连接是一对一的，不能同时显示两个 ViewBridgeHostView
 - 需要在 Focus/Overview 切换时重建 ViewBridge 连接？
 
-#### 方向 2: 调查 Actro Transform 对 NSRemoteView 的影响
+#### 方向 2: 调查 Actrium Transform 对 NSRemoteView 的影响
 
-可能 Actro Transform（通过 CALayer transform）影响了 NSRemoteView 的显示。
+可能 Actrium Transform（通过 CALayer transform）影响了 NSRemoteView 的显示。
 
 **调试方向**:
 
 - 检查 NSRemoteView 的 layer 属性
-- 尝试禁用 Actro Transform 看是否能正常显示
+- 尝试禁用 Actrium Transform 看是否能正常显示
 - 研究 ViewBridge 私有 API 中的尺寸同步机制
 
 ### 8.8 关键日志
@@ -513,10 +513,10 @@ ViewBridgeHostView: Remote view embedded, size=(186.74, 126.19)
 ## 9. 文件清单
 
 ```
-Actro/
-├── Actro/
+Actrium/
+├── Actrium/
 │   ├── App/
-│   │   └── ActroApp.swift               # 应用入口，Metro 自动启动
+│   │   └── ActriumApp.swift               # 应用入口，Metro 自动启动
 │   ├── MultiProcess/
 │   │   ├── ViewBridgeHostView.swift     # ViewBridge Host 端实现
 │   │   ├── XPCServicePool.swift         # XPC Service 池管理
@@ -526,8 +526,8 @@ Actro/
 │   │   └── MetroAddressResolver.swift   # Metro 地址解析
 │   └── Views/
 │       └── WorkspaceMainView.swift      # TabPanel, 渲染尺寸计算
-├── ActroViewService/
-│   └── ActroServiceViewController.swift # XPC Service 实现
+├── ActriumViewService/
+│   └── ActriumServiceViewController.swift # XPC Service 实现
 ├── scripts/
 │   └── generate_xpc_pool.sh             # XPC Service Pool 生成脚本
 └── packages/actrium/
@@ -545,10 +545,10 @@ Actro/
 
 ```bash
 # Host 端日志
-log show --predicate 'process == "Actro"' --last 1m
+log show --predicate 'process == "Actrium"' --last 1m
 
 # XPC Service 日志
-log show --predicate 'process contains "ActroViewService"' --last 1m
+log show --predicate 'process contains "ActriumViewService"' --last 1m
 
 # Metro 相关
 log show --predicate 'eventMessage contains "Metro"' --last 1m
@@ -568,7 +568,7 @@ log show --predicate 'eventMessage contains "Metro"' --last 1m
 ---
 
 *文档更新时间: 2026-01-09*
-*基于 Actro 项目实际运行日志分析*
+*基于 Actrium 项目实际运行日志分析*
 *第 8 节"未解决的问题"记录了 Focus 模式渲染问题的调试过程*
 
 ## 11. 新问题：Remote / Local 视图错位
@@ -587,7 +587,7 @@ log show --predicate 'eventMessage contains "Metro"' --last 1m
    - 当同一进程槽（slot0）里同时有 StartPage/Bookmarks/History 三个连接时，只要“连接建立顺序”和“配置发送顺序”不一致，就会把 TabA 的 config 绑定到 TabB 的远程视图，出现内容错位。
 
 2) **Service 端未清理旧 entry，容易复用到错误连接**
-   - `registerActroServiceViewController` 里定义了 dealloc block，但没有 `class_addMethod` 注册，`unregisterEntry` 从未被调用。
+   - `registerActriumServiceViewController` 里定义了 dealloc block，但没有 `class_addMethod` 注册，`unregisterEntry` 从未被调用。
    - SwiftUI 若重建 Host 侧 ViewBridge（例如切换模式或尺寸变化导致视图替换），旧的 entry 仍在 `tabRegistry`，新的 pending entry 拿不到 `tabId` 绑定，导致新连接渲染不到内容或拿到旧内容。
 
 3) **xpcServiceReady 只在首个 tabConfig 前重发**（次要但加剧混乱）

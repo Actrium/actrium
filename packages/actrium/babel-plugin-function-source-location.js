@@ -14,7 +14,7 @@
  * Only applies to functions passed as JSX props to avoid performance overhead.
  */
 
-const debug = process.env.ACTRO_BABEL_PLUGIN_DEBUG === '1';
+const debug = process.env.ACTRIUM_BABEL_PLUGIN_DEBUG === '1';
 const log = (...args) => {
   if (debug) {
     console.log(...args);

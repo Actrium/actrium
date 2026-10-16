@@ -16,7 +16,7 @@ Prepare the runtime link and install the Android app dependencies:
 ```sh
 cd android
 yarn install
-yarn actro-runtime
+yarn actrium-runtime
 ```
 
 Set `sdk.dir` in `android/local.properties` to the local Android SDK. If Node is
@@ -40,5 +40,5 @@ npm run verify:android
 ```
 
 The `android/` subdirectory contains the Gradle project and platform lifecycle
-code. The `actro-runtime` link points to `../packages/actrium`; `index.js` only
+code. The `actrium-runtime` link points to `../packages/actrium`; `index.js` only
 registers the shared runtime application.

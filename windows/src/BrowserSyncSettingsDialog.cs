@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 // Product surface for the browser sync provider connection, structured after
 // macOS Settings > Sync: provider picker, sync folder, status, device, and a
@@ -467,11 +467,11 @@ internal sealed class BrowserSyncSettingsDialog : Form
         var result = BrowserSyncFolderPreflight.Evaluate(
             directoryExists,
             directoryExists && RunWriteProbe(rootPath),
-            ActroCore.BuildBrowserStorageSyncCloudLocalFolderCapabilityPreflightJson(observedAt),
-            ActroCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
-                ActroCore.LoadBrowserStorageSyncCloudLocalFolderCapabilitiesJson(),
+            ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCapabilityPreflightJson(observedAt),
+            ActriumCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
+                ActriumCore.LoadBrowserStorageSyncCloudLocalFolderCapabilitiesJson(),
                 observedAt),
-            ActroCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
+            ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
                 rootPath,
                 observedAt));
         if (!result.Accept)
@@ -496,7 +496,7 @@ internal sealed class BrowserSyncSettingsDialog : Form
     // authoritatively through its own preflights.
     private static bool RunWriteProbe(string rootPath)
     {
-        var probePath = Path.Combine(rootPath, $".actro-sync-write-probe-{Guid.NewGuid():N}");
+        var probePath = Path.Combine(rootPath, $".actrium-sync-write-probe-{Guid.NewGuid():N}");
         try
         {
             File.WriteAllText(probePath, "probe");

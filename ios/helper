@@ -9,7 +9,7 @@ show_error() {
 
 # Modify iOS Hard Encoding Configuration in Project (BrowserViewModel Medium counterAppDevPath)
 update_ios_config() {
-  local viewmodel_file="Actro/Views/MainContentView/BrowserViewModel.swift"
+  local viewmodel_file="Actrium/Views/MainContentView/BrowserViewModel.swift"
   
   if [[ ! -f "$viewmodel_file" ]]; then
     show_error "File not found: $viewmodel_file"
@@ -17,7 +17,7 @@ update_ios_config() {
   
   # Absolute path to fetching the root of the item (script directory)
   local project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local abs_path="$project_root/ActroRuntime/keel-guest-examples/counterapp"
+  local abs_path="$project_root/ActriumRuntime/keel-guest-examples/counterapp"
   
   # Verify if the target path exists
   if [[ ! -d "$abs_path" ]]; then

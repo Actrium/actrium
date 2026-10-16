@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Security;
 using Microsoft.Win32;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// UI-side theme owner: reads the Windows personalization registry value,

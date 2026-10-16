@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class HostBridgeDispatcher
 {
@@ -45,19 +45,19 @@ internal sealed class HostBridgeDispatcher
             requestId = request.Id;
             if (request.Type != RequestType)
             {
-                return SerializeError(request.Id, "invalid_type", "Unsupported Actro host bridge message type.");
+                return SerializeError(request.Id, "invalid_type", "Unsupported Actrium host bridge message type.");
             }
 
             if (!isSourceAllowed(source))
             {
-                return SerializeError(request.Id, "forbidden_source", "This document is not allowed to use the Actro host bridge.");
+                return SerializeError(request.Id, "forbidden_source", "This document is not allowed to use the Actrium host bridge.");
             }
 
             return request.Method switch
             {
                 GetCoreStatusMethod => SerializeSuccess(
                     request.Id,
-                    ActroCoreStatusPayload.From(actions.LoadCoreStatus())),
+                    ActriumCoreStatusPayload.From(actions.LoadCoreStatus())),
                 OpenTabMethod => SerializeSuccess(
                     request.Id,
                     await actions.OpenTabAsync(
@@ -87,7 +87,7 @@ internal sealed class HostBridgeDispatcher
                     request.Id,
                     await actions.RemoveHistoryEntryAsync(
                         DeserializeParams(request.Params, new HostRemoveHistoryEntryRequest()))),
-                _ => SerializeError(request.Id, "unknown_method", "Unsupported Actro host bridge method."),
+                _ => SerializeError(request.Id, "unknown_method", "Unsupported Actrium host bridge method."),
             };
         }
         catch (HostBridgeException error)
@@ -148,7 +148,7 @@ internal sealed class HostBridgeDispatcher
 
         if (paramsElement.Value.ValueKind != JsonValueKind.Object)
         {
-            throw new JsonException("Actro host bridge params must be a JSON object.");
+            throw new JsonException("Actrium host bridge params must be a JSON object.");
         }
 
         return paramsElement.Value.Deserialize<T>(JsonOptions) ?? defaultValue;
@@ -162,7 +162,7 @@ internal sealed record HostBridgeRequest(string? Type, string? Id, string? Metho
         using var document = JsonDocument.Parse(messageJson);
         if (document.RootElement.ValueKind != JsonValueKind.Object)
         {
-            throw new JsonException("Actro host bridge messages must be JSON objects.");
+            throw new JsonException("Actrium host bridge messages must be JSON objects.");
         }
 
         return new HostBridgeRequest(
@@ -181,7 +181,7 @@ internal sealed record HostBridgeRequest(string? Type, string? Id, string? Metho
 
         if (property.ValueKind != JsonValueKind.String)
         {
-            throw new JsonException($"Actro host bridge property '{propertyName}' must be a string.");
+            throw new JsonException($"Actrium host bridge property '{propertyName}' must be a string.");
         }
 
         return property.GetString();
@@ -219,7 +219,7 @@ internal sealed class HostBridgeException : Exception
 }
 
 internal sealed record HostBridgeActions(
-    Func<ActroCoreStatus> LoadCoreStatus,
+    Func<ActriumCoreStatus> LoadCoreStatus,
     Func<Guid, HostOpenTabRequest, Task<HostOpenTabPayload>> OpenTabAsync,
     Func<Guid, HostCloseTabRequest, Task<bool>> CloseTabAsync,
     Func<HostSelectTabRequest, Task<bool>> SelectTabAsync,
@@ -288,7 +288,7 @@ internal sealed record HostTabPayload(
     bool CanGoBack,
     bool CanGoForward);
 
-internal sealed record ActroCoreStatusPayload(
+internal sealed record ActriumCoreStatusPayload(
     bool IsAvailable,
     string ProductName,
     uint CApiVersion,
@@ -298,9 +298,9 @@ internal sealed record ActroCoreStatusPayload(
     uint RuntimeSchemaVersion,
     string? UnavailableReason)
 {
-    public static ActroCoreStatusPayload From(ActroCoreStatus status)
+    public static ActriumCoreStatusPayload From(ActriumCoreStatus status)
     {
-        return new ActroCoreStatusPayload(
+        return new ActriumCoreStatusPayload(
             status.IsAvailable,
             status.ProductName,
             status.CApiVersion,

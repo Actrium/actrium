@@ -10,7 +10,7 @@ runtime link and CocoaPods workspace:
 ```sh
 pnpm install
 cd ios
-./Scripts/ensure-actro-runtime.sh
+./Scripts/ensure-actrium-runtime.sh
 pod install
 ```
 
@@ -21,7 +21,7 @@ cd ../packages/actrium
 yarn dev
 ```
 
-Open `ios/Actro.xcworkspace` in Xcode, or run the repository verification
+Open `ios/Actrium.xcworkspace` in Xcode, or run the repository verification
 command:
 
 ```sh
@@ -32,5 +32,5 @@ Use `./Scripts/af <command>` for the existing install, bundle, build, upload,
 clean, and configuration-check helpers. Run `./Scripts/af help` for the complete
 command list.
 
-`ActroRuntime` is a compatibility symlink to `../packages/actrium`; the iOS host
+`ActriumRuntime` is a compatibility symlink to `../packages/actrium`; the iOS host
 does not maintain a separate React Native runtime copy.

@@ -1,4 +1,4 @@
-# Actro XPC Multi-Process Architecture
+# Actrium XPC Multi-Process Architecture
 
 > History document. See current path [Renderer-Process-Pool.md](Renderer-Process-Pool.md). Install package no longer contains `RCTViewService*.xpc`.
 
@@ -12,7 +12,7 @@ Tab : ViewBridgeConnection : RCTRootView = 1 : 1 : 1
 
 Every one. Tab The following is a full-fledged repertoire:
 - One. `ViewBridgeHostView` (Host End Connection)
-- One. `ActroServiceViewController` (Service Side instance)
+- One. `ActriumServiceViewController` (Service Side instance)
 - One. `RCTRootView` (React Native Render View)
 
 **For the front and the back, every one. Tab Keeps the status of independent rendering.**
@@ -26,7 +26,7 @@ Harmonization of all resource markers **tabId** (`UUID`):
 
 ## Overview
 
-Actro Use ViewBridge XPC Structure will React Native Rendering isolation to the independence process, achieving:
+Actrium Use ViewBridge XPC Structure will React Native Rendering isolation to the independence process, achieving:
 - Process isolation:RN The crash does not affect the main process
 - Reuse of resources: share of the same application RCTBridge(but each) Tab Independence RCTRootView)
 - Parallel rendering: multiple Tab But it's replicating.
@@ -35,7 +35,7 @@ Actro Use ViewBridge XPC Structure will React Native Rendering isolation to the 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                 Host App (Actro)                                    │
+│                                 Host App (Actrium)                                    │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                      │
 │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
@@ -108,7 +108,7 @@ Actro Use ViewBridge XPC Structure will React Native Rendering isolation to the 
 │  │  │                           │    │  │   │         │    │  │   │         │    │  │
 │  │  ▼                           ▼    │  │   ▼         │    │  │   ▼         │    │  │
 │  │ ┌──────────────┐  ┌──────────────┐│  │┌──────────┐ │    │  │┌──────────┐ │    │  │
-│  │ │ActroService │  │ActroService ││  ││ActroSvc │ │    │  ││ActroSvc │ │    │  │
+│  │ │ActriumService │  │ActriumService ││  ││ActriumSvc │ │    │  ││ActriumSvc │ │    │  │
 │  │ │ViewController│  │ViewController││  ││VC (TabC) │ │    │  ││VC (TabD) │ │    │  │
 │  │ │   (TabA)     │  │   (TabB)     ││  │└──────────┘ │    │  │└──────────┘ │    │  │
 │  │ │              │  │              ││  │             │    │  │             │    │  │
@@ -128,7 +128,7 @@ Actro Use ViewBridge XPC Structure will React Native Rendering isolation to the 
 
 | Host End | ViewBridge | Service End |
 |---------|------------|------------|
-| Tab (tabId: UUID) | ViewBridgeHostView | ActroServiceViewController |
+| Tab (tabId: UUID) | ViewBridgeHostView | ActriumServiceViewController |
 | ViewBridgeCoordinator | NSRemoteViewController | RCTRootView |
 
 Every one. Tab It's... `tabId` The whole link is used for resource management and information routing.
@@ -138,7 +138,7 @@ Every one. Tab It's... `tabId` The whole link is used for resource management an
 The same. XPC Service Within the process:
 - Share one `ServiceReactNativeHost` Single cases (management) RCTBridge)
 - Share one `RCTBridge` (JS Runtime)
-- Every one. Tab Independent `ActroServiceViewController` Examples
+- Every one. Tab Independent `ActriumServiceViewController` Examples
 - Every one. Tab Independent `RCTRootView`(by each of the ViewController held)
 
 ## Slot Allocation Strategy
@@ -161,7 +161,7 @@ The same. XPC Service Within the process:
 ## IPC Communication
 
 Transport: `DistributedNotificationCenter`
-Protocol: Protobuf (Define in `Shared/IPC/actro_ipc.proto`)
+Protocol: Protobuf (Define in `Shared/IPC/actrium_ipc.proto`)
 
 ### Messages
 
@@ -175,7 +175,7 @@ Protocol: Protobuf (Define in `Shared/IPC/actro_ipc.proto`)
 ### Key: tabId (UUID)
 
 All messages are included. `tab_id` fields for:
-1. Service Internal route is right. ActroServiceViewController
+1. Service Internal route is right. ActriumServiceViewController
 2. Host The end matches right. ViewBridgeCoordinator
 3. Resource life-cycle management
 
@@ -183,9 +183,9 @@ All messages are included. `tab_id` fields for:
 
 | File | Annotations |
 |------|------|
-| `Shared/IPC/actro_ipc.proto` | Protobuf Definitions XPC Message) |
-| `Actro/MultiProcess/XPCServicePool.swift` | Process pool management |
-| `Actro/MultiProcess/ViewBridgeHostView.swift` | Host End ViewBridge Encapsulate |
-| `ActroViewService/ActroServiceViewController.swift` | Service End ViewController |
+| `Shared/IPC/actrium_ipc.proto` | Protobuf Definitions XPC Message) |
+| `Actrium/MultiProcess/XPCServicePool.swift` | Process pool management |
+| `Actrium/MultiProcess/ViewBridgeHostView.swift` | Host End ViewBridge Encapsulate |
+| `ActriumViewService/ActriumServiceViewController.swift` | Service End ViewController |
 | `scripts/generate_xpc_pool.sh` | Build Phase Script, Generate 4 individual XPC service |
 | `docs/XPC-Architecture.md` | This document |

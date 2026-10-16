@@ -1,11 +1,11 @@
-# Actro Runtime (ActroRuntime) 业务内核架构
+# Actrium Runtime (ActriumRuntime) 业务内核架构
 
-`ActroRuntime` 是项目的跨平台业务逻辑中心。作为独立仓库存在，它不依赖特定的 Native UI，而是通过标准的 Bridge 与宿主壳通信。
+`ActriumRuntime` 是项目的跨平台业务逻辑中心。作为独立仓库存在，它不依赖特定的 Native UI，而是通过标准的 Bridge 与宿主壳通信。
 
 ## 1. 核心模块划分
 
 ```
-ActroRuntime/src/
+ActriumRuntime/src/
 ├── TabRouter.tsx          # 顶级路由：分发至 RuntimeApp (插件) 或 SystemApp (内置功能)
 ├── runtime-host/             # 核心宿主逻辑
 │   ├── RuntimeApp.tsx        #   多 Tab 管理与全局监控推送

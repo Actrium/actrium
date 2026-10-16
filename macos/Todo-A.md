@@ -3,9 +3,9 @@
 ## A1. Stop Loading
 
 **Files:**
-- `Actro/MultiProcess/WebViewTabView.swift` — WebViewHolder add `stopLoading()`
-- `Actro/Views/MainContentView/BrowserViewModel.swift` — add `stopCurrentTab()`
-- `Actro/Views/MainToolbar.swift` — reload button toggles to stop (X) when loading
+- `Actrium/MultiProcess/WebViewTabView.swift` — WebViewHolder add `stopLoading()`
+- `Actrium/Views/MainContentView/BrowserViewModel.swift` — add `stopCurrentTab()`
+- `Actrium/Views/MainToolbar.swift` — reload button toggles to stop (X) when loading
 
 **Implementation:**
 1. WebViewHolder: `func stopLoading() { webView.stopLoading() }`
@@ -16,9 +16,9 @@
 ## A2. Loading Progress Bar (Safari-style)
 
 **Files:**
-- `Actro/MultiProcess/WebViewTabView.swift` — observe `estimatedProgress` via KVO
-- `Actro/Views/MainContentView/BrowserViewModel.swift` — publish `loadingProgress: Double`
-- `Actro/Views/WorkspaceMainView.swift` — thin progress bar overlay at top of web content
+- `Actrium/MultiProcess/WebViewTabView.swift` — observe `estimatedProgress` via KVO
+- `Actrium/Views/MainContentView/BrowserViewModel.swift` — publish `loadingProgress: Double`
+- `Actrium/Views/WorkspaceMainView.swift` — thin progress bar overlay at top of web content
 
 **Implementation:**
 1. WebViewHolder: add `progressObservation: NSKeyValueObservation?`

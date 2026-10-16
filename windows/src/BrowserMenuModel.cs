@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// WinForms-free keyboard shortcut: modifier flags plus a canonical key

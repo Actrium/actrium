@@ -1,6 +1,6 @@
-pub const PACKAGE_NAME: &str = "actro";
-pub const PACKAGE_DESCRIPTION: &str = "Actro browser client app";
-pub const PACKAGE_AUTHOR: &str = "Actro-Team";
+pub const PACKAGE_NAME: &str = "actrium";
+pub const PACKAGE_DESCRIPTION: &str = "Actrium browser client app";
+pub const PACKAGE_AUTHOR: &str = "Actrium-Team";
 pub const PACKAGE_LICENSE: &str = "Apache-2.0";
 pub const PACKAGE_TAG_DEV: &str = "dev";
 pub const PACKAGE_TAG_CLIENT: &str = "client";
@@ -24,7 +24,7 @@ pub const LOCK_DEPENDENCY_NAME: &str = "bot";
 pub const LOCK_DEPENDENCY_FINGERPRINT: &str =
     "service_semantic:090a8d3fb0c937ac019606c43cbe40e2223690e3d3ad87b2f16e42119c41820a";
 pub const LOCK_CACHED_AT: &str = "2026-02-06T06:40:17.912656+00:00";
-pub const LOCK_DEPENDENCY_FILE_PATH: &str = "bot/actro.proto";
+pub const LOCK_DEPENDENCY_FILE_PATH: &str = "bot/actrium.proto";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActrServiceEndpoint {
@@ -243,8 +243,8 @@ mod tests {
             turn_services: vec![endpoint("loran1.actrium.example", Some("3478"))],
         });
 
-        assert!(toml.contains("name = \"actro\""));
-        assert!(toml.contains("tracing_service_name = \"actro\""));
+        assert!(toml.contains("name = \"actrium\""));
+        assert!(toml.contains("tracing_service_name = \"actrium\""));
         assert!(toml.contains("bid-service = { actr_type = \"acmeopenclaw+AskService\" }"));
         assert!(toml.contains("url = \"wss://loran1.actrium.example:443/signaling/ws\""));
         assert!(toml.contains("realm_id = 1234567"));
@@ -263,7 +263,7 @@ mod tests {
         assert!(toml.contains("version = 1"));
         assert!(toml.contains("name = \"bot\""));
         assert!(toml.contains("actr_type = \"acmeopenclaw+AskService\""));
-        assert!(toml.contains("path = \"bot/actro.proto\""));
+        assert!(toml.contains("path = \"bot/actrium.proto\""));
         assert!(toml.ends_with('\n'));
     }
 }

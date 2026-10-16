@@ -1,19 +1,19 @@
-actro_runtime_path = File.join(__dir__, 'ActroRuntime')
+actrium_runtime_path = File.join(__dir__, 'ActriumRuntime')
 # Keep react-native path RELATIVE. RN CocoaPods helpers assume `path` is relative and will
 # incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
-react_native_path = 'ActroRuntime/node_modules/react-native'
+react_native_path = 'ActriumRuntime/node_modules/react-native'
 
-# Settings NODE_PATH Environmental variables, which Node.js I can find it. ActroRuntime Down node_modules
-ENV['NODE_PATH'] = File.join(__dir__, 'ActroRuntime', 'node_modules')
+# Settings NODE_PATH Environmental variables, which Node.js I can find it. ActriumRuntime Down node_modules
+ENV['NODE_PATH'] = File.join(__dir__, 'ActriumRuntime', 'node_modules')
 
 # Disable sign here
 # Disable VisionCamera with worklets(Framework Processor)
 $VCEnableFrameProcessors = false 
 
 # Require react_native_pods via a stable absolute path.
-require File.join(actro_runtime_path, 'node_modules', 'react-native', 'scripts', 'react_native_pods')
+require File.join(actrium_runtime_path, 'node_modules', 'react-native', 'scripts', 'react_native_pods')
 # react-native-permissions setup Script
-require File.join(actro_runtime_path, 'node_modules', 'react-native-permissions', 'scripts', 'setup')
+require File.join(actrium_runtime_path, 'node_modules', 'react-native-permissions', 'scripts', 'setup')
 
 prepare_react_native_project!
 
@@ -22,42 +22,42 @@ setup_permissions([
   'Notifications',
 ])
 
-target 'Actro' do
+target 'Actrium' do
   platform :ios, '17.0'
 
   # Autolink Native Module (Temporary manual addition to address path problems caused by project structure)
   # use_native_modules!
-  pod 'RNLocalize', :path => 'ActroRuntime/node_modules/react-native-localize'
-  pod 'react-native-safe-area-context', :path => 'ActroRuntime/node_modules/react-native-safe-area-context'
-  pod 'react-native-sqlite-storage', :path => 'ActroRuntime/node_modules/react-native-sqlite-storage'
-  pod 'VisionCamera', :path => 'ActroRuntime/node_modules/react-native-vision-camera'
-  pod 'react-native-image-picker', :path => 'ActroRuntime/node_modules/react-native-image-picker'
-  pod 'react-native-document-picker', :path => 'ActroRuntime/node_modules/@react-native-documents/picker'
-  pod 'react-native-maps', :path => 'ActroRuntime/node_modules/react-native-maps'
-  pod 'react-native-geolocation', :path => 'ActroRuntime/node_modules/@react-native-community/geolocation'
-  pod 'react-native-netinfo', :path => 'ActroRuntime/node_modules/@react-native-community/netinfo'
-  pod 'react-native-image-resizer', :path => 'ActroRuntime/node_modules/@bam.tech/react-native-image-resizer'
-  pod 'BVLinearGradient', :path => 'ActroRuntime/node_modules/react-native-linear-gradient'
-  pod 'NitroSound', :path => 'ActroRuntime/node_modules/react-native-nitro-sound'
-  pod 'NitroModules', :path => 'ActroRuntime/node_modules/react-native-nitro-modules'
-  pod 'RNCClipboard', :path => 'ActroRuntime/node_modules/@react-native-clipboard/clipboard'
-  pod 'RNFS', :path => 'ActroRuntime/node_modules/react-native-fs'
-  pod 'RNZipArchive', :path => 'ActroRuntime/node_modules/react-native-zip-archive'
-  pod 'RNLiveAudioStream', :path => 'ActroRuntime/node_modules/react-native-live-audio-stream'
-  pod 'RNDeviceInfo', :path => 'ActroRuntime/node_modules/react-native-device-info'
-  pod 'react-native-get-random-values', :path => 'ActroRuntime/node_modules/react-native-get-random-values'
-  pod 'react-native-webview', :path => 'ActroRuntime/node_modules/react-native-webview'
-  pod 'react-native-view-shot', :path => 'ActroRuntime/node_modules/react-native-view-shot'
-  pod 'react-native-cameraroll', :path => 'ActroRuntime/node_modules/@react-native-camera-roll/camera-roll'
-  pod 'RNGestureHandler', :path => 'ActroRuntime/node_modules/react-native-gesture-handler'
-  pod 'RNReanimated', :path => 'ActroRuntime/node_modules/react-native-reanimated'
-  pod 'RNSVG', :path => 'ActroRuntime/node_modules/react-native-svg'
-  pod 'react-native-keyboard-controller', :path => 'ActroRuntime/node_modules/react-native-keyboard-controller'
-  pod 'RNReactNativeHapticFeedback', :path => 'ActroRuntime/node_modules/react-native-haptic-feedback'
-  pod 'ExpoSpeechRecognition', :path => 'ActroRuntime/node_modules/@boomsi/rn-speech-recognition/ios'
+  pod 'RNLocalize', :path => 'ActriumRuntime/node_modules/react-native-localize'
+  pod 'react-native-safe-area-context', :path => 'ActriumRuntime/node_modules/react-native-safe-area-context'
+  pod 'react-native-sqlite-storage', :path => 'ActriumRuntime/node_modules/react-native-sqlite-storage'
+  pod 'VisionCamera', :path => 'ActriumRuntime/node_modules/react-native-vision-camera'
+  pod 'react-native-image-picker', :path => 'ActriumRuntime/node_modules/react-native-image-picker'
+  pod 'react-native-document-picker', :path => 'ActriumRuntime/node_modules/@react-native-documents/picker'
+  pod 'react-native-maps', :path => 'ActriumRuntime/node_modules/react-native-maps'
+  pod 'react-native-geolocation', :path => 'ActriumRuntime/node_modules/@react-native-community/geolocation'
+  pod 'react-native-netinfo', :path => 'ActriumRuntime/node_modules/@react-native-community/netinfo'
+  pod 'react-native-image-resizer', :path => 'ActriumRuntime/node_modules/@bam.tech/react-native-image-resizer'
+  pod 'BVLinearGradient', :path => 'ActriumRuntime/node_modules/react-native-linear-gradient'
+  pod 'NitroSound', :path => 'ActriumRuntime/node_modules/react-native-nitro-sound'
+  pod 'NitroModules', :path => 'ActriumRuntime/node_modules/react-native-nitro-modules'
+  pod 'RNCClipboard', :path => 'ActriumRuntime/node_modules/@react-native-clipboard/clipboard'
+  pod 'RNFS', :path => 'ActriumRuntime/node_modules/react-native-fs'
+  pod 'RNZipArchive', :path => 'ActriumRuntime/node_modules/react-native-zip-archive'
+  pod 'RNLiveAudioStream', :path => 'ActriumRuntime/node_modules/react-native-live-audio-stream'
+  pod 'RNDeviceInfo', :path => 'ActriumRuntime/node_modules/react-native-device-info'
+  pod 'react-native-get-random-values', :path => 'ActriumRuntime/node_modules/react-native-get-random-values'
+  pod 'react-native-webview', :path => 'ActriumRuntime/node_modules/react-native-webview'
+  pod 'react-native-view-shot', :path => 'ActriumRuntime/node_modules/react-native-view-shot'
+  pod 'react-native-cameraroll', :path => 'ActriumRuntime/node_modules/@react-native-camera-roll/camera-roll'
+  pod 'RNGestureHandler', :path => 'ActriumRuntime/node_modules/react-native-gesture-handler'
+  pod 'RNReanimated', :path => 'ActriumRuntime/node_modules/react-native-reanimated'
+  pod 'RNSVG', :path => 'ActriumRuntime/node_modules/react-native-svg'
+  pod 'react-native-keyboard-controller', :path => 'ActriumRuntime/node_modules/react-native-keyboard-controller'
+  pod 'RNReactNativeHapticFeedback', :path => 'ActriumRuntime/node_modules/react-native-haptic-feedback'
+  pod 'ExpoSpeechRecognition', :path => 'ActriumRuntime/node_modules/@boomsi/rn-speech-recognition/ios'
   # react-native-permissions Core library (notify permission processor by setup_permissions Automount)
-  pod 'RNPermissions', :path => 'ActroRuntime/node_modules/react-native-permissions'
-  # pod 'react-native-worklets-core', :path => 'ActroRuntime/node_modules/react-native-worklets-core'
+  pod 'RNPermissions', :path => 'ActriumRuntime/node_modules/react-native-permissions'
+  # pod 'react-native-worklets-core', :path => 'ActriumRuntime/node_modules/react-native-worklets-core'
 
   # Wesson. SDK
   pod 'WechatOpenSDK-XCFramework'
@@ -70,11 +70,11 @@ target 'Actro' do
     hermes_enabled: false,
     fabric_enabled: false,
     # React Native JS Project 's Directory (includes) package.json)
-    app_path: actro_runtime_path
+    app_path: actrium_runtime_path
   )
 
   # keel native sandbox (JSI)
-  pod 'KeelSandboxNative', :path => 'ActroRuntime/node_modules/keel'
+  pod 'KeelSandboxNative', :path => 'ActriumRuntime/node_modules/keel'
 
   post_install do |installer|
     # Tell React Native Right source position. Avoid. Codegen Misreporting
@@ -115,7 +115,7 @@ target 'Actro' do
 
     # Xcode 26 may set TOOLCHAIN_DIR to the Metal toolchain for parts of the build.
     # Keep Swift stdlib search paths anchored to the default Xcode toolchain.
-    Dir.glob(File.join(__dir__, 'Pods', 'Target Support Files', 'Pods-Actro', 'Pods-Actro.*.xcconfig')).each do |xcconfig|
+    Dir.glob(File.join(__dir__, 'Pods', 'Target Support Files', 'Pods-Actrium', 'Pods-Actrium.*.xcconfig')).each do |xcconfig|
       contents = File.read(xcconfig)
       updated = contents.gsub('${TOOLCHAIN_DIR}/usr/lib/swift/${PLATFORM_NAME}', '${DT_TOOLCHAIN_DIR}/usr/lib/swift/${PLATFORM_NAME}')
       File.write(xcconfig, updated) if updated != contents

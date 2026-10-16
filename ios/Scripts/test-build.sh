@@ -20,7 +20,7 @@ START_TIME=$(date +%s)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-SCHEME="Actro"
+SCHEME="Actrium"
 
 # Colour Output
 BLUE='\033[0;34m'
@@ -33,12 +33,12 @@ echo -e "${BLUE}===================================================${NC}"
 echo ""
 
 cd "$PROJECT_ROOT"
-"$SCRIPT_DIR/ensure-actro-runtime.sh"
+"$SCRIPT_DIR/ensure-actrium-runtime.sh"
 
 # Global Cleanup
 echo "🧹 Global cleanup of old builders and dependencies..."
 rm -rf build
-rm -rf ActroRuntime/node_modules
+rm -rf ActriumRuntime/node_modules
 rm -rf Pods
 
 # Cleaning Watchman and Metro Cache
@@ -49,7 +49,7 @@ fi
 
 # Pack up. React Native Bundle and resources
 echo "📦 Pack up. React Native Bundle..."
-cd ActroRuntime
+cd ActriumRuntime
 
 # Installation Dependence
 echo "📦 Install React Native Dependency..."
@@ -70,8 +70,8 @@ node node_modules/react-native/scripts/bundle.js \
     --platform ios \
     --dev false \
     --entry-file index.ts \
-    --bundle-output "$PROJECT_ROOT/Actro/runtime.jsbundle" \
-    --assets-dest "$PROJECT_ROOT/Actro"
+    --bundle-output "$PROJECT_ROOT/Actrium/runtime.jsbundle" \
+    --assets-dest "$PROJECT_ROOT/Actrium"
 
 cd "$PROJECT_ROOT"
 
@@ -114,24 +114,24 @@ EOF
 # Cleaning
 echo "🧹 Clear old build..."
 xcodebuild clean \
-    -workspace Actro.xcworkspace \
+    -workspace Actrium.xcworkspace \
     -scheme "$SCHEME"
 
 # Build Archive
 echo ""
 echo "🏗️  Start Build Archive..."
 xcodebuild archive \
-    -workspace Actro.xcworkspace \
+    -workspace Actrium.xcworkspace \
     -scheme "$SCHEME" \
     -configuration Release \
-    -archivePath build/Actro.xcarchive \
+    -archivePath build/Actrium.xcarchive \
     -verbose
 
-if [ -d "build/Actro.xcarchive" ]; then
+if [ -d "build/Actrium.xcarchive" ]; then
     echo ""
     echo -e "${GREEN}✅ Construction succeeded!${NC}"
     echo ""
-    echo "📁 Archive Path: build/Actro.xcarchive"
+    echo "📁 Archive Path: build/Actrium.xcarchive"
     
     # Show Build Information
     BUILD_VERSION=$(agvtool what-marketing-version -terse1)
@@ -148,7 +148,7 @@ if [ -d "build/Actro.xcarchive" ]; then
     
     echo "📦 Exporting IPA and rename..."
     xcodebuild -exportArchive \
-        -archivePath build/Actro.xcarchive \
+        -archivePath build/Actrium.xcarchive \
         -exportPath build/IPA \
         -exportOptionsPlist Scripts/ExportOptions.plist \
         -configuration Release \
@@ -159,7 +159,7 @@ if [ -d "build/Actro.xcarchive" ]; then
         mv "build/IPA/$SCHEME.ipa" "$DESKTOP_PATH/$IPA_NAME"
         echo -e "${GREEN}✅ IPA Exported successfully to: $DESKTOP_PATH/$IPA_NAME${NC}"
     else
-        # Sometimes the exported filename may not be Actro.ipa, try to find the only one in the folder ipa
+        # Sometimes the exported filename may not be Actrium.ipa, try to find the only one in the folder ipa
         EXTRACTED_IPA=$(find build/IPA -name "*.ipa" | head -n 1)
         if [ -n "$EXTRACTED_IPA" ]; then
             mv "$EXTRACTED_IPA" "$DESKTOP_PATH/$IPA_NAME"
