@@ -2,6 +2,7 @@ import Darwin
 import XCTest
 @testable import ActroIPC
 
+@MainActor
 final class AccessibilityTreeIPCTests: XCTestCase {
     func testAccessibilityTreeRoundTripsThroughIPCMessage() throws {
         var node = Actro_Ipc_AccessibilityNode()
@@ -23,7 +24,7 @@ final class AccessibilityTreeIPCTests: XCTestCase {
         var message = Actro_Ipc_IPCMessage()
         message.accessibilityTree = tree
 
-        let decoded = try Actro_Ipc_IPCMessage(serializedData: try message.serializedData())
+        let decoded = try Actro_Ipc_IPCMessage(serializedBytes: try message.serializedData())
         XCTAssertEqual(decoded.accessibilityTree.tabID, "tab-1")
         XCTAssertEqual(decoded.accessibilityTree.focusedID, 42)
         XCTAssertEqual(decoded.accessibilityTree.nodes.first?.label, "Save")
@@ -36,7 +37,7 @@ final class AccessibilityTreeIPCTests: XCTestCase {
         message.accessibilityAction.nodeID = 7
         message.accessibilityAction.action = "AXPress"
 
-        let decoded = try Actro_Ipc_IPCMessage(serializedData: try message.serializedData())
+        let decoded = try Actro_Ipc_IPCMessage(serializedBytes: try message.serializedData())
         XCTAssertEqual(decoded.accessibilityAction.tabID, "tab-1")
         XCTAssertEqual(decoded.accessibilityAction.nodeID, 7)
         XCTAssertEqual(decoded.accessibilityAction.action, "AXPress")
@@ -75,48 +76,39 @@ final class AccessibilityTreeIPCTests: XCTestCase {
         broker.stop()
     }
 
-    func testAccessibilityActionRoundTrip() throws {
+    func testAccessibilityActionRoundTrip() async throws {
         var descriptors: [Int32] = [-1, -1]
         XCTAssertEqual(Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
 
         let broker = IPCConnection(tabId: "renderer-test", connectedSocket: descriptors[0])
         let renderer = IPCHelperConnection(tabId: "renderer-test", connectedSocket: descriptors[1])
-        let handled = expectation(description: "renderer handles accessibility action")
-        let completed = expectation(description: "broker receives action result")
 
         renderer.onAccessibilityAction = { request, reply in
             XCTAssertEqual(request.tabID, "tab-1")
             XCTAssertEqual(request.nodeID, 9)
             XCTAssertEqual(request.action, "AXPress")
-            handled.fulfill()
             reply(true, nil)
         }
 
         try broker.start()
         try renderer.connect()
 
-        Task {
-            let ok = try await broker.sendAccessibilityAction(
-                tabId: "tab-1",
-                nodeId: 9,
-                action: "AXPress"
-            )
-            XCTAssertTrue(ok)
-            completed.fulfill()
-        }
-
-        wait(for: [handled, completed], timeout: 2)
+        let ok = try await broker.sendAccessibilityAction(
+            tabId: "tab-1",
+            nodeId: 9,
+            action: "AXPress"
+        )
+        XCTAssertTrue(ok)
         renderer.disconnect()
         broker.stop()
     }
 
-    func testGetAccessibilityTreeRoundTrip() throws {
+    func testGetAccessibilityTreeRoundTrip() async throws {
         var descriptors: [Int32] = [-1, -1]
         XCTAssertEqual(Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
 
         let broker = IPCConnection(tabId: "renderer-test", connectedSocket: descriptors[0])
         let renderer = IPCHelperConnection(tabId: "renderer-test", connectedSocket: descriptors[1])
-        let completed = expectation(description: "broker receives tree")
 
         renderer.onGetAccessibilityTree = { tabId, reply in
             XCTAssertEqual(tabId, "tab-1")
@@ -133,15 +125,10 @@ final class AccessibilityTreeIPCTests: XCTestCase {
         try broker.start()
         try renderer.connect()
 
-        Task {
-            let tree = try await broker.getAccessibilityTree(tabId: "tab-1")
-            XCTAssertEqual(tree.tabID, "tab-1")
-            XCTAssertEqual(tree.generation, 2)
-            XCTAssertEqual(tree.nodes.first?.label, "Home")
-            completed.fulfill()
-        }
-
-        wait(for: [completed], timeout: 2)
+        let tree = try await broker.getAccessibilityTree(tabId: "tab-1")
+        XCTAssertEqual(tree.tabID, "tab-1")
+        XCTAssertEqual(tree.generation, 2)
+        XCTAssertEqual(tree.nodes.first?.label, "Home")
         renderer.disconnect()
         broker.stop()
     }

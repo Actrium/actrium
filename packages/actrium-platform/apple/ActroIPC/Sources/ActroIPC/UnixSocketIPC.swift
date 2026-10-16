@@ -50,344 +50,301 @@ enum IPCSocketPath {
     }
 }
 
+// MARK: - Socket ownership
+
+/// The descriptor stays open until all in-flight I/O releases this object.
+/// Only `stopped` is mutable, protected by `stateLock`; complete writes are
+/// serialized by `sendLock`. Shutdown wakes I/O without recycling its descriptor.
+private final class IPCSocket: @unchecked Sendable {
+    let descriptor: Int32
+    private let stateLock = NSLock()
+    private let sendLock = NSLock()
+    private var stopped = false
+
+    init(_ descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    deinit {
+        Darwin.close(descriptor)
+    }
+
+    var isStopped: Bool {
+        stateLock.withLock { stopped }
+    }
+
+    func stop() {
+        stateLock.withLock {
+            guard !stopped else { return }
+            stopped = true
+            // The read/write owner closes the descriptor after its syscall exits.
+            _ = Darwin.shutdown(descriptor, SHUT_RDWR)
+        }
+    }
+
+    func send(_ data: Data) throws {
+        try sendLock.withLock {
+            guard !isStopped else { throw IPCError.notConnected }
+            try sendFrame(to: descriptor, data: data)
+        }
+    }
+
+    func acceptClient() throws -> IPCSocket {
+        // A bounded poll also handles platforms where shutdown does not wake a
+        // listening socket. Nonblocking accept cannot outlive that cancellation.
+        while !isStopped {
+            var event = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            let ready = Darwin.poll(&event, 1, 100)
+            if ready == 0 || (ready < 0 && errno == EINTR) { continue }
+            guard ready > 0, !isStopped else { throw IPCError.connectionClosed }
+            let accepted = Darwin.accept(descriptor, nil, nil)
+            if accepted < 0 && (errno == EAGAIN || errno == EINTR) { continue }
+            guard accepted >= 0 else { throw IPCError.connectionClosed }
+            let socket = IPCSocket(accepted)
+            let flags = fcntl(accepted, F_GETFL)
+            guard flags >= 0, fcntl(accepted, F_SETFL, flags & ~O_NONBLOCK) >= 0 else {
+                throw IPCError.socketCreationFailed(errno)
+            }
+            try configureConnectedSocket(accepted)
+            return socket
+        }
+        throw IPCError.connectionClosed
+    }
+}
+
+/// Bridges synchronous sends from any thread to the main-actor lifecycle.
+/// Every access to the current socket is protected by the lock. I/O keeps a
+/// strong snapshot so replacement cannot close a descriptor in use.
+private final class IPCSocketSlot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var socket: IPCSocket?
+
+    deinit { replace(with: nil) }
+
+    func replace(with newSocket: IPCSocket?) {
+        let previous = lock.withLock {
+            let previous = socket
+            socket = newSocket
+            return previous
+        }
+        previous?.stop()
+    }
+
+    func send(_ data: Data) throws {
+        guard let current = lock.withLock({ socket }) else { throw IPCError.notConnected }
+        try current.send(data)
+    }
+}
+
 // MARK: - IPC Server (Actro side)
 
-/// Unix Socket server for receiving connections from Helper processes
-class IPCServer {
-    private var serverSocket: Int32 = -1
-    private var clientSocket: Int32 = -1
+/// Lifecycle and callbacks are main-actor isolated; blocking I/O owns a socket snapshot.
+@MainActor
+final class IPCServer {
     private let socketPath: String?
-    private let connectedSocket: Int32?
+    private var inheritedSocket: IPCSocket?
+    private var listener: IPCSocket?
+    private var client: IPCSocket?
+    private nonisolated let outgoing = IPCSocketSlot()
     private let queue = DispatchQueue(label: "io.actrium.actro.ipc.server")
-    private let sendLock = NSLock()
-    private var isRunning = false
 
     var onMessage: ((Data) -> Void)?
     var onConnected: (() -> Void)?
     var onDisconnected: (() -> Void)?
 
-    init(socketPath: String) {
-        self.socketPath = socketPath
-        self.connectedSocket = nil
-    }
+    init(socketPath: String) { self.socketPath = socketPath }
 
-    /// Create the Broker endpoint around one side of an already-connected
-    /// `socketpair`. The descriptor is owned by this instance after `start()`.
     init(connectedSocket: Int32) {
         self.socketPath = nil
-        self.connectedSocket = connectedSocket
+        self.inheritedSocket = connectedSocket >= 0 ? IPCSocket(connectedSocket) : nil
     }
 
     deinit {
-        stop()
+        listener?.stop()
+        client?.stop()
+        if listener != nil, let socketPath { IPCSocketPath.cleanup(socketPath) }
     }
 
-    /// Start listening for connections
     func start() throws {
-        if let connectedSocket {
-            guard connectedSocket >= 0 else {
-                throw IPCError.socketCreationFailed(EBADF)
-            }
-            try configureConnectedSocket(connectedSocket)
-            clientSocket = connectedSocket
-            isRunning = true
-            queue.async { [weak self] in
-                self?.readLoop()
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.onConnected?()
-            }
-            NSLog("IPCServer: Using inherited socketpair endpoint")
+        guard listener == nil, client == nil else { return }
+        if let inheritedSocket {
+            self.inheritedSocket = nil
+            try configureConnectedSocket(inheritedSocket.descriptor)
+            activate(inheritedSocket)
             return
         }
-
-        guard let socketPath else {
-            throw IPCError.socketCreationFailed(EINVAL)
-        }
-
-        // Clean up any existing socket file
+        guard let socketPath else { throw IPCError.notConnected }
         IPCSocketPath.cleanup(socketPath)
-
-        // Create socket
-        serverSocket = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard serverSocket >= 0 else {
+        let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw IPCError.socketCreationFailed(errno) }
+        let socket = IPCSocket(descriptor)
+        try configureConnectedSocket(descriptor)
+        var address = try socketAddress(socketPath)
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard result >= 0 else { throw IPCError.bindFailed(errno) }
+        guard Darwin.listen(descriptor, 1) >= 0 else { throw IPCError.listenFailed(errno) }
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
             throw IPCError.socketCreationFailed(errno)
         }
-        try configureConnectedSocket(serverSocket)
-
-        // Bind to path
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-
-        let pathBytes = socketPath.utf8CString
-        guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
-            throw IPCError.pathTooLong
-        }
-
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dest in
-                for (i, byte) in pathBytes.enumerated() {
-                    dest[i] = byte
-                }
-            }
-        }
-
-        let bindResult = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                bind(serverSocket, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-
-        guard bindResult >= 0 else {
-            close(serverSocket)
-            throw IPCError.bindFailed(errno)
-        }
-
-        // Listen
-        guard listen(serverSocket, 1) >= 0 else {
-            close(serverSocket)
-            throw IPCError.listenFailed(errno)
-        }
-
-        isRunning = true
-
-        // Accept connections in background
-        queue.async { [weak self] in
-            self?.acceptLoop()
-        }
-
-        NSLog("IPCServer: Listening on \(socketPath)")
+        listener = socket
+        acceptNext(socket)
     }
 
-    /// Stop the server
     func stop() {
-        isRunning = false
-
-        if clientSocket >= 0 {
-            close(clientSocket)
-            clientSocket = -1
-        }
-
-        if serverSocket >= 0 {
-            close(serverSocket)
-            serverSocket = -1
-        }
-
-        if let socketPath {
-            IPCSocketPath.cleanup(socketPath)
-        }
+        listener?.stop()
+        listener = nil
+        outgoing.replace(with: nil)
+        client = nil
+        inheritedSocket = nil
+        if let socketPath { IPCSocketPath.cleanup(socketPath) }
     }
 
-    /// Send a message to the connected client
-    func send(_ data: Data) throws {
-        guard clientSocket >= 0 else {
-            throw IPCError.notConnected
-        }
+    nonisolated func send(_ data: Data) throws { try outgoing.send(data) }
 
-        sendLock.lock()
-        defer { sendLock.unlock() }
-        try sendFrame(to: clientSocket, data: data)
-    }
-
-    // MARK: - Private
-
-    private func acceptLoop() {
-        while isRunning && serverSocket >= 0 {
-            var clientAddr = sockaddr_un()
-            var clientAddrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
-
-            let newClient = withUnsafeMutablePointer(to: &clientAddr) { ptr in
-                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    accept(serverSocket, sockaddrPtr, &clientAddrLen)
-                }
-            }
-
-            guard newClient >= 0 else {
-                if isRunning {
-                    NSLog("IPCServer: Accept failed: \(errno)")
-                }
-                continue
-            }
+    private func acceptNext(_ socket: IPCSocket) {
+        queue.async { [weak self] in
             do {
-                try configureConnectedSocket(newClient)
-            } catch {
-                close(newClient)
-                NSLog("IPCServer: Failed to configure client socket: \(error)")
-                continue
-            }
-
-            NSLog("IPCServer: Client connected")
-            clientSocket = newClient
-
-            DispatchQueue.main.async { [weak self] in
-                self?.onConnected?()
-            }
-
-            readLoop()
-        }
-    }
-
-    private func readLoop() {
-        while isRunning && clientSocket >= 0 {
-            do {
-                let data = try readFrame(from: clientSocket)
+                let accepted = try socket.acceptClient()
                 DispatchQueue.main.async { [weak self] in
-                    self?.onMessage?(data)
+                    guard let self, self.listener === socket else { return }
+                    self.activate(accepted)
                 }
             } catch {
-                NSLog("IPCServer: Read error: \(error)")
-                break
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.listener === socket else { return }
+                    self.stop()
+                    self.onDisconnected?()
+                }
             }
         }
+    }
 
-        if clientSocket >= 0 {
-            close(clientSocket)
-            clientSocket = -1
+    private func activate(_ socket: IPCSocket) {
+        client = socket
+        outgoing.replace(with: socket)
+        queue.async { [weak self] in
+            do {
+                while !socket.isStopped {
+                    let data = try readFrame(from: socket.descriptor)
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.client === socket else { return }
+                        self.onMessage?(data)
+                    }
+                }
+            } catch {
+                // EOF and local shutdown both finish this socket generation.
+            }
+            socket.stop()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.client === socket else { return }
+                self.outgoing.replace(with: nil)
+                self.client = nil
+                let listener = self.listener
+                self.onDisconnected?()
+                // A callback may stop or restart the server; do not start a
+                // second accept loop for the replacement listener.
+                if let listener, self.listener === listener, self.client == nil {
+                    self.acceptNext(listener)
+                }
+            }
         }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.onDisconnected?()
-        }
+        onConnected?()
     }
 }
 
 // MARK: - IPC Client (Helper side)
 
-/// Unix Socket client for connecting to Actro
-class IPCClient {
-    private var socket: Int32 = -1
+@MainActor
+final class IPCClient {
     private let socketPath: String?
-    private let connectedSocket: Int32?
+    private var inheritedSocket: IPCSocket?
+    private var connection: IPCSocket?
+    private nonisolated let outgoing = IPCSocketSlot()
     private let queue = DispatchQueue(label: "io.actrium.actro.ipc.client")
-    private let sendLock = NSLock()
-    private var isConnected = false
 
     var onMessage: ((Data) -> Void)?
     var onDisconnected: (() -> Void)?
 
-    init(socketPath: String) {
-        self.socketPath = socketPath
-        self.connectedSocket = nil
-    }
+    init(socketPath: String) { self.socketPath = socketPath }
 
-    /// Create the Helper endpoint around an inherited, already-connected file
-    /// descriptor (normally standard input supplied by the Broker).
     init(connectedSocket: Int32) {
         self.socketPath = nil
-        self.connectedSocket = connectedSocket
+        self.inheritedSocket = connectedSocket >= 0 ? IPCSocket(connectedSocket) : nil
     }
 
-    deinit {
-        disconnect()
-    }
+    deinit { connection?.stop() }
 
-    /// Connect to the server
     func connect() throws {
-        if let connectedSocket {
-            guard connectedSocket >= 0 else {
-                throw IPCError.socketCreationFailed(EBADF)
-            }
-            try configureConnectedSocket(connectedSocket)
-            socket = connectedSocket
-            isConnected = true
-            NSLog("IPCClient: Using inherited socketpair endpoint")
-            queue.async { [weak self] in
-                self?.readLoop()
-            }
-            return
-        }
-
-        guard let socketPath else {
-            throw IPCError.socketCreationFailed(EINVAL)
-        }
-
-        socket = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        guard socket >= 0 else {
-            throw IPCError.socketCreationFailed(errno)
-        }
-        try configureConnectedSocket(socket)
-
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-
-        let pathBytes = socketPath.utf8CString
-        guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
-            close(socket)
-            socket = -1
-            throw IPCError.pathTooLong
-        }
-
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dest in
-                for (i, byte) in pathBytes.enumerated() {
-                    dest[i] = byte
+        guard connection == nil else { return }
+        let socket: IPCSocket
+        if let inheritedSocket {
+            self.inheritedSocket = nil
+            socket = inheritedSocket
+        } else {
+            guard let socketPath else { throw IPCError.notConnected }
+            let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+            guard descriptor >= 0 else { throw IPCError.socketCreationFailed(errno) }
+            socket = IPCSocket(descriptor)
+            var address = try socketAddress(socketPath)
+            let result = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
                 }
             }
+            guard result >= 0 else { throw IPCError.connectFailed(errno) }
         }
-
-        let connectResult = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                Darwin.connect(socket, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-
-        guard connectResult >= 0 else {
-            close(socket)
-            socket = -1
-            throw IPCError.connectFailed(errno)
-        }
-
-        isConnected = true
-        NSLog("IPCClient: Connected to \(socketPath)")
-
-        // Start reading in background
+        try configureConnectedSocket(socket.descriptor)
+        connection = socket
+        outgoing.replace(with: socket)
         queue.async { [weak self] in
-            self?.readLoop()
-        }
-    }
-
-    /// Disconnect from the server
-    func disconnect() {
-        isConnected = false
-
-        if socket >= 0 {
-            close(socket)
-            socket = -1
-        }
-    }
-
-    /// Send a message to the server
-    func send(_ data: Data) throws {
-        guard socket >= 0 && isConnected else {
-            throw IPCError.notConnected
-        }
-
-        sendLock.lock()
-        defer { sendLock.unlock() }
-        try sendFrame(to: socket, data: data)
-    }
-
-    // MARK: - Private
-
-    private func readLoop() {
-        while isConnected && socket >= 0 {
             do {
-                let data = try readFrame(from: socket)
-                DispatchQueue.main.async { [weak self] in
-                    self?.onMessage?(data)
+                while !socket.isStopped {
+                    let data = try readFrame(from: socket.descriptor)
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.connection === socket else { return }
+                        self.onMessage?(data)
+                    }
                 }
             } catch {
-                NSLog("IPCClient: Read error: \(error)")
-                break
+                // EOF and local shutdown both finish this socket generation.
+            }
+            socket.stop()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.connection === socket else { return }
+                self.outgoing.replace(with: nil)
+                self.connection = nil
+                self.onDisconnected?()
             }
         }
+    }
 
-        isConnected = false
+    func disconnect() {
+        outgoing.replace(with: nil)
+        connection = nil
+        inheritedSocket = nil
+    }
 
-        DispatchQueue.main.async { [weak self] in
-            self?.onDisconnected?()
+    nonisolated func send(_ data: Data) throws { try outgoing.send(data) }
+}
+
+private func socketAddress(_ path: String) throws -> sockaddr_un {
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    let bytes = path.utf8CString
+    guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+        throw IPCError.pathTooLong
+    }
+    withUnsafeMutablePointer(to: &address.sun_path) {
+        $0.withMemoryRebound(to: CChar.self, capacity: bytes.count) { destination in
+            for (index, byte) in bytes.enumerated() { destination[index] = byte }
         }
     }
+    return address
 }
 
 // MARK: - Frame I/O Helpers
@@ -440,6 +397,7 @@ private func readExactly(from fd: Int32, buffer: UnsafeMutableRawPointer, count:
     var totalRead = 0
     while totalRead < count {
         let bytesRead = read(fd, buffer.advanced(by: totalRead), count - totalRead)
+        if bytesRead < 0 && errno == EINTR { continue }
         if bytesRead <= 0 {
             // 0 = EOF, -1 = error
             throw IPCError.connectionClosed

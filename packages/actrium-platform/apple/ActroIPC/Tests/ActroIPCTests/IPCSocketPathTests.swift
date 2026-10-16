@@ -2,6 +2,7 @@ import Darwin
 import XCTest
 @testable import ActroIPC
 
+@MainActor
 final class IPCSocketPathTests: XCTestCase {
     func testPathIsDeterministicAndFitsDarwinUnixSocketLimit() {
         let identifier = "renderer-" + String(repeating: "very-long-identifier-", count: 20)

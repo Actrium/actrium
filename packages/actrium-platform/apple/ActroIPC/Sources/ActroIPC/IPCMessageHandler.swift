@@ -10,14 +10,15 @@ import SwiftProtobuf
 
 // MARK: - IPC Connection (Actro side)
 
-/// Manages IPC connection to a Helper process
-public class IPCConnection {
+/// Manages IPC connection to a Helper process. Lifecycle, requests, and
+/// callback registration are isolated to the main actor.
+@MainActor
+public final class IPCConnection {
     private let server: IPCServer
     private let tabId: String
     private let filesystemSocketPath: String?
     private var pendingRequests: [UInt32: CheckedContinuation<Actro_Ipc_IPCMessage, Error>] = [:]
     private var nextRequestId: UInt32 = 1
-    private let lock = NSLock()
 
     public var onSurfaceUpdated: ((UInt32) -> Void)?
     public var onTitleChanged: ((String) -> Void)?
@@ -61,6 +62,7 @@ public class IPCConnection {
         }
 
         server.onDisconnected = { [weak self] in
+            self?.cancelPendingRequests()
             self?.onDisconnected?()
         }
     }
@@ -78,11 +80,12 @@ public class IPCConnection {
     public func stop() {
         server.stop()
 
-        // Cancel all pending requests
-        lock.lock()
+        cancelPendingRequests()
+    }
+
+    private func cancelPendingRequests() {
         let pending = pendingRequests
         pendingRequests.removeAll()
-        lock.unlock()
 
         for (_, continuation) in pending {
             continuation.resume(throwing: IPCError.connectionClosed)
@@ -271,37 +274,25 @@ public class IPCConnection {
     private func sendRequest(_ message: Actro_Ipc_IPCMessage) async throws -> Actro_Ipc_IPCMessage {
         var msg = message
 
-        lock.lock()
         let requestId = nextRequestId
         nextRequestId += 1
-        lock.unlock()
 
         msg.id = requestId
 
         return try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
             pendingRequests[requestId] = continuation
-            lock.unlock()
 
             do {
                 let data = try msg.serializedData()
                 try server.send(data)
             } catch {
-                lock.lock()
                 pendingRequests.removeValue(forKey: requestId)
-                lock.unlock()
                 continuation.resume(throwing: error)
             }
 
-            // Timeout after 10 seconds
-            DispatchQueue.global().asyncAfter(deadline: .now() + 10) { [weak self] in
-                self?.lock.lock()
-                if let cont = self?.pendingRequests.removeValue(forKey: requestId) {
-                    self?.lock.unlock()
-                    cont.resume(throwing: IPCError.timeout)
-                } else {
-                    self?.lock.unlock()
-                }
+            // Timeout, replies, and stop all remove requests on the main actor.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                self?.pendingRequests.removeValue(forKey: requestId)?.resume(throwing: IPCError.timeout)
             }
         }
     }
@@ -313,17 +304,14 @@ public class IPCConnection {
 
     private func handleMessage(_ data: Data) {
         do {
-            let msg = try Actro_Ipc_IPCMessage(serializedData: data)
+            let msg = try Actro_Ipc_IPCMessage(serializedBytes: data)
 
             // Check if it's a response to a pending request
             if msg.id != 0 {
-                lock.lock()
                 if let continuation = pendingRequests.removeValue(forKey: msg.id) {
-                    lock.unlock()
                     continuation.resume(returning: msg)
                     return
                 }
-                lock.unlock()
             }
 
             // Handle push messages from Helper
@@ -373,8 +361,10 @@ public class IPCConnection {
 
 // MARK: - IPC Helper Connection (Helper side)
 
-/// Manages IPC connection from Helper to Actro
-public class IPCHelperConnection {
+/// Manages IPC connection from Helper to Actro. Lifecycle and callbacks use
+/// the main actor; outbound events may be sent from any thread.
+@MainActor
+public final class IPCHelperConnection {
     private let client: IPCClient
     private let tabId: String
 
@@ -432,7 +422,7 @@ public class IPCHelperConnection {
     // MARK: - Send Messages to Actro
 
     /// Send ready notification
-    public func sendReady(
+    nonisolated public func sendReady(
         surfaceId: UInt32,
         width: UInt32,
         height: UInt32,
@@ -451,7 +441,7 @@ public class IPCHelperConnection {
     }
 
     /// Send surface updated notification
-    public func sendSurfaceUpdated(surfaceId: UInt32, tabId: String = "") throws {
+    nonisolated public func sendSurfaceUpdated(surfaceId: UInt32, tabId: String = "") throws {
         var msg = Actro_Ipc_IPCMessage()
         msg.surfaceUpdated = Actro_Ipc_SurfaceUpdated()
         msg.surfaceUpdated.surfaceID = surfaceId
@@ -461,7 +451,7 @@ public class IPCHelperConnection {
     }
 
     /// Send title changed notification
-    public func sendTitleChanged(_ title: String, tabId: String = "") throws {
+    nonisolated public func sendTitleChanged(_ title: String, tabId: String = "") throws {
         var msg = Actro_Ipc_IPCMessage()
         msg.titleChanged = Actro_Ipc_TitleChanged()
         msg.titleChanged.title = title
@@ -471,7 +461,7 @@ public class IPCHelperConnection {
     }
 
     /// Send navigation request
-    public func sendNavigationRequest(url: String, newTab: Bool, tabId: String = "") throws {
+    nonisolated public func sendNavigationRequest(url: String, newTab: Bool, tabId: String = "") throws {
         var msg = Actro_Ipc_IPCMessage()
         msg.navigationRequest = Actro_Ipc_NavigationRequest()
         msg.navigationRequest.url = url
@@ -482,7 +472,7 @@ public class IPCHelperConnection {
     }
 
     /// Send console log
-    public func sendConsoleLog(level: String, message: String, source: String, tabId: String = "") throws {
+    nonisolated public func sendConsoleLog(level: String, message: String, source: String, tabId: String = "") throws {
         var msg = Actro_Ipc_IPCMessage()
         msg.consoleLog = Actro_Ipc_ConsoleLog()
         msg.consoleLog.level = level
@@ -494,7 +484,7 @@ public class IPCHelperConnection {
     }
 
     /// Forward an allow-listed business action to the Browser Broker.
-    public func sendHostEvent(name: String, userInfoJSON: String, tabId: String = "") throws {
+    nonisolated public func sendHostEvent(name: String, userInfoJSON: String, tabId: String = "") throws {
         var msg = Actro_Ipc_IPCMessage()
         msg.hostEvent = Actro_Ipc_HostEvent()
         msg.hostEvent.name = name
@@ -504,7 +494,7 @@ public class IPCHelperConnection {
     }
 
     /// Send crash report
-    public func sendCrash(reason: String, tabId: String = "") throws {
+    nonisolated public func sendCrash(reason: String, tabId: String = "") throws {
         var msg = Actro_Ipc_IPCMessage()
         msg.crashReport = Actro_Ipc_CrashReport()
         msg.crashReport.reason = reason
@@ -514,7 +504,7 @@ public class IPCHelperConnection {
     }
 
     /// Acknowledge that a Tab viewport update has been applied.
-    public func sendViewportApplied(
+    nonisolated public func sendViewportApplied(
         tabId: String,
         requestId: UInt32,
         width: Double,
@@ -529,7 +519,7 @@ public class IPCHelperConnection {
         try send(msg)
     }
 
-    public func sendAccessibilityTree(_ tree: Actro_Ipc_AccessibilityTree) throws {
+    nonisolated public func sendAccessibilityTree(_ tree: Actro_Ipc_AccessibilityTree) throws {
         var msg = Actro_Ipc_IPCMessage()
         msg.accessibilityTree = tree
         try send(msg)
@@ -537,12 +527,12 @@ public class IPCHelperConnection {
 
     // MARK: - Private
 
-    private func send(_ message: Actro_Ipc_IPCMessage) throws {
+    nonisolated private func send(_ message: Actro_Ipc_IPCMessage) throws {
         let data = try message.serializedData()
         try client.send(data)
     }
 
-    private func sendResponse(requestId: UInt32, _ message: Actro_Ipc_IPCMessage) throws {
+    nonisolated private func sendResponse(requestId: UInt32, _ message: Actro_Ipc_IPCMessage) throws {
         var msg = message
         msg.id = requestId
         try send(msg)
@@ -550,7 +540,7 @@ public class IPCHelperConnection {
 
     private func handleMessage(_ data: Data) {
         do {
-            let msg = try Actro_Ipc_IPCMessage(serializedData: data)
+            let msg = try Actro_Ipc_IPCMessage(serializedBytes: data)
             let requestId = msg.id
 
             switch msg.payload {
