@@ -282,7 +282,7 @@ pub struct SignalingServer {
     pub target_rate_limiter: Arc<crate::ratelimit::TargetRateLimiter>,
     /// Signaling queue observability counters (issue #351)
     pub queue_metrics: Arc<SignalingQueueMetrics>,
-    /// Realm Provider ID that Actor credentials must carry
+    /// Realm Infra Provider ID that Actor credentials must carry
     pub provider_id: String,
 }
 
@@ -325,7 +325,7 @@ pub struct SignalingServerHandle {
     pub target_rate_limiter: Arc<crate::ratelimit::TargetRateLimiter>,
     /// Signaling queue observability counters (issue #351)
     pub queue_metrics: Arc<SignalingQueueMetrics>,
-    /// Realm Provider ID that Actor credentials must carry
+    /// Realm Infra Provider ID that Actor credentials must carry
     pub provider_id: String,
 }
 impl SignalingServerHandle {

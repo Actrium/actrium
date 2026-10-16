@@ -11,7 +11,7 @@ pub struct AuthorityConfig {
     pub enabled: bool,
 
     /// Canonical public authority URI, `actr://<domain>` without a port,
-    /// for example `actr://example.com`. Its domain is the Realm Provider ID.
+    /// for example `actr://example.com`. Its domain is the Realm Infra Provider ID.
     #[serde(default)]
     pub uri: Option<String>,
 
@@ -22,12 +22,12 @@ pub struct AuthorityConfig {
 }
 
 impl AuthorityConfig {
-    /// Realm Provider ID: the canonical DNS domain of `uri`.
+    /// Realm Infra Provider ID: the canonical DNS domain of `uri`.
     pub fn provider_id(&self) -> Result<String, String> {
         let uri = self
             .uri
             .as_deref()
-            .ok_or("authority.uri is required: its domain is the Realm Provider ID")?;
+            .ok_or("authority.uri is required: its domain is the Realm Infra Provider ID")?;
         parse_authority_member(uri)
             .map(|uri| uri.domain().to_string())
             .map_err(|error| format!("authority.uri is not a valid authority URI: {error}"))

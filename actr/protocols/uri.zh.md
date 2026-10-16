@@ -79,7 +79,7 @@ Actr Host 打开 `actr://<domain>/<realm_id>[…]`（实例）时：
 3. 按 `package` 取得包，核对 `sha256`，再按
    [Actor Package](actor-package.zh.md) 验证包签名；包中声明的 Actor 类型即该实例的程序。
 4. 启动包中的前台部分，把 path 余下部分、query 和 fragment 交给它。
-5. 经 Realm Profile 指定的 Realm Provider 连接该实例的 Service：本 Realm 内 Actor 类型与包
+5. 经 Realm Profile 指定的 Realm Infra Provider 连接该实例的 Service：本 Realm 内 Actor 类型与包
    相同的 Actor 恰好一个；找到零个或多于一个都是错误，Actr Host 不做选择。连接需要 Realm
    membership；没有时进入加入流程（例如 Realm 邀请）。
 

@@ -85,7 +85,7 @@ pub struct AdminApiService {
     /// Shared issuer (present when Issuer is enabled on this node). The same
     /// Arc backs the public /issuer router, so rotation here affects live traffic.
     aid_issuer: Option<Arc<issuer::AIdIssuer>>,
-    /// Signs Realm Profiles when this Loran is the Realm Provider for its own
+    /// Signs Realm Profiles when this Loran is the Realm Infra Provider for its own
     /// domain.
     realm_profiles: Option<Arc<RealmProfiles>>,
 }
@@ -191,7 +191,7 @@ impl AdminApiService {
     }
 
     /// Get the override store reference.
-    /// Attach the Realm Profile signer of this Realm Provider.
+    /// Attach the Realm Profile signer of this Realm Infra Provider.
     pub fn with_realm_profiles(mut self, profiles: Arc<RealmProfiles>) -> Self {
         self.realm_profiles = Some(profiles);
         self
@@ -736,7 +736,7 @@ impl AdminApiService {
             // management requests.
             None if self.realm_profiles.is_some() => {
                 return failed(format!(
-                    "this Realm Provider creates Realms only under {}",
+                    "this Realm Infra Provider creates Realms only under {}",
                     self.realm_profiles
                         .as_ref()
                         .map(|profiles| profiles.provider_id())
@@ -826,7 +826,7 @@ impl AdminApiService {
     ) -> GrpcResult<CreateRealmResponse> {
         platform::recording::info!("Create managed realm request received: realm={}", req.realm);
 
-        // As Realm Provider, Loran creates Realms only under its Provider
+        // As Realm Infra Provider, Loran creates Realms only under its Provider
         // domain, with a Realm Profile package that this request lacks.
         if self.realm_profiles.is_some() && Realm::get(&req.realm).await.ok().flatten().is_none() {
             return Ok(CreateRealmResponse {
@@ -885,7 +885,7 @@ impl AdminApiService {
     ///
     /// `profile` carries the package and display name of the first Realm
     /// Profile, required and allowed only for Realms under the Provider
-    /// domain. As Realm Provider, Loran creates no Realm elsewhere.
+    /// domain. As Realm Infra Provider, Loran creates no Realm elsewhere.
     pub async fn create_realm_with_invite_direct(
         &self,
         req: CreateRealmRequest,
@@ -1040,11 +1040,11 @@ impl AdminApiService {
     }
 
     /// Start rotating `realm`'s issuer key (`realm-profile.md` section 6.1);
-    /// returns the new key id. Only when this Loran is a Realm Provider.
+    /// returns the new key id. Only when this Loran is a Realm Infra Provider.
     pub async fn rotate_realm_issuer_key_direct(&self, realm: &str) -> GrpcResult<u32> {
         let Some(profiles) = &self.realm_profiles else {
             return Err(Status::failed_precondition(
-                "this Loran is not a Realm Provider",
+                "this Loran is not a Realm Infra Provider",
             ));
         };
         profiles
