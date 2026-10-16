@@ -8,4 +8,7 @@
 import Foundation
 import Cocoa
 
-RendererProcessController.runFromCommandLine()
+// The synchronous executable entry point runs on the main thread.
+MainActor.assumeIsolated {
+    RendererProcessController.runFromCommandLine()
+}
