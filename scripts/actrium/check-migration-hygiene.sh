@@ -115,7 +115,7 @@ old_macos_app_scheme_matches=$(
 if [ -n "$old_macos_app_scheme_matches" ]; then
   print_matches_failure "old macOS app URL scheme remains in primary code or examples" "$old_macos_app_scheme_matches"
 else
-  print_ok "macOS app URLs use actro:// as the primary scheme"
+  print_ok "macOS app URLs use actr:// as the primary scheme"
 fi
 
 macos_bundle_identity_failures=""
@@ -129,8 +129,8 @@ if ! rg -U -q '<key>CFBundleName</key>[[:space:]]*<string>Actrium</string>' maco
 "
 fi
 
-if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<string>actro</string>' macos/Actrium/Info.plist; then
-  macos_bundle_identity_failures="${macos_bundle_identity_failures}macos/Actrium/Info.plist must register the actro URL scheme
+if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<string>actr</string>' macos/Actrium/Info.plist; then
+  macos_bundle_identity_failures="${macos_bundle_identity_failures}macos/Actrium/Info.plist must register the actr URL scheme
 "
 fi
 
@@ -151,8 +151,8 @@ if ! rg -U -q '<key>CFBundleName</key>[[:space:]]*<string>Actrium</string>' ios/
 "
 fi
 
-if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<string>actro</string>' ios/Actrium/Info.plist; then
-  ios_bundle_identity_failures="${ios_bundle_identity_failures}ios/Actrium/Info.plist must register the actro URL scheme
+if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<string>actr</string>' ios/Actrium/Info.plist; then
+  ios_bundle_identity_failures="${ios_bundle_identity_failures}ios/Actrium/Info.plist must register the actr URL scheme
 "
 fi
 

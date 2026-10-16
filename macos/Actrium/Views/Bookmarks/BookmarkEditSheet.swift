@@ -211,12 +211,12 @@ struct BookmarkEditSheet: View {
     }
 
     /// Long press on tag -> open tag manager in new window
-    /// URI: actro://bookmarks/tags/{tagId}
+    /// URI: about:bookmarks/tags/{tagId}
     private func openTagManager(_ tag: Tag) {
         dismiss()
         // Post notification to open bookmarks with tag filter
-        // URI scheme: actro://bookmarks/tags/{tagId}
-        let uri = "actro://bookmarks/tags/\(tag.id.uuidString)"
+        // URI scheme: about:bookmarks/tags/{tagId}
+        let uri = "about:bookmarks/tags/\(tag.id.uuidString)"
         NotificationCenter.default.post(
             name: NSNotification.Name("io.actrium.openURI"),
             object: nil,

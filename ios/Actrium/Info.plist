@@ -15,7 +15,7 @@
 			<string>io.actrium.ios</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>actro</string>
+				<string>actr</string>
 			</array>
 		</dict>
 		<dict>

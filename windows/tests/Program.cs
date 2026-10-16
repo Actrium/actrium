@@ -74,7 +74,7 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("data:image/png;base64,AAAA"));
         AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("data:text/plain,hello"));
         AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("https://example.com"));
-        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("actro://home"));
+        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("about:home"));
         AssertFalse(NavigationPolicy.IsGeneratedDocumentUri(""));
         return Task.CompletedTask;
     }),
@@ -87,7 +87,7 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("file:///C:/Actrium/index.html"));
         AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("javascript:alert(1)"));
         AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("data:text/html,hello"));
-        AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("actro://home"));
+        AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("about:home"));
         return Task.CompletedTask;
     }),
     ("builds external protocol prompt", () =>
@@ -108,16 +108,16 @@ var tests = new (string Name, Func<Task> Run)[]
     }),
     ("recognizes home address", () =>
     {
-        AssertTrue(NavigationPolicy.IsHomeAddress(" actro://HOME "));
+        AssertTrue(NavigationPolicy.IsHomeAddress(" about:HOME "));
         AssertFalse(NavigationPolicy.IsHomeAddress("https://actrium.local"));
         return Task.CompletedTask;
     }),
     ("recognizes history address", () =>
     {
-        AssertTrue(NavigationPolicy.IsHistoryAddress(" actro://HISTORY "));
-        AssertTrue(NavigationPolicy.IsInternalAddress("actro://history"));
-        AssertTrue(NavigationPolicy.IsBookmarksAddress(" actro://BOOKMARKS "));
-        AssertTrue(NavigationPolicy.IsInternalAddress("actro://bookmarks"));
+        AssertTrue(NavigationPolicy.IsHistoryAddress(" about:HISTORY "));
+        AssertTrue(NavigationPolicy.IsInternalAddress("about:history"));
+        AssertTrue(NavigationPolicy.IsBookmarksAddress(" about:BOOKMARKS "));
+        AssertTrue(NavigationPolicy.IsInternalAddress("about:bookmarks"));
         AssertFalse(NavigationPolicy.IsInternalAddress("https://actrium.local/history"));
         return Task.CompletedTask;
     }),
@@ -127,15 +127,15 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual("https://example.com/docs", resolved);
         AssertFalse(isSearch);
 
-        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" actro://HOME ", out var homeAddress, out var isHomeSearch));
+        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" about:HOME ", out var homeAddress, out var isHomeSearch));
         AssertEqual(NavigationPolicy.HomeAddress, homeAddress);
         AssertFalse(isHomeSearch);
 
-        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" actro://HISTORY ", out var historyAddress, out var isHistorySearch));
+        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" about:HISTORY ", out var historyAddress, out var isHistorySearch));
         AssertEqual(NavigationPolicy.HistoryAddress, historyAddress);
         AssertFalse(isHistorySearch);
 
-        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" actro://BOOKMARKS ", out var bookmarksAddress, out var isBookmarksSearch));
+        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" about:BOOKMARKS ", out var bookmarksAddress, out var isBookmarksSearch));
         AssertEqual(NavigationPolicy.BookmarksAddress, bookmarksAddress);
         AssertFalse(isBookmarksSearch);
         return Task.CompletedTask;
@@ -4365,8 +4365,8 @@ static HostBridgeDispatcher CreateDispatcher(
                 var tab = new HostTabPayload("active", "Active", request.Url ?? request.Address ?? "", true, false, false, false);
                 return Task.FromResult(tab);
             },
-            () => new HostTabsPayload("active", [new HostTabPayload("active", "Active", "actro://home", true, false, false, false)]),
-            () => new HostTabPayload("active", "Active", "actro://home", true, false, false, false),
+            () => new HostTabsPayload("active", [new HostTabPayload("active", "Active", "about:home", true, false, false, false)]),
+            () => new HostTabPayload("active", "Active", "about:home", true, false, false, false),
             removeBookmarkAsync ?? (_ => Task.FromResult(false)),
             removeHistoryEntryAsync ?? (_ => Task.FromResult(false))));
 }

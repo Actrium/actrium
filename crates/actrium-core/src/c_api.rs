@@ -2213,15 +2213,15 @@ mod tests {
             assert_eq!(actrium_core_browser_data_max_title_length(), 160);
             assert_eq!(
                 CStr::from_ptr(actrium_core_browser_home_address()).to_str(),
-                Ok("actro://home")
+                Ok("about:home")
             );
             assert_eq!(
                 CStr::from_ptr(actrium_core_browser_history_address()).to_str(),
-                Ok("actro://history")
+                Ok("about:history")
             );
             assert_eq!(
                 CStr::from_ptr(actrium_core_browser_bookmarks_address()).to_str(),
-                Ok("actro://bookmarks")
+                Ok("about:bookmarks")
             );
 
             let input = c"{\"version\":99,\"items\":[{\"title\":\"\",\"address\":\"https://example.com/docs\",\"visitedAtUnixSeconds\":-1,\"visitCount\":0}]}";
@@ -2248,7 +2248,7 @@ mod tests {
             let output = CStr::from_ptr(buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"createdAtUnixSeconds\":253402300799"));
 
-            let input = c"{\"version\":99,\"activeTabIndex\":9,\"tabs\":[{\"title\":\"\",\"address\":\"ACTRO://HISTORY\"}]}";
+            let input = c"{\"version\":99,\"activeTabIndex\":9,\"tabs\":[{\"title\":\"\",\"address\":\"ABOUT:HISTORY\"}]}";
             let required = actrium_core_browser_session_snapshot_normalize_json(
                 input.as_ptr(),
                 buffer.as_mut_ptr(),
@@ -2258,13 +2258,13 @@ mod tests {
             let output = CStr::from_ptr(buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"activeTabIndex\":0"));
             assert!(output.contains("\"title\":\"New Tab\""));
-            assert!(output.contains("\"address\":\"actro://history\""));
+            assert!(output.contains("\"address\":\"about:history\""));
 
             let required =
                 actrium_core_browser_session_home_snapshot_json(buffer.as_mut_ptr(), buffer.len());
             assert!(required > 0);
             let output = CStr::from_ptr(buffer.as_ptr()).to_str().unwrap();
-            assert!(output.contains("\"address\":\"actro://home\""));
+            assert!(output.contains("\"address\":\"about:home\""));
 
             let mut storage_buffer = [0 as c_char; 32768];
             let required = actrium_core_browser_storage_schema_statements_json(
@@ -2469,7 +2469,7 @@ mod tests {
             assert!(output.contains("\"orderedTabIds\":[\"tab-a\",\"tab-b\"]"));
 
             let required = actrium_core_browser_storage_session_tab_id_plan_json(
-                c"[{\"id\":\"\",\"index\":0,\"address\":\"actro://home\"},{\"id\":\"tab-a\",\"index\":1,\"address\":\"https://example.com/a\"}]"
+                c"[{\"id\":\"\",\"index\":0,\"address\":\"about:home\"},{\"id\":\"tab-a\",\"index\":1,\"address\":\"https://example.com/a\"}]"
                     .as_ptr(),
                 storage_buffer.as_mut_ptr(),
                 storage_buffer.len(),
@@ -2478,7 +2478,7 @@ mod tests {
             let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"policy\":\"browserStorageSessionTabId\""));
             assert!(
-                output.contains("\"tabIds\":[\"fa3d824d-efbc-593f-b327-a463b5e0973c\",\"tab-a\"]")
+                output.contains("\"tabIds\":[\"d1cf82a6-21b1-5f7b-a0fe-927c04728a08\",\"tab-a\"]")
             );
 
             let required = actrium_core_browser_storage_session_active_tab_consistency_policy_json(

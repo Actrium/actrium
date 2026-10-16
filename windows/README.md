@@ -35,7 +35,7 @@ Native Windows WebView2 browser shell for Actrium.
   explicit page bookmarks, backed by the shared browser SQLite schema.
 - `src/BrowserBookmarksDocumentPolicy.cs` owns safe generated bookmarks-page
   HTML plus in-page filtering and remove controls for the local
-  `actro://bookmarks` document.
+  `about:bookmarks` document.
 - `src/BrowserLocalListDocumentPolicy.cs` owns shared generated-list chrome for
   Windows-local pages that need safe rows, filtering, and remove controls.
 - `src/BrowserHistoryStore.cs` owns Windows-local browser history snapshots for
@@ -45,7 +45,7 @@ Native Windows WebView2 browser shell for Actrium.
   schema and repository SQL to Windows through `Microsoft.Data.Sqlite`, including
   one-time import from the older JSON files.
 - `src/BrowserHistoryDocumentPolicy.cs` owns safe generated history-page HTML
-  plus in-page filtering and remove controls for the local `actro://history`
+  plus in-page filtering and remove controls for the local `about:history`
   document.
 - `src/BrowserMenuCommand.cs`, `src/BrowserMenuModel.cs` and
   `src/BrowserAppMenu.cs` own the compact application menu (Chrome/Edge
@@ -235,7 +235,7 @@ routing, page navigation, WebView lifecycle, or high-volume UI events through
 Rust just to centralize them.
 
 The native home page is Windows-owned. `BrowserHomeDocumentPolicy` builds the
-generated `actro://home` HTML and safely renders the ActriumCore availability
+generated `about:home` HTML and safely renders the ActriumCore availability
 summary before the page requests the host bridge for live status. `MainForm` only
 decides when to show that document. This keeps start-page UX and WebView2
 document rendering in the shell; Rust only provides stable core metadata through
@@ -268,7 +268,7 @@ Browser history is Windows-owned in this first slice. `MainForm` records
 successful non-private external navigations and handles the generated page's
 remove action, `BrowserHistoryStore` persists through `BrowserStorageDatabase`
 into the Rust-owned `actrium_browser.db` schema, and
-`BrowserHistoryDocumentPolicy` renders the generated `actro://history` page with
+`BrowserHistoryDocumentPolicy` renders the generated `about:history` page with
 local filtering through `BrowserLocalListDocumentPolicy`. Older
 `browser-history.json` files are imported once. WebView2 event timing,
 private-window rules, generated document routing, and host-bridge action
@@ -278,7 +278,7 @@ Browser bookmarks are Windows-owned in this first slice too. `MainForm` handles
 the explicit bookmark/unbookmark command and the generated page's remove action,
 `BrowserBookmarkStore` persists through `BrowserStorageDatabase` into the
 Rust-owned `actrium_browser.db` schema, and `BrowserBookmarksDocumentPolicy`
-renders the generated `actro://bookmarks` page. Older `browser-bookmarks.json`
+renders the generated `about:bookmarks` page. Older `browser-bookmarks.json`
 files are imported once. Menu routing, bookmark-page filtering/rendering through
 `BrowserLocalListDocumentPolicy`, host-bridge action dispatch, and active-tab
 checked state stay in the Windows shell.
@@ -326,7 +326,7 @@ External protocol handoff is Windows-owned. When a page tries to navigate to a
 non-browser scheme such as `mailto:` or `tel:`, the WebView navigation is
 canceled first. `BrowserExternalProtocolManager` then requests the user before
 opening the target through Windows' default protocol handler. Browser-internal or
-unsafe schemes such as `javascript:`, `data:`, `blob:`, and `actro:` are never
+unsafe schemes such as `javascript:`, `data:`, `blob:`, and `actrium:` are never
 handed off.
 
 The tab sidebar is also Windows-owned. Each tab owns a separate WebView2 control
@@ -453,7 +453,7 @@ On a Windows host, `scripts/actrium/package-windows.sh` (a thin wrapper around
   administrator rights, installs to `%LOCALAPPDATA%\Programs\Actrium`, creates a
   per-user Start Menu shortcut, and runs the embedded official WebView2
   Evergreen bootstrapper only when the runtime is missing. Uninstall removes
-  binaries and shortcuts but leaves `%LOCALAPPDATA%\Actrium\Actro\Windows`
+  binaries and shortcuts but leaves `%LOCALAPPDATA%\Actrium\Actrium\Windows`
   (profile data) in place.
 
 Known gaps: artifacts are unsigned (no code-signing certificate yet), and the

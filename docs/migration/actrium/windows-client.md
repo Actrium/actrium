@@ -52,7 +52,7 @@ windows/src/BrowserBookmarkStore.cs
 windows/src/BrowserBookmarksDocumentPolicy.cs
                               Safe generated bookmarks-page document and
                               in-page filter/remove controls for
-                              actro://bookmarks.
+                              about:bookmarks.
 windows/src/BrowserLocalListDocumentPolicy.cs
                               Shared generated-list chrome for Windows-local
                               pages with safe rows, filtering, and remove
@@ -63,7 +63,7 @@ windows/src/BrowserHistoryStore.cs
 windows/src/BrowserHistoryDocumentPolicy.cs
                               Safe generated history-page document and
                               in-page filter/remove controls for
-                              actro://history.
+                              about:history.
 windows/src/BrowserMenuCommand.cs
                               Command enum shared by the compact app menu and
                               the keyboard shortcut router.
@@ -374,7 +374,7 @@ Windows shell behavior for now. A future complete rule-list parser or shared
 privacy model may become Rust-owned, but WebView2 interception and menu routing
 stay platform-owned.
 
-`BrowserHomeDocumentPolicy.cs` owns the generated native `actro://home`
+`BrowserHomeDocumentPolicy.cs` owns the generated native `about:home`
 document. It safely renders the local ActriumCore availability summary and leaves
 live status refresh to the existing `window.actriumHost.getCoreStatus` bridge.
 `MainForm.cs` only decides when to show the document. This stays Windows-owned:
@@ -414,7 +414,7 @@ database surfaces that need cross-platform parity.
 `BrowserHistoryStore.cs` and `BrowserHistoryDocumentPolicy.cs` add the first
 Windows-local history slice. `MainForm.cs` records successful non-private
 external navigations, stores a compact JSON history list under local app data,
-serves it through the generated `actro://history` document with local filtering
+serves it through the generated `about:history` document with local filtering
 via `BrowserLocalListDocumentPolicy`, removes individual entries through the
 local host bridge, and clears that store when normal-window browsing data is
 cleared. Private windows do not write, remove, or clear the normal history store.
@@ -425,7 +425,7 @@ history/bookmark/session database schema worth moving into Rust.
 Windows-local bookmark slice. `MainForm.cs` handles explicit bookmark/unbookmark
 commands, stores a compact JSON bookmark list under local app data, tracks the
 active page's checked state in the Bookmarks menu, and serves the list through
-the generated `actro://bookmarks` document with local filtering via
+the generated `about:bookmarks` document with local filtering via
 `BrowserLocalListDocumentPolicy`. The generated page can remove a bookmark
 through the local host bridge; `MainForm.cs` still owns the store write and
 active-tab UI synchronization. This should stay Windows-owned until there is a
@@ -484,5 +484,5 @@ the single version source for the assembly/file version stamps and the
 installer version. The installer requires no administrator rights, creates a
 per-user Start Menu shortcut, installs the WebView2 Evergreen runtime through
 the official bootstrapper only when it is missing, and on uninstall leaves the
-user's profile data in `%LOCALAPPDATA%\Actrium\Actro\Windows` untouched.
+user's profile data in `%LOCALAPPDATA%\Actrium\Actrium\Windows` untouched.
 Artifacts are currently unsigned (no code-signing certificate yet).

@@ -23,14 +23,19 @@ struct URLParsingTests {
         #expect(url?.absoluteString == "about:blank")
     }
 
-    @Test func parseURL_actriumScheme_passesThrough() {
-        let url = vm.parseURL("actro://settings")
-        #expect(url?.absoluteString == "actro://settings")
+    @Test func parseURL_settingsPage_passesThrough() {
+        let url = vm.parseURL("about:settings")
+        #expect(url?.absoluteString == "about:settings")
     }
 
-    @Test func actriumArchiveURL_isNotMisclassifiedAsLocalPath() {
-        #expect(vm.isLocalFilePath("actro:///tmp/example.actr") == false)
-        #expect(vm.parseURL("actro:///tmp/example.actr")?.path == "/tmp/example.actr")
+    @Test func parseURL_actrScheme_passesThrough() {
+        let url = vm.parseURL("actr://localhost:8081/echo")
+        #expect(url?.absoluteString == "actr://localhost:8081/echo")
+        #expect(vm.isLocalFilePath("actr://localhost:8081/echo") == false)
+    }
+
+    @Test func fileURL_isRecognizedAsLocalPath() {
+        #expect(vm.isLocalFilePath("file:///tmp/example.actr"))
     }
 
     @Test func plainArchivePath_isStillRecognizedAsLocalPath() {

@@ -702,7 +702,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   after the migration, the view models also backfill existing local http/https
   history/bookmarks into `actrium_browser.db` with idempotent upserts and
   platform-scoped meta flags. Full native tab state still serves system tabs,
-  ACTR tabs, and tab groups. Do not store `actro://`, ACTR package, or system
+  ACTR tabs, and tab groups. Do not store `actr://`, ACTR package, or system
   tabs in the browser page schema.
 - iOS now has the matching first product call path through
   `ios/Actrium/Database/BrowserDataRepository.swift`. It records
@@ -738,7 +738,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   app bookmarks are follow-ups.
 - Windows browser history and bookmark UI workflow remains local. Recording
   successful non-private external navigations, rendering generated
-  `actro://history` / `actro://bookmarks` documents, filtering/removing entries
+  `about:history` / `about:bookmarks` documents, filtering/removing entries
   from those local pages, host-bridge dispatch, clearing local history, honoring
   private-window rules, and active-tab bookmark menu state are WebView2 shell
   behavior. Rust owns the durable snapshot schema, not the browser event timing
@@ -774,7 +774,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   browser-domain contract needs durable non-UI error classification.
 - Windows native home-page document generation lives in
   `windows/src/BrowserHomeDocumentPolicy.cs` and `MainForm.cs`.
-  Generated `actro://home` HTML, safe status text rendering, and the decision to
+  Generated `about:home` HTML, safe status text rendering, and the decision to
   show the document are WebView2 shell UX. Rust only supplies stable core
   metadata through the local `ActriumCore.cs` adapter.
 - Windows WebView2 process-failure handling lives in

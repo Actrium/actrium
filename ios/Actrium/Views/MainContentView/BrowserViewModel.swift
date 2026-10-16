@@ -1232,7 +1232,7 @@ class BrowserViewModel: ObservableObject {
             objectWillChange.send()
 
         } catch {
-            logger.error(" [reloadCurrentTab] Synchronising "%s"\(error.localizedDescription)")
+            logger.error(" [reloadCurrentTab] Synchronization failed: \(error.localizedDescription)")
         }
     }
 

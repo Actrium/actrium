@@ -99,33 +99,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
-                <data
-                    android:host="go.actrium.example"
-                    android:path="/main"
-                    android:scheme="actro" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="go-actrium.actrium-beta.example"
-                    android:path="/main"
-                    android:scheme="actro" />
-            </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="go-actrium.actrium-dev.example"
-                    android:path="/main"
-                    android:scheme="actro" />
+                <data android:scheme="actr" />
             </intent-filter>
         </activity>
 

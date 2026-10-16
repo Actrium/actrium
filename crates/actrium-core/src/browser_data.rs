@@ -122,9 +122,9 @@ pub const BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_POLICY: &str =
     "browserStorageSessionActiveTabConsistency";
 pub const BROWSER_STORAGE_RETENTION_PRUNING_POLICY: &str = "browserStorageRetentionPruning";
 
-pub const HOME_ADDRESS: &str = "actro://home";
-pub const HISTORY_ADDRESS: &str = "actro://history";
-pub const BOOKMARKS_ADDRESS: &str = "actro://bookmarks";
+pub const HOME_ADDRESS: &str = "about:home";
+pub const HISTORY_ADDRESS: &str = "about:history";
+pub const BOOKMARKS_ADDRESS: &str = "about:bookmarks";
 
 pub const BROWSER_STORAGE_SCHEMA_VERSION: u32 = 6;
 pub const BROWSER_STORAGE_DATABASE_NAME: &str = "actrium_browser.db";
@@ -28193,9 +28193,9 @@ fn normalize_session_tab_id(id: &str, index: usize, address: &str) -> String {
 }
 
 fn stable_session_tab_id(index: usize, address: &str) -> String {
-    let seed = format!("actro-session-tab:{index}:{address}");
+    let seed = format!("actrium-session-tab:{index}:{address}");
     let first = fnv1a64(seed.as_bytes());
-    let second = fnv1a64(format!("actro:{seed}").as_bytes());
+    let second = fnv1a64(format!("actrium:{seed}").as_bytes());
     let mut bytes = [0u8; 16];
     for index in 0..8 {
         bytes[index] = ((first >> ((7 - index) * 8)) & 0xff) as u8;
@@ -28233,16 +28233,16 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
+fn internal_address(trimmed: &str) -> Option<&'static str> {
+    [HOME_ADDRESS, HISTORY_ADDRESS, BOOKMARKS_ADDRESS]
+        .into_iter()
+        .find(|address| trimmed.eq_ignore_ascii_case(address))
+}
+
 fn normalize_session_address(address: &str) -> Option<String> {
     let trimmed = address.trim();
-    if trimmed.eq_ignore_ascii_case(HOME_ADDRESS) {
-        return Some(HOME_ADDRESS.to_string());
-    }
-    if trimmed.eq_ignore_ascii_case(HISTORY_ADDRESS) {
-        return Some(HISTORY_ADDRESS.to_string());
-    }
-    if trimmed.eq_ignore_ascii_case(BOOKMARKS_ADDRESS) {
-        return Some(BOOKMARKS_ADDRESS.to_string());
+    if let Some(address) = internal_address(trimmed) {
+        return Some(address.to_string());
     }
     if let Some(address) = canonicalize_session_only_address(trimmed) {
         return Some(address);
@@ -28263,24 +28263,8 @@ pub fn browser_storage_canonicalize_address(input: &str) -> BrowserStorageCanoni
         return browser_storage_canonical_address_rejected(input, "empty", "emptyAddress");
     }
 
-    if trimmed.eq_ignore_ascii_case(HOME_ADDRESS) {
-        return browser_storage_canonical_address_accepted(input, "internal", HOME_ADDRESS, false);
-    }
-    if trimmed.eq_ignore_ascii_case(HISTORY_ADDRESS) {
-        return browser_storage_canonical_address_accepted(
-            input,
-            "internal",
-            HISTORY_ADDRESS,
-            false,
-        );
-    }
-    if trimmed.eq_ignore_ascii_case(BOOKMARKS_ADDRESS) {
-        return browser_storage_canonical_address_accepted(
-            input,
-            "internal",
-            BOOKMARKS_ADDRESS,
-            false,
-        );
+    if let Some(address) = internal_address(trimmed) {
+        return browser_storage_canonical_address_accepted(input, "internal", address, false);
     }
     if let Some(address) = canonicalize_session_only_address(trimmed) {
         return browser_storage_canonical_address_accepted(input, "session", &address, false);
@@ -32768,7 +32752,7 @@ mod tests {
                 " HTTP://Example.COM:80/Path?Q=1#Top ",
                 "https://Example.COM:443",
                 "https://user:secret@Example.COM:443/secure",
-                "actro://HOME",
+                "about:HOME",
                 "about:blank",
                 "ftp://example.com/file",
                 "example.com"
@@ -32816,7 +32800,7 @@ mod tests {
             batch["canonicalizationSummary"]["canonicalAddresses"],
             json!([
                 "about:blank",
-                "actro://home",
+                "about:home",
                 "http://example.com/Path?Q=1#Top",
                 "https://example.com/",
                 "https://example.com/secure"
@@ -33880,7 +33864,7 @@ mod tests {
         );
         assert_eq!(
             browser_storage_bookmark_restore_placement_plan_json(
-                r#"{"bookmarks":[{"id":"bookmark-a","address":"actro://home"}]}"#
+                r#"{"bookmarks":[{"id":"bookmark-a","address":"about:home"}]}"#
             ),
             "null"
         );
@@ -34244,7 +34228,7 @@ mod tests {
         );
         assert_eq!(
             browser_storage_bookmark_ownership_plan_json(
-                r#"{"bookmarks":[{"id":"bookmark-a","address":"actro://home"}]}"#
+                r#"{"bookmarks":[{"id":"bookmark-a","address":"about:home"}]}"#
             ),
             "null"
         );
@@ -34492,7 +34476,7 @@ mod tests {
         );
         assert_eq!(
             browser_storage_history_visit_aggregation_plan_json(
-                r#"{"visits":[{"id":"visit-1","address":"actro://home","visitedAtUnixSeconds":1}]}"#
+                r#"{"visits":[{"id":"visit-1","address":"about:home","visitedAtUnixSeconds":1}]}"#
             ),
             "null"
         );
@@ -34550,7 +34534,7 @@ mod tests {
                 ],
                 "candidateSessionTabs": [
                     {"sessionId":"session-a","tabId":"tab-a","tabIndex":0,"title":"Moved","address":"https://example.com/a","createdAtUnixSeconds":10,"updatedAtUnixSeconds":30},
-                    {"sessionId":"session-b","tabId":"","tabIndex":2,"title":"","address":"actro://home","createdAtUnixSeconds":40,"updatedAtUnixSeconds":40}
+                    {"sessionId":"session-b","tabId":"","tabIndex":2,"title":"","address":"about:home","createdAtUnixSeconds":40,"updatedAtUnixSeconds":40}
                 ]
             }"#,
         ))
@@ -34749,7 +34733,7 @@ mod tests {
     fn session_tab_id_plan_derives_stable_ids_for_empty_ids() {
         let plan = serde_json::from_str::<Value>(&browser_storage_session_tab_id_plan_json(
             r#"[
-                {"id":"","index":0,"address":"actro://home"},
+                {"id":"","index":0,"address":"about:home"},
                 {"id":"  tab-a  ","index":1,"address":"https://example.com/a"},
                 {"id":"","index":2,"address":"https://example.com/b"}
             ]"#,
@@ -34761,12 +34745,12 @@ mod tests {
         assert_eq!(plan["tabCount"], json!(3));
         assert_eq!(plan["preservedTabIdCount"], json!(1));
         assert_eq!(plan["derivedTabIdCount"], json!(2));
-        // Fixed vector: double FNV-1a over "actro-session-tab:0:actro://home"
+        // Fixed vector: double FNV-1a over "actrium-session-tab:0:about:home"
         // with the version/variant nibbles applied, rendered as lowercase hex.
         // Every platform must store this exact byte sequence.
         assert_eq!(
             plan["tabIds"][0],
-            json!("fa3d824d-efbc-593f-b327-a463b5e0973c")
+            json!("d1cf82a6-21b1-5f7b-a0fe-927c04728a08")
         );
         // The derived id must match the id Rust itself derives for the home
         // session snapshot, because that is the merge identity key.
@@ -34781,14 +34765,14 @@ mod tests {
         // aliases must not change the derived identity.
         let plan = serde_json::from_str::<Value>(&browser_storage_session_tab_id_plan_json(
             r#"[
-                {"id":"","index":0,"address":"ACTRO://HOME"},
-                {"id":"","index":0,"address":"  actro://home  "}
+                {"id":"","index":0,"address":"ABOUT:HOME"},
+                {"id":"","index":0,"address":"  about:home  "}
             ]"#,
         ))
         .unwrap();
         assert_eq!(
             plan["tabIds"][0],
-            json!("fa3d824d-efbc-593f-b327-a463b5e0973c")
+            json!("d1cf82a6-21b1-5f7b-a0fe-927c04728a08")
         );
         assert_eq!(plan["tabIds"][0], plan["tabIds"][1]);
     }
@@ -34809,13 +34793,13 @@ mod tests {
     #[test]
     fn session_tab_id_plan_accepts_wrapped_tabs_and_defaults_index_to_position() {
         let plan = serde_json::from_str::<Value>(&browser_storage_session_tab_id_plan_json(
-            r#"{"sessionTabs":[{"address":"actro://home"}]}"#,
+            r#"{"sessionTabs":[{"address":"about:home"}]}"#,
         ))
         .unwrap();
         assert_eq!(plan["tabCount"], json!(1));
         assert_eq!(
             plan["tabIds"][0],
-            json!("fa3d824d-efbc-593f-b327-a463b5e0973c")
+            json!("d1cf82a6-21b1-5f7b-a0fe-927c04728a08")
         );
 
         let empty =
@@ -34841,7 +34825,7 @@ mod tests {
         let oversized = format!(
             "[{}]",
             (0..=MAX_BROWSER_STORAGE_SYNC_RECORDS)
-                .map(|index| format!(r#"{{"id":"","index":{index},"address":"actro://home"}}"#))
+                .map(|index| format!(r#"{{"id":"","index":{index},"address":"about:home"}}"#))
                 .collect::<Vec<_>>()
                 .join(",")
         );
@@ -35632,7 +35616,7 @@ mod tests {
         );
         assert_eq!(
             browser_storage_retention_pruning_plan_json(
-                r#"{"historyPages":[{"address":"actro://home"}]}"#
+                r#"{"historyPages":[{"address":"about:home"}]}"#
             ),
             "null"
         );
@@ -35675,7 +35659,7 @@ mod tests {
             "version": 99,
             "activeTabIndex": 9,
             "tabs": [
-                {"title":" Home ","address":" ACTRO://HOME "},
+                {"title":" Home ","address":" ABOUT:HOME "},
                 {"title":"","address":"https://example.com/"},
                 {"title":"Bad","address":"javascript:alert(1)"}
             ]

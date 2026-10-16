@@ -9,7 +9,7 @@ enum AppSourceType: String, Codable {
 }
 
 /// Represents an installed Actrium app
-/// Used for actro:// URL scheme navigation
+/// Used for actr:// URL scheme navigation
 struct InstalledActriumApp: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     var name: String
@@ -55,11 +55,6 @@ struct InstalledActriumApp: Identifiable, Codable, Equatable, Hashable {
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
-    }
-
-    /// The actro:// URL for this app
-    var actriumURL: URL {
-        ActriumAppURLScheme.appURL(bundleId: bundleId)
     }
 
     /// The source URL (file path) for loading this app

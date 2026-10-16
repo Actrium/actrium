@@ -513,7 +513,7 @@ struct ActriumApp: App {
     private func openHistoryItem(_ item: HistoryItem) {
         guard let vm = focusedViewModel else { return }
         if let url = item.appURL {
-            // Use navigateCurrentTab which handles all URL schemes (actro://, http://, about:, etc.)
+            // Use navigateCurrentTab which handles all URL schemes (actr://, http://, about:, etc.)
             vm.navigateCurrentTab(to: url.absoluteString)
             historyVM.recordVisit(item: item)
         }
