@@ -14,14 +14,14 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
 
     private static let logger = Logger(subsystem: "io.actrium", category: "BrowserSyncCredentials")
 
-    private let deviceIdKey = "com.actrium.actro.browserSync.deviceId"
+    private let deviceIdKey = "io.actrium.browserSync.deviceId"
     // Legacy plaintext UserDefaults key. The session (including the access
     // token) now lives in the Keychain; this key is only read once for
     // migration and then deleted.
-    private let legacyStoredSessionKey = "com.actrium.actro.browserSync.session"
+    private let legacyStoredSessionKey = "io.actrium.browserSync.session"
     private let defaultScope = "default"
     private let userDefaults = UserDefaults.standard
-    private let keychain = KeychainStore(service: "com.actrium.actro.browserSync")
+    private let keychain = KeychainStore(service: "io.actrium.browserSync")
     private let keychainSessionAccount = "session"
 
     private init() {}

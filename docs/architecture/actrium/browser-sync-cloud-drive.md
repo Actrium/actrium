@@ -58,7 +58,7 @@ UI, and concrete fallback/emulation still stay platform/provider-owned.
 `browser_storage_sync_cloud_provider_adapter_plan_json()` define the object-space
 adapter layer above raw capabilities and below connection status. Platforms pass
 the selected provider kind, adapter family, root path, capabilities, or an
-existing capability preflight; Rust returns the canonical `Actro/BrowserSync`
+existing capability preflight; Rust returns the canonical `Actrium/BrowserSync`
 layout, required manifest/device/log/snapshot/recovery objects and prefixes,
 coarse operation groups, production-readiness flags, root setup actions,
 adapter-emulation requirements, and blocked reasons. This keeps path mapping,
@@ -128,7 +128,7 @@ repair, keeps migrated/repaired writes out of automatic SDK execution for now,
 and requires compatibility preflight to pass again before normal sync resumes.
 `browser_storage_sync_cloud_recovery_snapshot_plan_json()` turns that playbook
 plus the same compatibility preflight into a provider-executable batch of
-`writeRecoveryCopy` operations under `Actro/BrowserSync/recovery/...`. Rust
+`writeRecoveryCopy` operations under `Actrium/BrowserSync/recovery/...`. Rust
 chooses the affected migration/repair source files and deterministic snapshot
 paths in one call, while provider adapters perform the actual read/write copies
 through their existing object-store layer. This keeps recovery snapshots

@@ -670,10 +670,14 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual(null, WindowsStartupOptions.FromArgs(["--user-data-root"]).UserDataRoot);
         return Task.CompletedTask;
     }),
-    ("builds Windows app data root", () =>
+    ("uses Actrium names for Windows stores", () =>
     {
-        var root = WindowsAppPaths.GetLocalAppDataRoot();
-        AssertTrue(root.EndsWith(Path.Combine("Actrium", "Actro", "Windows"), StringComparison.OrdinalIgnoreCase));
+        var directory = CreateTempDirectoryPath();
+        var root = Path.Combine(directory, "Actrium", "Actrium", "Windows");
+        AssertEqual(root, WindowsAppPaths.GetDefaultLocalAppDataRoot(directory));
+        AssertEqual(
+            Path.Combine(root, "actrium_browser.db"),
+            BrowserStorageDatabase.GetDatabasePathInDirectory(root));
         return Task.CompletedTask;
     }),
     ("honors the user data root environment override", () =>
@@ -683,7 +687,7 @@ var tests = new (string Name, Func<Task> Run)[]
         try
         {
             // An absolute override replaces the whole root verbatim (no
-            // Actrium/Actro/Windows suffix), so concurrent instances keep
+            // Actrium/Actrium/Windows suffix), so concurrent instances keep
             // fully independent state trees.
             var overrideRoot = CreateTempDirectoryPath();
             Environment.SetEnvironmentVariable(
@@ -698,8 +702,9 @@ var tests = new (string Name, Func<Task> Run)[]
             // Blank overrides fall back to the standard per-user root.
             Environment.SetEnvironmentVariable(
                 WindowsAppPaths.UserDataRootEnvironmentVariable, "   ");
-            AssertTrue(WindowsAppPaths.GetLocalAppDataRoot().EndsWith(
-                Path.Combine("Actrium", "Actro", "Windows"), StringComparison.OrdinalIgnoreCase));
+            AssertEqual(WindowsAppPaths.GetDefaultLocalAppDataRoot(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)),
+                WindowsAppPaths.GetLocalAppDataRoot());
 
             // A relative override would silently split state across instances:
             // it must fail loudly instead of resolving against the CWD.
@@ -729,7 +734,7 @@ var tests = new (string Name, Func<Task> Run)[]
     {
         var userDataFolder = BrowserProfilePolicy.GetDefaultUserDataFolder();
         AssertTrue(userDataFolder.EndsWith(
-            Path.Combine("Actrium", "Actro", "Windows", BrowserProfilePolicy.UserDataFolderName),
+            Path.Combine(WindowsAppPaths.GetLocalAppDataRoot(), BrowserProfilePolicy.UserDataFolderName),
             StringComparison.OrdinalIgnoreCase));
         return Task.CompletedTask;
     }),
@@ -740,9 +745,7 @@ var tests = new (string Name, Func<Task> Run)[]
 
         AssertTrue(userDataFolder.EndsWith(
             Path.Combine(
-                "Actrium",
-                "Actro",
-                "Windows",
+                WindowsAppPaths.GetLocalAppDataRoot(),
                 BrowserProfilePolicy.PrivateUserDataParentFolderName,
                 "aaaaaaaabbbbccccddddeeeeeeeeeeee"),
             StringComparison.OrdinalIgnoreCase));
@@ -1344,7 +1347,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 "cloudProviderAdapterPlan",
                 contract.RootElement.GetProperty("planType").GetString());
             AssertEqual(
-                "Actro/BrowserSync",
+                "Actrium/BrowserSync",
                 contract.RootElement.GetProperty("objectSpace").GetProperty("rootPath").GetString());
             AssertTrue(contract.RootElement.GetProperty("operationBoundary").GetString()!.Contains(
                 "coarse rounds",
@@ -1363,7 +1366,7 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertTrue(ready.RootElement.GetProperty("shouldAllowSync").GetBoolean());
             AssertFalse(ready.RootElement.GetProperty("shouldBlockSync").GetBoolean());
             AssertEqual(
-                "Actro/BrowserSync/manifest.json",
+                "Actrium/BrowserSync/manifest.json",
                 ready.RootElement.GetProperty("objectLayout").GetProperty("manifestPath").GetString());
         }
 
@@ -1390,7 +1393,7 @@ var tests = new (string Name, Func<Task> Run)[]
         {
             AssertEqual("providerSetupRequired", setup.RootElement.GetProperty("classification").GetString());
             AssertTrue(setup.RootElement.GetProperty("shouldBlockSync").GetBoolean());
-            AssertEqual("configureActroBrowserSyncRoot", setup.RootElement.GetProperty("rootPathAction").GetString());
+            AssertEqual("configureActriumBrowserSyncRoot", setup.RootElement.GetProperty("rootPathAction").GetString());
         }
 
         return Task.CompletedTask;
@@ -1494,7 +1497,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     {
                         "operationIndex": 1,
                         "operationType": "writeManifest",
-                        "path": "Actro/BrowserSync/manifest.json",
+                        "path": "Actrium/BrowserSync/manifest.json",
                         "providerStatusCode": 412,
                         "message": "etag mismatch"
                     }
@@ -1650,7 +1653,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 AssertTrue(seedResult.RootElement.GetProperty("observabilityEvent").GetProperty("redactedExportAllowed").GetBoolean());
             }
 
-            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json")));
+            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json")));
 
             var localDatabase = new BrowserStorageDatabase(localDatabasePath);
             var localClient = new BrowserStorageSyncClient(localDatabase);
@@ -1732,7 +1735,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     localDatabasePath,
                     "SELECT COUNT(*) FROM browser_history_visits WHERE address = 'https://example.com/local-folder-remote'"));
 
-            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifestPath = Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json");
             var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
             manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
             File.WriteAllText(manifestPath, manifest.ToJsonString());
@@ -1906,8 +1909,8 @@ var tests = new (string Name, Func<Task> Run)[]
                     joinResult.RootElement.GetProperty("membershipRound").GetProperty("membershipAction").GetString());
             }
 
-            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json")));
-            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actro", "BrowserSync", "devices", "device-win.json")));
+            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json")));
+            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actrium", "BrowserSync", "devices", "device-win.json")));
 
             var revokeRequestJson = JsonSerializer.Serialize(new Dictionary<string, object>
             {
@@ -1986,7 +1989,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 "revoked",
                 revokeResult.RootElement.GetProperty("membershipRound").GetProperty("memberStatus").GetString());
 
-            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifestPath = Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json");
             using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
             AssertTrue(manifest.RootElement.GetProperty("devices").EnumerateArray().Any(device =>
                 device.GetProperty("deviceId").GetString() == "device-win"
@@ -2096,7 +2099,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 "upgradeClient",
                 blockedJoinResult.RootElement.GetProperty("recoverySnapshotRound").GetProperty("clientAction").GetString());
             AssertFalse(blockedJoinResult.RootElement.GetProperty("recoverySnapshotRound").GetProperty("resultPlan").GetProperty("snapshotRequested").GetBoolean());
-            AssertFalse(File.Exists(Path.Combine(cloudRoot, "Actro", "BrowserSync", "devices", "device-win-2.json")));
+            AssertFalse(File.Exists(Path.Combine(cloudRoot, "Actrium", "BrowserSync", "devices", "device-win-2.json")));
         }
         finally
         {
@@ -2549,7 +2552,7 @@ var tests = new (string Name, Func<Task> Run)[]
 
             AssertEqual(2210L, providerStore.Load().MembershipJoinedAtUnixSeconds);
             AssertTrue(File.Exists(Path.Combine(
-                cloudRoot, "Actro", "BrowserSync", "devices", $"{deviceId}.json")));
+                cloudRoot, "Actrium", "BrowserSync", "devices", $"{deviceId}.json")));
 
             // The coordinator keeps the last executed round's diagnostics
             // summary in memory (here the cycle that followed the join) for
@@ -2697,7 +2700,7 @@ var tests = new (string Name, Func<Task> Run)[]
             // A cloud membership round blocked by a newer store schema: the
             // round's own cloud scheduleState parks the scheduler on the
             // user, and the membership marker is not persisted.
-            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifestPath = Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json");
             var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
             manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
             File.WriteAllText(manifestPath, manifest.ToJsonString());
@@ -2912,11 +2915,11 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual(
                 BrowserSyncFolderPreflight.AdapterBlockedReason,
                 adapterBlocked.BlockedReasonKey);
-            AssertEqual("configureActroBrowserSyncRoot", adapterBlocked.DetailText);
+            AssertEqual("configureActriumBrowserSyncRoot", adapterBlocked.DetailText);
 
             // A cloud store written by a newer schema blocks acceptance with
             // the compatibility policy's user action as the error detail.
-            var manifestDirectory = Path.Combine(cloudRoot, "Actro", "BrowserSync");
+            var manifestDirectory = Path.Combine(cloudRoot, "Actrium", "BrowserSync");
             Directory.CreateDirectory(manifestDirectory);
             var manifest = JsonNode.Parse(ActriumCore.BuildBrowserStorageSyncCloudDefaultManifestJson(
                 "profile", "device-win-preflight", 2502))!.AsObject();
@@ -3100,7 +3103,7 @@ var tests = new (string Name, Func<Task> Run)[]
             // Blocked cycle (cloud schema bumped past this client): the same
             // fixture as the local-folder client case; the formatter surfaces
             // the blocking classification and its user action readably.
-            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifestPath = Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json");
             var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
             manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
             File.WriteAllText(manifestPath, manifest.ToJsonString());
@@ -3176,7 +3179,7 @@ var tests = new (string Name, Func<Task> Run)[]
                             {
                                 "operationIndex": 0,
                                 "operationType": "writeManifest",
-                                "path": "Actro/BrowserSync/manifest.json",
+                                "path": "Actrium/BrowserSync/manifest.json",
                                 "providerStatusCode": 412,
                                 "message": "etag mismatch"
                             }
@@ -3208,7 +3211,7 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertTrue(errorText.Contains("  Failed operations: 1 of 1 (retryable ", StringComparison.Ordinal));
             AssertTrue(errorText.Contains("  Cloud reread planned: yes", StringComparison.Ordinal));
             AssertTrue(errorText.Contains(
-                "    - writeManifest Actro/BrowserSync/manifest.json",
+                "    - writeManifest Actrium/BrowserSync/manifest.json",
                 StringComparison.Ordinal));
             AssertTrue(errorText.Contains("      Kind: conflict", StringComparison.Ordinal));
             AssertTrue(errorText.Contains("      Message: etag mismatch", StringComparison.Ordinal));

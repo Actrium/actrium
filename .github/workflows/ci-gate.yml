@@ -415,6 +415,13 @@ jobs:
           bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Check formatting
         run: cargo fmt --all -- --check
+      - name: Check generated Actrium contracts
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ripgrep
+          fi
+          scripts/actrium/check-generated-contracts.sh
       - name: Test Rust protoc plugin well-known types
         run: cargo test -p actr-framework-protoc-codegen --test well_known_type_smoke
       - name: Verify RFC-0400 timer inventory

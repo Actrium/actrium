@@ -45,12 +45,12 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
     private let baseUrlKey = "browserSyncBaseUrl"
     private let accessTokenKey = "browserSyncAccessToken"
     private let scopeKey = "browserSyncScope"
-    private let legacyStoredSessionKey = "com.actrium.actro.browserSync.session"
-    private let deviceIdKey = "com.actrium.actro.browserSync.deviceId"
+    private let legacyStoredSessionKey = "io.actrium.browserSync.session"
+    private let deviceIdKey = "io.actrium.browserSync.deviceId"
     private let legacyDeviceIdKey = "syncDeviceId"
     private let defaultScope = "default"
     private let userDefaults = UserDefaults.standard
-    private let keychain = KeychainStore(service: "com.actrium.actro.browserSync")
+    private let keychain = KeychainStore(service: "io.actrium.browserSync")
     private let keychainSessionAccount = "session"
 
     private init() {}

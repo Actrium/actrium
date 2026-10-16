@@ -41,7 +41,7 @@ Native Windows WebView2 browser shell for Actrium.
 - `src/BrowserHistoryStore.cs` owns Windows-local browser history snapshots for
   successful non-private external navigations, backed by the shared browser
   SQLite schema.
-- `src/BrowserStorageDatabase.cs` adapts the Rust-owned `actro_browser.db`
+- `src/BrowserStorageDatabase.cs` adapts the Rust-owned `actrium_browser.db`
   schema and repository SQL to Windows through `Microsoft.Data.Sqlite`, including
   one-time import from the older JSON files.
 - `src/BrowserHistoryDocumentPolicy.cs` owns safe generated history-page HTML
@@ -267,7 +267,7 @@ saved passwords. Prompt and status text stay testable through
 Browser history is Windows-owned in this first slice. `MainForm` records
 successful non-private external navigations and handles the generated page's
 remove action, `BrowserHistoryStore` persists through `BrowserStorageDatabase`
-into the Rust-owned `actro_browser.db` schema, and
+into the Rust-owned `actrium_browser.db` schema, and
 `BrowserHistoryDocumentPolicy` renders the generated `actro://history` page with
 local filtering through `BrowserLocalListDocumentPolicy`. Older
 `browser-history.json` files are imported once. WebView2 event timing,
@@ -277,7 +277,7 @@ dispatch stay in the Windows shell.
 Browser bookmarks are Windows-owned in this first slice too. `MainForm` handles
 the explicit bookmark/unbookmark command and the generated page's remove action,
 `BrowserBookmarkStore` persists through `BrowserStorageDatabase` into the
-Rust-owned `actro_browser.db` schema, and `BrowserBookmarksDocumentPolicy`
+Rust-owned `actrium_browser.db` schema, and `BrowserBookmarksDocumentPolicy`
 renders the generated `actro://bookmarks` page. Older `browser-bookmarks.json`
 files are imported once. Menu routing, bookmark-page filtering/rendering through
 `BrowserLocalListDocumentPolicy`, host-bridge action dispatch, and active-tab
@@ -339,7 +339,7 @@ such as `Ctrl+Tab`, `Ctrl+Shift+Tab`, `Ctrl+PageUp`, `Ctrl+PageDown`, and
 duplicate-tab creation, closed-tab reopening, or WebView ownership into Rust.
 
 The session store is Windows-owned for now. It writes the first-window session
-into the Rust-owned `actro_browser.db` schema through `BrowserStorageDatabase`,
+into the Rust-owned `actrium_browser.db` schema through `BrowserStorageDatabase`,
 restores tabs when no `--url` startup override is provided, ignores corrupt
 legacy session files, and drops unsafe navigation entries instead of restoring
 them. Older `browser-session.json` files are imported once. This launch/restore

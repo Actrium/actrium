@@ -633,7 +633,7 @@ fi
 # The durable state root honors an absolute-path override so concurrent
 # multi-instance runs keep independent state trees; the --user-data-root
 # argument feeds the same single choke point.
-if ! rg -q 'ACTRO_USER_DATA_ROOT' windows/src/WindowsAppPaths.cs \
+if ! rg -q 'ACTRIUM_USER_DATA_ROOT' windows/src/WindowsAppPaths.cs \
   || ! rg -q 'UserDataRootEnvironmentVariable' windows/src/Program.cs \
   || ! rg -q -- '--user-data-root' windows/src/WindowsStartupOptions.cs; then
   print_failure "Windows user data root override is not wired through the single app data path choke point"

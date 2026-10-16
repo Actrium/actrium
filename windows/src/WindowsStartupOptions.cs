@@ -33,7 +33,7 @@ internal sealed record WindowsStartupOptions(
 
             // Concurrent multi-instance runs: overrides the durable state
             // root so a second instance keeps a fully independent state tree.
-            // Program.Main mirrors it into ACTRO_USER_DATA_ROOT, the single
+            // Program.Main mirrors it into ACTRIUM_USER_DATA_ROOT, the single
             // override choke point WindowsAppPaths reads.
             if (args[index] == "--user-data-root" && index + 1 < args.Count)
             {

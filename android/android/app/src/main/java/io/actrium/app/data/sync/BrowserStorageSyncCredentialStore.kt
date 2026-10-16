@@ -10,7 +10,7 @@ import java.util.UUID
 
 class BrowserStorageSyncCredentialStore(
     context: Context,
-    private val preferencesName: String = DEFAULT_PREFERENCES_NAME
+    preferencesName: String = DEFAULT_PREFERENCES_NAME
 ) : BrowserStorageSyncCredentialsProvider {
     private val appContext = context.applicationContext
 
@@ -169,7 +169,7 @@ class BrowserStorageSyncCredentialStore(
 
     companion object {
         const val DEFAULT_SCOPE = "default"
-        const val DEFAULT_PREFERENCES_NAME = "actro_browser_sync_credentials"
+        const val DEFAULT_PREFERENCES_NAME = "actrium_browser_sync_credentials"
 
         private const val TAG = "BrowserSyncCredStore"
 

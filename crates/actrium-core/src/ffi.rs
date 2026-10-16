@@ -3045,7 +3045,7 @@ mod tests {
     fn ffi_browser_storage_schema_contract_is_shared() {
         let schema = browser_storage_schema();
         assert_eq!(schema.schema_version, 6);
-        assert_eq!(schema.database_name, "actro_browser.db");
+        assert_eq!(schema.database_name, "actrium_browser.db");
         assert!(
             schema
                 .table_names
@@ -3063,7 +3063,7 @@ mod tests {
                 .any(|statement| statement.contains("browser_bookmarks"))
         );
         assert_eq!(browser_storage_schema_version(), 6);
-        assert_eq!(browser_storage_database_name(), "actro_browser.db");
+        assert_eq!(browser_storage_database_name(), "actrium_browser.db");
         assert!(
             browser_storage_schema_statements()
                 .iter()
@@ -3337,7 +3337,7 @@ mod tests {
         assert!(transport_contract.contains(r#""Authorization""#));
 
         let cloud_store_contract = browser_storage_sync_cloud_store_contract_json();
-        assert!(cloud_store_contract.contains(r#""rootPath":"Actro/BrowserSync""#));
+        assert!(cloud_store_contract.contains(r#""rootPath":"Actrium/BrowserSync""#));
         assert!(cloud_store_contract.contains(r#""operation":"write""#));
         assert!(cloud_store_contract.contains("expectedRevision"));
         assert!(cloud_store_contract.contains(r#""adapterKind":"opendal""#));
@@ -3347,7 +3347,7 @@ mod tests {
         assert!(provider_adapter_contract.contains("coarse rounds"));
 
         let provider_adapter_plan = browser_storage_sync_cloud_provider_adapter_plan_json(
-            r#"{"providerKind":"localFolder","rootPath":"Actro/BrowserSync","revisionKind":"contentHash","supportsPrefixList":true,"supportsPagedList":true,"supportsConditionalWrite":true,"supportsConditionalDelete":true,"supportsReadIfChanged":true,"supportsAtomicRename":false,"supportsAppFolder":true,"backgroundSync":"platformScheduled","conflictResolution":"optimisticRevision","maxObjectBytes":8388608,"maxPageSize":1000}"#.to_string(),
+            r#"{"providerKind":"localFolder","rootPath":"Actrium/BrowserSync","revisionKind":"contentHash","supportsPrefixList":true,"supportsPagedList":true,"supportsConditionalWrite":true,"supportsConditionalDelete":true,"supportsReadIfChanged":true,"supportsAtomicRename":false,"supportsAppFolder":true,"backgroundSync":"platformScheduled","conflictResolution":"optimisticRevision","maxObjectBytes":8388608,"maxPageSize":1000}"#.to_string(),
             8,
         );
         assert!(provider_adapter_plan.contains(r#""classification":"ready""#));
@@ -3387,7 +3387,7 @@ mod tests {
         assert!(provider_error_classification.contains(r#""canonicalErrorKind":"conflict""#));
 
         let cloud_store_preflight = browser_storage_sync_cloud_store_capability_preflight_json(
-            r#"{"providerKind":"memory","rootPath":"Actro/BrowserSync","revisionKind":"monotonicCounter","supportsPrefixList":true,"supportsPagedList":true,"supportsConditionalWrite":true,"supportsConditionalDelete":true,"supportsReadIfChanged":true,"supportsAtomicRename":false,"supportsAppFolder":true,"backgroundSync":"testControlled","conflictResolution":"optimisticRevision","maxObjectBytes":8388608,"maxPageSize":1000}"#.to_string(),
+            r#"{"providerKind":"memory","rootPath":"Actrium/BrowserSync","revisionKind":"monotonicCounter","supportsPrefixList":true,"supportsPagedList":true,"supportsConditionalWrite":true,"supportsConditionalDelete":true,"supportsReadIfChanged":true,"supportsAtomicRename":false,"supportsAppFolder":true,"backgroundSync":"testControlled","conflictResolution":"optimisticRevision","maxObjectBytes":8388608,"maxPageSize":1000}"#.to_string(),
             8,
         );
         assert!(cloud_store_preflight.contains(r#""planType":"cloudStoreCapabilityPreflight""#));
@@ -3432,7 +3432,7 @@ mod tests {
         assert!(cleanup_result_plan.contains(r#""clientAction":"nothingToCleanup""#));
         let cloud_compatibility_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             format!(
-                r#"[{{"path":"Actro/BrowserSync/manifest.json","document":{cloud_manifest}}}]"#
+                r#"[{{"path":"Actrium/BrowserSync/manifest.json","document":{cloud_manifest}}}]"#
             ),
             8,
         );

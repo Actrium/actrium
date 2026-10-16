@@ -829,7 +829,7 @@ check_pattern_in_each_file \
 # The single app data path choke point honors an absolute-path override so
 # concurrent multi-instance runs keep fully independent state trees.
 check_pattern_in_each_file \
-  'ACTRO_USER_DATA_ROOT' \
+  'ACTRIUM_USER_DATA_ROOT' \
   "Windows app data root honors the user data root override" \
   "Windows app data root does not honor the user data root override" \
   windows/src/WindowsAppPaths.cs
