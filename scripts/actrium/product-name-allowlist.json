@@ -2,28 +2,11 @@
   "description": "Existing runtime identifiers and explicit historical/protocol-rejection references; remove allowances as references are retired.",
   "pending_cutover": "https://github.com/Actrium/actrium/pull/288",
   "references": {
-    "android/android/app/Actr.toml": {
-      "actro": 2
-    },
-    "android/android/app/Actr_2.toml": {
-      "actro": 2
-    },
-    "android/android/app/src/Actr.lock.toml": {
-      "actro+app_server": 1
-    },
-    "android/android/app/src/Actr.toml": {
-      "actro": 2,
-      "actro+app_server": 2,
-      "actro@example.com": 1
-    },
     "android/android/app/src/main/AndroidManifest.xml": {
       "actro": 3
     },
     "android/android/app/src/main/java/io/actrium/app/MainActivity.kt": {
       "actro://chat/123": 1
-    },
-    "android/android/app/src/main/java/io/actrium/app/datastream/UnifiedWorkload.kt": {
-      "actro@example.com": 1
     },
     "android/android/app/src/main/java/io/actrium/app/tablet/TabletActivity.kt": {
       "actro://chat/123": 1
@@ -31,13 +14,8 @@
     "crates/actr-protocol/src/uri.rs": {
       "actro://acme.com": 1
     },
-    "crates/actrium-core/src/actr_config.rs": {
-      "actro": 2
-    },
     "crates/actrium-core/src/browser_data.rs": {
       "ACTRO://HOME": 2,
-      "X-Actro-Account-Id": 1,
-      "X-Actro-Device-Id": 1,
       "actro-session-tab:": 1,
       "actro-session-tab:0:actro://home": 1,
       "actro:": 1,
@@ -125,9 +103,6 @@
     "macos/ActriumTests/URLParsingTests.swift": {
       "actro:///tmp/example.actr": 2,
       "actro://settings": 2
-    },
-    "packages/actrium/src/runtime-host/generated/actriumCoreContract.ts": {
-      "actro": 2
     },
     "scripts/actrium/check-migration-hygiene.sh": {
       "actro": 4,

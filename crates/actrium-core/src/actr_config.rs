@@ -5,8 +5,8 @@ pub const PACKAGE_LICENSE: &str = "Apache-2.0";
 pub const PACKAGE_TAG_DEV: &str = "dev";
 pub const PACKAGE_TAG_CLIENT: &str = "client";
 
-pub const CLIENT_ACTR_PUBLISHER: &str = "actro";
-pub const CLIENT_ACTR_NAME: &str = "actro";
+pub const CLIENT_ACTR_PUBLISHER: &str = "actrium";
+pub const CLIENT_ACTR_NAME: &str = "actrium";
 pub const DEPENDENCY_NAME: &str = "bid-service";
 
 pub const DEFAULT_SIGNALING_URL: &str = "wss://loran.example.com/signaling/ws";
