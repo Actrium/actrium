@@ -150,25 +150,25 @@ if [ "$SKIP_INSTALL" = "0" ] || [ ! -d Pods ] || [ ! -d build/generated/ios ]; t
     pod install
 fi
 
-./scripts/bundle-actro-runtime.sh --target all --dev
+./scripts/bundle-actrium-runtime.sh --target all --dev
 
-ACTRO_CORE_LIBRARY="$REPO_ROOT/crates/actrium-core/ActroCore.xcframework/macos-arm64_x86_64/libactro_core.a"
-ACTRO_VAULT_LIBRARY="$REPO_ROOT/crates/actrium-vault/ActroVault.xcframework/macos-arm64_x86_64/libactro_vault.a"
-if [ ! -f "$ACTRO_CORE_LIBRARY" ] || [ ! -f "$ACTRO_VAULT_LIBRARY" ]; then
+ACTRIUM_CORE_LIBRARY="$REPO_ROOT/crates/actrium-core/ActriumCore.xcframework/macos-arm64_x86_64/libactrium_core.a"
+ACTRIUM_VAULT_LIBRARY="$REPO_ROOT/crates/actrium-vault/ActriumVault.xcframework/macos-arm64_x86_64/libactrium_vault.a"
+if [ ! -f "$ACTRIUM_CORE_LIBRARY" ] || [ ! -f "$ACTRIUM_VAULT_LIBRARY" ]; then
     echo "Building the Apple Rust bindings required by Actrium."
-    "$REPO_ROOT/scripts/actrium/build-actro-rust-bindings.sh" apple-macos
+    "$REPO_ROOT/scripts/actrium/build-actrium-rust-bindings.sh" apple-macos
 fi
 
 xcodebuild \
-    -workspace Actro.xcworkspace \
-    -scheme Actro \
+    -workspace Actrium.xcworkspace \
+    -scheme Actrium \
     -configuration Debug \
     -destination "platform=macOS,arch=$(uname -m)" \
     -derivedDataPath "$DERIVED_DATA_DIR" \
     CODE_SIGNING_ALLOWED=NO \
     build
 
-APP_PATH="$DERIVED_DATA_DIR/Build/Products/Debug/Actro.app"
+APP_PATH="$DERIVED_DATA_DIR/Build/Products/Debug/Actrium.app"
 if [ ! -d "$APP_PATH" ]; then
     echo "Actrium build did not produce $APP_PATH" >&2
     exit 1

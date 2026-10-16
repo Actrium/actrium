@@ -1,8 +1,8 @@
-# Actro Android Client
+# Actrium Android Client
 
 ## Project overview
 
-Actro Android Yes. Actro Browser Client Android Shell, adopt **Kotlin Raw shells + React Native Operational level** The first one is a hybrid. The original shell is more responsible. Tab Window management and system-level capacity,RN Layer (Class)`packages/actrium`) All operations carried UI And logic.
+Actrium Android Yes. Actrium Browser Client Android Shell, adopt **Kotlin Raw shells + React Native Operational level** The first one is a hybrid. The original shell is more responsible. Tab Window management and system-level capacity,RN Layer (Class)`packages/actrium`) All operations carried UI And logic.
 
 ## Warehouse structure
 
@@ -10,7 +10,7 @@ Actro Android Yes. Actro Browser Client Android Shell, adopt **Kotlin Raw shells
 android/
 ├── android/                  # Android Raw shells (Kotlin)
 │   ├── app/                  #   Main application module
-│   │   └── src/main/java/com/actro/android/
+│   │   └── src/main/java/com/actrium/android/
 │   │       ├── MainActivity.kt        # Entry Activity- It's a lot of management. Tab RN Containers
 │   │       ├── MainApplication.kt     # Application, Register RN Package
 │   │       ├── MainViewModel.kt       # Tab Life cycle ViewModel
@@ -20,10 +20,10 @@ android/
 │   │           └── UserInfoModule.kt  # RN NativeModule: User information
 │   └── settings.gradle       # Gradle Project Configuration (inclusive) autolink + Manual include)
 │
-├── actro-runtime -> ../../../packages/actrium
+├── actrium-runtime -> ../../../packages/actrium
 │                              # React Native Business level. Source code in place. monorepo packages
 │
-├── index.js                  # RN Entry, registration. actro-runtime Root Component
+├── index.js                  # RN Entry, registration. actrium-runtime Root Component
 ├── metro.config.js           # Metro Packing Configuration (By) node_modules Go on, get heavy!
 ├── package.json              # Root Dependence (Land Dependence)RN The original bank hereby announces its support. autolink)
 └── babel.config.js
@@ -33,7 +33,7 @@ android/
 
 ```
 packages/
-├── actro-runtime/  # Share React Native Business Run-time
+├── actrium-runtime/  # Share React Native Business Run-time
 ├── askit/          # Share TS Library
 ├── keel/           # Keel Plugin Sandbox Engine
 ```

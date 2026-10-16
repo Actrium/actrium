@@ -3,9 +3,9 @@
 ## E1. Content Rule List Engine
 
 **Files:**
-- `Actro/ContentBlocking/ContentBlockerManager.swift` (new)
-- `Actro/ContentBlocking/easylist-lite.json` (bundled)
-- `Actro/MultiProcess/WebViewTabView.swift` — apply rules to WKWebViewConfiguration
+- `Actrium/ContentBlocking/ContentBlockerManager.swift` (new)
+- `Actrium/ContentBlocking/easylist-lite.json` (bundled)
+- `Actrium/MultiProcess/WebViewTabView.swift` — apply rules to WKWebViewConfiguration
 
 **Implementation:**
 1. Bundle a lightweight ad-blocking rule list (EasyList-lite, ~2000 rules)
@@ -22,8 +22,8 @@
 ## E2. Settings UI
 
 **Files:**
-- `Actro/Settings/ContentBlockingSettingsView.swift` (new)
-- `Actro/Settings/SettingsView.swift` — add tab
+- `Actrium/Settings/ContentBlockingSettingsView.swift` (new)
+- `Actrium/Settings/SettingsView.swift` — add tab
 
 **Implementation:**
 1. Master toggle: enable/disable ad blocking

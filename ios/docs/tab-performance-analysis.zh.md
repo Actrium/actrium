@@ -1,4 +1,4 @@
-# Actro iPhone 标签页性能问题分析与解决方案
+# Actrium iPhone 标签页性能问题分析与解决方案
 
 > 本文档主要从 **iPhone 端** 视角进行分析。iPad 端使用 Focus/Overview 模式切换，iPhone 端使用 `.sheet` 全屏展开 + TabView 底部导航，交互路径不同，但底层内存问题一致。
 
@@ -25,7 +25,7 @@ PhoneMainView (TabView 底部导航)
   .sheet(item: $fullscreenTab) 弹出全屏 →
     PhoneBrowserView(tab) →
       SingleTabRootView(tab) →
-        ActroReactNativeHost.shared.viewForTab(tabId, props) →
+        ActriumReactNativeHost.shared.viewForTab(tabId, props) →
           viewCache[tabId] 缓存 RCTRootView
 
 用户退出全屏（RN 侧通知或手势） →
@@ -43,16 +43,16 @@ PhoneMainView (TabView 底部导航)
 
 ### 3.1 每个 Tab 的 RCTRootView 常驻内存（核心问题）
 
-**现状**：`ActroReactNativeHost.viewCache` 是强引用字典，每个曾打开过的 Tab 的 `RCTRootView` 永远不会被释放。
+**现状**：`ActriumReactNativeHost.viewCache` 是强引用字典，每个曾打开过的 Tab 的 `RCTRootView` 永远不会被释放。
 
 ```
-ActroReactNativeHost.swift:88
+ActriumReactNativeHost.swift:88
 private var viewCache: [UUID: RCTRootView] = [:]
 
 // 只有 closeTab 才清理
 BrowserViewModel.swift:437-438
 func closeTab(id: UUID) {
-    ActroReactNativeHost.shared.removeViewForTab(tabId: id)
+    ActriumReactNativeHost.shared.removeViewForTab(tabId: id)
     ...
 }
 ```
@@ -194,7 +194,7 @@ var props: [String: Any] = [
 
 **为什么 2-3 个够用**：iPhone 同一时间只有 1 个标签处于全屏状态。用户最常见的切换模式是"退出 A → 打开 B → 切回 A"，2-3 个缓存覆盖了这种来回切换场景。不常用的旧标签自动释放，避免了"10 个标签全驻留内存"的问题。
 
-**改造 `ActroReactNativeHost`**：
+**改造 `ActriumReactNativeHost`**：
 
 ```swift
 // 当前：无限缓存
@@ -327,7 +327,7 @@ func downsampledSnapshot(_ image: UIImage, targetSize: CGSize) -> UIImage {
 }
 ```
 
-**改造后**：LRU 管理已由 `ActroReactNativeHost` 自动处理，无需手动释放。退出全屏时只需截取快照缩略图：
+**改造后**：LRU 管理已由 `ActriumReactNativeHost` 自动处理，无需手动释放。退出全屏时只需截取快照缩略图：
 
 ```swift
 .onReceive(NotificationCenter.default.publisher(for: .exitFullscreenFromRN)) { _ in
@@ -413,7 +413,7 @@ func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
 func handleMemoryWarning() {
     // 1. 释放所有非活跃 Tab 的 RootView
     for tab in tabs where tab.id != currentTabId {
-        ActroReactNativeHost.shared.removeViewForTab(tabId: tab.id)
+        ActriumReactNativeHost.shared.removeViewForTab(tabId: tab.id)
     }
     // 2. 释放快照内存副本（磁盘副本保留，按需加载）
     tabSnapshots.removeAll()

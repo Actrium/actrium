@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed record WindowsStartupOptions(
     IReadOnlyList<string> InitialAddresses,

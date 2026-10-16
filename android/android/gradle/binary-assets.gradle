@@ -1,6 +1,6 @@
 def assetHelper = rootProject.file("../../../../scripts/PrepareAndroidBinaryAssets.java")
 def assetLock = rootProject.file("binary-assets.lock.properties")
-def assetCache = new File(gradle.gradleUserHomeDir, "caches/actro-binary-assets")
+def assetCache = new File(gradle.gradleUserHomeDir, "caches/actrium-binary-assets")
 def isWindows = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")
 def javaExecutable = new File(
         System.getProperty("java.home"),
@@ -42,7 +42,7 @@ appProject.plugins.withId("com.android.application") {
             appProject,
             "prepareAsrModels",
             "asr",
-            "generated/actro-binary-assets/asr"
+            "generated/actrium-binary-assets/asr"
     )
     appProject.android.sourceSets.main.assets.srcDir(
             registration.generatedRoot.map { it.dir("assets") }
@@ -58,7 +58,7 @@ actrProject.plugins.withId("com.android.library") {
             actrProject,
             "prepareActrNativeLibraries",
             "actr",
-            "generated/actro-binary-assets/actr"
+            "generated/actrium-binary-assets/actr"
     )
     actrProject.android.sourceSets.main.jniLibs.srcDir(
             registration.generatedRoot.map { it.dir("jniLibs") }

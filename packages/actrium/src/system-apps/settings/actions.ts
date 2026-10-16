@@ -9,8 +9,8 @@ import { EmailBridge } from '../../native-bridge';
 export const createFeedbackAction = ({ t }: { t: TFunction }) => {
   return async () => {
     const feedbackLabel = t('actr.settings.feedback').trim();
-    const aboutActroLabel = t('actr.settings.aboutActro').trim();
-    const subjectText = `#${feedbackLabel} ${aboutActroLabel} #`;
+    const aboutActriumLabel = t('actr.settings.aboutActrium').trim();
+    const subjectText = `#${feedbackLabel} ${aboutActriumLabel} #`;
 
     if (Platform.OS === 'android') {
       // Android Prefer to primary Intent The message is that the message is not a message.

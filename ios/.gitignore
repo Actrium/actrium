@@ -19,7 +19,7 @@ Pods/
 Podfile.lock
 
 # React Native / Node.js
-ActroRuntime/node_modules/
+ActriumRuntime/node_modules/
 rn/.metro-health-check*
 *.log
 npm-debug.log*
@@ -30,16 +30,16 @@ yarn-error.log*
 *.jsbundle
 *.jsbundle.map
 
-# ActroRuntime actr example build artifacts
-ActroRuntime/keel-guest-examples/**/dist/
-ActroRuntime/keel-guest-examples/**/*.actr
-ActroRuntime/keel-guest-examples/**/unified-app.js
+# ActriumRuntime actr example build artifacts
+ActriumRuntime/keel-guest-examples/**/dist/
+ActriumRuntime/keel-guest-examples/**/*.actr
+ActriumRuntime/keel-guest-examples/**/unified-app.js
 
 # Temporary files
 *.tmp
 *.temp
-ActroRuntime/bun.lock
-ActroRuntime
+ActriumRuntime/bun.lock
+ActriumRuntime
 
 # TestFlight Upload Script Sensitive Files
 Scripts/.config

@@ -1,3 +1,3 @@
 fn main() {
-    uniffi::generate_scaffolding("src/actro_core.udl").unwrap();
+    uniffi::generate_scaffolding("src/actrium_core.udl").unwrap();
 }

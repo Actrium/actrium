@@ -2,7 +2,7 @@
 
 Migration completed: 2026-07-29.
 
-The source Actro repository initially contained 15 tracked blobs over 1,000,000
+The source Actrium repository initially contained 15 tracked blobs over 1,000,000
 bytes, totalling 206,485,114 bytes (196.92 MiB). The Android Vosk models and
 Actr JNI libraries moved to checksum-verified build-time generation before the
 monorepo import. After the Actrium integration and the exclusion of Supramark,
@@ -34,7 +34,7 @@ CI validates the lock and runs both repository checks.
 
 `prepareAsrModels` and `prepareActrNativeLibraries` run before their modules'
 `preBuild` tasks. Verified archives are cached in
-`$GRADLE_USER_HOME/caches/actro-binary-assets`; a warm cache supports Gradle
+`$GRADLE_USER_HOME/caches/actrium-binary-assets`; a warm cache supports Gradle
 `--offline`. Clean build outputs are generated under each module's `build/`
 directory and remain ignored by Git.
 

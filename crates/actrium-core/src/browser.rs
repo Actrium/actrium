@@ -95,8 +95,8 @@ mod tests {
     #[test]
     fn builds_search_urls_with_shared_engine_catalog() {
         assert_eq!(
-            browser_search_url("actro browser", Some("duckduckgo")),
-            "https://duckduckgo.com/?q=actro%20browser"
+            browser_search_url("actrium browser", Some("duckduckgo")),
+            "https://duckduckgo.com/?q=actrium%20browser"
         );
         assert_eq!(
             browser_search_url("a&b=c", Some("google")),

@@ -1,14 +1,14 @@
-# Actro v1 Product demand statement
+# Actrium v1 Product demand statement
 
 > Status: Draft target design (P.S.)Target State Draft)<br>
 > Document version:0.1<br>
 > Date:2026-07-29<br>
-> Scope of application:Actro, Actr, Keel Next stage of product and protocol design<br>
+> Scope of application:Actrium, Actr, Keel Next stage of product and protocol design<br>
 > Principle: Define the ideal model before adjusting the existing realization; this paper is not premised on historical compatibility
 
 ## 1. Definition of a sentence
 
-Actro Yes. Actrium The world.“Program Browser”: User in resident app Tab Running by Keel Guest Description of original interface, each resident app Tab A trusted one. Front Actor Carrying and adopting a clear Service Actor Status of access procedures,Workspace with Actor Network.
+Actrium Yes. Actrium The world.“Program Browser”: User in resident app Tab Running by Keel Guest Description of original interface, each resident app Tab A trusted one. Front Actor Carrying and adopting a clear Service Actor Status of access procedures,Workspace with Actor Network.
 
 ## 2. Overall conclusion
 
@@ -17,7 +17,7 @@ The revised set is well-directed, unified and technically feasible:
 ```text
 Tab
 └── Front Actor
-    ├── Actro Fixed Native Workload
+    ├── Actrium Fixed Native Workload
     │   ├── Keel Host
     │   ├── Capability Broker
     │   └── Actr Client
@@ -28,7 +28,7 @@ Tab
 Its main value is not to draw fewer layers, but to make each layer assume only one responsibility:
 
 - Tab is an interactive user session.
-- Front Actor Yes, it is. Actro Controlled front-office secure borders.
+- Front Actor Yes, it is. Actrium Controlled front-office secure borders.
 - Keel Guest is the only pre-office code that the program developer can customise.
 - Service Actor There are examples of state-of-the-state programs, too. Front Enter Actor The only main entrance to the world.
 - Workspace By Service Hold on,Front Do not touch path, key or bottom storage.
@@ -40,7 +40,7 @@ But it relies on three basic capabilities that must be completed first:
 
 1. **Persistence, decipherable. ActorId**: Service Actor Restart, denet, renew or relocate and must retain the same `ActorId`, and can be made by ID Got it. Realm authority. Current Actr It's... hard rebind Maybe. IDand ID Only with Value Realm, cannot be directly shared as long-term URL Semantics.
 2. **Domain Name Publisher**: Actr It's... manufacturer/publisher Semantic and length limits need to be adjusted to regularize DNS Domain name becomes the program publisher 's identity.
-3. **It's really closed. Front Host**: Actro It must be. Keel . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . capability, white list of components, resource quotas and identified sandbox backend limits Guest;cannotsat affix URL Just give it to me. Keel Load.
+3. **It's really closed. Front Host**: Actrium It must be. Keel . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . capability, white list of components, resource quotas and identified sandbox backend limits Guest;cannotsat affix URL Just give it to me. Keel Load.
 
 ## 3. Core decision-making for freezing
 
@@ -51,16 +51,16 @@ But it relies on three basic capabilities that must be completed first:
 | D-003 | “1:1”Yes. live Front The only binding of the angles, not the one. Service And history Tab (b) Permanent double-fire;Service Alive and can be replaced. Front Reconnection. |
 | D-004 | v1 Default use of monogamous interactive sessions; same Service URL Focus now when this machine is open again. Tab. Sharing sessions is a follow-up and visible capability. |
 | D-005 | Service Tie zero or one. Workspace;required more Actor Procedure by Primary Service In the back. |
-| D-006 | Front workload By Actro It's a natural.Publisher Can not replace Host;Publisher Only if you're available. Keel Guestresources, statements and Service workload. |
+| D-006 | Front workload By Actrium It's a natural.Publisher Can not replace Host;Publisher Only if you're available. Keel Guestresources, statements and Service workload. |
 | D-007 | v1 Third parties Front Guest Open only Keel JS Guestand fixed-use with hard timeout and stack caps QuickJS Backend. |
-| D-008 | One. Actro Program Release It's a signature. `.actr` Package:Service workload Is the subject of enforceability,Keel Guest It is a package of resources protected by a signature. |
+| D-008 | One. Actrium Program Release It's a signature. `.actr` Package:Service workload Is the subject of enforceability,Keel Guest It is a package of resources protected by a signature. |
 | D-009 | `actr://publisher/program@version` indicating creation;adding `service=<ActorId>` is only connected, and cannot be built by sneaking up. |
 | D-010 | Publisher Identity is a standardized domain name, without port; credible Profile Actual HTTPS, WSS, STUN, TURN End points can be used in a visible manner. |
 | D-011 | Marketplace It's a source of information, not a source of information. Publisher Name authority; domain name and package signature are the source chain. |
 | D-012 | v1 ActorId Must contain verifiable Realm authority; it's a public address and password identity, not bearer tokenYes, sir. URL It does not mean that you have the right to connect. |
 | D-013 | Realm It's a logical trust field, which can assign multiple letters./TURN Services;Realm It's not the same thing as a physical messenger process. |
 | D-014 | Service Examples fixed to exact version and package digest;v1 Upgrade Creates new by Visible Migration Actor, instead of replacing it. workload. |
-| D-015 | Realm credential Prove it. Actor keyand claims, does not automatically prove that the other side is actually running the official Actro Host;Service We have to. Front Consider it independent of the letter client. |
+| D-015 | Realm credential Prove it. Actor keyand claims, does not automatically prove that the other side is actually running the official Actrium Host;Service We have to. Front Consider it independent of the letter client. |
 | D-016 | Workspace It's... requirement, provisioning, access and providers It's an independent dimension, not a single count. |
 | D-017 | Remove as Restoreable Trashed And irrecoverable. Purged/Deleted;deleting Workspace Always acting independently. |
 | D-018 | Publisher/Realm Domain Name bootstrap Fixed Use HTTPS 443;experience Profile Actual endpoint You can bring port. |
@@ -100,7 +100,7 @@ The recommendations are read in order:
 10. [Demand and acceptance criteria](10-requirements-and-acceptance.md): Functional needs, non-functional needs and end-to-end acceptance.
 11. [Delivery plan and feasibility](11-delivery-plan.md): Basic adaptation, phasing, risk and conditions of exit.
 12. [Reference protocol and sample](12-reference-spec.md): Manifest, Publisher/Realm Profile# And the handshake news and the terminology. #
-13. [Actro Privacy tags and diagrams are assembled](13-privacy-state-and-aggregation.md): to bring the current security model to Tab / Front / Host.
+13. [Actrium Privacy tags and diagrams are assembled](13-privacy-state-and-aggregation.md): to bring the current security model to Tab / Front / Host.
 14. [Privacy, remote certification and credible algorithms](14-privacy-primitives-and-attestation.md): All-process encryption,WASM/CC Division of labour,RATSKey Releases and CPU/GPU/NPU Group certification.
 
 ## 5. Normative Use of Terms
@@ -111,7 +111,7 @@ This paper uses the following intensity:
 - **I think so. / SHOULD**: Default should be satisfied and the reason and the alternative must be recorded in case of deviation.
 - **Yes. / MAY**: Compatibility or subsequent expansion.
 
-Example: JSON/TOML/Protocol fields for freezing product syntax; official wire schema Still need to be here. Actr/Actro It's... schema Version in the warehouse.
+Example: JSON/TOML/Protocol fields for freezing product syntax; official wire schema Still need to be here. Actr/Actrium It's... schema Version in the warehouse.
 
 ### 5.1 Document Effectiveness
 
@@ -132,7 +132,7 @@ This design is based on the following publicly available feasibility but is not 
 
 - [Actrium/actr](https://github.com/Actrium/actr): Actor Models,`ActrId` Accurately locate,Realm/ACL♪ By letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter,WebRTC, `.actr` Signature bag and WASM workload.
 - [Actrium/keel](https://github.com/Actrium/keel): Keel Host/Guest, Bridge, JS Sandboxes, contracts and raw components rendered.
-- [Actro Overview of the current structure](../../architecture/overview.md): Multiplatforms Shell, share running time with Actr SDK Borders.
+- [Actrium Overview of the current structure](../../architecture/overview.md): Multiplatforms Shell, share running time with Actr SDK Borders.
 
 Key facts that have been verified include:
 

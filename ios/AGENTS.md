@@ -1,6 +1,6 @@
-# Actro-Pad/Phone System Architecture Overview
+# Actrium-Pad/Phone System Architecture Overview
 
-This project is a cross-platform mobile end AI Interactive system, adopted **Native iOS Shell + React Native Run-time** ♪ The mix of structures. `ActroRuntime` Operating nuclear simultaneously iPad(Actroand iPhone Both ends.
+This project is a cross-platform mobile end AI Interactive system, adopted **Native iOS Shell + React Native Run-time** ♪ The mix of structures. `ActriumRuntime` Operating nuclear simultaneously iPad(Actriumand iPhone Both ends.
 
 ---
 
@@ -9,10 +9,10 @@ This project is a cross-platform mobile end AI Interactive system, adopted **Nat
 ```mermaid
 graph TD
     subgraph "Native Layer (Main item)"
-        A[Actro / Actro-Phone] -->|NativeModules| B[Bridge/Event]
+        A[Actrium / Actrium-Phone] -->|NativeModules| B[Bridge/Event]
     end
 
-    subgraph "Core Layer (ActroRuntime Sub-projects)"
+    subgraph "Core Layer (ActriumRuntime Sub-projects)"
         B --> C[native-bridge]
         C --> D[runtime-host]
         D --> E[Infrastructure]
@@ -52,12 +52,12 @@ graph TD
 ## 3. Project collaboration and warehouse description
 
 - **Main repository (Current)**:
-    - `Actro/` & `Actro-iPhone/`: Native Shell source code and build environment.
+    - `Actrium/` & `Actrium-iPhone/`: Native Shell source code and build environment.
     - Duties: Multi-window management, enhanced primary capacity, and rendering layer stability.
-- **Sub-warehouse (Actro Runtime - Submodule)**:
-    - `ActroRuntime/`: Pure JS/TS Operational nuclear.
+- **Sub-warehouse (Actrium Runtime - Submodule)**:
+    - `ActriumRuntime/`: Pure JS/TS Operational nuclear.
     - Responsibilities: Business logic, data durability, two-end logical alignment.
-    - **Detailed Logic Documents:[ActroRuntime/AGENTS.md](./ActroRuntime/AGENTS.md)**
+    - **Detailed Logic Documents:[ActriumRuntime/AGENTS.md](./ActriumRuntime/AGENTS.md)**
 
 ---
 
@@ -73,5 +73,5 @@ Native Start -> `TabRouter` Distribution -> `AppSessionService` Initialization P
 ---
 
 ## 5. Development norms
-- The business logic of cross-cutting is not directly related to Native The layer is complete. It's going down. `ActroRuntime`.
+- The business logic of cross-cutting is not directly related to Native The layer is complete. It's going down. `ActriumRuntime`.
 - Original module references to be in `native-bridge` - Get down.

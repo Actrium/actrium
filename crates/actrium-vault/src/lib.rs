@@ -1,6 +1,6 @@
 #![allow(clippy::empty_line_after_doc_comments)]
 
-//! Cross-platform Actro vault primitives.
+//! Cross-platform Actrium vault primitives.
 //!
 //! This crate owns vault cryptography, field serialization, and password
 //! scoring. Platform shells still own OS credential stores, biometric prompts,
@@ -13,4 +13,4 @@ pub mod password;
 
 pub use ffi::*;
 
-uniffi::include_scaffolding!("actro_vault");
+uniffi::include_scaffolding!("actrium_vault");

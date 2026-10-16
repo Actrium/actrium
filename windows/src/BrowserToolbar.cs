@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Drawing.Text;
 using System.Windows.Forms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Two-segment toolbar mirroring the macOS structure with Chrome-ordered

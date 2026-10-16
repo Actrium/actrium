@@ -2,10 +2,10 @@
 
 ## 1. 信息架构
 
-Actro 的一级产品面由五部分组成：
+Actrium 的一级产品面由五部分组成：
 
 ```text
-Actro Shell
+Actrium Shell
 ├── Tab 与地址栏
 ├── Program Catalog（程序库）
 ├── Service Inventory（实例库）
@@ -72,7 +72,7 @@ Program 与 Service 必须在 UI 和数据模型中分开。安装一个程序�
 
 ## 3. 首次启动
 
-Actro 首次启动完成以下配置：
+Actrium 首次启动完成以下配置：
 
 1. 在 OS 安全存储中创建设备密钥；
 2. 建立带 `local:<installation-id>` authority 的本地 Realm；
@@ -81,20 +81,20 @@ Actro 首次启动完成以下配置：
 5. 展示 Program Catalog 和 Service Inventory 的区别；
 6. 默认关闭匿名遥测和开发模式。
 
-本地 Realm 允许离线运行本机 Front 与 Service，但其 URI 只在该 Actro 安装内可解析。跨设备连接需要先把 Service 迁移到带 DNS authority 的联网 Realm。
+本地 Realm 允许离线运行本机 Front 与 Service，但其 URI 只在该 Actrium 安装内可解析。跨设备连接需要先把 Service 迁移到带 DNS authority 的联网 Realm。
 
 ## 4. 安装程序
 
 ### 4.1 从 Marketplace
 
 1. 用户打开程序详情；
-2. Actro 显示 Publisher、版本、digest、权限、Workspace 模式和市场审核状态；
-3. Actro 从 Publisher HTTPS 入口解析并下载 `.actr`；
+2. Actrium 显示 Publisher、版本、digest、权限、Workspace 模式和市场审核状态；
+3. Actrium 从 Publisher HTTPS 入口解析并下载 `.actr`；
 4. 校验 HTTPS、Publisher key、包签名、digest、兼容性和压缩包限制；
 5. 记录 Program Release；
 6. 只缓存程序，不自动创建 Service，除非用户点击“创建实例”。
 
-Marketplace 返回的下载地址不是最终信任源；Actro 必须回到 Publisher 可信元数据或校验已固定的 Publisher 签名和 digest。
+Marketplace 返回的下载地址不是最终信任源；Actrium 必须回到 Publisher 可信元数据或校验已固定的 Publisher 签名和 digest。
 
 ### 4.2 从 `actr://` URI
 
@@ -122,7 +122,7 @@ Marketplace 返回的下载地址不是最终信任源；Actro 必须回到 Publ
 ```mermaid
 sequenceDiagram
     actor U as 用户
-    participant A as Actro Shell
+    participant A as Actrium Shell
     participant P as Package Resolver
     participant M as Service Manager
     participant S as Service Actor
@@ -207,7 +207,7 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 
 ## 7. Tab 行为
 
-Actro UI 中有两类 Tab：
+Actrium UI 中有两类 Tab：
 
 - **Shell Navigation Tab**：安装、创建确认、错误详情、Program 和 Service 管理页面；它不代表应用运行，因此可以没有 Front Actor。
 - **Resident App Tab**：处于 loading、running 或 suspended 的应用页；任一时刻必须恰有一个 live Front Actor，并且 Front 完成 Attach 后恰有一个 Primary Service。
@@ -267,7 +267,7 @@ Guest 崩溃不得自动重启 Service。Service 崩溃则显示单独状态，�
 
 ### 8.1 两类收藏
 
-Actro 必须明确区分：
+Actrium 必须明确区分：
 
 - **程序模板收藏**：不含 `service`，每次打开都创建新实例。
 - **实例收藏**：含 `service`，回到同一 Service。
@@ -394,7 +394,7 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 
 ## 14. Realm、设备与身份体验
 
-Actro 的身份页至少支持：
+Actrium 的身份页至少支持：
 
 - 加入 Realm：通过组织域名或一次性邀请完成登录、设备注册和 Profile 固定；
 - 重新认证：credential 到期或管理员要求时，暂停新的 Attach，保留本地数据并引导恢复；
@@ -433,18 +433,18 @@ Service 的最小 ACL 角色为：
 - Front 的相机、麦克风、剪贴板等交互能力按首次使用即时请求，可选“仅本次会话”；
 - 管理员 policy 可以预先拒绝或约束 scope，但不能在 UI 中伪装成用户同意；
 - 撤销持久 grant 后，Host 必须立即失效相关 capability handle，并结束仍在使用它的调用；
-- 远端 Service 的宿主级权限由远端宿主管理；本地 Actro 只能显示经签名声明的结果，不能替用户修改另一台宿主的 OS 权限。
+- 远端 Service 的宿主级权限由远端宿主管理；本地 Actrium 只能显示经签名声明的结果，不能替用户修改另一台宿主的 OS 权限。
 
 ## 17. 远端 Service 的来源与管理边界
 
-v1 的 Create Intent 只在当前 Actro 支持的本地 Service Host 上创建。远端 Service 通过以下途径进入 Inventory：
+v1 的 Create Intent 只在当前 Actrium 支持的本地 Service Host 上创建。远端 Service 通过以下途径进入 Inventory：
 
 - 打开已有 Attach URI；
 - 接受 Service 邀请；
 - 从同一用户的加密 Inventory 同步实例地址；
 - 显式导入带签名的 Service 元数据。
 
-Actro 只有在远端宿主另行授予 management capability 时，才能远程启动、停止、迁移或清除 Service；否则只提供 Attach、请求授权和查看可验证状态。iOS/Android 上“长期在线”通常意味着连接桌面、服务器或其他远端宿主，不意味着移动端能任意创建云端进程。通用服务器宿主和云调度不属于 Actro v1 客户端范围。
+Actrium 只有在远端宿主另行授予 management capability 时，才能远程启动、停止、迁移或清除 Service；否则只提供 Attach、请求授权和查看可验证状态。iOS/Android 上“长期在线”通常意味着连接桌面、服务器或其他远端宿主，不意味着移动端能任意创建云端进程。通用服务器宿主和云调度不属于 Actrium v1 客户端范围。
 
 ## 18. Guest 导航语义
 
@@ -462,7 +462,7 @@ Guest 不能直接改写 Shell 地址栏，只能调用 `host:navigate`：
 官方工具链应提供一条可重复流程：
 
 ```text
-actro init
+actrium init
 → 编写 Keel Guest、Service Component 与 contract
 → build
 → validate（schema、capability、hash、沙箱兼容性）

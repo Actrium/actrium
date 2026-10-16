@@ -23,7 +23,7 @@ Privacy Graph Aggregation（整条 Actor 数据路径是否成立）
 - “Actor 网络全过程加密”具体保证什么；
 - WASM、Native Capsule 与 Confidential Computing 分别解决什么问题；
 - Agent 使用 CPU、GPU、NPU 或边缘算力时如何证明运行环境；
-- 不同厂商证明如何映射为统一 Actro claims；
+- 不同厂商证明如何映射为统一 Actrium claims；
 - 密钥何时可以释放；
 - 多项证据如何进入 `ActorAssurance` 的事实项（`CONTROLLED / UNKNOWN / UNCONTROLLED`）。
 
@@ -31,7 +31,7 @@ Privacy Graph Aggregation（整条 Actor 数据路径是否成立）
 
 ### 2.1 不使用“数据始终是密文”
 
-普通计算必须在某个执行边界内使用明文。除非使用 FHE、MPC 等专用密码学计算，Actro 不应声称数据在每个时刻都是密文。
+普通计算必须在某个执行边界内使用明文。除非使用 FHE、MPC 等专用密码学计算，Actrium 不应声称数据在每个时刻都是密文。
 
 推荐表述与 [总览](../../security/01-overview.zh.md) 一致：
 
@@ -179,23 +179,23 @@ Contract 至少冻结：
 示意：
 
 ```toml
-[actro.privacy_contract]
+[actrium.privacy_contract]
 schema_version = 1
 contract_id = "notes.example/team-notes@1.4.2#privacy"
 package_digest = "sha256:..."
 
-[[actro.privacy_contract.actor_role]]
+[[actrium.privacy_contract.actor_role]]
 role = "primary-service"
 actr_type = "notes.example:team-notes-service:1.4.2"
 cardinality = "1"
 required = true
 
-[[actro.privacy_contract.actor_role]]
+[[actrium.privacy_contract.actor_role]]
 role = "ai-inference"
 cardinality = "0..n"
 required_assurance_profile = "confidential-ai-v1"
 
-[[actro.privacy_contract.edge]]
+[[actrium.privacy_contract.edge]]
 source = "primary-service"
 target = "ai-inference"
 data_classes = ["private"]
@@ -284,7 +284,7 @@ Change → SUSPENDED → 取证 / 评定 → Resume（须有当前 AA）→ 尝�
 示意：
 
 ```toml
-[[actro.privacy.data_policy]]
+[[actrium.privacy.data_policy]]
 class = "public"
 required = [
   "identity",
@@ -293,7 +293,7 @@ required = [
   "egress_closure"
 ]
 
-[[actro.privacy.data_policy]]
+[[actrium.privacy.data_policy]]
 class = "private"
 required = [
   "identity",
@@ -304,7 +304,7 @@ required = [
   "egress_closure"
 ]
 
-[[actro.privacy.data_policy]]
+[[actrium.privacy.data_policy]]
 class = "secret"
 required = [
   "identity",
@@ -438,7 +438,7 @@ egress_closure = pass
 
 ```json
 {
-  "profile": "actro.compute-assurance.v1",
+  "profile": "actrium.compute-assurance.v1",
   "environmentType": "confidential-vm",
   "platformVendor": "vendor-id",
   "platformModel": "model-id",
@@ -466,9 +466,9 @@ egress_closure = pass
 
 ## 8. RATS 角色模型
 
-Actro 采用标准远程证明角色：
+Actrium 采用标准远程证明角色：
 
-| 角色 | Actro 中的实体 | 职责 |
+| 角色 | Actrium 中的实体 | 职责 |
 |---|---|---|
 | Attester | Host TEE、设备、GPU/NPU、可信 launcher | 产生关于 Target Environment 的 Evidence |
 | Verifier | Realm/组织/本地受信 Verifier 与 vendor adapter | 验证签名、证书链、测量值、参考值、撤销与 freshness |
@@ -494,7 +494,7 @@ Attester 不能给自己签发最终 `ActorAssurance`（`issuer ≠ subject`）�
 
 ### 8.1 Assured Actor Edge 与 Certified Privacy Domain
 
-跨组织或大型云服务不一定向调用方披露完整内部 Actor 图。Actro 允许可信 Verifier 把一个已经闭合的内部子图封装成 `CertifiedPrivacyDomain`：
+跨组织或大型云服务不一定向调用方披露完整内部 Actor 图。Actrium 允许可信 Verifier 把一个已经闭合的内部子图封装成 `CertifiedPrivacyDomain`：
 
 ```text
 Actor A
@@ -605,7 +605,7 @@ reason = ACCELERATOR_CONFIDENTIALITY_NOT_PROVEN
 
 ### 10.3 厂商兼容
 
-Actro 不把 Intel、AMD、Arm、NVIDIA、华为 Ascend 或某云服务写成固定信任结论，而采用：
+Actrium 不把 Intel、AMD、Arm、NVIDIA、华为 Ascend 或某云服务写成固定信任结论，而采用：
 
 ```text
 vendor evidence
@@ -663,7 +663,7 @@ DEK ── KEK in local Keystore / organization KMS / Realm-approved KMS
 服务器保留审计日志本身必须是静态 Contract 中的显式 storage/audit sink：
 
 ```toml
-[[actro.privacy_contract.audit_sink]]
+[[actrium.privacy_contract.audit_sink]]
 kind = "security-audit"
 fields = ["actor-pseudonym", "operation", "decision", "timestamp"]
 payload = false
@@ -689,7 +689,7 @@ Attestation 可以证明正在运行包含某日志配置的 workload/环境，H
 - 若日志逻辑位于被度量 workload 内，workload/config digest 可以证明“运行的是哪套日志代码与配置”，但仍要结合封闭 egress 和可信 Verifier 才能证明没有其他口子；
 - 若是 opaque 第三方 LLM API，外部调用方不能仅凭 GPU 证明技术性检测其内部留存；只能依赖 Certified Privacy Domain 对 retention/audit 的有 scope 证明。没有该证明该项为 `UNKNOWN`。
 
-所以“服务器留了审计日志”不是天然对外可感知。只有日志出口被 capability 化，或者整个服务边界对日志/retention 提供了可验证 aggregate，它才进入 Actro 可证明的隐私图。
+所以“服务器留了审计日志”不是天然对外可感知。只有日志出口被 capability 化，或者整个服务边界对日志/retention 提供了可验证 aggregate，它才进入 Actrium 可证明的隐私图。
 
 ## 12. 输出与二次泄露
 
@@ -802,7 +802,7 @@ EdgePrivacy(e, d) = meet(
 ## 15. 控制面组件
 
 ```text
-Actro / Actr Privacy Control Plane
+Actrium / Actr Privacy Control Plane
 ├── Policy Registry
 │   ├── data class policy
 │   ├── organization overrides
@@ -822,7 +822,7 @@ Actro / Actr Privacy Control Plane
 └── Audit & Transparency Log
 ```
 
-Realm 可以运营或委派 Verifier、Reference Value、Revocation 和 Key Broker 服务，但它不是唯一全球信任根。组织和本地 Actro 可以选择自己的 Verifier 与 appraisal policy。
+Realm 可以运营或委派 Verifier、Reference Value、Revocation 和 Key Broker 服务，但它不是唯一全球信任根。组织和本地 Actrium 可以选择自己的 Verifier 与 appraisal policy。
 
 ## 16. 失败与撤销
 

@@ -4,7 +4,7 @@
 
 ## 1. Problem
 
-Adoption of the item ActroRuntime It's... React Native The modules are indirectly integrated in a local-dependent manner keel Project.keel Include C Language code, but in the current project process,keel It's... C The code was not properly compiled into the final product.
+Adoption of the item ActriumRuntime It's... React Native The modules are indirectly integrated in a local-dependent manner keel Project.keel Include C Language code, but in the current project process,keel It's... C The code was not properly compiled into the final product.
 
 To solve the problem, I tried to find out app/gradle Add in Configuration keel Library C path to the code, but the following error occurred during the run:
 

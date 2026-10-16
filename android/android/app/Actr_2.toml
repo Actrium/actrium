@@ -2,9 +2,9 @@ edition = 1
 exports = []
 
 [package]
-name = "actro"
-description = "Actro browser client app"
-authors = ["Actro-Team"]
+name = "actrium"
+description = "Actrium browser client app"
+authors = ["Actrium-Team"]
 license = "Apache-2.0"
 tags = ["dev", "client"]
 
@@ -28,7 +28,7 @@ visible = true
 filter_level = "debug"
 tracing_enabled = true
 tracing_endpoint = "http://127.0.0.1:4317"
-tracing_service_name = "actro"
+tracing_service_name = "actrium"
 
 [system.webrtc]
 force_relay = false

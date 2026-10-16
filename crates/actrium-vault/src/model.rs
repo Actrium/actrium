@@ -101,7 +101,7 @@ pub enum VaultCoreError {
     InvalidSalt,
     #[error("AES-GCM nonce must be 12 bytes")]
     InvalidNonce,
-    #[error("ciphertext does not match the Actro vault format")]
+    #[error("ciphertext does not match the Actrium vault format")]
     InvalidCiphertext,
     #[error("encryption failed")]
     EncryptionFailed,

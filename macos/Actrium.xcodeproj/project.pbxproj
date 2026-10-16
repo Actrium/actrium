@@ -1,0 +1,1101 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A2B3C4D5E6F7890ABCD0001 /* ActriumIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0002 /* ActriumIPC */; };
+		1A2B3C4D5E6F7890ABCD0003 /* ActriumIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0002 /* ActriumIPC */; };
+		36ED6B68B2DE67F2DB1523A7 /* libPods-ActriumRenderer.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1394BEA9FE9BE0BE89646222 /* libPods-ActriumRenderer.a */; };
+		457EEA1F5D65241F37B32E2D /* libPods-Actrium.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 68501CEF0142AD9A599B85C8 /* libPods-Actrium.a */; };
+		A90D97D7984E951158B896D0 /* libPods-ActriumTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DACA28DED8E4818311DAAB4D /* libPods-ActriumTests.a */; };
+		AA00110022003300AA00BB02 /* ActriumVault in Frameworks */ = {isa = PBXBuildFile; productRef = AA00110022003300AA00BB03 /* ActriumVault */; };
+		AB00110022003300AA00BB02 /* ActriumCore in Frameworks */ = {isa = PBXBuildFile; productRef = AB00110022003300AA00BB03 /* ActriumCore */; };
+		B3312B262F066DB70018A0B4 /* ActriumRenderer.app in Embed Helper Apps */ = {isa = PBXBuildFile; fileRef = B3312B1B2F066DB70018A0B4 /* ActriumRenderer.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
+		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
+		D78EA70AE5A1D39CD226530B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B3312B242F066DB70018A0B4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3312B1A2F066DB70018A0B4;
+			remoteInfo = ActriumRenderer;
+		};
+		B3E458B02EC731A40014D74C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3E4589F2EC731A30014D74C;
+			remoteInfo = Actrium;
+		};
+		B3E458BA2EC731A40014D74C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B3E458982EC731A30014D74C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B3E4589F2EC731A30014D74C;
+			remoteInfo = Actrium;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B3E78A802F03A100001F9589 /* Embed Helper Apps */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				B3312B262F066DB70018A0B4 /* ActriumRenderer.app in Embed Helper Apps */,
+			);
+			name = "Embed Helper Apps";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		1394BEA9FE9BE0BE89646222 /* libPods-ActriumRenderer.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ActriumRenderer.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		453DB22E380EBC5CF3E87FBC /* Pods-ActriumViewService.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ActriumViewService.debug.xcconfig"; path = "Target Support Files/Pods-ActriumViewService/Pods-ActriumViewService.debug.xcconfig"; sourceTree = "<group>"; };
+		5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		63F53BFD7815C17CC828629D /* Pods-ActriumRenderer.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ActriumRenderer.debug.xcconfig"; path = "Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer.debug.xcconfig"; sourceTree = "<group>"; };
+		68501CEF0142AD9A599B85C8 /* libPods-Actrium.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Actrium.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		68BCCD90DFFC47253F89532C /* Pods-ActriumRenderer.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ActriumRenderer.release.xcconfig"; path = "Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer.release.xcconfig"; sourceTree = "<group>"; };
+		89B514D408E702A02C0609E2 /* Pods-ActriumViewService.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ActriumViewService.release.xcconfig"; path = "Target Support Files/Pods-ActriumViewService/Pods-ActriumViewService.release.xcconfig"; sourceTree = "<group>"; };
+		A37D707140194D1539118712 /* Pods-ActriumTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ActriumTests.debug.xcconfig"; path = "Target Support Files/Pods-ActriumTests/Pods-ActriumTests.debug.xcconfig"; sourceTree = "<group>"; };
+		A807C4A936C422853EAA4882 /* Pods-Actrium.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Actrium.release.xcconfig"; path = "Target Support Files/Pods-Actrium/Pods-Actrium.release.xcconfig"; sourceTree = "<group>"; };
+		B3312B1B2F066DB70018A0B4 /* ActriumRenderer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ActriumRenderer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B38A7F072ECA222600B4185F /* Gemfile */ = {isa = PBXFileReference; lastKnownFileType = text; path = Gemfile; sourceTree = "<group>"; };
+		B3E458A02EC731A30014D74C /* Actrium.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Actrium.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B3E458AF2EC731A40014D74C /* ActriumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ActriumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B3E458B92EC731A40014D74C /* ActriumUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ActriumUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C6A7E7F65DC0D2FA1F7D3C5F /* Pods-ActriumTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ActriumTests.release.xcconfig"; path = "Target Support Files/Pods-ActriumTests/Pods-ActriumTests.release.xcconfig"; sourceTree = "<group>"; };
+		DACA28DED8E4818311DAAB4D /* libPods-ActriumTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ActriumTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E9714E32CAB19E5B8190B795 /* Pods-Actrium.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Actrium.debug.xcconfig"; path = "Target Support Files/Pods-Actrium/Pods-Actrium.debug.xcconfig"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		B3312B272F066DB70018A0B4 /* Exceptions for "ActriumViewService" folder in "ActriumRenderer" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = B3312B1A2F066DB70018A0B4 /* ActriumRenderer */;
+		};
+		B3A57E700000000000000001 /* Exceptions for "Actrium" folder in "Actrium" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				App/RNCSafeAreaProviderManager.m,
+				DevTools/DevToolsBridge.m,
+				DevTools/DevToolsBridge.swift,
+				Info.plist,
+				Resources/assets,
+				Resources/system.jsbundle,
+			);
+			target = B3E4589F2EC731A30014D74C /* Actrium */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		B3312B1C2F066DB70018A0B4 /* ActriumViewService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B3312B272F066DB70018A0B4 /* Exceptions for "ActriumViewService" folder in "ActriumRenderer" target */,
+			);
+			path = ActriumViewService;
+			sourceTree = "<group>";
+		};
+		B3E458A22EC731A30014D74C /* Actrium */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B3A57E700000000000000001 /* Exceptions for "Actrium" folder in "Actrium" target */,
+			);
+			path = Actrium;
+			sourceTree = "<group>";
+		};
+		B3E458B22EC731A40014D74C /* ActriumTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			path = ActriumTests;
+			sourceTree = "<group>";
+		};
+		B3E458BC2EC731A40014D74C /* ActriumUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
+			path = ActriumUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B3312B182F066DB70018A0B4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A2B3C4D5E6F7890ABCD0003 /* ActriumIPC in Frameworks */,
+				36ED6B68B2DE67F2DB1523A7 /* libPods-ActriumRenderer.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E4589D2EC731A30014D74C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AB00110022003300AA00BB02 /* ActriumCore in Frameworks */,
+				AA00110022003300AA00BB02 /* ActriumVault in Frameworks */,
+				1A2B3C4D5E6F7890ABCD0001 /* ActriumIPC in Frameworks */,
+				B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */,
+				457EEA1F5D65241F37B32E2D /* libPods-Actrium.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E458AC2EC731A40014D74C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A90D97D7984E951158B896D0 /* libPods-ActriumTests.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E458B62EC731A40014D74C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		349156444B47045588D99DFC /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				68501CEF0142AD9A599B85C8 /* libPods-Actrium.a */,
+				DACA28DED8E4818311DAAB4D /* libPods-ActriumTests.a */,
+				1394BEA9FE9BE0BE89646222 /* libPods-ActriumRenderer.a */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		50AD95B7B3434865B5C8389F /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				B38A7F072ECA222600B4185F /* Gemfile */,
+				E9714E32CAB19E5B8190B795 /* Pods-Actrium.debug.xcconfig */,
+				A807C4A936C422853EAA4882 /* Pods-Actrium.release.xcconfig */,
+				453DB22E380EBC5CF3E87FBC /* Pods-ActriumViewService.debug.xcconfig */,
+				89B514D408E702A02C0609E2 /* Pods-ActriumViewService.release.xcconfig */,
+				A37D707140194D1539118712 /* Pods-ActriumTests.debug.xcconfig */,
+				C6A7E7F65DC0D2FA1F7D3C5F /* Pods-ActriumTests.release.xcconfig */,
+				63F53BFD7815C17CC828629D /* Pods-ActriumRenderer.debug.xcconfig */,
+				68BCCD90DFFC47253F89532C /* Pods-ActriumRenderer.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
+		B3E458972EC731A30014D74C = {
+			isa = PBXGroup;
+			children = (
+				B3E458A22EC731A30014D74C /* Actrium */,
+				B3E458B22EC731A40014D74C /* ActriumTests */,
+				B3E458BC2EC731A40014D74C /* ActriumUITests */,
+				B3312B1C2F066DB70018A0B4 /* ActriumViewService */,
+				B3E458A12EC731A30014D74C /* Products */,
+				5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */,
+				50AD95B7B3434865B5C8389F /* Pods */,
+				349156444B47045588D99DFC /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		B3E458A12EC731A30014D74C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B3E458A02EC731A30014D74C /* Actrium.app */,
+				B3E458AF2EC731A40014D74C /* ActriumTests.xctest */,
+				B3E458B92EC731A40014D74C /* ActriumUITests.xctest */,
+				B3312B1B2F066DB70018A0B4 /* ActriumRenderer.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B3312B1A2F066DB70018A0B4 /* ActriumRenderer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B3312B282F066DB70018A0B4 /* Build configuration list for PBXNativeTarget "ActriumRenderer" */;
+			buildPhases = (
+				2E9082A2A7BE1102B2074EAE /* [CP] Check Pods Manifest.lock */,
+				B3AAAA002F4800000000AAAA /* Bundle Actrium Runtime */,
+				B3312B172F066DB70018A0B4 /* Sources */,
+				B3312B182F066DB70018A0B4 /* Frameworks */,
+				B3312B192F066DB70018A0B4 /* Resources */,
+				5D734BB00FC54E42D7283398 /* [CP] Copy Pods Resources */,
+				14309D0F7A14D3FAD77F6333 /* [CP] Embed Pods Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B3312B1C2F066DB70018A0B4 /* ActriumViewService */,
+			);
+			name = ActriumRenderer;
+			productName = ActriumRenderer;
+			productReference = B3312B1B2F066DB70018A0B4 /* ActriumRenderer.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B3E4589F2EC731A30014D74C /* Actrium */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B3E458C32EC731A40014D74C /* Build configuration list for PBXNativeTarget "Actrium" */;
+			buildPhases = (
+				CBA3BCE34D80E77B0AABEFD0 /* [CP] Check Pods Manifest.lock */,
+				B3E4589C2EC731A30014D74C /* Sources */,
+				B3E4589D2EC731A30014D74C /* Frameworks */,
+				B3E4589E2EC731A30014D74C /* Resources */,
+				B3E78A802F03A100001F9589 /* Embed Helper Apps */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B3312B252F066DB70018A0B4 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B3E458A22EC731A30014D74C /* Actrium */,
+			);
+			name = Actrium;
+			productName = Actrium;
+			productReference = B3E458A02EC731A30014D74C /* Actrium.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B3E458AE2EC731A40014D74C /* ActriumTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B3E458C62EC731A40014D74C /* Build configuration list for PBXNativeTarget "ActriumTests" */;
+			buildPhases = (
+				B003CAB9998ADD585EB1F320 /* [CP] Check Pods Manifest.lock */,
+				B3E458AB2EC731A40014D74C /* Sources */,
+				B3E458AC2EC731A40014D74C /* Frameworks */,
+				B3E458AD2EC731A40014D74C /* Resources */,
+				00BBDABFC1D1620D751658D3 /* [CP] Embed Pods Frameworks */,
+				95B2392C6AAB1352492B0B57 /* [CP] Copy Pods Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B3E458B12EC731A40014D74C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B3E458B22EC731A40014D74C /* ActriumTests */,
+			);
+			name = ActriumTests;
+			productName = ActriumTests;
+			productReference = B3E458AF2EC731A40014D74C /* ActriumTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B3E458B82EC731A40014D74C /* ActriumUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B3E458C92EC731A40014D74C /* Build configuration list for PBXNativeTarget "ActriumUITests" */;
+			buildPhases = (
+				B3E458B52EC731A40014D74C /* Sources */,
+				B3E458B62EC731A40014D74C /* Frameworks */,
+				B3E458B72EC731A40014D74C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B3E458BB2EC731A40014D74C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B3E458BC2EC731A40014D74C /* ActriumUITests */,
+			);
+			name = ActriumUITests;
+			productName = ActriumUITests;
+			productReference = B3E458B92EC731A40014D74C /* ActriumUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B3E458982EC731A30014D74C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2610;
+				TargetAttributes = {
+					B3312B1A2F066DB70018A0B4 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					B3E4589F2EC731A30014D74C = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					B3E458AE2EC731A40014D74C = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = B3E4589F2EC731A30014D74C;
+					};
+					B3E458B82EC731A40014D74C = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = B3E4589F2EC731A30014D74C;
+					};
+					CC11220033004400AA00BB20 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					DD11220033004400AA00BB20 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					EE11220033004400AA00BB20 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+				};
+			};
+			buildConfigurationList = B3E4589B2EC731A30014D74C /* Build configuration list for PBXProject "Actrium" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B3E458972EC731A30014D74C;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "ActriumIPC" */,
+				AB00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumCore" */,
+				AA00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumVault" */,
+				B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B3E458A12EC731A30014D74C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B3E4589F2EC731A30014D74C /* Actrium */,
+				B3E458AE2EC731A40014D74C /* ActriumTests */,
+				B3E458B82EC731A40014D74C /* ActriumUITests */,
+				B3312B1A2F066DB70018A0B4 /* ActriumRenderer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B3312B192F066DB70018A0B4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D78EA70AE5A1D39CD226530B /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E4589E2EC731A30014D74C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E458AD2EC731A40014D74C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E458B72EC731A40014D74C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		00BBDABFC1D1620D751658D3 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ActriumTests/Pods-ActriumTests-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ActriumTests/Pods-ActriumTests-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ActriumTests/Pods-ActriumTests-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		14309D0F7A14D3FAD77F6333 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		2E9082A2A7BE1102B2074EAE /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-ActriumRenderer-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		5D734BB00FC54E42D7283398 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		95B2392C6AAB1352492B0B57 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ActriumTests/Pods-ActriumTests-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-ActriumTests/Pods-ActriumTests-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ActriumTests/Pods-ActriumTests-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		B003CAB9998ADD585EB1F320 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-ActriumTests-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		B3AAAA002F4800000000AAAA /* Bundle Actrium Runtime */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle Actrium Runtime";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/system.jsbundle",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$CONFIGURATION\" = \"Debug\" ]; then\n  DEV_FLAG=\"--dev\"\nelse\n  DEV_FLAG=\"\"\nfi\n\"${SRCROOT}/scripts/bundle-actrium-runtime.sh\" --target system $DEV_FLAG\nRENDERER_RESOURCES=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nmkdir -p \"$RENDERER_RESOURCES\"\ncp \"${SRCROOT}/Actrium/Resources/system.jsbundle\" \"$RENDERER_RESOURCES/system.jsbundle\"\n";
+			showEnvVarsInLog = 0;
+		};
+		CBA3BCE34D80E77B0AABEFD0 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-Actrium-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B3312B172F066DB70018A0B4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E4589C2EC731A30014D74C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E458AB2EC731A40014D74C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3E458B52EC731A40014D74C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B3312B252F066DB70018A0B4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3312B1A2F066DB70018A0B4 /* ActriumRenderer */;
+			targetProxy = B3312B242F066DB70018A0B4 /* PBXContainerItemProxy */;
+		};
+		B3E458B12EC731A40014D74C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3E4589F2EC731A30014D74C /* Actrium */;
+			targetProxy = B3E458B02EC731A40014D74C /* PBXContainerItemProxy */;
+		};
+		B3E458BB2EC731A40014D74C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B3E4589F2EC731A30014D74C /* Actrium */;
+			targetProxy = B3E458BA2EC731A40014D74C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		B3312B292F066DB70018A0B4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 63F53BFD7815C17CC828629D /* Pods-ActriumRenderer.debug.xcconfig */;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = ActriumViewService/ActriumViewService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ActriumViewService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ActriumRenderer;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.renderer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B3312B2A2F066DB70018A0B4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 68BCCD90DFFC47253F89532C /* Pods-ActriumRenderer.release.xcconfig */;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = ActriumViewService/ActriumViewService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ActriumViewService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ActriumRenderer;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.renderer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B3E458C12EC731A40014D74C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					" ",
+				);
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../packages/actrium/node_modules/react-native-macos";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				USE_HERMES = true;
+			};
+			name = Debug;
+		};
+		B3E458C22EC731A40014D74C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					" ",
+				);
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../packages/actrium/node_modules/react-native-macos";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				USE_HERMES = true;
+			};
+			name = Release;
+		};
+		B3E458C42EC731A40014D74C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = E9714E32CAB19E5B8190B795 /* Pods-Actrium.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Actrium/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B3E458C52EC731A40014D74C /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A807C4A936C422853EAA4882 /* Pods-Actrium.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Actrium/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B3E458C72EC731A40014D74C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A37D707140194D1539118712 /* Pods-ActriumTests.debug.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Actrium.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Actrium";
+			};
+			name = Debug;
+		};
+		B3E458C82EC731A40014D74C /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C6A7E7F65DC0D2FA1F7D3C5F /* Pods-ActriumTests.release.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Actrium.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Actrium";
+			};
+			name = Release;
+		};
+		B3E458CA2EC731A40014D74C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Actrium;
+			};
+			name = Debug;
+		};
+		B3E458CB2EC731A40014D74C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7EARH3U976;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Actrium;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B3312B282F066DB70018A0B4 /* Build configuration list for PBXNativeTarget "ActriumRenderer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B3312B292F066DB70018A0B4 /* Debug */,
+				B3312B2A2F066DB70018A0B4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B3E4589B2EC731A30014D74C /* Build configuration list for PBXProject "Actrium" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B3E458C12EC731A40014D74C /* Debug */,
+				B3E458C22EC731A40014D74C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B3E458C32EC731A40014D74C /* Build configuration list for PBXNativeTarget "Actrium" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B3E458C42EC731A40014D74C /* Debug */,
+				B3E458C52EC731A40014D74C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B3E458C62EC731A40014D74C /* Build configuration list for PBXNativeTarget "ActriumTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B3E458C72EC731A40014D74C /* Debug */,
+				B3E458C82EC731A40014D74C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B3E458C92EC731A40014D74C /* Build configuration list for PBXNativeTarget "ActriumUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B3E458CA2EC731A40014D74C /* Debug */,
+				B3E458CB2EC731A40014D74C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "ActriumIPC" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/actrium-platform/apple/ActriumIPC;
+		};
+		AA00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumVault" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/actrium-platform/apple/ActriumVault;
+		};
+		AB00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../packages/actrium-platform/apple/ActriumCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/raspu/Highlightr";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.3.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A2B3C4D5E6F7890ABCD0002 /* ActriumIPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ActriumIPC;
+		};
+		AA00110022003300AA00BB03 /* ActriumVault */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ActriumVault;
+		};
+		AB00110022003300AA00BB03 /* ActriumCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ActriumCore;
+		};
+		B3E78A282F02AFD7001F9589 /* Highlightr */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */;
+			productName = Highlightr;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B3E458982EC731A30014D74C /* Project object */;
+}

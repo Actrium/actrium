@@ -1,11 +1,11 @@
 # ViewBridge Scale Implementation Memo
 
 ## Current Git State
-- **Commit**: `585c74ba` - Fix ViewBridge scale to use viewport size with actro compensation
+- **Commit**: `585c74ba` - Fix ViewBridge scale to use viewport size with actrium compensation
 - **Date**: 2026-01-10
 
 ## Problem
-Single-layer actro approach with `scaleEffect` doesn't work for ViewBridge XPC:
+Single-layer actrium approach with `scaleEffect` doesn't work for ViewBridge XPC:
 - SwiftUI `scaleEffect` does NOT affect NSViewRepresentable content
 - CALayer transform on NSRemoteView has issues with bounds/frame mismatch
 - Remote view bounds (1280x720) differs from requested containerSize (988x838)
@@ -129,10 +129,10 @@ enum TransitionState {
 1. **ViewBridgeHostView.captureSnapshot()** - Uses NSRemoteView's private snapshot API
 2. **ViewBridgeCoordinator.cachedSnapshot** - Stores snapshot for Scale Layer
 3. **ViewBridgeCoordinatorManager.shared** - Singleton for global access
-4. **FocusedReactNativeOverlay** - Real Layer component (actro Out Full Screen)
+4. **FocusedReactNativeOverlay** - Real Layer component (actrium Out Full Screen)
 5. **ViewBridgeThumbnailView** - Scale Layer component (Show screenshot)
-6. **WorkspaceMainView integration** - Real Layer Yes. actro Change
-7. **TabPanel integration** - Scale Layer Yes. actro Internal
+6. **WorkspaceMainView integration** - Real Layer Yes. actrium Change
+7. **TabPanel integration** - Scale Layer Yes. actrium Internal
 8. **Snapshot capture timing** - Focus -> Overview Toggle filming
 
 ### Removed

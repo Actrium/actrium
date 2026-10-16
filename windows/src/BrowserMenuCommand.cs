@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Every user-invocable chrome command, shared by the compact app menu and

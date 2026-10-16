@@ -4,9 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-CRATE_NAME="actro_core"
-FRAMEWORK_NAME="ActroCore"
-UDL_FILE="src/actro_core.udl"
+CRATE_NAME="actrium_core"
+FRAMEWORK_NAME="ActriumCore"
+UDL_FILE="src/actrium_core.udl"
 GENERATED_DIR="generated"
 STAGING_DIR="xcframework-staging"
 TARGET_DIR="${CARGO_TARGET_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)/target}"

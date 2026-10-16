@@ -23,7 +23,7 @@
     "networkCheckInfo": "Error de red, por favor comprueba tu conexión"
   },
   "actr": {
-    "appTitle": "Actro ActroRuntime",
+    "appTitle": "Actrium ActriumRuntime",
     "input": {
       "placeholder": "Por favor ingrese",
       "holdToSpeak": "Mantén presionado para hablar",
@@ -104,7 +104,7 @@
       "shareSaveFailed": "Error al guardar la imagen. Inténtalo de nuevo.",
       "shareSavePermissionDeniedTitle": "Permisos insuficientes",
       "shareSavePermissionDenied": "Sin permiso de acceso.",
-      "shareFooter": "Una tarjeta de preguntas y respuestas de Actro",
+      "shareFooter": "Una tarjeta de preguntas y respuestas de Actrium",
       "shareAiFooter": "Esta respuesta fue generada por IA",
       "shareAiDisclaimer": "El contenido es solo para referencia. Revísalo cuidadosamente.",
       "submit": "Enviar",
@@ -181,7 +181,7 @@
       "realtime": "En tiempo real",
       "parentChild": "Ocio familiar",
       "culture": "Exploración cultural",
-      "officialService": "Servicio al cliente oficial de Actro",
+      "officialService": "Servicio al cliente oficial de Actrium",
       "scanHint": "Escanear código QR de la app"
     },
     "auth": {
@@ -254,7 +254,7 @@
       "deleteAccount": "Eliminar cuenta",
       "deleteAccountConfirm": "¿Confirmas que deseas eliminar tu cuenta? Esta acción no se puede deshacer y todos los datos de la cuenta se eliminarán permanentemente.",
       "logoutAccount": "Cerrar sesión de la cuenta",
-      "aboutActro": "Acerca de Actro",
+      "aboutActrium": "Acerca de Actrium",
       "userAgreement": "Acuerdo de Usuario",
       "privacyPolicy": "Política de Privacidad",
       "icp": "Registro ICP",

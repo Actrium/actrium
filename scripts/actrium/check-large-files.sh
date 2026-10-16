@@ -26,7 +26,7 @@ esac
 
 repo_root="$(git rev-parse --show-toplevel)"
 policy_file="${repo_root}/.github/actrium-large-files-allowlist.txt"
-limit_bytes="${ACTRO_LARGE_FILE_LIMIT_BYTES:-1000000}"
+limit_bytes="${ACTRIUM_LARGE_FILE_LIMIT_BYTES:-1000000}"
 
 cd "${repo_root}"
 
@@ -36,7 +36,7 @@ if [[ ! -f "${policy_file}" ]]; then
 fi
 
 if ! [[ "${limit_bytes}" =~ ^[0-9]+$ ]]; then
-  echo "ACTRO_LARGE_FILE_LIMIT_BYTES must be a non-negative integer" >&2
+  echo "ACTRIUM_LARGE_FILE_LIMIT_BYTES must be a non-negative integer" >&2
   exit 1
 fi
 

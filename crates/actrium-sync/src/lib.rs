@@ -1,12 +1,12 @@
-//! Reference executor for Actro browser sync.
+//! Reference executor for Actrium browser sync.
 //!
 //! This crate is intentionally outside client apps. Client apps consume
-//! `actro-core` contracts, while local probes and tests can use this crate as
+//! `actrium-core` contracts, while local probes and tests can use this crate as
 //! a SQLite reference executor for those contracts. Product browser sync is
 //! expected to use user-owned cloud storage through provider adapters instead
-//! of an Actro-operated sync service.
+//! of an Actrium-operated sync service.
 
-use actro_core::browser_data::{
+use actrium_core::browser_data::{
     self, BROWSER_STORAGE_SCHEMA_VERSION, BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
     BrowserStorageSyncExecutionPlan, BrowserStorageSyncExecutionResultBatch,
     BrowserStorageSyncOperation, BrowserStorageSyncOperationResult,

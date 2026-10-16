@@ -1,6 +1,6 @@
 # React Native Bundle 构建指南
 
-Actro 项目包含独立的 React Native bundle。现行 Helper 是单一 `ActroRenderer.app`，按 fingerprint 隔离进程，不再复制 `RCTViewService*.xpc`。详见 [Renderer-Process-Pool.md](Renderer-Process-Pool.md)。
+Actrium 项目包含独立的 React Native bundle。现行 Helper 是单一 `ActriumRenderer.app`，按 fingerprint 隔离进程，不再复制 `RCTViewService*.xpc`。详见 [Renderer-Process-Pool.md](Renderer-Process-Pool.md)。
 
 | Bundle | 入口文件 | 输出文件 | 用途 |
 |--------|----------|----------|------|
@@ -11,19 +11,19 @@ Actro 项目包含独立的 React Native bundle。现行 Helper 是单一 `Actro
 
 ```bash
 # 构建所有 bundle（Release 模式）
-./scripts/bundle-actro-runtime.sh
+./scripts/bundle-actrium-runtime.sh
 
 # 仅构建 System Apps bundle
-./scripts/bundle-actro-runtime.sh --target system
+./scripts/bundle-actrium-runtime.sh --target system
 
 # 仅构建 Actr Host bundle
-./scripts/bundle-actro-runtime.sh --target actr
+./scripts/bundle-actrium-runtime.sh --target actr
 
 # 构建 Development bundle（包含 source map）
-./scripts/bundle-actro-runtime.sh --dev
+./scripts/bundle-actrium-runtime.sh --dev
 
 # 查看帮助
-./scripts/bundle-actro-runtime.sh --help
+./scripts/bundle-actrium-runtime.sh --help
 ```
 
 ## Bundle 说明
@@ -77,12 +77,12 @@ packages/actrium/
 
 2. **构建 bundle**：
    ```bash
-   ./scripts/bundle-actro-runtime.sh
+   ./scripts/bundle-actrium-runtime.sh
    ```
 
 3. **构建 Xcode 项目**：
    ```bash
-   xcodebuild -workspace Actro.xcworkspace -scheme Actro build
+   xcodebuild -workspace Actrium.xcworkspace -scheme Actrium build
    ```
 
 4. **运行应用**：从 Xcode 运行或打开 `.app` 文件
@@ -96,6 +96,6 @@ packages/actrium/
 
 ## 文件位置
 
-- **Bundle 输出**：`Actro/Resources/`
-- **Xcode 项目**：`Actro.xcodeproj`
-- **构建脚本**：`scripts/bundle-actro-runtime.sh`
+- **Bundle 输出**：`Actrium/Resources/`
+- **Xcode 项目**：`Actrium.xcodeproj`
+- **构建脚本**：`scripts/bundle-actrium-runtime.sh`

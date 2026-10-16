@@ -1,7 +1,7 @@
 using System.Drawing;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class BrowserTab : IDisposable
 {

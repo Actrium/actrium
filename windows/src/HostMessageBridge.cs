@@ -1,6 +1,6 @@
 using Microsoft.Web.WebView2.Core;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class HostMessageBridge
 {
@@ -52,7 +52,7 @@ internal sealed class HostMessageBridge
 
     private const string BootstrapScript = """
         (() => {
-          if (!window.chrome || !window.chrome.webview || window.actroHost) {
+          if (!window.chrome || !window.chrome.webview || window.actriumHost) {
             return;
           }
 
@@ -93,7 +93,7 @@ internal sealed class HostMessageBridge
             }
           });
 
-          Object.defineProperty(window, "actroHost", {
+          Object.defineProperty(window, "actriumHost", {
             configurable: false,
             enumerable: true,
             writable: false,

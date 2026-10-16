@@ -1,4 +1,4 @@
-### actro-runtime
+### actrium-runtime
 
 for Android and iOS
 

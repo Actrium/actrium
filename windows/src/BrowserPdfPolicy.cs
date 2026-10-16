@@ -1,8 +1,8 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class BrowserPdfPolicy
 {
-    public const string DefaultPdfFileName = "actro-page.pdf";
+    public const string DefaultPdfFileName = "actrium-page.pdf";
 
     public static string GetSuggestedFileName(string? title, string? address)
     {

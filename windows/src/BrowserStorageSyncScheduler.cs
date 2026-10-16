@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed record BrowserStorageSyncSchedulerSnapshot
 {
@@ -42,7 +42,7 @@ internal sealed class BrowserStorageSyncScheduler : IDisposable
         }
     }
 
-    public string StatusJson => ActroCore.BuildBrowserStorageSyncSchedulerStatusJson(
+    public string StatusJson => ActriumCore.BuildBrowserStorageSyncSchedulerStatusJson(
         BuildStatusSnapshotJson(Snapshot));
 
     public async Task<string> RunNowAsync(

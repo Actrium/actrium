@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 // Renders the collapsible Diagnostics detail of the Browser Data Sync
 // settings dialog from the last provider round envelope the sync coordinator

@@ -1,5 +1,5 @@
 {
-  "name": "actro-native-deps",
+  "name": "actrium-native-deps",
   "version-string": "0.1.0",
   "dependencies": [
     "aom",

@@ -20,7 +20,7 @@
             android:orientation="horizontal"
             android:paddingHorizontal="8dp">
 
-            <io.actrium.actro.view.RoundedCornerLayout
+            <io.actrium.app.view.RoundedCornerLayout
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:layout_marginEnd="6dp"
@@ -30,7 +30,7 @@
                     android:id="@+id/ivAppIcon"
                     android:layout_width="20dp"
                     android:layout_height="20dp" />
-            </io.actrium.actro.view.RoundedCornerLayout>
+            </io.actrium.app.view.RoundedCornerLayout>
 
             <TextView
                 android:id="@+id/tvAppName"
@@ -50,7 +50,7 @@
 
     <!-- Select left bridge: Fill this oneitemLeft spacing. Connecting to the left neighbor.rcvBottomRight -->
 
-    <io.actrium.actro.tablet.ReverseCornerView
+    <io.actrium.app.tablet.ReverseCornerView
         android:id="@+id/vBridgeLeft"
         android:layout_width="20dp"
         android:layout_height="20dp"
@@ -60,7 +60,7 @@
         app:fillColor="#F2F2F6"
         app:reverseDirection="bottomRight" />
 
-    <io.actrium.actro.tablet.ReverseCornerView
+    <io.actrium.app.tablet.ReverseCornerView
         android:id="@+id/vBridgeRight"
         android:layout_width="20dp"
         android:layout_height="20dp"
@@ -70,7 +70,7 @@
         app:fillColor="#F2F2F6"
         app:reverseDirection="bottomLeft" />
 
-    <io.actrium.actro.tablet.ReverseCornerView
+    <io.actrium.app.tablet.ReverseCornerView
         android:id="@+id/rcvBottomLeft"
         android:layout_width="20dp"
         android:layout_height="20dp"
@@ -80,7 +80,7 @@
         app:fillColor="#F2F2F6"
         app:reverseDirection="bottomLeft" />
 
-    <io.actrium.actro.tablet.ReverseCornerView
+    <io.actrium.app.tablet.ReverseCornerView
         android:id="@+id/rcvBottomRight"
         android:layout_width="20dp"
         android:layout_height="20dp"

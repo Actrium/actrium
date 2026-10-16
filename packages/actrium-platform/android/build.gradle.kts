@@ -5,18 +5,18 @@ plugins {
 
 group =
     providers
-        .gradleProperty("actroNativeGroup")
+        .gradleProperty("actriumNativeGroup")
         .orElse("io.actrium")
         .get()
 
 version =
     providers
-        .gradleProperty("actroNativeVersion")
+        .gradleProperty("actriumNativeVersion")
         .orElse("0.0.0-dev")
         .get()
 
 android {
-    namespace = "io.actrium.actro.rust"
+    namespace = "io.actrium.app.rust"
     compileSdk = rootProject.extra["compileSdkVersion"] as Int
 
     defaultConfig {

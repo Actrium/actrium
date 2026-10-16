@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Built-in Actro app pages known by native shells and the shared RN runtime.
+/// Built-in Actrium app pages known by native shells and the shared RN runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SystemAppType {

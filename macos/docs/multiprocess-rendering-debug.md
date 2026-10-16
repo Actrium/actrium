@@ -4,7 +4,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Main Process (Actro.app)                                │
+│                           Main Process (Actrium.app)                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 1. BrowserViewModel receives an .actr package                                │
 │    ├─ Verify manifest, signature, and payload digests                        │
@@ -14,8 +14,8 @@
 │    ├─ Read the workload entry declared in manifest.toml                      │
 │    └─ appendRuntimeTab() → tabs.append(newTab)                               │
 │                                                                             │
-│ 3. UnifiedActroView Render                                                    │
-│    └─ ActroView                                                             │
+│ 3. UnifiedActriumView Render                                                    │
+│    └─ ActriumView                                                             │
 │        └─ ForEach(tabs) → TabCardView                                        │
 │            └─ MultiProcessTabView                                            │
 │                                                                             │
@@ -31,7 +31,7 @@
                          stdin (JSON config)
                                     ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Rendering Process (ActroTabRenderer.app)                       │
+│                        Rendering Process (ActriumTabRenderer.app)                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 1. TabRendererAppDelegate.applicationDidFinishLaunching                      │
 │    ├─ Parsing command line parameters (--tab-id, --width, --height, --background)              │
@@ -79,7 +79,7 @@
 **Symptom**: `onAppear` followed immediately by `onDisappear`
 **Cause**: SwiftUI view recreation when `@ObservedObject` properties change
 **Attempted Fix**:
-- Removed `@ObservedObject var viewModel` from `ActroView` and `TabCardView`
+- Removed `@ObservedObject var viewModel` from `ActriumView` and `TabCardView`
 - Added 1 second delay before switching to focus mode
 
 ### Issue 2: IOSurface Shows Only Background Color
@@ -105,12 +105,12 @@
 ## Files Involved
 
 ### Main Process
-- `Actro/Views/UnifiedActroView.swift` - Main actro view
-- `Actro/Views/MainContentView/BrowserViewModel.swift` - Tab management
-- `Actro/MultiProcess/IOSurfaceHostView.swift` - IOSurface display
-- `Actro/MultiProcess/TabProcessManager.swift` - Process management
+- `Actrium/Views/UnifiedActriumView.swift` - Main actrium view
+- `Actrium/Views/MainContentView/BrowserViewModel.swift` - Tab management
+- `Actrium/MultiProcess/IOSurfaceHostView.swift` - IOSurface display
+- `Actrium/MultiProcess/TabProcessManager.swift` - Process management
 
 ### Renderer Process
-- `ActroTabRenderer/TabRendererAppDelegate.swift` - App entry point
-- `ActroTabRenderer/TabRendererService.swift` - Rendering logic
-- `ActroTabRenderer/RendererReactNativeHost.swift` - React Native setup
+- `ActriumTabRenderer/TabRendererAppDelegate.swift` - App entry point
+- `ActriumTabRenderer/TabRendererService.swift` - Rendering logic
+- `ActriumTabRenderer/RendererReactNativeHost.swift` - React Native setup
