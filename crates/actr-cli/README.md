@@ -61,6 +61,20 @@ actr realm register-publisher --key publisher-profile-key.json \
 
 ---
 
+## Browser Host Realm client key
+
+Run `actr run --web -c actr.toml`, open its local page, choose the authorized
+Realm client key JSON file written by `actr realm join`, then select **Start
+Actor**. The file must name the configured Realm and Issuer. The page passes
+the key directly to its Service Worker before initialization; the worker
+validates it and stores it in its scoped browser secret store. The page shows
+the Actor as ready only after the worker confirms registration.
+
+Select the key when opening the bundled page. Host-side
+`deployment.realm_client_key` paths are not served to the browser, and private
+key material is not included in `/actr-runtime-config.json` or uploaded to the
+local static server. Package verification still uses public trust anchors.
+
 ## Organization principles
 
 These rules govern where a new command lives. Add commands that fit; if a new
