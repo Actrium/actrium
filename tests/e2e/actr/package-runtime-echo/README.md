@@ -29,7 +29,8 @@ retire the Realm and require the resolver to refuse it.
 - `sqlite3`
 - `python3` 3.11 or later
 - `perl`, `rustc`, `lsof`, `timeout`
-- Linux: `bubblewrap` and permission to create mount/PID namespaces.
+- Linux: Landlock ABI 2+ enabled in the kernel, or `bubblewrap` with permission
+  to create mount/PID namespaces.
 - macOS: the system `sandbox-exec` command.
 
 `actrix` does not need to be preinstalled. The scenario builds its test binary with `cargo test --no-run --bin actrix` and starts only the ignored `package_runtime_fixture` entry point. This avoids depending on public DNS for the virtual publisher domain while exercising the complete server and package runtime. An explicit `ACTRIX_BIN` must name that test binary.
@@ -86,13 +87,17 @@ Package signing and optional Registry publication happen in the builder. Their
 private keychains stay in a dedicated `publisher-private` directory. Both the
 Service Host and the client Host run through `lib/runtime-isolation.py`, which
 removes builder-specific environment variables and denies access to that
-directory. Linux uses bubblewrap mount/PID namespaces; macOS uses a Seatbelt
-file-access rule. The launcher fails if the boundary cannot be established.
+directory. Linux uses an inherited Landlock filesystem policy; kernels without
+Landlock may use bubblewrap mount/PID namespaces. macOS uses a Seatbelt
+file-access rule. The launcher fails if neither supported boundary is available.
 There is no fallback to HOME-only isolation.
 
 `test_runtime_isolation.py` first verifies the actual OS boundary: a disposable
 signing key and its symlink cannot be read, public material and the client's own
 Realm key remain usable, and builder-only environment variables are absent.
+Writing the signing file or moving/linking it into an allowed directory must
+also fail. Landlock allows filesystem siblings while leaving the signing
+directory's ancestor chain without content-read or mutation permissions.
 Before each Service startup the same launcher also probes the actual Publisher
 keychain and Realm key. The signing keys remain on disk during execution, so a
 missing-file cleanup cannot make this check pass accidentally. The existing
@@ -110,6 +115,8 @@ remain reserved in the protocol.
 CI runs the default runtime, both formal Realm paths, optional publication, and
 the retired-key/revoked-key scenario. The latter is Publisher package-key
 revocation coverage, separate from Realm Issuer-key rotation tests.
+The lightweight `Runtime Publisher Key Isolation` workflow can also validate
+Linux and macOS boundaries independently, without building Rust fixtures.
 
 ## Test transport and remaining coverage
 

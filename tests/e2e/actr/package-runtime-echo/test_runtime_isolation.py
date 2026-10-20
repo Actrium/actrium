@@ -39,6 +39,17 @@ for name in sys.argv[1:3]:
         raise SystemExit('runtime read Publisher signing material')
 assert pathlib.Path(sys.argv[3]).read_text() == 'public-package-material'
 assert pathlib.Path(sys.argv[4]).read_text() == 'runtime-owned-realm-material'
+secret = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[5]) / 'stolen-key'
+for operation in [lambda: secret.write_text('overwritten'),
+                  lambda: secret.rename(destination),
+                  lambda: os.link(secret, destination)]:
+    try:
+        operation()
+    except OSError:
+        pass
+    else:
+        raise SystemExit('runtime modified or reparented Publisher signing material')
 assert 'ACTR_TEST_PUBLISHER_PRIVATE_KEY' not in os.environ
 assert 'ACTR_REALM_E2E_DOCUMENTS' not in os.environ
 assert pathlib.Path(os.environ['HOME']) == pathlib.Path(sys.argv[5])
@@ -56,6 +67,7 @@ print('Publisher keys denied; public package and Realm key remain usable')
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertEqual((runtime / "runtime-state").read_text(), "started")
+            self.assertEqual(secret.read_text(), "disposable-signing-canary")
 
     def test_runtime_failure_is_propagated(self):
         with tempfile.TemporaryDirectory() as signing:

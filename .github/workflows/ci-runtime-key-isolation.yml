@@ -1,0 +1,43 @@
+name: Runtime Publisher Key Isolation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/ci-runtime-key-isolation.yml
+      - tests/e2e/actr/package-runtime-echo/lib/runtime-isolation.py
+      - tests/e2e/actr/package-runtime-echo/test_runtime_isolation.py
+  pull_request:
+    paths:
+      - .github/workflows/ci-runtime-key-isolation.yml
+      - tests/e2e/actr/package-runtime-echo/lib/runtime-isolation.py
+      - tests/e2e/actr/package-runtime-echo/test_runtime_isolation.py
+
+permissions:
+  contents: read
+
+jobs:
+  isolation:
+    name: Publisher key boundary (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: [self-hosted, Linux, X64]
+          - platform: macos
+            runner: macos-arm64-larger
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install optional namespace backend
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+      - name: Verify the actual OS boundary
+        run: python3 tests/e2e/actr/package-runtime-echo/test_runtime_isolation.py
