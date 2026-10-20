@@ -258,7 +258,7 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update
-          sudo apt-get install -y jq sqlite3 lsof perl
+          sudo apt-get install -y jq sqlite3 lsof perl bubblewrap
       # protoc 29.3 ships in the self-hosted runner image; skip the
       # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
@@ -286,10 +286,16 @@ jobs:
           test -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
           test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
           bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
-      - name: Run package runtime echo e2e (PR gate, MODE=published)
+      - name: Verify Publisher signing-key isolation
+        run: python3 tests/e2e/actr/package-runtime-echo/test_runtime_isolation.py
+      - name: Run package runtime echo e2e without Registry publication
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
-      - name: Run provider and external domain Realm runtime E2E
+      - name: Run provider and external domain Realms without Registry publication
         run: bash tests/e2e/actr/package-runtime-echo/realm-matrix.sh
+      - name: Verify optional Registry publication
+        run: MODE=published bash tests/e2e/actr/package-runtime-echo/run.sh
+      - name: Verify retired and revoked Publisher signing keys
+        run: MODE=rotation bash tests/e2e/actr/package-runtime-echo/run.sh
 
   audit:
     name: Dependency Audit

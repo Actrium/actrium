@@ -2338,8 +2338,9 @@ async fn archive_key_to_history(
 
 /// Publisher A signs a package; the owner of a Realm on another Host holds
 /// only the public package and its own Realm client key, and registers the
-/// Realm's Service. No Publisher private key takes part, and the package keeps
-/// its Publisher identity although it was never published to this Loran.
+/// Realm's Service, then renews and reissues it. No Publisher private key takes
+/// part after preparation, and the package keeps its Publisher identity although
+/// it was never published to this Loran.
 #[tokio::test]
 #[serial]
 async fn test_trusted_package_registers_without_publisher_private_key() {
@@ -2376,16 +2377,58 @@ async fn test_trusted_package_registers_without_publisher_private_key() {
     drop(publisher_key);
 
     let app = create_test_router(&env).await;
-    let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
-    match response.result.expect("result") {
+    let response = post_register(app.clone(), request.clone(), Some(ROUTE_KEY_LABEL)).await;
+    let registered = match response.result.expect("result") {
         register_response::Result::Success(ok) => {
             assert_eq!(registered_type(&ok).publisher, "publisher-a.example");
             assert_eq!(development(&ok), None, "keeps the Publisher identity");
+            ok
         }
         register_response::Result::Error(err) => {
             panic!("the Realm owner must register the Service without a Publisher key: {err:?}")
         }
+    };
+    let renewed = renewed(
+        post_renew(
+            app.clone(),
+            RenewCredentialRequest {
+                actr_id: registered.actr_id.clone(),
+                renewal_token: registered.renewal_token.unwrap(),
+                attempt_id: control_attempt_id(),
+            },
+        )
+        .await,
+    );
+    assert_eq!(renewed.actr_id, registered.actr_id);
+    assert_eq!(development(&renewed), None);
+    let reissued = post_reissue(
+        app,
+        ReissueCredentialRequest {
+            actr_id: registered.actr_id.clone(),
+            registration: request,
+            renewal_proof: renewed.renewal_token,
+            attempt_id: control_attempt_id(),
+        },
+        Some(ROUTE_KEY_LABEL),
+    )
+    .await;
+    match reissued.result.expect("reissue result") {
+        register_response::Result::Success(ok) => {
+            assert_eq!(ok.actr_id, registered.actr_id);
+            assert_eq!(registered_type(&ok).publisher, "publisher-a.example");
+            assert_eq!(development(&ok), None);
+        }
+        register_response::Result::Error(err) => {
+            panic!("reissue must not require a Publisher private key: {err:?}")
+        }
     }
+    let publications: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM publisher_package WHERE type_str = 'publisher-a.example/notes@1.0.0'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(publications, 0, "runtime must not publish the package");
 }
 
 /// A valid package whose publisher this Loran's registry does not know runs as

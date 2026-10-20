@@ -64,17 +64,14 @@ fi
 
 # MODE selects the scenario. The service host never holds the Publisher's
 # private key: it registers with the signed package and its Realm client key.
-#   published    (default) published package, full echo round-trip
-#   unpublished  package never published to this Loran keeps its Publisher identity
+#   unpublished  (default) full lifecycle without publishing the package to Loran
+#   published    optional Registry publication, same full runtime lifecycle
 #   rotation     unpublished package, Publisher key retired (pass) then revoked (reject)
-MODE="${MODE:-published}"
+MODE="${MODE:-unpublished}"
 case "$MODE" in
     published|unpublished|rotation) ;;
     *) fail "Unknown MODE: $MODE" ;;
 esac
-if [ "$REALM_MODE" != legacy ] && [ "$MODE" != published ]; then
-    fail "Formal Realm scenarios require MODE=published"
-fi
 
 for cmd in cargo curl jq sqlite3 python3 perl rustc lsof timeout; do
     require_cmd "$cmd"
@@ -98,15 +95,17 @@ ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
 CLIENT_RUNTIME_PATH="$RUN_DIR/client-runtime.toml"
 ACTRIX_DB="$SQLITE_DIR/actrix.db"
-SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
+PUBLISHER_PRIVATE_DIR="$RUN_DIR/publisher-private"
+SERVICE_KEYCHAIN="$PUBLISHER_PRIVATE_DIR/package.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
-PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
+PROVISIONED_KEYCHAIN="$SERVICE_KEYCHAIN"
 PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
 CLIENT_GUEST_PACKAGE="$DIST_DIR/${CLIENT_PUBLISHER}-pkg-runtime-echo-client-guest-${CLIENT_GUEST_VERSION}-cdylib.actr"
 CLIENT_GUEST_PUBLIC_KEY="$DIST_DIR/public-key.json"
 
-mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT"
 umask 077
+mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT" "$PUBLISHER_PRIVATE_DIR"
+RUNTIME_LAUNCHER=(python3 "$SCRIPT_DIR/lib/runtime-isolation.py" --private-dir "$PUBLISHER_PRIVATE_DIR" --)
 
 ACTRIX_PID=""
 SERVER_PID=""
@@ -189,14 +188,9 @@ render_runtime_configs() {
 
 start_actrix() {
     section "🚀 Starting local actrix"
-    if [ "$REALM_MODE" != legacy ]; then
-        if lsof -tiTCP:"$HTTP_PORT" -sTCP:LISTEN >/dev/null 2>&1 \
-            || lsof -tiUDP:"$ICE_PORT" >/dev/null 2>&1; then
-            fail "Realm E2E ports are occupied; set HTTP_PORT and ICE_PORT to unused ports"
-        fi
-    else
-        kill_listener tcp "$HTTP_PORT"
-        kill_listener udp "$ICE_PORT"
+    if lsof -tiTCP:"$HTTP_PORT" -sTCP:LISTEN >/dev/null 2>&1 \
+        || lsof -tiUDP:"$ICE_PORT" >/dev/null 2>&1; then
+        fail "Realm E2E ports are occupied; set HTTP_PORT and ICE_PORT to unused ports"
     fi
 
     # ACTRIX_RUST_LOG lets modes capture the debug provenance marker.
@@ -301,8 +295,6 @@ scaffold_service_guest() {
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
-    mkdir -p "$(dirname "$SERVICE_KEYCHAIN")"
-    cp "$PROVISIONED_KEYCHAIN" "$SERVICE_KEYCHAIN"
     cp "$PROVISIONED_PUBLIC_KEY" "$SERVICE_PUBLIC_KEY"
     write_project_keychain_config "$TMP_SERVICE_DIR" "$SERVICE_KEYCHAIN"
 
@@ -456,7 +448,7 @@ run_client_and_assert() {
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
         RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
-        "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
+        "${RUNTIME_LAUNCHER[@]}" "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
         >"$LOG_DIR/client.log" 2>&1 &
     CLIENT_PID=$!
 
@@ -511,7 +503,7 @@ assert_removed_member_refused() {
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
         RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
-        timeout "${CLIENT_TIMEOUT_SECONDS:-40}" \
+        "${RUNTIME_LAUNCHER[@]}" timeout "${CLIENT_TIMEOUT_SECONDS:-40}" \
         "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
         >"$LOG_DIR/client-removed.log" 2>&1 || status=$?
 
@@ -537,18 +529,25 @@ mk_isolated_env() {
     printf '%s\t%s\n' "$home_dir" "$hyper_dir"
 }
 
-# Assert no active publisher_package row for type_str+target: the package was
-# never published to this Loran.
-assert_no_active_package() {
+# A public Publisher Profile/key cache is allowed; a package-publication row
+# for this release is not. Do not hide DB errors or ignore revoked rows.
+assert_no_package_record() {
     local type_str="$1"
     local target="$2"
     local count
-    count="$(sqlite3 "$ACTRIX_DB" \
-        "SELECT COUNT(*) FROM publisher_package WHERE type_str='$type_str' AND target='$target' AND status='active';" 2>/dev/null || echo 0)"
+    count="$(python3 - "$ACTRIX_DB" "$type_str" "$target" <<'PY'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as connection:
+    print(connection.execute(
+        'SELECT COUNT(*) FROM publisher_package WHERE type_str = ? AND target = ?',
+        sys.argv[2:4],
+    ).fetchone()[0])
+PY
+)"
     if [ "$count" != "0" ]; then
-        fail "Precondition violated: $count active publisher_package row(s) for type_str=$type_str target=$target"
+        fail "Unexpected package-publication record(s): $count for $type_str / $target"
     fi
-    success "Confirmed no active published package for $type_str / $target"
+    success "Confirmed no package-publication record for $type_str / $target"
 }
 
 # Render the server runtime config (reuses the existing template).
@@ -572,10 +571,20 @@ start_server_isolated() {
     local hyper_dir="$2"
     local log_name="${3:-server.log}"
     render_server_runtime
+    HOME="$home_dir" "${RUNTIME_LAUNCHER[@]}" python3 - "$SERVICE_KEYCHAIN" "$REALM_OWNER_KEY" <<'PY'
+import pathlib, sys
+try:
+    pathlib.Path(sys.argv[1]).read_bytes()
+except OSError:
+    pass
+else:
+    raise SystemExit('Runtime can read the Publisher signing key')
+assert pathlib.Path(sys.argv[2]).read_bytes(), 'Runtime cannot read its own Realm key'
+PY
     HOME="$home_dir" \
         RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
         CARGO_TARGET_DIR="$ACTR_TARGET_DIR" \
-        "$ACTR_CLI_BIN" run -c "$SERVER_RUNTIME_PATH" --hyper-dir "$hyper_dir" \
+        "${RUNTIME_LAUNCHER[@]}" "$ACTR_CLI_BIN" run -c "$SERVER_RUNTIME_PATH" --hyper-dir "$hyper_dir" \
         >"$LOG_DIR/$log_name" 2>&1 &
     SERVER_PID=$!
 }
@@ -654,18 +663,21 @@ stop_actrix() {
 # Mode flows
 # ============================================================================
 
-mode_published() {
-    # Publish → run server → client echo round-trip. The server host has no
-    # Publisher keychain: the Realm owner registers with the package alone.
-    publish_service_package
+mode_runtime() {
+    if [ "$MODE" = published ]; then
+        publish_service_package
+    else
+        assert_no_package_record "${PUBLISHER}/EchoService@${SERVICE_VERSION}" "$HOST_TARGET"
+    fi
     local env
-    env="$(mk_isolated_env "published")"
+    env="$(mk_isolated_env "$MODE")"
     local home_dir hyper_dir
     IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
     start_server_isolated "$home_dir" "$hyper_dir" "server.log"
     expect_server_started "server.log"
+    assert_publisher_provenance
     # Dependency installation resolves the service over signaling, so the
-    # published service must also be online before the client guest lockfile is
+    # service must also be online before the client guest lockfile is
     # generated. Reuse this server for the final echo round-trip.
     build_client_guest_package
     run_client_and_assert
@@ -679,24 +691,10 @@ mode_published() {
     stop_server
 }
 
-mode_unpublished() {
-    section "🧪 MODE=unpublished (never-published package keeps its Publisher identity)"
-    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
-    assert_no_active_package "$type_str" "$HOST_TARGET"
-    local env
-    env="$(mk_isolated_env "unpublished")"
-    local home_dir hyper_dir
-    IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-    start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    expect_server_started "server.log"
-    assert_publisher_provenance
-    stop_server
-}
-
 mode_rotation() {
     section "🧪 MODE=rotation (retired key passes, revoked key rejects)"
     local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
-    assert_no_active_package "$type_str" "$HOST_TARGET"
+    assert_no_package_record "$type_str" "$HOST_TARGET"
 
     # The manifest's signing_key_id (key A) — needed to find the history_id after rotation.
     local signing_key_id
@@ -716,7 +714,7 @@ PY
 
     # --- Phase 1: rotate A→B (A archived as retired); the package signed by A still runs. ---
     section "🔄 Phase 1: rotate key (A → retired), expect success"
-    local rotation_keychain="$RUN_DIR/publisher-rotation-b.keychain.json"
+    local rotation_keychain="$PUBLISHER_PRIVATE_DIR/rotation-b.keychain.json"
     run_actr pkg keygen --output "$rotation_keychain" --force >/dev/null
     python3 - "$ACTRIX_DB" "$PUBLISHER" "$rotation_keychain" <<'PY'
 import base64
@@ -777,7 +775,7 @@ PY
     [ "$revoked_rows" = "1" ] || fail "Could not revoke historical key ${signing_key_id}"
 
     # Re-confirm no published package row, so rejection comes from KeyRevoked.
-    assert_no_active_package "$type_str" "$HOST_TARGET"
+    assert_no_package_record "$type_str" "$HOST_TARGET"
 
     local env2
     env2="$(mk_isolated_env "rot2")"
@@ -798,15 +796,14 @@ echo "Backend:       $BACKEND"
 echo "Message:       $TEST_INPUT"
 echo "Actrix binary: $ACTRIX_BIN"
 
+python3 "$SCRIPT_DIR/test_runtime_isolation.py"
 render_runtime_configs
 build_local_actr_cli
 build_local_actrix
 if [ "$REALM_MODE" != legacy ]; then prepare_realm_scenario; fi
 # Modes that assert the provenance need the debug-level "Package provenance
 # verified" marker in actrix.log.
-case "$MODE" in
-    unpublished|rotation) export ACTRIX_RUST_LOG="info,actrix::observability=debug" ;;
-esac
+export ACTRIX_RUST_LOG="info,actrix::observability=debug"
 start_actrix
 login_admin
 wait_for_signer
@@ -817,12 +814,14 @@ build_service_package
 if [ "$REALM_MODE" != legacy ]; then create_profile_realm; fi
 
 case "$MODE" in
-    published)   mode_published ;;
-    unpublished) mode_unpublished ;;
+    published|unpublished) mode_runtime ;;
     rotation)    mode_rotation ;;
 esac
 
 if [ "$REALM_MODE" != legacy ]; then retire_profile_realm; fi
+if [ "$MODE" != published ]; then
+    assert_no_package_record "${PUBLISHER}/EchoService@${SERVICE_VERSION}" "$HOST_TARGET"
+fi
 
 echo ""
 success "Package runtime echo E2E (MODE=${MODE}, REALM_MODE=${REALM_MODE}) completed successfully"
