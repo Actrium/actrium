@@ -322,6 +322,10 @@ impl PublisherRegistryManager {
             }
             // A confirmation goes on to find nothing to confirm.
             if record.profile_json == profile_json && confirmed.is_none() {
+                // Repair profiles accepted before listed retired keys were
+                // imported, without replacing any recorded revocation.
+                Self::import_retired_keys(&mut tx, record.id, keys, now).await?;
+                tx.commit().await?;
                 return Ok(record.clone());
             }
         }
@@ -396,7 +400,7 @@ impl PublisherRegistryManager {
                     )));
                 }
             }
-            sqlx::query(
+            let inserted = sqlx::query(
                 "INSERT INTO publisher
                     (name, public_key, key_id, profile_json, contact, status,
                      created_at, updated_at, verified_at, key_expires_at,
@@ -418,6 +422,7 @@ impl PublisherRegistryManager {
             .bind(&pins_json)
             .execute(&mut *tx)
             .await?;
+            Self::import_retired_keys(&mut tx, inserted.last_insert_rowid(), keys, now).await?;
             tx.commit().await?;
             platform::recording::info!("Publisher registered: name={publisher}, key_id={key_id}");
             return Publisher::get_by_name(&self.pool, publisher)
@@ -451,7 +456,10 @@ impl PublisherRegistryManager {
             sqlx::query(
                 "INSERT INTO publisher_key_history
                  (publisher_id, key_id, public_key, status, created_at, retired_at)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                 SELECT ?, ?, ?, ?, ?, ?
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM publisher_key_history WHERE publisher_id = ? AND key_id = ?
+                 )",
             )
             .bind(record.id)
             .bind(old_id)
@@ -459,6 +467,8 @@ impl PublisherRegistryManager {
             .bind(if listed { "retired" } else { "revoked" })
             .bind(record.verified_at.unwrap_or(record.created_at))
             .bind(now)
+            .bind(record.id)
+            .bind(old_id)
             .execute(&mut *tx)
             .await?;
         }
@@ -481,6 +491,7 @@ impl PublisherRegistryManager {
                     .await?;
             }
         }
+        Self::import_retired_keys(&mut tx, record.id, keys, now).await?;
         let updated = sqlx::query(
             "UPDATE publisher
              SET public_key = ?, key_id = ?, key_expires_at = ?, next_public_key = ?,
@@ -516,6 +527,45 @@ impl PublisherRegistryManager {
         Publisher::get(&self.pool, record.id)
             .await?
             .ok_or(PublisherRegistryError::NotFound)
+    }
+
+    /// An accepted Profile also authorizes verification with retired package
+    /// keys this Registry has never seen active. Import them in the same write
+    /// transaction; an existing history row, especially a revocation, wins.
+    async fn import_retired_keys(
+        connection: &mut sqlx::SqliteConnection,
+        publisher_id: i64,
+        keys: &PublisherKeys,
+        now: i64,
+    ) -> Result<(), PublisherRegistryError> {
+        for key in keys
+            .keys
+            .iter()
+            .filter(|key| key.status == KeyStatus::Retired)
+        {
+            crypto::validate_public_key(&key.public_key)?;
+            let key_id = crypto::compute_key_id_from_b64(&key.public_key)?;
+            // Profiles do not carry a retirement timestamp. Record when this
+            // Registry accepted the historical key, not an invented lifetime.
+            sqlx::query(
+                "INSERT INTO publisher_key_history
+                 (publisher_id, key_id, public_key, status, created_at, retired_at)
+                 SELECT ?, ?, ?, 'retired', ?, ?
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM publisher_key_history WHERE publisher_id = ? AND key_id = ?
+                 )",
+            )
+            .bind(publisher_id)
+            .bind(&key_id)
+            .bind(&key.public_key)
+            .bind(now)
+            .bind(now)
+            .bind(publisher_id)
+            .bind(&key_id)
+            .execute(&mut *connection)
+            .await?;
+        }
+        Ok(())
     }
 
     /// Test-only shortcut for provisioning publisher records without external

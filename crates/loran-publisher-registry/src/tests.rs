@@ -1481,6 +1481,209 @@ async fn publish_with(
 }
 
 #[tokio::test]
+async fn register_rotated_profile_imports_retired_package_keys() {
+    use base64::Engine as _;
+    use ed25519_dalek::{Signer, SigningKey};
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let old = SigningKey::generate(&mut OsRng);
+    let current = SigningKey::generate(&mut OsRng);
+    let domain = "first-rotated.example";
+    let profile = signed_profile(
+        domain,
+        4,
+        &[("root-1", &root, "active")],
+        &[(&old, "retired"), (&current, "active")],
+    );
+    let manifest = test_manifest(domain, "svc", "1.0.0", "wasm32-wasip1");
+    let signature =
+        base64::engine::general_purpose::STANDARD.encode(old.sign(manifest.as_bytes()).to_bytes());
+    let old_id = crypto::compute_key_id(old.verifying_key().as_bytes());
+    drop(old);
+
+    let record = register(&manager, &profile).await.unwrap();
+    let PackageSigningKey::Trusted(info) = manager
+        .package_signing_key(domain, &old_id)
+        .await
+        .expect("a listed retired key must verify packages on first import")
+    else {
+        panic!("a listed retired key must retain Publisher trust");
+    };
+    assert!(crypto::verify_signature(manifest.as_bytes(), &signature, &info.public_key).unwrap());
+    assert!(
+        !crypto::verify_signature(manifest.as_bytes(), &signature, &record.public_key).unwrap()
+    );
+    register(&manager, &profile).await.unwrap();
+    assert_eq!(manager.admin_list_keys(record.id).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn refresh_imports_unseen_retired_keys_without_reviving_revocations() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let current = SigningKey::generate(&mut OsRng);
+    let old = SigningKey::generate(&mut OsRng);
+    let older = SigningKey::generate(&mut OsRng);
+    let old_id = crypto::compute_key_id(old.verifying_key().as_bytes());
+    let older_id = crypto::compute_key_id(older.verifying_key().as_bytes());
+    let domain = "refresh-retired.example";
+    register(
+        &manager,
+        &signed_profile(domain, 1, &roots, &[(&current, "active")]),
+    )
+    .await
+    .unwrap();
+    let record = register(
+        &manager,
+        &signed_profile(
+            domain,
+            2,
+            &roots,
+            &[(&current, "active"), (&old, "retired")],
+        ),
+    )
+    .await
+    .unwrap();
+    let history = manager.admin_list_keys(record.id).await.unwrap();
+    assert_eq!(
+        history.len(),
+        1,
+        "refresh must import previously unseen keys"
+    );
+    crate::model::PublisherKeyHistory::revoke(manager.pool(), history[0].id)
+        .await
+        .unwrap();
+
+    let profile = signed_profile(
+        domain,
+        3,
+        &roots,
+        &[(&current, "active"), (&old, "retired"), (&older, "retired")],
+    );
+    register(&manager, &profile).await.unwrap();
+    register(&manager, &profile).await.unwrap();
+    assert!(matches!(
+        manager.package_signing_key(domain, &old_id).await,
+        Err(PublisherRegistryError::KeyRevoked(_))
+    ));
+    assert!(matches!(
+        manager.package_signing_key(domain, &older_id).await,
+        Ok(PackageSigningKey::Trusted(_))
+    ));
+    assert_eq!(manager.admin_list_keys(record.id).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn reregister_same_profile_backfills_retired_keys_without_reviving_revocations() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let current = SigningKey::generate(&mut OsRng);
+    let old = SigningKey::generate(&mut OsRng);
+    let revoked = SigningKey::generate(&mut OsRng);
+    let old_id = crypto::compute_key_id(old.verifying_key().as_bytes());
+    let revoked_id = crypto::compute_key_id(revoked.verifying_key().as_bytes());
+    let domain = "backfill-retired.example";
+    let profile = signed_profile(
+        domain,
+        4,
+        &[("root-1", &root, "active")],
+        &[
+            (&current, "active"),
+            (&old, "retired"),
+            (&revoked, "retired"),
+        ],
+    );
+    let record = register(&manager, &profile).await.unwrap();
+    // Reproduce a Registry imported before retired keys were persisted. Keep
+    // an explicit local revocation: backfill must never replace that decision.
+    sqlx::query("DELETE FROM publisher_key_history WHERE publisher_id = ?")
+        .bind(record.id)
+        .execute(manager.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO publisher_key_history
+         (publisher_id, key_id, public_key, status, created_at, retired_at)
+         VALUES (?, ?, ?, 'revoked', 1, 2)",
+    )
+    .bind(record.id)
+    .bind(&revoked_id)
+    .bind(b64_key(&revoked))
+    .execute(manager.pool())
+    .await
+    .unwrap();
+
+    register(&manager, &profile).await.unwrap();
+    assert!(matches!(
+        manager.package_signing_key(domain, &old_id).await,
+        Ok(PackageSigningKey::Trusted(_))
+    ));
+    assert!(matches!(
+        manager.package_signing_key(domain, &revoked_id).await,
+        Err(PublisherRegistryError::KeyRevoked(_))
+    ));
+    register(&manager, &profile).await.unwrap();
+    assert_eq!(manager.admin_list_keys(record.id).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn refresh_preserves_current_key_revocation_when_it_retires() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let old = SigningKey::generate(&mut OsRng);
+    let current = SigningKey::generate(&mut OsRng);
+    let domain = "revoked-current.example";
+    let record = register(
+        &manager,
+        &signed_profile(domain, 1, &roots, &[(&old, "active")]),
+    )
+    .await
+    .unwrap();
+    crate::model::PublisherKeyHistory::archive(
+        manager.pool(),
+        record.id,
+        &record.key_id,
+        &record.public_key,
+        record.created_at,
+    )
+    .await
+    .unwrap();
+    let history = manager.admin_list_keys(record.id).await.unwrap();
+    crate::model::PublisherKeyHistory::revoke(manager.pool(), history[0].id)
+        .await
+        .unwrap();
+    register(
+        &manager,
+        &signed_profile(
+            domain,
+            2,
+            &roots,
+            &[(&current, "active"), (&old, "retired")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        manager.package_signing_key(domain, &record.key_id).await,
+        Err(PublisherRegistryError::KeyRevoked(_))
+    ));
+    assert_eq!(manager.admin_list_keys(record.id).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn two_active_package_keys_overlap_during_rotation() {
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
