@@ -27,10 +27,11 @@ const deferred = () => {
 // Execute the complete shipped classic worker, including its real message
 // handler, bootstrap and cleanup paths. Only the external WASM/package bytes
 // and WASM registration boundary are doubles; no worker function is replaced.
-function worker(sourceUrl, register) {
+function worker(sourceUrl, register, restoredKeyId = 'key-a') {
   const listeners = new Map();
   const windows = new Map();
   const attempts = [];
+  let storedKeyId = restoredKeyId;
   const wasm = Object.assign(
     vi.fn(async () => {}),
     {
@@ -48,7 +49,10 @@ function worker(sourceUrl, register) {
       })),
       register_client: vi.fn(async (id, runtimeConfig) => {
         attempts.push({ id, config: structuredClone(runtimeConfig) });
+        storedKeyId = runtimeConfig.realm_client_key?.key_id ?? storedKeyId;
+        const keyId = storedKeyId;
         await register(id, runtimeConfig);
+        return keyId;
       }),
       unregister_client: vi.fn(async () => {}),
     }
@@ -178,15 +182,32 @@ describe.each([
     expect(runtime.wasm.unregister_client).not.toHaveBeenCalledWith('live');
   });
 
-  it('does not replace the key of a live client restored from browser storage', async () => {
+  it('accepts the same imported A after restoring A and still refuses B', async () => {
     const runtime = worker(source, async () => {});
     const live = await runtime.init('stored-key', config, 'live-tab');
     await expectMessage(live, 'runtime_ready');
+    expect(runtime.state().keyId).toBe('key-a');
+    const same = await runtime.init('same-key', imported('key-a'), 'same-tab');
+    await expectMessage(same, 'runtime_ready');
+    expect(runtime.state().keyId).toBe('key-a');
     const other = await runtime.init('other-key', imported('key-b'), 'other-tab');
     await expectMessage(other, 'runtime_error');
-    expect(runtime.attempts.map((attempt) => attempt.id)).toEqual(['stored-key']);
-    expect(runtime.state().clients).toEqual(['stored-key']);
+    expect(runtime.attempts.map((attempt) => attempt.id)).toEqual(['stored-key', 'same-key']);
+    expect(runtime.state().clients).toEqual(['stored-key', 'same-key']);
     expect(runtime.wasm.unregister_client).not.toHaveBeenCalled();
+  });
+
+  it('keeps the live binding if a later Host restores a different key', async () => {
+    const runtime = worker(source, async () => {});
+    const live = await runtime.init('stored-key', config, 'live-tab');
+    await expectMessage(live, 'runtime_ready');
+    runtime.wasm.register_client.mockResolvedValueOnce('key-b');
+    const changed = await runtime.init('changed-storage', config, 'changed-tab');
+    await expectMessage(changed, 'runtime_error');
+    expect(runtime.wasm.unregister_client).toHaveBeenCalledWith('changed-storage');
+    expect(runtime.wasm.unregister_client).not.toHaveBeenCalledWith('stored-key');
+    expect(runtime.state().keyId).toBe('key-a');
+    expect(runtime.state().clients).toEqual(['stored-key']);
   });
 
   it('allows a replacement key after WASM bootstrap fails', async () => {

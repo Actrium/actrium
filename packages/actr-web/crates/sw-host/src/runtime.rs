@@ -3353,12 +3353,13 @@ pub fn init_global() -> Result<(), JsValue> {
 /// Each call creates an independent runtime with its own signaling connection,
 /// actor registration, and WebRTC state. This enables multiple browser tabs
 /// to work simultaneously without interfering with each other.
+/// Returns the actual imported or restored Realm client key ID after success.
 #[wasm_bindgen]
 pub async fn register_client(
     client_id: String,
     config: JsValue,
     port: MessagePort,
-) -> Result<(), JsValue> {
+) -> Result<String, JsValue> {
     // Ensure global init
     init_global()?;
 
@@ -3371,6 +3372,7 @@ pub async fn register_client(
         config.acl_allow_types,
     );
     let mut runtime = SwRuntime::new(client_id.clone(), config).await?;
+    let client_key_id = runtime.issuer.client_key_id().to_owned();
 
     // Set DOM port
     runtime.dom_port = Some(port);
@@ -3807,7 +3809,7 @@ pub async fn register_client(
         "[SW] [{}] Client registration complete (State Path enabled)",
         client_id
     );
-    Ok(())
+    Ok(client_key_id)
 }
 
 /// Unregister a client (browser tab) from the SW runtime.
@@ -4207,6 +4209,7 @@ mod cred_ns_tests {
         let imported = SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
             .await
             .unwrap();
+        assert_eq!(imported.client_key_id(), file.key_id);
         assert!(imported.accepts_credential(&credential));
         drop(imported);
         config.realm_client_key = None;
@@ -4214,6 +4217,7 @@ mod cred_ns_tests {
         let restored = SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
             .await
             .unwrap();
+        assert_eq!(restored.client_key_id(), file.key_id);
         assert!(restored.accepts_credential(&credential));
         assert!(
             SwRuntime::load_issuer_client(

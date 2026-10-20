@@ -228,8 +228,17 @@ async function registerClient(registration) {
   try {
     await ensureWasmReady();
     if (registration.cancelled) return;
-    await wasm_bindgen.register_client(clientId, config, port);
+    const clientKeyId = await wasm_bindgen.register_client(clientId, config, port);
     if (registration.cancelled) return;
+    if (typeof clientKeyId !== 'string' || !clientKeyId) {
+      throw new Error('[SW] Host did not return a Realm client key ID');
+    }
+    if (RUNTIME_CLIENT_KEY_ID !== null && RUNTIME_CLIENT_KEY_ID !== clientKeyId) {
+      throw new Error('[SW] Host registered a different Realm client key');
+    }
+    // Imported and IndexedDB-restored clients must share the same binding.
+    // Use the validated Host result rather than guessing from the input.
+    RUNTIME_CLIENT_KEY_ID = clientKeyId;
     registration.registered = true;
     delete config.realm_client_key;
     console.log('[SW] Client registered (WBG):', clientId);

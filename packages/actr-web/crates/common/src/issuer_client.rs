@@ -96,6 +96,11 @@ impl WebIssuerClient {
         }
     }
 
+    /// Public identity of the validated key used for registration and renewal.
+    pub fn client_key_id(&self) -> &str {
+        &self.client_key.key_id
+    }
+
     pub fn accepts_credential(&self, credential: &actr_protocol::AIdCredential) -> bool {
         actr_protocol::IdentityClaims::decode(credential.claims.as_ref()).is_ok_and(|claims| {
             claims.realm == self.client_key.realm
