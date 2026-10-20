@@ -53,7 +53,7 @@ def main():
         # root/fd aliases. Keep host networking for the real Issuer and TURN.
         launch = [
             sandbox, "--die-with-parent", "--new-session", "--unshare-user",
-            "--disable-userns", "--unshare-pid",
+            "--unshare-pid",
             "--bind", "/", "/", "--proc", "/proc", "--tmpfs", str(private_dir),
             "--chdir", os.getcwd(), "--", *command,
         ]
