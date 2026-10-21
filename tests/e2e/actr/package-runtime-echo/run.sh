@@ -14,6 +14,11 @@ case "$REALM_MODE" in
     legacy|provider|external) ;;
     *) fail "Unknown REALM_MODE: $REALM_MODE" ;;
 esac
+REALM_STAGE="${REALM_STAGE:-full}"
+case "$REALM_STAGE" in full|profile) ;; *) fail "Unknown REALM_STAGE: $REALM_STAGE" ;; esac
+if [ "$REALM_STAGE" = profile ] && [ "$REALM_MODE" = legacy ]; then
+    fail "REALM_STAGE=profile requires a provider or external Realm"
+fi
 
 HTTP_PORT="${HTTP_PORT:-8081}"
 ICE_PORT="${ICE_PORT:-3478}"
@@ -96,6 +101,9 @@ SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
 CLIENT_RUNTIME_PATH="$RUN_DIR/client-runtime.toml"
 ACTRIX_DB="$SQLITE_DIR/actrix.db"
 PUBLISHER_PRIVATE_DIR="$RUN_DIR/publisher-private"
+BUILDER_HOME="$RUN_DIR/home-builder"
+BUILDER_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+BUILDER_RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
 SERVICE_KEYCHAIN="$PUBLISHER_PRIVATE_DIR/package.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
 PROVISIONED_KEYCHAIN="$SERVICE_KEYCHAIN"
@@ -104,10 +112,11 @@ CLIENT_GUEST_PACKAGE="$DIST_DIR/${CLIENT_PUBLISHER}-pkg-runtime-echo-client-gues
 CLIENT_GUEST_PUBLIC_KEY="$DIST_DIR/public-key.json"
 
 umask 077
-mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT" "$PUBLISHER_PRIVATE_DIR"
+mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT" "$PUBLISHER_PRIVATE_DIR" "$BUILDER_HOME"
 RUNTIME_LAUNCHER=(python3 "$SCRIPT_DIR/lib/runtime-isolation.py" --private-dir "$PUBLISHER_PRIVATE_DIR" --)
 
 ACTRIX_PID=""
+HTTPS_PID=""
 SERVER_PID=""
 CLIENT_PID=""
 ACTR_CLI_BIN=""
@@ -132,6 +141,9 @@ cleanup() {
     if [ -n "$ACTRIX_PID" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
         kill "$ACTRIX_PID" 2>/dev/null || true
     fi
+    if [ -n "$HTTPS_PID" ] && kill -0 "$HTTPS_PID" 2>/dev/null; then
+        kill "$HTTPS_PID" 2>/dev/null || true
+    fi
     wait 2>/dev/null || true
 
     if [ $status -eq 0 ] && [ "${KEEP_TMP:-0}" != "1" ]; then
@@ -146,7 +158,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 run_actr() {
-    CARGO_TARGET_DIR="$ACTR_TARGET_DIR" "$ACTR_CLI_BIN" "$@"
+    # pkg keygen writes ~/.actr/config.toml even with an explicit output.
+    # Isolate all CLI configuration while keeping the existing toolchain cache.
+    HOME="$BUILDER_HOME" CARGO_HOME="$BUILDER_CARGO_HOME" RUSTUP_HOME="$BUILDER_RUSTUP_HOME" \
+        CARGO_TARGET_DIR="$ACTR_TARGET_DIR" "$ACTR_CLI_BIN" "$@"
 }
 
 build_local_actr_cli() {
@@ -812,6 +827,14 @@ provision_publisher_keychain
 scaffold_service_guest
 build_service_package
 if [ "$REALM_MODE" != legacy ]; then create_profile_realm; fi
+if [ "$REALM_STAGE" = profile ]; then
+    # An explicit transport diagnostic, not a successful runtime Echo. Keep
+    # the default/full CI path unchanged and require retirement verification.
+    retire_profile_realm
+    assert_no_package_record "${PUBLISHER}/EchoService@${SERVICE_VERSION}" "$HOST_TARGET"
+    success "Realm Profile/package lifecycle (REALM_MODE=${REALM_MODE}, REALM_HTTPS=${REALM_HTTPS:-0}) passed; runtime Echo was not run"
+    exit 0
+fi
 
 case "$MODE" in
     published|unpublished) mode_runtime ;;

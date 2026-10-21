@@ -583,8 +583,56 @@ mod tests {
         ));
     }
 
+    /// Download the Profile-selected package before joining. This remains a
+    /// test orchestrator, not automatic Host resolution (#324/#336).
+    async fn download_realm_package(profile: &RealmProfile, output: &str) -> Result<()> {
+        use sha2::{Digest, Sha256};
+        use std::io::Write as _;
+
+        let package = profile.package.as_ref().context("active Realm package")?;
+        let bytes = e2e_documents::fetch_https(&package.href, 64 * 1024 * 1024).await?;
+        anyhow::ensure!(
+            hex::encode(Sha256::digest(&bytes)) == package.sha256,
+            "PACKAGE_DIGEST_MISMATCH"
+        );
+        let manifest = actr_pack::read_manifest(&bytes)?;
+        let publisher = ActrUri::from_domain(&manifest.publisher)?;
+        let document =
+            e2e_documents::fetch(publisher.discovery_url().context("Publisher URL")?).await?;
+        let value: Value = serde_json::from_slice(&document)?;
+        let descriptor: AuthorityDescriptor = serde_json::from_value(value.clone())?;
+        descriptor.validate_for(&publisher)?;
+        let profile: actr_protocol::PublisherProfile =
+            serde_json::from_value(value["publisher"].clone())?;
+        let keys = profile.verify(&manifest.publisher, chrono::Utc::now())?;
+        let key = keys
+            .keys
+            .iter()
+            .find(|key| Some(&key.id) == manifest.signing_key_id.as_ref())
+            .context("package signing key is not listed by Publisher")?;
+        let public_key: [u8; 32] = BASE64
+            .decode(&key.public_key)?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("invalid package public key"))?;
+        let verified = actr_pack::verify(
+            &bytes,
+            &ed25519_dalek::VerifyingKey::from_bytes(&public_key)?,
+        )?;
+        anyhow::ensure!(
+            verified.manifest.actr_type_str() == package.r#type,
+            "SERVICE_ACTOR_TYPE_MISMATCH"
+        );
+        let output = std::path::Path::new(output);
+        let parent = output.parent().context("package output directory")?;
+        std::fs::create_dir_all(parent)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(&bytes)?;
+        temporary.persist(output)?;
+        Ok(())
+    }
+
     /// Drives the real Profile resolver and join handler against the running
-    /// E2E Issuer. Only public-document transport uses the virtual-domain map.
+    /// E2E Issuer. HTTPS mode also downloads and verifies the selected package.
     #[tokio::test]
     #[ignore = "started by package-runtime-echo/lib/realm-scenarios.sh"]
     async fn realm_runtime_join_fixture() -> Result<()> {
@@ -595,6 +643,9 @@ mod tests {
         let invite = RealmInvite::decode(&invite_text)?;
         let profile =
             realm_profile(&invite.realm, invite.profile.as_ref(), e2e_documents::fetch).await?;
+        if let Some(output) = request["package_file"].as_str() {
+            download_realm_package(&profile, output).await?;
+        }
         let args = JoinArgs {
             invite: invite_text,
             output: request["key_file"].as_str().context("key_file")?.into(),

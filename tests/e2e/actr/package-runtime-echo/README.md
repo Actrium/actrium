@@ -29,6 +29,7 @@ retire the Realm and require the resolver to refuse it.
 - `sqlite3`
 - `python3` 3.11 or later
 - `perl`, `rustc`, `lsof`, `timeout`
+- `openssl` for the formal matrix's disposable TLS certificates
 - Linux: Landlock ABI 2+ enabled in the kernel, or `bubblewrap` with permission
   to create mount/PID namespaces.
 - macOS: the system `sandbox-exec` command.
@@ -53,8 +54,8 @@ MODE=rotation bash tests/e2e/actr/package-runtime-echo/run.sh
 bash tests/e2e/actr/package-runtime-echo/realm-matrix.sh
 
 # Or run one path while iterating.
-REALM_MODE=provider bash tests/e2e/actr/package-runtime-echo/run.sh
-REALM_MODE=external bash tests/e2e/actr/package-runtime-echo/run.sh
+REALM_HTTPS=1 REALM_MODE=provider bash tests/e2e/actr/package-runtime-echo/run.sh
+REALM_HTTPS=1 REALM_MODE=external bash tests/e2e/actr/package-runtime-echo/run.sh
 ```
 
 The matrix defaults to `MODE=unpublished` and enables the Provider's authority. It builds
@@ -64,6 +65,29 @@ through the Admin API and verifies the Provider-signed Profile.
 `REALM_MODE=external` publishes a separate domain's self-signed Realm keys, uses
 the real CLI `create-request` / `sign-profile` commands, and checks the
 pending-to-active transition through `/actr/realm-management`.
+
+The matrix defaults to `REALM_HTTPS=1`. A disposable private CA and TLS server
+serve the Realm/Publisher documents and actual `.actr` bytes. A restricted
+loopback CONNECT tunnel preserves bootstrap URLs on HTTPS port 443 without
+requiring root privileges or changing system DNS/trust. Both Rust test clients
+and the test server explicitly trust that CA, with certificate/hostname checks
+enabled. Each client resolves and verifies the signed Realm and Publisher
+Profiles, downloads the package, checks its digest/signature/type, and only then
+redeems its invite. The Service Host executes the downloaded package. Negative
+cases require untrusted CA, wrong authority, bad digest and invalid Publisher
+signature to fail before key creation or package-cache publication. The external
+domain also signs Profiles selecting a type-mismatched package or an invalid
+package signature with a matching digest; both must be refused.
+
+`test_https_documents.py` checks the real TLS fixture, including wrong-hostname
+rejection and the tunnel's destination allowlist. CI runs it before the matrix.
+`REALM_STAGE=profile bash tests/e2e/actr/package-runtime-echo/realm-matrix.sh`
+isolates discovery, download/verification, joining and retirement for diagnosis
+on machines without usable RTC networking. Its result explicitly excludes Echo,
+restart and live Actor revocation; CI retains the default full runtime matrix.
+`REALM_HTTPS=0` retains the map-only diagnostic mode. Publisher rotation retains
+its separate dynamic signed-document fixture (`MODE=rotation` defaults to
+`REALM_HTTPS=0`), because it intentionally edits Registry key states directly.
 
 Both paths resolve and verify the Profile before redeeming owner/editor invites,
 use independent Realm client keys, run the real Issuer, signaling and Host Echo
@@ -105,9 +129,15 @@ Issuer integration regression `test_trusted_package_registers_without_publisher_
 also covers registration, renewal and reissue after dropping the Publisher key,
 while checking that no package-publication row was created.
 
+Builder CLI commands also use a disposable HOME so `pkg keygen` cannot rewrite
+the developer's global `~/.actr/config.toml`. Cargo/Rustup caches are explicitly
+retained for subprocess builds; runtime HOME and key isolation stay separate.
+
 This boundary protects the test's Publisher signing directory; it is not a
 general-purpose sandbox for untrusted native workloads. The server fixture's
-Publisher Profile signing root stays inside the separate server process.
+legacy/rotation Publisher Profile root stays inside the server process. In HTTPS
+mode the builder's Profile root stays in the protected `publisher-private`
+directory and the TLS origin serves only its public signed descriptor.
 Production package signing and authenticated optional Registry publication
 continue to require their legitimate signing keys. Removed runtime proof fields
 remain reserved in the protocol.
@@ -120,16 +150,16 @@ Linux and macOS boundaries independently, without building Rust fixtures.
 
 ## Test transport and remaining coverage
 
-**Transport boundary:** virtual-domain public documents are read from a
-disposable URL-to-document map instead of public HTTPS. The map is used only by
-the server test binary and the explicitly invoked CLI lib-test entry point
-`realm_runtime_join_fixture`. That entry point runs the production Profile
-resolver and join implementation without `--issuer`; membership requests still
-go to the running server over HTTP. Document signatures, domain-key acceptance,
-management envelopes, membership authorization and client proofs are not
-stubbed. Publisher transport keeps the existing signed-document fixture. The
-package is built locally and hash-checked, rather than downloaded from its
-declared HTTPS URL. Production executables have no document-map override.
+**Transport boundary:** in HTTPS mode the map is the TLS origin's published
+document store, not a replacement client fetcher. The server test binary and
+explicit CLI lib-test entry point `realm_runtime_join_fixture` use real reqwest
+HTTPS requests with the isolated test CA/tunnel. The entry point runs the
+production Profile resolver and join implementation without `--issuer`, plus
+package verification before joining. Membership and the Loran runtime control
+plane still use the test server's HTTP/WS endpoints. This is not a production
+deployment or an assertion that public control-plane endpoints may be plaintext.
+Signatures, domain binding, membership handlers and client proofs are not
+stubbed. Production executables have no test CA, tunnel or document-map override.
 
 The matrix enables real STUN/TURN and uses relay-only RTC, so the Echo also
 requires usable Realm-scoped TURN credentials. Its test server permits private
@@ -141,7 +171,10 @@ when no route exists. Override `REALM_ICE_IP` to select another reachable IPv4
 address of the test machine. This changes the advertised test deployment
 address, not identity checks or the RTC implementation.
 
-This is protocol/runtime E2E, not public DNS/WebPKI, package-download or UI E2E.
+This is protocol/runtime E2E with HTTPS package download, not public DNS/WebPKI
+or Actrium UI E2E. The private-CA transport does not exercise production SSRF
+DNS filtering. Host automatic Profile/package integration remains #324/#336;
+the test orchestrator still translates a verified Profile into Host config.
 It does not claim coverage for `.actr.alt` local Realms, Provider subdomains,
 multi-node infrastructure, periodic external Profile refresh, or persistent
 client trust-pin/rollback handling. Those need separate implementation or

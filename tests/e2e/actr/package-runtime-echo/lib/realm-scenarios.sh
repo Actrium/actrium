@@ -58,6 +58,22 @@ PY
         --message-format=json >"$RUN_DIR/cli-fixture-build.jsonl"
     REALM_CLI_FIXTURE="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "actr_cli" and .profile.test == true and .executable != null) | .executable' "$RUN_DIR/cli-fixture-build.jsonl" | tail -1)"
     [ -x "$REALM_CLI_FIXTURE" ] || fail "CLI test fixture was not built"
+    if [ "${REALM_HTTPS:-0}" = 1 ]; then
+        require_cmd openssl
+        export ACTR_REALM_E2E_HTTPS_CONFIG="$RUN_DIR/https-ready.json"
+        printf '{}\n' >"$RUN_DIR/https-artifacts.json"
+        python3 "$SCRIPT_DIR/fixtures/https_documents.py" --directory "$RUN_DIR/https" \
+            --documents "$ACTR_REALM_E2E_DOCUMENTS" --artifacts "$RUN_DIR/https-artifacts.json" \
+            --ready "$ACTR_REALM_E2E_HTTPS_CONFIG" >"$LOG_DIR/https.log" 2>&1 &
+        HTTPS_PID=$!
+        local attempt=0
+        while [ ! -s "$ACTR_REALM_E2E_HTTPS_CONFIG" ]; do
+            kill -0 "$HTTPS_PID" 2>/dev/null || { cat "$LOG_DIR/https.log"; fail "HTTPS fixture exited"; }
+            attempt=$((attempt + 1))
+            [ "$attempt" -lt 100 ] || fail "HTTPS fixture did not become ready"
+            sleep 0.1
+        done
+    fi
 }
 
 post_realm_management() {
@@ -69,8 +85,10 @@ realm_fixture_join() {
     local label="$1" invite_file="$2" key_file="$3" result_file="$4"
     local request="$RUN_DIR/join-${label}-request.json"
     jq -n --arg invite "$invite_file" --arg key "$key_file" --arg client_label "$label" \
-        --arg result "$result_file" \
-        '{invite_file:$invite,key_file:$key,"label":$client_label,result_file:$result}' >"$request" || return
+        --arg result "$result_file" --arg package "$RUN_DIR/downloads/${label}.actr" \
+        --argjson https "${REALM_HTTPS:-0}" \
+        '{invite_file:$invite,key_file:$key,"label":$client_label,result_file:$result}
+         + (if $https == 1 then {package_file:$package} else {} end)' >"$request" || return
     ACTR_REALM_E2E_REQUEST="$request" "$REALM_CLI_FIXTURE" \
         --exact commands::realm_members::tests::realm_runtime_join_fixture \
         --ignored --nocapture >"$LOG_DIR/join-${label}.log" 2>&1
@@ -141,6 +159,80 @@ PY
     REALM_OWNER_KEY="$RUN_DIR/keys/owner.json"
     REALM_CLIENT_KEY="$RUN_DIR/keys/client.json"
 
+    if [ "${REALM_HTTPS:-0}" = 1 ]; then
+        # Signing remains in the builder. Only the public descriptor is served.
+        run_actr publisher profile keygen --key-id https-e2e-root \
+            -o "$PUBLISHER_PRIVATE_DIR/profile-root.json" >/dev/null
+        run_actr publisher profile sign -k "$PUBLISHER_PRIVATE_DIR/profile-root.json" \
+            --domain "$PUBLISHER" --package-key "$SERVICE_PUBLIC_KEY" \
+            --security-contact mailto:e2e@example.invalid >"$RUN_DIR/publisher-member.json"
+        jq -n --arg domain "$PUBLISHER" --slurpfile publisher "$RUN_DIR/publisher-member.json" \
+            '{version:1,authority:("actr://"+$domain),services:[{rel:"contracts",href:("https://"+$domain+"/contracts")}],publisher:$publisher[0]}' \
+            >"$RUN_DIR/publisher-descriptor.json"
+        publish_realm_document "https://$PUBLISHER/.well-known/actr" "$RUN_DIR/publisher-descriptor.json"
+        jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
+
+        openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=Untrusted E2E CA' \
+            -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+            -keyout "$PUBLISHER_PRIVATE_DIR/untrusted-ca-key.pem" -out "$RUN_DIR/https/untrusted-ca.pem" \
+            >"$LOG_DIR/untrusted-ca.log" 2>&1
+        jq --arg ca "$RUN_DIR/https/untrusted-ca.pem" '.ca_file = $ca' \
+            "$ACTR_REALM_E2E_HTTPS_CONFIG" >"$RUN_DIR/untrusted-https.json"
+        ACTR_REALM_E2E_HTTPS_CONFIG="$RUN_DIR/untrusted-https.json" \
+            expect_https_join_rejected certificate "$RUN_DIR/owner-invite.txt" 'certificate'
+
+        # An HTTP 200 is insufficient: the real resolver must reject a
+        # descriptor for another authority before consuming the owner invite.
+        jq '.authority = "actr://wrong.realm-e2e.test"' "$descriptor" >"$RUN_DIR/wrong-authority.json"
+        publish_realm_document "https://$REALM_DOMAIN/.well-known/actr" "$RUN_DIR/wrong-authority.json"
+        expect_https_join_rejected authority "$RUN_DIR/owner-invite.txt" 'authority'
+        publish_realm_document "https://$REALM_DOMAIN/.well-known/actr" "$descriptor"
+
+        cp "$SERVICE_PACKAGE" "$RUN_DIR/corrupted.actr"
+        printf 'corrupted' >>"$RUN_DIR/corrupted.actr"
+        jq -n --arg url "$package_href" --arg file "$RUN_DIR/corrupted.actr" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
+        expect_https_join_rejected digest "$RUN_DIR/owner-invite.txt" 'PACKAGE_DIGEST_MISMATCH'
+        jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
+
+        jq '.publisher.signature.value = "invalid"' "$RUN_DIR/publisher-descriptor.json" >"$RUN_DIR/bad-publisher.json"
+        publish_realm_document "https://$PUBLISHER/.well-known/actr" "$RUN_DIR/bad-publisher.json"
+        expect_https_join_rejected publisher "$RUN_DIR/owner-invite.txt" 'signature'
+        publish_realm_document "https://$PUBLISHER/.well-known/actr" "$RUN_DIR/publisher-descriptor.json"
+
+        if [ "$REALM_MODE" = external ]; then
+            # The domain owner legitimately signs these higher-sequence
+            # Profiles; rejection must happen at package verification.
+            jq '.package.type = "e2e.actrium.test/WrongService@1.0.0"' "$profile" >"$RUN_DIR/wrong-type-input.json"
+            run_actr realm sign-profile --key "$RUN_DIR/domain-key.json" "$RUN_DIR/wrong-type-input.json" \
+                >"$RUN_DIR/wrong-type-request.json"
+            jq '.profile' "$RUN_DIR/wrong-type-request.json" >"$RUN_DIR/wrong-type-profile.json"
+            publish_realm_document "https://$REALM_DOMAIN/realms/${REALM%@*}" "$RUN_DIR/wrong-type-profile.json"
+            expect_https_join_rejected type "$RUN_DIR/owner-invite.txt" 'SERVICE_ACTOR_TYPE_MISMATCH'
+            publish_realm_document "https://$REALM_DOMAIN/realms/${REALM%@*}" "$profile"
+
+            python3 - "$SERVICE_PACKAGE" "$RUN_DIR/bad-signature.actr" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as source, zipfile.ZipFile(sys.argv[2], 'w', compression=zipfile.ZIP_STORED) as target:
+    for name in source.namelist():
+        body = source.read(name)
+        if name == 'manifest.sig':
+            body = bytes([body[0] ^ 1]) + body[1:]
+        target.writestr(name, body)
+PY
+            local bad_hash
+            bad_hash="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$RUN_DIR/bad-signature.actr")"
+            jq --arg hash "$bad_hash" '.package.sha256 = $hash' "$profile" >"$RUN_DIR/bad-signature-input.json"
+            run_actr realm sign-profile --key "$RUN_DIR/domain-key.json" "$RUN_DIR/bad-signature-input.json" \
+                >"$RUN_DIR/bad-signature-request.json"
+            jq '.profile' "$RUN_DIR/bad-signature-request.json" >"$RUN_DIR/bad-signature-profile.json"
+            publish_realm_document "https://$REALM_DOMAIN/realms/${REALM%@*}" "$RUN_DIR/bad-signature-profile.json"
+            jq -n --arg url "$package_href" --arg file "$RUN_DIR/bad-signature.actr" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
+            expect_https_join_rejected signature "$RUN_DIR/owner-invite.txt" 'signature'
+            publish_realm_document "https://$REALM_DOMAIN/realms/${REALM%@*}" "$profile"
+            jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
+        fi
+    fi
+
     # A tampered Profile must fail verification before redeeming the invite
     # or creating a client key. Neither signing nor membership is mocked.
     jq '.realm.display_name = "tampered"' "$profile" >"$RUN_DIR/tampered-profile.json"
@@ -154,6 +246,11 @@ PY
     realm_fixture_join owner "$RUN_DIR/owner-invite.txt" "$REALM_OWNER_KEY" "$RUN_DIR/owner-result.json" ||
         { cat "$LOG_DIR/join-owner.log"; fail "Owner join failed"; }
     jq -e '.joined.role == "owner"' "$RUN_DIR/owner-result.json" >/dev/null
+    if [ "${REALM_HTTPS:-0}" = 1 ]; then
+        # Hosts now execute bytes fetched through the Profile's HTTPS href,
+        # not the builder's local package path.
+        SERVICE_PACKAGE="$RUN_DIR/downloads/owner.actr"
+    fi
     if realm_fixture_join replay "$RUN_DIR/owner-invite.txt" "$RUN_DIR/keys/replay.json" "$RUN_DIR/replay-result.json"; then
         fail "Owner invitation was redeemed twice"
     fi
@@ -174,6 +271,16 @@ assert owner['provider_id'] == client['provider_id'] == 'localhost'
 assert owner['key_id'] != client['key_id']
 PY
     success "Signed Profile discovery, owner/editor joins and negative cases passed"
+}
+
+expect_https_join_rejected() {
+    local label="$1" invite="$2" marker="$3"
+    if realm_fixture_join "$label" "$invite" "$RUN_DIR/keys/${label}.json" "$RUN_DIR/${label}-result.json"; then
+        fail "HTTPS negative case was accepted: $label"
+    fi
+    grep -qi "$marker" "$LOG_DIR/join-${label}.log" || { cat "$LOG_DIR/join-${label}.log"; fail "Wrong rejection for $label"; }
+    [ ! -e "$RUN_DIR/keys/${label}.json" ] || fail "Rejected HTTPS input created a key"
+    [ ! -e "$RUN_DIR/downloads/${label}.actr" ] || fail "Rejected HTTPS input populated the package cache"
 }
 
 # The E2E orchestrator translates the verified Profile into the runtime's

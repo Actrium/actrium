@@ -43,6 +43,12 @@ impl PublicDocumentFetcher for PublisherDocument {
                 "unexpected publisher domain in E2E fixture",
             ));
         }
+        if std::env::var_os("ACTR_REALM_E2E_HTTPS_CONFIG").is_some() {
+            return https_documents::fetch(url.to_string())
+                .await
+                .map(Arc::from)
+                .map_err(|error| FetchError::new(error.to_string()));
+        }
         // The shell provisions public package keys into its disposable DB.
         // Represent them in a signed authority descriptor; signature, pin,
         // sequence and revocation acceptance still use production code.
@@ -85,4 +91,11 @@ impl PublicDocumentFetcher for PublisherDocument {
         .map(Arc::from)
         .map_err(|e| FetchError::new(e.to_string()))
     }
+}
+
+mod https_documents {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/e2e/actr/package-runtime-echo/fixtures/documents.rs"
+    ));
 }
