@@ -43,11 +43,11 @@ tower-service = "0.3"
 # Rustls related dependencies
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }
-webpki-roots = "1.0.1"
+webpki-roots = "1.0.10"
 
 # Axum related
 tokio-util = { version = "0.7.13", features = ["io"] }
-axum-server = { version = "0.7.3", default-features = false, features = [
+axum-server = { version = "0.8.0", default-features = false, features = [
     "tls-rustls",
 ] }
 

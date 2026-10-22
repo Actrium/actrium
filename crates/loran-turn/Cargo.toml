@@ -26,7 +26,7 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 once_cell = "1.21.3"
 base64 = { workspace = true }
-lru = "0.12"
+lru = "0.18.2"
 
 platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.6" }
 actr-protocol = { workspace = true }

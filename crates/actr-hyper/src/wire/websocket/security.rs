@@ -2,7 +2,7 @@
 use crate::error::{HyperError, HyperResult};
 use crate::transport::{NetworkError, NetworkResult};
 use actr_config::{DirectWebSocketSecurity, RuntimeConfig, Url};
-use std::io::BufReader;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -54,7 +54,7 @@ fn certificates(path: &Path) -> HyperResult<Vec<rustls::pki_types::CertificateDe
             path.display()
         ))
     })?;
-    let certs = rustls_pemfile::certs(&mut BufReader::new(file))
+    let certs = CertificateDer::pem_reader_iter(file)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| config_error("invalid direct WebSocket PEM certificate"))?;
     if certs.is_empty() {
@@ -85,7 +85,9 @@ impl DirectSecurity {
                         key.display()
                     ))
                 })?;
-                let key = rustls_pemfile::private_key(&mut BufReader::new(file))
+                let key = PrivateKeyDer::pem_reader_iter(file)
+                    .next()
+                    .transpose()
                     .map_err(|_| config_error("invalid direct WebSocket PEM private key"))?
                     .ok_or_else(|| {
                         config_error("direct WebSocket private key file contains no key")

@@ -4,9 +4,8 @@
 
 use anyhow::Result;
 use rustls::ServerConfig;
-use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::fs;
-use std::io::BufReader;
 use tokio_rustls::TlsAcceptor;
 
 /// TLS configuration utilities
@@ -18,13 +17,12 @@ impl TlsConfigurer {
         let cert_file = fs::File::open(cert_path)?;
         let key_file = fs::File::open(key_path)?;
 
-        let mut cert_reader = BufReader::new(cert_file);
-        let mut key_reader = BufReader::new(key_file);
-
         let cert_chain: Vec<CertificateDer> =
-            rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
+            CertificateDer::pem_reader_iter(cert_file).collect::<Result<Vec<_>, _>>()?;
 
-        let private_key: PrivateKeyDer = rustls_pemfile::private_key(&mut key_reader)?
+        let private_key: PrivateKeyDer = PrivateKeyDer::pem_reader_iter(key_file)
+            .next()
+            .transpose()?
             .ok_or_else(|| anyhow::anyhow!("No private key found"))?;
 
         let config = ServerConfig::builder()

@@ -31,12 +31,8 @@ required = [
     'ACTR_BUILD_ANDROID_NATIVE="${ACTR_BUILD_ANDROID_NATIVE:-true}"',
     'ACTR_BUILD_HOST_LIBRARY="${ACTR_BUILD_HOST_LIBRARY:-true}"',
     'ACTR_GENERATE_KOTLIN_BINDINGS="${ACTR_GENERATE_KOTLIN_BINDINGS:-true}"',
-    'target_upper_for()',
     'target_abi_for()',
     'copy_target_if_dir_exists()',
-    'printf -v "RUSTFLAGS_EXTRA_${target_upper}" "%s" "-L ${opus_lib_dir} -l opus"',
-    'target_rustflags="${!target_rustflags_var:?missing opus RUSTFLAGS for ${target}}"',
-    'RUSTFLAGS="${target_rustflags}" cargo build -p libactr --release --target "${target}"',
 ]
 
 for snippet in required:
@@ -44,8 +40,10 @@ for snippet in required:
         fail(f"build-android.sh missing expected snippet: {snippet}")
 
 for forbidden in [
-    'RUSTFLAGS_EXTRA="${RUSTFLAGS_EXTRA} -L ${opus_lib_dir} -l opus"',
-    'RUSTFLAGS="${RUSTFLAGS_EXTRA}" \\\n        (cd "${WORKSPACE_ROOT}" && cargo build -p libactr --release --target "${target}")',
+    'audiopus_sys',
+    'RUSTFLAGS_EXTRA_',
+    'LIBOPUS_STATIC',
+    'fix_opus_for_target',
 ]:
     if forbidden in text:
         fail(f"build-android.sh still contains forbidden snippet: {forbidden}")
