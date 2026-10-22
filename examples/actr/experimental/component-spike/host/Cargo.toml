@@ -2,15 +2,16 @@
 name = "spike-host"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 publish = false
 
 # Mark as an independent workspace so the repo-root workspace does not absorb this crate.
 [workspace]
 
 [dependencies]
-# wasmtime pinned to 43.0.1 (the version the spike was validated against).
-wasmtime = { version = "=43.0.1", features = ["component-model", "runtime", "cranelift"] }
-wasmtime-wasi = "=43.0.1"
+# Match the patched Component Model runtime used by the main workspace.
+wasmtime = { version = "=48.0.7", features = ["component-model", "runtime", "cranelift"] }
+wasmtime-wasi = "=48.0.7"
 anyhow = "1"
 
 [profile.release]

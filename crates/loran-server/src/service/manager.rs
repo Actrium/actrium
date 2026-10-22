@@ -103,7 +103,7 @@ pub struct ServiceManager {
     /// Join handles for running ICE service tasks.
     ice_handles: Vec<JoinHandle<()>>,
     /// axum_server Handle for graceful HTTP shutdown.
-    http_handle: Option<axum_server::Handle>,
+    http_handle: Option<axum_server::Handle<SocketAddr>>,
     /// JWT secret for Admin UI, persisted across reloads.
     jwt_secret: Option<Vec<u8>>,
     /// SQLite-backed config override store, reused across reloads.
@@ -645,13 +645,10 @@ impl ServiceManager {
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to bind to address '{bind_addr}': {e}"))?;
             let std_listener = listener.into_std()?;
+            let server = axum_server::from_tcp(std_listener)?;
 
             tokio::spawn(async move {
-                if let Err(e) = axum_server::from_tcp(std_listener)
-                    .handle(handle)
-                    .serve(make_svc)
-                    .await
-                {
+                if let Err(e) = server.handle(handle).serve(make_svc).await {
                     platform::recording::error!("HTTP server error: {}", e);
                     let _ = shutdown_tx_for_error.send(());
                 }

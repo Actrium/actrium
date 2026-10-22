@@ -19,7 +19,9 @@ bindgen!({
 });
 
 use actr::spike::host::Host as HostImports;
-use actr::spike::types::{ActrId, ErrorCategory, ErrorEvent, PeerEvent, PeerInfo, RpcEnvelope, SpikeError};
+use actr::spike::types::{
+    ActrId, ErrorCategory, ErrorEvent, PeerEvent, PeerInfo, RpcEnvelope, SpikeError,
+};
 
 struct HostState {
     wasi: WasiCtx,
