@@ -2,23 +2,24 @@
 name = "spike-host-async"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 publish = false
 
 # Mark as an independent workspace so the repo-root workspace does not absorb this crate.
 [workspace]
 
 [dependencies]
-# wasmtime pinned to 43.0.1 (the version the spike was validated against).
+# Match the patched Component Model runtime used by the main workspace.
 # `component-model-async` pulls in the async ABI handling for components compiled
 # against WIT `async func` signatures.
-wasmtime = { version = "=43.0.1", features = [
+wasmtime = { version = "=48.0.7", features = [
     "component-model",
     "component-model-async",
     "async",
     "runtime",
     "cranelift",
 ] }
-wasmtime-wasi = "=43.0.1"
+wasmtime-wasi = "=48.0.7"
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 

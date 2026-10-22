@@ -37,8 +37,8 @@ url = "2.5"
 async-trait = "0.1"
 parking_lot = "0.12"
 futures-util = "0.3.31"
-opus = "0.3.1"
-audiopus_sys = { version = "0.2", features = ["static"] }
+opus = "0.4.0"
+opusic-sys = { version = "0.7.3", features = ["bundled"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
