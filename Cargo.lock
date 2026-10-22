@@ -148,6 +148,8 @@ dependencies = [
  "maxminddb",
  "prost",
  "reqwest 0.12.28",
+ "rustls",
+ "rustls-webpki",
  "serde-wasm-bindgen",
  "tar",
  "tokio",
