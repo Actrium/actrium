@@ -123,7 +123,8 @@ rustls-webpki.workspace = true
 rustls-pki-types.workspace = true
 rustls-native-certs = "0.8"
 webpki-roots = "1.0.10"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "rustls-tls-webpki-roots", "json"] }
+# Keep Reqwest on Rustls 0.23 so the verifier security floor above applies.
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls-native-roots", "rustls-tls-webpki-roots", "json"] }
 url.workspace = true
 
 # Utilities (native-only)
