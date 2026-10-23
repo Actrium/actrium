@@ -24,6 +24,44 @@ jobs:
       - name: Validate Android build script
         run: scripts/actr/tests/kotlin-android-build-script.sh
 
+  native-build:
+    name: Kotlin Android Native Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "ndk;25.2.9519653"
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Build both Android ABIs from source
+        env:
+          ACTR_BUILD_HOST_LIBRARY: "false"
+          ACTR_GENERATE_KOTLIN_BINDINGS: "false"
+          ACTR_COPY_DEMO_JNILIBS: "false"
+        run: bash packages/actr-kotlin/build-android.sh
+      - name: Verify bundled Opus linkage
+        run: |
+          for abi in arm64-v8a x86_64; do
+            directory="packages/actr-kotlin/actr-kotlin/src/main/jniLibs/$abi"
+            dynamic=$(readelf --dynamic "$directory/libactr.so")
+            symbols=$(readelf --dyn-syms --wide "$directory/libactr.so")
+            if [[ "$dynamic" == *libopus.so* ]] ||
+               awk '$7 == "UND" && $8 ~ /^opus_/ { found = 1 } END { exit !found }' <<< "$symbols"; then
+              echo "error: $abi still requires external Opus symbols" >&2
+              exit 1
+            fi
+            test ! -e "$directory/libopus.so"
+          done
+
   test:
     name: Kotlin Binding Test
     runs-on: [self-hosted, Linux, X64]

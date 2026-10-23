@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "actr-cabi"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "actr-cli"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr",
  "actr-cli",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "actr-config"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "chrono",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "actr-web-abi",
@@ -148,6 +148,8 @@ dependencies = [
  "maxminddb",
  "prost",
  "reqwest 0.12.28",
+ "rustls",
+ "rustls-webpki",
  "serde-wasm-bindgen",
  "tar",
  "tokio",
@@ -160,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework-protoc-codegen"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -184,11 +186,11 @@ dependencies = [
 
 [[package]]
 name = "actr-hlc"
-version = "0.10.6"
+version = "0.10.7"
 
 [[package]]
 name = "actr-hyper"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -236,7 +238,8 @@ dependencies = [
  "rusqlite",
  "rustls",
  "rustls-native-certs",
- "rustls-pemfile",
+ "rustls-pki-types",
+ "rustls-webpki",
  "serde",
  "serde_json",
  "sha1",
@@ -269,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "actr-mock-actrix"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -298,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "base64",
@@ -315,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-native"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-hyper",
  "actr-platform-traits",
@@ -333,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "async-trait",
  "hex",
@@ -342,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "anyhow",
  "base64",
@@ -367,7 +370,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -379,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -398,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "actr-service-compat"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -411,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "actr-web-abi"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "async-trait",
  "js-sys",
@@ -423,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "actr-web-protoc-codegen"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "anyhow",
  "bytes",
@@ -497,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "actrix"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "actr-runtime",
@@ -576,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "actrix-admin"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actrix-issuer",
  "actrix-platform",
@@ -598,7 +601,7 @@ dependencies = [
 
 [[package]]
 name = "actrix-issuer"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "actrix-platform",
@@ -642,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "actrix-platform"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "actrix-proto",
@@ -671,8 +674,8 @@ dependencies = [
  "rcgen",
  "reqwest 0.12.28",
  "rustls",
- "rustls-pemfile",
  "rustls-pki-types",
+ "rustls-webpki",
  "serde",
  "serde_json",
  "serial_test",
@@ -694,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "actrix-proto"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "prost",
  "prost-types",
@@ -705,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "actrix-publisher-registry"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "actrix-platform",
@@ -730,14 +733,14 @@ dependencies = [
 
 [[package]]
 name = "actrix-sdk"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actrix-admin",
 ]
 
 [[package]]
 name = "actrix-signaling"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "actrix-platform",
@@ -769,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "actrix-signer"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actrix-proto",
  "aes-gcm",
@@ -806,7 +809,7 @@ dependencies = [
 
 [[package]]
 name = "actrix-stun"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actrix-platform",
  "anyhow",
@@ -819,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "actrix-turn"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "actrix-platform",
@@ -1284,17 +1287,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
-name = "audiopus_sys"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62314a1546a2064e033665d658e88c620a62904be945f8147e6b16c3db9f8651"
-dependencies = [
- "cmake",
- "log",
- "pkg-config",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1393,12 +1385,13 @@ dependencies = [
 
 [[package]]
 name = "axum-server"
-version = "0.7.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1ab4a3ec9ea8a657c72d99a03a824af695bd0fb5ec639ccbd9cd3543b41a5f9"
+checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
 dependencies = [
  "arc-swap",
  "bytes",
+ "either",
  "fs-err 3.3.0",
  "http",
  "http-body",
@@ -1406,7 +1399,6 @@ dependencies = [
  "hyper-util",
  "pin-project-lite",
  "rustls",
- "rustls-pemfile",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
@@ -1654,9 +1646,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chacha20"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
+checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
@@ -2531,11 +2523,10 @@ dependencies = [
 
 [[package]]
 name = "event-listener"
-version = "5.4.1"
+version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab"
+checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
 dependencies = [
- "concurrent-queue",
  "parking",
  "pin-project-lite",
 ]
@@ -3578,11 +3569,11 @@ dependencies = [
  "actr-runtime",
  "android_logger",
  "async-trait",
- "audiopus_sys",
  "bytes",
  "futures-util",
  "log",
  "opus",
+ "opusic-sys",
  "parking_lot",
  "tempfile",
  "thiserror 2.0.18",
@@ -3681,7 +3672,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "loran-packages"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "axum",
  "hex",
@@ -3697,11 +3688,11 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.16.4"
+version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
 dependencies = [
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -4263,11 +4254,20 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "opus"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d3809943dff6fbad5f0484449ea26bdb9cb7d8efdf26ed50d3c7f227f69eb5c"
+checksum = "33718946cc77d4032911d4efe03a66dbcbfbd2bb16c3da06aaeadcc637c32216"
 dependencies = [
- "audiopus_sys",
+ "opusic-sys",
+]
+
+[[package]]
+name = "opusic-sys"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9d1ecdf206421bc74343ab3bb2f30ad2abbfee41fa341f7181fecbaf957769a"
+dependencies = [
+ "cmake",
 ]
 
 [[package]]
@@ -5598,15 +5598,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
-]
-
-[[package]]
 name = "rustls-pki-types"
 version = "1.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6000,9 +5991,9 @@ dependencies = [
 
 [[package]]
 name = "spin"
-version = "0.9.8"
+version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 dependencies = [
  "lock_api",
 ]

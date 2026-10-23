@@ -61,7 +61,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.10.6"
+version = "0.10.7"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -74,20 +74,20 @@ collapsible_else_if = "allow"
 
 [workspace.dependencies]
 # === Internal Dependencies ===
-actr-protocol = { path = "crates/actr-protocol", version = "0.10.6" }
+actr-protocol = { path = "crates/actr-protocol", version = "0.10.7" }
 proto-fingerprint = "0.1.0"
-actr-service-compat = { path = "crates/actr-service-compat", version = "0.10.6" }
-actr-config = { path = "crates/actr-config", version = "0.10.6" }
-actr-framework = { path = "crates/actr-framework", version = "0.10.6" }
-actr-framework-protoc-codegen = { path = "tools/actr/protoc-gen/rust", version = "0.10.6" }
-actr-runtime = { path = "crates/actr-runtime", version = "0.10.6" }
-actr-runtime-mailbox = { path = "crates/actr-runtime-mailbox", version = "0.10.6" }
-actr-hyper = { path = "crates/actr-hyper", version = "0.10.6" }
-actr-platform-traits = { path = "crates/actr-platform-traits", version = "0.10.6" }
-actr-platform-native = { path = "crates/actr-platform-native", version = "0.10.6" }
-actr-pack = { path = "crates/actr-pack", version = "0.10.6" }
+actr-service-compat = { path = "crates/actr-service-compat", version = "0.10.7" }
+actr-config = { path = "crates/actr-config", version = "0.10.7" }
+actr-framework = { path = "crates/actr-framework", version = "0.10.7" }
+actr-framework-protoc-codegen = { path = "tools/actr/protoc-gen/rust", version = "0.10.7" }
+actr-runtime = { path = "crates/actr-runtime", version = "0.10.7" }
+actr-runtime-mailbox = { path = "crates/actr-runtime-mailbox", version = "0.10.7" }
+actr-hyper = { path = "crates/actr-hyper", version = "0.10.7" }
+actr-platform-traits = { path = "crates/actr-platform-traits", version = "0.10.7" }
+actr-platform-native = { path = "crates/actr-platform-native", version = "0.10.7" }
+actr-pack = { path = "crates/actr-pack", version = "0.10.7" }
 actr-hlc = { path = "crates/actr-hlc", version = "0.5.9" }
-actr-mock-actrix = { path = "crates/actr-mock-actrix", version = "0.10.6" }
+actr-mock-actrix = { path = "crates/actr-mock-actrix", version = "0.10.7" }
 
 # === Async Runtime ===
 tokio = { version = "1.48", features = ["full"] }
@@ -137,10 +137,12 @@ tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 axum = { version = "0.8.7", features = ["json", "macros"] }
-rustls = { version = "0.23" }
-rustls-pki-types = "1.0.0"
+# Keep Rustls on WebPKI 0.103.x so an older 0.102.x verifier cannot coexist.
+rustls = { version = "0.23.27" }
+# Enforce the emSign verification fix in published crates and downstream locks.
+rustls-webpki = { version = "0.103.16", default-features = false }
+rustls-pki-types = { version = "1.9", features = ["std"] }
 tokio-rustls = { version = "0.26.2", features = ["logging"] }
-rustls-pemfile = "2.0.0"
 nonce-auth = { version = "0.6.3" }
 ecies = { version = "0.2", features = ["std"] }
 reqwest = { version = "0.12.24", features = ["json"] }
@@ -162,17 +164,9 @@ rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 
 # === WASM Runtime ===
-# Pinned to 48.0.7 for Component Model host execution. 48 requires rustc >=
-# 1.95 (workspace MSRV is 1.95, so exactly satisfied). 48.0.7 fixes
-# RUSTSEC-2026-0378/0379 (component stream panic and aarch64 br_table).
-# 48.0.6 fixes the 2026-10-14 advisories, including the WASI sandbox escape in
-# RUSTSEC-2026-0352. 48.0.5 carries the fixes for RUSTSEC-2026-0327
-# (wasmtime) and RUSTSEC-2026-0321/0322/0323/0324 (wasmtime-wasi), all of
-# which require >= 48.0.4, on top of 48.0.3's fixes for RUSTSEC-2026-0314 and
-# RUSTSEC-2026-0316 (guests can panic the host via filesystem datetime
-# overflow) and the older chain (GHSA-4ch3-9j33-3pmj,
-# RUSTSEC-2026-0190/0223/0268/0269). Do NOT revert to 46.x: 46.0.3 itself is
-# affected by the two 2026-09-24 advisories.
+# Pinned to 48.0.7 for Component Model host execution (Rust >= 1.95).
+# This includes the 2026-10-19 fixes for RUSTSEC-2026-0378/0379 and
+# the earlier WASI sandbox and host-panic security fixes in the 48.x line.
 #
 # The `async` feature powers the host-side wasmtime fibers we rely on
 # (`instantiate_async` / `call_async`); `component-model-async` stays enabled

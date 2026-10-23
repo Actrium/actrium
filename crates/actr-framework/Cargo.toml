@@ -1,6 +1,6 @@
 [package]
 name = "actr-framework"
-version = "0.10.6"
+version = "0.10.7"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -23,7 +23,11 @@ anyhow = "1.0"
 tracing = "0.1"
 tokio = { workspace = true, optional = true }
 maxminddb = { version = "0.27", optional = true }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "blocking"], optional = true }
+# Keep Reqwest on Rustls 0.23 so the verifier security floors below apply.
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls-native-roots", "blocking"], optional = true }
+# Match the workspace TLS security floors without selecting a crypto provider.
+rustls = { version = "0.23.27", default-features = false, optional = true }
+rustls-webpki = { workspace = true, optional = true }
 flate2 = { version = "1.1", optional = true }
 tar = { version = "0.4", optional = true }
 
@@ -47,6 +51,8 @@ web = [
 geoip = [
     "maxminddb",
     "reqwest",
+    "dep:rustls",
+    "dep:rustls-webpki",
     "flate2",
     "tar",
 ] # GeoIP with auto-download support
@@ -74,7 +80,7 @@ serde-wasm-bindgen = { version = "0.6", optional = true }
 # gamma-unified §3.3/§3.4). Kept optional + path+version so native builds never
 # pull it (or its wasm-bindgen tail) and so the cross-workspace path is
 # explicit.
-actr-web-abi = { path = "../../packages/actr-web/crates/actr-web-abi", version = "0.10.6", optional = true }
+actr-web-abi = { path = "../../packages/actr-web/crates/actr-web-abi", version = "0.10.7", optional = true }
 
 [dev-dependencies]
 tokio.workspace = true

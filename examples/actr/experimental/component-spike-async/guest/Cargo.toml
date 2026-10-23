@@ -2,6 +2,7 @@
 name = "spike-guest-async"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 publish = false
 
 # Mark as an independent workspace so the repo-root workspace does not absorb this crate.
@@ -11,8 +12,8 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-# Phase 0 pin; wit-bindgen 0.57 default features include `async` + `macros`.
-wit-bindgen = "=0.57.1"
+# Match the explicit async function types in the WIT contract.
+wit-bindgen = "=0.59.0"
 
 [profile.release]
 opt-level = "s"

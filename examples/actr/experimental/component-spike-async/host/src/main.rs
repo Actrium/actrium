@@ -1,28 +1,13 @@
 // Host for the async Component Model spike.
-//
-// Validates end-to-end async path: guest calls (async fn) -> host calls (async
-// fn) -> real tokio await -> back. Each guest dispatch runs one at a time per
-// Store (actor-instance single-threadedness guarantee), but the host import
-// inside dispatch is a real async fn that awaits tokio::sleep, simulating
-// network RTT.
-//
-// Setup choices:
-// - WIT uses plain `func`, not `async func` (see wit/actr-spike-async.wit).
-//   Reason: `async func` would invoke the Component Model Concurrency proposal
-//   which wasmtime 43 flags as "very incomplete" and which requires a totally
-//   different Accessor-based binding shape.
-// - bindgen macros use `async: true` (guest) and `imports: { default: async },
-//   exports: { default: async }` (host) to get async Rust ergonomics without
-//   the concurrent ABI.
-// - Config requires `wasm_component_model_async(true)` regardless, because
-//   wit-bindgen 0.57 guest emits `context.get` (async-ABI primitive) even when
-//   every WIT function is sync.
+// Explicitly async WIT functions use Accessor and Store::run_concurrent.
+// The helper methods deliberately serialize calls within one Store while
+// separate instances can await host I/O concurrently.
 
 use anyhow::Result;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
+use wasmtime::component::{Accessor, Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
@@ -33,7 +18,7 @@ wasmtime::component::bindgen!({
     exports: { default: async },
 });
 
-use actr::spike_async::host::Host as HostImports;
+use actr::spike_async::host::{Host, HostWithStore};
 use actr::spike_async::types::{ActrId, RpcEnvelope, SpikeError};
 
 struct HostState {
@@ -56,33 +41,41 @@ impl WasiView for HostState {
     }
 }
 
-impl HostImports for HostState {
+impl Host for HostState {}
+
+impl HostWithStore<HostState> for HasSelf<HostState> {
     async fn call_raw(
-        &mut self,
+        accessor: &Accessor<HostState, Self>,
         target: ActrId,
         route_key: String,
         payload: Vec<u8>,
     ) -> wasmtime::Result<Result<Vec<u8>, SpikeError>> {
-        self.call_raw_count.fetch_add(1, Ordering::SeqCst);
+        accessor.with(|mut access| {
+            access.get().call_raw_count.fetch_add(1, Ordering::SeqCst);
+        });
 
         // Simulate network RTT. 50ms is long enough to measure, short enough
         // that multi-dispatch tests still finish quickly.
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let reply = format!(
-            "downstream({route_key})[target={}]: ",
-            target.serial_number
-        );
+        let reply = format!("downstream({route_key})[target={}]: ", target.serial_number);
         let mut out = reply.into_bytes();
         out.extend_from_slice(&payload);
         Ok(Ok(out))
     }
 
-    async fn log_message(&mut self, level: String, msg: String) -> wasmtime::Result<()> {
-        self.log_count.fetch_add(1, Ordering::SeqCst);
-        if !self.silent_logs {
-            println!("[{}:{level}] {msg}", self.label);
-        }
+    async fn log_message(
+        accessor: &Accessor<HostState, Self>,
+        level: String,
+        msg: String,
+    ) -> wasmtime::Result<()> {
+        accessor.with(|mut access| {
+            let state = access.get();
+            state.log_count.fetch_add(1, Ordering::SeqCst);
+            if !state.silent_logs {
+                println!("[{}:{level}] {msg}", state.label);
+            }
+        });
         Ok(())
     }
 }
@@ -90,12 +83,8 @@ impl HostImports for HostState {
 fn build_config() -> Config {
     let mut config = Config::new();
     config.wasm_component_model(true);
-    // Required because wit-bindgen 0.57 guest compiled with `async: true`
-    // emits `context.get` (async-ABI primitive), even when every WIT function
-    // is sync.
     config.wasm_component_model_async(true);
-    // `async_support(true)` is no-op in 43.x when component-model-async is on
-    // (deprecated warning), but the option is harmless and explicit.
+    config.concurrency_support(true);
     config
 }
 
@@ -137,6 +126,37 @@ async fn instantiate(
         .map_err(|e| anyhow::anyhow!("instantiate_async: {e}"))
 }
 
+// Hold the mutable Store borrow for a complete call to preserve the
+// harness's per-instance serialization policy over the concurrent ABI.
+impl SpikeGuestAsync {
+    async fn call_on_start(
+        &self,
+        store: &mut Store<HostState>,
+    ) -> wasmtime::Result<Result<(), SpikeError>> {
+        store
+            .run_concurrent(async |accessor| {
+                self.actr_spike_async_workload()
+                    .call_on_start(accessor)
+                    .await
+            })
+            .await?
+    }
+
+    async fn call_dispatch(
+        &self,
+        store: &mut Store<HostState>,
+        envelope: &RpcEnvelope,
+    ) -> wasmtime::Result<Result<Vec<u8>, SpikeError>> {
+        store
+            .run_concurrent(async |accessor| {
+                self.actr_spike_async_workload()
+                    .call_dispatch(accessor, envelope.clone())
+                    .await
+            })
+            .await?
+    }
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<()> {
     let guest_wasm = std::env::args()
@@ -174,7 +194,6 @@ async fn main() -> Result<()> {
         let bindings = instantiate(&component, &linker, &mut store).await?;
 
         bindings
-            .actr_spike_async_workload()
             .call_on_start(&mut store)
             .await?
             .map_err(|e| anyhow::anyhow!("on_start: {e:?}"))?;
@@ -186,7 +205,6 @@ async fn main() -> Result<()> {
         };
         let t0 = Instant::now();
         let reply = bindings
-            .actr_spike_async_workload()
             .call_dispatch(&mut store, &env)
             .await?
             .map_err(|e| anyhow::anyhow!("dispatch: {e:?}"))?;
@@ -230,12 +248,10 @@ async fn main() -> Result<()> {
         // Warm up: make sure on_start has completed for both. That way Test 2
         // measures dispatch latency only, not first-instantiation + init.
         bindings_a
-            .actr_spike_async_workload()
             .call_on_start(&mut store_a)
             .await?
             .map_err(|e| anyhow::anyhow!("on_start A: {e:?}"))?;
         bindings_b
-            .actr_spike_async_workload()
             .call_on_start(&mut store_b)
             .await?
             .map_err(|e| anyhow::anyhow!("on_start B: {e:?}"))?;
@@ -253,18 +269,8 @@ async fn main() -> Result<()> {
 
         let t0 = Instant::now();
         let (ra, rb) = tokio::join!(
-            async {
-                bindings_a
-                    .actr_spike_async_workload()
-                    .call_dispatch(&mut store_a, &env_a)
-                    .await
-            },
-            async {
-                bindings_b
-                    .actr_spike_async_workload()
-                    .call_dispatch(&mut store_b, &env_b)
-                    .await
-            },
+            async { bindings_a.call_dispatch(&mut store_a, &env_a).await },
+            async { bindings_b.call_dispatch(&mut store_b, &env_b).await },
         );
         let dt = t0.elapsed();
         let _ = ra?.map_err(|e| anyhow::anyhow!("dispatch A: {e:?}"))?;
@@ -301,7 +307,6 @@ async fn main() -> Result<()> {
         );
         let bindings = instantiate(&component, &linker, &mut store).await?;
         bindings
-            .actr_spike_async_workload()
             .call_on_start(&mut store)
             .await?
             .map_err(|e| anyhow::anyhow!("on_start: {e:?}"))?;
@@ -317,38 +322,22 @@ async fn main() -> Result<()> {
             request_id: "req-3B".to_string(),
         };
 
-        // We cannot `tokio::join!` two calls that both borrow `&mut store` —
-        // Rust's aliasing rules forbid it. This itself is a finding: wasmtime
-        // models "same Store" serially at the type level. To even *attempt* a
-        // concurrent same-instance dispatch we'd need a cell with interior
-        // mutability, and wasmtime::Store isn't `Sync` anyway. So the type
-        // system forces serialization before we ever get to runtime.
-        //
-        // Emulate "concurrent calls on the same instance" as the closest
-        // achievable approximation: interleaved sequential calls, measuring
-        // the wall time of running both back-to-back.
+        // The harness helpers borrow the Store mutably for the entire call,
+        // so they intentionally serialize two calls on the same instance.
+        // The underlying Component Model ABI also supports concurrent calls;
+        // using it directly would require a separate scheduling experiment.
         let t0 = Instant::now();
-        let ra = bindings
-            .actr_spike_async_workload()
-            .call_dispatch(&mut store, &env_a)
-            .await?;
-        let rb = bindings
-            .actr_spike_async_workload()
-            .call_dispatch(&mut store, &env_b)
-            .await?;
+        let ra = bindings.call_dispatch(&mut store, &env_a).await?;
+        let rb = bindings.call_dispatch(&mut store, &env_b).await?;
         let dt = t0.elapsed();
         let _ = ra.map_err(|e| anyhow::anyhow!("dispatch 3A: {e:?}"))?;
         let _ = rb.map_err(|e| anyhow::anyhow!("dispatch 3B: {e:?}"))?;
         let ms = dt.as_secs_f64() * 1000.0;
+        println!("Test 3 wall time (sequential, enforced by the harness): {ms:.1}ms");
         println!(
-            "Test 3 wall time (sequential, forced by Store ownership): {ms:.1}ms"
-        );
-        println!(
-            "Test 3 RESULT: wasmtime `Store<T>` is not `Sync`, and `call_dispatch` \
-             takes `&mut Store<T>` — the Rust borrow checker forces \
-             serialization of hooks on the same instance at compile time. \
-             Actor-instance single-threadedness is guaranteed by construction, \
-             not by runtime convention."
+            "Test 3 RESULT: the harness helpers hold a mutable Store borrow \
+             for each call, enforcing the chosen per-instance serialization \
+             policy over the concurrent Component Model ABI."
         );
     }
 
@@ -388,7 +377,6 @@ async fn main() -> Result<()> {
         };
         let t0 = Instant::now();
         let _ = bindings
-            .actr_spike_async_workload()
             .call_dispatch(&mut store, &env)
             .await?
             .map_err(|e| anyhow::anyhow!("dispatch: {e:?}"))?;
@@ -397,9 +385,7 @@ async fn main() -> Result<()> {
         let _ = ticker.await;
         let ticks = tick_count.load(Ordering::SeqCst);
         let ms = dt.as_secs_f64() * 1000.0;
-        println!(
-            "Test 4 dispatch took {ms:.1}ms; ticker recorded {ticks} ticks during/around it"
-        );
+        println!("Test 4 dispatch took {ms:.1}ms; ticker recorded {ticks} ticks during/around it");
         if ticks >= 3 {
             println!(
                 "Test 4 PASS: tokio executor kept running during guest host-import await \
@@ -420,22 +406,9 @@ async fn main() -> Result<()> {
     println!("Test 5 — guest-side async ergonomics");
     println!("────────────────────────────────────────");
     println!(
-        "Test 5 RESULT: guest writes normal `.await` syntax. wit-bindgen 0.57.1 \
-         with `async: true` generates `async fn call_raw(...) -> Result<...>` \
-         that the guest calls as `call_raw(...).await?`. No block_on, no manual \
-         poll loops, no custom wakers."
-    );
-    println!(
-        "Test 5 NOTE: with `async: true`, ALL imports become `async fn` at the \
-         Rust surface — even imports declared plain `func` (not `async func`) \
-         in WIT. So a sync WIT import still needs `.await` on the guest. Trade \
-         at import-time ergonomics, not a runtime cost."
-    );
-    println!(
-        "Test 5 NOTE: async imports take OWNED values (`String`, `Vec<u8>`) \
-         instead of the sync path's `&str` / `&[u8]`. Suspend points can't \
-         hold stack-frame borrows across await. Expect extra `.to_string()` / \
-         `.clone()` at call sites."
+        "Test 5 RESULT: wit-bindgen 0.59 follows explicit WIT async func \
+         annotations. The guest uses normal .await syntax with owned import \
+         parameters; the host drives calls with Accessor and run_concurrent."
     );
 
     // =========================================================
@@ -467,15 +440,13 @@ async fn main() -> Result<()> {
         let t0 = Instant::now();
         for _ in 0..iters {
             let _ = bindings
-                .actr_spike_async_workload()
                 .call_dispatch(&mut store, &bench_env)
                 .await?
                 .map_err(|e| anyhow::anyhow!("bench dispatch: {e:?}"))?;
         }
         let elapsed = t0.elapsed();
         let per_call_ms = elapsed.as_secs_f64() * 1000.0 / iters as f64;
-        let per_call_overhead_us =
-            (elapsed.as_secs_f64() * 1_000_000.0 / iters as f64) - 50_000.0;
+        let per_call_overhead_us = (elapsed.as_secs_f64() * 1_000_000.0 / iters as f64) - 50_000.0;
         println!(
             "Test 6: {iters} sequential dispatches (each includes 50ms host sleep): \
              total {:.1}ms, {per_call_ms:.2}ms/call",
@@ -507,11 +478,7 @@ async fn main() -> Result<()> {
             payload: vec![],
             request_id: "req-err".to_string(),
         };
-        match bindings
-            .actr_spike_async_workload()
-            .call_dispatch(&mut store, &env)
-            .await?
-        {
+        match bindings.call_dispatch(&mut store, &env).await? {
             Ok(_) => println!("Test 7 FAIL: expected guest error but dispatch returned Ok"),
             Err(SpikeError::Timeout(msg)) => {
                 println!("Test 7 PASS: got Timeout variant, message: {msg:?}");
@@ -540,11 +507,7 @@ async fn main() -> Result<()> {
             payload: b"boom-payload".to_vec(),
             request_id: "req-panic".to_string(),
         };
-        match bindings
-            .actr_spike_async_workload()
-            .call_dispatch(&mut store, &env)
-            .await
-        {
+        match bindings.call_dispatch(&mut store, &env).await {
             Ok(_) => println!("Test 8 WARN: panic did not propagate (unexpected)"),
             Err(e) => {
                 let s = format!("{e:?}");

@@ -4,9 +4,8 @@
 
 use anyhow::Result;
 use rustls::ServerConfig;
-use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::fs;
-use std::io::BufReader;
 use tokio_rustls::TlsAcceptor;
 
 /// TLS configuration utilities
@@ -18,13 +17,12 @@ impl TlsConfigurer {
         let cert_file = fs::File::open(cert_path)?;
         let key_file = fs::File::open(key_path)?;
 
-        let mut cert_reader = BufReader::new(cert_file);
-        let mut key_reader = BufReader::new(key_file);
-
         let cert_chain: Vec<CertificateDer> =
-            rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
+            CertificateDer::pem_reader_iter(cert_file).collect::<Result<Vec<_>, _>>()?;
 
-        let private_key: PrivateKeyDer = rustls_pemfile::private_key(&mut key_reader)?
+        let private_key: PrivateKeyDer = PrivateKeyDer::pem_reader_iter(key_file)
+            .next()
+            .transpose()?
             .ok_or_else(|| anyhow::anyhow!("No private key found"))?;
 
         let config = ServerConfig::builder()
@@ -62,9 +60,8 @@ impl TlsConfigurer {
         // Load the CA bundle used to verify client certificates.
         let ca_file = fs::File::open(ca_cert_path)
             .map_err(|e| anyhow::anyhow!("Failed to open Signer mTLS CA '{ca_cert_path}': {e}"))?;
-        let mut ca_reader = BufReader::new(ca_file);
         let ca_certs: Vec<CertificateDer> =
-            rustls_pemfile::certs(&mut ca_reader).collect::<Result<Vec<_>, _>>()?;
+            CertificateDer::pem_reader_iter(ca_file).collect::<Result<Vec<_>, _>>()?;
         if ca_certs.is_empty() {
             return Err(anyhow::anyhow!(
                 "No CA certificate found in '{ca_cert_path}'"
@@ -87,11 +84,11 @@ impl TlsConfigurer {
         })?;
         let key_file = fs::File::open(key_path)
             .map_err(|e| anyhow::anyhow!("Failed to open Signer mTLS key '{key_path}': {e}"))?;
-        let mut cert_reader = BufReader::new(cert_file);
-        let mut key_reader = BufReader::new(key_file);
         let cert_chain: Vec<CertificateDer> =
-            rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
-        let private_key: PrivateKeyDer = rustls_pemfile::private_key(&mut key_reader)?
+            CertificateDer::pem_reader_iter(cert_file).collect::<Result<Vec<_>, _>>()?;
+        let private_key: PrivateKeyDer = PrivateKeyDer::pem_reader_iter(key_file)
+            .next()
+            .transpose()?
             .ok_or_else(|| anyhow::anyhow!("No private key found in '{key_path}'"))?;
 
         let mut config = ServerConfig::builder()
@@ -106,5 +103,49 @@ impl TlsConfigurer {
     /// Install the crypto provider
     pub fn install_crypto_provider() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mtls_loads_pem_material_and_advertises_http2() {
+        TlsConfigurer::install_crypto_provider();
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let cert = dir.path().join("cert.pem");
+        let key = dir.path().join("key.pem");
+        fs::write(&cert, certified.cert.pem()).unwrap();
+        fs::write(&key, certified.signing_key.serialize_pem()).unwrap();
+
+        let config = TlsConfigurer::create_mtls_server_config(
+            cert.to_str().unwrap(),
+            cert.to_str().unwrap(),
+            key.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(config.alpn_protocols, vec![b"h2".to_vec()]);
+        assert!(
+            TlsConfigurer::create_tls_config(cert.to_str().unwrap(), key.to_str().unwrap()).is_ok()
+        );
+
+        let empty = dir.path().join("empty.pem");
+        fs::write(&empty, "").unwrap();
+        for paths in [
+            [&empty, &cert, &key],
+            [&cert, &empty, &key],
+            [&cert, &cert, &empty],
+        ] {
+            assert!(
+                TlsConfigurer::create_mtls_server_config(
+                    paths[0].to_str().unwrap(),
+                    paths[1].to_str().unwrap(),
+                    paths[2].to_str().unwrap(),
+                )
+                .is_err()
+            );
+        }
     }
 }

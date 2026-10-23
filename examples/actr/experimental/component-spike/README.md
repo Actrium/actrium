@@ -6,6 +6,10 @@ can serve as the substrate for a future actr workload contract.
 This spike is isolated from the main workspace: each sub-crate declares its own `[workspace]`,
 so `cargo build` at the repo root does not see it and the root `Cargo.lock` is never touched.
 
+The host pins Wasmtime/WASI 48.0.7 for the current security fixes. `REPORT.md`
+records the original 43.0.1 experiment and is a historical measurement, not
+an instruction to restore that dependency version.
+
 ## Layout
 
 ```
