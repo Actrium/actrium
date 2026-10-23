@@ -1972,7 +1972,7 @@ async fn removing_a_member_closes_its_connections_and_refuses_it() {
     .expect("the connection closes");
     let frame = closed.expect("close frame");
     assert_eq!(u16::from(frame.code), 1008);
-    assert_eq!(frame.reason.as_str(), "client revoked");
+    assert_eq!(frame.reason.as_str(), "client revoked or replaced");
 
     assert!(
         connect_async(authenticated_ws_request(harness.port, &editor))
