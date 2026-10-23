@@ -5272,3 +5272,76 @@ async fn test_concurrent_publisher_profile_checks_share_one_fetch() {
     c.unwrap();
     assert_eq!(fetcher.calls(), 1);
 }
+
+/// A successful 24-hour cache entry must stop authorizing registrations at
+/// the signed expiry, including while a retry throttle prevents another fetch.
+#[tokio::test]
+#[serial]
+async fn test_publisher_profile_cache_stops_at_signed_expiry() {
+    use ed25519_dalek::SigningKey;
+    for mode in ["expired", "unreachable", "throttled", "refreshed"] {
+        let mut env = setup_test_environment().await;
+        let realm = format!("expiry-{mode}@example.com");
+        seed_realm(&realm, Some(ROUTE_KEY_LABEL)).await;
+        let domain = format!("expiry-{mode}.example");
+        let root = SigningKey::from_bytes(&[81; 32]);
+        let package = SigningKey::from_bytes(&[82; 32]);
+        let expires = chrono::Utc::now() + chrono::Duration::seconds(2);
+        let mut profile = signed_publisher_profile(&domain, 1, &root, &[(&package, "active")]);
+        profile["profile_expires_at"] = serde_json::json!(expires.to_rfc3339());
+        profile.as_object_mut().unwrap().remove("signature");
+        actr_protocol::realm_profile::sign_document(&mut profile, "root-1", &root);
+        register_publisher_from_profile(&domain, &profile).await;
+        let fetcher = StubFetcher::serving(publisher_descriptor(&domain, profile));
+        let refresher = Arc::new(PublisherProfileRefresher::new(
+            fetcher.clone(),
+            Duration::from_secs(24 * 3600),
+            if mode == "throttled" {
+                Duration::from_secs(60)
+            } else {
+                Duration::ZERO
+            },
+        ));
+        refresher.ensure_current(&domain).await.unwrap();
+        refresher.ensure_current(&domain).await.unwrap();
+        assert_eq!(
+            fetcher.calls(),
+            1,
+            "a still-valid document should be cached"
+        );
+        if mode == "unreachable" {
+            *fetcher.response.lock().unwrap() = Err("publisher unavailable".into());
+        } else if mode != "expired" {
+            let fresh = signed_publisher_profile(&domain, 2, &root, &[(&package, "active")]);
+            fetcher.serve(publisher_descriptor(&domain, fresh));
+        }
+        let issuer = create_test_issuer(&env)
+            .await
+            .with_publisher_profiles(refresher);
+        // Wait for the signed deadline, rather than the 24-hour cache TTL.
+        tokio::time::sleep(
+            (expires - chrono::Utc::now()).to_std().unwrap_or_default() + Duration::from_millis(20),
+        )
+        .await;
+        let request =
+            signed_package_request(&domain, "notes", "1.0.0", &realm, "wasm32-wasip1", &package);
+        let response = issuer
+            .issue_credential(&request, &owner(&realm).await)
+            .await
+            .unwrap();
+        if mode == "refreshed" {
+            assert!(
+                matches!(response.result, Some(register_response::Result::Success(_))),
+                "{response:?}"
+            );
+        } else {
+            assert_eq!(
+                error_code(&response),
+                Some(500),
+                "expired authorization accepted in {mode}: {response:?}"
+            );
+        }
+        assert_eq!(fetcher.calls(), if mode == "throttled" { 1 } else { 2 });
+        env.shutdown_signer().await;
+    }
+}

@@ -129,7 +129,7 @@ enum EnqueueError {
 ///
 /// The permit is returned to the byte budget when this value is dropped (on send
 /// completion, or on connection teardown/reset), so teardown never leaks a byte reservation.
-struct QueuedFrame {
+pub(crate) struct QueuedFrame {
     msg: WsMessage,
     byte_len: usize,
     _permit: OwnedSemaphorePermit,
@@ -159,7 +159,7 @@ pub struct ClientEgress {
 
 impl ClientEgress {
     /// Build a bounded egress handle and its two consumers for a new connection
-    fn new(
+    pub(crate) fn new(
         config: EgressQueueConfig,
         metrics: Arc<SignalingQueueMetrics>,
     ) -> (
@@ -412,7 +412,7 @@ impl SignalingServer {
 /// Follow Realm state changes and drop the state of every Realm that
 /// retires: first for Realms retired before this process started, then as
 /// retirements are announced. Likewise drop every Actor disabled by a
-/// revoked Realm client key.
+/// revoked or replaced Realm client key.
 ///
 /// `cancel` retires this server (a configuration reload builds a new one),
 /// but its connections stay open, so the task keeps following until the
@@ -431,15 +431,10 @@ pub async fn follow_realm_retirements(
             actor = actor_changes.recv() => {
                 match actor {
                     Ok(actor) => {
-                        if platform::realm::membership::actor_disabled(&actor)
-                            .await
-                            .unwrap_or(false)
-                        {
-                            disable_actor(&server, &actor).await;
-                        }
+                        disable_actor(&server, &actor).await;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        disable_known_disabled_actors(&server).await;
+                        revalidate_known_actor_connections(&server).await;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -539,8 +534,8 @@ pub async fn retire_realm(server: &SignalingServerHandle, realm: &str) {
     }
 }
 
-/// Drop every connected Actor that is disabled.
-async fn disable_known_disabled_actors(server: &SignalingServerHandle) {
+/// Recheck every live credential after losing actor-change notifications.
+async fn revalidate_known_actor_connections(server: &SignalingServerHandle) {
     let mut actors: Vec<ActrId> = server
         .clients
         .read()
@@ -551,36 +546,48 @@ async fn disable_known_disabled_actors(server: &SignalingServerHandle) {
     actors.sort();
     actors.dedup();
     for actor in actors {
-        if platform::realm::membership::actor_disabled(&actor)
-            .await
-            .unwrap_or(false)
-        {
-            disable_actor(server, &actor).await;
-        }
+        disable_actor(server, &actor).await;
     }
 }
 
-/// Drop an Actor whose Realm client key was revoked
-/// (`realm-membership.md` section 6): close its connections with close code
-/// 1008 and remove its Actor Registry rows (in memory and in the cache) and
-/// presence subscriptions. It cannot connect again while it stays disabled.
+/// Close connections whose client key was revoked or replaced. Revalidate
+/// each credential so an actor-change notification preserves valid replacements.
 pub async fn disable_actor(server: &SignalingServerHandle, actor: &ActrId) {
-    platform::recording::info!(
-        "Actor {} disabled: its Realm client key was revoked",
-        actor.to_string_repr()
-    );
-    let connections: Vec<(String, ClientEgress)> = server
+    let connections: Vec<(String, Option<AIdCredential>)> = server
         .clients
         .read()
         .await
         .iter()
         .filter(|(_, client)| client.actor_id.as_ref() == Some(actor))
-        .map(|(id, client)| (id.clone(), client.egress.clone()))
+        .map(|(id, client)| (id.clone(), client.credential.clone()))
         .collect();
-    for (client_id, egress) in connections {
+    let mut refused = false;
+    for (client_id, credential) in connections {
+        if client_credential_refused(actor, credential.as_ref()).await {
+            refused = true;
+            close_refused_connection(server, &client_id).await;
+        }
+    }
+    if refused
+        || platform::realm::membership::actor_disabled(actor)
+            .await
+            .unwrap_or(false)
+    {
+        cleanup_refused_actor(server, actor).await;
+    }
+}
+
+async fn close_refused_connection(server: &SignalingServerHandle, client_id: &str) {
+    let connection = server
+        .clients
+        .read()
+        .await
+        .get(client_id)
+        .map(|client| (client.egress.clone(), client.actor_id.clone()));
+    if let Some((egress, actor)) = connection {
         let close_frame = axum::extract::ws::CloseFrame {
             code: axum::extract::ws::close_code::POLICY,
-            reason: "client revoked".into(),
+            reason: "client revoked or replaced".into(),
         };
         if !egress.close(close_frame) {
             platform::recording::warn!(
@@ -588,7 +595,22 @@ pub async fn disable_actor(server: &SignalingServerHandle, actor: &ActrId) {
                 client_id
             );
         }
-        cleanup_client(&client_id, server, CleanupMode::ExplicitUnregister).await;
+        cleanup_client(client_id, server, CleanupMode::ExplicitUnregister).await;
+        if let Some(actor) = actor {
+            cleanup_refused_actor(server, &actor).await;
+        }
+    }
+}
+
+async fn cleanup_refused_actor(server: &SignalingServerHandle, actor: &ActrId) {
+    // Hold this guard through cleanup: a new connection cannot install its
+    // routing/presence state between the replacement check and deletion.
+    let clients = server.clients.read().await;
+    if clients
+        .values()
+        .any(|client| client.actor_id.as_ref() == Some(actor))
+    {
+        return;
     }
     if let Err(e) = server
         .actor_registry
@@ -1151,6 +1173,21 @@ async fn handle_client_envelope(
     client_id: &str,
     server: &SignalingServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let identity = {
+        let clients = server.clients.read().await;
+        let Some(client) = clients.get(client_id) else {
+            return Ok(());
+        };
+        client.actor_id.clone().zip(client.credential.clone())
+    };
+    if let Some((actor, credential)) = identity
+        && client_credential_refused(&actor, Some(&credential)).await
+    {
+        close_refused_connection(server, client_id).await;
+        // Let the egress task write its policy Close frame and terminate the
+        // receive task; any already-queued input finds no registered client.
+        return Ok(());
+    }
     // Check message rate limit
     if let Some(ref limiter) = server.message_rate_limiter
         && let Err(e) = limiter.check_message(client_id).await
@@ -1262,6 +1299,30 @@ async fn handle_client_envelope(
     }
     .instrument(span)
     .await
+}
+
+/// A signed message must still belong to the actor's current client key,
+/// including when it arrives over an otherwise valid replacement connection.
+async fn check_message_binding(
+    client_id: &str,
+    actor: &ActrId,
+    client_key: &str,
+    server: &SignalingServerHandle,
+    request_envelope_id: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if platform::realm::membership::credential_refused(actor, client_key).await? {
+        send_error_response(
+            client_id,
+            actor,
+            401,
+            "Credential client key was revoked or replaced",
+            server,
+            Some(request_envelope_id),
+        )
+        .await?;
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// Whether `source` is the Actor the connection authenticated as.
@@ -1464,6 +1525,18 @@ async fn handle_actr_to_server(
         return Ok(());
     }
     let source_type = claims.actor_type;
+
+    if !check_message_binding(
+        client_id,
+        &source,
+        &claims.client_key,
+        server,
+        request_envelope_id,
+    )
+    .await?
+    {
+        return Ok(());
+    }
 
     match actr_to_server.payload {
         Some(actr_to_signaling::Payload::Ping(ping)) => {
@@ -1902,6 +1975,17 @@ async fn handle_actr_relay(
         return Ok(());
     }
     let source_type = claims.actor_type;
+    if !check_message_binding(
+        client_id,
+        &source,
+        &claims.client_key,
+        server,
+        request_envelope_id,
+    )
+    .await?
+    {
+        return Ok(());
+    }
 
     // ACL check: can source relay to target? Same-realm / cross-realm both go
     // through the same rule query. The target type comes from the registry
@@ -2478,13 +2562,24 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
                     replacement_client_id
                 );
             } else {
-                let mut registry = server.actor_registry.write().await;
-                match mode {
-                    CleanupMode::ConnectionClosed => {
-                        registry.unregister_actor_memory_only(&actor_id);
-                    }
-                    CleanupMode::ExplicitUnregister => {
-                        registry.unregister_actor(&actor_id);
+                // A replacement may have connected after the snapshot above.
+                let clients = server.clients.read().await;
+                if !clients
+                    .values()
+                    .any(|client| client.actor_id.as_ref() == Some(&actor_id))
+                {
+                    let mut registry = server.actor_registry.write().await;
+                    match mode {
+                        CleanupMode::ConnectionClosed => {
+                            registry.unregister_actor_memory_only(&actor_id);
+                        }
+                        CleanupMode::ExplicitUnregister => {
+                            if let Err(error) = registry.unregister_actor_durable(&actor_id).await {
+                                platform::recording::warn!(
+                                    "Failed to unregister Actor during connection cleanup: {error}"
+                                );
+                            }
+                        }
                     }
                 }
             }

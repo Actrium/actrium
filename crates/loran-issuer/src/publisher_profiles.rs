@@ -53,8 +53,20 @@ pub enum RefreshError {
 struct Entry {
     /// The last successful check.
     checked_at: Option<Instant>,
+    /// A cache hit never extends the signed document's validity period.
+    profile_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// The last attempt, success or failure, for the retry spacing.
     attempted_at: Option<Instant>,
+}
+
+impl Entry {
+    fn is_current(&self, now: Instant, ttl: Duration) -> bool {
+        self.checked_at
+            .is_some_and(|checked| now.duration_since(checked) < ttl)
+            && self
+                .profile_expires_at
+                .is_some_and(|expires| chrono::Utc::now() < expires)
+    }
 }
 
 /// Re-checks registered publishers' Publisher Profiles during registration
@@ -109,18 +121,14 @@ impl PublisherProfileRefresher {
         // publishers do not wait for this domain's network request.
         let mut entry = entry.lock().await;
         let now = Instant::now();
-        if !missing_key
-            && entry
-                .checked_at
-                .is_some_and(|checked| now.duration_since(checked) < self.ttl)
-        {
+        if !missing_key && entry.is_current(now, self.ttl) {
             return Ok(());
         }
         if entry
             .attempted_at
             .is_some_and(|attempted| now.duration_since(attempted) < self.retry_after_failure)
         {
-            return if entry.checked_at.is_some() {
+            return if entry.is_current(now, self.ttl) {
                 // A recent accepted Profile still lacks this key: the caller
                 // re-resolves it and refuses it without another fetch.
                 Ok(())
@@ -132,16 +140,22 @@ impl PublisherProfileRefresher {
         }
         entry.attempted_at = Some(now);
         entry.checked_at = None;
-        let result = self.check(domain).await;
-        if result.is_ok() {
-            entry.checked_at = Some(Instant::now());
+        entry.profile_expires_at = None;
+        let expires_at = self.check(domain).await?;
+        if chrono::Utc::now() >= expires_at {
+            return Err(RefreshError::Profile {
+                domain: domain.to_string(),
+                message: "Publisher Profile expired during refresh".to_string(),
+            });
         }
-        result
+        entry.checked_at = Some(Instant::now());
+        entry.profile_expires_at = Some(expires_at);
+        Ok(())
     }
 
     /// Fetch `domain`'s authority descriptor, verify its Publisher Profile,
     /// and accept it into this Loran's Publisher Registry.
-    async fn check(&self, domain: &str) -> Result<(), RefreshError> {
+    async fn check(&self, domain: &str) -> Result<chrono::DateTime<chrono::Utc>, RefreshError> {
         let url = format!("https://{domain}/.well-known/actr");
         let document = self
             .fetcher
@@ -152,11 +166,17 @@ impl PublisherProfileRefresher {
                 message: error.to_string(),
             })?;
         let (profile, keys) = verify_descriptor(domain, &document)?;
+        let expires_at = chrono::DateTime::parse_from_rfc3339(&keys.profile_expires_at)
+            .map_err(|error| RefreshError::Profile {
+                domain: domain.to_string(),
+                message: error.to_string(),
+            })?
+            .with_timezone(&chrono::Utc);
         let pool = platform::storage::db::get_database().get_pool().clone();
         actrix_publisher_registry::PublisherRegistryManager::new(pool)
             .register_publisher(domain, &profile, &keys)
             .await
-            .map(|_| ())
+            .map(|_| expires_at)
             .map_err(|error| RefreshError::Profile {
                 domain: domain.to_string(),
                 message: error.to_string(),

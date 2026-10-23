@@ -50,8 +50,7 @@ pub fn issuer_key_name(realm: &str) -> String {
     format!("issuer:{realm}")
 }
 
-/// How long a Realm Profile must list a new issuer key before it signs.
-pub const PREPUBLISH_SECS: i64 = 24 * 3600;
+pub use platform::realm::issuer_key::PREPUBLISH_SECS;
 /// How often the Realm issuer keys of Provider-domain Realms rotate.
 pub const ROTATION_INTERVAL_SECS: i64 = 90 * 24 * 3600;
 /// Clock skew allowed before a retired issuer key is removed.
@@ -604,7 +603,7 @@ impl RealmProfiles {
                         .is_some_and(|at| at + PREPUBLISH_SECS <= now) =>
                 {
                     let remove_after = now + self.credential_ttl_secs as i64 + CLOCK_SKEW_SECS;
-                    RealmIssuerKey::switch(realm, now, remove_after).await?;
+                    key.switch(now, remove_after).await?;
                     // The retired key verifies only until it is removed.
                     for old in keys.iter().filter(|k| k.state == IssuerKeyState::Current) {
                         self.cache_key(realm, old, remove_after as u64).await?;

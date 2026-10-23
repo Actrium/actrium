@@ -13,6 +13,9 @@ use actr_protocol::realm_profile::RealmProfile;
 use super::error::RealmError;
 use crate::storage::db::get_database;
 
+/// Continuous publication required before an issuer key may sign credentials.
+pub const PREPUBLISH_SECS: i64 = 24 * 3600;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssuerKeyState {
     Next,
@@ -139,18 +142,16 @@ impl RealmIssuerKey {
         profile: &RealmProfile,
         now: i64,
     ) -> Result<(), RealmError> {
-        let next: Option<String> = sqlx::query_scalar(
-            "SELECT public_key FROM realm_issuer_key WHERE realm = ? AND state = 'next'",
+        let next: Option<(i64, String)> = sqlx::query_as(
+            "SELECT key_id, public_key FROM realm_issuer_key WHERE realm = ? AND state = 'next'",
         )
         .bind(&profile.realm.name)
         .fetch_optional(&mut *tx)
         .await?;
-        if let Some(next) = next
+        if let Some((key_id, public_key)) = next
             && !profile
-                .issuer
-                .keys
-                .iter()
-                .any(|key| key.status == KeyStatus::Active && key.public_key == next)
+                .issuer_key(key_id as u32)
+                .is_some_and(|key| key.status == KeyStatus::Active && key.public_key == public_key)
         {
             sqlx::query(
                 "UPDATE realm_issuer_key SET published_at = NULL
@@ -181,10 +182,42 @@ impl RealmIssuerKey {
         Ok(())
     }
 
-    /// Make the `next` key `current` and retire the current one, which
-    /// stays listed until `remove_after`.
-    pub async fn switch(realm: &str, now: i64, remove_after: i64) -> Result<(), RealmError> {
-        let mut tx = get_database().get_pool().begin().await?;
+    /// Activate this observed next key only if the accepted Profile and its
+    /// continuous publication interval still authorize it at commit time.
+    pub async fn switch(&self, now: i64, remove_after: i64) -> Result<(), RealmError> {
+        let realm = self.realm.as_str();
+        let conflict =
+            || RealmError::Conflict(format!("Realm {realm} issuer key publication changed"));
+        let Some(published_at) = self.published_at else {
+            return Err(conflict());
+        };
+        if self.state != IssuerKeyState::Next || published_at > now.saturating_sub(PREPUBLISH_SECS)
+        {
+            return Err(conflict());
+        }
+        // Serialize the final authorization check with Profile acceptance and
+        // withdrawal, including the timestamp reset performed by mark_published.
+        let mut tx = get_database()
+            .get_pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await?;
+        let document: Option<String> = sqlx::query_scalar(
+            "SELECT p.document FROM realm_profile p JOIN realm r ON r.name = p.realm
+             WHERE p.realm = ? AND r.status = 'active'",
+        )
+        .bind(realm)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let profile: RealmProfile = serde_json::from_str(&document.ok_or_else(conflict)?)
+            .map_err(|error| RealmError::ParseError(error.to_string()))?;
+        if profile.realm.name != realm
+            || profile.realm.status != actr_protocol::realm_profile::RealmStatus::Active
+            || !profile.issuer_key(self.key_id).is_some_and(|key| {
+                key.status == KeyStatus::Active && key.public_key == self.public_key
+            })
+        {
+            return Err(conflict());
+        }
         sqlx::query(
             "UPDATE realm_issuer_key SET state = 'retired', remove_after = ?
              WHERE realm = ? AND state = 'current'",
@@ -195,17 +228,20 @@ impl RealmIssuerKey {
         .await?;
         let switched = sqlx::query(
             "UPDATE realm_issuer_key SET state = 'current', current_since = ?
-             WHERE realm = ? AND state = 'next'",
+             WHERE realm = ? AND state = 'next' AND key_id = ? AND public_key = ?
+               AND published_at = ? AND published_at <= ?",
         )
         .bind(now)
         .bind(realm)
+        .bind(self.key_id as i64)
+        .bind(&self.public_key)
+        .bind(published_at)
+        .bind(now.saturating_sub(PREPUBLISH_SECS))
         .execute(&mut *tx)
         .await?
         .rows_affected();
         if switched != 1 {
-            return Err(RealmError::Conflict(format!(
-                "Realm {realm} has no next issuer key"
-            )));
+            return Err(conflict());
         }
         tx.commit().await?;
         Ok(())

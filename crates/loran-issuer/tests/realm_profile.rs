@@ -1408,7 +1408,13 @@ async fn rotation_republishes_after_interrupted_switch() {
         .unwrap();
     // This is the durable state left by a crash/RPC failure in the gap
     // between RealmIssuerKey::switch and RealmProfiles::republish.
-    RealmIssuerKey::switch(&name, now, now + 3600 + 300)
+    RealmIssuerKey::list(&name)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|key| key.key_id == next)
+        .unwrap()
+        .switch(now, now + 3600 + 300)
         .await
         .unwrap();
     assert_eq!(
@@ -1618,4 +1624,120 @@ async fn removed_profile_key_cannot_verify_or_be_redistributed_from_cache() {
         .await
         .unwrap();
     assert!(Validator::get_key_bytes(name, 902).await.unwrap().is_some());
+}
+
+/// Interleave maintenance's eligible-key read with an accepted withdrawal,
+/// then republication. Neither stale snapshot may activate the next key.
+#[tokio::test]
+#[serial]
+async fn issuer_key_switch_rechecks_withdrawal_and_continuous_publication() {
+    use platform::realm::{IssuerKeyState, RealmIssuerKey};
+    let (profiles, _dir) = setup().await;
+    let acme = Domain {
+        keys: vec![("rs-1", SigningKey::from_bytes(&[1; 32]))],
+    };
+    let member = acme.member(1, &["rs-1"]);
+    let name = "switch-race@acme.com";
+    insert(name, RealmStatus::Active).await;
+    let before = issuer_of(&profiles, name).await;
+    accept(
+        name,
+        &acme.profile(name, 1, "active", "rs-1", &before),
+        &member,
+    )
+    .await;
+    let old = RealmIssuerKey::current(name).await.unwrap().unwrap();
+    let next_id = profiles.rotate_issuer_key(name).await.unwrap();
+    let rotating = issuer_of(&profiles, name).await;
+    accept(
+        name,
+        &acme.profile(name, 2, "active", "rs-1", &rotating),
+        &member,
+    )
+    .await;
+    let now = chrono::Utc::now().timestamp();
+    let pool = platform::storage::db::get_database().get_pool();
+    sqlx::query("UPDATE realm_issuer_key SET published_at = ? WHERE realm = ? AND state = 'next'")
+        .bind(now - issuer::realm_profile::PREPUBLISH_SECS - 1)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    let eligible = RealmIssuerKey::list(name)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|key| key.state == IssuerKeyState::Next)
+        .unwrap();
+    assert!(eligible.published_at.unwrap() + issuer::realm_profile::PREPUBLISH_SECS <= now);
+
+    accept(
+        name,
+        &acme.profile(name, 3, "active", "rs-1", &before),
+        &member,
+    )
+    .await;
+    assert!(
+        eligible.switch(now, now + 3900).await.is_err(),
+        "a withdrawn key was activated"
+    );
+    assert_eq!(
+        RealmIssuerKey::current(name).await.unwrap().unwrap().key_id,
+        old.key_id
+    );
+    // Checking the Profile is necessary even if stale publication metadata remains.
+    sqlx::query("UPDATE realm_issuer_key SET published_at = ? WHERE realm = ? AND state = 'next'")
+        .bind(eligible.published_at)
+        .bind(name)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(
+        eligible.switch(now, now + 3900).await.is_err(),
+        "an unlisted key was activated"
+    );
+    sqlx::query(
+        "UPDATE realm_issuer_key SET published_at = NULL WHERE realm = ? AND state = 'next'",
+    )
+    .bind(name)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    accept(
+        name,
+        &acme.profile(name, 4, "active", "rs-1", &rotating),
+        &member,
+    )
+    .await;
+    assert!(
+        eligible.switch(now, now + 3900).await.is_err(),
+        "republication reused the old prepublication period"
+    );
+    let republished = RealmIssuerKey::list(name)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|key| key.state == IssuerKeyState::Next)
+        .unwrap();
+    let ready_at = republished.published_at.unwrap() + issuer::realm_profile::PREPUBLISH_SECS;
+    assert!(
+        republished
+            .switch(ready_at - 1, ready_at + 3900)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        RealmIssuerKey::current(name).await.unwrap().unwrap().key_id,
+        old.key_id
+    );
+    assert!(
+        eligible.switch(ready_at, ready_at + 3900).await.is_err(),
+        "a stale snapshot must not activate a republished key even after its new interval elapses"
+    );
+    republished.switch(ready_at, ready_at + 3900).await.unwrap();
+    assert_eq!(
+        RealmIssuerKey::current(name).await.unwrap().unwrap().key_id,
+        next_id
+    );
 }

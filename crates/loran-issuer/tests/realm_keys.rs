@@ -297,7 +297,46 @@ async fn credentials_are_signed_with_the_realm_issuer_key() {
     .insert()
     .await
     .expect("insert next key");
-    platform::realm::RealmIssuerKey::switch(TEST_REALM, now, now + 3900)
+    // Activation requires an actually accepted Profile listing both keys.
+    let root = ed25519_dalek::SigningKey::from_bytes(&[83; 32]);
+    let root_public = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        root.verifying_key().as_bytes(),
+    );
+    let mut roots = serde_json::json!({ "sequence": 1, "keys": [{
+        "id": "root", "algorithm": "Ed25519", "status": "active", "public_key": root_public,
+    }] });
+    actr_protocol::realm_profile::sign_document(&mut roots, "root", &root);
+    let roots: actr_protocol::RealmSigningKeys = serde_json::from_value(roots).unwrap();
+    let public =
+        |bytes: &[u8]| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+    let mut document = serde_json::json!({
+        "schema": "actr.realm/v1", "sequence": 1,
+        "realm": { "name": TEST_REALM, "display_name": "Keys", "status": "active" },
+        "package": { "href": "https://example.com/keys.actr", "sha256": "ab".repeat(32), "type": "example.com/source-workload@1.0.0" },
+        "issuer": { "url": "https://provider.example/issuer", "keys": [
+            { "id": realm_key_id.to_string(), "algorithm": "Ed25519", "status": "active", "public_key": public(realm_key.as_bytes()) },
+            { "id": next_id.to_string(), "algorithm": "Ed25519", "status": "active", "public_key": public(&next_public) },
+        ] },
+        "provider": { "id": "provider.example", "signaling": [], "ice": [] },
+        "policy": { "membership": "invite-only" }, "issued_at": chrono::Utc::now().to_rfc3339(),
+    });
+    actr_protocol::realm_profile::sign_document(&mut document, "root", &root);
+    let document = serde_json::to_string(&document).unwrap();
+    let profile =
+        actr_protocol::realm_profile::RealmProfile::verify(document.as_bytes(), TEST_REALM, &roots)
+            .unwrap();
+    platform::realm::RealmProfileRecord::store(&profile, &document, None, None, None)
+        .await
+        .unwrap();
+    let next = platform::realm::RealmIssuerKey::list(TEST_REALM)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|key| key.key_id == next_id)
+        .unwrap();
+    let switch_at = next.published_at.unwrap() + issuer::realm_profile::PREPUBLISH_SECS;
+    next.switch(switch_at, switch_at + 3900)
         .await
         .expect("switch keys");
     let rotated = issuer
