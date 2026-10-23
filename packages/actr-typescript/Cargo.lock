@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr-config"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "chrono",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "actr-hyper"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "base64",
@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "async-trait",
  "hex",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "anyhow",
  "base64",
@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "actr-service-compat"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "actr-ts"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -3482,7 +3482,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
