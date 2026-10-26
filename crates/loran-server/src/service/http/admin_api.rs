@@ -19,6 +19,8 @@ use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+mod login_admission;
+
 // ── State ──────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -113,14 +115,22 @@ async fn login(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(body): Json<LoginRequest>,
 ) -> impl IntoResponse {
-    use argon2::{Argon2, PasswordHash, PasswordVerifier};
-    let is_match = PasswordHash::new(&state.config.password_hash)
-        .ok()
-        .is_some_and(|hash| {
-            Argon2::default()
-                .verify_password(body.password.as_bytes(), &hash)
-                .is_ok()
-        });
+    let admission = login_admission::LoginAdmission::process();
+    let permit = match admission.try_acquire(peer.ip(), &state.config.login_limits) {
+        Ok(permit) => permit,
+        Err(retry_after) => {
+            // Keep rejected floods cheap; verified attempts below retain the
+            // security audit without generating an unbounded denial log stream.
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(header::RETRY_AFTER, retry_after.to_string())],
+                Json(json!({"error": "Too many login attempts"})),
+            )
+                .into_response();
+        }
+    };
+    let is_match =
+        login_admission::verify(body.password, state.config.password_hash.clone(), permit).await;
 
     if !is_match {
         // ADM-03: Record failed admin login on the security channel. The source

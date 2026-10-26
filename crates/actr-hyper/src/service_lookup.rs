@@ -8,10 +8,9 @@
 use actr_protocol::{ActrError, ActrId, ActrType};
 use thiserror::Error;
 
-/// Candidates requested when looking up a Service. Discovery may also return
-/// Actors of other Realms that an ACL rule exposes, so all are requested and
-/// the ones outside the Realm are dropped before counting.
-pub const SERVICE_CANDIDATE_COUNT: u32 = u32::MAX;
+/// Signaling scopes this lookup to the requested Realm; two candidates suffice
+/// to distinguish missing, unique, and non-unique Services.
+pub const SERVICE_CANDIDATE_COUNT: u32 = 2;
 
 /// Service lookup failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

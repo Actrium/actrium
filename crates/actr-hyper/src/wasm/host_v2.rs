@@ -1,4 +1,4 @@
-//! WasmWorkloadV2 — the `actr:workload@0.7.0` async-world execution path.
+//! WasmWorkloadV2 — the `actr:workload@0.8.0` async-world execution path.
 //!
 //! The sole actr:workload execution path (the 0.1.0 synchronous serial
 //! world is retired — a component exporting it is rejected at load by

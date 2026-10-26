@@ -60,9 +60,20 @@ struct ActrixHarness {
 impl ActrixHarness {
     /// Start actrix with default features (Issuer/Signer/Signaling) and wait for health
     async fn start(token_ttl: u64) -> Self {
+        Self::start_with_login_limits(token_ttl, None).await
+    }
+
+    async fn start_with_login_limits(token_ttl: u64, limits: Option<&str>) -> Self {
         let tmp = tempfile::tempdir().expect("temp dir");
         let port = choose_port();
         let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, token_ttl);
+        if let Some(limits) = limits {
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(&config_path)
+                .unwrap();
+            writeln!(file, "\n[control.admin_ui.login_limits]\n{limits}").unwrap();
+        }
         let log_path = tmp.path().join("actrix_fullstack.log");
         let data_dir = tmp.path().join("data");
         ensure_realm(&data_dir, TEST_REALM).await;
@@ -2002,6 +2013,104 @@ async fn removing_a_member_closes_its_connections_and_refuses_it() {
         other => panic!("a removed member registered: {other:?}"),
     }
 
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn admin_login_limits_reject_before_hashing_and_leave_services_responsive() {
+    let harness = ActrixHarness::start_with_login_limits(
+        DEFAULT_TOKEN_TTL,
+        Some("per_ip_per_minute = 1\nper_ip_burst = 1"),
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/api/auth/login", harness.base_url());
+    let first = client
+        .post(&url)
+        .json(&json!({"password": "wrong-test-password"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let denied = client
+        .post(&url)
+        .json(&json!({"password": "testpassword123"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+    assert!(denied.headers().contains_key("retry-after"));
+    let health = client
+        .get(format!("{}/issuer/health", harness.base_url()))
+        .send()
+        .await
+        .unwrap();
+    assert!(health.status().is_success());
+    harness.shutdown();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial]
+async fn signer_authentication_reload_requires_restart_and_preserves_live_policy() {
+    let mut harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let config_path = harness.tmp.path().join("config.toml");
+    let mut config: toml::Value =
+        toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+    let replacement_key = "abcdef0123456789abcdef0123456789";
+    config["actrix_shared_key"] = toml::Value::String(replacement_key.into());
+    fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
+    assert_eq!(
+        unsafe { libc::kill(harness.child.id() as libc::pid_t, libc::SIGHUP) },
+        0
+    );
+    tokio::time::timeout(START_TIMEOUT, async {
+        loop {
+            if fs::read_to_string(harness.log_path())
+                .unwrap_or_default()
+                .contains("Signer listener/security change requires a full restart")
+            {
+                break;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("reload must explicitly require restart");
+    let signer_config = |key: &str| GrpcClientConfig {
+        endpoint: format!("http://127.0.0.1:{}", harness.signer_port),
+        actrix_shared_key: key.into(),
+        timeout_seconds: 5,
+        enable_tls: false,
+        tls_domain: None,
+        ca_cert: None,
+        client_cert: None,
+        client_key: None,
+    };
+    let old_config = signer_config(ACTRIX_SHARED_KEY);
+    let new_config = signer_config(replacement_key);
+    let mut old_client = GrpcClient::new(&old_config).await.unwrap();
+    assert_eq!(old_client.health_check().await.unwrap(), "healthy");
+    let mut new_client = GrpcClient::new(&new_config).await.unwrap();
+    assert!(new_client.health_check().await.is_err());
+
+    // A full restart, rather than router reload, adopts the new policy.
+    let log_path = harness.log_path().to_path_buf();
+    graceful_shutdown(harness.child);
+    harness.child = spawn_actrix(&config_path, &log_path);
+    tokio::time::timeout(START_TIMEOUT, async {
+        loop {
+            if let Ok(mut client) = GrpcClient::new(&new_config).await
+                && client.health_check().await.is_ok()
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("restart must adopt the new Signer authentication policy");
     harness.shutdown();
 }
 

@@ -305,6 +305,9 @@ enum CleanupMode {
     ExplicitUnregister,
 }
 
+/// Maximum number of route candidates encoded for any wire request.
+const MAX_ROUTE_CANDIDATES: u32 = 64;
+
 struct StaleClient {
     id: String,
     egress: ClientEgress,
@@ -776,6 +779,15 @@ pub(crate) async fn handle_websocket_connection_inner(
             };
 
             let service_name = format!("{}:{}", actor_type.publisher, actor_type.name);
+            // A delayed registration must not overwrite a replacement. Use the
+            // same lock order as installation and durable unregister: clients -> registry.
+            let clients = server.clients.read().await;
+            if !clients
+                .get(&client_id)
+                .is_some_and(|client| client.actor_id.as_ref() == Some(&actor_id_for_registry))
+            {
+                return Ok(());
+            }
             let mut registry = server.actor_registry.write().await;
             if let Err(e) = registry.register_service_full(
                 actor_id_for_registry.clone(),
@@ -1180,14 +1192,6 @@ async fn handle_client_envelope(
         };
         client.actor_id.clone().zip(client.credential.clone())
     };
-    if let Some((actor, credential)) = identity
-        && client_credential_refused(&actor, Some(&credential)).await
-    {
-        close_refused_connection(server, client_id).await;
-        // Let the egress task write its policy Close frame and terminate the
-        // receive task; any already-queued input finds no registered client.
-        return Ok(());
-    }
     // Check message rate limit
     if let Some(ref limiter) = server.message_rate_limiter
         && let Err(e) = limiter.check_message(client_id).await
@@ -1205,6 +1209,15 @@ async fn handle_client_envelope(
         let error_envelope =
             server.create_new_envelope(signaling_envelope::Flow::EnvelopeError(error_response));
         send_envelope_to_client(client_id, error_envelope, server).await?;
+        return Ok(());
+    }
+
+    // Admission must precede database authorization work, including for malformed
+    // binary frames. Admitted messages still recheck the live durable binding.
+    if let Some((actor, credential)) = identity
+        && client_credential_refused(&actor, Some(&credential)).await
+    {
+        close_refused_connection(server, client_id).await;
         return Ok(());
     }
 
@@ -1746,6 +1759,15 @@ async fn handle_unregister(
         req.reason.as_deref().unwrap_or("not provided")
     );
 
+    // Serialize ownership and deletion with replacement installation. An old
+    // handler may have passed authentication before the new connection arrived.
+    let clients = server.clients.read().await;
+    if !clients
+        .get(client_id)
+        .is_some_and(|client| client.actor_id.as_ref() == Some(&source))
+    {
+        return Ok(());
+    }
     // The storage DELETE must complete before Success is acknowledged: the
     // peer treats UnregisterOk as "the removal survives a server restart".
     let durable = server
@@ -1754,6 +1776,7 @@ async fn handle_unregister(
         .await
         .unregister_actor_durable(&source)
         .await;
+    drop(clients);
 
     let response = match durable {
         Ok(()) => actr_protocol::UnregisterResponse {
@@ -2834,16 +2857,24 @@ async fn handle_route_candidates_request(
     });
 
     // Extract ws_address (rank_candidates moves candidates, collect beforehand)
-    let ws_address_map: Vec<(ActrId, Option<String>)> = acl_filtered_candidates
+    let ws_address_map: std::collections::HashMap<ActrId, Option<String>> = acl_filtered_candidates
         .iter()
         .map(|c| (c.actor_id.clone(), c.ws_address.clone()))
         .collect();
 
     // Ranking: ACL filtered, same ActrType means protocol compatible, apply ranking_factors in order
     // is_exact_match flag handled internally by LB via client_fingerprint
+    // Cap arbitrary wire requests before ranking/encoding response candidates.
+    let mut criteria = req.criteria.clone().unwrap_or_else(|| {
+        actr_protocol::route_candidates_request::NodeSelectionCriteria {
+            candidate_count: MAX_ROUTE_CANDIDATES,
+            ..Default::default()
+        }
+    });
+    criteria.candidate_count = criteria.candidate_count.min(MAX_ROUTE_CANDIDATES);
     let ranked_actor_ids = LoadBalancer::rank_candidates(
         &acl_filtered_candidates,
-        req.criteria.as_ref(),
+        Some(&criteria),
         req.client_fingerprint.trim(),
         Some(client_id),
         client_location,
@@ -2858,12 +2889,12 @@ async fn handle_route_candidates_request(
     let ws_address_map: Vec<actr_protocol::WsAddressEntry> = ranked_actor_ids
         .iter()
         .filter_map(|id| {
-            ws_address_map.iter().find(|(a, _)| a == id).map(|(_, ws)| {
-                actr_protocol::WsAddressEntry {
+            ws_address_map
+                .get(id)
+                .map(|ws| actr_protocol::WsAddressEntry {
                     candidate_id: id.clone(),
                     ws_address: ws.clone(),
-                }
-            })
+                })
         })
         .collect();
 
@@ -3210,6 +3241,162 @@ mod tests {
                 None,
             )
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn displaced_unregister_preserves_replacement_and_durable_discovery() {
+        use crate::actor_registry_storage::ActorRegistryStorage;
+        let server = create_test_server_handle();
+        let actor = create_test_actr_id(812);
+        server.clients.write().await.insert(
+            "old".into(),
+            create_test_client_with_id("old", actor.clone(), None),
+        );
+        register_test_service(&server, &actor).await;
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(
+            ActorRegistryStorage::new(dir.path().join("actors.db"), None)
+                .await
+                .unwrap(),
+        );
+
+        // Pause the actual old handler at its ownership lock, then install a
+        // replacement before releasing it. No timing sleeps or scheduler races.
+        let mut clients = server.clients.write().await;
+        let mut old_request = Box::pin(handle_unregister(
+            actor.clone(),
+            Default::default(),
+            "old",
+            &server,
+            "old-request",
+        ));
+        assert!(futures_util::poll!(&mut old_request).is_pending());
+        clients.remove("old");
+        clients.insert(
+            "new".into(),
+            create_test_client_with_id("new", actor.clone(), None),
+        );
+        server
+            .actor_id_index
+            .write()
+            .await
+            .insert(actor.clone(), "new".into());
+        register_test_service(&server, &actor).await;
+        let service = server
+            .actor_registry
+            .read()
+            .await
+            .find_by_actr_type(&actor.realm, &create_test_actr_type())[0]
+            .clone();
+        storage.save_service(&service).await.unwrap();
+        server
+            .actor_registry
+            .write()
+            .await
+            .set_storage(storage.clone());
+        drop(clients);
+        old_request.await.unwrap();
+        assert!(server.clients.read().await.contains_key("new"));
+        assert_eq!(
+            server
+                .actor_id_index
+                .read()
+                .await
+                .get(&actor)
+                .map(String::as_str),
+            Some("new")
+        );
+        assert_eq!(
+            server.actor_registry.read().await.get_actor_type(&actor),
+            Some(&create_test_actr_type())
+        );
+        assert_eq!(
+            storage
+                .load_services_by_actor_id(&actor)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        handle_unregister(
+            actor.clone(),
+            Default::default(),
+            "new",
+            &server,
+            "current-request",
+        )
+        .await
+        .unwrap();
+        assert!(
+            server
+                .actor_registry
+                .read()
+                .await
+                .get_actor_type(&actor)
+                .is_none()
+        );
+        assert!(
+            storage
+                .load_services_by_actor_id(&actor)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn over_limit_messages_do_not_run_connection_authorization() {
+        let mut server = create_test_server_handle();
+        let limiter = Arc::new(crate::ratelimit::MessageRateLimiter::new(
+            platform::config::signaling::MessageRateLimit {
+                enabled: true,
+                per_second: 1,
+                burst_size: 1,
+            },
+        ));
+        limiter.check_message("limited").await.unwrap();
+        server.message_rate_limiter = Some(limiter);
+        let (egress, mut data_rx, mut control_rx) =
+            create_blocked_egress(EgressQueueConfig::default(), server.queue_metrics.clone());
+        server.clients.write().await.insert(
+            "limited".into(),
+            ClientConnection {
+                id: "limited".into(),
+                actor_id: Some(create_test_actr_id(813)),
+                credential: Some(AIdCredential {
+                    claims: vec![0xff].into(),
+                    ..Default::default()
+                }),
+                egress,
+                client_ip: None,
+                webrtc_role: None,
+            },
+        );
+        handle_client_envelope(&[], "limited", &server)
+            .await
+            .unwrap();
+        let queued = data_rx.recv().await.unwrap();
+        let WsMessage::Binary(bytes) = queued.msg else {
+            panic!("expected binary error")
+        };
+        let envelope = SignalingEnvelope::decode(bytes.as_ref()).unwrap();
+        assert!(matches!(
+            envelope.flow,
+            Some(signaling_envelope::Flow::EnvelopeError(ErrorResponse {
+                code: 429,
+                ..
+            }))
+        ));
+        assert!(server.clients.read().await.contains_key("limited"));
+        assert!(control_rx.try_recv().is_err());
+        // Once admitted, the same invalid connection must still be refused.
+        server.message_rate_limiter = None;
+        handle_client_envelope(&[], "limited", &server)
+            .await
+            .unwrap();
+        assert!(!server.clients.read().await.contains_key("limited"));
+        assert!(matches!(control_rx.recv().await, Some(WsMessage::Close(_))));
     }
 
     #[test]
@@ -4031,6 +4218,56 @@ mod tests {
                 dir
             })
             .await;
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn route_candidate_responses_are_bounded_before_encoding() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 900, "lookup-source").await;
+            for n in 0..80 {
+                let peer = connect(&server, 1000 + n, &format!("candidate-{n}")).await;
+                register(&server, &peer.id, worker()).await;
+            }
+            for count in [2, u32::MAX] {
+                handle_route_candidates_request(
+                    source.id.clone(),
+                    &edge(),
+                    actr_protocol::RouteCandidatesRequest {
+                        target_type: worker(),
+                        criteria: Some(
+                            actr_protocol::route_candidates_request::NodeSelectionCriteria {
+                                candidate_count: count,
+                                ..Default::default()
+                            },
+                        ),
+                        ..Default::default()
+                    },
+                    "lookup-source",
+                    &server,
+                    "lookup-request",
+                )
+                .await
+                .unwrap();
+                let Some(signaling_envelope::Flow::ServerToActr(SignalingToActr {
+                    payload: Some(signaling_to_actr::Payload::RouteCandidatesResponse(response)),
+                    ..
+                })) = next_flow(&mut source)
+                else {
+                    panic!("missing response")
+                };
+                let Some(actr_protocol::route_candidates_response::Result::Success(ok)) =
+                    response.result
+                else {
+                    panic!("lookup failed")
+                };
+                assert_eq!(
+                    ok.candidates.len(),
+                    count.min(MAX_ROUTE_CANDIDATES) as usize
+                );
+                assert_eq!(ok.ws_address_map.len(), ok.candidates.len());
+            }
         }
 
         fn credential(actor: &ActrId, actor_type: ActrType) -> AIdCredential {

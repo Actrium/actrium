@@ -1,4 +1,4 @@
-declare module 'actr:workload/host@0.7.0' {
+declare module 'actr:workload/host@0.8.0' {
   // V2 host imports are real WIT `async func`. Every import takes a
   // `ctx-token: u64` first parameter (surfaced to JS as a `bigint`) that keys
   // the host's per-invocation table so it can recover the correct bridge even

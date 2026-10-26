@@ -1428,6 +1428,31 @@ async fn test_register_route_package_with_publisher_identity_succeeds() {
 
 #[tokio::test]
 #[serial]
+async fn test_register_accepts_canonical_digit_and_long_publisher_domains() {
+    let env = setup_test_environment().await;
+    let realm = "publisher-domain-validation@example.com";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+    let app = create_test_router(&env).await;
+    for publisher in [
+        "1acme.example",
+        "a-very-long-publisher-domain-name.example.com",
+    ] {
+        let (_, key) =
+            seed_active_package_returning_key(publisher, "echo", "1.0.0", "wasm32-wasip1").await;
+        let request =
+            signed_package_request(publisher, "echo", "1.0.0", realm, "wasm32-wasip1", &key);
+        let response = post_register(app.clone(), request, Some(ROUTE_KEY_LABEL)).await;
+        match response.result.unwrap() {
+            register_response::Result::Success(ok) => {
+                assert_eq!(registered_type(&ok).publisher, publisher)
+            }
+            other => panic!("canonical Publisher was rejected: {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+#[serial]
 async fn test_register_route_unspecified_auth_mode_uses_package_identity() {
     let env = setup_test_environment().await;
     let realm = "unspecified-http-route@example.com";

@@ -53,6 +53,32 @@ pub struct AdminUiConfig {
     /// JWT session expiry in seconds. Default: 3600 (1 hour).
     #[serde(default = "default_session_expiry_secs")]
     pub session_expiry_secs: u64,
+
+    /// Login admission limits, applied before expensive password verification.
+    #[serde(default)]
+    pub login_limits: AdminLoginLimits,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct AdminLoginLimits {
+    pub per_ip_per_minute: u32,
+    pub per_ip_burst: u32,
+    pub global_per_minute: u32,
+    pub global_burst: u32,
+    pub max_concurrent: usize,
+}
+
+impl Default for AdminLoginLimits {
+    fn default() -> Self {
+        Self {
+            per_ip_per_minute: 30,
+            per_ip_burst: 10,
+            global_per_minute: 120,
+            global_burst: 20,
+            max_concurrent: 2,
+        }
+    }
 }
 
 impl AdminUiConfig {
@@ -117,6 +143,7 @@ impl Default for AdminUiConfig {
             enabled: default_admin_ui_enabled(),
             password_hash: String::new(),
             session_expiry_secs: default_session_expiry_secs(),
+            login_limits: AdminLoginLimits::default(),
         }
     }
 }
@@ -183,6 +210,16 @@ impl ControlConfig {
 
     fn validate_admin_ui(&self) -> Result<(), String> {
         let cfg = &self.admin_ui;
+
+        let limits = &cfg.login_limits;
+        if limits.per_ip_per_minute == 0
+            || limits.per_ip_burst == 0
+            || limits.global_per_minute == 0
+            || limits.global_burst == 0
+            || limits.max_concurrent == 0
+        {
+            return Err("control.admin_ui.login_limits values must be greater than 0".into());
+        }
 
         if cfg.password_hash.is_empty() {
             return Err(

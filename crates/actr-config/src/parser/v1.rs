@@ -244,7 +244,7 @@ impl ParserV1 {
     }
 
     fn parse_package(&self, raw: &RawPackageConfig) -> Result<PackageInfo> {
-        Name::new(raw.publisher.clone()).map_err(|e| {
+        ActrType::validate_publisher(&raw.publisher).map_err(|e| {
             ConfigError::InvalidActrType(format!(
                 "Invalid publisher name '{}': {}",
                 raw.publisher, e
@@ -427,7 +427,7 @@ impl ParserV1 {
             return Err(expected());
         }
 
-        Name::new(publisher.to_string()).map_err(|e| {
+        ActrType::validate_publisher(publisher).map_err(|e| {
             ConfigError::InvalidActrType(format!(
                 "Invalid publisher '{}' in '{}': {}",
                 publisher, s, e
@@ -696,6 +696,37 @@ mod tests {
     use crate::ManifestRawConfig;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn publisher_domain_rules_apply_to_manifest_and_dependency_types() {
+        let parser = ParserV1::new("manifest.toml");
+        for publisher in [
+            "1acme.example",
+            "a-very-long-publisher-domain-name.example.com",
+        ] {
+            let raw: ManifestRawConfig = toml::from_str(&format!(
+                "edition = 1\n[package]\nname = \"echo\"\npublisher = \"{publisher}\"\nversion = \"1.0.0\"\n"
+            )).unwrap();
+            parser
+                .parse_package(&raw.package)
+                .unwrap()
+                .actr_type
+                .validate()
+                .unwrap();
+            parser
+                .parse_actr_type(&format!("{publisher}/echo@1.0.0"))
+                .unwrap()
+                .validate()
+                .unwrap();
+        }
+        for publisher in ["acme_example.com", "a..example"] {
+            assert!(
+                parser
+                    .parse_actr_type(&format!("{publisher}/echo@1.0.0"))
+                    .is_err()
+            );
+        }
+    }
 
     #[test]
     fn test_parse_basic_config() {

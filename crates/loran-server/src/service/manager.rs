@@ -116,6 +116,9 @@ pub struct ServiceManager {
     /// live for the lifetime of the listener (which is not hot-reloaded) and
     /// are cancelled only on shutdown.
     signer_bg_cancel: Option<tokio_util::sync::CancellationToken>,
+    /// Material actually loaded by the dedicated listener, including same-path
+    /// certificate/CA/KEK replacements that config comparisons cannot detect.
+    signer_material_fingerprint: Option<String>,
     /// In-memory metrics ring buffer, reused across reloads.
     metrics_store: MetricsStore,
     /// Per-service-type atomic counters, keyed by ResourceType i32.
@@ -144,6 +147,7 @@ impl ServiceManager {
             config_store: None,
             bg_cancel: None,
             signer_bg_cancel: None,
+            signer_material_fingerprint: None,
             metrics_store: MetricsStore::new(),
             service_counters: Arc::new(HashMap::new()),
         }
@@ -723,6 +727,7 @@ impl ServiceManager {
     /// true the listener terminates TLS with mutual client-certificate
     /// verification; otherwise it serves plaintext h2c for loopback callers.
     async fn start_signer_service(&mut self, notify: Arc<Notify>) -> Result<JoinHandle<()>> {
+        self.signer_material_fingerprint = Some(Self::signer_material_fingerprint(&self.config)?);
         let signer_ip = self.config.signer_bind_ip();
         let signer_port = self.config.signer_bind_port();
         let bind_addr = parse_bind_socket_addr("bind.signer.ip", &signer_ip, signer_port)?;
@@ -977,6 +982,10 @@ impl ServiceManager {
     fn check_restart_required(old: &ActrixConfig, new: &ActrixConfig) -> Vec<String> {
         let mut reasons = Vec::new();
 
+        if Self::signer_restart_required(old, new) {
+            reasons.push("Signer listener/authentication config changed".into());
+        }
+
         if old.bind.http != new.bind.http {
             reasons.push("bind.http changed".into());
         }
@@ -999,6 +1008,48 @@ impl ServiceManager {
         }
 
         reasons
+    }
+
+    fn signer_restart_required(old: &ActrixConfig, new: &ActrixConfig) -> bool {
+        old.is_signer_enabled() != new.is_signer_enabled()
+            || ((old.is_signer_enabled() || new.is_signer_enabled())
+                && (old.bind.signer != new.bind.signer
+                    || old.actrix_shared_key != new.actrix_shared_key
+                    || serde_json::to_value(&old.services.signer).ok()
+                        != serde_json::to_value(&new.services.signer).ok()))
+    }
+
+    fn signer_material_fingerprint(config: &ActrixConfig) -> Result<String> {
+        let mut material = Vec::new();
+        if let Some(signer) = &config.services.signer {
+            let mut paths = Vec::new();
+            if signer.mtls_enabled() {
+                paths.extend(
+                    [&signer.mtls_ca_cert, &signer.mtls_cert, &signer.mtls_key]
+                        .into_iter()
+                        .flatten(),
+                );
+            }
+            if let Some(path) = &signer.kek_file {
+                paths.push(path);
+            }
+            for path in paths {
+                let bytes = std::fs::read(path).map_err(|_| {
+                    anyhow::anyhow!("Signer material cannot be read; restart required")
+                })?;
+                material.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+                material.extend_from_slice(&bytes);
+            }
+            if signer.kek_file.is_none()
+                && let Some(name) = &signer.kek_env
+            {
+                let value = std::env::var(name).map_err(|_| {
+                    anyhow::anyhow!("Signer KEK environment is unavailable; restart required")
+                })?;
+                material.extend_from_slice(value.as_bytes());
+            }
+        }
+        Ok(actr_protocol::realm_membership::body_sha256(&material))
     }
 
     /// Reload configuration and hot-swap services.
@@ -1050,6 +1101,20 @@ impl ServiceManager {
         }
 
         let old_config = self.config.clone();
+        // The dedicated Signer listener is not rebuilt by router hot swapping.
+        // Reject the reload before adopting any config or cancelling any task.
+        if Self::signer_restart_required(&old_config, &new_config)
+            || (old_config.is_signer_enabled()
+                && self.signer_material_fingerprint.as_ref()
+                    != Some(&Self::signer_material_fingerprint(&new_config)?))
+        {
+            platform::recording::warn!(
+                "Signer listener/security change requires a full restart; keeping the previous configuration"
+            );
+            return Err(anyhow::anyhow!(
+                "Signer listener/security change requires restart"
+            ));
+        }
         self.config = new_config;
 
         // 2. Warn about config changes that require a full restart
@@ -1371,4 +1436,53 @@ fn parse_bind_socket_addr(field_name: &str, ip: &str, port: u16) -> Result<Socke
         .parse::<IpAddr>()
         .map_err(|e| anyhow::anyhow!("Invalid {field_name} '{ip}': {e}"))?;
     Ok(SocketAddr::new(parsed_ip, port))
+}
+
+#[cfg(test)]
+mod signer_reload_tests {
+    use super::*;
+
+    #[test]
+    fn signer_listener_and_security_changes_require_restart() {
+        let mut old = ActrixConfig::default();
+        old.enable |= platform::config::ENABLE_SIGNER;
+        old.services.signer = Some(signer::SignerServiceConfig::default());
+        old.bind.signer = Some(Default::default());
+        let mut changed = old.clone();
+        changed.enable &= !platform::config::ENABLE_SIGNER;
+        assert!(ServiceManager::signer_restart_required(&old, &changed));
+        changed = old.clone();
+        changed.actrix_shared_key.push('x');
+        assert!(ServiceManager::signer_restart_required(&old, &changed));
+        changed = old.clone();
+        changed.services.signer.as_mut().unwrap().require_mtls = true;
+        assert!(ServiceManager::signer_restart_required(&old, &changed));
+        changed = old.clone();
+        changed.bind.signer.as_mut().unwrap().port += 1;
+        assert!(ServiceManager::signer_restart_required(&old, &changed));
+        assert!(!ServiceManager::signer_restart_required(&old, &old));
+    }
+
+    #[test]
+    fn replacing_material_at_the_same_path_changes_the_listener_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ca.pem");
+        std::fs::write(&path, b"first test certificate").unwrap();
+        let mut config = ActrixConfig::default();
+        config.services.signer = Some(signer::SignerServiceConfig {
+            mtls_ca_cert: Some(path.to_str().unwrap().into()),
+            mtls_cert: Some(path.to_str().unwrap().into()),
+            mtls_key: Some(path.to_str().unwrap().into()),
+            require_mtls: true,
+            ..Default::default()
+        });
+        let old = ServiceManager::signer_material_fingerprint(&config).unwrap();
+        std::fs::write(&path, b"replacement test certificate").unwrap();
+        assert_ne!(
+            old,
+            ServiceManager::signer_material_fingerprint(&config).unwrap()
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert!(ServiceManager::signer_material_fingerprint(&config).is_err());
+    }
 }

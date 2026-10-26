@@ -20,7 +20,7 @@ pub mod turn;
 
 pub use crate::config::authority::AuthorityConfig;
 pub use crate::config::bind::BindConfig;
-pub use crate::config::control::{AdminUiConfig, ControlConfig, ControlHead};
+pub use crate::config::control::{AdminLoginLimits, AdminUiConfig, ControlConfig, ControlHead};
 pub use crate::config::issuer::IssuerServiceConfig;
 pub use crate::config::packages::PackagesConfig;
 pub use crate::config::realm::RealmConfig;

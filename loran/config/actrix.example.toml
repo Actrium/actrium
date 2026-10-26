@@ -281,6 +281,14 @@ password_hash = "<generate-argon2id-phc>"
 # JWT session expiry in seconds (default: 86400 = 24h)
 session_expiry_secs = 86400
 
+# Login token buckets and password-verification concurrency (no waiting queue).
+[control.admin_ui.login_limits]
+per_ip_per_minute = 30
+per_ip_burst = 10
+global_per_minute = 120
+global_burst = 20
+max_concurrent = 2
+
 [control.grpc_api]
 # Enable the supervisor-facing NodeAdminService gRPC API under
 # /admin.v1.NodeAdminService/* (default: false). When enabled, the node is

@@ -40,8 +40,8 @@ fn validate_actor_namespace(value: &str) -> Result<(), ActrIdError> {
 /// interior underscores, so the general parser must not reintroduce the old
 /// "starts with a letter" rule. A leading or trailing `-`, `_`, or `.` is
 /// still rejected, as is any character outside ASCII alphanumeric and `-_.`.
-/// Security-sensitive entry points use the strict [`ActrType::validate`]
-/// (Name-based) gate rather than this parser-level check.
+/// Security-sensitive entry points use [`ActrType::validate`] rather than
+/// this parser-level check.
 fn validate_type_publisher(value: &str) -> Result<(), ActrIdError> {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -85,6 +85,40 @@ pub enum ActrIdError {
 }
 
 impl ActrType {
+    /// Validate a Publisher domain, retaining short local namespaces for linked workloads.
+    pub fn validate_publisher(publisher: &str) -> Result<(), ActrIdError> {
+        if publisher.contains('.') {
+            validate_actor_namespace(publisher)?;
+            // URL-based Registry lookup interprets a numeric final label as an
+            // IPv4 address (including shorthand and hexadecimal forms), not DNS.
+            let last = publisher.rsplit('.').next().unwrap_or_default();
+            let numeric_last = last.bytes().all(|c| c.is_ascii_digit())
+                || last
+                    .strip_prefix("0x")
+                    .is_some_and(|digits| digits.bytes().all(|c| c.is_ascii_hexdigit()));
+            if publisher != publisher.to_ascii_lowercase()
+                || numeric_last
+                || publisher.split('.').any(|label| {
+                    label.is_empty()
+                        || label.len() > 63
+                        || label.starts_with('-')
+                        || label.ends_with('-')
+                })
+            {
+                return Err(ActrIdError::InvalidComponent(
+                    "publisher must be a canonical lowercase DNS domain".to_string(),
+                ));
+            }
+            Ok(())
+        } else {
+            Name::new(publisher.to_string())
+                .map(|_| ())
+                .map_err(|error| {
+                    ActrIdError::InvalidComponent(format!("Invalid publisher: {error}"))
+                })
+        }
+    }
+
     /// Canonical program identity used by registries:
     /// `publisher/program@version`.
     pub fn to_program_identity(&self) -> String {
@@ -102,16 +136,8 @@ impl ActrType {
         if publisher.is_empty() || program.is_empty() || version.is_empty() {
             return Err(ActrIdError::InvalidTypeFormat(value.to_string()));
         }
-        validate_actor_namespace(publisher)?;
-        if publisher != publisher.to_ascii_lowercase()
-            || !publisher.contains('.')
-            || publisher.split('.').any(|label| {
-                label.is_empty()
-                    || label.len() > 63
-                    || label.starts_with('-')
-                    || label.ends_with('-')
-            })
-        {
+        Self::validate_publisher(publisher)?;
+        if !publisher.contains('.') {
             return Err(ActrIdError::InvalidComponent(
                 "program publisher must be a canonical lowercase DNS domain".to_string(),
             ));
@@ -145,15 +171,15 @@ impl ActrType {
 
     /// Validate the identity fields against the protocol naming rules.
     ///
-    /// `publisher`/`name` reuse [`Name`]; `version` uses its own 1–64 byte
+    /// `publisher` uses DNS rules (or a short local namespace), `name` uses
+    /// [`Name`]; `version` uses its own 1–64 byte
     /// ASCII allowlist (see [`validate_version`]). Because [`ActrType`] is a
     /// protobuf type with public fields, callers can construct invalid values
     /// without going through a parser — so every security-sensitive entry point
     /// (package verification, registry lookup, Issuer registration, storage
     /// namespace derivation) must call `validate()` before trusting the identity.
     pub fn validate(&self) -> Result<(), ActrIdError> {
-        Name::new(self.publisher.clone())
-            .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid publisher: {e}")))?;
+        Self::validate_publisher(&self.publisher)?;
         Name::new(self.name.clone())
             .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid type name: {e}")))?;
         validate_version(&self.version)
@@ -417,6 +443,38 @@ mod tests {
             program.to_program_identity(),
             "apps.example.com/echo-service@1.0.0"
         );
+    }
+
+    #[test]
+    fn publisher_domains_validate_consistently_with_program_identity() {
+        for publisher in [
+            "1acme.example",
+            "a-very-long-publisher-domain-name.example.com",
+        ] {
+            let identity = format!("{publisher}/echo@1.0.0");
+            let actor_type = ActrType::from_program_identity(&identity).unwrap();
+            actor_type.validate().unwrap();
+            assert_eq!(ActrType::from_string_repr(&identity).unwrap(), actor_type);
+        }
+        for publisher in [
+            "acme_example.com",
+            "a..example",
+            "EXAMPLE.com",
+            "a.-bad.example",
+            "a.bad-.example",
+            "127.0.0.1",
+            "127.1",
+            "example.0xff",
+        ] {
+            assert!(
+                ActrType::validate_publisher(publisher).is_err(),
+                "{publisher}"
+            );
+        }
+        ActrType::validate_publisher("linked_src").unwrap();
+        let mut actor_type = ActrType::from_program_identity("1acme.example/echo@1.0.0").unwrap();
+        actor_type.name = "1invalid".into();
+        assert!(actor_type.validate().is_err());
     }
 
     #[test]
