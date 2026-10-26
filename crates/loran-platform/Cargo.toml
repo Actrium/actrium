@@ -28,7 +28,6 @@ tokio-rustls = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 rand = "0.8.5"
-ecies = { workspace = true }
 uuid = { workspace = true }
 hex = { workspace = true }
 hkdf = { workspace = true }

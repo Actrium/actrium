@@ -78,7 +78,6 @@ toml = { version = "0.8" }
 nonce-auth = { workspace = true }
 chrono = { workspace = true }
 hmac = { workspace = true }
-ecies = { workspace = true }
 reqwest = { workspace = true }
 typetag = "0.2.20"
 pwrzv = { version = "0.7.0" }
