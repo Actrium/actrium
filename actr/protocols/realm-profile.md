@@ -478,8 +478,10 @@ quotas per Realm domain and per Realm.
 
 ## 10. Open work
 
-- Define machine-readable JSON Schemas for `actr.realm/v1` and Realm
-  management requests, with signing test vectors.
+- Define machine-readable JSON Schemas and signing test vectors for Realm
+  management requests. The Realm Profile schema and interoperability vectors
+  are available in [`contracts/actr`](../../contracts/actr/README.md#realm-profile);
+  schema validation does not replace signature, trust or successor checks.
 - Define delegated creation keys with scoped RealmId prefixes and lifetimes.
 - Let users create and manage Realms under a Realm Infra Provider's domain
   themselves with Realm Infra Provider accounts (for example OAuth 2.0 authorization

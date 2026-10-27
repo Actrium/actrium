@@ -367,7 +367,9 @@ Authority Discovery 第 4.5 节用它登记 publisher，Actr Realm Membership �
 
 ## 10. 待完成工作
 
-- 为 `actr.realm/v1` 与 Realm 管理请求定义机器可读的 JSON Schema 与签名 test vector；
+- 为 Realm 管理请求定义机器可读的 JSON Schema 与签名 test vector；Realm Profile 的
+  Schema 与互操作向量已提供于 [`contracts/actr`](../../contracts/actr/README.md#realm-profile)，
+  结构校验不替代签名、信任与后继 Profile 检查；
 - 定义限定 RealmId 前缀与有效期的创建委派 key；
 - Realm Infra Provider 域名下由用户以 Realm Infra Provider 账号（例如 OAuth 2.0 授权码 + PKCE）自助创建与
   管理 Realm，并按账号计配额。

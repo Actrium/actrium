@@ -1,0 +1,2446 @@
+{
+  "description": "Actr Realm Profile interoperability vectors, actr/protocols/realm-profile.md sections 4-6. Signatures generated independently with Python cryptography and public RFC 8032 section 7.1 test keys. No deployment secrets. JCS inputs use integer and exactly representable 1.5 numbers.",
+  "realm": "k7m2q9xh@acme.com",
+  "key_sets": {
+    "initial": {
+      "document": {
+        "sequence": 1,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "55ntdTXVOE1J26OoRHLuG5GwdlSFCWSH3wJG2fYSw1kU8Icu80EgJ29sWmEiyzGCrY5Q5dFDJGpZfd7C6l7CDw=="
+        }
+      },
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\",\"status\":\"active\"}],\"sequence\":1}"
+    },
+    "retired_signer": {
+      "document": {
+        "sequence": 2,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+            "status": "retired"
+          },
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "ipZdNS1yFqL1ubxsCX1y20WvjS2vKht07TgJFP7DETbD2H1GW+Vp0ryqomMHpF2l5H8ipR7CTXPFW+zA8fxHCw=="
+        }
+      },
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\",\"status\":\"retired\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\"}],\"sequence\":2}"
+    },
+    "removed_signer": {
+      "document": {
+        "sequence": 3,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "2T/vpFZCM0lubmsMeDAyMHuDEiZC6/XcUkROYXjf0SGCjh04XjzYhqTdFkLxissnZALtu1VO4ZV0BWNUkmuBDQ=="
+        }
+      },
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\"}],\"sequence\":3}"
+    }
+  },
+  "profiles": {
+    "active": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 31,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "kBf5aGBkTG3+V+PQzcYCmuyOmYSpjuAeo2dX6E5pmblERN8aNB/VzXU5cdKvhxls9jO4Q4krEpQPjU37MD7DBw=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":31,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "successor": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 32,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Updated Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "RwVRlJNj7CzF1YcayRd7kJTOCSZDxiHtJYBXSI8TLeY8mCqCd8DFGPfFrQ+xn+tjbH35T08NNArYnBxEXIQdCA=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Updated Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":32,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "same_sequence_changed": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 31,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Changed without a new sequence",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "ZDQPSCjTHWQ9gl7NFVt+0DDyseN7s99HkBhsASjkz3qulnaJlLcv5o3zJXeiqvlKb1ZgtbAAy8hu4xCWUSFaBg=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Changed without a new sequence\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":31,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "provider_changed": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 32,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "other.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "k5oswrk/igrpL0XKIE8O1x2taylzoQUkeoLr5SVepigrcClWdLAZ0vkfi8XLMeZt6bHbXpZ1gVwrNqFAVY+yBg=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"other.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":32,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "retired": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 33,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "retired",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "fLd+XcyASoIgIuwjRDAgOFMSje2SJKlekR/Gq4mb99+u1aTKPpUhohMeacxnPZN3rYXn+mYGgwGoSvULZg42CA=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"retired\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":33,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "retired_with_package": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 33,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "retired",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "4rhGfIrYy+JNTBPWqe4nuMcvD5ZlT8h7xkqAQKIPiGo6d+YXnkR9EQfi1enpAHJhHDNgvLMs/4xhDkWbiKCSAQ=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"retired\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":33,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "retired_null_package": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 33,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "retired",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": null,
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "p1NdeSnkAw3SneYIw/88t+rXZ9PQ96PK6ofOUXSqNitfIoYLr3pvzuvQwaAGUA5X+KLf+DFKM6We0h2tMLBSCw=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":null,\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"retired\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":33,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "rollback": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 30,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "QbOTehu9Yqk7IklO5IRu0kaPDMRSwKU+KfcV7cuME90LROyigHT4AGpoUqh3AdCWMntm2Wdazy87wnYQ5d6vCA=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":30,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "zero_sequence": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 0,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "hY7vnaPNN+Z37jF6pv5ipoQJpRIUfnwbaa1IV/0cnVJi4wn/x2U9uezSEiCI/5x/h8CknM7eS+McKeOCsLGzBw=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":0,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "max_sequence": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 9007199254740991,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 4294967295,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "RAyVpNZixrdssg5EiWq6Og1b+FswBRtiABdG9bl0SXcjT+91lEc/aGD1mXXWAqKEgB06fudwosVfGFB6F7zUBA=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":4294967295,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":9007199254740991,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "issuer_rotation": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 32,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "retired"
+            },
+            {
+              "id": "0",
+              "algorithm": "Ed25519",
+              "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+              "status": "active"
+            },
+            {
+              "id": "4294967295",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "retired"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "1Aldc3OlsEW5lGIYpf47svqeGSMjOOBMWaMkiatvmndLFuaaz2HY41lRYvpfGLA0MSKv3em4kxqHku/W84ytCg=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"retired\"},{\"algorithm\":\"Ed25519\",\"id\":\"0\",\"public_key\":\"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"4294967295\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"retired\"}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":32,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "unlisted_signer": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 31,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-unknown",
+          "algorithm": "Ed25519",
+          "value": "kBf5aGBkTG3+V+PQzcYCmuyOmYSpjuAeo2dX6E5pmblERN8aNB/VzXU5cdKvhxls9jO4Q4krEpQPjU37MD7DBw=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":31,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "invalid_issuer_id": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 31,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "4294967296",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "FbzmGn1aOg2awyUdk+5TI7OsOs5ohIA9iXn+eHuSp/DQRyw6bwzU+1cUU9jCuU0/OS8FN7hLzw4+oET+lhsCDw=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"4294967296\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":31,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "duplicate_issuer_id": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 31,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+              "status": "active"
+            },
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "retired"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "mRopnYF1wMq9jgBfS6zW+E8NZ4RlDzUIaU1nG8+H6YMQVmXVd/2VqLyQhMgm0nF5QYl4CIT1g4mIGGYWKBiqAA=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"retired\"}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":31,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "invalid_issuer_key": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 31,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "not-base64",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "c4AxYRI2E+fCvm9YgAJ6aahuVqTvUm1izMmt1M648ZvhLIeJ3yk2d5afDvs9Zwadq6jKElG44gva7YmKdcIvAA=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"not-base64\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":31,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "invalid_sequence": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 9007199254740992,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "YTQO8hw0ILGcGC0Lq6p08vehB63DOoJjO1PSDYEeKUWDVtIAlY8UjnI8MBVaoAD/rUpsCUh15olY0FymqhlhDQ=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":9007199254740992,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "tampered_extension": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 31,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "tampered"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "kBf5aGBkTG3+V+PQzcYCmuyOmYSpjuAeo2dX6E5pmblERN8aNB/VzXU5cdKvhxls9jO4Q4krEpQPjU37MD7DBw=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":31,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"tampered\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    },
+    "invalid_signature": {
+      "document": {
+        "schema": "actr.realm/v1",
+        "sequence": 31,
+        "realm": {
+          "name": "k7m2q9xh@acme.com",
+          "display_name": "Acme Notes",
+          "status": "active",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "package": {
+          "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "type": "notes.example/team-notes@1.4.2",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issuer": {
+          "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+          "keys": [
+            {
+              "id": "7",
+              "algorithm": "Ed25519",
+              "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+              "status": "active",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "provider": {
+          "id": "provider.example",
+          "signaling": [
+            {
+              "url": "wss://signal.provider.example/ws",
+              "priority": 10,
+              "control_plane_id": "provider.example/v1",
+              "ticket_audience": "signal-a",
+              "x-extension": {
+                "enabled": true
+              }
+            }
+          ],
+          "ice": [
+            {
+              "urls": [
+                "stun:stun.provider.example:3478"
+              ],
+              "x-extension": {
+                "enabled": true
+              }
+            },
+            {
+              "urls": [
+                "turns:turn.provider.example:5349"
+              ],
+              "credential_audience": "turn-pool-1"
+            }
+          ],
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "policy": {
+          "membership": "invite-only",
+          "x-extension": {
+            "enabled": true
+          }
+        },
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+          "\ue000": "BMP",
+          "\ud83d\ude00": "astral",
+          "numbers": [
+            1,
+            1.5
+          ],
+          "text": "caf\u00e9"
+        },
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+        }
+      },
+      "jcs": "{\"issued_at\":\"2026-07-29T00:00:00Z\",\"issuer\":{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"7\",\"public_key\":\"PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}}],\"url\":\"https://identity.provider.example/realms/acme.com/k7m2q9xh\",\"x-extension\":{\"enabled\":true}},\"package\":{\"href\":\"https://cdn.notes.example/team-notes-1.4.2.actr\",\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"type\":\"notes.example/team-notes@1.4.2\",\"x-extension\":{\"enabled\":true}},\"policy\":{\"membership\":\"invite-only\",\"x-extension\":{\"enabled\":true}},\"provider\":{\"ice\":[{\"urls\":[\"stun:stun.provider.example:3478\"],\"x-extension\":{\"enabled\":true}},{\"credential_audience\":\"turn-pool-1\",\"urls\":[\"turns:turn.provider.example:5349\"]}],\"id\":\"provider.example\",\"signaling\":[{\"control_plane_id\":\"provider.example/v1\",\"priority\":10,\"ticket_audience\":\"signal-a\",\"url\":\"wss://signal.provider.example/ws\",\"x-extension\":{\"enabled\":true}}],\"x-extension\":{\"enabled\":true}},\"realm\":{\"display_name\":\"Acme Notes\",\"name\":\"k7m2q9xh@acme.com\",\"status\":\"active\",\"x-extension\":{\"enabled\":true}},\"schema\":\"actr.realm/v1\",\"sequence\":31,\"x-extension\":{\"numbers\":[1,1.5],\"text\":\"caf\u00e9\",\"\ud83d\ude00\":\"astral\",\"\ue000\":\"BMP\"}}"
+    }
+  },
+  "verification_cases": [
+    {
+      "name": "active",
+      "profile": "active",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "successor",
+      "profile": "successor",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "same_sequence_changed",
+      "profile": "same_sequence_changed",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "provider_changed",
+      "profile": "provider_changed",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "retired",
+      "profile": "retired",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "retired_with_package",
+      "profile": "retired_with_package",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "retired_null_package",
+      "profile": "retired_null_package",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "rollback",
+      "profile": "rollback",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "zero_sequence",
+      "profile": "zero_sequence",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "max_sequence",
+      "profile": "max_sequence",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "issuer_rotation",
+      "profile": "issuer_rotation",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "unlisted_signer",
+      "profile": "unlisted_signer",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "invalid_issuer_id",
+      "profile": "invalid_issuer_id",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "duplicate_issuer_id",
+      "profile": "duplicate_issuer_id",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "invalid_issuer_key",
+      "profile": "invalid_issuer_key",
+      "keys": "initial",
+      "schema_valid": false,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "invalid_sequence",
+      "profile": "invalid_sequence",
+      "keys": "initial",
+      "schema_valid": false,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "tampered_extension",
+      "profile": "tampered_extension",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "invalid_signature",
+      "profile": "invalid_signature",
+      "keys": "initial",
+      "schema_valid": true,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "retired listed signing key still verifies",
+      "profile": "active",
+      "keys": "retired_signer",
+      "schema_valid": true,
+      "result": "accept"
+    },
+    {
+      "name": "removed signing key no longer verifies",
+      "profile": "active",
+      "keys": "removed_signer",
+      "schema_valid": true,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "requested Realm differs",
+      "profile": "active",
+      "keys": "initial",
+      "realm": "other@acme.com",
+      "schema_valid": true,
+      "result": "REALM_PROFILE_INVALID"
+    },
+    {
+      "name": "local Realm has no Profile",
+      "profile": "active",
+      "keys": "initial",
+      "realm": "notes@aaaaaaaaaaaaaaaaaaaaaaaaaa.actr.alt",
+      "schema_valid": true,
+      "result": "REALM_PROFILE_INVALID"
+    }
+  ],
+  "successor_cases": [
+    {
+      "name": "same document",
+      "accepted": "active",
+      "candidate": "active",
+      "result": "accept"
+    },
+    {
+      "name": "higher sequence",
+      "accepted": "active",
+      "candidate": "successor",
+      "result": "accept"
+    },
+    {
+      "name": "rollback",
+      "accepted": "active",
+      "candidate": "rollback",
+      "result": "REALM_PROFILE_ROLLBACK"
+    },
+    {
+      "name": "same sequence with different signed content",
+      "accepted": "active",
+      "candidate": "same_sequence_changed",
+      "result": "REALM_PROFILE_ROLLBACK"
+    },
+    {
+      "name": "provider cannot change",
+      "accepted": "active",
+      "candidate": "provider_changed",
+      "result": "REALM_INFRA_PROVIDER_MISMATCH"
+    },
+    {
+      "name": "retirement",
+      "accepted": "active",
+      "candidate": "retired",
+      "result": "accept"
+    },
+    {
+      "name": "retirement cannot be undone",
+      "accepted": "retired",
+      "candidate": "max_sequence",
+      "result": "REALM_RETIRED"
+    },
+    {
+      "name": "issuer rotation",
+      "accepted": "active",
+      "candidate": "issuer_rotation",
+      "result": "accept"
+    }
+  ],
+  "issuer_key_lookups": {
+    "profile": "issuer_rotation",
+    "cases": {
+      "0": "active",
+      "7": "retired",
+      "4294967295": "retired",
+      "1": null
+    }
+  },
+  "schema_cases": [
+    {
+      "name": "missing schema",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/schema"
+      ],
+      "valid": false
+    },
+    {
+      "name": "missing sequence",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/sequence"
+      ],
+      "valid": false
+    },
+    {
+      "name": "missing realm",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/realm"
+      ],
+      "valid": false
+    },
+    {
+      "name": "missing issuer",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/issuer"
+      ],
+      "valid": false
+    },
+    {
+      "name": "missing provider",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/provider"
+      ],
+      "valid": false
+    },
+    {
+      "name": "missing policy",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/policy"
+      ],
+      "valid": false
+    },
+    {
+      "name": "missing issued_at",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/issued_at"
+      ],
+      "valid": false
+    },
+    {
+      "name": "missing signature",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/signature"
+      ],
+      "valid": false
+    },
+    {
+      "name": "missing package",
+      "profile": "active",
+      "set": {},
+      "remove": [
+        "/package"
+      ],
+      "valid": false
+    },
+    {
+      "name": "wrong schema",
+      "profile": "active",
+      "set": {
+        "/schema": "actr.realm/v2"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "negative sequence",
+      "profile": "active",
+      "set": {
+        "/sequence": -1
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "fractional sequence",
+      "profile": "active",
+      "set": {
+        "/sequence": 1.5
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "null active package",
+      "profile": "active",
+      "set": {
+        "/package": null
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "bad Realm status",
+      "profile": "active",
+      "set": {
+        "/realm/status": "pending"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "local Realm name",
+      "profile": "active",
+      "set": {
+        "/realm/name": "notes@aaaaaaaaaaaaaaaaaaaaaaaaaa.actr.alt"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "uppercase Realm name",
+      "profile": "active",
+      "set": {
+        "/realm/name": "notes@ACME.com"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "Realm name newline",
+      "profile": "active",
+      "set": {
+        "/realm/name": "notes@acme.com\n"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "actor ID is not a Realm",
+      "profile": "active",
+      "set": {
+        "/realm/name": "2af01.notes@acme.com"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "uppercase hash",
+      "profile": "active",
+      "set": {
+        "/package/sha256": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "short hash",
+      "profile": "active",
+      "set": {
+        "/package/sha256": "ab"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "insecure package URL",
+      "profile": "active",
+      "set": {
+        "/package/href": "http://cdn.example/app.actr"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "unstructured Actor type",
+      "profile": "active",
+      "set": {
+        "/package/type": "notes@1.4.2"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "empty issuer keys",
+      "profile": "active",
+      "set": {
+        "/issuer/keys": []
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "too many issuer keys",
+      "profile": "active",
+      "set": {
+        "/issuer/keys": [
+          {
+            "id": "7",
+            "algorithm": "Ed25519",
+            "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+            "status": "active",
+            "x-extension": {
+              "enabled": true
+            }
+          },
+          {
+            "id": "7",
+            "algorithm": "Ed25519",
+            "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+            "status": "active",
+            "x-extension": {
+              "enabled": true
+            }
+          },
+          {
+            "id": "7",
+            "algorithm": "Ed25519",
+            "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+            "status": "active",
+            "x-extension": {
+              "enabled": true
+            }
+          },
+          {
+            "id": "7",
+            "algorithm": "Ed25519",
+            "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+            "status": "active",
+            "x-extension": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "leading zero key ID",
+      "profile": "active",
+      "set": {
+        "/issuer/keys/0/id": "07"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "key ID newline",
+      "profile": "active",
+      "set": {
+        "/issuer/keys/0/id": "7\n"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "numeric key ID",
+      "profile": "active",
+      "set": {
+        "/issuer/keys/0/id": 7
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "issuer algorithm",
+      "profile": "active",
+      "set": {
+        "/issuer/keys/0/algorithm": "RSA"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "issuer key status",
+      "profile": "active",
+      "set": {
+        "/issuer/keys/0/status": "revoked"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "uppercase provider",
+      "profile": "active",
+      "set": {
+        "/provider/id": "Provider.example"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "provider newline",
+      "profile": "active",
+      "set": {
+        "/provider/id": "provider.example\n"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "provider port",
+      "profile": "active",
+      "set": {
+        "/provider/id": "provider.example:443"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "provider empty label",
+      "profile": "active",
+      "set": {
+        "/provider/id": "provider..example"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "signaling priority negative",
+      "profile": "active",
+      "set": {
+        "/provider/signaling/0/priority": -1
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "signaling priority overflow",
+      "profile": "active",
+      "set": {
+        "/provider/signaling/0/priority": 4294967296
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "bad signing time",
+      "profile": "active",
+      "set": {
+        "/issued_at": "yesterday"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "missing signing key ID",
+      "profile": "active",
+      "set": {
+        "/signature/key_id": ""
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "signature algorithm",
+      "profile": "active",
+      "set": {
+        "/signature/algorithm": "RSA"
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "short signature",
+      "profile": "active",
+      "set": {
+        "/signature/value": "AA=="
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "empty ICE urls",
+      "profile": "active",
+      "set": {
+        "/provider/ice/0/urls": []
+      },
+      "remove": [],
+      "valid": false
+    },
+    {
+      "name": "retired without package",
+      "profile": "active",
+      "set": {
+        "/realm/status": "retired"
+      },
+      "remove": [
+        "/package"
+      ],
+      "valid": true
+    },
+    {
+      "name": "retired with null package",
+      "profile": "active",
+      "set": {
+        "/realm/status": "retired",
+        "/package": null
+      },
+      "remove": [],
+      "valid": true
+    },
+    {
+      "name": "unknown members",
+      "profile": "active",
+      "set": {
+        "/future_member": {
+          "enabled": true
+        },
+        "/package/future_member": []
+      },
+      "remove": [],
+      "valid": true
+    },
+    {
+      "name": "key ID range needs protocol verifier",
+      "profile": "active",
+      "set": {
+        "/issuer/keys/0/id": "4294967296"
+      },
+      "remove": [],
+      "valid": true
+    },
+    {
+      "name": "unique key IDs need protocol verifier",
+      "profile": "active",
+      "set": {
+        "/issuer/keys": [
+          {
+            "id": "7",
+            "algorithm": "Ed25519",
+            "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+            "status": "active",
+            "x-extension": {
+              "enabled": true
+            }
+          },
+          {
+            "id": "7",
+            "algorithm": "Ed25519",
+            "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+            "status": "active",
+            "x-extension": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "remove": [],
+      "valid": true
+    }
+  ]
+}
