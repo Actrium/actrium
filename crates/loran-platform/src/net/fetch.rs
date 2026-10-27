@@ -278,10 +278,16 @@ impl CachedFetcher {
                     .cache
                     .retain(|_, (at, _)| now.duration_since(*at) < ttl);
             }
-            if state.hosts.len() >= MAX_ENTRIES {
+            if !state.hosts.contains_key(&host) && state.hosts.len() >= MAX_ENTRIES {
                 state
                     .hosts
                     .retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(60));
+                // Reclaiming expired windows may leave the table full. Refuse
+                // new hosts under this same lock instead of exceeding the cap
+                // or evicting an active host and resetting its rate limit.
+                if state.hosts.len() >= MAX_ENTRIES {
+                    return Err(FetchError::new("fetch host table is full"));
+                }
             }
             let window = state.hosts.entry(host.clone()).or_insert((now, 0));
             if now.duration_since(window.0) >= Duration::from_secs(60) {
@@ -493,5 +499,62 @@ mod tests {
         assert!(fetcher.get(&url("/relative")).await.is_ok());
         let error = fetcher.get(&url("/html")).await.unwrap_err();
         assert!(error.to_string().contains("too many fetches"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn host_admission_caps_fresh_hosts_and_preserves_existing_windows() {
+        let fetcher = CachedFetcher::new(Duration::from_secs(300), 2);
+        // HTTP is rejected locally before DNS/network I/O. Failed fetches still
+        // consume a host slot, just like failed public descriptor lookups.
+        for i in 0..MAX_ENTRIES + 8 {
+            let url = format!("http://host-{i}.example/doc");
+            let error = fetcher.get(&url).await.unwrap_err();
+            let expected = if i < MAX_ENTRIES {
+                "is not HTTPS"
+            } else {
+                "fetch host table is full"
+            };
+            assert!(error.to_string().contains(expected), "host {i}: {error}");
+        }
+        {
+            let state = fetcher.state.lock().unwrap();
+            assert_eq!(state.hosts.len(), MAX_ENTRIES);
+            assert_eq!(state.cache.len(), MAX_ENTRIES);
+            assert!(
+                !state
+                    .hosts
+                    .contains_key(&format!("host-{MAX_ENTRIES}.example"))
+            );
+        }
+        // A full table must neither block known hosts nor reset their budget.
+        let error = fetcher
+            .get("http://host-0.example/second")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("is not HTTPS"), "{error}");
+        let error = fetcher
+            .get("http://host-0.example/third")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("too many fetches"), "{error}");
+
+        // Reclaim an expired window before deciding whether a new host fits.
+        fetcher
+            .state
+            .lock()
+            .unwrap()
+            .hosts
+            .get_mut("host-0.example")
+            .unwrap()
+            .0 = Instant::now() - Duration::from_secs(61);
+        let error = fetcher
+            .get("http://replacement.example/doc")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("is not HTTPS"), "{error}");
+        let state = fetcher.state.lock().unwrap();
+        assert_eq!(state.hosts.len(), MAX_ENTRIES);
+        assert!(!state.hosts.contains_key("host-0.example"));
+        assert!(state.hosts.contains_key("replacement.example"));
     }
 }
