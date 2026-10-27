@@ -3,14 +3,15 @@ exports = ["./proto/echo-twice.proto"]
 
 [package]
 name = "EchoTwiceService"
-manufacturer = "acme"
+publisher = "acme"
+version = "1.0.0"
 description = "EchoTwice Server Example"
 
 [system.signaling]
 url = "wss://loran1.actrium-dev.example/signaling/ws"
 
 [system.deployment]
-realm_id = 2368266035
+realm = "echo@example.com"
 
 [system.discovery]
 visible = true
@@ -24,4 +25,4 @@ turn_urls = ["turn:loran1.actrium-dev.example:3478"]
 
 [[acl.rules]]
 permission = "allow"
-types = ["acme+echo-client-app"]
+types = ["acme/echo-client-app@1.0.0"]

@@ -1,29 +1,23 @@
 use super::*;
-use actr_protocol::Realm;
 
-fn sample_context(realm_secret: Option<&str>) -> DiscoveryContext {
+fn sample_context(realm_client_key: Option<&str>) -> DiscoveryContext {
     DiscoveryContext {
         package_actr_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "cli-client".to_string(),
             version: "1.0.0".to_string(),
         },
         signaling_url: Url::parse("ws://localhost:8081/signaling/ws").unwrap(),
-        ais_endpoint: "http://localhost:8081/ais".to_string(),
-        realm: Realm { realm_id: 1001 },
-        realm_secret: realm_secret.map(str::to_string),
+        issuer_endpoint: "http://localhost:8081/issuer".to_string(),
+        realm: Some("test@example.com".to_string()),
+        realm_client_key: realm_client_key.map(std::path::PathBuf::from),
     }
 }
 
 fn sample_actor_id() -> ActrId {
     ActrId {
         serial_number: 42,
-        r#type: ActrType {
-            manufacturer: "acme".to_string(),
-            name: "echo".to_string(),
-            version: "1.0.0".to_string(),
-        },
-        realm: Realm { realm_id: 1001 },
+        realm: "test@example.com".to_string(),
     }
 }
 
@@ -36,64 +30,74 @@ fn sample_credential() -> AIdCredential {
 }
 
 #[test]
-fn build_signaling_url_with_identity_appends_auth_query() {
+fn build_signaling_request_with_identity_uses_url_query_params() {
     let signaling_url = Url::parse("ws://localhost:8081/signaling/ws?existing=1").unwrap();
     let actor_id = sample_actor_id();
     let credential = sample_credential();
 
-    let authenticated_url = NetworkServiceDiscovery::build_signaling_url_with_identity(
+    let request = NetworkServiceDiscovery::build_signaling_request_with_identity(
         &signaling_url,
         &actor_id,
         &credential,
-    );
-    let query_pairs: std::collections::HashMap<_, _> =
-        authenticated_url.query_pairs().into_owned().collect();
+    )
+    .unwrap();
 
-    assert_eq!(query_pairs.get("existing"), Some(&"1".to_string()));
-    assert_eq!(
-        query_pairs.get("actor_id"),
-        Some(&actor_id.to_string_repr())
-    );
-    assert_eq!(query_pairs.get("key_id"), Some(&"7".to_string()));
-    assert_eq!(
-        query_pairs.get("claims"),
-        Some(&base64::engine::general_purpose::STANDARD.encode([1, 2, 3, 4]))
-    );
-    assert_eq!(
-        query_pairs.get("signature"),
-        Some(&base64::engine::general_purpose::STANDARD.encode([5, 6, 7, 8]))
+    let parsed = Url::parse(&request.uri().to_string()).unwrap();
+    let params: std::collections::HashMap<String, String> =
+        parsed.query_pairs().into_owned().collect();
+    assert_eq!(params["existing"], "1", "existing params are preserved");
+    assert_eq!(params["actor_id"], actor_id.to_string_repr());
+    assert_eq!(params["key_id"], "7");
+    assert_eq!(params["claims"], "AQIDBA==");
+    assert_eq!(params["signature"], "BQYHCA==");
+    assert!(
+        request.headers().get("x-actr-id").is_none(),
+        "identity must not travel in headers"
     );
 }
 
 #[test]
 fn cli_discovery_register_request_uses_linked_auth_mode() {
     let discovery = NetworkServiceDiscovery::new(sample_context(Some("rs_test_secret")));
-    let request = discovery.build_linked_register_request();
+    let request = discovery.build_linked_register_request(discovery.required_realm().unwrap());
 
     assert_eq!(request.auth_mode, Some(RegisterAuthMode::Linked as i32));
     assert_eq!(request.manifest_raw, None);
-    assert_eq!(request.mfr_signature, None);
+    assert_eq!(request.publisher_signature, None);
     assert_eq!(request.target, None);
     assert_eq!(request.actr_type.name, "cli-client");
-    assert_eq!(request.realm.realm_id, 1001);
+    assert_eq!(request.realm, "test@example.com");
 }
 
 #[test]
-fn cli_discovery_requires_realm_secret() {
-    let missing = NetworkServiceDiscovery::new(sample_context(None));
-    let err = missing.required_realm_secret().unwrap_err();
-    assert!(err.to_string().contains("network.realm_secret is required"));
+fn cli_discovery_requires_realm() {
+    let mut context = sample_context(Some("rs_test_secret"));
+    context.realm = None;
+    let err = NetworkServiceDiscovery::new(context)
+        .required_realm()
+        .unwrap_err();
+    assert!(err.to_string().contains("network.realm is required"));
+}
 
-    let blank = NetworkServiceDiscovery::new(sample_context(Some("   ")));
-    let err = blank.required_realm_secret().unwrap_err();
-    assert!(err.to_string().contains("network.realm_secret is required"));
+#[test]
+fn cli_discovery_requires_a_realm_client_key() {
+    let missing = NetworkServiceDiscovery::new(sample_context(None));
+    let err = missing.required_client_key("test@example.com").unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("network.realm_client_key is required")
+    );
+
+    let absent = NetworkServiceDiscovery::new(sample_context(Some("/nonexistent/key.json")));
+    let err = absent.required_client_key("test@example.com").unwrap_err();
+    assert!(err.to_string().contains("Realm client key"));
 }
 
 #[test]
 fn lookup_name_accepts_registry_key_service_name_and_full_actor_type() {
     let entry = discovery_response::TypeEntry {
         actr_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "EchoService".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -114,7 +118,7 @@ fn lookup_name_accepts_registry_key_service_name_and_full_actor_type() {
     ));
     assert!(NetworkServiceDiscovery::matches_lookup_name(
         &entry,
-        "acme:EchoService:1.0.0"
+        "acme/EchoService@1.0.0"
     ));
     assert!(!NetworkServiceDiscovery::matches_lookup_name(
         &entry,

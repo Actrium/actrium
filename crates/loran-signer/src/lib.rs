@@ -1,8 +1,8 @@
 //! Signer - Ed25519 signing key generation and management service
 //!
-//! The Signer service provides the following functionality:
-//! 1. Generate Ed25519 signing key pairs; private keys never leave Signer
-//! 2. Expose a Sign API, performing signing operations on behalf of callers
+//! The Signer service provides the following capabilities:
+//! 1. Keep named Ed25519 signing keys; the private key never leaves the Signer
+//! 2. Expose a Sign API to perform signing operations on behalf of callers
 //! 3. PSK signature verification and replay attack protection
 //! 4. Multiple storage backend support: SQLite, PostgreSQL
 #![deny(clippy::disallowed_macros)]
@@ -19,22 +19,6 @@ pub mod recording;
 pub mod storage;
 pub mod types;
 
-/// Whether a signing key with this `expires_at` may still mint signatures at
-/// `now` (both Unix seconds).
-///
-/// This is the single expiry decision shared by the gRPC and HTTP Sign
-/// handlers, and it deliberately ignores the tolerance window: verifiers
-/// verifier caches drop verifying keys at `expires_at` without any
-/// tolerance, so a signature created at or after that instant yields a
-/// credential that fails every handshake with 401. Tolerance only governs how
-/// long key *material* stays
-/// readable (`get_verifying_key`, storage cleanup), never minting.
-///
-/// `expires_at == 0` means the key never expires.
-pub(crate) fn key_expired_for_signing(expires_at: u64, now: u64) -> bool {
-    expires_at > 0 && expires_at <= now
-}
-
 // Re-export commonly used items
 #[cfg(test)]
 pub use client::{Client, ClientConfig};
@@ -49,10 +33,7 @@ pub use handlers::{
     SignerState, create_router, create_signer_state, get_stats, register_signer_metrics,
 };
 pub use storage::{KeyStorage, StorageConfig};
-pub use types::{
-    GenerateSigningKeyRequest, GenerateSigningKeyResponse, KeyPair, KeyRecord, SignRequest,
-    SignResponse,
-};
+pub use types::{KeyPair, KeyRecord, SignRequest, SignResponse};
 
 #[cfg(test)]
 mod tests {
@@ -68,17 +49,16 @@ mod tests {
         let config = SignerServiceConfig {
             storage: StorageConfig {
                 backend: StorageBackend::Sqlite,
-                key_ttl_seconds: 3600,
-                sqlite: Some(SqliteConfig {}),
+                sqlite: Some(SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
-            tolerance_seconds: 3600,
+            ..Default::default()
         };
 
-        // Use in-memory storage for testing (avoid file system dependency)
+        // Use in-memory storage for testing (avoid filesystem dependency)
         let nonce_storage = MemoryStorage::new();
         let state = create_signer_state(
             &config,
@@ -88,21 +68,5 @@ mod tests {
         )
         .await;
         assert!(state.is_ok());
-    }
-
-    #[test]
-    fn test_key_expired_for_signing_never_expires() {
-        assert!(!key_expired_for_signing(0, u64::MAX));
-        assert!(!key_expired_for_signing(0, 0));
-    }
-
-    #[test]
-    fn test_key_expired_for_signing_boundary() {
-        let now = 1_000_000u64;
-        // Still valid one second before expiry, expired exactly at expiry,
-        // and expired long ago (even inside any tolerance window).
-        assert!(!key_expired_for_signing(now + 1, now));
-        assert!(key_expired_for_signing(now, now));
-        assert!(key_expired_for_signing(now - 1, now));
     }
 }

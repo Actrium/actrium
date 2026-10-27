@@ -4,7 +4,7 @@
 
 核心规则：
 
-> Service Actor 绑定 Workspace，Front Actor 只通过 Service ActorId 连接；Front 不需要知道 Workspace 的路径、Provider credential 或锁。
+> Service 绑定 Workspace，Front Actor 只连接 Service；Front 不需要知道 Workspace 的路径、Workspace Provider credential 或锁。
 
 这不是增加抽象，而是把本地文件、云盘、数据库和远程仓库统一为 Service 可持有的 capability。
 
@@ -40,7 +40,7 @@ Guest 可见的 launch context 只包含：
 - bookmark/security-scoped token；
 - cloud OAuth token；
 - encryption key；
-- Provider internal id（除非本身非敏感且契约需要）。
+- Workspace Provider internal id（除非本身非敏感且契约需要）。
 
 ## 3. Workspace 声明
 
@@ -51,7 +51,7 @@ Workspace 由互相正交的字段描述：
 | requirement | `none` / `optional` / `required` | 是否需要用户 Workspace，以及何时必须绑定 |
 | provisioning | `managed` / `user-selected` | 由 Actrium 创建，还是由用户选择 |
 | access | `read-only` / `read-write` | Service 获得的访问能力 |
-| providers | 一组 Provider 类型 | 允许 `managed-store`、`local-folder`、`cloud-drive` 等实现 |
+| providers | 一组 Workspace Provider 类型 | 允许 `managed-store`、`local-folder`、`cloud-drive` 等实现 |
 
 `requirement=none` 时 Service 仍可使用实例私有 store，但不能获得用户 Workspace。`requirement=required` 与 `provisioning=managed` 可以同时出现，含义是创建 Service 时由 Actrium 自动创建一个必需 Workspace。
 
@@ -59,7 +59,7 @@ Workspace 由互相正交的字段描述：
 
 - `exclusive-writer`：v1 默认；
 - `shared-readers`：多个 Service 可读；
-- `versioned-collaboration`：未来由 Provider/程序协议实现；
+- `versioned-collaboration`：未来由 Workspace Provider/程序协议实现；
 - 未声明时禁止多个可写 Service 绑定同一 Workspace。
 
 ## 4. Service 生命周期
@@ -106,13 +106,13 @@ stateDiagram-v2
 - Program Release reference；
 - Actor long-term key；
 - persistent ActorId；
-- Realm credential state；
+- Actor credential state；
 - per-instance data directory；
 - WorkspaceBinding；
 - permission grant；
 - Service Inventory record。
 
-任何失败都补偿未提交资源；已经成功签发 ActorId 后不能假装“完全回滚”，必须保留恢复记录或 tombstone，且不能重新使用该身份。
+任何失败都补偿未提交资源；已经成功签发 ActorId 后不能假装「完全回滚」，必须保留恢复记录或本机实例 tombstone，且不能重新使用该身份。
 
 ### 4.2 Running
 
@@ -127,7 +127,7 @@ stateDiagram-v2
 - ActorId 仍属于该 Service；
 - identity/key、Workspace binding 和 store 保留；
 - signaling presence offline；
-- 本地 Service Manager 知道它已停止，因此本机 Attach 可以返回“已停止/可启动”；
+- 本地 Service Manager 知道它已停止，因此本机 Attach 可以返回「已停止/可启动」；
 - 远端只有在宿主控制面提供签名状态时才能报告 stopped；否则观察者只能得到 offline/unreachable；
 - Actor 自身停止后不能响应请求，启动操作由宿主控制面执行；
 - 用户具备宿主管理 capability 时可以在宿主设备启动。
@@ -152,7 +152,7 @@ stateDiagram-v2
 ### 4.6 Deleted
 
 - 撤销 Actor credential；
-- 永久保留 ActorId tombstone；
+- 永久保留本机实例 tombstone（含 ActorId）；
 - 删除实例 store 和 key；
 - Workspace 默认不删除；
 - Workspace 删除需要独立、明确确认；
@@ -180,10 +180,10 @@ Deleted 是彻底清除后的终态，不可恢复。恢复窗口只属于 Trash
 
 ```text
 CreationIntent
-├── creation_intent_id
-├── source_uri
+├── idempotency_key
+├── package_source
 ├── program_release + digest
-├── realm
+├── realm_name
 ├── workspace_selection
 ├── requested_permissions
 ├── stage
@@ -199,7 +199,6 @@ Prepared
 → IdentityAllocated
 → StorageCommitted
 → ServiceStarted
-→ URIRewritten
 → FrontAttached
 → Completed
 ```
@@ -209,7 +208,6 @@ Prepared
 - 每一阶段可重入；
 - `result_actor_id` 一旦写入不得换 ID；
 - `StorageCommitted` 后即使 UI 崩溃，实例也出现在 Inventory；
-- URI 改写失败可以从 result 恢复；
 - 失败不会留一个可复用的半身份。
 
 ## 7. Service 存储
@@ -241,9 +239,9 @@ actrium-data/
 
 以下内容只进入 OS Keychain/Keystore/Credential Locker：
 
-- device private key；
-- Service Actor private key；
-- Realm refresh material；
+- Realm 客户端 key；
+- Service private key；
+- renewal token（Actor credential 续期用）；
 - Workspace Provider credential；
 - TURN/signaling ticket（通常仅内存）；
 - encryption keys。
@@ -259,8 +257,8 @@ program_release
   publisher, program, version, digest, key_id, manifest, trust_state
 
 service
-  actor_id, actor_id_hash, publisher, program, version, digest,
-  realm_domain, realm_id, workspace_id, runtime_location,
+  realm_name, actor_id, actor_id_hash, publisher, program, version, digest,
+  workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
 
@@ -272,29 +270,36 @@ permission_grant
   subject, capability, scope, decision, granted_at, expires_at
 
 tab_session
-  tab_id, uri, service_actor_id, front_actor_id, state,
-  structure_id, application_state_id, application_color, ready
+  tab_id, realm_link, service_actor_id, front_actor_id, state,
+  structure_digest, application_state_digest, application_color, ready
 
 privacy_mark_cache
   mark_id, subject_ref, issuer_ref, workload_kind, egress_digest,
   issued_at, expires_at, revocation_state, encrypted_blob_ref
 
 privacy_dependency_edge
-  structure_id, application_state_id, edge_id, source_ref, target_ref,
+  structure_digest, application_state_digest, edge_id, source_ref, target_ref,
   data_classes, target_mark_digest, decision, opened_at, closed_at
 
 privacy_aggregate
-  assurance_id, tab_id, structure_id, application_state_id, policy_digest,
+  assurance_digest, tab_id, structure_digest, application_state_digest, policy_digest,
   mark, weakest_actor_ref, evidence_root, generated_at, expires_at
 
 creation_intent
-  intent_id, uri, stage, result_actor_id, timestamps
+  intent_id, package_source, stage, result_actor_id, timestamps
+
+realm_domain
+  domain, signing_keys, signing_keys_sequence, signing_keys_digest,
+  authority_descriptor_digest
 
 realm
-  domain, realm_id, profile_digest, issuer_keys, membership_ref
+  realm_name, profile_digest, profile_sequence, provider_id,
+  issuer_keys, membership_ref, client_key_ref
 ```
 
-Service 表以完整 ActorId 为业务主键；`actor_id_hash` 只用于索引和目录。
+实例以 Realm 名为业务主键（升级时 Realm 名不变），当前 Service 的 ActorId 作为字段记录；`actor_id_hash` 只用于索引和目录。
+
+`realm_domain` 记录每个已信任的 Realm 域名及其 Realm 签名 key（来自 `https://<domain>/.well-known/actr` 的 `realm_signing_keys` 成员，已在 Actr Authority Discovery §4.4 定义；`signing_keys` 为该域名曾接受过的每一把 key 及其最后状态——`id`、公钥与 `active`、`retired` 或已移除；已移除的 key 也保留，使同一 `id` 不能换公钥、已移除的 key 不能再被接受；`signing_keys_sequence` 为已接受的 `sequence`，`signing_keys_digest` 为已接受 member 的摘要，用于判断同一 `sequence` 的内容是否相同；身份变化经用户重新确认后清空这些记录，以新 member 为基线），随 Realm Profile 一同刷新，以便被移除的 key 使其签过的 Realm Profile 失效；`realm` 记录每个实例 Realm，`profile_sequence` 与 `provider_id` 用于拒绝回滚或 `provider.id` 改变的 Realm Profile（本机 Realm 无 Realm Profile，两者为空），`client_key_ref` 指向该 Realm 独立的 Realm 客户端 key（不跨 Realm 复用）。两者都以完整 Realm 名为键。
 
 `ApplicationAssurance` 是当前切面的派生结论，不是 Service 的永久属性。缓存过期、Tab 重建、状态或图变化后必须重算；展示还须 `Ready`。原始 attestation token 和完整远端拓扑优先保存在短期加密缓存或内存中，不能因便于 UI 展示而长期明文落库。
 
@@ -302,7 +307,7 @@ Service 表以完整 ActorId 为业务主键；`actor_id_hash` 只用于索引�
 
 ### Program Catalog 可同步
 
-- coordinate；
+- Program Release；
 - digest；
 - 收藏；
 - Marketplace metadata；
@@ -325,9 +330,9 @@ Service 表以完整 ActorId 为业务主键；`actor_id_hash` 只用于索引�
 - Actor private key；
 - Workspace credential；
 - 本地绝对路径；
-- 未保护的 Provider token。
+- 未保护的 Workspace Provider token。
 
-如果 Service 只存在于一台设备，其他设备的 Inventory 记录显示“远端/宿主设备离线”，而不是尝试本地复制身份。
+如果 Service 只存在于一台设备，其他设备的 Inventory 记录显示「远端/宿主设备离线」，而不是尝试本地复制身份。
 
 ## 9. Workspace 锁与租约
 
@@ -335,12 +340,12 @@ Service 表以完整 ActorId 为业务主键；`actor_id_hash` 只用于索引�
 
 Actrium Workspace broker 检查：
 
-- 同一 provider locator 是否已有写 lease；
-- Provider 是否支持多写；
+- 同一 Workspace Provider locator 是否已有写 lease；
+- Workspace Provider 是否支持多写；
 - 当前 Service 是否具备权限；
 - 符号链接、路径穿越和安全作用域；
 - 存储配额；
-- Provider 在线状态。
+- Workspace Provider 在线状态。
 
 ### 9.2 运行时
 
@@ -351,7 +356,7 @@ Actrium Workspace broker 检查：
 - quota；
 - write lease heartbeat；
 - 崩溃后 lease 恢复/过期；
-- Provider 冲突明确上报。
+- Workspace Provider 冲突明确上报。
 
 ### 9.3 重绑
 
@@ -360,7 +365,7 @@ Workspace 不得静默改变。重绑流程：
 1. 停止新业务写；
 2. 生成一致性快照；
 3. 用户选择新 Workspace；
-4. 校验新 Provider；
+4. 校验新 Workspace Provider；
 5. 迁移/导入；
 6. 原子切换 binding；
 7. 保留回滚点；
@@ -371,11 +376,11 @@ Workspace 不得静默改变。重绑流程：
 Snapshot 分两层：
 
 - Service workload state；
-- Workspace/Provider state。
+- Workspace/Workspace Provider state。
 
 Manifest 应声明 snapshot schema version。恢复必须验证：
 
-- Program coordinate/digest；
+- Program Release/digest；
 - snapshot schema；
 - Workspace fingerprint；
 - ActorId；
@@ -391,17 +396,18 @@ Manifest 应声明 snapshot schema version。恢复必须验证：
 
 ## 11. Service 升级
 
-v1 不原地修改 `ActorId.type.version` 所对应的 workload。
+v1 不原地修改 Service 的 Program Release（其 Actor 类型版本）。
 
 升级是迁移：
 
 ```text
 Old Service ActorId + v1 Workspace
   → quiesce + snapshot
-  → New Service ActorId + v2 workload
+  → New Service ActorId + v2 workload（同一 Realm）
   → import/migrate
   → Workspace lease handoff
   → user verification
+  → Realm Profile 的 package 改指 v2 包
   → Old archived
 ```
 
@@ -411,13 +417,13 @@ Old Service ActorId + v1 Workspace
 - package digest 仍可审计；
 - 可回滚；
 - 新旧 contract 可以并存；
-- URI 不会声称旧 ActorId 已变成新类型。
+- 旧 ActorId 不会被说成已变成新类型。
 
-缺点是 ActorId 变化；Actrium 可以更新本地收藏和当前 Tab。本地已保存迁移记录时，旧链接可以提示“实例已迁移”；其他设备只能看到旧实例 offline/archived，除非旧 Service 在回滚期继续提供签名迁移提示。Realm 级 alias/redirect 是后续能力，不在 v1 静默实现。
+新 Service 创建在原实例的同一 Realm 内：实例没有变，Realm 链接、Realm 成员与应用权限都延续，只有 Service 的 ActorId 变化。其他设备打开同一 Realm 链接时，按新的 Realm Profile 取得新包，并按其 Actor 类型找到新 Service。
 
 ## 12. Service 迁移设备
 
-同 Realm、同 Program Release 的主机迁移可以保留 ActorId：
+同 Realm、同 Program Release 的主机迁移可以保留 ActorId。Realm 与 Realm Infra Provider 永久绑定；换运营方即在新 Realm Infra Provider 上新建实例，按本节规则迁移。迁移到另一个 Realm（包括从本机 Realm 迁到域名下的 Realm）必须产生新 ActorId。
 
 1. 获取 migration lease；
 2. 停止旧宿主新请求；
@@ -426,7 +432,7 @@ Old Service ActorId + v1 Workspace
 5. Realm 更新 presence；
 6. 新宿主启动；
 7. 旧宿主销毁密钥副本；
-8. Front 用原 URI 重连。
+8. Front 用原 Realm 链接重连。
 
 Workspace 如果本来是旧设备本地目录，必须单独迁移或保持远程可访问。ActorId 可迁移不意味着 Workspace 自动可迁移。
 
@@ -451,17 +457,17 @@ Workspace 如果本来是旧设备本地目录，必须单独迁移或保持远�
 
 - 前台 Service/通知可扩展可用时间，但必须符合平台政策；
 - Doze、后台限制和厂商策略会影响在线性；
-- 用户可选择“仅使用时运行”；
+- 用户可选择「仅使用时运行」；
 - 不以系统限制失败为 Actor 不存在。
 
-产品 UI 必须区分“Stopped”“Suspended”“Host offline”和“Actor not found”。
+产品 UI 必须区分「Stopped」「Suspended」「Actr Host offline」和「Actor not found」。
 
 ## 14. 删除与可恢复性
 
 删除分为两个 Service 阶段和一个独立数据动作：
 
 1. **移入回收站**：停止并隐藏 Service，保留 Actor key、credential、实例 store/snapshot 与 WorkspaceBinding；默认 30 天内可用同一 ActorId 恢复。
-2. **彻底清除**：撤销身份，删除 key 和实例私有数据，记录永久 tombstone；不可恢复。
+2. **彻底清除**：撤销身份，删除 key 和实例私有数据，记录永久本机实例 tombstone；不可恢复。
 3. **删除 Workspace**：始终是独立的高风险动作，不随前两步默认执行。
 
-清除前必须列出将删除的实例私有数据、将保留的外部 Workspace 和恢复后果。Workspace 文件若也被用户明确删除，应优先进入 Provider/OS 回收站；审计记录不含业务内容。
+清除前必须列出将删除的实例私有数据、将保留的外部 Workspace 和恢复后果。Workspace 文件若也被用户明确删除，应优先进入 Workspace Provider/OS 回收站；审计记录不含业务内容。

@@ -63,9 +63,9 @@ class ActrManager {
             Log.e("ActrManager", "networkMonitor:${msg}")
         })
         val clientRef = clientNode.start()
-        Log.e("ActrManager", "manufacturer:${actorType.manufacturer} name:${actorType.name}")
+        Log.e("ActrManager", "publisher:${actorType.publisher} name:${actorType.name}")
         val serverType = ActrType(
-            manufacturer = actorType.manufacturer,
+            publisher = actorType.publisher,
             name = actorType.name,
             version = actorType.version
         )

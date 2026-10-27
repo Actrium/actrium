@@ -10,7 +10,7 @@ import {
   sendDataChunk as hostSendDataChunk,
   tell as hostTell,
   unregisterStream as hostUnregisterStream,
-} from 'actr:workload/host@0.7.0';
+} from 'actr:workload/host@0.8.0';
 
 export type PayloadBytes = Uint8Array | ArrayBuffer | ArrayLike<number>;
 
@@ -28,20 +28,16 @@ export interface RpcEnvelope {
   timeoutMs: number;
 }
 
-export interface Realm {
-  realmId: number;
-}
-
 export interface ActrType {
-  manufacturer: string;
+  publisher: string;
   name: string;
   version: string;
 }
 
 export interface ActrId {
-  realm: Realm;
+  /** Realm name, `<realm_id>@<domain>`. */
+  realm: string;
   serialNumber: bigint | number;
-  type: ActrType;
 }
 
 export interface MetadataEntry {
@@ -332,7 +328,6 @@ function toWitActrId(id: ActrId): WitActrId {
   return {
     realm: id.realm,
     serialNumber: BigInt(id.serialNumber),
-    type: id.type,
   };
 }
 
@@ -364,7 +359,6 @@ function fromWitActrId(id: WitActrId): ActrId {
   return {
     realm: id.realm,
     serialNumber: id.serialNumber,
-    type: id.type,
   };
 }
 

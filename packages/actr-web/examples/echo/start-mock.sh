@@ -6,7 +6,7 @@
 #     --no-default-features`)
 #   - signs the wasm-bindgen binary and glue into one authenticated `.actr`
 #     package
-#   - boots the in-repo `actr-mock-actrix` (signaling WS + HTTP AIS + MFR)
+#   - boots the in-repo `actr-mock-actrix` (signaling WS + HTTP Issuer + publisher)
 #   - starts `actr run --web` for server + client
 #   - drives the Puppeteer test suite (BasicFunction by default; pass
 #     `SUITES='BasicFunction MultiTab'` for the full matrix)
@@ -42,7 +42,7 @@ RELEASE_DIR="$SCRIPT_DIR/release"
 SERVER_ACTR_TOML="$SCRIPT_DIR/server-actr.toml"
 CLIENT_ACTR_TOML="$SCRIPT_DIR/client-actr.toml"
 
-MFR_NAME="acme"
+PUBLISHER_NAME="acme"
 MOCK_PORT="${1:-8081}"
 
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -75,10 +75,10 @@ for PORT in "$MOCK_PORT" 5173 5174; do
 done
 
 sed_inplace \
-    "s|pubkey_b64 = [\"'][A-Za-z0-9+/=]\{20,\}[\"']|pubkey_b64 = \"__MFR_PUBKEY_PLACEHOLDER__\"|g" \
+    "s|pubkey_b64 = [\"'][A-Za-z0-9+/=]\{20,\}[\"']|pubkey_b64 = \"__PUBLISHER_PUBKEY_PLACEHOLDER__\"|g" \
     "$SERVER_ACTR_TOML" 2>/dev/null || true
 sed_inplace \
-    "s|pubkey_b64 = [\"'][A-Za-z0-9+/=]\{20,\}[\"']|pubkey_b64 = \"__MFR_PUBKEY_PLACEHOLDER__\"|g" \
+    "s|pubkey_b64 = [\"'][A-Za-z0-9+/=]\{20,\}[\"']|pubkey_b64 = \"__PUBLISHER_PUBKEY_PLACEHOLDER__\"|g" \
     "$CLIENT_ACTR_TOML" 2>/dev/null || true
 
 echo -e "${GREEN}Stale data cleaned${NC}"
@@ -97,10 +97,10 @@ cleanup() {
         kill "$MOCK_PID" 2>/dev/null || true
     fi
     sed_inplace \
-        "s|pubkey_b64 = [\"'][A-Za-z0-9+/=]\{20,\}[\"']|pubkey_b64 = \"__MFR_PUBKEY_PLACEHOLDER__\"|g" \
+        "s|pubkey_b64 = [\"'][A-Za-z0-9+/=]\{20,\}[\"']|pubkey_b64 = \"__PUBLISHER_PUBKEY_PLACEHOLDER__\"|g" \
         "$SERVER_ACTR_TOML" 2>/dev/null || true
     sed_inplace \
-        "s|pubkey_b64 = [\"'][A-Za-z0-9+/=]\{20,\}[\"']|pubkey_b64 = \"__MFR_PUBKEY_PLACEHOLDER__\"|g" \
+        "s|pubkey_b64 = [\"'][A-Za-z0-9+/=]\{20,\}[\"']|pubkey_b64 = \"__PUBLISHER_PUBKEY_PLACEHOLDER__\"|g" \
         "$CLIENT_ACTR_TOML" 2>/dev/null || true
     wait 2>/dev/null || true
     echo "Cleanup complete"
@@ -183,23 +183,23 @@ echo -e "${GREEN}WBG guests built${NC}"
 echo ""
 echo -e "${BLUE}Step 2: Building signed .actr packages...${NC}"
 
-MFR_KEY_FILE="$RELEASE_DIR/dev-key.json"
-"$ACTR_CMD" pkg keygen --output "$MFR_KEY_FILE" --force
-MFR_PUBKEY=$(python3 -c "import json; print(json.load(open('$MFR_KEY_FILE'))['public_key'])")
-echo "  MFR pubkey: ${MFR_PUBKEY:0:20}..."
+PUBLISHER_KEY_FILE="$RELEASE_DIR/dev-key.json"
+"$ACTR_CMD" pkg keygen --output "$PUBLISHER_KEY_FILE" --force
+PUBLISHER_PUBKEY=$(python3 -c "import json; print(json.load(open('$PUBLISHER_KEY_FILE'))['public_key'])")
+echo "  publisher pubkey: ${PUBLISHER_PUBKEY:0:20}..."
 
 SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.2.0-wasm32-unknown-unknown.actr"
 (cd "$SERVER_GUEST_DIR" && "$ACTR_CMD" build \
     --no-compile \
     --target "wasm32-unknown-unknown" \
-    --key "$MFR_KEY_FILE" \
+    --key "$PUBLISHER_KEY_FILE" \
     --output "$SERVER_ACTR_PACKAGE")
 
 CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-unknown-unknown.actr"
 (cd "$CLIENT_GUEST_DIR" && "$ACTR_CMD" build \
     --no-compile \
     --target "wasm32-unknown-unknown" \
-    --key "$MFR_KEY_FILE" \
+    --key "$PUBLISHER_KEY_FILE" \
     --output "$CLIENT_ACTR_PACKAGE")
 
 echo -e "${GREEN}.actr packages built${NC}"
@@ -229,10 +229,10 @@ done
 [ "$READY" -eq 1 ] || { echo -e "${RED}mock-actrix did not reach 'listening on' within 10s${NC}"; cat "$MOCK_LOG"; exit 1; }
 echo -e "${GREEN}mock-actrix ready on http://127.0.0.1:$MOCK_PORT${NC}"
 
-# ---- Step 4: seed realm + MFR + packages ----
+# ---- Step 4: seed realm + publisher + packages ----
 
 echo ""
-echo -e "${BLUE}Step 4: Seeding realm + MFR + packages on mock-actrix...${NC}"
+echo -e "${BLUE}Step 4: Seeding realm + publisher + packages on mock-actrix...${NC}"
 
 ENDPOINT="http://127.0.0.1:$MOCK_PORT"
 bash "$SCRIPT_DIR/register-mock.sh" --endpoint "$ENDPOINT"

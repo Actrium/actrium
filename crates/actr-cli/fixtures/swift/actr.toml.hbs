@@ -3,11 +3,11 @@ edition = 1
 [signaling]
 url = "{{{SIGNALING_URL}}}/signaling/ws"
 
-[ais_endpoint]
-url = "{{{AIS_ENDPOINT_URL}}}"
+[issuer_endpoint]
+url = "{{{ISSUER_ENDPOINT_URL}}}"
 
 [deployment]
-realm_id = {{REALM_ID}}
+realm = "{{REALM}}"
 
 [hyper.trust]
 kind = "dev_only"

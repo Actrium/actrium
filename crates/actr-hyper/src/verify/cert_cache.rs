@@ -1,7 +1,7 @@
-//! Production mode MFR public key cache
+//! Production mode Publisher Registry public key cache
 //!
-//! `MfrCertCache` fetches manufacturer Ed25519 public keys on demand from
-//! AIS `GET /mfr/{name}/verifying_key`, caching locally (TTL 1 hour).
+//! `PublisherCertCache` fetches publisher Ed25519 public keys on demand from
+//! Issuer `GET /registry/publishers/{name}/verifying-key`, caching locally (TTL 1 hour).
 //!
 //! Uses `std::sync::RwLock` (not tokio) internally because:
 //! - Cache reads/writes are extremely short memory operations that won't block the tokio executor
@@ -16,46 +16,46 @@ use ed25519_dalek::VerifyingKey;
 
 use crate::error::{HyperError, HyperResult};
 
-/// MFR public key cache entry
+/// Publisher Registry public key cache entry
 struct CacheEntry {
     key: VerifyingKey,
     fetched_at: Instant,
 }
 
-/// Structured cert cache key: `(manufacturer, signing_key_id)`.
+/// Structured cert cache key: `(publisher, signing_key_id)`.
 ///
-/// A tuple avoids the `manufacturer:key_id` string-concatenation collision, where
+/// A tuple avoids the `publisher:key_id` string-concatenation collision, where
 /// e.g. `("a", "b:c")` and `("a:b", "c")` would otherwise map to the same key.
 type CertCacheKey = (String, Option<String>);
 
-fn cert_cache_key(manufacturer: &str, key_id: Option<&str>) -> CertCacheKey {
-    (manufacturer.to_string(), key_id.map(str::to_string))
+fn cert_cache_key(publisher: &str, key_id: Option<&str>) -> CertCacheKey {
+    (publisher.to_string(), key_id.map(str::to_string))
 }
 
-/// Production mode MFR Ed25519 public key cache
+/// Production mode Publisher Registry Ed25519 public key cache
 ///
-/// Fetches manufacturer public keys on demand from the AIS endpoint, cache TTL defaults to 1 hour.
-/// Shared across tasks via `Arc<MfrCertCache>`.
-pub struct MfrCertCache {
-    ais_endpoint: String,
+/// Fetches publisher public keys on demand from the Issuer endpoint, cache TTL defaults to 1 hour.
+/// Shared across tasks via `Arc<PublisherCertCache>`.
+pub struct PublisherCertCache {
+    issuer_endpoint: String,
     http: reqwest::Client,
     ttl: Duration,
     cache: RwLock<HashMap<CertCacheKey, CacheEntry>>,
 }
 
-impl std::fmt::Debug for MfrCertCache {
+impl std::fmt::Debug for PublisherCertCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MfrCertCache")
-            .field("ais_endpoint", &self.ais_endpoint)
+        f.debug_struct("PublisherCertCache")
+            .field("issuer_endpoint", &self.issuer_endpoint)
             .field("ttl", &self.ttl)
             .finish_non_exhaustive()
     }
 }
 
-impl MfrCertCache {
-    pub fn new(ais_endpoint: impl Into<String>) -> Arc<Self> {
+impl PublisherCertCache {
+    pub fn new(issuer_endpoint: impl Into<String>) -> Arc<Self> {
         Arc::new(Self {
-            ais_endpoint: ais_endpoint.into(),
+            issuer_endpoint: issuer_endpoint.into(),
             http: reqwest::Client::new(),
             ttl: Duration::from_secs(3600),
             cache: RwLock::new(HashMap::new()),
@@ -64,8 +64,8 @@ impl MfrCertCache {
 
     /// Used in `RegistryTrust::verify_package` synchronous path;
     /// caller must ensure the cache has been warmed via `get_or_fetch` beforehand.
-    pub fn get_from_cache(&self, manufacturer: &str, key_id: Option<&str>) -> Option<VerifyingKey> {
-        let cache_key = cert_cache_key(manufacturer, key_id);
+    pub fn get_from_cache(&self, publisher: &str, key_id: Option<&str>) -> Option<VerifyingKey> {
+        let cache_key = cert_cache_key(publisher, key_id);
         let cache = self.cache.read().expect("cert_cache read lock poisoned");
         cache.get(&cache_key).and_then(|entry| {
             // Instant-based TTL is a deliberate in-process freshness policy:
@@ -80,31 +80,31 @@ impl MfrCertCache {
         })
     }
 
-    /// Get the Ed25519 verifying key for the specified manufacturer
+    /// Get the Ed25519 verifying key for the specified publisher
     ///
-    /// Reads from cache first (if not expired); on miss, fetches from AIS and updates cache.
+    /// Reads from cache first (if not expired); on miss, fetches from Issuer and updates cache.
     pub async fn get_or_fetch(
         &self,
-        manufacturer: &str,
+        publisher: &str,
         key_id: Option<&str>,
     ) -> HyperResult<VerifyingKey> {
         // fast path: read cache
-        if let Some(key) = self.get_from_cache(manufacturer, key_id) {
-            tracing::debug!(manufacturer, ?key_id, "MFR pubkey cache hit");
+        if let Some(key) = self.get_from_cache(publisher, key_id) {
+            tracing::debug!(publisher, ?key_id, "Publisher Registry pubkey cache hit");
             return Ok(key);
         }
 
         tracing::debug!(
-            manufacturer,
+            publisher,
             ?key_id,
-            "MFR pubkey cache miss, fetching from AIS"
+            "Publisher Registry pubkey cache miss, fetching from Issuer"
         );
 
         // slow path: HTTP fetch
-        let key = self.fetch_from_ais(manufacturer, key_id).await?;
+        let key = self.fetch_from_issuer(publisher, key_id).await?;
 
         // write to cache (brief blocking lock, just a HashMap insert)
-        let cache_key = cert_cache_key(manufacturer, key_id);
+        let cache_key = cert_cache_key(publisher, key_id);
         {
             let mut cache = self.cache.write().expect("cert_cache write lock poisoned");
             cache.insert(
@@ -118,36 +118,39 @@ impl MfrCertCache {
         }
 
         tracing::info!(
-            manufacturer,
+            publisher,
             ?key_id,
-            "MFR pubkey fetched from AIS and cached"
+            "Publisher Registry pubkey fetched from Issuer and cached"
         );
         Ok(key)
     }
 
-    /// Fetch public key from AIS `GET /mfr/{manufacturer}/verifying_key`
-    async fn fetch_from_ais(
+    /// Fetch public key from Issuer `GET /registry/publishers/{publisher}/verifying-key`
+    async fn fetch_from_issuer(
         &self,
-        manufacturer: &str,
+        publisher: &str,
         key_id: Option<&str>,
     ) -> HyperResult<VerifyingKey> {
-        // Build the URL with the url crate (not `format!`) so the manufacturer
+        // Build the URL with the url crate (not `format!`) so the publisher
         // and key_id are percent-encoded as path segments / query pairs and can
-        // never inject extra path or query structure into the AIS request.
-        let mut url = reqwest::Url::parse(&self.ais_endpoint).map_err(|e| {
-            HyperError::Config(format!("invalid AIS endpoint `{}`: {e}", self.ais_endpoint))
+        // never inject extra path or query structure into the Issuer request.
+        let mut url = reqwest::Url::parse(&self.issuer_endpoint).map_err(|e| {
+            HyperError::Config(format!(
+                "invalid Issuer endpoint `{}`: {e}",
+                self.issuer_endpoint
+            ))
         })?;
         url.path_segments_mut()
-            .map_err(|_| HyperError::Config("AIS endpoint cannot be a base URL".to_string()))?
-            .extend(["mfr", manufacturer, "verifying_key"]);
+            .map_err(|_| HyperError::Config("Issuer endpoint cannot be a base URL".to_string()))?
+            .extend(["registry", "publishers", publisher, "verifying-key"]);
         if let Some(id) = key_id {
             url.query_pairs_mut().append_pair("key_id", id);
         }
-        tracing::debug!(url = %url, "fetching MFR pubkey from AIS");
+        tracing::debug!(url = %url, "fetching Publisher Registry pubkey from Issuer");
 
         let resp = self.http.get(url).send().await.map_err(|e| {
-            HyperError::UntrustedManufacturer(format!(
-                "failed to fetch MFR pubkey ({manufacturer}): {e}"
+            HyperError::UntrustedPublisher(format!(
+                "failed to fetch Publisher Registry pubkey ({publisher}): {e}"
             ))
         })?;
 
@@ -155,13 +158,13 @@ impl MfrCertCache {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             tracing::warn!(
-                manufacturer,
+                publisher,
                 status = status.as_u16(),
                 body,
-                "AIS returned non-2xx, MFR pubkey fetch failed"
+                "Issuer returned non-2xx, Publisher Registry pubkey fetch failed"
             );
-            return Err(HyperError::UntrustedManufacturer(format!(
-                "AIS refused to provide MFR pubkey ({manufacturer}), status={status}"
+            return Err(HyperError::UntrustedPublisher(format!(
+                "Issuer refused to provide Publisher Registry pubkey ({publisher}), status={status}"
             )));
         }
 
@@ -172,29 +175,29 @@ impl MfrCertCache {
         }
 
         let body: VerifyingKeyResp = resp.json().await.map_err(|e| {
-            HyperError::UntrustedManufacturer(format!(
-                "failed to parse MFR pubkey response ({manufacturer}): {e}"
+            HyperError::UntrustedPublisher(format!(
+                "failed to parse Publisher Registry pubkey response ({publisher}): {e}"
             ))
         })?;
 
         let key_bytes = base64::engine::general_purpose::STANDARD
             .decode(&body.public_key)
             .map_err(|e| {
-                HyperError::UntrustedManufacturer(format!(
-                    "MFR pubkey base64 decode failed ({manufacturer}): {e}"
+                HyperError::UntrustedPublisher(format!(
+                    "Publisher Registry pubkey base64 decode failed ({publisher}): {e}"
                 ))
             })?;
 
         let key_arr: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| {
-            HyperError::UntrustedManufacturer(format!(
-                "MFR pubkey length incorrect ({manufacturer}), expected 32 bytes, got {} bytes",
+            HyperError::UntrustedPublisher(format!(
+                "Publisher Registry pubkey length incorrect ({publisher}), expected 32 bytes, got {} bytes",
                 v.len()
             ))
         })?;
 
         VerifyingKey::from_bytes(&key_arr).map_err(|e| {
-            HyperError::UntrustedManufacturer(format!(
-                "MFR pubkey format invalid ({manufacturer}): {e}"
+            HyperError::UntrustedPublisher(format!(
+                "Publisher Registry pubkey format invalid ({publisher}): {e}"
             ))
         })
     }

@@ -26,7 +26,7 @@ async fn uri_options_cannot_bypass_ownership() {
         let cfg = config(&path, wal);
         let mailbox = SqliteMailbox::with_config(cfg.clone()).await.unwrap();
         let id = mailbox
-            .enqueue(vec![1], vec![2], MessagePriority::Normal)
+            .enqueue(vec![1], None, vec![2], MessagePriority::Normal)
             .await
             .unwrap();
         mailbox.dequeue().await.unwrap();
@@ -68,7 +68,12 @@ async fn reopen_preserves_unacked_records_and_queued_messages() {
         for n in 0..40u8 {
             ids.push(
                 mailbox
-                    .enqueue(vec![n], vec![n, 42], MessagePriority::Normal)
+                    .enqueue(
+                        vec![n],
+                        (n % 2 == 0).then(|| vec![n, 7]),
+                        vec![n, 42],
+                        MessagePriority::Normal,
+                    )
                     .await
                     .unwrap(),
             );
@@ -78,7 +83,7 @@ async fn reopen_preserves_unacked_records_and_queued_messages() {
         let acked = batch[0].id;
         mailbox.ack(acked).await.unwrap();
         let high = mailbox
-            .enqueue(vec![255], vec![255], MessagePriority::High)
+            .enqueue(vec![255], None, vec![255], MessagePriority::High)
             .await
             .unwrap();
         drop(mailbox);
@@ -96,6 +101,7 @@ async fn reopen_preserves_unacked_records_and_queued_messages() {
         for original in batch.iter().skip(1) {
             let restored = recovered.iter().find(|m| m.id == original.id).unwrap();
             assert_eq!(restored.from, original.from);
+            assert_eq!(restored.from_type, original.from_type);
             assert_eq!(restored.payload, original.payload);
             assert_eq!(restored.priority, original.priority);
             assert_eq!(restored.created_at, original.created_at);
@@ -104,6 +110,7 @@ async fn reopen_preserves_unacked_records_and_queued_messages() {
         for (n, id) in ids.iter().enumerate().filter(|(_, id)| **id != acked) {
             let restored = recovered.iter().find(|m| m.id == *id).unwrap();
             assert_eq!(restored.payload, vec![n as u8, 42]);
+            assert_eq!(restored.from_type, (n % 2 == 0).then(|| vec![n as u8, 7]));
         }
         for record in recovered {
             mailbox.ack(record.id).await.unwrap();
@@ -128,7 +135,7 @@ async fn ownership_survives_commits_and_failed_open_does_not_requeue() {
             Err(StorageError::ConcurrencyError(_))
         ));
         let id = mailbox
-            .enqueue(vec![1], vec![2], MessagePriority::Normal)
+            .enqueue(vec![1], None, vec![2], MessagePriority::Normal)
             .await
             .unwrap();
         mailbox.dequeue().await.unwrap();
@@ -172,7 +179,7 @@ async fn recovery_failure_rolls_back_and_releases_ownership() {
         let mailbox = SqliteMailbox::with_config(cfg.clone()).await.unwrap();
         for n in 0..2 {
             mailbox
-                .enqueue(vec![n], vec![n], MessagePriority::Normal)
+                .enqueue(vec![n], None, vec![n], MessagePriority::Normal)
                 .await
                 .unwrap();
         }
@@ -207,7 +214,7 @@ async fn recovery_failure_rolls_back_and_releases_ownership() {
 }
 
 #[tokio::test]
-async fn legacy_database_recovers_without_schema_migration() {
+async fn current_schema_database_recovers_without_ownership_metadata() {
     for wal in [false, true] {
         let dir = tempdir().unwrap();
         let path = dir.path().join("legacy.db");
@@ -215,17 +222,20 @@ async fn legacy_database_recovers_without_schema_migration() {
         if wal {
             conn.execute_batch("PRAGMA journal_mode = WAL").unwrap();
         }
-        // Database produced by the previous implementation, with no ownership
-        // metadata. Fixed timestamps also verify ordering across recovery.
+        // Current sender-type schema, with no ownership metadata. Old schema
+        // versions are intentionally refused (covered by the schema unit test).
+        // Fixed timestamps also verify ordering across recovery.
         conn.execute_batch(
-            "CREATE TABLE messages (
+            "PRAGMA user_version = 1;
+             CREATE TABLE messages (
                  id TEXT PRIMARY KEY, from_actr_id BLOB NOT NULL,
+                 from_actr_type BLOB,
                  payload BLOB NOT NULL, priority INTEGER NOT NULL,
                  status INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
              );
              INSERT INTO messages VALUES
-                 ('00000000-0000-0000-0000-000000000001', X'01', X'41', 0, 1, '2026-01-01T00:00:00Z'),
-                 ('00000000-0000-0000-0000-000000000002', X'01', X'42', 0, 0, '2026-01-01T00:00:01Z');",
+                 ('00000000-0000-0000-0000-000000000001', X'01', X'02', X'41', 0, 1, '2026-01-01T00:00:00Z'),
+                 ('00000000-0000-0000-0000-000000000002', X'01', NULL, X'42', 0, 0, '2026-01-01T00:00:01Z');",
         ).unwrap();
         drop(conn);
         let cfg = config(&path, wal);
@@ -236,6 +246,8 @@ async fn legacy_database_recovers_without_schema_migration() {
             assert_eq!(records.len(), 2);
             assert_eq!(records[0].payload, b"A");
             assert_eq!(records[1].payload, b"B");
+            assert_eq!(records[0].from_type, Some(vec![2]));
+            assert_eq!(records[1].from_type, None);
             assert_eq!(
                 records[0].id.to_string(),
                 "00000000-0000-0000-0000-000000000001"
@@ -249,7 +261,7 @@ async fn memory_mailboxes_are_independent() {
     let first = SqliteMailbox::new(":memory:").await.unwrap();
     let second = SqliteMailbox::new(":memory:").await.unwrap();
     first
-        .enqueue(vec![1], vec![2], MessagePriority::Normal)
+        .enqueue(vec![1], None, vec![2], MessagePriority::Normal)
         .await
         .unwrap();
     first.dequeue().await.unwrap();
@@ -310,7 +322,7 @@ fn shared_cache_child() {
             let cfg = config(&dir.path().join("mailbox.db"), wal);
             let mailbox = SqliteMailbox::with_config(cfg.clone()).await.unwrap();
             let id = mailbox
-                .enqueue(vec![1], vec![2], MessagePriority::Normal)
+                .enqueue(vec![1], None, vec![2], MessagePriority::Normal)
                 .await
                 .unwrap();
             mailbox.dequeue().await.unwrap();
@@ -387,12 +399,12 @@ fn crash_child() {
             .await
             .unwrap();
         let acked = mailbox
-            .enqueue(vec![1], b"acked".to_vec(), MessagePriority::Normal)
+            .enqueue(vec![1], None, b"acked".to_vec(), MessagePriority::Normal)
             .await
             .unwrap();
         for payload in [b"A", b"B"] {
             mailbox
-                .enqueue(vec![1], payload.to_vec(), MessagePriority::Normal)
+                .enqueue(vec![1], None, payload.to_vec(), MessagePriority::Normal)
                 .await
                 .unwrap();
         }

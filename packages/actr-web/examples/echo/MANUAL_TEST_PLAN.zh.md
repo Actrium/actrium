@@ -90,7 +90,7 @@
 | 6-2 | 多 client 同时发送 | 两个 client 同时向 server 发送消息 | Server 同时处理两个请求，各自收到正确回复 | ☐ |
 | 6-3 | 关闭一个 client | 打开两个 client，关闭其中一个 | 剩余 client 不受影响，继续正常发送。关闭的 client 触发 `beforeunload → client.close()` | ☐ |
 | 6-4 | 刷新一个 client | 两个 client 中刷新其中一个 | 被刷新的 client 重建，另一个 client 不受影响 | ☐ |
-| 6-5 | 多 server 实例 | 打开两个 server 标签页 | 各自注册同一 `acme+EchoService` type，client 发现时按 `MaximumPowerReserve` ranking 选择 | ☐ |
+| 6-5 | 多 server 实例 | 打开两个 server 标签页 | 各自注册同一 `acme/EchoService@0.2.0` type，client 发现时按 `MaximumPowerReserve` ranking 选择 | ☐ |
 | 6-6 | 共享 SW 隔离性 | 检查同源 client 标签页是否共享同一 SW 实例 | 共享同一个 SW，但每个 tab 有独立 `clientId`、独立 `SwRuntime`、独立 signaling WebSocket | ☐ |
 
 ---
@@ -124,7 +124,7 @@
 | 8-1 | Signaling URL 不可达 | 修改 `RUNTIME_CONFIG.signaling_url` 为错误地址后启动 | 连接失败，指数退避重试 10 次（1s→2s→4s→...→60s），总共约 2 分钟，最终报错 | ☐ |
 | 8-2 | Signaling 连接超时 | 使用防火墙 drop(非 reject) signaling server 端口 | WebSocket open 15s 超时 → 进入重试流程 | ☐ |
 | 8-3 | Signaling WS 被 server 关闭 | Signaling server 主动关闭 WS 连接 | `onclose` 触发 → inbound channel 关闭 → relay loop 退出 → heartbeat 失败 → 重连 | ☐ |
-| 8-4 | Realm 不匹配 | Client 和 server 配置不同的 `realm_id` | Client 的 `route_candidates` 无法找到跨 realm 的 server → "No candidates" | ☐ |
+| 8-4 | Realm 不匹配 | Client 和 server 配置不同的 `realm`（Realm 名） | Client 的 `route_candidates` 无法找到跨 realm 的 server → "No candidates" | ☐ |
 | 8-5 | ACL 不匹配 | Server `acl_allow_types` 不包含 client type | Client 的 `route_candidates` 被 ACL 拒绝 → 无法发现 server | ☐ |
 
 ---
@@ -199,11 +199,10 @@
 > 两端通过同一 Actrix Signaling Server 发现彼此，经由 WebRTC DataChannel 通信。  
 >  
 > **前置条件**：  
-> - 确保 Web Client 与 Rust Server 使用**相同的 `realm_id`** 和**同一 signaling server URL**  
->   - Rust Server 默认 `realm_id=6`（[actr.toml](../../actr-examples/shell-actr-echo/server/actr.toml)），Web Client 默认 `realm_id=2368266035`（actor.sw.js）  
->   - **测试前需修改其中一端使两者一致**  
+> - 确保 Web Client 与 Rust Server 使用**相同的 `realm`**（Realm 名）和**同一 signaling server URL**
+>   - 示例配置 [server-actr.toml](server-actr.toml) 与 [client-actr.toml](client-actr.toml) 默认都为 `realm = "web-echo@example.com"`
 > - Rust Server 配置了 `force_relay = true`，若使用本地 TURN server 需确保其运行  
-> - `actr_type` 已匹配：Server = `acme+EchoService`，Client = `acme+echo-client-app`  
+> - `actr_type` 已匹配：Server = `acme/EchoService@0.2.0`，Client = `acme/echo-client-app@0.1.0`
 > - ACL 双向已配置
 
 ### 14.0 环境准备
@@ -211,7 +210,7 @@
 | # | 检查项 | 操作 | 预期 |
 |---|--------|------|------|
 | 14-0-1 | Actrix 运行 | 确认 signaling server 在双端可达的地址上运行 | WebSocket 握手成功 |
-| 14-0-2 | realm_id 对齐 | 修改 Rust Server `actr.toml` 的 `realm_id` 或 Web Client `actor.sw.js` 的 `realm_id`，使两端一致 | 配置值相同 |
+| 14-0-2 | Realm 对齐 | 确认 Rust Server 与 Web Client 配置的 `realm` 相同 | 配置值相同 |
 | 14-0-3 | signaling URL 对齐 | 确保两端指向同一 signaling server（注意 `ws://` vs `wss://`） | 双端能连到同一 server |
 | 14-0-4 | TURN/STUN 环境 | 如 Rust Server `force_relay=true`，确保 TURN server 运行；或改为 `false` 并确保两端网络可达 | ICE 候选能匹配 |
 | 14-0-5 | 启动 Rust Server | `cd actr-examples && cargo run -p echo-real-server` | 终端显示 "✅ Echo Server 已完全启动并注册"，打印 Server ID |
@@ -276,7 +275,7 @@
 | 14-6-2 | RpcEnvelope 兼容 | 抓包或日志对比 DataChannel 帧格式 | Web Client (WASM) 编码的 `RpcEnvelope` 与 Rust Server 解码兼容 | ☐ |
 | 14-6-3 | Signaling 协议兼容 | 对比两端的 `SignalingEnvelope` 序列化 | RegisterRequest、RouteCandidates、ActrRelay 格式一致 | ☐ |
 | 14-6-4 | Role Negotiation 跨端 | 观察双端日志中的 role_assignment | 一端被分配为 offerer，另一端为 answerer，角色正确建立 | ☐ |
-| 14-6-5 | ACL 跨端 | Web Client type = `acme+echo-client-app`，Rust Server ACL 允许该 type | route_candidates 返回 Rust Server 作为候选 | ☐ |
+| 14-6-5 | ACL 跨端 | Web Client type = `acme/echo-client-app@0.1.0`，Rust Server ACL 允许该 type | route_candidates 返回 Rust Server 作为候选 | ☐ |
 
 ---
 

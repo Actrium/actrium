@@ -233,13 +233,8 @@ async fn live_websocket_partial_write_is_uncertain_without_replay() {
                     }));
                 }
                 let actor = |serial_number| ActrId {
-                    realm: actr_protocol::Realm { realm_id: 1 },
+                    realm: "test@example.com".into(),
                     serial_number,
-                    r#type: actr_protocol::ActrType {
-                        manufacturer: "acme".into(),
-                        name: "websocket-no-replay".into(),
-                        version: "1.0.0".into(),
-                    },
                 };
                 let target = actor(2);
                 let transport = Arc::new(PeerTransport::new(

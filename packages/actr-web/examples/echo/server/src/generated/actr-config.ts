@@ -14,15 +14,15 @@ import type { ActorClientConfig, SwRuntimeConfig, TrustAnchor } from '@actrium/a
 
 export interface RuntimeConfigJson {
     signaling_url: string;
-    ais_endpoint: string;
-    realm_id: number;
+    issuer_endpoint: string;
+    realm: string;
     visible: boolean;
     force_relay: boolean;
     stun_urls: string[];
     turn_urls: string[];
     package: {
         name: string;
-        manufacturer: string;
+        publisher: string;
         actr_name: string;
         version: string;
         full_type: string;
@@ -63,8 +63,8 @@ function requireConfig(): RuntimeConfigJson {
 
 /** ActrType info (available after initConfig) */
 export const actrType = {
-    get manufacturer() {
-        return requireConfig().package.manufacturer;
+    get publisher() {
+        return requireConfig().package.publisher;
     },
     get name() {
         return requireConfig().package.actr_name;
@@ -85,11 +85,11 @@ export const system = {
         },
     },
     deployment: {
-        get realm_id() {
-            return requireConfig().realm_id;
+        get realm() {
+            return requireConfig().realm;
         },
-        get ais_endpoint() {
-            return requireConfig().ais_endpoint;
+        get issuer_endpoint() {
+            return requireConfig().issuer_endpoint;
         },
     },
     discovery: {
@@ -126,9 +126,9 @@ export const acl = {
 export function buildRuntimeConfig(): SwRuntimeConfig {
     const c = requireConfig();
     return {
-        ais_endpoint: c.ais_endpoint,
+        issuer_endpoint: c.issuer_endpoint,
         signaling_url: c.signaling_url,
-        realm_id: c.realm_id,
+        realm: c.realm,
         client_actr_type: c.package.full_type,
         service_fingerprint: '',
         acl_allow_types: c.acl_allow_types,
@@ -153,7 +153,7 @@ export function buildActrConfig(): ActorClientConfig {
     const rc = buildRuntimeConfig();
     return {
         signalingUrl: c.signaling_url,
-        realm: String(c.realm_id),
+        realm: c.realm,
         iceServers: [
             ...c.stun_urls.map((url: string) => ({ urls: url })),
             ...c.turn_urls.map((url: string) => ({ urls: url })),

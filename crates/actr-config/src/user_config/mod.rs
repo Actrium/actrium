@@ -9,6 +9,6 @@ pub use resolver::{
     EffectiveCliConfig, expand_tilde, resolve_effective_cli_config, resolve_hyper_data_dir,
 };
 pub use schema::{
-    CacheConfig, CliConfig, CodegenConfig, InstallConfig, MfrConfig, NetworkConfig, StorageConfig,
-    UiConfig,
+    CacheConfig, CliConfig, CodegenConfig, InstallConfig, NetworkConfig, PublisherConfig,
+    StorageConfig, UiConfig,
 };

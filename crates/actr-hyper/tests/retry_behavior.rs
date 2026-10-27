@@ -7,7 +7,8 @@
 
 use actr_framework::Bytes;
 use actr_hyper::test_support::TestHarness;
-use actr_protocol::{ActrError, Direction, PayloadType, RpcEnvelope};
+use actr_protocol::prost::Message as _;
+use actr_protocol::{ActrError, DataChunk, Direction, PayloadType, RpcEnvelope};
 use std::time::{Duration, Instant};
 
 fn init_tracing() {
@@ -76,19 +77,30 @@ async fn enter_recovering(harness: &TestHarness) {
         .expect("controller must publish Recovering/sendable=false");
 }
 
-async fn assert_connection_not_ready(
-    handle: tokio::task::JoinHandle<actr_protocol::ActorResult<Bytes>>,
-    label: &str,
-) {
+async fn assert_readiness_deadline(harness: &TestHarness, label: &str) {
+    let mut handle = harness.peer(100).spawn_request(200, label, 300);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), &mut handle)
+            .await
+            .is_err(),
+        "{label} must wait for recovery instead of failing immediately"
+    );
+    assert_eq!(
+        harness.peer(100).pending_count().await,
+        0,
+        "{label} must not register an in-flight RPC before readiness"
+    );
     let error = tokio::time::timeout(Duration::from_secs(2), handle)
         .await
-        .unwrap_or_else(|_| panic!("{label} did not fail promptly"))
+        .unwrap_or_else(|_| panic!("{label} exceeded its request deadline"))
         .unwrap_or_else(|error| panic!("{label} task panicked: {error}"))
         .unwrap_err();
     assert!(
-        matches!(error, ActrError::ConnectionNotReady(_)),
-        "{label} returned {error}, expected ConnectionNotReady"
+        matches!(error, ActrError::TimedOut),
+        "{label} returned {error}, expected a pre-send deadline timeout"
     );
+    assert_eq!(harness.peer(100).pending_count().await, 0);
+    assert_eq!(harness.peer(200).request_count(label), 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -119,11 +131,7 @@ async fn test_call_fails_during_outage_then_succeeds_after_recovery() {
     let harness = connected(true).await;
     harness.simulate_disconnect();
     enter_recovering(&harness).await;
-    assert_connection_not_ready(
-        harness.peer(100).spawn_request(200, "outage-call", 30_000),
-        "outage call",
-    )
-    .await;
+    assert_readiness_deadline(&harness, "outage-call").await;
 
     harness.simulate_reconnect();
     assert_eq!(
@@ -276,7 +284,7 @@ async fn test_tell_does_not_register_pending_requests() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_send_data_chunk_rejected_during_recovery() {
+async fn test_reliable_data_chunk_waits_during_recovery_while_latency_first_fails_fast() {
     init_tracing();
     let harness = connected(false).await;
     let target = harness.peer(200).id.clone();
@@ -287,28 +295,76 @@ async fn test_send_data_chunk_rejected_during_recovery() {
             &target,
             PayloadType::StreamReliable,
             "healthy",
-            bytes::Bytes::from_static(b"chunk"),
+            Bytes::from(
+                DataChunk {
+                    stream_id: "healthy".into(),
+                    payload: Bytes::from_static(b"chunk"),
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+            ),
             "healthy",
         )
         .await
         .expect("healthy stream send");
+    assert!(
+        harness
+            .peer(200)
+            .wait_data_chunk_count("healthy", 1, Duration::from_secs(2))
+            .await,
+        "healthy stream must reach the recipient"
+    );
 
     enter_recovering(&harness).await;
-    let started = Instant::now();
-    let error = harness
+    let fast_started = Instant::now();
+    let fast_error = harness
         .peer(100)
         .gate
         .send_data_chunk(
             &target,
-            PayloadType::StreamReliable,
-            "recovering",
-            bytes::Bytes::from_static(b"chunk"),
-            "recovering",
+            PayloadType::StreamLatencyFirst,
+            "latency-first",
+            Bytes::from(
+                DataChunk {
+                    stream_id: "latency-first".into(),
+                    payload: Bytes::from_static(b"chunk"),
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+            ),
+            "latency-first",
         )
         .await
-        .expect_err("recovery must reject stream send");
-    assert!(matches!(error, ActrError::ConnectionNotReady(_)));
-    assert!(started.elapsed() < Duration::from_secs(1));
+        .expect_err("latency-first streams must not wait for recovery");
+    assert!(matches!(fast_error, ActrError::ConnectionNotReady(_)));
+    assert!(fast_started.elapsed() < Duration::from_secs(1));
+    assert_eq!(harness.peer(200).data_chunk_count("latency-first"), 0);
+
+    let started = Instant::now();
+    let error = tokio::time::timeout(
+        Duration::from_secs(18),
+        harness.peer(100).gate.send_data_chunk(
+            &target,
+            PayloadType::StreamReliable,
+            "recovering",
+            Bytes::from(
+                DataChunk {
+                    stream_id: "recovering".into(),
+                    payload: Bytes::from_static(b"chunk"),
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+            ),
+            "recovering",
+        ),
+    )
+    .await
+    .expect("the stream deadline must bound readiness waiting")
+    .expect_err("the offline peer cannot become sendable before the deadline");
+    assert!(matches!(error, ActrError::TimedOut), "{error}");
+    assert!(started.elapsed() >= Duration::from_secs(14));
+    assert_eq!(harness.peer(200).data_chunk_count("recovering"), 0);
+    assert_eq!(harness.peer(100).pending_count().await, 0);
     harness.shutdown().await;
 }
 
@@ -353,38 +409,22 @@ async fn test_call_succeeds_after_full_disconnect_reconnect_cycle() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_call_fast_fails_during_recovery_window() {
+async fn test_call_readiness_wait_respects_deadline_during_recovery_window() {
     init_tracing();
     let harness = connected(false).await;
     enter_recovering(&harness).await;
-    let started = Instant::now();
-    assert_connection_not_ready(
-        harness
-            .peer(100)
-            .spawn_request(200, "recovery-fast-fail", 30_000),
-        "request during recovery",
-    )
-    .await;
-    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_readiness_deadline(&harness, "recovery-deadline").await;
     harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_call_fast_fails_while_cleanup_owns_mutation_authority() {
+async fn test_call_waits_without_submission_while_cleanup_owns_mutation_authority() {
     init_tracing();
     let harness = connected(false).await;
     // NetworkUnavailable is the production cleanup/recovery ownership fence:
     // the controller revokes permits before physical mutation starts.
     enter_recovering(&harness).await;
-    let started = Instant::now();
-    assert_connection_not_ready(
-        harness
-            .peer(100)
-            .spawn_request(200, "cleanup-authority", 30_000),
-        "request while cleanup owns the session",
-    )
-    .await;
-    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_readiness_deadline(&harness, "cleanup-authority").await;
     harness.shutdown().await;
 }
 
@@ -406,13 +446,7 @@ async fn test_recovery_ready_hook_unblocks_mobile_retry() {
         states.changed().await.expect("state stream");
     }
     assert!(!states.borrow().sendable);
-    assert_connection_not_ready(
-        harness
-            .peer(100)
-            .spawn_request(200, "mobile-guarded", 30_000),
-        "mobile request while recovering",
-    )
-    .await;
+    assert_readiness_deadline(&harness, "mobile-guarded").await;
 
     harness.peer(100).rtc.network_available();
     while !states.borrow().sendable {

@@ -1,7 +1,8 @@
-//! AIS signing public key cache
+//! Issuer signing public key cache
 //!
-//! Provides a local SQLite cache for the verifier, avoiding repeated retrieval of Ed25519 public keys from AIS registration responses.
-//! Cache entries are indexed by key_id, storing the corresponding Ed25519 verifying key (32 bytes) and expiration time.
+//! Provides a local SQLite cache for the verifier, avoiding repeated retrieval of Ed25519 public keys from Issuer registration responses.
+//! Each Realm has its own issuer key, so entries are indexed by `(realm, key_id)`: a key is
+//! only ever looked up for the Realm it belongs to.
 
 use crate::aid::credential::error::AidError;
 use base64::prelude::*;
@@ -13,10 +14,10 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// AIS signing public key cache manager
+/// Issuer signing public key cache manager
 ///
-/// Caches AIS Ed25519 verifying keys, indexed by key_id.
-/// Used by signaling and other services to look up the corresponding public key by key_id when verifying AIdCredential.
+/// Caches Issuer Ed25519 verifying keys, indexed by `(realm, key_id)`.
+/// Used by signaling and other services to look up a Realm's public key by key_id when verifying AIdCredential.
 #[derive(Debug, Clone)]
 pub struct KeyCache {
     pool: SqlitePool,
@@ -50,7 +51,7 @@ impl KeyCache {
         cache.init_tables().await?;
 
         crate::recording::info!(
-            "AIS public key cache initialized, database: {}",
+            "Issuer public key cache initialized, database: {}",
             cache_db_file.as_ref().display()
         );
         Ok(cache)
@@ -58,14 +59,34 @@ impl KeyCache {
 
     /// Initialize cache database tables
     async fn init_tables(&self) -> Result<(), AidError> {
+        // An older cache keyed keys by key_id alone. It is only a cache, so drop
+        // it; the Issuer writes each Realm's key again when it next signs.
+        let has_realm: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM pragma_table_info('key_cache') WHERE name = 'realm'")
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| {
+                    AidError::DecodeFailure(format!("failed to inspect key_cache table: {e}"))
+                })?;
+        if has_realm.is_none() {
+            sqlx::query("DROP TABLE IF EXISTS key_cache")
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    AidError::DecodeFailure(format!("failed to drop old key_cache table: {e}"))
+                })?;
+        }
+
         // key_cache table: stores Ed25519 verifying key (base64-encoded, 32 bytes) and expiration time
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS key_cache (
-                key_id     INTEGER PRIMARY KEY,
+                realm      TEXT NOT NULL,
+                key_id     INTEGER NOT NULL,
                 pubkey     TEXT NOT NULL,
                 cached_at  INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL
+                expires_at INTEGER NOT NULL,
+                PRIMARY KEY (realm, key_id)
             )
             "#,
         )
@@ -80,15 +101,16 @@ impl KeyCache {
                 AidError::DecodeFailure(format!("failed to create key_cache index: {e}"))
             })?;
 
-        crate::recording::debug!("AIS public key cache database tables ready");
+        crate::recording::debug!("Issuer public key cache database tables ready");
         Ok(())
     }
 
-    /// Get the Ed25519 verifying key from the cache
+    /// Get `realm`'s Ed25519 verifying key `key_id` from the cache
     ///
     /// Returns `(VerifyingKey, expires_at)`; returns `None` if the cache entry does not exist or has expired.
     pub async fn get_cached_key(
         &self,
+        realm: &str,
         key_id: u32,
     ) -> Result<Option<(VerifyingKey, u64)>, AidError> {
         self.maybe_cleanup().await;
@@ -98,18 +120,21 @@ impl KeyCache {
             .unwrap_or_default()
             .as_secs();
 
-        let result = sqlx::query("SELECT pubkey, expires_at FROM key_cache WHERE key_id = ?1")
-            .bind(key_id as i64)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| {
-                crate::recording::error!(
-                    "Failed to query AIS public key cache: key_id={}, {}",
-                    key_id,
-                    e
-                );
-                AidError::DecodeFailure(format!("key cache query error: {e}"))
-            })?;
+        let result = sqlx::query(
+            "SELECT pubkey, expires_at FROM key_cache WHERE realm = ?1 AND key_id = ?2",
+        )
+        .bind(realm)
+        .bind(key_id as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            crate::recording::error!(
+                "Failed to query Issuer public key cache: key_id={}, {}",
+                key_id,
+                e
+            );
+            AidError::DecodeFailure(format!("key cache query error: {e}"))
+        })?;
 
         match result {
             Some(row) => {
@@ -123,10 +148,11 @@ impl KeyCache {
                 // Cache entry expired, delete and return None
                 if expires_at > 0 && (expires_at as u64) <= now {
                     crate::recording::debug!(
-                        "AIS public key cache expired, deleting: key_id={}",
+                        "Issuer public key cache expired, deleting: key_id={}",
                         key_id
                     );
-                    let _ = sqlx::query("DELETE FROM key_cache WHERE key_id = ?1")
+                    let _ = sqlx::query("DELETE FROM key_cache WHERE realm = ?1 AND key_id = ?2")
+                        .bind(realm)
                         .bind(key_id as i64)
                         .execute(&self.pool)
                         .await;
@@ -149,21 +175,22 @@ impl KeyCache {
                     AidError::DecodeFailure(format!("invalid Ed25519 verifying key: {e}"))
                 })?;
 
-                crate::recording::debug!("AIS public key cache hit: key_id={}", key_id);
+                crate::recording::debug!("Issuer public key cache hit: key_id={}", key_id);
                 Ok(Some((verifying_key, expires_at as u64)))
             }
             None => {
-                crate::recording::debug!("AIS public key cache miss: key_id={}", key_id);
+                crate::recording::debug!("Issuer public key cache miss: key_id={}", key_id);
                 Ok(None)
             }
         }
     }
 
-    /// Write the Ed25519 verifying key to the cache
+    /// Write `realm`'s Ed25519 verifying key to the cache
     ///
     /// `expires_at` is a Unix second timestamp; pass 0 to indicate never expires.
     pub async fn cache_key(
         &self,
+        realm: &str,
         key_id: u32,
         verifying_key: &VerifyingKey,
         expires_at: u64,
@@ -176,8 +203,10 @@ impl KeyCache {
         let pubkey_b64 = BASE64_STANDARD.encode(verifying_key.as_bytes());
 
         sqlx::query(
-            "REPLACE INTO key_cache (key_id, pubkey, cached_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
+            "REPLACE INTO key_cache (realm, key_id, pubkey, cached_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
         )
+        .bind(realm)
         .bind(key_id as i64)
         .bind(&pubkey_b64)
         .bind(now as i64)
@@ -187,10 +216,37 @@ impl KeyCache {
         .map_err(|e| AidError::DecodeFailure(format!("failed to write key cache: {e}")))?;
 
         crate::recording::debug!(
-            "AIS public key written to cache: key_id={}, expires_at={}",
+            "Issuer public key written to cache: key_id={}, expires_at={}",
             key_id,
             expires_at
         );
+        Ok(())
+    }
+
+    /// Remove entries absent from an accepted Profile, including a mismatched
+    /// public key under the same id. Other Realms are unaffected.
+    pub async fn retain_profile_keys(
+        &self,
+        profile: &actr_protocol::realm_profile::RealmProfile,
+    ) -> Result<(), AidError> {
+        let mut query =
+            sqlx::QueryBuilder::<sqlx::Sqlite>::new("DELETE FROM key_cache WHERE realm = ");
+        query.push_bind(&profile.realm.name);
+        for key in &profile.issuer.keys {
+            if let Some(id) = actr_protocol::realm_profile::parse_issuer_key_id(&key.id) {
+                query
+                    .push(" AND NOT (key_id = ")
+                    .push_bind(i64::from(id))
+                    .push(" AND pubkey = ")
+                    .push_bind(&key.public_key)
+                    .push(")");
+            }
+        }
+        query
+            .build()
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AidError::DecodeFailure(format!("failed to prune key cache: {e}")))?;
         Ok(())
     }
 
@@ -210,7 +266,7 @@ impl KeyCache {
         let deleted = result.rows_affected() as u32;
         if deleted > 0 {
             crate::recording::info!(
-                "AIS public key cache: cleaned up {} expired records",
+                "Issuer public key cache: cleaned up {} expired records",
                 deleted
             );
         }
@@ -244,14 +300,14 @@ impl KeyCache {
         };
 
         if should_cleanup {
-            crate::recording::debug!("Triggering scheduled AIS public key cache cleanup");
+            crate::recording::debug!("Triggering scheduled Issuer public key cache cleanup");
             match self.cleanup_expired_keys().await {
                 Ok(n) if n > 0 => crate::recording::info!(
-                    "AIS public key cache cleanup complete, deleted {} entries",
+                    "Issuer public key cache cleanup complete, deleted {} entries",
                     n
                 ),
                 Ok(_) => {}
-                Err(e) => crate::recording::error!("AIS public key cache cleanup failed: {}", e),
+                Err(e) => crate::recording::error!("Issuer public key cache cleanup failed: {}", e),
             }
             let mut last = self.last_cleanup_time.lock().unwrap();
             *last = now;
@@ -265,6 +321,8 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
     use tempfile::tempdir;
+
+    const REALM: &str = "k7m2q9xh@example.com";
 
     fn generate_test_key() -> VerifyingKey {
         let signing_key = SigningKey::generate(&mut OsRng);
@@ -293,16 +351,64 @@ mod tests {
             + 3600;
 
         cache
-            .cache_key(1, &verifying_key, expires_at)
+            .cache_key(REALM, 1, &verifying_key, expires_at)
             .await
             .unwrap();
         assert_eq!(cache.get_cached_key_count().await.unwrap(), 1);
 
-        let cached = cache.get_cached_key(1).await.unwrap();
+        let cached = cache.get_cached_key(REALM, 1).await.unwrap();
         assert!(cached.is_some());
         let (retrieved_key, retrieved_expires) = cached.unwrap();
         assert_eq!(verifying_key.as_bytes(), retrieved_key.as_bytes());
         assert_eq!(expires_at, retrieved_expires);
+    }
+
+    #[tokio::test]
+    async fn keys_are_looked_up_only_in_their_realm() {
+        let temp_dir = tempdir().unwrap();
+        let cache = KeyCache::new(temp_dir.path().join("test.db"))
+            .await
+            .unwrap();
+
+        cache
+            .cache_key(REALM, 1, &generate_test_key(), 0)
+            .await
+            .unwrap();
+        assert!(cache.get_cached_key(REALM, 1).await.unwrap().is_some());
+        assert!(
+            cache
+                .get_cached_key("other@example.com", 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_old_cache_keyed_by_key_id_alone_is_replaced() {
+        let temp_dir = tempdir().unwrap();
+        let path = temp_dir.path().join("test.db");
+        {
+            let cache = KeyCache::new(&path).await.unwrap();
+            sqlx::query("DROP TABLE key_cache")
+                .execute(&cache.pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "CREATE TABLE key_cache (key_id INTEGER PRIMARY KEY, pubkey TEXT NOT NULL, \
+                 cached_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
+            )
+            .execute(&cache.pool)
+            .await
+            .unwrap();
+        }
+
+        let cache = KeyCache::new(&path).await.unwrap();
+        cache
+            .cache_key(REALM, 1, &generate_test_key(), 0)
+            .await
+            .unwrap();
+        assert!(cache.get_cached_key(REALM, 1).await.unwrap().is_some());
     }
 
     #[tokio::test]
@@ -321,11 +427,11 @@ mod tests {
             .saturating_sub(1);
 
         cache
-            .cache_key(1, &verifying_key, expires_at)
+            .cache_key(REALM, 1, &verifying_key, expires_at)
             .await
             .unwrap();
         // Expired entry should return None
-        let cached = cache.get_cached_key(1).await.unwrap();
+        let cached = cache.get_cached_key(REALM, 1).await.unwrap();
         assert!(cached.is_none());
     }
 
@@ -344,7 +450,7 @@ mod tests {
             .saturating_sub(1);
 
         cache
-            .cache_key(1, &verifying_key, expired_at)
+            .cache_key(REALM, 1, &verifying_key, expired_at)
             .await
             .unwrap();
         assert_eq!(cache.get_cached_key_count().await.unwrap(), 1);

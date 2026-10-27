@@ -1,4 +1,4 @@
-//! Versioned Actor Package (`actr-package/1`) support.
+//! Versioned Actor Package (`actr-package/2`) support.
 //!
 //! This module implements the profile-neutral package shape documented in
 //! `actr/protocols/actor-package.zh.md`.  The older flat binary manifest stays
@@ -17,7 +17,9 @@ use crate::error::PackError;
 use crate::util::{read_zip_entry_bounded, sha256_hex, sha256_zip_entry_bounded};
 use crate::verify::{DEFAULT_MAX_VERIFIED_ENTRIES, DEFAULT_MAX_VERIFIED_ENTRY_BYTES};
 
-pub const ACTOR_PACKAGE_FORMAT_V1: &str = "actr-package/1";
+pub const ACTOR_PACKAGE_FORMAT_V2: &str = "actr-package/2";
+/// Superseded format identifier; rejected with a migration hint.
+const ACTOR_PACKAGE_FORMAT_V1: &str = "actr-package/1";
 pub const KEEL_GUEST_PROFILE_V1: &str = "keel.guest/1";
 const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 const MAX_SIGNATURE_BYTES: usize = 64;
@@ -41,7 +43,7 @@ pub struct ActorPackageManifest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActorDescriptor {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
 }
@@ -146,8 +148,31 @@ pub struct PackageFileEntry {
     pub sha256: String,
 }
 
+/// Rejects `actr-package/1` manifests, which named the publisher field
+/// differently, with an actionable error instead of a generic parse failure.
+fn reject_legacy_manifest(source: &str) -> Result<(), PackError> {
+    let Ok(value) = source.parse::<toml::Table>() else {
+        return Ok(());
+    };
+    let legacy_key = value
+        .get("actor")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|actor| actor.contains_key(LEGACY_PUBLISHER_KEY));
+    let legacy_format =
+        value.get("format").and_then(toml::Value::as_str) == Some(ACTOR_PACKAGE_FORMAT_V1);
+    if legacy_key || legacy_format {
+        return Err(PackError::InvalidPackage(format!(
+            "{ACTOR_PACKAGE_FORMAT_V1} manifests are no longer supported: set `format = \"{ACTOR_PACKAGE_FORMAT_V2}\"` and rename `actor.{LEGACY_PUBLISHER_KEY}` to `actor.publisher`"
+        )));
+    }
+    Ok(())
+}
+
+const LEGACY_PUBLISHER_KEY: &str = "manufacturer";
+
 impl ActorPackageManifest {
     pub fn from_toml(source: &str) -> Result<Self, PackError> {
+        reject_legacy_manifest(source)?;
         let manifest: Self = toml::from_str(source)
             .map_err(|error| PackError::ManifestParseError(error.to_string()))?;
         manifest.validate()?;
@@ -162,8 +187,8 @@ impl ActorPackageManifest {
 
     pub fn actor_type(&self) -> String {
         format!(
-            "{}:{}:{}",
-            self.actor.manufacturer, self.actor.name, self.actor.version
+            "{}/{}@{}",
+            self.actor.publisher, self.actor.name, self.actor.version
         )
     }
 
@@ -180,14 +205,14 @@ impl ActorPackageManifest {
     }
 
     pub fn validate(&self) -> Result<(), PackError> {
-        if self.format != ACTOR_PACKAGE_FORMAT_V1 {
+        if self.format != ACTOR_PACKAGE_FORMAT_V2 {
             return Err(PackError::InvalidPackage(format!(
                 "unsupported package format `{}`",
                 self.format
             )));
         }
         for (field, value) in [
-            ("actor.manufacturer", self.actor.manufacturer.as_str()),
+            ("actor.publisher", self.actor.publisher.as_str()),
             ("actor.name", self.actor.name.as_str()),
             ("actor.version", self.actor.version.as_str()),
             ("workload.profile", self.workload.profile.as_str()),
@@ -532,9 +557,9 @@ mod tests {
 
     fn manifest() -> ActorPackageManifest {
         ActorPackageManifest {
-            format: ACTOR_PACKAGE_FORMAT_V1.to_string(),
+            format: ACTOR_PACKAGE_FORMAT_V2.to_string(),
             actor: ActorDescriptor {
-                manufacturer: "actrium".to_string(),
+                publisher: "actrium".to_string(),
                 name: "echo-ui".to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -613,5 +638,30 @@ mod tests {
         let mut manifest = manifest();
         manifest.files[0].path = "../guest.js".to_string();
         assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_legacy_publisher_key_with_rename_hint() {
+        let source = manifest()
+            .to_toml()
+            .unwrap()
+            .replace("publisher = ", "manufacturer = ");
+        let error = ActorPackageManifest::from_toml(&source)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("actor.manufacturer"), "{error}");
+        assert!(error.contains("actor.publisher"), "{error}");
+    }
+
+    #[test]
+    fn rejects_superseded_format() {
+        let source = manifest()
+            .to_toml()
+            .unwrap()
+            .replace(ACTOR_PACKAGE_FORMAT_V2, ACTOR_PACKAGE_FORMAT_V1);
+        let error = ActorPackageManifest::from_toml(&source)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(ACTOR_PACKAGE_FORMAT_V2), "{error}");
     }
 }

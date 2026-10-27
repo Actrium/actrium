@@ -1,4 +1,4 @@
-//! WasmWorkloadV2 — the `actr:workload@0.7.0` async-world execution path.
+//! WasmWorkloadV2 — the `actr:workload@0.8.0` async-world execution path.
 //!
 //! The sole actr:workload execution path (the 0.1.0 synchronous serial
 //! world is retired — a component exporting it is rejected at load by
@@ -29,7 +29,7 @@ use actr_framework::{
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     ActrError, ActrId, ActrType, ConnectionNotReadyInfo, DataChunk, Direction, MetadataEntry,
-    PayloadType, Realm, RpcEnvelope,
+    PayloadType, RpcEnvelope,
 };
 use wasmtime::component::{Accessor, Component, HasData, Linker};
 use wasmtime::{AsContextMut, Engine, Store};
@@ -41,7 +41,7 @@ use super::component_bindings_v2::actr::workload::types::{
     BackpressureEvent as WitBackpressureEvent, CredentialEvent as WitCredentialEvent,
     DataChunk as WitDataChunk, Dest as WitDest, Host as TypesHostV2,
     InvocationCtx as WitInvocationCtx, PayloadType as WitPayloadType, PeerEvent as WitPeerEvent,
-    Realm as WitRealm, RpcEnvelope as WitRpcEnvelope, WebrtcNetworkPath as WitWebrtcNetworkPath,
+    RpcEnvelope as WitRpcEnvelope, WebrtcNetworkPath as WitWebrtcNetworkPath,
     WebrtcPeerState as WitWebrtcPeerState, WebrtcPeerStatus as WitWebrtcPeerStatus,
     WebrtcUnavailableReason as WitWebrtcUnavailableReason,
 };
@@ -393,21 +393,9 @@ impl HostWithStore<HostState> for HostState {
 // payloads still shared with DynClib.
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn wit_realm_to_proto(r: &WitRealm) -> Realm {
-    Realm {
-        realm_id: r.realm_id,
-    }
-}
-
-fn proto_realm_to_wit(r: &Realm) -> WitRealm {
-    WitRealm {
-        realm_id: r.realm_id,
-    }
-}
-
 fn wit_actr_type_to_proto(t: &WitActrType) -> ActrType {
     ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }
@@ -415,7 +403,7 @@ fn wit_actr_type_to_proto(t: &WitActrType) -> ActrType {
 
 fn proto_actr_type_to_wit(t: &ActrType) -> WitActrType {
     WitActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }
@@ -423,17 +411,15 @@ fn proto_actr_type_to_wit(t: &ActrType) -> WitActrType {
 
 fn wit_actr_id_to_proto(id: &WitActrId) -> ActrId {
     ActrId {
-        realm: wit_realm_to_proto(&id.realm),
+        realm: id.realm.clone(),
         serial_number: id.serial_number,
-        r#type: wit_actr_type_to_proto(&id.type_),
     }
 }
 
 fn proto_actr_id_to_wit(id: &ActrId) -> WitActrId {
     WitActrId {
-        realm: proto_realm_to_wit(&id.realm),
+        realm: id.realm.clone(),
         serial_number: id.serial_number,
-        type_: proto_actr_type_to_wit(&id.r#type),
     }
 }
 
@@ -829,7 +815,7 @@ impl WasmWorkloadV2 {
     pub(crate) fn init(&mut self, init_payload: &guest_abi::InitPayloadV1) -> WasmResult<()> {
         tracing::debug!(
             actr_type = %init_payload.actr_type,
-            realm_id = init_payload.realm_id,
+            realm = %init_payload.realm,
             "wasm Component workload init (v2; Component-model lifecycle handles this implicitly)"
         );
         Ok(())

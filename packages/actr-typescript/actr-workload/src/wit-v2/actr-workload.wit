@@ -1,5 +1,9 @@
 // actr workload contract — Component Model WIT, lane-aware async world
 //
+// `actr:workload@0.8.0` replaces the numeric Realm and embedded Actor type
+// with a Realm name and a separately carried Publisher/program identity. These
+// record changes break 0.7.0 components; rebuild them with the current SDK.
+//
 // `actr:workload@0.6.0` extends the 0.5.0 contract with the EXPLICIT reply
 // boundary: `invocation-ctx` carries `expects-response` / `reply-enabled`, and
 // the host interface adds `reply`, `reply-error`, `reply-sync`, and `reply-error-sync`.
@@ -60,7 +64,7 @@
 // stdlib-ish names during binding generation (e.g. `actr-error` rather
 // than bare `error`, which clashes with `wasi:io/error`).
 
-package actr:workload@0.7.0;
+package actr:workload@0.8.0;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared value types
@@ -71,25 +75,20 @@ package actr:workload@0.7.0;
 // exports.
 
 interface types {
-    // Actor realm container identifier (see actr_protocol::Realm).
-    record realm {
-        realm-id: u32,
-    }
-
-    // Three-part actor type coordinate (manufacturer, name, semantic
+    // Three-part actor type coordinate (publisher, name, semantic
     // version string). Mirrors actr_protocol::ActrType.
     record actr-type {
-        manufacturer: string,
+        publisher: string,
         name: string,
         version: string,
     }
 
-    // Fully-qualified actor identity — the Component Model analogue of
-    // actr_protocol::ActrId.
+    // Actor identity — the Component Model analogue of
+    // actr_protocol::ActrId. `realm` is the Realm name
+    // `<realm_id>@<domain>`; the Actor type is not part of the identity.
     record actr-id {
-        realm: realm,
+        realm: string,
         serial-number: u64,
-        %type: actr-type,
     }
 
     // Dispatch destination for host-routed calls (the Component Model

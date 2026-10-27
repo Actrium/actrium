@@ -3,7 +3,7 @@
 #
 # This file is a slimmer cousin of `tests/e2e/actr/package-runtime-echo/lib/common.sh`:
 # the polyglot scenario runs against the in-tree `mock-actrix` binary, so the
-# `ensure_actrix_available` / admin-login / AIS warmup machinery is dropped.
+# `ensure_actrix_available` / admin-login / Issuer warmup machinery is dropped.
 
 set -euo pipefail
 
@@ -159,14 +159,14 @@ actr-runtime-mailbox = { path = "$repo_path/crates/actr-runtime-mailbox" }
 EOF
 }
 
-# Write a project-local `.actr/config.toml` that pins the manufacturer keychain
+# Write a project-local `.actr/config.toml` that pins the publisher keychain
 # path. Used by `actr build` / `actr registry publish`.
 write_project_keychain_config() {
     local project_dir="$1"
     local keychain_path="$2"
     mkdir -p "$project_dir/.actr"
     cat >"$project_dir/.actr/config.toml" <<EOF
-[mfr]
+[publisher]
 keychain = "$keychain_path"
 EOF
 }

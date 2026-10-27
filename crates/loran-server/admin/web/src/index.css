@@ -1,1 +1,22 @@
 @import "tailwindcss";
+
+/* CSP (`default-src 'self'`) blocks inline <style> elements, so SVG diagram
+   styles must live in this bundled stylesheet. */
+svg text {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* Signer service diagrams */
+.sgn-muted { fill: #64748b; font-size: 11.5px; }
+.sgn-chip-title { font-size: 10.5px; font-weight: 700; }
+.sgn-chip-caption, .sgn-arrow-label { font-size: 9.4px; }
+.sgn-chip-caption { fill: #64748b; }
+.sgn-node-title { font-size: 12.5px; font-weight: 700; }
+.sgn-node-subtitle { font-size: 9px; }
+.sgn-detail-text { font-size: 9px; }
+.sgn-panel { fill: #ffffff; stroke-width: 1.15px; }
+.sgn-label-chip { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
+
+/* Network page service-testing pulse */
+@keyframes net-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+.testing { animation: net-pulse 1.2s ease-in-out infinite; }

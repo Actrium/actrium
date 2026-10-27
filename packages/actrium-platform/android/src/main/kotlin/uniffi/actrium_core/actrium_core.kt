@@ -3548,7 +3548,7 @@ public object FfiConverterTypeActiveTabRowInfo: FfiConverterRustBuffer<ActiveTab
 
 
 data class ActrActorTypeInfo (
-    var `manufacturer`: kotlin.String,
+    var `publisher`: kotlin.String,
     var `name`: kotlin.String,
     var `version`: kotlin.String
 ) {
@@ -3569,13 +3569,13 @@ public object FfiConverterTypeActrActorTypeInfo: FfiConverterRustBuffer<ActrActo
     }
 
     override fun allocationSize(value: ActrActorTypeInfo) = (
-            FfiConverterString.allocationSize(value.`manufacturer`) +
+            FfiConverterString.allocationSize(value.`publisher`) +
             FfiConverterString.allocationSize(value.`name`) +
             FfiConverterString.allocationSize(value.`version`)
     )
 
     override fun write(value: ActrActorTypeInfo, buf: ByteBuffer) {
-            FfiConverterString.write(value.`manufacturer`, buf)
+            FfiConverterString.write(value.`publisher`, buf)
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`version`, buf)
     }
@@ -4594,7 +4594,7 @@ data class CoreBookmarkInfo (
     var `appId`: kotlin.String?,
     var `createdAtSeconds`: kotlin.Long,
     var `lastUsedAtSeconds`: kotlin.Long?,
-    var `manufacturer`: kotlin.String?,
+    var `publisher`: kotlin.String?,
     var `notes`: kotlin.String?,
     var `favicon`: kotlin.String?
 ) {
@@ -4627,7 +4627,7 @@ public object FfiConverterTypeCoreBookmarkInfo: FfiConverterRustBuffer<CoreBookm
             FfiConverterOptionalString.allocationSize(value.`appId`) +
             FfiConverterLong.allocationSize(value.`createdAtSeconds`) +
             FfiConverterOptionalLong.allocationSize(value.`lastUsedAtSeconds`) +
-            FfiConverterOptionalString.allocationSize(value.`manufacturer`) +
+            FfiConverterOptionalString.allocationSize(value.`publisher`) +
             FfiConverterOptionalString.allocationSize(value.`notes`) +
             FfiConverterOptionalString.allocationSize(value.`favicon`)
     )
@@ -4639,7 +4639,7 @@ public object FfiConverterTypeCoreBookmarkInfo: FfiConverterRustBuffer<CoreBookm
             FfiConverterOptionalString.write(value.`appId`, buf)
             FfiConverterLong.write(value.`createdAtSeconds`, buf)
             FfiConverterOptionalLong.write(value.`lastUsedAtSeconds`, buf)
-            FfiConverterOptionalString.write(value.`manufacturer`, buf)
+            FfiConverterOptionalString.write(value.`publisher`, buf)
             FfiConverterOptionalString.write(value.`notes`, buf)
             FfiConverterOptionalString.write(value.`favicon`, buf)
     }
@@ -4734,7 +4734,7 @@ data class CoreBookmarkRowInfo (
     var `appId`: kotlin.String?,
     var `createdAtSeconds`: kotlin.Long,
     var `lastUsedAtSeconds`: kotlin.Long?,
-    var `manufacturer`: kotlin.String?,
+    var `publisher`: kotlin.String?,
     var `notes`: kotlin.String?,
     var `favicon`: kotlin.String?
 ) {
@@ -4767,7 +4767,7 @@ public object FfiConverterTypeCoreBookmarkRowInfo: FfiConverterRustBuffer<CoreBo
             FfiConverterOptionalString.allocationSize(value.`appId`) +
             FfiConverterLong.allocationSize(value.`createdAtSeconds`) +
             FfiConverterOptionalLong.allocationSize(value.`lastUsedAtSeconds`) +
-            FfiConverterOptionalString.allocationSize(value.`manufacturer`) +
+            FfiConverterOptionalString.allocationSize(value.`publisher`) +
             FfiConverterOptionalString.allocationSize(value.`notes`) +
             FfiConverterOptionalString.allocationSize(value.`favicon`)
     )
@@ -4779,7 +4779,7 @@ public object FfiConverterTypeCoreBookmarkRowInfo: FfiConverterRustBuffer<CoreBo
             FfiConverterOptionalString.write(value.`appId`, buf)
             FfiConverterLong.write(value.`createdAtSeconds`, buf)
             FfiConverterOptionalLong.write(value.`lastUsedAtSeconds`, buf)
-            FfiConverterOptionalString.write(value.`manufacturer`, buf)
+            FfiConverterOptionalString.write(value.`publisher`, buf)
             FfiConverterOptionalString.write(value.`notes`, buf)
             FfiConverterOptionalString.write(value.`favicon`, buf)
     }
@@ -8790,7 +8790,7 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
-         * Parse an Actr actor type wire value in `manufacturer+name` format.
+         * Parse an Actor type in `publisher/program@version` form.
          */
     @Throws(CoreException::class) fun `parseActrActorType`(`raw`: kotlin.String): ActrActorTypeInfo {
             return FfiConverterTypeActrActorTypeInfo.lift(
@@ -8803,7 +8803,7 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
-         * Parse and validate an actr-package/1 TOML manifest.
+         * Parse and validate an actr-package/2 TOML manifest.
          */
     @Throws(CoreException::class) fun `parseActrPackageManifest`(`source`: kotlin.String): ActrPackageManifestInfo {
             return FfiConverterTypeActrPackageManifestInfo.lift(
@@ -9535,7 +9535,7 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
-         * Validate an actr-package/1 TOML manifest without returning normalized fields.
+         * Validate an actr-package/2 TOML manifest without returning normalized fields.
          */
     @Throws(CoreException::class) fun `validateActrPackageManifest`(`source`: kotlin.String)
         =

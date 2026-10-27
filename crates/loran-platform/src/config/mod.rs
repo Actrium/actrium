@@ -1,14 +1,15 @@
 //! Unified configuration management system
 //!
 //! This module is the "single source of truth" for Actrix auxiliary service configuration.
-//! All configuration item definitions, documentation, and default values are managed here.
+//! All configuration item definitions, documentation, and default values are managed here uniformly.
 
-pub mod ais;
 pub mod authority;
 pub mod bind;
 pub mod config_store;
 pub mod control;
+pub mod issuer;
 pub mod packages;
+pub mod realm;
 pub mod registry;
 pub mod resolver;
 pub mod services;
@@ -17,34 +18,213 @@ pub mod signer;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub mod turn;
 
-pub use crate::config::ais::AisConfig;
 pub use crate::config::authority::AuthorityConfig;
 pub use crate::config::bind::BindConfig;
-pub use crate::config::control::{AdminUiConfig, ControlConfig, ControlHead};
-pub use crate::config::packages::{PackageTargetConfig, PackagesConfig};
+pub use crate::config::control::{AdminLoginLimits, AdminUiConfig, ControlConfig, ControlHead};
+pub use crate::config::issuer::IssuerServiceConfig;
+pub use crate::config::packages::PackagesConfig;
+pub use crate::config::realm::RealmConfig;
 pub use crate::config::services::ServicesConfig;
 pub use crate::config::signaling::SignalingConfig;
 pub use crate::config::turn::TurnConfig;
 use ::signer::storage::StorageBackend;
+use base64::Engine as _;
+use rand::{RngCore, rngs::OsRng};
 use std::path::{Path, PathBuf};
 use url::Url;
 
-/// Main configuration structure for Actrix auxiliary services
+fn generate_ephemeral_secret() -> String {
+    let mut bytes = [0_u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn looks_like_placeholder_secret(secret: &str) -> bool {
+    let normalized = secret.to_ascii_lowercase();
+    [
+        "default",
+        "change",
+        "example",
+        "replace",
+        "changeme",
+        "your-",
+        "<generate",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+/// Minimum number of distinct bytes a secret must contain.
+///
+/// A secret that clears a length gate but is built from very few distinct bytes
+/// (for example `"aaaa...a"` or a base64 blob of all-zero bytes) is trivially
+/// guessable. This floor rejects the most degenerate cases while staying well
+/// below the distinct-byte count of any real hex/base64 random secret (hex uses
+/// up to 16 symbols, base64 up to 64), so legitimate values are never flagged.
+const MIN_SECRET_DISTINCT_BYTES: usize = 8;
+
+/// Approximate entropy check: true when the secret carries too few distinct
+/// bytes to be a credible random value.
+fn looks_like_low_entropy_secret(secret: &str) -> bool {
+    secret
+        .bytes()
+        .collect::<std::collections::BTreeSet<u8>>()
+        .len()
+        < MIN_SECRET_DISTINCT_BYTES
+}
+
+/// Apply the shared secret-hygiene gates to a named secret: reject documented
+/// placeholder markers, enforce a minimum length, and reject degenerate
+/// low-entropy values. One error is pushed per failing gate.
+fn validate_secret_hygiene(field: &str, secret: &str, min_len: usize, errors: &mut Vec<String>) {
+    if looks_like_placeholder_secret(secret) {
+        errors.push(format!(
+            "{field} must not use a documented placeholder or example value"
+        ));
+    }
+    if secret.len() < min_len {
+        errors.push(format!("{field} must be at least {min_len} characters"));
+    }
+    if looks_like_low_entropy_secret(secret) {
+        errors.push(format!(
+            "{field} has too few distinct characters; use a high-entropy random value"
+        ));
+    }
+}
+
+/// CFG-06: collect every secret value that is actually present (non-empty) in
+/// the config, paired with its config-field path.
+///
+/// Used for cross-field reuse detection: no two distinct secret fields may hold
+/// the same value, because sharing a secret means compromising one credential
+/// compromises the others. Empty / unset secrets are ignored. Password *hashes*
+/// (for example `control.admin_ui.password_hash`) are intentionally excluded:
+/// they are meant to be stored and are not raw secrets.
+fn collect_present_secrets(config: &ActrixConfig) -> Vec<(&'static str, &str)> {
+    let mut secrets: Vec<(&'static str, &str)> = Vec::new();
+
+    if !config.actrix_shared_key.is_empty() {
+        secrets.push(("actrix_shared_key", config.actrix_shared_key.as_str()));
+    }
+    if !config.turn.turn_secret.is_empty() {
+        secrets.push(("turn.turn_secret", config.turn.turn_secret.as_str()));
+    }
+    if let Some(signer) = config.services.signer.as_ref() {
+        if let Some(kek) = signer.kek.as_deref() {
+            if !kek.is_empty() {
+                secrets.push(("services.signer.kek", kek));
+            }
+        }
+    }
+    if let Some(issuer) = config.services.issuer.as_ref() {
+        let renewal = issuer.server.renewal_token_secret.as_str();
+        if !renewal.is_empty() {
+            secrets.push(("services.issuer.server.renewal_token_secret", renewal));
+        }
+    }
+    if !config.control.grpc_api.shared_secret.is_empty() {
+        secrets.push((
+            "control.grpc_api.shared_secret",
+            config.control.grpc_api.shared_secret.as_str(),
+        ));
+    }
+
+    secrets
+}
+
+/// CFG-06: reject reuse of one secret value across two or more distinct secret
+/// fields. Reuse is a hard error in production and a warning in development so
+/// local configs still boot (the runtime ignores `Warning:`-prefixed entries).
+/// The colliding field paths are named so operators can fix them.
+fn validate_secret_reuse(config: &ActrixConfig, errors: &mut Vec<String>) {
+    let secrets = collect_present_secrets(config);
+    let mut by_value: std::collections::BTreeMap<&str, Vec<&'static str>> =
+        std::collections::BTreeMap::new();
+    for &(field, value) in &secrets {
+        by_value.entry(value).or_default().push(field);
+    }
+    for (_value, mut fields) in by_value {
+        if fields.len() >= 2 {
+            fields.sort_unstable();
+            let msg = format!(
+                "secret reuse detected: {} share the same value; each secret must use an independent random value",
+                fields.join(", ")
+            );
+            if config.env == "prod" {
+                errors.push(msg);
+            } else {
+                errors.push(format!("Warning: {msg}"));
+            }
+        }
+    }
+}
+
+/// Validate that an outbound dependency endpoint uses HTTPS in production.
+///
+/// Only `bind.http` (the inbound listener) is forced to TLS elsewhere; outbound
+/// dependency calls must be checked separately (CFG-05). Loopback targets
+/// (127.0.0.1, ::1, localhost) are exempt because that traffic never leaves the
+/// host. When the caller carries an explicit `enable_tls` switch, an `https://`
+/// endpoint must agree with it.
+fn validate_prod_endpoint_tls(
+    field: &str,
+    endpoint: &str,
+    enable_tls: Option<bool>,
+    errors: &mut Vec<String>,
+) {
+    let parsed = match Url::parse(endpoint) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            errors.push(format!(
+                "Invalid endpoint URL in {field}: {endpoint} (parse error: {error})"
+            ));
+            return;
+        }
+    };
+
+    // Loopback targets are exempt: intra-host traffic never crosses the network.
+    let is_loopback = match parsed.host_str() {
+        Some(host) => {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .parse::<std::net::IpAddr>()
+                    .map(|ip| ip.is_loopback())
+                    .unwrap_or(false)
+        }
+        None => false,
+    };
+    if is_loopback {
+        return;
+    }
+
+    if parsed.scheme() != "https" {
+        errors.push(format!(
+            "Production {field} must use https:// for non-loopback endpoints, got {endpoint}"
+        ));
+    } else if enable_tls == Some(false) {
+        errors.push(format!(
+            "Production {field} points at an https:// endpoint but enable_tls is false; set enable_tls = true"
+        ));
+    }
+}
+
+/// Main configuration struct for Actrix auxiliary services
 ///
 /// This is the core configuration of the system, containing all service configuration information.
-/// Configuration files use TOML format with full type-safe loading.
+/// The configuration file uses TOML format and supports fully type-safe loading.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ActrixConfig {
     /// Service enable flags (bitmask) - Primary switch for business services
     ///
     /// This is the primary control mechanism for enabling business services.
-    /// `control` is a resident control plane capability, not controlled by this bitmask.
+    /// `control` is an always-on control-plane capability and is not governed by this bitmask.
     ///
     /// Bit positions (business services only):
     /// - Bit 0 (1): Signaling service
     /// - Bit 1 (2): STUN service
     /// - Bit 2 (4): TURN service
-    /// - Bit 3 (8): AIS (Actor Identity Service)
+    /// - Bit 3 (8): Issuer (Actor Identity Service)
     /// - Bit 4 (16): Signer
     ///
     /// Examples:
@@ -56,27 +236,27 @@ pub struct ActrixConfig {
 
     /// Server instance name
     ///
-    /// Used to identify different server instances, distinguishing nodes in cluster deployments.
-    /// Recommended to use meaningful naming conventions, e.g.: actrix-01, actrix-prod-east-1.
+    /// Used to identify different server instances and distinguish nodes in cluster deployments.
+    /// A meaningful naming convention is recommended, e.g. actrix-01, actrix-prod-east-1.
     pub name: String,
 
-    /// Environment identifier
+    /// Runtime environment identifier
     ///
-    /// Specifies the current running environment, affecting security policies and default behavior:
-    /// - "dev": Development environment, allows HTTP, relaxed certificate checks
-    /// - "prod": Production environment, enforces HTTPS, strict security checks
-    /// - "test": Test environment, used for automated testing
+    /// Specifies the current runtime environment, which affects security policies and default behavior:
+    /// - "dev": Development environment; allows HTTP, relaxed certificate checks
+    /// - "prod": Production environment; enforces HTTPS, strict security checks
+    /// - "test": Test environment; used for automated testing
     pub env: String,
 
-    /// Run user (optional)
+    /// Runtime user (optional)
     ///
-    /// Specifies the system user the service runs as. The service will switch to this user after binding ports,
-    /// to improve security. Leave empty to keep the current user.
+    /// Specifies the system user the service runs as. The service drops to this user
+    /// after binding ports to improve security. Leave empty to keep the current user.
     pub user: Option<String>,
 
-    /// Run user group (optional)
+    /// Runtime user group (optional)
     ///
-    /// Specifies the system user group the service runs as. Used in conjunction with the user config.
+    /// Specifies the system user group the service runs as. Used together with the `user` setting.
     pub group: Option<String>,
 
     /// PID file path (optional)
@@ -85,44 +265,48 @@ pub struct ActrixConfig {
     /// to monitor and manage the service process.
     pub pid: Option<String>,
 
-    /// Network binding configuration
+    /// Network bind configuration
     ///
-    /// Defines bind addresses and port configurations for various network services.
+    /// Defines bind addresses and port configuration for various network services.
     pub bind: BindConfig,
 
-    /// Public Actr authority discovery and deploy-time target mappings.
+    /// Public Actr authority discovery.
     #[serde(default)]
     pub authority: AuthorityConfig,
 
+    /// Realm hosting limits.
+    #[serde(default)]
+    pub realm: RealmConfig,
+
     /// TURN service-specific configuration
     ///
-    /// Dedicated configuration for the TURN relay service, including public address, port range, authentication realm, etc.
+    /// Dedicated configuration for the TURN relay service, including public address, port range, auth realm, etc.
     pub turn: TurnConfig,
 
     /// Location tag
     ///
-    /// Used to identify the geographic location or logical grouping of the server, for operations management and monitoring.
-    /// e.g.: us-west-1, office-beijing, edge-node-01
+    /// Used to identify the server's geographic location or logical grouping for operations management and monitoring.
+    /// e.g. us-west-1, office-beijing, edge-node-01
     pub location_tag: String,
 
-    /// Control plane configuration (resident)
+    /// Control-plane configuration (always on)
     ///
-    /// The control plane is always available and not controlled by the `enable` bitmask.
+    /// The control plane is always available and is not governed by the `enable` bitmask.
     #[serde(default)]
     pub control: ControlConfig,
 
     /// Service configuration collection
     ///
-    /// Contains all business service configurations; each service can independently configure its own parameters and dependencies.
+    /// Contains configuration for all business services. Each service can independently configure its own parameters and dependencies.
     /// Uses a service-level configuration structure to achieve high cohesion and low coupling.
     #[serde(default)]
     pub services: ServicesConfig,
 
     /// SQLite database file storage directory path
     ///
-    /// Specifies the directory path for storing all SQLite database files.
-    /// The main database file will be stored as `{sqlite_path}/actrix.db`.
-    /// Includes Realm information, access control lists, nonce cache, etc.
+    /// Specifies the directory path used to store all SQLite database files.
+    /// The main database file is stored as `{sqlite_path}/actrix.db`.
+    /// Includes Realm info, access control lists, nonce cache, etc.
     #[serde(
         serialize_with = "serialize_pathbuf",
         deserialize_with = "deserialize_pathbuf"
@@ -131,19 +315,19 @@ pub struct ActrixConfig {
 
     /// Actrix internal service communication shared secret
     ///
-    /// Used for internal communication authentication between Actrix services, such as between AIS and Signer.
+    /// Used for internal communication authentication between Actrix services, such as between Issuer and Signer.
     /// This is a system-level internal authentication key, used only for inter-service communication, not for external business.
     ///
-    /// Note:
+    /// Notes:
     /// - This key is for Actrix internal services only
-    /// - Not for Realm business or external API access
-    /// - A strong random key should be used in production environments
-    /// - Field name retains actrix_shared_key for backward compatibility
+    /// - Must not be used for Realm business or external API access
+    /// - A strong random key should be used in production
+    /// - The field name actrix_shared_key is retained for backward compatibility
     pub actrix_shared_key: String,
 
-    /// Recording pipeline configuration (logging + tracing)
+    /// Recording pipeline configuration (logs + tracing)
     ///
-    /// Merges logging and OpenTelemetry tracing configuration into a unified recording section for centralized management.
+    /// Merges log and OpenTelemetry tracing configuration into a unified `recording` section for easy management.
     #[serde(default)]
     pub recording: RecordingConfig,
 
@@ -157,8 +341,9 @@ pub struct ActrixConfig {
     pub monitoring: MonitoringConfig,
 }
 
-/// Recording pipeline configuration
+/// Recording pipeline configuration (logs + tracing)
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct RecordingConfig {
     /// Global recording sink URI (single sink)
     ///
@@ -175,16 +360,16 @@ pub struct RecordingConfig {
     #[serde(default = "default_recording_service_name")]
     pub service_name: String,
 
-    /// observability channel configuration
+    /// Observability channel configuration
     #[serde(default = "default_observability_channel")]
     pub observability: RecordingChannelConfig,
-    /// audit channel configuration
+    /// Audit channel configuration
     #[serde(default = "default_audit_channel")]
     pub audit: RecordingChannelConfig,
-    /// security channel configuration
+    /// Security channel configuration
     #[serde(default = "default_security_channel")]
     pub security: RecordingChannelConfig,
-    /// operations channel configuration
+    /// Operations channel configuration
     #[serde(default = "default_operations_channel")]
     pub operations: RecordingChannelConfig,
 
@@ -199,8 +384,9 @@ pub struct RecordingConfig {
     pub logs_enabled: Option<bool>,
 }
 
-/// Single channel configuration: semantic filter + sink override
+/// Single-channel configuration: semantic filter + sink override
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct RecordingChannelConfig {
     /// Channel semantic filter
     ///
@@ -330,6 +516,7 @@ fn validate_recording_sink_field(field: &str, value: &Option<String>, errors: &m
 /// When both are configured, a request matching either is allowed (OR logic).
 /// When neither is configured, endpoints are publicly accessible.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct MonitoringConfig {
     /// IP whitelist in CIDR notation (e.g. "10.0.0.0/8", "127.0.0.1").
     /// A bare IP without prefix length implies /32 (IPv4) or /128 (IPv6).
@@ -349,6 +536,7 @@ pub struct MonitoringConfig {
 
 /// Per-service monitoring auth override.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct MonitoringServiceOverride {
     #[serde(default)]
     pub allowed_ips: Vec<String>,
@@ -380,7 +568,7 @@ impl MonitoringConfig {
 }
 
 fn default_enable() -> u8 {
-    31 // Signaling(1) + STUN(2) + TURN(4) + AIS(8) + Signer(16)
+    31 // Signaling(1) + STUN(2) + TURN(4) + Issuer(8) + Signer(16)
 }
 
 fn default_recording_service_name() -> String {
@@ -413,12 +601,13 @@ impl Default for ActrixConfig {
             pid: Some("logs/actrix.pid".to_string()),
             bind: BindConfig::default(),
             authority: AuthorityConfig::default(),
+            realm: RealmConfig::default(),
             turn: TurnConfig::default(),
             location_tag: "default-location".to_string(),
             control: ControlConfig::default(),
             services: ServicesConfig::default(),
             sqlite_path: PathBuf::from("database"),
-            actrix_shared_key: "XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg=".to_string(),
+            actrix_shared_key: generate_ephemeral_secret(),
             recording: RecordingConfig::default(),
             monitoring: MonitoringConfig::default(),
         }
@@ -429,47 +618,113 @@ impl Default for ActrixConfig {
 pub const ENABLE_SIGNALING: u8 = 0b00001;
 pub const ENABLE_STUN: u8 = 0b00010;
 pub const ENABLE_TURN: u8 = 0b00100;
-pub const ENABLE_AIS: u8 = 0b01000;
+pub const ENABLE_ISSUER: u8 = 0b01000;
 pub const ENABLE_SIGNER: u8 = 0b10000;
 
 impl ActrixConfig {
-    /// Check if the signaling service is enabled
+    /// Check whether the signaling service is enabled
     ///
     /// Service is enabled if the ENABLE_SIGNALING bit is set in the enable bitmask.
     pub fn is_signaling_enabled(&self) -> bool {
         self.enable & ENABLE_SIGNALING != 0
     }
 
-    /// Check if the STUN service is enabled
+    /// Check whether the STUN service is enabled
     pub fn is_stun_enabled(&self) -> bool {
         self.enable & ENABLE_STUN != 0
     }
 
-    /// Check if the TURN service is enabled
+    /// Check whether the TURN service is enabled
     pub fn is_turn_enabled(&self) -> bool {
         self.enable & ENABLE_TURN != 0
     }
 
-    /// Check if the AIS (AId Issue Service) identity service is enabled
+    /// Check whether the Issuer (AId Issue Service) identity authentication service is enabled
     ///
-    /// Service is enabled if the ENABLE_AIS bit is set in the enable bitmask.
-    pub fn is_ais_enabled(&self) -> bool {
-        self.enable & ENABLE_AIS != 0
+    /// Service is enabled if the ENABLE_ISSUER bit is set in the enable bitmask.
+    pub fn is_issuer_enabled(&self) -> bool {
+        self.enable & ENABLE_ISSUER != 0
     }
 
-    /// Check if the Signer key service is enabled
+    /// Check whether the Signer key service is enabled
     ///
     /// Service is enabled if the ENABLE_SIGNER bit is set in the enable bitmask.
     pub fn is_signer_enabled(&self) -> bool {
         self.enable & ENABLE_SIGNER != 0
     }
 
-    /// Check if the ICE service (STUN or TURN) is enabled
+    /// Resolve the bind IP for the dedicated Signer gRPC listener (SGN-02).
+    ///
+    /// Uses `bind.signer.ip` when `[bind.signer]` is configured; otherwise
+    /// defaults to loopback (`127.0.0.1`), matching the `expose = "loopback"`
+    /// default.
+    pub fn signer_bind_ip(&self) -> String {
+        self.bind
+            .signer
+            .as_ref()
+            .map(|s| s.ip.clone())
+            .unwrap_or_else(|| "127.0.0.1".to_string())
+    }
+
+    /// Resolve the port for the dedicated Signer gRPC listener (SGN-02).
+    ///
+    /// Uses `bind.signer.port` when `[bind.signer]` is configured; otherwise
+    /// defaults to `bind.http.port + 1`.
+    pub fn signer_bind_port(&self) -> u16 {
+        if let Some(ref signer) = self.bind.signer {
+            return signer.port;
+        }
+        let http_port = self.bind.http.as_ref().map(|h| h.port).unwrap_or(8080);
+        http_port.saturating_add(1)
+    }
+
+    /// Whether the dedicated Signer listener terminates TLS.
+    ///
+    /// The Signer listener serves TLS with mutual client-certificate
+    /// verification exactly when `services.signer.mtls_enabled()` is true;
+    /// otherwise it serves plaintext h2c for loopback callers.
+    pub fn signer_listener_tls(&self) -> bool {
+        self.services
+            .signer
+            .as_ref()
+            .is_some_and(|s| s.mtls_enabled())
+    }
+
+    /// Domain name used for Signer TLS certificate verification by co-located
+    /// clients. Prefers `bind.signer.domain_name`, falling back to the shared
+    /// `bind.http.domain_name`.
+    pub fn signer_tls_domain(&self) -> String {
+        if let Some(ref signer) = self.bind.signer {
+            return signer.domain_name.clone();
+        }
+        self.bind
+            .http
+            .as_ref()
+            .map(|h| h.domain_name.clone())
+            .unwrap_or_else(|| "localhost".to_string())
+    }
+
+    /// Endpoint that co-located clients (Issuer, Signaling) should dial to reach
+    /// the local Signer gRPC surface on its dedicated listener.
+    ///
+    /// For the loopback plaintext default this is
+    /// `http://127.0.0.1:{signer_port}`; when the listener terminates TLS it is
+    /// `https://{domain}:{signer_port}`.
+    pub fn signer_client_endpoint(&self) -> String {
+        let port = self.signer_bind_port();
+        if self.signer_listener_tls() {
+            format!("https://{}:{}", self.signer_tls_domain(), port)
+        } else {
+            format!("http://127.0.0.1:{port}")
+        }
+    }
+
+    /// Check whether ICE services (STUN or TURN) are enabled
     pub fn is_ice_enabled(&self) -> bool {
         self.is_stun_enabled() || self.is_turn_enabled()
     }
 
-    /// Current control plane head type
+    /// Current control-plane head type
     pub fn control_head(&self) -> ControlHead {
         if self.control.grpc_api_enabled() && !self.control.admin_ui_enabled() {
             ControlHead::GrpcApi
@@ -483,17 +738,17 @@ impl ActrixConfig {
         self.control.admin_ui_enabled()
     }
 
-    /// Whether NodeAdminService gRPC API is enabled.
+    /// Whether the NodeAdminService gRPC API is enabled.
     pub fn grpc_api_enabled(&self) -> bool {
         self.control.grpc_api_enabled()
     }
 
-    /// Whether in superv takeover mode.
+    /// Whether superv takeover mode is active.
     pub fn superv_managed(&self) -> bool {
         self.control.superv_managed()
     }
 
-    /// Get the PID file path, using the default if not configured
+    /// Get the PID file path, using the default value if not configured
     pub fn get_pid_path(&self) -> Option<String> {
         self.pid.clone().or_else(|| {
             // If pid is not configured, use the default value logs/actrix.pid
@@ -504,9 +759,9 @@ impl ActrixConfig {
     /// Get the Actrix internal service communication shared secret
     ///
     /// This key is used for authenticated communication between Actrix internal services,
-    /// such as service calls between AIS and Signer.
+    /// such as service calls between Issuer and Signer.
     ///
-    /// Note: This key is for internal service communication only, not for external business
+    /// Note: This key is for internal service communication only and must not be used for external business.
     pub fn get_actrix_shared_key(&self) -> &str {
         &self.actrix_shared_key
     }
@@ -521,7 +776,7 @@ impl ActrixConfig {
         &self.recording.service_name
     }
 
-    /// Get the composite log/trace filter level; prefers RUST_LOG.
+    /// Get the composite log/trace filter level, preferring RUST_LOG.
     ///
     /// With semantic filters, channel targets are set to TRACE so that
     /// all events reach the recording layer (which applies its own gate).
@@ -537,7 +792,7 @@ impl ActrixConfig {
         "info,actrix::observability=trace,actrix::audit=trace,actrix::security=trace,actrix::operations=trace".to_string()
     }
 
-    /// Load configuration from file
+    /// Load configuration from a file
     pub fn from_file<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -603,14 +858,14 @@ impl ActrixConfig {
             ));
         }
 
-        // Control is always mounted on the main HTTP port; binding must exist.
+        // control is always mounted on the main HTTP port; a bind is required.
         if self.bind.http.is_none() {
             errors.push(
                 "Control plane requires bind.http because /admin is always served".to_string(),
             );
         }
 
-        // Validate channel semantic filters (empty string = use channel default, skip validation)
+        // Validate each channel's semantic filter (empty string = use channel default, skip validation)
         {
             let check = |name: &str, value: &str, valid: &[&str]| -> Option<String> {
                 if value.is_empty() || valid.contains(&value) {
@@ -656,7 +911,7 @@ impl ActrixConfig {
             errors.push("recording.service_name cannot be empty".to_string());
         }
 
-        // Validate new URI recording sink configuration (single sink, global + per-channel)
+        // Validate the new URI recording sink configuration (single sink, global + per-channel)
         validate_recording_sink_field("recording.sink", &self.recording.sink, &mut errors);
         validate_recording_sink_field(
             "recording.observability.sink",
@@ -679,12 +934,28 @@ impl ActrixConfig {
             &mut errors,
         );
 
-        // Validate actrix_shared_key
-        if self.actrix_shared_key.contains("default") || self.actrix_shared_key.contains("change") {
-            errors.push("Security warning: actrix_shared_key appears to be a default value. Please change it!".to_string());
+        // Validate actrix_shared_key hygiene (placeholder / length / entropy).
+        validate_secret_hygiene(
+            "actrix_shared_key",
+            &self.actrix_shared_key,
+            32,
+            &mut errors,
+        );
+
+        // Issuer always issues the TURN credential carried by RegisterOk, so the
+        // Realm Infra Provider secret is required whenever either Issuer or TURN runs.
+        if self.is_turn_enabled() || self.is_issuer_enabled() {
+            validate_secret_hygiene("turn.turn_secret", &self.turn.turn_secret, 32, &mut errors);
         }
-        if self.actrix_shared_key.len() < 16 {
-            errors.push("Security warning: actrix_shared_key is too short, recommend at least 16 characters".to_string());
+
+        // Issuer, Signaling and TURN bind credentials to the Realm Infra Provider ID.
+        if (self.is_issuer_enabled()
+            || self.is_signaling_enabled()
+            || self.is_turn_enabled()
+            || self.authority.uri.is_some())
+            && let Err(error) = self.authority.provider_id()
+        {
+            errors.push(error);
         }
 
         // Validate SQLite path
@@ -723,11 +994,46 @@ impl ActrixConfig {
         if self.is_turn_enabled() && self.turn.realm.trim().is_empty() {
             errors.push("TURN realm is required when TURN is enabled".to_string());
         }
+        if self.is_turn_enabled()
+            && let Err(error) = self.turn.relay_port_bounds()
+        {
+            errors.push(error);
+        }
 
         // Validate Signer configuration (if enabled)
         if self.is_signer_enabled() {
             if let Some(ref signer_cfg) = self.services.signer {
-                // Validate storage configuration
+                if self.env == "prod" && signer_cfg.get_kek_source().is_none() {
+                    errors.push(
+                        "Production Signer requires kek_file, kek_env, or kek; plaintext private-key storage is forbidden"
+                            .to_string(),
+                    );
+                }
+                // Inline KEK material (Direct form) is a secret: apply the same
+                // placeholder / length / entropy hygiene as other secrets. A KEK
+                // encodes 32 bytes (44 base64 or 64 hex chars), so 32 is a safe
+                // minimum-length floor that never rejects a well-formed value.
+                // Messages spell out "KEK" so operators (and startup logs) tie
+                // the failure back to the key-encryption key.
+                if let Some(ref kek) = signer_cfg.kek {
+                    if looks_like_placeholder_secret(kek) {
+                        errors.push(
+                            "services.signer.kek (inline KEK) must not use a documented placeholder or example value".to_string(),
+                        );
+                    }
+                    if kek.len() < 32 {
+                        errors.push(
+                            "services.signer.kek (inline KEK) must be at least 32 characters"
+                                .to_string(),
+                        );
+                    }
+                    if looks_like_low_entropy_secret(kek) {
+                        errors.push(
+                            "services.signer.kek (inline KEK) has too few distinct characters; use a high-entropy random value".to_string(),
+                        );
+                    }
+                }
+                // Validate storage configuration.
                 match signer_cfg.storage.backend {
                     StorageBackend::Sqlite => {}
                     StorageBackend::Postgres => {
@@ -739,6 +1045,46 @@ impl ActrixConfig {
                         }
                     }
                 }
+
+                // SGN-05: the Postgres storage backend is out of scope for the
+                // v1 Signer surface (v1 is scoped to SQLite per the accepted
+                // design). Selecting it in prod is a hard, fail-closed error.
+                if self.env == "prod" && signer_cfg.storage.backend == StorageBackend::Postgres {
+                    errors.push(
+                        "services.signer.storage.backend = \"postgres\" is not supported in v1; \
+                         Signer must use the sqlite backend in prod"
+                            .to_string(),
+                    );
+                }
+
+                // SGN-02: fail-closed exposure gate. Serving the Signer gRPC
+                // surface on the public listener in prod without mTLS is
+                // rejected. `env` is owned here and threaded into the per-service
+                // policy check on the live SignerServiceConfig.
+                if let Err(error) = signer_cfg.validate_exposure(&self.env) {
+                    errors.push(error);
+                }
+
+                // SGN-02: a bind/expose mismatch must not silently expose the
+                // oracle. Even if `expose` is left at the loopback default, an
+                // explicit non-loopback `bind.signer.ip` (including wildcard
+                // addresses such as 0.0.0.0 / ::) effectively publishes the
+                // Signer gRPC surface. Treat that as public: in prod it requires
+                // mTLS, otherwise fail closed.
+                if self.env == "prod"
+                    && let Some(ref signer_bind) = self.bind.signer
+                    && let Ok(ip) = signer_bind.ip.parse::<std::net::IpAddr>()
+                    && !ip.is_loopback()
+                    && !signer_cfg.mtls_enabled()
+                {
+                    errors.push(format!(
+                        "bind.signer.ip '{}' is non-loopback (public) in prod but Signer mTLS \
+                         is not enabled: set services.signer.require_mtls = true together with \
+                         mtls_ca_cert, mtls_cert and mtls_key, or bind the Signer to a loopback \
+                         address",
+                        signer_bind.ip
+                    ));
+                }
             } else {
                 // Signer bitmask is set but services.signer configuration is missing
                 errors.push(
@@ -747,45 +1093,74 @@ impl ActrixConfig {
             }
         }
 
-        // Validate AIS configuration (if enabled)
-        if self.is_ais_enabled() {
-            // Check if Signer config can be obtained (explicit config or auto default)
-            if let Some(ref ais) = self.services.ais {
-                if ais.get_signer_client_config(self).is_none() {
+        // Validate Issuer configuration (if enabled)
+        if self.is_issuer_enabled() {
+            // Check whether Signer configuration is available (explicit config or auto default)
+            if let Some(ref issuer) = self.services.issuer {
+                if issuer.server.worker_id > 31 {
                     errors.push(
-                        "AIS service is enabled but no Signer available: \
-                        either configure services.ais.dependencies.signer or enable local Signer service"
+                        "services.issuer.server.worker_id must be in the range 0..=31".to_string(),
+                    );
+                }
+                if issuer.get_signer_client_config(self).is_none() {
+                    errors.push(
+                        "Issuer service is enabled but no Signer available: \
+                        either configure services.issuer.dependencies.signer or enable local Signer service"
                             .to_string(),
                     );
                 }
-                // Validate renewal_token_secret configuration
-                if ais.server.renewal_token_secret.is_empty() {
-                    errors.push("services.ais.server.renewal_token_secret is required".to_string());
+                // Validate renewal_token_secret configuration.
+                if issuer.server.renewal_token_secret.is_empty() {
+                    errors.push(
+                        "services.issuer.server.renewal_token_secret is required".to_string(),
+                    );
                 } else {
+                    // Placeholder check runs on the pre-decode string so example
+                    // markers are caught even when the value is not valid base64.
+                    if looks_like_placeholder_secret(&issuer.server.renewal_token_secret) {
+                        errors.push(
+                            "services.issuer.server.renewal_token_secret must not use a documented placeholder or example value"
+                                .to_string(),
+                        );
+                    }
+                    // CFG-06: entropy gate. The base64 / decoded-length check
+                    // below still accepts a degenerate all-same-byte value (for
+                    // example a base64 blob of zero bytes), so add the shared
+                    // low-entropy gate on the raw string. It is a hard error in
+                    // prod and a warning in dev, so shipped low-entropy example
+                    // values still let local development boot.
+                    if looks_like_low_entropy_secret(&issuer.server.renewal_token_secret) {
+                        let msg = "services.issuer.server.renewal_token_secret has too few distinct characters; use a high-entropy random value";
+                        if self.env == "prod" {
+                            errors.push(msg.to_string());
+                        } else {
+                            errors.push(format!("Warning: {msg}"));
+                        }
+                    }
                     match base64::Engine::decode(
                         &base64::engine::general_purpose::STANDARD,
-                        &ais.server.renewal_token_secret,
+                        &issuer.server.renewal_token_secret,
                     ) {
                         Ok(decoded) if decoded.len() >= 32 => {}
                         Ok(decoded) => {
                             errors.push(format!(
-                                "services.ais.server.renewal_token_secret must decode to \
+                                "services.issuer.server.renewal_token_secret must decode to \
                                  at least 32 bytes, got {} byte(s)",
                                 decoded.len()
                             ));
                         }
                         Err(e) => {
                             errors.push(format!(
-                                "services.ais.server.renewal_token_secret is not valid \
+                                "services.issuer.server.renewal_token_secret is not valid \
                                  base64: {e}"
                             ));
                         }
                     }
                 }
             } else {
-                // AIS bitmask is set but services.ais configuration is missing
+                // Issuer bitmask is set but services.issuer configuration is missing
                 errors.push(
-                    "AIS service is enabled (ENABLE_AIS bit is set) but services.ais configuration is missing".to_string(),
+                    "Issuer service is enabled (ENABLE_ISSUER bit is set) but services.issuer configuration is missing".to_string(),
                 );
             }
         }
@@ -802,11 +1177,11 @@ impl ActrixConfig {
                 );
                 }
 
-                if signaling.dependencies.ais.is_none()
-                    && !(self.is_ais_enabled() && self.services.ais.is_some())
+                if signaling.dependencies.issuer.is_none()
+                    && !(self.is_issuer_enabled() && self.services.issuer.is_some())
                 {
                     errors.push(
-                    "Signaling dependencies.ais is not configured; enable AIS (bitmask + services.ais) to use local defaults"
+                    "Signaling dependencies.issuer is not configured; enable Issuer (bitmask + services.issuer) to use local defaults"
                         .to_string(),
                 );
                 }
@@ -820,7 +1195,7 @@ impl ActrixConfig {
 
         // Production environment additional checks
         if self.env == "prod" {
-            // Production environment should use HTTPS (bind.http must exist and is_tls() == true)
+            // Production should use HTTPS (bind.http must exist and is_tls() == true)
             if let Some(ref http) = self.bind.http {
                 if !http.is_tls() {
                     errors.push(
@@ -831,15 +1206,113 @@ impl ActrixConfig {
                 errors.push("Production environment requires bind.http configuration".to_string());
             }
 
-            // Production environment should configure at least one file:// sink
+            // Production should configure at least one file:// recording sink.
             if !any_recording_file_sink(&self.recording) {
                 errors.push("Warning: Production environment should configure recording.sink (file://...) or channel-specific recording.<channel>.sink".to_string());
+            }
+
+            // Monitoring endpoints (/health, /metrics) expose the node name,
+            // version and full Prometheus metrics. In production they must not be
+            // anonymous: require an IP allowlist or htpasswd, or force the
+            // operator to make the exposure explicit.
+            if self.monitoring.allowed_ips.is_empty() && self.monitoring.htpasswd_file.is_empty() {
+                errors.push(
+                    "Production environment requires monitoring authentication: set monitoring.allowed_ips or monitoring.htpasswd_file".to_string(),
+                );
+            }
+
+            // CFG-05: outbound dependency endpoints must use HTTPS in prod.
+            // bind.http (inbound) is forced to TLS above; these are the explicit
+            // client endpoints this node dials. Loopback targets are exempt, and
+            // the auto-discovered local-service fallbacks already point at
+            // 127.0.0.1, so only operator-configured remote endpoints are gated.
+            if let Some(ref issuer) = self.services.issuer {
+                if let Some(ref signer) = issuer.dependencies.signer {
+                    validate_prod_endpoint_tls(
+                        "services.issuer.dependencies.signer.endpoint",
+                        &signer.endpoint,
+                        Some(signer.enable_tls),
+                        &mut errors,
+                    );
+                }
+            }
+            if let Some(ref signaling) = self.services.signaling {
+                if let Some(ref signer) = signaling.dependencies.signer {
+                    validate_prod_endpoint_tls(
+                        "services.signaling.dependencies.signer.endpoint",
+                        &signer.endpoint,
+                        Some(signer.enable_tls),
+                        &mut errors,
+                    );
+                }
+                if let Some(ref issuer) = signaling.dependencies.issuer {
+                    validate_prod_endpoint_tls(
+                        "services.signaling.dependencies.issuer.endpoint",
+                        &issuer.endpoint,
+                        None,
+                        &mut errors,
+                    );
+                }
+            }
+
+            // CFG-07: production intends to run as root and drop privileges after
+            // binding ports. validate() cannot observe the runtime uid, so this
+            // is a warning rather than a hard error: without `user`, a root-run
+            // daemon would keep root for its whole lifetime. The hard fail-closed
+            // path lives in ProcessManager::drop_privileges (non-root + drop
+            // configured => Err).
+            if self.user.is_none() {
+                errors.push(
+                    "Warning: Production environment should set `user` (and optionally `group`) so the daemon drops root privileges after binding ports".to_string(),
+                );
             }
         }
 
         if let Err(e) = self.control.validate() {
             errors.push(format!("Control configuration error: {e}"));
         }
+
+        // CFG-06: the gRPC control shared_secret is a secret. Length (>=64) and
+        // hex-format are enforced in ControlConfig::validate; add the placeholder
+        // and entropy gates here (only meaningful when grpc_api is enabled and a
+        // value is present).
+        if self.control.grpc_api_enabled() && !self.control.grpc_api.shared_secret.is_empty() {
+            let secret = &self.control.grpc_api.shared_secret;
+            if looks_like_placeholder_secret(secret) {
+                errors.push(
+                    "control.grpc_api.shared_secret must not use a documented placeholder or example value".to_string(),
+                );
+            }
+            if looks_like_low_entropy_secret(secret) {
+                errors.push(
+                    "control.grpc_api.shared_secret has too few distinct characters; use a high-entropy random value".to_string(),
+                );
+            }
+        }
+
+        // Argon2id parameter floor for the admin password hash (OWASP minimums:
+        // m>=19456 KiB, t>=2, p>=1). A weak hash is trivially crackable if the
+        // config/DB leaks. Hard error in production; a warning in dev so weak
+        // local hashes still boot. (Algorithm/format are validated in control.)
+        if !self.control.admin_ui.password_hash.is_empty() {
+            if let Ok(parsed) = argon2::PasswordHash::new(&self.control.admin_ui.password_hash) {
+                if let Ok(params) = argon2::Params::try_from(&parsed) {
+                    if params.m_cost() < 19456 || params.t_cost() < 2 || params.p_cost() < 1 {
+                        let msg = "control.admin_ui.password_hash uses Argon2id parameters below the OWASP minimum (m>=19456, t>=2, p>=1)";
+                        if self.env == "prod" {
+                            errors.push(msg.to_string());
+                        } else {
+                            errors.push(format!("Warning: {msg}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        // CFG-06: mutual non-reuse across every present secret field. Runs last
+        // so it sees the full set of secrets regardless of which services are
+        // enabled. Hard error in prod, warning in dev.
+        validate_secret_reuse(self, &mut errors);
 
         if errors.is_empty() {
             Ok(())
@@ -854,9 +1327,11 @@ mod tests {
     use super::*;
     use ::signer::SignerServiceConfig;
 
-    fn valid_ais_server_config() -> ais::AisServerConfig {
-        ais::AisServerConfig {
-            renewal_token_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
+    fn valid_issuer_server_config() -> issuer::IssuerServerConfig {
+        issuer::IssuerServerConfig {
+            // High-entropy base64 secret decoding to 32 bytes; distinct from the
+            // other test secrets so it passes the CFG-06 entropy and reuse gates.
+            renewal_token_secret: "b2x+ISzUdwmiUR+Oe7w/KF+L6K9tbkRHhTfM2E83r/k=".to_string(),
             ..Default::default()
         }
     }
@@ -866,7 +1341,20 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../loran/config/actrix.example.toml");
         let cfg = ActrixConfig::from_file(&path).expect("example config should parse");
-        cfg.validate().expect("example config should validate");
+        let errors = cfg
+            .validate()
+            .expect_err("example must fail until operators replace secret placeholders");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("actrix_shared_key"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("turn.turn_secret"))
+        );
+        assert!(errors.iter().any(|error| error.contains("password_hash")));
         assert!(
             cfg.admin_ui_enabled(),
             "example should have admin_ui enabled"
@@ -878,15 +1366,38 @@ mod tests {
     }
 
     #[test]
+    fn rust_example_config_is_valid_for_local_development() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/actr/rust/actrix-config.example.toml");
+        let cfg = ActrixConfig::from_file(&path).expect("Rust example config should parse");
+        // The dev example ships low-entropy / reused placeholder secrets, which
+        // now surface as `Warning:`-prefixed entries. The runtime ignores those
+        // (see actrixd main/manager), so the config still boots for local
+        // development: assert only that it produces no hard (non-warning) error.
+        if let Err(errors) = cfg.validate() {
+            let hard: Vec<&String> = errors
+                .iter()
+                .filter(|error| !error.starts_with("Warning:"))
+                .collect();
+            assert!(
+                hard.is_empty(),
+                "Rust example config should have no hard validation errors, got: {hard:?}"
+            );
+        }
+        assert_eq!(cfg.services.issuer.as_ref().unwrap().server.worker_id, 0);
+        assert_eq!(cfg.services.publisher_registry.nonce_retain_secs, 86_400);
+    }
+
+    #[test]
     fn test_default_config() {
         let config = ActrixConfig::default();
-        assert_eq!(config.enable, 31); // Default: all services enabled
+        assert_eq!(config.enable, 31); // All services enabled by default
         assert_eq!(config.name, "actrix-default");
         assert_eq!(config.env, "dev");
         assert!(config.is_signaling_enabled());
         assert!(config.is_stun_enabled());
         assert!(config.is_turn_enabled());
-        assert!(config.is_ais_enabled());
+        assert!(config.is_issuer_enabled());
         assert!(config.is_signer_enabled());
         assert_eq!(config.recording.service_name, "actrix");
         assert!(config.recording.sink.is_none());
@@ -939,7 +1450,7 @@ mod tests {
             enable: 0,
             ..Default::default()
         };
-        config.control.admin_ui.password = "testpassword123".to_string();
+        config.control.admin_ui.password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string();
         config.recording.sink = Some("file:///tmp/actrix.log".to_string());
         config.recording.audit.sink = Some("otlp+http://127.0.0.1:4318/v1/logs".to_string());
         config.recording.security.sink = Some("otlp+grpc://127.0.0.1:4317".to_string());
@@ -984,10 +1495,7 @@ mod tests {
         let toml_str = config.to_toml().unwrap();
         assert!(toml_str.contains("enable = 31")); // all services
         assert!(toml_str.contains("name = \"actrix-default\""));
-        assert!(
-            toml_str
-                .contains("actrix_shared_key = \"XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg=\"")
-        );
+        assert!(toml_str.contains("actrix_shared_key = \""));
 
         let parsed_config = ActrixConfig::from_toml(&toml_str).unwrap();
         assert_eq!(parsed_config.enable, config.enable);
@@ -998,12 +1506,12 @@ mod tests {
     #[test]
     fn test_actrix_shared_key() {
         let config = ActrixConfig::default();
-        assert_eq!(
-            config.get_actrix_shared_key(),
-            "XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg="
-        );
+        assert!(config.get_actrix_shared_key().len() >= 32);
+        assert!(!looks_like_placeholder_secret(
+            config.get_actrix_shared_key()
+        ));
 
-        // Test custom shared secret
+        // Test custom shared key
         let mut custom_config = config;
         custom_config.actrix_shared_key = "custom-shared-key".to_string();
         assert_eq!(custom_config.get_actrix_shared_key(), "custom-shared-key");
@@ -1040,30 +1548,30 @@ mod tests {
         config.services.signaling = None;
         assert!(config.is_signaling_enabled());
 
-        // Test AIS service: bitmask-only control
+        // Test Issuer service: bitmask-only control
         config.enable = 0;
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies::default(),
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies::default(),
         });
-        assert!(!config.is_ais_enabled());
+        assert!(!config.is_issuer_enabled());
 
         // Case 2: Bitmask set -> enabled (regardless of services.* config)
-        config.enable = ENABLE_AIS;
-        assert!(config.is_ais_enabled());
+        config.enable = ENABLE_ISSUER;
+        assert!(config.is_issuer_enabled());
 
         // Case 3: Bitmask set, with services.* config -> still enabled
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies::default(),
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies::default(),
         });
-        assert!(config.is_ais_enabled());
+        assert!(config.is_issuer_enabled());
 
         // Case 4: Bitmask set, no services.* config -> enabled
-        config.services.ais = None;
-        assert!(config.is_ais_enabled());
+        config.services.issuer = None;
+        assert!(config.is_issuer_enabled());
 
-        // Test KS service: bitmask-only control
+        // Test Signer service: bitmask-only control
         config.enable = 0;
         config.services.signer = Some(SignerServiceConfig {
             ..Default::default()
@@ -1095,41 +1603,42 @@ mod tests {
     }
 
     #[test]
-    fn test_ais_auto_ks_config() {
+    fn test_issuer_auto_signer_config() {
         let mut config = ActrixConfig {
-            enable: ENABLE_SIGNER | ENABLE_AIS,
+            enable: ENABLE_SIGNER | ENABLE_ISSUER,
             ..ActrixConfig::default()
         };
 
-        // Scenario 1: Local Signer enabled, AIS has no Signer client config, should auto-use local Signer
-        config.enable = ENABLE_SIGNER | ENABLE_AIS; // Enable both KS and AIS via bitmask
+        // Scenario 1: Local Signer enabled, Issuer does not configure a Signer client, should auto-use local Signer
+        config.enable = ENABLE_SIGNER | ENABLE_ISSUER; // Enable both Signer and Issuer via bitmask
         config.services.signer = Some(SignerServiceConfig {
             ..Default::default()
         });
 
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies { signer: None }, // Signer not configured
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies { signer: None }, // Signer not configured
         });
 
-        // Should be able to get the auto-generated Signer config
-        let ks_config = config
+        // Should be able to get the auto-generated Signer configuration
+        let signer_config = config
             .services
-            .ais
+            .issuer
             .as_ref()
             .unwrap()
             .get_signer_client_config(&config);
-        assert!(ks_config.is_some());
-        let ks_config = ks_config.unwrap();
-        // Signer gRPC reuses the main HTTP port (default 8080)
-        assert_eq!(ks_config.endpoint, "http://127.0.0.1:8080");
+        assert!(signer_config.is_some());
+        let signer_config = signer_config.unwrap();
+        // SGN-02: Signer gRPC runs on its own dedicated listener, defaulting to
+        // the HTTP port + 1 (8080 + 1 = 8081) when [bind.signer] is omitted.
+        assert_eq!(signer_config.endpoint, "http://127.0.0.1:8081");
 
-        // Scenario 2: Explicit Signer client config, should use the explicit config
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies {
+        // Scenario 2: Explicitly configured Signer client, should use the explicit configuration
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies {
                 signer: Some(crate::config::signer::SignerClientConfig {
-                    endpoint: "http://remote-ks:8080".to_string(),
+                    endpoint: "http://remote-signer:8080".to_string(),
                     timeout_seconds: 10,
                     enable_tls: false,
                     tls_domain: None,
@@ -1140,35 +1649,35 @@ mod tests {
             },
         });
 
-        let ks_config = config
+        let signer_config = config
             .services
-            .ais
+            .issuer
             .as_ref()
             .unwrap()
             .get_signer_client_config(&config);
-        assert!(ks_config.is_some());
-        let ks_config = ks_config.unwrap();
-        assert_eq!(ks_config.endpoint, "http://remote-ks:8080"); // Uses explicit config
+        assert!(signer_config.is_some());
+        let signer_config = signer_config.unwrap();
+        assert_eq!(signer_config.endpoint, "http://remote-signer:8080"); // Uses explicit configuration
 
-        // Scenario 3: No local Signer, no explicit config, should return None
+        // Scenario 3: No local Signer and no explicit configuration, should return None
         config.services.signer = None;
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies { signer: None },
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies { signer: None },
         });
-        config.enable = ENABLE_AIS; // Enable AIS via bitmask
+        config.enable = ENABLE_ISSUER; // Enable Issuer via bitmask
 
-        let ks_config = config
+        let signer_config = config
             .services
-            .ais
+            .issuer
             .as_ref()
             .unwrap()
             .get_signer_client_config(&config);
-        assert!(ks_config.is_none());
+        assert!(signer_config.is_none());
     }
 
     #[test]
-    fn test_signaling_auto_ks_config() {
+    fn test_signaling_auto_signer_config() {
         let mut config = ActrixConfig {
             enable: ENABLE_SIGNER | ENABLE_SIGNALING,
             ..ActrixConfig::default()
@@ -1184,44 +1693,45 @@ mod tests {
             server: signaling::SignalingServerConfig::default(),
             dependencies: signaling::SignalingDependencies {
                 signer: None,
-                ais: None,
+                issuer: None,
             },
         });
 
-        // Signaling should be able to get the auto-generated Signer config
-        let ks_config = config
+        // Signaling should be able to get the auto-generated Signer configuration
+        let signer_config = config
             .services
             .signaling
             .as_ref()
             .unwrap()
             .get_signer_client_config(&config);
-        assert!(ks_config.is_some());
-        let ks_config = ks_config.unwrap();
-        // Signer gRPC reuses the main HTTP port (default 8080)
-        assert_eq!(ks_config.endpoint, "http://127.0.0.1:8080");
+        assert!(signer_config.is_some());
+        let signer_config = signer_config.unwrap();
+        // SGN-02: Signer gRPC runs on its own dedicated listener, defaulting to
+        // the HTTP port + 1 (8080 + 1 = 8081) when [bind.signer] is omitted.
+        assert_eq!(signer_config.endpoint, "http://127.0.0.1:8081");
     }
 
     #[test]
     fn test_validate_bitmask_consistency() {
         let mut config = ActrixConfig {
-            enable: ENABLE_AIS,
+            enable: ENABLE_ISSUER,
             ..ActrixConfig::default()
         };
 
-        // Case 1: AIS bitmask set but services.ais config missing - should warn
-        config.enable = ENABLE_AIS;
-        config.services.ais = None;
+        // Case 1: Issuer bitmask set but services.issuer config missing - should warn
+        config.enable = ENABLE_ISSUER;
+        config.services.issuer = None;
 
         let result = config.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
         assert!(errors.iter().any(|e| e.contains(
-            "AIS service is enabled (ENABLE_AIS bit is set) but services.ais configuration is missing"
+            "Issuer service is enabled (ENABLE_ISSUER bit is set) but services.issuer configuration is missing"
         )));
 
         // Case 2: Signer bitmask set but services.signer config missing - should warn
         config.enable = ENABLE_SIGNER;
-        config.services.ais = None;
+        config.services.issuer = None;
         config.services.signer = None;
 
         let result = config.validate();
@@ -1244,16 +1754,16 @@ mod tests {
         }));
 
         // Case 4: Signaling enabled with config present - should pass (if other validations pass)
-        // Note: Unlike AIS, Signaling validation does not check KS availability
+        // Note: Unlike Issuer, Signaling validation does not check Signer availability
         config.enable = ENABLE_SIGNALING;
         config.services.signaling = Some(SignalingConfig {
             server: signaling::SignalingServerConfig::default(),
             dependencies: signaling::SignalingDependencies {
                 signer: None,
-                ais: None,
+                issuer: None,
             },
         });
-        config.services.signer = None; // No local KS
+        config.services.signer = None; // No local Signer
 
         let result = config.validate();
         // Signaling with config should not have bitmask consistency errors
@@ -1272,10 +1782,10 @@ mod tests {
         }
 
         // Case 5: Bitmask set and services.* config present - should pass (if other validations pass)
-        config.enable = ENABLE_AIS | ENABLE_SIGNER;
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies {
+        config.enable = ENABLE_ISSUER | ENABLE_SIGNER;
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies {
                 signer: Some(crate::config::signer::SignerClientConfig {
                     endpoint: "http://127.0.0.1:8080".to_string(),
                     timeout_seconds: 10,
@@ -1290,14 +1800,13 @@ mod tests {
         config.services.signer = Some(SignerServiceConfig {
             storage: ::signer::storage::StorageConfig {
                 backend: ::signer::storage::StorageBackend::Sqlite,
-                key_ttl_seconds: 3600,
-                sqlite: Some(::signer::storage::SqliteConfig {}),
+                sqlite: Some(::signer::storage::SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
-            tolerance_seconds: 3600,
+            ..Default::default()
         });
 
         // Should not have bitmask consistency errors (may have other validation errors)
@@ -1322,7 +1831,7 @@ mod tests {
             dependencies: signaling::SignalingDependencies::default(),
         });
         config.services.signer = None;
-        config.services.ais = None;
+        config.services.issuer = None;
 
         let result = config.validate();
         assert!(result.is_err());
@@ -1335,17 +1844,18 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| e.contains("Signaling dependencies.ais is not configured"))
+                .any(|e| e.contains("Signaling dependencies.issuer is not configured"))
         );
     }
 
     #[test]
     fn test_signaling_dependencies_accept_local_services_when_enabled() {
         let mut config = ActrixConfig {
-            enable: ENABLE_SIGNALING | ENABLE_SIGNER | ENABLE_AIS,
+            enable: ENABLE_SIGNALING | ENABLE_SIGNER | ENABLE_ISSUER,
             ..ActrixConfig::default()
         };
-        config.control.admin_ui.password = "testpassword123".to_string();
+        config.control.admin_ui.password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string();
+        config.turn.turn_secret = "test-turn-secret-32-bytes-minimum".to_string();
         config.services.signaling = Some(SignalingConfig {
             server: signaling::SignalingServerConfig::default(),
             dependencies: signaling::SignalingDependencies::default(),
@@ -1353,12 +1863,47 @@ mod tests {
         config.services.signer = Some(SignerServiceConfig {
             ..Default::default()
         });
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies::default(),
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies::default(),
         });
 
+        let errors = config.validate().unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.contains("authority.uri")),
+            "{errors:?}"
+        );
+
+        config.authority.uri = Some("actr://provider.example".to_string());
         let result = config.validate();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn production_signer_requires_private_key_encryption() {
+        let mut config = ActrixConfig {
+            env: "prod".to_string(),
+            enable: ENABLE_SIGNER,
+            ..ActrixConfig::default()
+        };
+        config.control.admin_ui.password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string();
+        config.services.signer = Some(SignerServiceConfig::default());
+
+        let errors = config
+            .validate()
+            .expect_err("production Signer must fail closed without a KEK");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("plaintext private-key storage is forbidden"))
+        );
+
+        config.services.signer.as_mut().unwrap().kek_env = Some("ACTRIX_SIGNER_KEK".to_string());
+        let remaining_errors = config.validate().err().unwrap_or_default();
+        assert!(
+            !remaining_errors
+                .iter()
+                .any(|error| error.contains("plaintext private-key storage is forbidden"))
+        );
     }
 }

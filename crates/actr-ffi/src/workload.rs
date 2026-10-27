@@ -981,10 +981,10 @@ mod tests {
                 "edition = 1\n\
                  [signaling]\n\
                  url = \"{}\"\n\
-                 [ais_endpoint]\n\
-                 url = \"{}/ais\"\n\
+                 [issuer_endpoint]\n\
+                 url = \"{}/issuer\"\n\
                  [deployment]\n\
-                 realm_id = 1\n\
+                 realm = \"test@example.com\"\n\
                  [hyper]\n\
                  data_dir = \"{}\"\n\
                  [hyper.trust]\n\
@@ -1002,7 +1002,7 @@ mod tests {
         let node = crate::runtime::ActrNode::new_from_linked_workload(
             config_path.display().to_string(),
             crate::types::ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "LifecycleProbe".to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -1172,10 +1172,10 @@ mod tests {
                 "edition = 1\n\
                  [signaling]\n\
                  url = \"{}\"\n\
-                 [ais_endpoint]\n\
-                 url = \"{}/ais\"\n\
+                 [issuer_endpoint]\n\
+                 url = \"{}/issuer\"\n\
                  [deployment]\n\
-                 realm_id = 1\n\
+                 realm = \"test@example.com\"\n\
                  [hyper]\n\
                  data_dir = \"{}\"\n\
                  [hyper.trust]\n\
@@ -1197,7 +1197,7 @@ mod tests {
         crate::runtime::ActrNode::new_from_linked_workload(
             config_path.display().to_string(),
             crate::types::ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "LifecycleProbe".to_string(),
                 version: "0.1.0".to_string(),
             },

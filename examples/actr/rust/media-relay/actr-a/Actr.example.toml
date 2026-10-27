@@ -3,12 +3,13 @@ edition = 1
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 33554433
-realm_secret = "rs_MediaRelayExampleSecret123"
+realm = "media-relay@example.com"
+# Written by `actr realm join` (the start script runs it).
+realm_client_key = "realm-client.json"
 
 [discovery]
 visible = true
@@ -21,7 +22,7 @@ visible = true
 [[acl.rules]]
 permission = "allow"
 # Allow RelayService to send signaling/data to us (RelayClient)
-type = "actr-example:RelayService:1.0.0"
+type = "actr-example/RelayService@1.0.0"
 
 [scripts]
 dev = "cargo run"

@@ -16,8 +16,17 @@ pub enum RealmError {
     #[error("Realm not found")]
     NotFound,
 
-    #[error("Realm already exists")]
+    #[error("Realm already exists; Realm names are never reused")]
     AlreadyExists,
+
+    #[error("Realm is retired")]
+    Retired,
+
+    #[error("Realm quota exceeded: {0}")]
+    QuotaExceeded(String),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
 
     #[error("Key expired")]
     KeyExpired,
@@ -27,6 +36,10 @@ pub enum RealmError {
 
     #[error("Parse error: {0}")]
     ParseError(String),
+
+    /// A membership check inside a Realm write failed.
+    #[error(transparent)]
+    Membership(#[from] super::membership::MembershipError),
 }
 
 impl From<sqlx::Error> for RealmError {

@@ -30,7 +30,14 @@ async fn exchange(socket: &UdpSocket, server: SocketAddr, raw: &[u8]) -> Message
 #[ignore = "issue #248: turn 0.17.2 awaits the upstream Allocate replay release"]
 async fn allocate_retransmission_replays_success() {
     install_test_crypto_provider();
-    let auth = Arc::new(turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned()).unwrap());
+    let auth = Arc::new(
+        turn::Authenticator::new(
+            TURN_SHARED_TEST_KEY.to_owned(),
+            "provider.example".to_owned(),
+        )
+        .unwrap()
+        .with_inactive_realms(turn_bindings().clone()),
+    );
     let (address, server) = start_turn(auth).await;
     let expires = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -171,7 +178,14 @@ async fn wait_for_retirement(server: &turn_crate::server::Server, old: &[FiveTup
 
 async fn allocation_lifecycle(restart: bool) {
     install_test_crypto_provider();
-    let auth = Arc::new(turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned()).unwrap());
+    let auth = Arc::new(
+        turn::Authenticator::new(
+            TURN_SHARED_TEST_KEY.to_owned(),
+            "provider.example".to_owned(),
+        )
+        .unwrap()
+        .with_inactive_realms(turn_bindings().clone()),
+    );
     let (address, server) = start_turn(auth).await;
     let expires = SystemTime::now()
         .duration_since(UNIX_EPOCH)

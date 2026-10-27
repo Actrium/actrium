@@ -4,7 +4,7 @@ exports = ["examples/test.proto"]
 
 [package]
 name = "test-service"
-manufacturer = "acme"
+publisher = "acme"
 description = "Test configuration"
 
 [dependencies]
@@ -18,11 +18,11 @@ test = "cargo test"
 [system.signaling]
 url = "ws://localhost:8081"
 
-[system.ais_endpoint]
-url = "http://localhost:8081/ais"
+[system.issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "k7m2q9xh@example.com"
 
 [system.discovery]
 visible = true

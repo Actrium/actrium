@@ -9,7 +9,7 @@
 //! The module honours `actr-config::TrustAnchor` semantics:
 //!   - `kind = "static"` — pre-configured Ed25519 pubkey (from `pubkey_b64`);
 //!     used to run `actr_pack::verify`.
-//!   - `kind = "registry"` — look up MFR keys over HTTP. **Not yet implemented
+//!   - `kind = "registry"` — look up publisher keys over HTTP. **Not yet implemented
 //!     on the browser side**; surfacing it produces a hard error instead of a
 //!     silent skip (the native host has this via `RegistryTrust`; porting to
 //!     the SW is a follow-up).
@@ -96,7 +96,7 @@ impl ExtractedPackage {
 /// - `trust_anchors_json` — JSON array of `TrustAnchor` entries
 ///   (shape matches `actr_config::TrustAnchor`). The SW tries every usable
 ///   `kind = "static"` entry; registry-only trust causes a hard error until
-///   the SW learns to do async AIS key lookup.
+///   the SW learns to do async Issuer key lookup.
 ///
 /// # Errors
 /// Raises a `JsError` with a descriptive message on:
@@ -203,7 +203,7 @@ fn resolve_static_pubkeys(anchors: &[TrustAnchorCfg]) -> Vec<String> {
             TrustAnchorCfg::Static {
                 pubkey_b64: Some(b64),
                 ..
-            } if !b64.is_empty() && b64 != "__MFR_PUBKEY_PLACEHOLDER__" => Some(b64.clone()),
+            } if !b64.is_empty() && b64 != "__PUBLISHER_PUBKEY_PLACEHOLDER__" => Some(b64.clone()),
             _ => None,
         })
         .collect()

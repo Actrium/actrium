@@ -46,7 +46,7 @@ impl ActrNode {
         // Accept the manifest.toml path, resolve its sibling actr.toml,
         // and feed the manifest's [package] into Hyper so the node
         // registers under the real actr_type instead of the
-        // `local:Client:0.0.0` placeholder that `from_config_file`
+        // `local/Client@0.0.0` placeholder that `from_config_file`
         // would otherwise synthesise. TypeScript bindings link a
         // minimal static-lib workload here; this surface exposes
         // discovery and outbound calls, not TS-defined service hosting.
@@ -62,9 +62,9 @@ impl ActrNode {
             .link(TypeScriptBindingWorkload)
             .await
             .map_err(crate::error::hyper_error_to_napi)?;
-        let ais_endpoint = attached.ais_endpoint().to_string();
+        let issuer_endpoint = attached.issuer_endpoint().to_string();
         let registered = attached
-            .register(&ais_endpoint)
+            .register(&issuer_endpoint)
             .await
             .map_err(crate::error::hyper_error_to_napi)?;
 

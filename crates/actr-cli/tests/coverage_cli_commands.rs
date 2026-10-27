@@ -146,7 +146,7 @@ exports = ["proto/echo.proto"]
 
 [package]
 name = "echo-service"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 description = "Echo service"
 
@@ -162,7 +162,13 @@ fn config_local_scope_round_trips_values_and_validates() {
     let home = isolated_home(tmp.path());
 
     let set = run_actr(
-        &["config", "--local", "set", "network.realm_id", "4242"],
+        &[
+            "config",
+            "--local",
+            "set",
+            "network.realm",
+            "dev@example.com",
+        ],
         tmp.path(),
         &home,
     );
@@ -171,15 +177,18 @@ fn config_local_scope_round_trips_values_and_validates() {
 
     let config_path = tmp.path().join(".actr/config.toml");
     let saved = fs::read_to_string(&config_path).expect("read local config");
-    assert!(saved.contains("realm_id = 4242"), "saved config:\n{saved}");
+    assert!(
+        saved.contains("realm = \"dev@example.com\""),
+        "saved config:\n{saved}"
+    );
 
     let get = run_actr(
-        &["config", "--local", "get", "network.realm_id"],
+        &["config", "--local", "get", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_success(&get, "config local get");
-    assert_eq!(clean_stdout(&get).trim(), "4242");
+    assert_eq!(clean_stdout(&get).trim(), "\"dev@example.com\"");
 
     let show = run_actr(
         &["config", "--local", "show", "--format", "json"],
@@ -189,26 +198,26 @@ fn config_local_scope_round_trips_values_and_validates() {
     assert_success(&show, "config local show json");
     let show_json: serde_json::Value =
         serde_json::from_str(clean_stdout(&show).trim()).expect("show output should be JSON");
-    assert_eq!(show_json["network"]["realm_id"], 4242);
+    assert_eq!(show_json["network"]["realm"], "dev@example.com");
 
     let test = run_actr(&["config", "--local", "test"], tmp.path(), &home);
     assert_success(&test, "config local test");
     assert!(clean_stdout(&test).contains("Local config syntax and schema are valid"));
 
     let unset = run_actr(
-        &["config", "--local", "unset", "network.realm_id"],
+        &["config", "--local", "unset", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_success(&unset, "config local unset");
 
     let get_missing = run_actr(
-        &["config", "--local", "get", "network.realm_id"],
+        &["config", "--local", "get", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_failure(&get_missing, "config local get after unset");
-    assert!(stderr(&get_missing).contains("Configuration key 'network.realm_id' not found"));
+    assert!(stderr(&get_missing).contains("Configuration key 'network.realm' not found"));
 }
 
 #[test]
@@ -218,7 +227,13 @@ fn config_global_scope_round_trips_and_list_shows_effective_values() {
 
     // Set a value in the global scope (writes to ~/.actr/config.toml).
     let set = run_actr(
-        &["config", "--global", "set", "network.realm_id", "8372"],
+        &[
+            "config",
+            "--global",
+            "set",
+            "network.realm",
+            "qa@example.com",
+        ],
         tmp.path(),
         &home,
     );
@@ -226,32 +241,32 @@ fn config_global_scope_round_trips_and_list_shows_effective_values() {
     let global_config = home.join(".actr/config.toml");
     assert!(global_config.exists(), "global config should be written");
     let saved = fs::read_to_string(&global_config).expect("read global config");
-    assert!(saved.contains("realm_id"), "global config:\n{saved}");
+    assert!(saved.contains("realm"), "global config:\n{saved}");
 
     let get = run_actr(
-        &["config", "--global", "get", "network.realm_id"],
+        &["config", "--global", "get", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_success(&get, "config global get");
-    assert!(clean_stdout(&get).contains("8372"));
+    assert!(clean_stdout(&get).contains("qa@example.com"));
 
     // list shows effective (merged) config.
     let list = run_actr(&["config", "list"], tmp.path(), &home);
     assert_success(&list, "config list");
     let list_out = clean_stdout(&list);
-    assert!(list_out.contains("network.realm_id"), "list: {list_out}");
-    assert!(list_out.contains("mfr.manufacturer"), "list: {list_out}");
+    assert!(list_out.contains("network.realm"), "list: {list_out}");
+    assert!(list_out.contains("publisher.name"), "list: {list_out}");
 
     let global_unset = run_actr(
-        &["config", "--global", "unset", "network.realm_id"],
+        &["config", "--global", "unset", "network.realm"],
         tmp.path(),
         &home,
     );
     assert_success(&global_unset, "config global unset");
 
     let get_missing = run_actr(
-        &["config", "--global", "get", "network.realm_id"],
+        &["config", "--global", "get", "network.realm"],
         tmp.path(),
         &home,
     );
@@ -393,12 +408,12 @@ fn config_rejects_unknown_keys_and_bad_values() {
     assert!(stderr(&bad_bool).contains("expects a boolean"));
 
     let bad_int = run_actr(
-        &["config", "--local", "set", "network.realm_id", "abc"],
+        &["config", "--local", "set", "network.realm", "4242"],
         tmp.path(),
         &home,
     );
-    assert_failure(&bad_int, "config bad int");
-    assert!(stderr(&bad_int).contains("expects a positive integer"));
+    assert_failure(&bad_int, "config bad realm");
+    assert!(stderr(&bad_int).contains("expects a Realm name"));
 }
 
 #[test]
@@ -489,7 +504,7 @@ fn deps_install_rejects_actr_type_without_alias() {
     write_manifest_with_proto(tmp.path());
 
     let no_alias = run_actr(
-        &["deps", "install", "--actr-type", "acme:Echo:1.0.0"],
+        &["deps", "install", "--actr-type", "acme/Echo@1.0.0"],
         tmp.path(),
         &home,
     );
@@ -552,7 +567,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "echo"
 alias = "echo"
-actr_type = "acme:EchoService:1.0.0"
+actr_type = "acme/EchoService@1.0.0"
 fingerprint = "{svc_fp}"
 cached_at = "2026-08-06T00:00:00Z"
 
@@ -604,7 +619,9 @@ fn init_rust_echo_service_produces_expected_files() {
             "service",
             "--signaling",
             "ws://localhost:8080",
-            "--manufacturer",
+            "--realm",
+            "dev@example.com",
+            "--publisher",
             "test-org",
             "--language",
             "rust",
@@ -654,7 +671,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "remote-echo"
 alias = "remote-echo"
-actr_type = "acme:EchoService:1.0.0"
+actr_type = "acme/EchoService@1.0.0"
 fingerprint = "service_semantic:stale"
 cached_at = "2026-08-06T00:00:00Z"
 
@@ -831,74 +848,60 @@ fn pkg_keygen_rejects_directory_output_path() {
 }
 
 #[test]
-fn pkg_keygen_with_manufacturer_writes_binding() {
+fn pkg_keygen_with_publisher_writes_binding() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
     let key_path = tmp.path().join("keys/dev-key.json");
     let key_arg = key_path.to_string_lossy().into_owned();
 
-    // --manufacturer binds the keychain to that manufacturer (issue #425).
-    let with_mfr = run_actr(
-        &[
-            "pkg",
-            "keygen",
-            "--output",
-            &key_arg,
-            "--manufacturer",
-            "acme",
-        ],
+    // --publisher binds the keychain to that publisher (issue #425).
+    let with_publisher = run_actr(
+        &["pkg", "keygen", "--output", &key_arg, "--publisher", "acme"],
         tmp.path(),
         &home,
     );
-    assert_success(&with_mfr, "pkg keygen with manufacturer");
+    assert_success(&with_publisher, "pkg keygen with publisher");
     let key_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&key_path).expect("read key"))
             .expect("key should be JSON");
-    assert_eq!(key_json["manufacturer"].as_str(), Some("acme"));
+    assert_eq!(key_json["publisher"].as_str(), Some("acme"));
 
-    // Without --manufacturer the field is omitted (backward compatible).
+    // Without --publisher the field is omitted (backward compatible).
     let unbound_path = tmp.path().join("keys/unbound.json");
     let unbound_arg = unbound_path.to_string_lossy().into_owned();
-    let without_mfr = run_actr(
+    let without_publisher = run_actr(
         &["pkg", "keygen", "--output", &unbound_arg],
         tmp.path(),
         &home,
     );
-    assert_success(&without_mfr, "pkg keygen without manufacturer");
+    assert_success(&without_publisher, "pkg keygen without publisher");
     let unbound_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&unbound_path).expect("read key"))
             .expect("unbound key should be JSON");
     assert!(
-        unbound_json.get("manufacturer").is_none(),
-        "unbound keychain must not carry a manufacturer field"
+        unbound_json.get("publisher").is_none(),
+        "unbound keychain must not carry a publisher field"
     );
 
-    // Empty manufacturer is rejected.
+    // Empty publisher is rejected.
     let empty_path = tmp.path().join("keys/empty.json");
     let empty_arg = empty_path.to_string_lossy().into_owned();
     let empty = run_actr(
-        &[
-            "pkg",
-            "keygen",
-            "--output",
-            &empty_arg,
-            "--manufacturer",
-            "  ",
-        ],
+        &["pkg", "keygen", "--output", &empty_arg, "--publisher", "  "],
         tmp.path(),
         &home,
     );
-    assert_failure(&empty, "pkg keygen empty manufacturer");
-    assert!(stderr(&empty).contains("--manufacturer cannot be empty"));
+    assert_failure(&empty, "pkg keygen empty publisher");
+    assert!(stderr(&empty).contains("--publisher cannot be empty"));
 }
 
 #[test]
-fn pkg_sign_rejects_cross_manufacturer_keychain_and_accepts_matching() {
+fn pkg_sign_rejects_cross_publisher_keychain_and_accepts_matching() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
     write_manifest_with_proto(tmp.path());
 
-    // Keychain bound to "rival" but manifest manufacturer is "acme".
+    // Keychain bound to "rival" but manifest publisher is "acme".
     let rival_key = tmp.path().join("keys/rival.json");
     let rival_arg = rival_key.to_string_lossy().into_owned();
     let gen_rival = run_actr(
@@ -907,7 +910,7 @@ fn pkg_sign_rejects_cross_manufacturer_keychain_and_accepts_matching() {
             "keygen",
             "--output",
             &rival_arg,
-            "--manufacturer",
+            "--publisher",
             "rival",
         ],
         tmp.path(),
@@ -927,10 +930,10 @@ fn pkg_sign_rejects_cross_manufacturer_keychain_and_accepts_matching() {
         tmp.path(),
         &home,
     );
-    assert_failure(&mismatch, "pkg sign cross-manufacturer");
+    assert_failure(&mismatch, "pkg sign cross-publisher");
     let err = stderr(&mismatch);
     assert!(
-        err.contains("Manufacturer mismatch"),
+        err.contains("Publisher mismatch"),
         "pkg sign mismatch stderr:\n{err}"
     );
     // The signature must not be written when the check fails.
@@ -945,7 +948,7 @@ fn pkg_sign_rejects_cross_manufacturer_keychain_and_accepts_matching() {
             "keygen",
             "--output",
             &acme_arg,
-            "--manufacturer",
+            "--publisher",
             "acme",
         ],
         tmp.path(),
@@ -968,7 +971,7 @@ fn pkg_sign_rejects_cross_manufacturer_keychain_and_accepts_matching() {
         tmp.path(),
         &home,
     );
-    assert_success(&signed, "pkg sign matching manufacturer");
+    assert_success(&signed, "pkg sign matching publisher");
     assert!(clean_stdout(&signed).contains("Manifest signed successfully"));
     assert!(tmp.path().join("manifest.sig").exists());
 }
@@ -1255,7 +1258,7 @@ fn pkg_sign_validates_manifest_and_signs_on_success() {
         stderr(&no_pkg)
     );
 
-    // Missing manufacturer field → error.
+    // Missing publisher field → error.
     fs::write(
         tmp.path().join("partial.toml"),
         "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
@@ -1275,7 +1278,7 @@ fn pkg_sign_validates_manifest_and_signs_on_success() {
     );
     assert_failure(&partial, "pkg sign partial");
     assert!(
-        stderr(&partial).contains("[package].manufacturer missing"),
+        stderr(&partial).contains("[package].publisher missing"),
         "pkg sign partial stderr:\n{}",
         stderr(&partial)
     );
@@ -1312,11 +1315,11 @@ fn pkg_sign_authenticates_v2_dependency_lock() {
 
 [package]
 name = "client"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
-echo = { actr_type = "acme:EchoService:1.0.0", service = "EchoService:service_semantic:echo" }
+echo = { actr_type = "acme/EchoService@1.0.0", service = "EchoService:service_semantic:echo" }
 "#,
     )
     .expect("write manifest");
@@ -1329,7 +1332,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "EchoService"
 alias = "echo"
-actr_type = "acme:EchoService:1.0.0"
+actr_type = "acme/EchoService@1.0.0"
 fingerprint = "service_semantic:echo"
 cached_at = "2026-08-06T00:00:00Z"
 
@@ -1505,7 +1508,7 @@ fn registry_fingerprint_covers_text_no_exports_and_unsupported_format() {
     // Manifest with no exports.
     fs::write(
         tmp.path().join("empty.toml"),
-        "edition = 1\n\n[package]\nname = \"empty-service\"\nmanufacturer = \"acme\"\nversion = \"0.1.0\"\ndescription = \"Empty\"\n",
+        "edition = 1\n\n[package]\nname = \"empty-service\"\npublisher = \"acme\"\nversion = \"0.1.0\"\ndescription = \"Empty\"\n",
     )
     .expect("write empty manifest");
 
@@ -1596,7 +1599,7 @@ fn doc_generates_default_pages_without_manifest_and_rejects_subdir() {
     fs::create_dir_all(parent.join("child")).expect("create parent/child");
     fs::write(
         parent.join("manifest.toml"),
-        "edition = 1\n\n[package]\nname = \"x\"\nmanufacturer = \"acme\"\nversion = \"0.1.0\"\n",
+        "edition = 1\n\n[package]\nname = \"x\"\npublisher = \"acme\"\nversion = \"0.1.0\"\n",
     )
     .expect("write parent manifest");
     let subdir = run_actr(
@@ -1652,7 +1655,7 @@ fn deps_install_with_only_actr_toml_explains_manifest_required() {
     // manifest.toml. The error must explain that manifest.toml is required.
     fs::write(
         tmp.path().join("actr.toml"),
-        "[network]\nsignaling_url = \"wss://example/signaling\"\nais_endpoint = \"http://example/ais\"\n",
+        "[network]\nsignaling_url = \"wss://example/signaling\"\nais_endpoint = \"http://example/issuer\"\n",
     )
     .expect("write actr.toml");
 
@@ -1678,9 +1681,22 @@ fn standalone_discover_skips_project_config_requirement() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
 
-    // Standalone discover (--endpoint --realm-id --realm-secret) must bypass
+    // Standalone discover (--endpoint --realm --realm-client-key) must bypass
     // the project-config requirement even in an empty directory. It fails on
     // network unreachability (localhost:1), not on missing configuration.
+    let key_path = tmp.path().join("realm-client.json");
+    let key_file = actr_protocol::realm_membership::RealmClientKeyFile::new(
+        "dev@example.com",
+        "localhost:1",
+        "http://localhost:1",
+        &ed25519_dalek::SigningKey::from_bytes(&[1; 32]),
+    );
+    std::fs::write(&key_path, serde_json::to_string(&key_file).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let output = run_actr(
         &[
             "registry",
@@ -1688,10 +1704,10 @@ fn standalone_discover_skips_project_config_requirement() {
             "--list-only",
             "--endpoint",
             "http://localhost:1",
-            "--realm-id",
-            "1",
-            "--realm-secret",
-            "secret",
+            "--realm",
+            "dev@example.com",
+            "--realm-client-key",
+            key_path.to_str().unwrap(),
         ],
         tmp.path(),
         &home,

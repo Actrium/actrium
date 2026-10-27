@@ -73,7 +73,7 @@ pnpm install --dir server
 # 终端 2: seed realm
 curl -fsS -X POST http://127.0.0.1:8081/admin/realms \
   -H 'content-type: application/json' \
-  --data '{"id":2368266035,"name":"data-stream-realm"}'
+  --data '{"realm":"data-stream@example.com"}'
 
 # 终端 3
 cd client && VITE_ACTRIX_HTTP_URL=http://127.0.0.1:8081 pnpm dev --host 127.0.0.1 --port 4175

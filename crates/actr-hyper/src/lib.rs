@@ -18,8 +18,8 @@
 //!
 //! ### Platform Layer (formerly Hyper)
 //!
-//! - Package signature verification (binary_hash + MFR signature)
-//! - Actor bootstrap (registers with AIS on behalf of the Actor, obtains credential)
+//! - Package signature verification (binary_hash + publisher signature)
+//! - Actor bootstrap (registers with Issuer on behalf of the Actor, obtains credential)
 //! - Storage namespace isolation (independent SQLite space per Actor)
 //! - Cryptographic primitives (Ed25519 sign/verify, Actor does not hold raw private keys)
 //! - Runtime lifecycle management (ActrNode lifecycle for Executor execution bodies)
@@ -37,7 +37,7 @@
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────┐
-//! │  Platform (Hyper)                                   │  AIS Bootstrap
+//! │  Platform (Hyper)                                   │  Issuer Bootstrap
 //! │  Sandbox / Verify / Storage / KeyCache              │  Package Verify
 //! ├─────────────────────────────────────────────────────┤
 //! │  Lifecycle Management (ActrNode → ActrRef)
@@ -92,7 +92,7 @@ pub mod verify;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod actr_ref;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod ais_client;
+pub mod issuer_client;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod key_cache;
 #[cfg(not(target_arch = "wasm32"))]
@@ -126,6 +126,9 @@ pub(crate) mod request_scope;
 // Context (native-only, depends on transport/wire)
 #[cfg(not(target_arch = "wasm32"))]
 pub mod context;
+
+// Service lookup rules for opening an instance
+pub mod service_lookup;
 
 // Runtime workload abstraction (native-only, WASM/dynclib host)
 #[cfg(not(target_arch = "wasm32"))]
@@ -192,7 +195,7 @@ pub use actr_platform_traits::{
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use ais_client::AisClient;
+pub use issuer_client::{IssuerClient, RealmClientKey};
 // Conflict-key dispatch scheduling (B2).
 #[cfg(not(target_arch = "wasm32"))]
 pub use config::DispatchConcurrency;
@@ -203,7 +206,7 @@ pub use dispatch::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use storage::{ActorStore, SecureStorageRoot};
 #[cfg(not(target_arch = "wasm32"))]
-pub use verify::{ChainTrust, MfrCertCache, RegistryTrust, StaticTrust, TrustProvider};
+pub use verify::{ChainTrust, PublisherCertCache, RegistryTrust, StaticTrust, TrustProvider};
 
 // Observability
 #[cfg(not(target_arch = "wasm32"))]
@@ -348,7 +351,7 @@ use uuid::Uuid;
 #[cfg(not(target_arch = "wasm32"))]
 use actr_platform_traits::KvOp;
 #[cfg(not(target_arch = "wasm32"))]
-use actr_protocol::{Realm, RegisterAuthMode, RegisterRequest, register_response};
+use actr_protocol::{RegisterAuthMode, RegisterRequest, register_response};
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Compile-time state marker: a [`Node`] has been born from a [`Hyper`]
@@ -357,10 +360,10 @@ use actr_protocol::{Realm, RegisterAuthMode, RegisterRequest, register_response}
 /// [`Node::link`].
 pub struct Init;
 #[cfg(not(target_arch = "wasm32"))]
-/// Compile-time state marker: a package has been verified and attached; AIS credential still pending.
+/// Compile-time state marker: a package has been verified and attached; Issuer credential still pending.
 pub struct Attached;
 #[cfg(not(target_arch = "wasm32"))]
-/// Compile-time state marker: AIS credential has been obtained and injected; ready to start.
+/// Compile-time state marker: Issuer credential has been obtained and injected; ready to start.
 pub struct Registered;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -397,7 +400,7 @@ impl NodeState for Registered {}
 /// Node::from_hyper(hyper, config) -> Node<Init>              (escape hatch)
 ///     .attach(package)            -> Node<Attached>          (attach: wasm / dyn lib)
 ///     .link(workload)             -> Node<Attached>          (link: static lib)
-///     .register(ais_endpoint)     -> Node<Registered>        (credential obtained)
+///     .register(issuer_endpoint)     -> Node<Registered>        (credential obtained)
 ///     .start()                    -> ActrRef                 (running node)
 /// ```
 ///
@@ -427,8 +430,8 @@ struct HyperInner {
 /// Carries state-dependent data for an attached [`Node`].
 struct Attachment {
     node: crate::lifecycle::node::Inner,
-    /// Verified package retained for AIS bootstrap: the manifest plus the raw
-    /// manifest bytes and signature that AIS may need to re-verify upstream.
+    /// Verified package retained for Issuer bootstrap: the manifest plus the raw
+    /// manifest bytes and signature that Issuer may need to re-verify upstream.
     ///
     /// `None` for linked attachments, which have no verified package
     /// metadata attached. In that case `Node::register*` falls back to the
@@ -452,7 +455,7 @@ struct Attachment {
 ///     .attach(package)         -> Node<Attached>   (attach: wasm / dyn lib)
 ///     .link(workload)          -> Node<Attached>   (link: static lib)
 ///
-/// Node<Attached>.register(ais) -> Node<Registered>
+/// Node<Attached>.register(issuer) -> Node<Registered>
 /// Node<Registered>.start()     -> ActrRef
 /// ```
 ///
@@ -580,154 +583,12 @@ impl WorkloadPackage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManufacturerRegistrationAuth {
-    pub signature: Vec<u8>,
-    pub signed_at: u64,
-    pub nonce: Vec<u8>,
-}
-
-/// Re-signing capability for the manufacturer proof used in package registration.
-///
-/// Unpublished package registration (AIS Path 2) requires a manufacturer proof —
-/// an Ed25519 signature over the `ACTR-MANUFACTURER-REGISTER-V1` payload that AIS
-/// verifies with the MFR key that signed the package manifest. Its nonce is
-/// consumed once to prevent replay. Because the nonce is single-use, the proof
-/// **cannot be reused**: hard rebind must mint a fresh `signed_at` + `nonce` +
-/// signature.
-///
-/// Rather than caching the signing key in memory, this trait is implemented by
-/// the CLI with a type that reloads the MFR private key from the keychain on
-/// every [`Self::sign`] call. AIS bootstrap calls it once for the initial
-/// registration; the credential manager calls it again on each hard rebind.
-pub trait ManufacturerAuthProvider: Send + Sync {
-    /// Produce a fresh manufacturer proof for the given registration inputs.
-    ///
-    /// `manifest_raw` is the exact package manifest bound into the proof
-    /// (via its SHA-256). Implementations must generate a new `signed_at` and
-    /// random `nonce` each call.
-    fn sign(
-        &self,
-        realm_id: u32,
-        actr_type: &actr_protocol::ActrType,
-        target: &str,
-        manifest_raw: &[u8],
-    ) -> Result<ManufacturerRegistrationAuth, HyperError>;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn sign_manufacturer_proof(
-    provider: Arc<dyn ManufacturerAuthProvider>,
-    realm_id: u32,
-    actr_type: ActrType,
-    target: String,
-    manifest_raw: Vec<u8>,
-) -> HyperResult<ManufacturerRegistrationAuth> {
-    tokio::task::spawn_blocking(move || provider.sign(realm_id, &actr_type, &target, &manifest_raw))
-        .await
-        .map_err(|err| HyperError::Runtime(format!("manufacturer signing task failed: {err}")))?
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn manufacturer_auth_fields(
-    auth: Option<&ManufacturerRegistrationAuth>,
-) -> (Option<bytes::Bytes>, Option<u64>, Option<bytes::Bytes>) {
-    match auth {
-        Some(auth) => (
-            Some(bytes::Bytes::from(auth.signature.clone())),
-            Some(auth.signed_at),
-            Some(bytes::Bytes::from(auth.nonce.clone())),
-        ),
-        None => (None, None, None),
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn package_registration_context(
-    verified: &VerifiedPackage,
-    realm_id: u32,
-    service_spec: Option<actr_protocol::ServiceSpec>,
-    acl: Option<actr_protocol::Acl>,
-    manufacturer_auth: Option<&ManufacturerRegistrationAuth>,
-    resign: Option<Arc<dyn ManufacturerAuthProvider>>,
-) -> crate::lifecycle::credential_manager::RegistrationContext {
-    let manifest = &verified.manifest;
-    let (manufacturer_auth_signature, manufacturer_auth_signed_at, manufacturer_auth_nonce) =
-        manufacturer_auth_fields(manufacturer_auth);
-    crate::lifecycle::credential_manager::RegistrationContext::Package {
-        request: RegisterRequest {
-            actr_type: ActrType {
-                manufacturer: manifest.manufacturer.clone(),
-                name: manifest.name.clone(),
-                version: manifest.version.clone(),
-            },
-            realm: Realm { realm_id },
-            service_spec,
-            acl,
-            service: None,
-            ws_address: None,
-            manifest_raw: Some(verified.manifest_raw.clone().into()),
-            mfr_signature: Some(verified.sig_raw.clone().into()),
-            target: Some(manifest.binary.target.clone()),
-            auth_mode: Some(RegisterAuthMode::Package as i32),
-            manufacturer_auth_signature,
-            manufacturer_auth_signed_at,
-            manufacturer_auth_nonce,
-        },
-        resign,
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl ManufacturerRegistrationAuth {
-    pub fn sign(
-        signing_key: &ed25519_dalek::SigningKey,
-        realm_id: u32,
-        actr_type: &actr_protocol::ActrType,
-        target: &str,
-        manifest_raw: &[u8],
-    ) -> HyperResult<Self> {
-        use ed25519_dalek::Signer as _;
-        use rand::RngCore as _;
-        use sha2::{Digest as _, Sha256};
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let signed_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| HyperError::Runtime(format!("system clock before Unix epoch: {e}")))?
-            .as_secs();
-
-        let mut nonce = vec![0u8; 32];
-        rand::thread_rng().fill_bytes(&mut nonce);
-
-        let manifest_sha256 = Sha256::digest(manifest_raw);
-        let manifest_sha256_hex = hex::encode(manifest_sha256);
-        let payload = actr_protocol::build_manufacturer_register_payload(
-            actr_protocol::ManufacturerRegisterPayload {
-                realm_id,
-                actr_type,
-                target,
-                manifest_sha256_hex: &manifest_sha256_hex,
-                manufacturer_auth_signed_at: signed_at,
-                manufacturer_auth_nonce: &nonce,
-            },
-        );
-        let signature = signing_key.sign(payload.as_bytes()).to_bytes().to_vec();
-
-        Ok(Self {
-            signature,
-            signed_at,
-            nonce,
-        })
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 /// Result of verifying a package and preparing a runtime workload from it.
 pub(crate) struct LoadedWorkload {
     /// Verified package retained for downstream bootstrap and storage
     /// operations — carries the parsed manifest plus the raw manifest bytes
-    /// and signature needed for transparent forwarding to AIS.
+    /// and signature needed for transparent forwarding to Issuer.
     pub verified: VerifiedPackage,
     /// Binary kind detected from `verified.manifest.binary.target`.
     pub binary_kind: BinaryKind,
@@ -866,7 +727,7 @@ impl Node {
     /// ```ignore
     /// let actr_ref = Node::from_config_file("actr.toml").await?
     ///     .attach(&package).await?
-    ///     .register(&ais_endpoint).await?
+    ///     .register(&issuer_endpoint).await?
     ///     .start().await?;
     /// ```
     ///
@@ -883,7 +744,7 @@ impl Node {
     /// This is the path the language bindings use: they already parsed
     /// `manifest.toml` to find the runtime config dir and want their
     /// `[package]` honoured rather than collapsed to the
-    /// `local:Client:0.0.0` placeholder that `from_config_file` synthesises.
+    /// `local/Client@0.0.0` placeholder that `from_config_file` synthesises.
     pub async fn from_config_with_package(
         path: impl AsRef<std::path::Path>,
         package_info: actr_config::PackageInfo,
@@ -929,7 +790,7 @@ impl Node {
     /// One-shot sugar: `from_config_file(path).attach(package).register().start()`.
     ///
     /// Loads the runtime configuration from `path`, attaches the given
-    /// workload package, registers with AIS at the `[ais_endpoint]` URL
+    /// workload package, registers with Issuer at the `[issuer_endpoint]` URL
     /// from the config, and starts the node, returning a live
     /// [`ActrRef`]. Use the typestate chain directly when you need to
     /// interleave `create_network_event_handle` or swap in a custom
@@ -939,13 +800,13 @@ impl Node {
         package: &WorkloadPackage,
     ) -> HyperResult<ActrRef> {
         let init = Self::from_config_file(path).await?;
-        let ais_endpoint = init
+        let issuer_endpoint = init
             .pending_runtime_config
             .as_ref()
-            .map(|c| c.ais_endpoint.clone())
+            .map(|c| c.issuer_endpoint.clone())
             .expect("Node<Init> without pending runtime config");
         let attached = init.attach(package).await?;
-        let registered = attached.register(&ais_endpoint).await?;
+        let registered = attached.register(&issuer_endpoint).await?;
         registered
             .start()
             .await
@@ -980,7 +841,7 @@ impl Node<Init> {
     ///
     /// `Node::from_config_file` can synthesize a placeholder actor type when
     /// the runtime config has no package manifest. Linked/static hosts use this
-    /// method to provide the concrete actor identity used for AIS registration.
+    /// method to provide the concrete actor identity used for Issuer registration.
     pub fn with_actor_type(mut self, actor_type: actr_protocol::ActrType) -> Self {
         if let Some(manifest) = self.pending_linked_manifest.as_ref()
             && manifest.package.actr_type != actor_type
@@ -1240,49 +1101,44 @@ impl Node<Attached> {
         self
     }
 
-    /// Register with AIS, obtain an AId credential, and inject it into this
+    /// Register with Issuer, obtain an AId credential, and inject it into this
     /// attached node. Consumes `Node<Attached>` and returns `Node<Registered>`.
     ///
-    /// `realm_id`, `acl`, and `realm_secret` come from the attached
+    /// `realm`, `acl`, and `realm_client_key` come from the attached
     /// [`RuntimeConfig`]; `service_spec` is derived from the package's proto
     /// exports when a package-backed attach was used. Linked attachments
     /// register from the runtime config's actor metadata instead.
     ///
-    /// This convenience method does not supply a manufacturer proof. A
-    /// package-backed caller can therefore use it only for a published package
-    /// accepted through AIS Path 1. Use
-    /// [`Self::register_with_manufacturer_auth`] for an unpublished package.
-    pub async fn register(self, ais_endpoint: &str) -> HyperResult<Node<Registered>> {
-        self.register_with_manufacturer_auth(ais_endpoint, None)
+    /// A package registers with its signed manifest and signing key; Issuer
+    /// decides from them whether it runs as its Publisher or as a development
+    /// identity. No Publisher private key is involved.
+    pub async fn register(self, issuer_endpoint: &str) -> HyperResult<Node<Registered>> {
+        let service_spec = self.derived_service_spec()?;
+        self.register_with_inner(issuer_endpoint, service_spec)
             .await
     }
 
-    /// Adopt an already-issued registration payload (`test-utils` builds
-    /// only). Package attachments retain package-mode registration inputs for
-    /// credential hard rebind; linked attachments continue to use linked-mode
-    /// registration. This convenience wrapper supports published package
-    /// credentials without a manufacturer proof. Use the fallible variant to
-    /// return service-spec derivation errors or the re-signing variant for
-    /// unpublished packages.
+    /// Adopt an already-issued credential without registering a second time.
+    /// Both package and linked attachments retain their registration inputs
+    /// for subsequent credential recovery.
     #[cfg(feature = "test-utils")]
     pub fn with_preregistered_credential(
         self,
         register_ok: actr_protocol::register_response::RegisterOk,
     ) -> Node<Registered> {
-        self.try_with_preregistered_credential_and_resign(register_ok, None)
-            .expect("failed to derive package registration context")
+        self.try_with_preregistered_credential(register_ok)
+            .expect("failed to derive registration context")
     }
 
-    /// Fallible pre-registration path for package credentials that require a
-    /// fresh manufacturer proof on hard rebind.
+    /// Fallible pre-registration path, including package service-spec validation.
     #[cfg(feature = "test-utils")]
-    pub fn try_with_preregistered_credential_and_resign(
+    pub fn try_with_preregistered_credential(
         self,
         register_ok: actr_protocol::register_response::RegisterOk,
-        resign: Option<Arc<dyn ManufacturerAuthProvider>>,
     ) -> HyperResult<Node<Registered>> {
         let service_spec = self.derived_service_spec()?;
-        Ok(self.finish_registration(register_ok, service_spec, None, resign))
+        let context = self.registration_context(service_spec)?;
+        Ok(self.finish_registration(register_ok, context))
     }
 
     fn derived_service_spec(&self) -> HyperResult<Option<ServiceSpec>> {
@@ -1299,30 +1155,43 @@ impl Node<Attached> {
         }
     }
 
+    fn registration_context(
+        &self,
+        service_spec: Option<ServiceSpec>,
+    ) -> HyperResult<crate::lifecycle::credential_manager::RegistrationContext> {
+        use crate::lifecycle::credential_manager::RegistrationContext;
+        let attachment = self
+            .attachment
+            .as_ref()
+            .expect("Node<Attached> without attachment");
+        let config = &attachment.node.config;
+        Ok(match attachment.verified.as_ref() {
+            Some(verified) => RegistrationContext::Package {
+                request: build_package_register_request(
+                    verified,
+                    &config.realm,
+                    service_spec,
+                    config.acl.clone(),
+                ),
+            },
+            None => RegistrationContext::Linked {
+                request: build_linked_register_request(config, service_spec)?,
+            },
+        })
+    }
+
     fn finish_registration(
         mut self,
         register_ok: actr_protocol::register_response::RegisterOk,
-        service_spec: Option<ServiceSpec>,
-        manufacturer_auth: Option<&ManufacturerRegistrationAuth>,
-        resign: Option<Arc<dyn ManufacturerAuthProvider>>,
+        context: crate::lifecycle::credential_manager::RegistrationContext,
     ) -> Node<Registered> {
         let attachment = self
             .attachment
             .as_mut()
             .expect("Node<Attached> without attachment");
-        if let Some(verified) = attachment.verified.as_ref() {
-            let context = package_registration_context(
-                verified,
-                attachment.node.config.realm.realm_id,
-                service_spec,
-                attachment.node.config.acl.clone(),
-                manufacturer_auth,
-                resign,
-            );
-            attachment
-                .node
-                .set_preregistered_registration_context(context);
-        }
+        attachment
+            .node
+            .set_preregistered_registration_context(context);
         attachment.node.set_preregistered_credential(register_ok);
         Node {
             hyper: self.hyper,
@@ -1336,105 +1205,48 @@ impl Node<Attached> {
         }
     }
 
-    /// Register with AIS and optionally attach manufacturer authorization for
-    /// unpublished package registrations.
-    ///
-    /// When `resign` is `Some`, it is invoked once here to mint the initial
-    /// manufacturer proof, and is then retained in the registration context so hard
-    /// rebind can re-invoke it to mint a fresh proof (the proof's nonce is
-    /// single-use on the AIS side). Linked registration ignores it.
-    pub async fn register_with_manufacturer_auth(
-        self,
-        ais_endpoint: &str,
-        resign: Option<Arc<dyn ManufacturerAuthProvider>>,
-    ) -> HyperResult<Node<Registered>> {
-        let service_spec = self.derived_service_spec()?;
-        self.register_with_inner(ais_endpoint, service_spec, resign)
-            .await
-    }
-
-    /// Register with AIS using an explicit `service_spec`.
-    ///
-    /// This skips package-based `service_spec` derivation for
-    /// package-backed attachments. Linked attachments use the supplied
-    /// `service_spec` together with the runtime config's actor metadata.
-    /// Like [`Self::register`], this convenience method supplies no
-    /// manufacturer proof and package-backed callers must use published Path 1.
+    /// Register with Issuer using an explicit `service_spec`.
+    /// The same spec is retained for credential recovery in both attachment modes.
     pub async fn register_with(
         self,
-        ais_endpoint: &str,
+        issuer_endpoint: &str,
         service_spec: Option<ServiceSpec>,
     ) -> HyperResult<Node<Registered>> {
-        self.register_with_inner(ais_endpoint, service_spec, None)
+        self.register_with_inner(issuer_endpoint, service_spec)
             .await
     }
 
     async fn register_with_inner(
-        mut self,
-        ais_endpoint: &str,
+        self,
+        issuer_endpoint: &str,
         service_spec: Option<ServiceSpec>,
-        resign: Option<Arc<dyn ManufacturerAuthProvider>>,
     ) -> HyperResult<Node<Registered>> {
+        let context = self.registration_context(service_spec.clone())?;
         let attachment = self
             .attachment
-            .as_mut()
+            .as_ref()
             .expect("Node<Attached> without attachment");
-        let realm_id = attachment.node.config.realm.realm_id;
-        let acl = attachment.node.config.acl.clone();
-        let realm_secret = attachment.node.config.realm_secret.clone();
-
-        // Mint the initial manufacturer proof (if a re-signing provider was supplied)
-        // so the same one-shot auth feeds both the saved registration context
-        // and the bootstrap request. The provider itself is retained in the
-        // context below so hard rebind can re-invoke it for a fresh proof
-        // instead of replaying the single-use nonce.
-        let manufacturer_auth = match (&resign, attachment.verified.as_ref()) {
-            (Some(provider), Some(verified)) => Some(
-                sign_manufacturer_proof(
-                    Arc::clone(provider),
-                    realm_id,
-                    ActrType {
-                        manufacturer: verified.manifest.manufacturer.clone(),
-                        name: verified.manifest.name.clone(),
-                        version: verified.manifest.version.clone(),
-                    },
-                    verified.manifest.binary.target.clone(),
-                    verified.manifest_raw.clone(),
-                )
-                .await?,
-            ),
-            _ => None,
-        };
+        let config = &attachment.node.config;
         let register_ok = if let Some(verified) = attachment.verified.as_ref() {
-            let verified = verified.clone();
             bootstrap_credential_inner(
                 &self.hyper,
-                &verified,
+                verified,
                 CredentialBootstrapRequest {
-                    ais_endpoint,
-                    realm_id,
-                    service_spec: service_spec.clone(),
-                    acl,
-                    realm_secret: realm_secret.as_deref(),
-                    manufacturer_auth: manufacturer_auth.clone(),
+                    issuer_endpoint,
+                    realm: &config.realm,
+                    service_spec,
+                    acl: config.acl.clone(),
+                    client_key: RealmClientKey::load_for(
+                        config.realm_client_key.as_deref(),
+                        &config.realm,
+                    )?,
                 },
             )
             .await?
         } else {
-            bootstrap_linked_credential_inner(
-                &attachment.node.config,
-                ais_endpoint,
-                service_spec.clone(),
-            )
-            .await?
+            bootstrap_linked_credential_inner(config, issuer_endpoint, service_spec).await?
         };
-
-        Ok(self.finish_registration(
-            register_ok,
-            service_spec,
-            manufacturer_auth.as_ref(),
-            resign,
-        ))
+        Ok(self.finish_registration(register_ok, context))
     }
 
     /// Create a network event handle for platform callbacks. Must be called
@@ -1464,17 +1276,17 @@ impl Node<Attached> {
             .create_gated_network_event_handle(debounce_ms)
     }
 
-    /// AIS endpoint URL resolved from the attached [`RuntimeConfig`].
+    /// Issuer endpoint URL resolved from the attached [`RuntimeConfig`].
     /// Convenience accessor for callers that just drove `from_config_file`
     /// + `attach` and need the endpoint to pass into `register`.
-    pub fn ais_endpoint(&self) -> &str {
+    pub fn issuer_endpoint(&self) -> &str {
         &self
             .attachment
             .as_ref()
             .expect("Node<Attached> without attachment")
             .node
             .config
-            .ais_endpoint
+            .issuer_endpoint
     }
 }
 
@@ -1531,49 +1343,46 @@ impl Hyper {
         resolve_storage_path_for(&self.inner, manifest)
     }
 
-    /// Bootstrap credential registration with AIS.
+    /// Bootstrap credential registration with Issuer.
     ///
-    /// Hyper completes registration bootstrap on behalf of the Actor and returns the full AIS
+    /// Hyper completes registration bootstrap on behalf of the Actor and returns the full Issuer
     /// registration payload.
     ///
     /// ## Registration Logic
     ///
-    /// Package bootstrap always authenticates with the MFR-signed manifest.
-    /// Credential renewal uses the renewal token returned by AIS through
-    /// `POST /ais/renew`, not a follow-up `/register` call.
-    ///
-    /// This legacy convenience API cannot supply a fresh manufacturer proof,
-    /// so it is suitable only for published packages accepted through AIS
-    /// Path 1. Unpublished packages must use
-    /// [`Node::<Attached>::register_with_manufacturer_auth`].
+    /// Package bootstrap always authenticates with the publisher-signed manifest.
+    /// Credential renewal uses the renewal token returned by Issuer through
+    /// `POST /issuer/renew`, not a follow-up `/register` call.
     ///
     /// ## Parameters
     ///
     /// - `verified`: verified package bundle (from `verify_package`) — carries
     ///   the parsed manifest plus the raw manifest bytes and signature needed
-    ///   for phase-1 registration with AIS.
-    /// - `ais_endpoint`: AIS HTTP address, e.g. `"http://ais.example.com:8080"`
-    /// - `realm_id`: target Realm ID
+    ///   for phase-1 registration with Issuer.
+    /// - `issuer_endpoint`: Issuer HTTP address, e.g. `"http://issuer.example.com:8080"`
+    /// - `realm`: target Realm name `<realm_id>@<domain>`
     /// - `service_spec`: optional protobuf API metadata published to discovery
     /// - `acl`: optional access-control policy attached to the actor
+    /// - `client_key`: the Realm client key that signs the request's client
+    ///   proof
     pub async fn bootstrap_credential(
         &self,
         verified: &VerifiedPackage,
-        ais_endpoint: &str,
-        realm_id: u32,
+        issuer_endpoint: &str,
+        realm: &str,
         service_spec: Option<ServiceSpec>,
         acl: Option<Acl>,
+        client_key: Option<RealmClientKey>,
     ) -> HyperResult<register_response::RegisterOk> {
         bootstrap_credential_inner(
             &self.inner,
             verified,
             CredentialBootstrapRequest {
-                ais_endpoint,
-                realm_id,
+                issuer_endpoint,
+                realm,
                 service_spec,
                 acl,
-                realm_secret: None,
-                manufacturer_auth: None,
+                client_key,
             },
         )
         .await
@@ -1733,7 +1542,7 @@ async fn load_wasm_workload_inner(
                 actr_type: manifest.actr_type_str(),
                 credential: Vec::new(),
                 actor_id: Vec::new(),
-                realm_id: 0,
+                realm: String::new(),
             })
             .map_err(|e| {
                 HyperError::Runtime(format!(
@@ -1769,7 +1578,7 @@ fn load_dynclib_workload_inner(
                 actr_type: manifest.actr_type_str(),
                 credential: Vec::new(),
                 actor_id: Vec::new(),
-                realm_id: 0,
+                realm: String::new(),
             })
             .map_err(|e| {
                 HyperError::Runtime(format!(
@@ -1795,12 +1604,11 @@ fn load_dynclib_workload_inner(
 
 #[cfg(not(target_arch = "wasm32"))]
 struct CredentialBootstrapRequest<'a> {
-    ais_endpoint: &'a str,
-    realm_id: u32,
+    issuer_endpoint: &'a str,
+    realm: &'a str,
     service_spec: Option<ServiceSpec>,
     acl: Option<Acl>,
-    realm_secret: Option<&'a str>,
-    manufacturer_auth: Option<ManufacturerRegistrationAuth>,
+    client_key: Option<RealmClientKey>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1810,68 +1618,43 @@ async fn bootstrap_credential_inner(
     request: CredentialBootstrapRequest<'_>,
 ) -> HyperResult<register_response::RegisterOk> {
     let CredentialBootstrapRequest {
-        ais_endpoint,
-        realm_id,
+        issuer_endpoint,
+        realm,
         service_spec,
         acl,
-        realm_secret,
-        manufacturer_auth,
+        client_key,
     } = request;
     let manifest = &verified.manifest;
     info!(
         actr_type = manifest.actr_type_str(),
-        ais_endpoint, realm_id, "starting credential bootstrap with AIS"
+        issuer_endpoint, realm, "starting credential bootstrap with Issuer"
     );
 
     // 1. Derive and validate the opaque namespace (pure; no I/O, no database).
     // The raw identity never becomes a path component. The store is opened only
-    // AFTER the AIS registration succeeds, so a rejected identity leaves no
+    // AFTER the Issuer registration succeeds, so a rejected identity leaves no
     // database behind (issue #350 acceptance; repeated rejected identities must
     // not accumulate empty databases).
     let namespace = storage_namespace_for(manifest)?;
 
-    // 2. Build RegisterRequest and send to AIS.
-    // Package bootstrap always authenticates with manifest + MFR signature.
+    // 2. Build RegisterRequest and send to Issuer.
+    // Package bootstrap always authenticates with manifest + publisher signature.
     // (Legacy PSK renewal path removed — credential renewal now goes through
-    // the Credential Manager via POST /ais/renew.)
-    let mut ais = AisClient::new(ais_endpoint);
-    if let Some(secret) = realm_secret {
-        ais = ais.with_realm_secret(secret);
+    // the Credential Manager via POST /issuer/renew.)
+    let mut issuer = IssuerClient::new(issuer_endpoint);
+    if let Some(key) = client_key {
+        issuer = issuer.with_client_key(key);
     }
-
-    let actr_type = ActrType {
-        manufacturer: manifest.manufacturer.clone(),
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-    };
-    let realm = Realm { realm_id };
 
     info!(
         actr_type = manifest.actr_type_str(),
-        "registering with AIS using MFR manifest"
+        "registering with Issuer using publisher manifest"
     );
 
-    let (manufacturer_auth_signature, manufacturer_auth_signed_at, manufacturer_auth_nonce) =
-        manufacturer_auth_fields(manufacturer_auth.as_ref());
+    let req = build_package_register_request(verified, realm, service_spec, acl);
+    let response = issuer.register_with_manifest(req).await?;
 
-    let req = RegisterRequest {
-        actr_type,
-        realm,
-        service_spec,
-        acl,
-        service: None,
-        ws_address: None,
-        manifest_raw: Some(verified.manifest_raw.clone().into()),
-        mfr_signature: Some(verified.sig_raw.clone().into()),
-        target: Some(manifest.binary.target.clone()),
-        auth_mode: Some(RegisterAuthMode::Package as i32),
-        manufacturer_auth_signature,
-        manufacturer_auth_signed_at,
-        manufacturer_auth_nonce,
-    };
-    let response = ais.register_with_manifest(req).await?;
-
-    // 3. Process AIS response
+    // 3. Process Issuer response
     let ok = match response.result {
         Some(register_response::Result::Success(ok)) => ok,
         Some(register_response::Result::Error(e)) => {
@@ -1879,20 +1662,20 @@ async fn bootstrap_credential_inner(
                 actr_type = manifest.actr_type_str(),
                 error_code = e.code,
                 error_message = %e.message,
-                "AIS registration returned error"
+                "Issuer registration returned error"
             );
-            return Err(HyperError::AisBootstrapFailed(format!(
-                "AIS rejected registration (code={}): {}",
+            return Err(HyperError::IssuerBootstrapFailed(format!(
+                "Issuer rejected registration (code={}): {}",
                 e.code, e.message
             )));
         }
         None => {
             error!(
                 actr_type = manifest.actr_type_str(),
-                "AIS response missing result field"
+                "Issuer response missing result field"
             );
-            return Err(HyperError::AisBootstrapFailed(
-                "AIS response missing result field".to_string(),
+            return Err(HyperError::IssuerBootstrapFailed(
+                "Issuer response missing result field".to_string(),
             ));
         }
     };
@@ -1913,17 +1696,17 @@ async fn bootstrap_credential_inner(
         Arc::new(ActorStore::open_under(root, &namespace).await?)
     };
 
-    // 5. Store signing_pubkey + signing_key_id (for AisKeyCache use)
+    // 5. Store signing_pubkey + signing_key_id (for IssuerKeyCache use)
     let pubkey_bytes = ok.signing_pubkey.to_vec();
     let key_id_bytes = ok.signing_key_id.to_le_bytes().to_vec();
     store
         .batch(vec![
             KvOp::Set {
-                key: "hyper:ais:signing_pubkey".to_string(),
+                key: "hyper:issuer:signing_pubkey".to_string(),
                 value: pubkey_bytes,
             },
             KvOp::Set {
-                key: "hyper:ais:signing_key_id".to_string(),
+                key: "hyper:issuer:signing_key_id".to_string(),
                 value: key_id_bytes,
             },
         ])
@@ -1932,13 +1715,13 @@ async fn bootstrap_credential_inner(
     debug!(
         actr_type = manifest.actr_type_str(),
         signing_key_id = ok.signing_key_id,
-        "AIS signing public key persisted to ActorStore"
+        "Issuer signing public key persisted to ActorStore"
     );
 
     info!(
         actr_type = manifest.actr_type_str(),
         credential_len = ok.credential.encode_to_vec().len(),
-        "AIS credential bootstrap succeeded"
+        "Issuer credential bootstrap succeeded"
     );
 
     Ok(ok)
@@ -1947,25 +1730,55 @@ async fn bootstrap_credential_inner(
 #[cfg(not(target_arch = "wasm32"))]
 async fn bootstrap_linked_credential_inner(
     config: &actr_config::RuntimeConfig,
-    ais_endpoint: &str,
+    issuer_endpoint: &str,
     service_spec: Option<ServiceSpec>,
 ) -> HyperResult<register_response::RegisterOk> {
-    let mut ais = AisClient::new(ais_endpoint);
-    if let Some(ref secret) = config.realm_secret {
-        ais = ais.with_realm_secret(secret.clone());
+    let mut issuer = IssuerClient::new(issuer_endpoint);
+    if let Some(key) = RealmClientKey::load_for(config.realm_client_key.as_deref(), &config.realm)?
+    {
+        issuer = issuer.with_client_key(key);
     }
 
     let req = build_linked_register_request(config, service_spec)?;
-    let response = ais.register_linked(req).await?;
+    let response = issuer.register_linked(req).await?;
     match response.result {
         Some(register_response::Result::Success(ok)) => Ok(ok),
-        Some(register_response::Result::Error(e)) => Err(HyperError::AisBootstrapFailed(format!(
-            "AIS rejected registration (code={}): {}",
-            e.code, e.message
-        ))),
-        None => Err(HyperError::AisBootstrapFailed(
-            "AIS response missing result field".to_string(),
+        Some(register_response::Result::Error(e)) => {
+            Err(HyperError::IssuerBootstrapFailed(format!(
+                "Issuer rejected registration (code={}): {}",
+                e.code, e.message
+            )))
+        }
+        None => Err(HyperError::IssuerBootstrapFailed(
+            "Issuer response missing result field".to_string(),
         )),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn build_package_register_request(
+    verified: &VerifiedPackage,
+    realm: &str,
+    service_spec: Option<ServiceSpec>,
+    acl: Option<Acl>,
+) -> RegisterRequest {
+    let manifest = &verified.manifest;
+    RegisterRequest {
+        actr_type: ActrType {
+            publisher: manifest.publisher.clone(),
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+        },
+        realm: realm.to_string(),
+        service_spec,
+        acl,
+        service: None,
+        ws_address: None,
+        manifest_raw: Some(verified.manifest_raw.clone().into()),
+        publisher_signature: Some(verified.sig_raw.clone().into()),
+        target: Some(manifest.binary.target.clone()),
+        auth_mode: Some(RegisterAuthMode::Package as i32),
+        signing_public_key: Some(verified.signing_public_key.to_vec().into()),
     }
 }
 
@@ -1985,7 +1798,7 @@ fn build_linked_register_request(
 
     Ok(RegisterRequest {
         actr_type: config.actr_type().clone(),
-        realm: config.realm,
+        realm: config.realm.clone(),
         service_spec,
         acl: config.acl.clone(),
         service: None,

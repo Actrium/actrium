@@ -1,5 +1,7 @@
 # Actr 基于 webrtc-rs v0.20 的分层测试与网络验证方案
 
+> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../GLOSSARY.zh.md)「历史名称对照」。
+
 状态：Implemented（Rust T3 阶段；T4/T5/T6 仍由系统/设备门禁推进）
 
 日期：2026-08-11

@@ -29,7 +29,7 @@ use actr_hyper::{
     PayloadFieldKind, StaticTrust,
 };
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrId, ActrType, Realm, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActrId, ActrType, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use tempfile::TempDir;
 
@@ -181,9 +181,9 @@ fn runtime_config(
             license: None,
         },
         signaling_url: url::Url::parse(&server.url()).unwrap(),
-        realm: Realm { realm_id: 7 },
-        ais_endpoint: format!("http://127.0.0.1:{}/ais", server.port()),
-        realm_secret: None,
+        realm: "test7@example.com".to_string(),
+        issuer_endpoint: format!("http://127.0.0.1:{}/issuer", server.port()),
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,
@@ -210,7 +210,7 @@ fn runtime_config(
 
 fn echo_type() -> ActrType {
     ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "BarrierEcho".to_string(),
         version: "1.0.0".to_string(),
     }
@@ -242,7 +242,7 @@ async fn setup(
     gate: bool,
     declare_key: bool,
 ) -> (ActrRef, ActrRef, ActrId) {
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
 
     // Echo (responder) node with the barrier workload.
     let mut echo_cfg = HyperConfig::new(dir_b.path(), Arc::new(StaticTrust::dev_only()));
@@ -278,7 +278,7 @@ async fn setup(
         .link(BarrierWorkload { barrier, entered })
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -294,7 +294,7 @@ async fn setup(
     .await
     .unwrap();
     let caller_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "Caller".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -308,7 +308,7 @@ async fn setup(
         })
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -328,7 +328,7 @@ async fn setup_serial(
     entry_tx: tokio::sync::mpsc::UnboundedSender<tokio::sync::oneshot::Sender<()>>,
     entered: Arc<AtomicUsize>,
 ) -> (ActrRef, ActrRef, ActrId) {
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
 
     // Echo node: dispatch concurrency ON but NO conflict key declared, so every
     // request projects to the global `Serial` key.
@@ -348,7 +348,7 @@ async fn setup_serial(
         .link(GatedWorkload { entry_tx, entered })
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -364,7 +364,7 @@ async fn setup_serial(
     .await
     .unwrap();
     let caller_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "Caller".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -377,7 +377,7 @@ async fn setup_serial(
         })
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()

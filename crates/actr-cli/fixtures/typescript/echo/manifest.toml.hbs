@@ -3,7 +3,7 @@ exports = []
 
 [package]
 name = "echo-client-app"
-manufacturer = "{{MANUFACTURER}}"
+publisher = "{{PUBLISHER}}"
 description = "Actor-RTC TypeScript echo app"
 authors = []
 license = "Apache-2.0"
@@ -11,19 +11,19 @@ tags = ["dev", "service"]
 
 [dependencies]
 {{#if IS_BOTH}}
-EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
+EchoService = { actr_type = "{{PUBLISHER}}/EchoService@1.0.0" }
 {{else}}
-EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
+EchoService = { actr_type = "{{PUBLISHER}}/EchoService@1.0.0" }
 {{/if}}
 
 [system.signaling]
 url = "{{{SIGNALING_URL}}}/signaling/ws"
 
-[system.ais_endpoint]
-url = "{{{AIS_ENDPOINT_URL}}}"
+[system.issuer_endpoint]
+url = "{{{ISSUER_ENDPOINT_URL}}}"
 
 [system.deployment]
-realm_id = {{REALM_ID}}
+realm = "{{REALM}}"
 
 [system.discovery]
 visible = true
@@ -46,4 +46,4 @@ dev = "npm run dev"
 
 [[acl.rules]]
 permission = "allow"
-type = "{{MANUFACTURER}}:EchoService:1.0.0"
+type = "{{PUBLISHER}}/EchoService@1.0.0"

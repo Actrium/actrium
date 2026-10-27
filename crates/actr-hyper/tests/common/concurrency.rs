@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use actr_framework::Bytes;
-use actr_protocol::{ActrId, ActrType, Realm};
+use actr_protocol::ActrId;
 use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinHandle;
 
@@ -46,13 +46,8 @@ pub const ECHO: &str = "test/echo";
 /// is distinct (or, for equal serials, identical).
 pub fn caller(serial: u64) -> Option<ActrId> {
     Some(ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: serial,
-        r#type: ActrType {
-            manufacturer: "test".to_string(),
-            name: "fixture".to_string(),
-            version: "0.2.0".to_string(),
-        },
     })
 }
 

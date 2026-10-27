@@ -34,18 +34,26 @@ Specified → Implemented → Tested → Attested → Deployed
 | 做 Actrium 产品 / UX | [产品标记与交互](04-product.zh.md) |
 | 做验证、审计或形式化 | [保障、证明与成熟度](05-assurance.zh.md) → [形式模型](formal/model.zh.md) |
 
-术语见 [glossary.zh.md](glossary.zh.md)。
+术语见[术语表](../../../GLOSSARY.zh.md)「安全与隐私模型」一节。
+
+规范用语：
+
+- 必须 / 禁止：不满足就不符合本模型；
+- 应该 / 不应该：偏离时必须记录理由和影响；
+- 可以：不改变安全语义的可选实现。
+
+白皮书式叙述和产品文案不是额外要求。
 
 ## 与产品文档的关系
 
 Actrium v1 产品稿写 Tab / Front / 交付与验收，安全语义以本目录为准：
 
-- [安全与隐私](../product/actrium-v1/09-security-and-privacy.md)
-- [隐私标记与图汇聚](../product/actrium-v1/13-privacy-state-and-aggregation.md)
-- [隐私原语与远程证明](../product/actrium-v1/14-privacy-primitives-and-attestation.md)
+- [安全与隐私](../../../product/actrium-v1/09-security-and-privacy.zh.md)
+- [隐私标记与图汇聚](../../../product/actrium-v1/13-privacy-state-and-aggregation.zh.md)
+- [隐私原语与远程证明](../../../product/actrium-v1/14-privacy-primitives-and-attestation.zh.md)
 
 产品稿已按现行模型修订。再出现冲突时，改产品稿，不改本目录。
 
-形式证明与缺陷表见 [formal/model.zh.md](formal/model.zh.md)、[formal/defects.zh.md](formal/defects.zh.md)。机器核验：`python3 docs/security/formal/proof/check_proofs.py`。
+形式证明与缺陷表见 [formal/model.zh.md](formal/model.zh.md)、[formal/defects.zh.md](formal/defects.zh.md)。机器核验：`python3 docs/architecture/security/actrium/formal/proof/check_proofs.py`。
 
 审查过程（问答卡、决定流水、冲突、TODO、停车场）不在本仓库。本地副本位于被 git 忽略的 `internal/security-review/`。

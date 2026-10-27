@@ -19,8 +19,8 @@ RELEASE_DIR="$SCRIPT_DIR/release"
 LOG_DIR="$SCRIPT_DIR/logs/python-workload"
 RUN_DIR="$LOG_DIR/run"
 MOCK_PORT="${1:-18081}"
-REALM_ID="2368266035"
-MFR_NAME="acme"
+REALM="python-web-echo@example.com"
+PUBLISHER_NAME="acme"
 PYTHON_SERVER_READY_ATTEMPTS="${PYTHON_SERVER_READY_ATTEMPTS:-600}"
 ACTR_E2E_RUST_LOG="${ACTR_E2E_RUST_LOG:-${RUST_LOG:-info}}"
 
@@ -121,15 +121,15 @@ fi
 
 command -v wasm-pack >/dev/null 2>&1 || fail "wasm-pack not found"
 
-MFR_KEY_FILE="$RELEASE_DIR/python-web-dev-key.json"
+PUBLISHER_KEY_FILE="$RELEASE_DIR/python-web-dev-key.json"
 log_step "Generating shared development signing key..."
-"$ACTR_CMD" pkg keygen --output "$MFR_KEY_FILE" --force >/dev/null
-MFR_PUBKEY="$(python3 -c "import json; print(json.load(open('$MFR_KEY_FILE'))['public_key'])")"
+"$ACTR_CMD" pkg keygen --output "$PUBLISHER_KEY_FILE" --force >/dev/null
+PUBLISHER_PUBKEY="$(python3 -c "import json; print(json.load(open('$PUBLISHER_KEY_FILE'))['public_key'])")"
 
 log_step "Building generated Python EchoService package..."
 (
     cd "$PY_WORKLOAD_DIR"
-    ACTR_SIGNING_KEY="$MFR_KEY_FILE" PATH="$ACTR_ROOT/target/debug:$PATH" ./build.sh package
+    ACTR_SIGNING_KEY="$PUBLISHER_KEY_FILE" PATH="$ACTR_ROOT/target/debug:$PATH" ./build.sh package
 )
 PY_ACTR_PACKAGE="$PY_WORKLOAD_DIR/dist/acme-EchoService-0.2.0-wasm32-wasip2.actr"
 [[ -f "$PY_ACTR_PACKAGE" ]] || fail "missing Python package: $PY_ACTR_PACKAGE"
@@ -149,7 +149,7 @@ CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-unknown-unkn
     "$ACTR_CMD" build \
         --no-compile \
         --target wasm32-unknown-unknown \
-        --key "$MFR_KEY_FILE" \
+        --key "$PUBLISHER_KEY_FILE" \
         --output "$CLIENT_ACTR_PACKAGE"
 )
 
@@ -161,16 +161,16 @@ MOCK_PID=$!
 wait_for_log "$MOCK_LOG" "listening on 127.0.0.1:$MOCK_PORT" "mock-actrix"
 ENDPOINT="http://127.0.0.1:$MOCK_PORT"
 
-log_step "Registering realm, manufacturer, and packages..."
+log_step "Registering realm, publisher, and packages..."
 curl -fsS -X POST "$ENDPOINT/admin/realms" \
     -H 'content-type: application/json' \
-    --data "{\"id\": $REALM_ID, \"name\": \"python-web-echo\"}" >/dev/null
-curl -fsS -X POST "$ENDPOINT/admin/mfr" \
+    --data "{\"realm\": \"$REALM\"}" >/dev/null
+curl -fsS -X POST "$ENDPOINT/admin/publisher" \
     -H 'content-type: application/json' \
-    --data "{\"name\": \"$MFR_NAME\", \"pubkey_b64\": \"$MFR_PUBKEY\", \"contact\": \"dev@example.com\"}" >/dev/null
+    --data "{\"name\": \"$PUBLISHER_NAME\", \"pubkey_b64\": \"$PUBLISHER_PUBKEY\", \"contact\": \"dev@example.com\"}" >/dev/null
 
-"$ACTR_CMD" registry publish --package "$PY_ACTR_PACKAGE" --keychain "$MFR_KEY_FILE" --endpoint "$ENDPOINT"
-"$ACTR_CMD" registry publish --package "$CLIENT_ACTR_PACKAGE" --keychain "$MFR_KEY_FILE" --endpoint "$ENDPOINT"
+"$ACTR_CMD" registry publish --package "$PY_ACTR_PACKAGE" --keychain "$PUBLISHER_KEY_FILE" --endpoint "$ENDPOINT"
+"$ACTR_CMD" registry publish --package "$CLIENT_ACTR_PACKAGE" --keychain "$PUBLISHER_KEY_FILE" --endpoint "$ENDPOINT"
 
 PY_SERVER_CONFIG="$RUN_DIR/python-server-actr.toml"
 CLIENT_CONFIG="$RUN_DIR/client-actr.toml"
@@ -184,11 +184,11 @@ path = "$PY_ACTR_PACKAGE"
 [signaling]
 url = "ws://127.0.0.1:$MOCK_PORT/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:$MOCK_PORT/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:$MOCK_PORT/issuer"
 
 [deployment]
-realm_id = $REALM_ID
+realm = "$REALM"
 
 [discovery]
 visible = true
@@ -206,11 +206,11 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:echo-client-app:0.1.0"
+type = "acme/echo-client-app@0.1.0"
 
 [[trust]]
 kind = "static"
-pubkey_b64 = "$MFR_PUBKEY"
+pubkey_b64 = "$PUBLISHER_PUBKEY"
 EOF
 
 cat > "$CLIENT_CONFIG" <<EOF
@@ -222,11 +222,11 @@ path = "$CLIENT_ACTR_PACKAGE"
 [signaling]
 url = "ws://127.0.0.1:$MOCK_PORT/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:$MOCK_PORT/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:$MOCK_PORT/issuer"
 
 [deployment]
-realm_id = $REALM_ID
+realm = "$REALM"
 
 [discovery]
 visible = true
@@ -244,7 +244,7 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoService:0.2.0"
+type = "acme/EchoService@0.2.0"
 
 [web]
 port = 5173
@@ -252,7 +252,7 @@ host = "127.0.0.1"
 
 [[trust]]
 kind = "static"
-pubkey_b64 = "$MFR_PUBKEY"
+pubkey_b64 = "$PUBLISHER_PUBKEY"
 EOF
 
 log_step "Starting native Python EchoService runtime..."

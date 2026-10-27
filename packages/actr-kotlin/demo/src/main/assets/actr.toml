@@ -9,12 +9,17 @@
 [signaling]
 url = "ws://127.0.0.1:9080/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:9080/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:9080/issuer"
 
 [deployment]
-realm_id = 33554434
-realm_secret = "rs_m5bEk-i1R9mCOpj3ej1_eN80f6ukR7OS"
+realm = "demo@example.com"
+# Realm client key written by `actr realm join <invite> --issuer <url>
+# --output demo/src/main/assets/realm-client.json`; the app copies it next to
+# this file. Development only: a key bundled into the APK is shared by every
+# install, like the removed Realm secret. A real app redeems its own invite
+# on the device, one Realm client key per install.
+realm_client_key = "realm-client.json"
 
 [discovery]
 visible = true
@@ -38,12 +43,12 @@ kind = "dev_only"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoApp:0.1.0"
+type = "acme/EchoApp@0.1.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:EchoService:1.0.0"
+type = "actrium/EchoService@1.0.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:DuplexStreamService:1.0.0"
+type = "actrium/DuplexStreamService@1.0.0"

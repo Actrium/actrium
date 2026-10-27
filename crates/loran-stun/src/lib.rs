@@ -48,20 +48,25 @@ pub async fn create_stun_server_with_shutdown_and_counters(
                         if is_stun_message(packet_data) {
                             platform::recording::debug!("Received potential STUN packet from {} ({} bytes)", src_addr, len);
 
-                            // Record the STUN request
-                            if let Some(ref ctr) = counters {
-                                ctr.record_request(true, 0.0).await;
-                            }
-
-                            // Process the packet in the background to avoid blocking the receive loop
-                            let socket_clone = socket.clone();
-                            let packet_data = packet_data.to_vec();
-
-                            tokio::spawn(async move {
-                                if let Err(e) = process_packet(socket_clone, &packet_data, src_addr).await {
+                            // Process inline to provide natural backpressure. Unbounded
+                            // task-per-datagram spawning lets unauthenticated UDP traffic
+                            // exhaust memory and scheduler capacity.
+                            //
+                            // Record the request only after the parse attempt and with the
+                            // real outcome: the first-two-bits check is not proof of a valid
+                            // STUN message, so recording `success = true` before parsing let
+                            // malformed floods inflate the success metric (and, previously,
+                            // the unbounded latency buffer).
+                            let parsed_ok = match process_packet(socket.clone(), packet_data, src_addr).await {
+                                Ok(parsed_ok) => parsed_ok,
+                                Err(e) => {
                                     platform::recording::error!("Failed to process STUN packet from {}: {}", src_addr, e);
+                                    false
                                 }
-                            });
+                            };
+                            if let Some(ref ctr) = counters {
+                                ctr.record_request(parsed_ok, 0.0).await;
+                            }
                         } else {
                             platform::recording::debug!("Received non-STUN packet from {} ({} bytes), ignoring", src_addr, len);
                         }
@@ -97,7 +102,12 @@ pub fn is_stun_message(data: &[u8]) -> bool {
 /// Processes a potential STUN packet.
 /// If it's a BINDING_REQUEST, it sends a BINDING_SUCCESS response.
 /// Other STUN message types are ignored.
-pub async fn process_packet(socket: Arc<UdpSocket>, data: &[u8], src: SocketAddr) -> Result<()> {
+///
+/// Returns `Ok(true)` when the datagram actually decoded as a STUN message and
+/// `Ok(false)` when it was malformed (the first-two-bits heuristic passed but
+/// the body failed to parse). Callers use this to record metrics by real
+/// outcome rather than treating every heuristic hit as a success.
+pub async fn process_packet(socket: Arc<UdpSocket>, data: &[u8], src: SocketAddr) -> Result<bool> {
     let mut msg = Message::new();
     // The `write` method decodes a message from a byte slice.
     if let Err(e) = msg.write(data) {
@@ -109,7 +119,7 @@ pub async fn process_packet(socket: Arc<UdpSocket>, data: &[u8], src: SocketAddr
             e,
             data.len()
         );
-        return Ok(());
+        return Ok(false);
     }
 
     if msg.typ == BINDING_REQUEST {
@@ -129,7 +139,7 @@ pub async fn process_packet(socket: Arc<UdpSocket>, data: &[u8], src: SocketAddr
         );
     }
 
-    Ok(())
+    Ok(true)
 }
 
 async fn handle_binding_request(
@@ -298,6 +308,72 @@ mod tests {
         // Wait for server to shut down
         let _ = timeout(Duration::from_secs(1), server_handle).await??;
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn malformed_udp_burst_does_not_starve_binding_requests() -> Result<()> {
+        use tokio::sync::broadcast;
+
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        let server_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+        let server_addr = server_socket.local_addr()?;
+        let server_handle = tokio::spawn(create_stun_server_with_shutdown(
+            Arc::clone(&server_socket),
+            shutdown_rx,
+        ));
+
+        let abuse_socket = UdpSocket::bind("127.0.0.1:0").await?;
+        let abuse_handle = tokio::spawn(async move {
+            for index in 0..4_096 {
+                let mut packet = [0_u8; 32];
+                packet[0] = if index % 2 == 0 { 0x00 } else { 0x40 };
+                abuse_socket.send_to(&packet, server_addr).await?;
+                if index % 128 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+            Ok::<(), std::io::Error>(())
+        });
+
+        let client_socket = UdpSocket::bind("127.0.0.1:0").await?;
+        let client_addr = client_socket.local_addr()?;
+        let mut response_buffer = [0_u8; 1_024];
+        let mut received = None;
+
+        // UDP may legitimately drop packets under pressure, so retry the valid
+        // RFC 5389 request while the malformed burst is in flight.
+        for _ in 0..20 {
+            let mut request = Message::new();
+            request.build(&[Box::<TransactionId>::default(), Box::new(BINDING_REQUEST)])?;
+            client_socket.send_to(&request.raw, server_addr).await?;
+
+            if let Ok(Ok((length, source))) = timeout(
+                Duration::from_millis(100),
+                client_socket.recv_from(&mut response_buffer),
+            )
+            .await
+            {
+                let mut response = Message::new();
+                response.write(&response_buffer[..length])?;
+                received = Some((request, response, source));
+                break;
+            }
+        }
+
+        abuse_handle.await??;
+        let (request, response, source) =
+            received.expect("valid STUN Binding request must not be starved");
+        assert_eq!(source, server_addr);
+        assert_eq!(response.typ, BINDING_SUCCESS);
+        assert_eq!(response.transaction_id, request.transaction_id);
+        let mut mapped = XorMappedAddress::default();
+        mapped.get_from(&response)?;
+        assert_eq!(mapped.ip, client_addr.ip());
+        assert_eq!(mapped.port, client_addr.port());
+
+        let _ = shutdown_tx.send(());
+        timeout(Duration::from_secs(1), server_handle).await???;
         Ok(())
     }
 }

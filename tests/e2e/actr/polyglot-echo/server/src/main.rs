@@ -1,6 +1,6 @@
 //! polyglot-echo streaming server — linked workload binary.
 //!
-//! Registers as `polyglot:EchoStreamService:1.0.0` under mock-actrix and
+//! Registers as `polyglot/EchoStreamService@1.0.0` under mock-actrix and
 //! serves two control RPCs:
 //!
 //! - `EchoStreamService.StartServerStream`: push N DataChunks to the
@@ -263,16 +263,16 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("failed to load runtime config {}", runtime_toml.display()))?
         .with_actor_type(manifest.package.actr_type.clone());
-    let ais_endpoint = init.runtime_config().ais_endpoint.to_string();
+    let issuer_endpoint = init.runtime_config().issuer_endpoint.to_string();
 
     let attached = init
         .link(StreamServerWorkload)
         .await
         .context("failed to link stream server workload")?;
     let registered = attached
-        .register(&ais_endpoint)
+        .register(&issuer_endpoint)
         .await
-        .context("failed to register with AIS")?;
+        .context("failed to register with Issuer")?;
     let actr_ref = registered.start().await.context("failed to start node")?;
 
     info!(actor_id = ?actr_ref.actor_id(), "stream server registered and ready");

@@ -10,7 +10,7 @@ is required.
 
 ## What It Does
 
-- Exports `acme:EchoService:0.2.0`.
+- Exports `acme/EchoService@0.2.0`.
 - Handles `echo.EchoService.Echo`.
 - Exercises DataChunk authoring by handling `PrepareStream` / `ReleaseStream`
   and using `registerStream`, `sendDataChunk`, and `unregisterStream`.

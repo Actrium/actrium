@@ -3,39 +3,37 @@
 //! These tests treat the mock as an opaque black box (HTTP/WS client driving
 //! it) and make sure it speaks the wire format expected by `actr-hyper`.
 
-use actr_hyper::{AisClient, MfrCertCache};
+use actr_hyper::{IssuerClient, PublisherCertCache};
 use actr_mock_actrix::MockActrixServer;
 use actr_protocol::prost::Message as _;
-use actr_protocol::{ActrType, Realm, RegisterAuthMode, RegisterRequest, register_response};
+use actr_protocol::{ActrType, RegisterAuthMode, RegisterRequest, register_response};
 use base64::Engine;
 use ed25519_dalek::SigningKey;
 
 fn test_register_request() -> RegisterRequest {
     RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "test-mfr".into(),
+            publisher: "test-publisher".into(),
             name: "TestSvc".into(),
             version: "0.1.0".into(),
         },
-        realm: Realm { realm_id: 42 },
+        realm: "test42@example.com".to_string(),
         service_spec: None,
         acl: None,
         service: None,
         ws_address: None,
         manifest_raw: Some(b"manifest".to_vec().into()),
-        mfr_signature: Some(vec![0u8; 64].into()),
+        publisher_signature: Some(vec![0u8; 64].into()),
         target: Some("wasm32-wasip2".into()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
+        signing_public_key: None,
     }
 }
 
 #[tokio::test]
 async fn http_register_returns_valid_protobuf() {
     let server = MockActrixServer::start().await.unwrap();
-    let client = AisClient::new(server.http_url());
+    let client = IssuerClient::new(server.http_url());
     let resp = client
         .register_with_manifest(test_register_request())
         .await
@@ -46,28 +44,27 @@ async fn http_register_returns_valid_protobuf() {
         other => panic!("expected Success, got {other:?}"),
     };
 
-    // Sanity check: allocated actr_id + credential signed by the mock's AIS key.
-    assert_eq!(ok.actr_id.r#type.manufacturer, "test-mfr");
-    assert_eq!(ok.actr_id.realm.realm_id, 42);
+    // Sanity check: allocated actr_id + credential signed by the mock's Issuer key.
+    assert_eq!(ok.actr_id.realm, "test42@example.com");
     assert!(ok.actr_id.serial_number > 0);
     assert_eq!(ok.credential.key_id, 1);
     assert_eq!(
         ok.signing_pubkey.as_ref(),
-        server.ais_signing_key().verifying_key().as_bytes()
+        server.issuer_signing_key().verifying_key().as_bytes()
     );
     assert!(ok.renewal_token.is_some());
 }
 
 #[tokio::test]
-async fn http_register_also_works_under_ais_prefix() {
+async fn http_register_also_works_under_issuer_prefix() {
     let server = MockActrixServer::start().await.unwrap();
-    // Configs in the wild use ais_endpoint = "http://host:port/ais" — make
-    // sure AisClient's `{endpoint}/register` still lands on the mock.
-    let client = AisClient::new(format!("{}/ais", server.http_url()));
+    // Configs in the wild use issuer_endpoint = "http://host:port/issuer" — make
+    // sure IssuerClient's `{endpoint}/register` still lands on the mock.
+    let client = IssuerClient::new(format!("{}/issuer", server.http_url()));
     let resp = client
         .register_with_manifest(test_register_request())
         .await
-        .expect("register via /ais prefix should succeed");
+        .expect("register via /issuer prefix should succeed");
     assert!(matches!(
         resp.result,
         Some(register_response::Result::Success(_))
@@ -75,17 +72,17 @@ async fn http_register_also_works_under_ais_prefix() {
 }
 
 #[tokio::test]
-async fn mfr_verifying_key_roundtrip_via_mfr_cert_cache() {
+async fn publisher_verifying_key_roundtrip_via_publisher_cert_cache() {
     let server = MockActrixServer::start().await.unwrap();
 
-    // Seed an MFR; the verifying key we register here is what the cache must
+    // Seed an Publisher Registry; the verifying key we register here is what the cache must
     // return.
     let signing_key = SigningKey::from_bytes(&[7u8; 32]);
     let verifying_key = signing_key.verifying_key();
     let key_id = actr_pack::compute_key_id(&verifying_key.to_bytes());
-    server.add_mfr("acme", verifying_key).await;
+    server.add_publisher("acme", verifying_key).await;
 
-    let cache = MfrCertCache::new(server.http_url());
+    let cache = PublisherCertCache::new(server.http_url());
     let fetched = cache.get_or_fetch("acme", Some(&key_id)).await.unwrap();
     assert_eq!(fetched.to_bytes(), verifying_key.to_bytes());
 
@@ -97,16 +94,19 @@ async fn mfr_verifying_key_roundtrip_via_mfr_cert_cache() {
 }
 
 #[tokio::test]
-async fn mfr_verifying_key_404_for_unregistered_mfr() {
+async fn publisher_verifying_key_404_for_unregistered_publisher() {
     let server = MockActrixServer::start().await.unwrap();
 
-    let url = format!("{}/mfr/ghost/verifying_key", server.http_url());
+    let url = format!(
+        "{}/registry/publishers/ghost/verifying-key",
+        server.http_url()
+    );
     let status = reqwest::get(&url).await.unwrap().status();
     assert_eq!(status, 404);
 }
 
 #[tokio::test]
-async fn admin_mfr_seeds_verifying_key() {
+async fn admin_publisher_seeds_verifying_key() {
     let server = MockActrixServer::start().await.unwrap();
 
     let signing_key = SigningKey::from_bytes(&[11u8; 32]);
@@ -115,7 +115,7 @@ async fn admin_mfr_seeds_verifying_key() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/admin/mfr", server.http_url()))
+        .post(format!("{}/admin/publisher", server.http_url()))
         .json(&serde_json::json!({
             "name": "seeded",
             "pubkey_b64": pubkey_b64,
@@ -124,9 +124,9 @@ async fn admin_mfr_seeds_verifying_key() {
         .send()
         .await
         .unwrap();
-    assert!(resp.status().is_success(), "admin/mfr should succeed");
+    assert!(resp.status().is_success(), "admin/publisher should succeed");
 
-    let cache = MfrCertCache::new(server.http_url());
+    let cache = PublisherCertCache::new(server.http_url());
     let fetched = cache.get_or_fetch("seeded", None).await.unwrap();
     assert_eq!(fetched.to_bytes(), signing_key.verifying_key().to_bytes());
 }
@@ -138,7 +138,7 @@ async fn admin_realm_and_state_endpoints() {
     let client = reqwest::Client::new();
     client
         .post(format!("{}/admin/realms", server.http_url()))
-        .json(&serde_json::json!({ "id": 99, "name": "admin-seeded" }))
+        .json(&serde_json::json!({ "realm": "admin-seeded@example.com" }))
         .send()
         .await
         .unwrap()
@@ -154,7 +154,11 @@ async fn admin_realm_and_state_endpoints() {
         .await
         .unwrap();
     let realms = snapshot["realms"].as_array().unwrap();
-    assert!(realms.iter().any(|v| v.as_u64() == Some(99)));
+    assert!(
+        realms
+            .iter()
+            .any(|v| v.as_str() == Some("admin-seeded@example.com"))
+    );
 }
 
 #[tokio::test]
@@ -165,8 +169,8 @@ async fn publish_flow_via_nonce_and_publish() {
 
     // Step 1: get a nonce.
     let nonce_resp: serde_json::Value = client
-        .post(format!("{}/mfr/pkg/nonce", server.http_url()))
-        .json(&serde_json::json!({ "manufacturer": "acme" }))
+        .post(format!("{}/registry/packages/nonce", server.http_url()))
+        .json(&serde_json::json!({ "publisher": "apps.example.com" }))
         .send()
         .await
         .unwrap()
@@ -177,9 +181,9 @@ async fn publish_flow_via_nonce_and_publish() {
 
     // Step 2: publish with that nonce.
     let publish: serde_json::Value = client
-        .post(format!("{}/mfr/pkg/publish", server.http_url()))
+        .post(format!("{}/registry/packages/publish", server.http_url()))
         .json(&serde_json::json!({
-            "manufacturer": "acme",
+            "publisher": "apps.example.com",
             "name": "EchoSvc",
             "version": "0.1.0",
             "target": "wasm32-wasip2",
@@ -195,14 +199,14 @@ async fn publish_flow_via_nonce_and_publish() {
         .json()
         .await
         .unwrap();
-    assert_eq!(publish["type_str"], "acme:EchoSvc:0.1.0");
+    assert_eq!(publish["type_str"], "apps.example.com/EchoSvc@0.1.0");
     assert_eq!(publish["status"], "active");
 
     // Step 3: same nonce cannot be reused.
     let reuse = client
-        .post(format!("{}/mfr/pkg/publish", server.http_url()))
+        .post(format!("{}/registry/packages/publish", server.http_url()))
         .json(&serde_json::json!({
-            "manufacturer": "acme",
+            "publisher": "apps.example.com",
             "name": "EchoSvc",
             "version": "0.1.0",
             "target": "wasm32-wasip2",
@@ -225,7 +229,7 @@ async fn mock_renew_allows_consecutive_soft_renewals() {
     };
 
     let server = MockActrixServer::start().await.unwrap();
-    let client = AisClient::new(server.http_url());
+    let client = IssuerClient::new(server.http_url());
     let resp = client
         .register_with_manifest(test_register_request())
         .await

@@ -16,17 +16,17 @@ use rand::RngCore;
 /// KEK (Key Encryption Key) source
 #[derive(Debug, Clone)]
 pub enum KekSource {
-    /// Read KEK directly from configuration file
+    /// Read KEK directly from the configuration file
     Direct(String),
-    /// Read KEK from environment variable
+    /// Read KEK from an environment variable
     Environment(String),
-    /// Read KEK from file path
+    /// Read KEK from a file path
     File(String),
 }
 
 /// Key encryptor
 ///
-/// Encrypts/decrypts private keys using AES-256-GCM
+/// Uses AES-256-GCM to encrypt/decrypt private keys
 /// Encryption format: base64(nonce[12] || ciphertext || tag[16])
 #[derive(Clone)]
 pub struct KeyEncryptor {
@@ -42,7 +42,7 @@ impl std::fmt::Debug for KeyEncryptor {
 }
 
 impl KeyEncryptor {
-    /// Create a no-encryption encryptor (compatibility mode)
+    /// Create an encryptor with no encryption (compatibility mode)
     pub fn no_encryption() -> Self {
         crate::recording::debug!("Creating KeyEncryptor in no-encryption mode");
         Self { cipher: None }
@@ -76,9 +76,9 @@ impl KeyEncryptor {
 
     /// Create an encryptor from a KEK string
     ///
-    /// KEK can be:
-    /// - 64-character hex string (32 bytes)
-    /// - 44-character Base64 string (32 bytes)
+    /// The KEK can be:
+    /// - A 64-character hex string (32 bytes)
+    /// - A 44-character Base64 string (32 bytes)
     pub fn from_kek(kek: &str) -> SignerResult<Self> {
         let kek = kek.trim();
 
@@ -116,20 +116,20 @@ impl KeyEncryptor {
 
     /// Encrypt a private key
     ///
-    /// If no KEK is configured, returns the original private key as-is (backward compatibility)
-    /// Otherwise, encrypts using AES-256-GCM
+    /// If no KEK is configured, returns the original private key as-is (backward compatible)
+    /// Otherwise encrypts using AES-256-GCM
     ///
     /// Encryption format: base64(nonce[12] || ciphertext || tag[16])
     pub fn encrypt(&self, secret_key: &str) -> SignerResult<String> {
         let cipher = match &self.cipher {
             Some(c) => c,
             None => {
-                // No-encryption mode, return plaintext directly
+                // No-encryption mode, return the original text directly
                 return Ok(secret_key.to_string());
             }
         };
 
-        // Generate random nonce (12 bytes)
+        // Generate a random nonce (12 bytes)
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
@@ -150,13 +150,13 @@ impl KeyEncryptor {
 
     /// Decrypt a private key
     ///
-    /// If no KEK is configured, returns the original data as-is (backward compatibility)
-    /// Otherwise, attempts Base64 decoding and AES-256-GCM decryption
+    /// If no KEK is configured, returns the original data as-is (backward compatible)
+    /// Otherwise attempts Base64 decoding and decryption with AES-256-GCM
     pub fn decrypt(&self, encrypted_key: &str) -> SignerResult<String> {
         let cipher = match &self.cipher {
             Some(c) => c,
             None => {
-                // No-encryption mode, return plaintext directly
+                // No-encryption mode, return the original text directly
                 return Ok(encrypted_key.to_string());
             }
         };
@@ -227,17 +227,17 @@ mod tests {
         let original = "my-secret-private-key-base64-encoded";
         let encrypted = encryptor.encrypt(original).unwrap();
 
-        // After encryption, should differ from original
+        // Encrypted result should differ
         assert_ne!(encrypted, original);
 
-        // After decryption, should match original
+        // Decrypted result should match
         let decrypted = encryptor.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted, original);
     }
 
     #[test]
     fn test_encryption_decryption_base64_kek() {
-        // Generate a 32-byte key and encode as Base64
+        // Generate a 32-byte key and encode it as Base64
         let mut key = [0u8; 32];
         OsRng.fill_bytes(&mut key);
         let kek_b64 = BASE64_STANDARD.encode(key);
@@ -278,7 +278,7 @@ mod tests {
         let original = "secret-data";
         let encrypted = encryptor1.encrypt(original).unwrap();
 
-        // Attempt to decrypt with a different KEK
+        // Attempt decryption with a different KEK
         let kek2 = KeyEncryptor::generate_kek();
         let encryptor2 = KeyEncryptor::from_kek(&kek2).unwrap();
 

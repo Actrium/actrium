@@ -1,7 +1,7 @@
-format = "actr-package/1"
+format = "actr-package/2"
 
 [actor]
-manufacturer = "actrium"
+publisher = "actrium"
 name = "counter"
 version = "1.0.0"
 

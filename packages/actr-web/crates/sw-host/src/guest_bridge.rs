@@ -163,13 +163,12 @@ impl Drop for DispatchCtxGuard {
 
 /// Parse a WIT `actr-id` record (as a JS object) into the protobuf
 /// `ActrId`. The JS caller builds this from the WBG guest's `actrIdToJs` shape
-/// — `{ realm: { realmId }, serialNumber, type: { manufacturer, name, version } }`
-/// — and passes it through to Rust.
+/// — `{ realm, serialNumber }`, where `realm` is the Realm name — and passes
+/// it through to Rust.
 fn parse_actr_id(value: &JsValue) -> Result<ActrId, JsValue> {
-    let realm = js_sys::Reflect::get(value, &JsValue::from_str("realm"))?;
-    let realm_id = js_sys::Reflect::get(&realm, &JsValue::from_str("realmId"))?
-        .as_f64()
-        .ok_or_else(|| JsValue::from_str("realm.realmId not a number"))? as u32;
+    let realm = js_sys::Reflect::get(value, &JsValue::from_str("realm"))?
+        .as_string()
+        .ok_or_else(|| JsValue::from_str("realm not a string"))?;
 
     let serial_number = js_sys::Reflect::get(value, &JsValue::from_str("serialNumber"))?;
     let serial_number = if let Some(f) = serial_number.as_f64() {
@@ -183,69 +182,24 @@ fn parse_actr_id(value: &JsValue) -> Result<ActrId, JsValue> {
             .map_err(|e| JsValue::from_str(&format!("serialNumber parse: {e}")))?
     };
 
-    // `type` collides with the WIT escape (`%type`); the WBG guest emits plain `type`
-    // on the JS object. Probe both for robustness.
-    let ty = js_sys::Reflect::get(value, &JsValue::from_str("type"))?;
-    let ty = if ty.is_undefined() {
-        js_sys::Reflect::get(value, &JsValue::from_str("%type"))?
-    } else {
-        ty
-    };
-    let manufacturer = js_sys::Reflect::get(&ty, &JsValue::from_str("manufacturer"))?
-        .as_string()
-        .ok_or_else(|| JsValue::from_str("type.manufacturer missing"))?;
-    let name = js_sys::Reflect::get(&ty, &JsValue::from_str("name"))?
-        .as_string()
-        .ok_or_else(|| JsValue::from_str("type.name missing"))?;
-    let version = js_sys::Reflect::get(&ty, &JsValue::from_str("version"))?
-        .as_string()
-        .ok_or_else(|| JsValue::from_str("type.version missing"))?;
-
     Ok(ActrId {
-        realm: actr_protocol::Realm { realm_id },
+        realm,
         serial_number,
-        r#type: ActrType {
-            manufacturer,
-            name,
-            version,
-        },
     })
 }
 
 /// Serialise `ActrId` into the JS-object shape the WBG guest expects. Mirror of
 /// [`parse_actr_id`].
 fn actr_id_to_js(id: &ActrId) -> JsValue {
-    let realm_obj = js_sys::Object::new();
-    let _ = js_sys::Reflect::set(
-        &realm_obj,
-        &JsValue::from_str("realmId"),
-        &JsValue::from_f64(id.realm.realm_id as f64),
-    );
-
-    let type_obj = js_sys::Object::new();
-    let t = &id.r#type;
-    let _ = js_sys::Reflect::set(
-        &type_obj,
-        &JsValue::from_str("manufacturer"),
-        &JsValue::from_str(&t.manufacturer),
-    );
-    let _ = js_sys::Reflect::set(
-        &type_obj,
-        &JsValue::from_str("name"),
-        &JsValue::from_str(&t.name),
-    );
-    let _ = js_sys::Reflect::set(
-        &type_obj,
-        &JsValue::from_str("version"),
-        &JsValue::from_str(&t.version),
-    );
-
     let obj = js_sys::Object::new();
-    let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("realm"), &realm_obj);
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &JsValue::from_str("realm"),
+        &JsValue::from_str(&id.realm),
+    );
     // Use `BigInt` for serial-number to match the guest's `bigint` u64 representation.
     let serial = js_sys::BigInt::from(id.serial_number);
     let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("serialNumber"), &serial);
-    let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("type"), &type_obj);
     obj.into()
 }
 
@@ -271,9 +225,9 @@ fn parse_dest(value: &JsValue) -> Result<Dest, JsValue> {
 /// Parse a WIT `actr-type` record JS object.
 fn parse_actr_type(value: &JsValue) -> Result<ActrType, JsValue> {
     Ok(ActrType {
-        manufacturer: js_sys::Reflect::get(value, &JsValue::from_str("manufacturer"))?
+        publisher: js_sys::Reflect::get(value, &JsValue::from_str("publisher"))?
             .as_string()
-            .ok_or_else(|| JsValue::from_str("manufacturer missing"))?,
+            .ok_or_else(|| JsValue::from_str("publisher missing"))?,
         name: js_sys::Reflect::get(value, &JsValue::from_str("name"))?
             .as_string()
             .ok_or_else(|| JsValue::from_str("name missing"))?,
@@ -287,8 +241,8 @@ fn actr_type_to_js(actr_type: &ActrType) -> JsValue {
     let value = js_sys::Object::new();
     let _ = js_sys::Reflect::set(
         &value,
-        &JsValue::from_str("manufacturer"),
-        &JsValue::from_str(&actr_type.manufacturer),
+        &JsValue::from_str("publisher"),
+        &JsValue::from_str(&actr_type.publisher),
     );
     let _ = js_sys::Reflect::set(
         &value,

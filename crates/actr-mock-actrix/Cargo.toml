@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Mock actrix server (WS signaling + HTTP AIS + MFR registry) for Actor-RTC integration tests"
+description = "Mock actrix server (WS signaling + HTTP Issuer + Publisher Registry) for Actor-RTC integration tests"
 
 [[bin]]
 name = "mock-actrix"

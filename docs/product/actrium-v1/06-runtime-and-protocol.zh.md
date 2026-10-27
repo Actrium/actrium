@@ -6,7 +6,7 @@
 flowchart TB
     subgraph Shell["Actrium Shell（受信）"]
         TRM["Tab Runtime Manager"]
-        PR["Package Resolver / Verified Cache"]
+        PR["Verified Package Cache"]
         PM["Permission Manager"]
         RM["Realm & Identity Manager"]
         SM["Service Manager"]
@@ -22,7 +22,7 @@ flowchart TB
         NW --> CB
     end
 
-    subgraph Service["Primary Service Actor"]
+    subgraph Service["Service"]
         SW["Signed WASM Service Workload"]
         SB["Service Host Broker"]
         WS["Workspace Capability"]
@@ -35,7 +35,7 @@ flowchart TB
     PM --> CB
     RM --> NW
     SM --> Service
-    CB -->|"Typed PrimaryService capability"| SW
+    CB -->|"Typed Service capability"| SW
 ```
 
 ## 2. Front Actor
@@ -48,22 +48,21 @@ Front 使用 Actr linked/native workload：
 - Publisher package 中不携带；
 - 每个 resident app Tab 创建一个逻辑 Front Actor 实例；
 - 负责 Actor 注册、身份、连接、会话、Keel Engine 和 Host capability；
-- Realm credential 只能证明 Actor key、ActorId、ActorType 与 issuer claims，不能单独证明实际运行代码；
-- Service 必须把 Front 当作不受信客户端，独立实施 principal、ACL、业务命令和 Workspace 授权。
+- Actor credential 只能证明 Actor key、ActorId、Actor 类型与 issuer claims，不能单独证明对端实际运行的代码（应用如何应对见[应用开发建议](app-development-guidance.zh.md)）。
 
-“Native workload”在这里表示 Host 由平台原生提供，不表示 Guest 可以提供 native code。
+「Native workload」在这里表示 Actr Host 由平台原生提供，不表示 Guest 可以提供 native code。
 
 ### 2.2 Front Actor 类型
 
-Front 的 ActorType 是 Actrium 系统类型，例如：
+Front 的 Actor 类型是 Actrium 系统类型，例如：
 
 ```text
-actrium:actrium-front:1.0.0
+actrium/actrium-front@1.0.0
 ```
 
-它描述 Host runtime，不伪装成 Program 的 Service ActrType。Attach handshake 由 Host 额外声明：
+它描述 Host runtime，不伪装成 Program 的 Service ActrType。Attach handshake 由 Actr Host 额外声明：
 
-- Program Release coordinate；
+- Program Release；
 - package digest；
 - Guest digest；
 - Front Host API；
@@ -71,9 +70,9 @@ actrium:actrium-front:1.0.0
 - protocol fingerprint；
 - local tab session nonce。
 
-这些字段由正常 Actrium Host 从已验证 package 构造，Guest 无法覆盖；但对远端 Service 而言它们仍是客户端声明，只用于兼容性协商，不能替代业务授权或远程 attestation。
+这些字段由 Actrium Host 从已验证 package 构造，Guest 无法覆盖；对远端而言它们是客户端声明，用于兼容性协商。
 
-受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential。若 Service policy 要求“官方 Actrium runtime”，Attach 必须验证该证明；没有证明时不得假定 ActorType 等于真实运行时。
+平台提供可选的远端证明：受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential，供需要的 Service 验证。
 
 ### 2.3 Front 生命周期
 
@@ -97,7 +96,7 @@ Allocated
 - capability 在 Guest 执行前完成；
 - close/crash 先撤销 session capability，再销毁 Engine；
 - background `pause` 不等于 Service detach；
-- 内存回收后的 Front 可以从 URI 和 Service 状态重建。
+- 内存回收后的 Front 可以从 Realm 链接和 Service 状态重建。
 
 ## 3. Keel v1 基线
 
@@ -123,9 +122,9 @@ v1 不允许 Keel 自动选择 JSC/Hermes/QuickJS：
 - 必须实现并启用 interrupt handler 硬超时；
 - 必须把 per-Guest heap limit 真正传入每个 QuickJS runtime；
 - 每个 Tab 使用独立 runtime/context；
-- 每个 Guest 在 Host 可中止的专用执行线程/worker 上运行，UI 只接收经过 schema 和配额检查的 render ops；
+- 每个 Guest 在 Actr Host 可中止的专用执行线程/worker 上运行，UI 只接收经过 schema 和配额检查的 render ops；
 - 销毁时清理 timer、callback、listener 和 remote ref；
-- provider 变化视为安全基线变更，需要版本和测试。
+- JS 引擎变化视为安全基线变更，需要版本和测试。
 
 固定 QuickJS 是为了让安全语义跨平台一致，不代表 QuickJS 是 OS 进程隔离。
 
@@ -145,7 +144,7 @@ v1 不宣称：
 
 - 浏览器 renderer 级独立进程；
 - 内核边界；
-- QuickJS/C++ 引擎内存安全漏洞无法影响 Host；
+- QuickJS/C++ 引擎内存安全漏洞无法影响 Actr Host；
 - Guest 卡死永远不会影响同进程调度。
 
 高风险 Publisher 的长期目标是：
@@ -154,9 +153,9 @@ v1 不宣称：
 - Windows AppContainer/helper process；
 - Android isolatedProcess；
 - iOS 可行范围内的独立 extension/helper 或更强 WASM runtime；
-- 可由 Host 强制 terminate 的 worker。
+- 可由 Actr Host 强制 terminate 的 worker。
 
-## 4. Actrium Safe Component Registry
+## 4. Actrium Component Registry
 
 Actrium 不能直接把通用 Keel `DefaultComponents` 全量暴露给不受信 Guest。
 
@@ -176,7 +175,7 @@ Actrium 不能直接把通用 Keel `DefaultComponents` 全量暴露给不受信 
 - `Image` 默认只接受 package asset id；
 - 远端 Image 走显式 `host:net` capability 和域名 allowlist；
 - Guest 不得自带任意 HTTP headers；
-- `WebView` 不进入默认 registry；
+- `WebView` 不进入默认 Actrium Component Registry；
 - 外链、Modal、StatusBar、文件选择和系统分享必须通过显式 capability；
 - v1 默认禁用通用字符串 RemoteRef，仅开放类型化方法。
 
@@ -206,12 +205,12 @@ named event
 
 不把跨边界函数 subscription、任意 callback 或通用 RemoteRef 作为长期公共协议。
 
-### 5.2 Primary Service capability
+### 5.2 Service capability
 
 Guest 获得的唯一 Actor 入口：
 
 ```typescript
-interface PrimaryService {
+interface Service {
   call<Route extends CallRoute>(
     route: Route,
     input: InputOf<Route>
@@ -229,7 +228,7 @@ interface PrimaryService {
 }
 ```
 
-Host 在内部固定 target 为当前 Service ActorId。Guest 不可传 target ActorId。
+Actr Host 在内部固定 target 为当前 Service ActorId。Guest 不可传 target ActorId。
 
 ### 5.3 其他 Front capability
 
@@ -257,24 +256,24 @@ Host 在内部固定 target 为当前 Service ActorId。Guest 不可传 target A
 6. rate/resource limit；
 7. audit policy。
 
-## 6. Service Actor
+## 6. Service
 
 ### 6.1 主 façade
 
-Primary Service：
+Service：
 
 - 是 Front 唯一业务入口；
 - 验证 Attach session；
 - 持有 Workspace；
 - 将 Guest 意图转成业务命令；
 - 负责幂等、授权、审计和并发；
-- 可以调用或管理辅助 Actor。
+- 可以调用或管理 Realm 内的其他 Actor。
 
 前台简化不限制后台拓扑：
 
 ```text
 Front
-  → Primary Service
+  → Service
       ├── Index Actor
       ├── Sync Actor
       ├── Media Actor
@@ -298,12 +297,12 @@ Service workload 的依赖和网络能力必须在 package manifest 中声明。
 
 ### 6.3 同 Realm 要求
 
-v1 要求 Front 和 Primary Service 在同一 Realm：
+Realm 对应一个应用实例，因此 Front 与 Service 天然在同一 Realm；Service 编排的其他 Actor 也在该 Realm 内：
 
-- Front 在 Attach 前取得该 Realm membership；
-- Realm ACL 决定 Front type 能否连接 Service type；
-- Service 再进行用户/实例级授权；
-- 跨 Realm调用由 Service 后台处理，Front 不直接联邦。
+- Front 在 Attach 前取得该实例的 Realm membership（通常经 Realm 邀请加入）；
+- 连接 ACL 决定 Front type 能否连接 Service type；
+- 类型发现只在本 Realm（本实例的 Actor）内进行，Front 也按包的 Actor 类型找到 Service；
+- 跨实例（跨 Realm）调用由 Service 后台处理：Service 的宿主按目标 Realm 的加入策略在该 Realm 取得客户端身份；Front 不直接联邦，v1 没有 federation。
 
 这显著缩小信任和错误面。
 
@@ -335,7 +334,7 @@ actrium.session.v1.Takeover
 actrium.session.v1.GetStatus
 ```
 
-`ActorAssurance`、无根图和 `ApplicationAssurance` 使用 `actrium.privacy.v1.*` 系统协议，见 [13](13-privacy-state-and-aggregation.md)。语义以 [docs/security](../../security/README.zh.md) 为准。
+`ActorAssurance`、无根图和 `ApplicationAssurance` 使用 `actrium.privacy.v1.*` 系统协议，见 [13](13-privacy-state-and-aggregation.md)。语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。
 
 ### 7.1 AttachRequest
 
@@ -382,10 +381,10 @@ actrium.session.v1.GetStatus
     "displayName": "Team Notes",
     "mode": "read-write"
   },
-  "effectiveCapabilities": ["primary-service", "host:clipboard.write"],
+  "effectiveCapabilities": ["service", "host:clipboard.write"],
   "privacy": {
-    "actorStateId": "…",
-    "applicationStateId": "…",
+    "actorStateDigest": "…",
+    "applicationStateDigest": "…",
     "assuranceDigest": "sha256:...",
     "expiresAt": "2026-07-29T12:01:15Z"
   },
@@ -399,21 +398,21 @@ Guest 不接触 Actor credential、challenge key 或原始 session secret。
 
 Service 按顺序检查：
 
-1. 发送方 Realm credential；
+1. 发送方 Actor credential；
 2. caller ActorId 与 credential claim；
 3. Front Actor type；若 policy 要求可信 runtime，再验证独立的 platform/runtime attestation；
 4. challenge/nonce 防重放；
 5. target Service ActorId；
-6. Program coordinate（兼容性声明）；
+6. Program Release（兼容性声明）；
 7. package digest（兼容性声明；无 attestation 时不是远端代码证明）；
 8. protocol fingerprint；
-9. Principal/Device/Workspace ACL；
+9. 应用权限：Front credential 中的成员 id、Realm 客户端 key id 与角色（owner/editor/viewer），以及 Workspace 范围；
 10. attachment policy；
 11. 当前 lease；
-12. 调用方要求的策略、当前 `ActorStateId` / AA 与 nonce；
+12. 调用方要求的策略、当前 `ActorStateDigest` / AA 与 nonce；
 13. 资源和速率限制。
 
-任何身份或 digest mismatch 都是 hard fail，不进入“兼容模式”。
+任何身份或 digest mismatch 都是 hard fail，不进入「兼容模式」。
 
 Host API 或协议版本可以在双方声明的范围内协商；协商结果必须固定到 session。
 
@@ -423,11 +422,12 @@ v1 exclusive lease：
 
 - Attach 成功后创建短期可续约 lease；
 - Heartbeat 只续会话，不续 Actor 身份；
+- 会话不超过 Front credential 的有效期：Front 续期 credential 后在 lease 续约时出示新 credential，Service 据此重读角色，否则在旧 credential 到期时结束会话；
 - 瞬时断线进入 grace period；
 - `Detach` 主动释放；
 - Front crash 后 lease 到期；
 - Takeover 需要权限与冲突策略；
-- lease id/session secret 只保存在 Host 内存和安全 IPC，不给 Guest；
+- lease id/session secret 只保存在 Actr Host 内存和安全 IPC，不给 Guest；
 - 同一个过期 session 的消息必须拒绝。
 
 ## 10. 消息路由
@@ -445,17 +445,15 @@ Guest call
   → Guest
 ```
 
-Host 必须附加不可由 Guest覆盖的 metadata：
+Actr Host 必须附加不可由 Guest覆盖的 metadata：
 
 - session id；
-- principal/device id 的最小化 claim；
+- principal/client id 的最小化 claim；
 - program digest；
 - trace id；
 - deadline；
 - idempotency key（适用时）。
 
-Service 不能信任 Guest payload 中自报的用户、Workspace 或权限字段。
-Service 同样不能仅凭 Front 自报的 Host 版本、package digest 或 ActorType 授予高权限。
 
 ## 11. 生命周期协议
 
@@ -564,8 +562,8 @@ Front Host、Service Host、Workspace broker 和 Actor transport 必须把实际
 - Actor spawn/discover/call/stream/close；
 - capability grant/revoke；
 - Workspace 与外部网络 edge；
-- package、credential、Host key 和 policy 撤销。
+- package、credential、Actr Host key 和 policy 撤销。
 
-Publisher workload 可以声明预期出口，但不能成为拓扑完整性的唯一来源。Host 对 WASM 比较声明、imports、有效能力与实际边，按 `structureId` 与当前 `ActorStateId` 组图；新 Actor 在当前 AA 通过且 `ACTIVE` 前不得收到应用数据。Front 定位整张无根图，取各节点最弱项；展示还须 `Ready`。
+Publisher workload 可以声明预期出口，但不能成为拓扑完整性的唯一来源。Actr Host 对 WASM 比较声明、imports、有效能力与实际边，按 `structureDigest` 与当前 `ActorStateDigest` 组图；新 Actor 在当前 AA 通过且 `ACTIVE` 前不得收到应用数据。Front 定位整张无根图，取各节点最弱项；展示还须 `Ready`。
 
-结论变化必须传到 Shell 和 session guard。绿 / 黄 / 红与挂起必须联动 Capability 和数据面，不能只是 UI 装饰。新配置只作用于新数据。
+结论变化必须传到 Shell 和 session guard。绿 / 黄 / 红与挂起必须联动 capability 和数据面，不能只是 UI 装饰。新配置只作用于新数据。

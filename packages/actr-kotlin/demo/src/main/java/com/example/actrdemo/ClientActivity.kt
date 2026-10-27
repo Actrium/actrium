@@ -42,6 +42,7 @@ import java.util.Locale
 class ClientActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "ClientActivity"
+        private const val REALM_CLIENT_KEY_ASSET = "realm-client.json"
 
         // Limit log buffer to avoid exceeding Android clipboard ~1MB transaction limit
         private const val MAX_LOG_CHARS = 500_000
@@ -258,11 +259,15 @@ class ClientActivity : AppCompatActivity() {
             try {
                 val configPath = copyAssetToInternalStorage("actr.toml")
                 val manifestPath = copyAssetToInternalStorage("manifest.toml")
+                // The Realm client key `actr.toml` names, if bundled.
+                if (assets.list("")?.contains(REALM_CLIENT_KEY_ASSET) == true) {
+                    copyAssetToInternalStorage(REALM_CLIENT_KEY_ASSET)
+                }
                 Log.i(TAG, "Config path: $configPath")
                 Log.i(TAG, "Manifest path: $manifestPath")
 
                 val actorType = resolveActorType(manifestPath)
-                Log.i(TAG, "Actor type from manifest: ${actorType.manufacturer}:${actorType.name}:${actorType.version}")
+                Log.i(TAG, "Actor type from manifest: ${actorType.publisher}/${actorType.name}@${actorType.version}")
 
                 // Host-side transport hooks: signaling + per-peer WebRTC state
                 // drive status text only. They are not a send/retry mechanism.

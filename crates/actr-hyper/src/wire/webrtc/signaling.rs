@@ -258,7 +258,7 @@ pub trait SignalingClient: Send + Sync {
         }
     }
 
-    /// Deprecated: Registration now happens via AIS HTTP; this WS path is no longer used.
+    /// Deprecated: Registration now happens via Issuer HTTP; this WS path is no longer used.
     /// Kept for backward compatibility; will be removed in a future release.
     async fn send_register_request(
         &self,
@@ -295,10 +295,10 @@ pub trait SignalingClient: Send + Sync {
         request: RouteCandidatesRequest,
     ) -> NetworkResult<RouteCandidatesResponse>;
 
-    /// Query AIS Ed25519 signing public key via signaling
+    /// Query Issuer Ed25519 signing public key via signaling
     ///
     /// Returns `(key_id, pubkey_bytes)` where pubkey_bytes is the 32-byte raw public key.
-    /// Typically called by AisKeyCache on cache miss; should not be used directly in hot paths.
+    /// Typically called by IssuerKeyCache on cache miss; should not be used directly in hot paths.
     async fn get_signing_key(
         &self,
         actor_id: ActrId,
@@ -636,7 +636,7 @@ enum AuthVerdictAction {
     /// A newer credential was published after the auth verdict was reported;
     /// its revision fact will wake the supervisor-owned recovery record.
     Reacquired,
-    /// AIS was temporarily unavailable. Return a retryable result so the
+    /// Issuer was temporarily unavailable. Return a retryable result so the
     /// supervisor can arm its identity-bearing backoff.
     RetrySameCredential,
     /// The realm denied membership. Recovery needs a new external trigger.
@@ -868,7 +868,7 @@ pub struct WebSocketSignalingClient {
     ///   receiver instead of the stored `credential_state`, so the handshake URL
     ///   always carries the latest published credential.
     /// - A supervisor recovery effect submits a tracked on-demand credential
-    ///   request. Publication emits a material fact; transient AIS failure is
+    ///   request. Publication emits a material fact; transient Issuer failure is
     ///   returned for supervisor-owned backoff.
     membership: OnceLock<MembershipHandle>,
 }

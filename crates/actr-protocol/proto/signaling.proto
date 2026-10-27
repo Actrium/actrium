@@ -27,7 +27,7 @@ message SignalingEnvelope {
   }
 }
 
-// Signing key lookup (actor queries AIS public key by key_id for offline verification)
+// Signing key lookup (actor queries Issuer public key by key_id for offline verification)
 message GetSigningKeyRequest  { required uint32 key_id = 1; }
 message GetSigningKeyResponse { required uint32 key_id = 1; required bytes pubkey = 2; }
 
@@ -133,6 +133,9 @@ message ActrRelay {
   // server delivery disposition. Legacy senders omit it; legacy servers
   // safely ignore it.
   optional RelayDeliveryContext delivery_context = 4;
+  // Actor type of `source`. Signaling overwrites it from the verified
+  // credential claims before forwarding; the sender's value is ignored.
+  optional actr.ActrType source_type = 5;
 
   oneof payload {
     webrtc.IceCandidate ice_candidate = 10;

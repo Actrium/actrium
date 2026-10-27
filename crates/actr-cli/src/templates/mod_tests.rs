@@ -6,7 +6,7 @@ fn test_template_context() {
     let ctx = TemplateContext::new(
         "my-chat-service",
         "ws://localhost:8080",
-        DEFAULT_MANUFACTURER,
+        DEFAULT_PUBLISHER,
         "echo-service",
         false,
     );
@@ -15,7 +15,7 @@ fn test_template_context() {
     assert_eq!(ctx.project_name_pascal, "MyChatService");
     assert_eq!(ctx.workload_name, "MyChatServiceWorkload");
     assert_eq!(ctx.signaling_url, "ws://localhost:8080");
-    assert_eq!(ctx.ais_endpoint_url, "http://localhost:8080/ais");
+    assert_eq!(ctx.issuer_endpoint_url, "http://localhost:8080/issuer");
     assert_eq!(ctx.actr_swift_version, DEFAULT_ACTR_SWIFT_VERSION);
     assert_eq!(ctx.actr_workload_version, DEFAULT_ACTR_WORKLOAD_VERSION);
 }
@@ -28,7 +28,7 @@ fn test_rust_cargo_templates_use_cli_version() {
         let context = TemplateContext::new(
             "test-project",
             "ws://localhost:8080",
-            DEFAULT_MANUFACTURER,
+            DEFAULT_PUBLISHER,
             "echo-service",
             is_service,
         );
@@ -79,7 +79,7 @@ fn test_rust_data_stream_uses_empty_entry_placeholder() {
         let context = TemplateContext::new(
             "test-project",
             "ws://localhost:8080",
-            DEFAULT_MANUFACTURER,
+            DEFAULT_PUBLISHER,
             template_name.to_service_name(),
             true,
         );
@@ -108,7 +108,7 @@ fn test_project_template_generation() {
     let context = TemplateContext::new(
         "test-app",
         "ws://localhost:8080",
-        DEFAULT_MANUFACTURER,
+        DEFAULT_PUBLISHER,
         "echo-service",
         false,
     );
@@ -142,7 +142,7 @@ fn test_project_template_load_files() {
     let context = TemplateContext::new(
         "test-app",
         "ws://localhost:8080",
-        DEFAULT_MANUFACTURER,
+        DEFAULT_PUBLISHER,
         "echo-service",
         false,
     );

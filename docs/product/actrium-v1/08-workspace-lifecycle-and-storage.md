@@ -1,12 +1,12 @@
-# 08. WorkspaceLife cycle and local storage
+# 08. Workspace, lifecycle and local storage
 
-## 1. Workspace Return Service
+## 1. Workspace belongs to the Service
 
-Core rules:
+Core rule:
 
-> Service Actor Tie Workspace, Front Actor Only pass Service ActorId (a) Connection;Front I don't need to know. Workspace ♪ And the path,Provider credential Or lock.
+> The Service binds the Workspace; the Front Actor only connects to the Service. Front does not need to know the Workspace's path, its Workspace Provider credential, or its lock.
 
-This is not an addition to abstraction, but rather a consolidation of local files, cloud dishes, databases and remote warehouses. Service Available capability.
+This is not adding abstraction; it is unifying local files, cloud drives, databases and remote repositories into a capability the Service can hold.
 
 ## 2. WorkspaceBinding
 
@@ -23,7 +23,7 @@ This is not an addition to abstraction, but rather a consolidation of local file
 }
 ```
 
-Guest Visible launch context Only include:
+The launch context visible to the Guest contains only:
 
 ```json
 {
@@ -34,35 +34,35 @@ Guest Visible launch context Only include:
 }
 ```
 
-It shall not include:
+It must not contain:
 
-- Original absolute path;
-- bookmark/security-scoped token;
-- cloud OAuth token;
-- encryption key;
-- Provider internal id(unless it is not per se sensitive and contractually required).
+- the raw absolute path;
+- a bookmark/security-scoped token;
+- a cloud OAuth token;
+- an encryption key;
+- a Workspace Provider internal id (unless it is itself non-sensitive and required by the contract).
 
-## 3. Workspace Statement
+## 3. Workspace declaration
 
-Workspace From the cross-sectioned field description:
+A Workspace is described by mutually orthogonal fields:
 
-| Dimensions | Value | Meaning |
+| Dimension | Values | Meaning |
 |---|---|---|
-| requirement | `none` / `optional` / `required` | Is there a user need WorkspaceAnd when must it be bound? |
-| provisioning | `managed` / `user-selected` | By Actrium Create, or choose by the user |
-| access | `read-only` / `read-write` | Service Visiting capacity acquired |
-| providers | Group Provider Type | Allow `managed-store`, `local-folder`, `cloud-drive` Waiting for it to happen |
+| requirement | `none` / `optional` / `required` | whether a user Workspace is needed, and when it must be bound |
+| provisioning | `managed` / `user-selected` | created by Actrium, or chosen by the user |
+| access | `read-only` / `read-write` | the access the Service is granted |
+| providers | a set of Workspace Provider types | which implementations are allowed, e.g. `managed-store`, `local-folder`, `cloud-drive` |
 
-`requirement=none` Time Service The example is still available for private use store, but not available for users Workspace.`requirement=required` with `provisioning=managed` It can come at once. It means creation. Service Time Actrium Automatically create a requirement Workspace.
+With `requirement=none`, a Service can still use the instance's private store, but cannot obtain a user Workspace. `requirement=required` and `provisioning=managed` can occur together, meaning Actrium automatically creates a required Workspace when the Service is created.
 
-Writing parallel strategy:
+Write-concurrency policy:
 
-- `exclusive-writer`: v1 Default;
-- `shared-readers`: Multiple Service (a) Readable;
-- `versioned-collaboration`: Future by Provider/Procedural agreement is achieved;
-- Ban multiple writtens if not declared Service Tie Same Workspace.
+- `exclusive-writer`: the v1 default;
+- `shared-readers`: multiple Services may read;
+- `versioned-collaboration`: implemented later by the Workspace Provider/program protocol;
+- when undeclared, multiple writable Services binding the same Workspace is forbidden.
 
-## 4. Service Life cycle
+## 4. Service lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -89,7 +89,7 @@ stateDiagram-v2
     Deleted --> [*]
 ```
 
-This diagram only shows lifecycle.Service Inventory Separate records must also be kept of:
+This diagram only expresses the lifecycle. The Service Inventory must also separately record:
 
 - desired state: `running`, `stopped` or `archived`;
 - reachability: `online`, `offline`, `unreachable` or `unknown`;
@@ -97,100 +97,100 @@ This diagram only shows lifecycle.Service Inventory Separate records must also b
 - attachment: `idle`, `leased` or `occupied`;
 - placement: `local` or `remote`.
 
-Launch failure as lifecycle Back `stopped` and health=`failed`Instead of creating a life cycle and a health level. `Error` Status.
+A failed start shows up as the lifecycle returning to `stopped` with health=`failed`, rather than inventing an `Error` state that is part lifecycle and part health.
 
 ### 4.1 Creating
 
-Create is a Zen etc. for the user; internal must be used durable saga Submitted in turn:
+Creation is idempotent from the user's point of view; internally it must commit in sequence via a durable saga:
 
-- Program Release reference;
-- Actor long-term key;
-- persistent ActorId;
-- Realm credential state;
-- per-instance data directory;
-- WorkspaceBinding;
-- permission grant;
-- Service Inventory record.
+- the Program Release reference;
+- the Actor long-term key;
+- the persistent ActorId;
+- the Actor credential state;
+- the per-instance data directory;
+- the WorkspaceBinding;
+- the permission grant;
+- the Service Inventory record.
 
-Any failure compensates for non-submission of resources; issued successfully ActorId I can't pretend after that.“Roll back to the ground.”, must keep a record of restoration or tombstone, and cannot be re-used.
+Any failure compensates the uncommitted resources; once an ActorId has actually been issued, it must not be pretended that things were "fully rolled back" — a recovery record or a local instance tombstone must be kept, and that identity must never be reused.
 
 ### 4.2 Running
 
-- Service Accept Attach;
-- ActorId Online;
-- Workspace lease (a) Effective;
-- workload digest (b) Fixed;
-- runtime health Observable.
+- the Service accepts Attach;
+- the ActorId is online;
+- the Workspace lease is valid;
+- the workload digest is fixed;
+- runtime health is observable.
 
 ### 4.3 Stopped
 
-- ActorId It's still on. Service;
-- identity/key, Workspace binding and store Reservations;
-- signaling presence offline;
-- Local Service Manager Knows it's stopped, so this is the machine. Attach You can return.“Stopped/Enabled”;
-- Remotely only reports when host control provides signature status stopped; otherwise observers will only get offline/unreachable;
-- Actor (a) cannot respond to a request after self-stopping, and the start-up operation is performed under host control;
-- User has host management capability can be activated at the host device.
+- the ActorId still belongs to this Service;
+- identity/key, Workspace binding and store are retained;
+- signaling presence is offline;
+- the local Service Manager knows it is stopped, so a local Attach can return "stopped/startable";
+- remotely, only when the host control plane provides a signed status can stopped be reported; otherwise observers can only get offline/unreachable;
+- the Actor itself cannot respond to requests once stopped; starting it is performed by the host control plane;
+- a user with host management capability can start it on the host device.
 
 ### 4.4 Suspended
 
-Mobile platforms or energy-saving strategies are temporarily frozen:
+Temporarily frozen by a mobile platform or a power-saving policy:
 
-- (a) The operational state can be restored;
-- (b) Not undertake to receive requests in real time;
-- lease Conduct by Platform and Service policy Decisions;
-- Far Front Show suspendedInstead of creating another example.
+- the running state is recoverable;
+- no promise to receive real-time requests;
+- lease behavior is decided by the platform and the Service's policy;
+- a remote Front shows suspended, rather than creating another instance.
 
 ### 4.5 Trashed
 
-- Service Stops to hide from the default list;
-- Actor credentialLong term keyExamples store, snapshot and WorkspaceBinding Reservations;
-- Default saving period is 30 God, it's a man who can be run by him. policy Adjustments;
-- Recovery must return to the same. ActorId;
-- Unable to use normal during wastebin Attach, but owner It can be restored or fully removed before it is ready.
+- the Service is stopped and hidden from the default list;
+- the Actor credential, long-term key, instance store, snapshots and WorkspaceBinding are retained;
+- the default retention period is 30 days, adjustable by admin policy;
+- restoring must return to the same ActorId;
+- ordinary Attach is not allowed while trashed, but the owner may restore it or purge it early.
 
 ### 4.6 Deleted
 
-- Undo Actor credential;
-- Permanent reservation ActorId tombstone;
-- Remove instance store and key;
-- Workspace Default not to delete;
-- Workspace The deletion requires independent and explicit confirmation;
-- Audit records may be exported.
+- the Actor credential is revoked;
+- a local instance tombstone (including the ActorId) is kept permanently;
+- the instance store and key are deleted;
+- the Workspace is not deleted by default;
+- deleting the Workspace requires an independent, explicit confirmation;
+- an audit record can be exported.
 
-Deleted Recover window only Trashed, cannot undo the private key and credential I'm still committed to it. ActorId Recoverable.
+Deleted is the terminal state after a full purge and is not recoverable. The recovery window only belongs to Trashed; once the private key and credential are revoked, the original ActorId can no longer be promised as recoverable.
 
-## 5. Tab with Service Life cycle separation
+## 5. Tab and Service lifecycles are separate
 
-| Events | Front | Service | Workspace |
+| Event | Front | Service | Workspace |
 |---|---|---|---|
-| New Tab | Create | Attach or Create | No change./Create binding |
-| Refresh | Reconstruction | No change. | No change. |
-| Tab Backstage. | pause/suspend | Continue or Platform suspend | No change. |
-| Tab Close | destroy | No change. | No change. |
-| Front crash | destroy/recreate | No change. | No change. |
-| Actrium Restart | Reconstruction | Restore Same ActorId | No change. |
-| Service stop | detach | stopped | No change. |
-| Service trash | detach | trashed, recoverable | No change. |
-| Service purge | detach | deletedIt's not gonna come back. | Default Reservations |
+| New Tab | create | Attach or Create | unchanged/binding created |
+| Refresh | recreate | unchanged | unchanged |
+| Tab backgrounded | pause/suspend | continues or platform suspend | unchanged |
+| Tab closed | destroy | unchanged | unchanged |
+| Front crash | destroy/recreate | unchanged | unchanged |
+| Actrium restart | recreate | resumes same ActorId | unchanged |
+| Service stop | detach | stopped | unchanged |
+| Service trash | detach | trashed, recoverable | unchanged |
+| Service purge | detach | deleted, not recoverable | retained by default |
 
-## 6. Create Services
+## 6. Creation transaction
 
-Local creation must be used durable intent:
+Local creation must use a durable intent:
 
 ```text
 CreationIntent
-├── creation_intent_id
-├── source_uri
+├── idempotency_key
+├── package_source
 ├── program_release + digest
-├── realm
+├── realm_name
 ├── workspace_selection
 ├── requested_permissions
 ├── stage
 └── result_actor_id?
 ```
 
-Phase:
+Stages:
 
 ```text
 Prepared
@@ -199,24 +199,22 @@ Prepared
 → IdentityAllocated
 → StorageCommitted
 → ServiceStarted
-→ URIRewritten
 → FrontAttached
 → Completed
 ```
 
-Rule restored:
+Recovery rules:
 
-- (a) Each stage may be re-encumbered;
-- `result_actor_id` Once written, you can't change it. ID;
-- `StorageCommitted` And then even after that, UI Crashes. Examples of them. Inventory;
-- URI The rewrite failed from result Rehabilitation;
-- Failure does not leave a reusable semi-identity.
+- every stage is reentrant;
+- once `result_actor_id` is written, the id may not change;
+- once `StorageCommitted` has happened, the instance appears in the Inventory even if the UI crashes;
+- a failure never leaves behind a reusable half-identity.
 
-## 7. Service Storage
+## 7. Service storage
 
 ### 7.1 Directory isolation
 
-Current Actr If you press only `ActrType` Build a directory of data that allows multiple entries of the same type Service Conflict. Target catalogue must be stable. ActorId Segregation:
+If Actr today keys data directories only by `ActrType`, multiple Services of the same type will collide. The target layout must isolate by the stable ActorId:
 
 ```text
 actrium-data/
@@ -235,32 +233,32 @@ actrium-data/
     └── actrium.sqlite
 ```
 
-Directory Name Use ActorId hashAvoid `/`, `:`(b) Length and case problems;`instance.json` Save Complete Standard ActorId.
+The directory name uses a hash of the ActorId, avoiding `/`, `:`, length and case-sensitivity problems; `instance.json` stores the full canonical ActorId.
 
-### 7.2 Secure Storage
+### 7.2 Secure storage
 
-The following entry is the only entry. OS Keychain/Keystore/Credential Locker:
+The following go only into the OS Keychain/Keystore/Credential Locker:
 
-- device private key;
-- Service Actor private key;
-- Realm refresh material;
-- Workspace Provider credential;
-- TURN/signaling ticket(Unusual memory only);
+- the Realm client key;
+- the Service's private key;
+- the renewal token (used to renew the Actor credential);
+- the Workspace Provider credential;
+- the TURN/signaling ticket (usually memory-only);
 - encryption keys.
 
-Normal SQLite Save Only opaque reference.
+Ordinary SQLite stores only opaque references.
 
-### 7.3 Database Table
+### 7.3 Database tables
 
-Suggested minimum model:
+A suggested minimal model:
 
 ```text
 program_release
   publisher, program, version, digest, key_id, manifest, trust_state
 
 service
-  actor_id, actor_id_hash, publisher, program, version, digest,
-  realm_domain, realm_id, workspace_id, runtime_location,
+  realm_name, actor_id, actor_id_hash, publisher, program, version, digest,
+  workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
 
@@ -272,196 +270,204 @@ permission_grant
   subject, capability, scope, decision, granted_at, expires_at
 
 tab_session
-  tab_id, uri, service_actor_id, front_actor_id, state,
-  structure_id, application_state_id, application_color, ready
+  tab_id, realm_link, service_actor_id, front_actor_id, state,
+  structure_digest, application_state_digest, application_color, ready
 
 privacy_mark_cache
   mark_id, subject_ref, issuer_ref, workload_kind, egress_digest,
   issued_at, expires_at, revocation_state, encrypted_blob_ref
 
 privacy_dependency_edge
-  structure_id, application_state_id, edge_id, source_ref, target_ref,
+  structure_digest, application_state_digest, edge_id, source_ref, target_ref,
   data_classes, target_mark_digest, decision, opened_at, closed_at
 
 privacy_aggregate
-  assurance_id, tab_id, structure_id, application_state_id, policy_digest,
+  assurance_digest, tab_id, structure_digest, application_state_digest, policy_digest,
   mark, weakest_actor_ref, evidence_root, generated_at, expires_at
 
 creation_intent
-  intent_id, uri, stage, result_actor_id, timestamps
+  intent_id, package_source, stage, result_actor_id, timestamps
+
+realm_domain
+  domain, signing_keys, signing_keys_sequence, signing_keys_digest,
+  authority_descriptor_digest
 
 realm
-  domain, realm_id, profile_digest, issuer_keys, membership_ref
+  realm_name, profile_digest, profile_sequence, provider_id,
+  issuer_keys, membership_ref, client_key_ref
 ```
 
-Service Table to Complete ActorId (a) Be the business key;`actor_id_hash` Only for indexing and directories.
+An instance uses the Realm name as its business primary key (unchanged across upgrades); the current Service's ActorId is recorded as a field; `actor_id_hash` is only used for indexing and directories.
 
-`ApplicationAssurance` It's a derivative of the current cut, no. Service . Cache expired,Tab Recalculation must be made after reconstruction, state or chart changes; presentation must also be made `Ready`Original attestation token Prefer to the long-term encryption cache or memory, and complete remote scaling, not for convenience UI The project is being implemented in the United States and is being implemented in the United States.
+`realm_domain` records each trusted Realm domain and its Realm signing keys (the `realm_signing_keys` member from `https://<domain>/.well-known/actr`, defined in Actr Authority Discovery §4.4; `signing_keys` holds every key the domain has ever had accepted with its last state — `id`, public key and `active`, `retired` or removed; removed keys are kept too, so an `id` cannot change its public key and a removed key is never accepted again; `signing_keys_sequence` is the accepted `sequence` and `signing_keys_digest` the digest of the accepted member, which tells whether a member with the same `sequence` has the same content; after the user re-confirms an identity change these records are cleared and the new member becomes the baseline), refreshed together with the Realm Profile so that removing a key invalidates the Realm Profiles it signed; `realm` records each instance Realm, with `profile_sequence` and `provider_id` used to reject a rolled-back Realm Profile or one whose `provider.id` has changed (a local Realm has no Realm Profile, so both are empty), and `client_key_ref` points at that Realm's own Realm client key (never reused across Realms). Both are keyed by the full Realm name.
 
-## 8. Program Catalog with Service Inventory Enduring
+`ApplicationAssurance` is a derived conclusion for the current facet, not a permanent property of the Service. It must be recomputed after cache expiry, Tab recreation, or a state or graph change; display also requires `Ready`. Raw attestation tokens and the full remote topology are preferably kept in a short-lived encrypted cache or in memory, and must not be persisted to disk in plaintext long-term just for the UI's convenience.
 
-### Program Catalog Syncable
+## 8. Persisting the Program Catalog and Service Inventory
 
-- coordinate;
+### The Program Catalog can be synced
+
+- Program Release;
 - digest;
-- Collections;
+- favorites;
 - Marketplace metadata;
-- User installation preferences.
+- the user's install preferences.
 
-But other equipment still needs to be self-verified and downloaded. package.
+But other devices still need to verify and download the package themselves.
 
-### Service Inventory Carefully synchronized
+### The Service Inventory syncs cautiously
 
-Can sync:
+May sync:
 
 - ActorId;
 - Realm;
 - Program Release;
-- Display name;
-- Remote host hint.
+- display name;
+- remote host hints.
 
-Can not blindly sync:
+Must never blindly sync:
 
-- Actor private key;
-- Workspace credential;
-- (a) Absolute local path;
-- Unprotected Provider token.
+- the Actor private key;
+- the Workspace credential;
+- local absolute paths;
+- an unprotected Workspace Provider token.
 
-If Service It only exists in one device, another. Inventory Record Display“Far/Host devices offline”, instead of trying to copy identity locally.
+If a Service exists on only one device, the Inventory record on other devices shows "remote/host device offline," rather than trying to replicate the identity locally.
 
-## 9. Workspace Lock and lease
+## 9. Workspace locks and leases
 
-### 9.1 Time-bound
+### 9.1 At binding time
 
-Actrium Workspace broker Inspection:
+The Actrium Workspace broker checks:
 
-- Same provider locator Did you write it? lease;
-- Provider Whether or not to support overwriting;
-- Current Service (a) The availability of competence;
-- Symbolic links, path crossing and security domain;
-- Storage quotas;
-- Provider Online status.
+- whether the same Workspace Provider locator already has a write lease;
+- whether the Workspace Provider supports multiple writers;
+- whether the current Service has permission;
+- symlinks, path traversal and the security scope;
+- storage quota;
+- the Workspace Provider's online status.
 
-### 9.2 Run-time
+### 9.2 At runtime
 
-- Service Just take it. brokered handle;
-- All Paths Relative Workspace root;
-- Atom Writing and fsync policy;
-- symlink/hardlink (b) Escape protection;
+- the Service only gets a brokered handle;
+- all paths are relative to the Workspace root;
+- atomic writes and an fsync policy;
+- symlink/hardlink escape protection;
 - quota;
-- write lease heartbeat;
-- After the crash lease Restore/Expiry;
-- Provider The conflict was clearly reported.
+- a write-lease heartbeat;
+- lease recovery/expiry after a crash;
+- Workspace Provider conflicts are clearly reported.
 
-### 9.3 Retie
+### 9.3 Rebinding
 
-Workspace Do not change silently. Re-knit process:
+A Workspace must not change silently. Rebinding process:
 
-1. (a) Stop new business writing;
-2. (b) Generate consistent snapshots;
-3. User Select New Workspace;
-4. Verify New Provider;
-5. Migration/Import;
-6. Atomic Switch binding;
-7. (a) Retain roll-back points;
-8. Restore Service.
+1. stop new writes;
+2. produce a consistent snapshot;
+3. the user selects a new Workspace;
+4. verify the new Workspace Provider;
+5. migrate/import;
+6. atomically switch the binding;
+7. keep a rollback point;
+8. resume the Service.
 
-## 10. Snapshot, back-up and recovery
+## 10. Snapshots, backup and restore
 
-Snapshot Two floors:
+Snapshots have two layers:
 
 - Service workload state;
-- Workspace/Provider state.
+- Workspace/Workspace Provider state.
 
-Manifest To be declared snapshot schema version. The restoration must verify:
+The manifest should declare a snapshot schema version. Restoring must verify:
 
-- Program coordinate/digest;
-- snapshot schema;
-- Workspace fingerprint;
-- ActorId;
-- Encryption key;
-- Integrity hash.
+- Program Release/digest;
+- the snapshot schema;
+- the Workspace fingerprint;
+- the ActorId;
+- the encryption key;
+- an integrity hash.
 
-Backup Actor Identity must be:
+When backing up Actor identity, it is required to:
 
-- Use Platform/(a) User-protected encryption;
-- Prevention of the same ActorId (a) Started simultaneously by two host persons;
-- From Recovery Realm Get Migration/Take over. lease;
-- When completed, the old host is withdrawn from the operation.
+- use platform/user-protected encryption;
+- prevent the same ActorId from being started on two hosts at once;
+- obtain a migration/takeover lease from the Realm when restoring;
+- revoke the old host's ability to run it once complete.
 
-## 11. Service Upgrade
+## 11. Service upgrade
 
-v1 Unmodified `ActorId.type.version` The corresponding workload.
+v1 does not modify a Service's Program Release (its Actor type version) in place.
 
 Upgrade is migration:
 
 ```text
 Old Service ActorId + v1 Workspace
   → quiesce + snapshot
-  → New Service ActorId + v2 workload
+  → New Service ActorId + v2 workload (same Realm)
   → import/migrate
   → Workspace lease handoff
   → user verification
+  → the Realm Profile's package is repointed to the v2 package
   → Old archived
 ```
 
 Advantages:
 
-- (b) The precise semantics of the version are not compromised;
-- package digest (a) remain auditable;
-- (a) Roll-back;
-- New and old contract (a) Be able to coexist;
-- URI I won't claim to be old. ActorId Has become a new type.
+- exact version semantics are not broken;
+- the package digest remains auditable;
+- it can be rolled back;
+- the old and new contracts can coexist;
+- the old ActorId is never said to have become the new type.
 
-The disadvantage is... ActorId Changes;Actrium Update local collections and current Tab. Old links can be used to hint when local migration records are saved“Example moved”; other devices only see old examples offline/archivedUnless it's old Service Signing migration tips continue to be provided during rollback.Realm Level alias/redirect It's a follow-up capability, not here. v1 Quietly achieved.
+The new Service is created in the same Realm as the original instance: the instance has not changed, the Realm link, Realm membership and application permissions all carry over, and only the Service's ActorId changes. When another device opens the same Realm link, it fetches the new package per the new Realm Profile and finds the new Service by its Actor type.
 
-## 12. Service Relocation of equipment
+## 12. Migrating a Service to another device
 
-Same Realmand Program Release . Host migration can be maintained ActorId:
+Migrating the host within the same Realm and the same Program Release can keep the ActorId. A Realm is permanently bound to its Realm Infra Provider; changing operators means creating a new instance on the new Realm Infra Provider and migrating under the rules in this section. Migrating to a different Realm (including from a local Realm to a Realm under a domain) must produce a new ActorId.
 
-1. Access migration lease;
-2. (b) Stop the new request from the old host;
-3. Encryption Transfer Actor identity, store and Workspace capability;
-4. New host certifying equipment and Actor key;
-5. Realm Update presence;
-6. New host start;
-7. (a) A copy of the old host ' s key destruction;
-8. Front Use original URI Reconnection.
+1. obtain a migration lease;
+2. stop accepting new requests on the old host;
+3. transfer the Actor identity, store and Workspace capability encrypted;
+4. the new host proves the device and the Actor key;
+5. the Realm's presence is updated;
+6. the new host starts;
+7. the old host destroys its copy of the key;
+8. Front reconnects using the original Realm link.
 
-Workspace If it was a local directory of used equipment, it would have to be moved alone or be accessible remotely.ActorId But moving doesn't mean Workspace Automatically.
+If the Workspace was originally a local directory on the old device, it must be migrated separately or kept remotely accessible. That the ActorId can migrate does not mean the Workspace automatically can.
 
 ## 13. Platform constraints
 
 ### macOS / Windows
 
-- You can run local for long periods. Service manager;
-- Available helper process;
-- Available login entry/Backstage strategies;
-- Users must be able to stop all backstages Service.
+- a local Service manager can run long-term;
+- a helper process can be used;
+- a login item/background policy can be provided;
+- the user must be able to stop all background Services.
 
 ### iOS
 
-- Local Service Key commitments Actrium Available during the front desk;
-- (a) Back-office tasks are subject to a system time frame;
-- No commitment to continue signaling presence;
-- Long-term online examples should host remote host(s) on desktop, server or supported;
-- Workspace security-scoped access It must be correctly renewed and released.
+- a local Service is only promised to be available while Actrium is in the foreground;
+- background tasks are subject to system time limits;
+- continuous signaling presence is not promised;
+- a long-running online instance should be hosted on a desktop, server, or supported remote host;
+- Workspace security-scoped access must be correctly renewed and released.
 
 ### Android
 
-- Front desk. Service/Notifications may extend the time available, subject to the Platform ' s policy;
-- DozeThe Internet is not a good place to be used for this, but it is a good place to be used for this.
-- User Select“Run on use only”;
-- Not to limit failure to a system Actor Not there.
+- a foreground Service/notification can extend the available time, but must comply with platform policy;
+- Doze, background restrictions and vendor policy affect online-ness;
+- the user can choose "only run while in use";
+- a system restriction causing a failure must not be treated as the Actor not existing.
 
-Products UI It has to be distinguished.“Stopped”“Suspended”“Host offline”and“Actor not found”.
+The product UI must distinguish "Stopped," "Suspended," "Actr Host offline" and "Actor not found."
 
-## 14. Delete and recoverability
+## 14. Deletion and recoverability
 
-Remove in two Service Phase and an independent data action:
+Deletion has two Service stages and one independent data action:
 
-1. **Move to Wastebin**: Stop and hide Service,Reserve Actor key, credentialExamples store/snapshot with WorkspaceBinding;defaults 30 Same as in days ActorId Restore.
-2. **Cleared**: Unidentify, delete key and examples of private data, permanent tombstone; Not recoverable.
-3. **Delete Workspace**: Always a stand-alone high-risk action, not by default with the first two steps.
+1. **Move to Trash**: stop and hide the Service, retain the Actor key, credential, instance store/snapshot and WorkspaceBinding; recoverable with the same ActorId within 30 days by default.
+2. **Purge**: revoke the identity, delete the key and instance-private data, record a permanent local instance tombstone; not recoverable.
+3. **Delete the Workspace**: always an independent, high-risk action, never performed by default alongside the first two steps.
 
-Before removal, list the private data of the example to be deleted, the external data to be retained Workspace And the consequences of recovery.Workspace If the document is explicitly deleted by the user, priority should be given to access Provider/OS Recycler; audit records do not contain business content.
+Before purging, the instance-private data to be deleted, the external Workspace to be retained, and the consequences of restoring must be listed. If the Workspace's files are also explicitly deleted by the user, they should preferentially go to the Workspace Provider's/OS's trash; the audit record contains no business content.

@@ -147,6 +147,8 @@ jobs:
     # ACTR_GRADLE_REPOSITORIES=canonical here.
     runs-on: [self-hosted, Linux, X64]
     env:
+      # Use settings.gradle.kts's mirror-first repositories on this pool,
+      # consistently with the binding test job; canonical Google egress fails.
       # rustc-level compilation cache (in-cluster MinIO backend) instead of
       # Swatinem/rust-cache: on ephemeral ARC pods the rust-cache post-job
       # upload to the GitHub Actions cache blob store goes over the slow

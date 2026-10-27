@@ -5,26 +5,27 @@ import io.actrium.actr.ActrId
 import io.actrium.actr.ActrType
 import io.actrium.actr.DataChunk
 import io.actrium.actr.MetadataEntry
-import io.actrium.actr.Realm
 
 // ============================================================================
 // ActrType Builders
 // ============================================================================
 
 /**
- * Create an ActrType from a string in "manufacturer:name:version" format.
+ * Create an ActrType from a string in "publisher/program@version" format.
  *
- * @param typeString Type string like "acme:EchoService:1.0.0"
- * @return ActrType with parsed manufacturer, name, and version
+ * @param typeString Type string like "acme/EchoService@1.0.0"
+ * @return ActrType with parsed publisher, name, and version
  * @throws IllegalArgumentException if format is invalid
  */
 fun String.toActrType(): ActrType {
-    val parts = this.split(":", limit = 3)
-    require(parts.size == 3) {
-        "ActrType string must be in 'manufacturer:name:version' format, got: $this"
+    val slash = indexOf('/')
+    val at = lastIndexOf('@')
+    require(slash > 0 && at > slash + 1 && indexOf('/', slash + 1) == -1) {
+        "ActrType string must be in 'publisher/program@version' format, got: $this"
     }
-    require(parts[2].isNotBlank()) { "ActrType version must not be blank" }
-    return ActrType(manufacturer = parts[0], name = parts[1], version = parts[2])
+    val version = substring(at + 1)
+    require(version.isNotBlank()) { "ActrType version must not be blank" }
+    return ActrType(publisher = substring(0, slash), name = substring(slash + 1, at), version = version)
 }
 
 /**
@@ -33,7 +34,7 @@ fun String.toActrType(): ActrType {
  * Example:
  * ```kotlin
  * val type = actrType {
- *     manufacturer = "acme"
+ *     publisher = "acme"
  *     name = "EchoService"
  *     version = "1.0.0"
  * }
@@ -42,7 +43,7 @@ fun String.toActrType(): ActrType {
 inline fun actrType(builder: ActrTypeBuilder.() -> Unit): ActrType = ActrTypeBuilder().apply(builder).build()
 
 /**
- * Create an ActrType from manufacturer, name, and version.
+ * Create an ActrType from publisher, name, and version.
  *
  * Example:
  * ```kotlin
@@ -50,22 +51,22 @@ inline fun actrType(builder: ActrTypeBuilder.() -> Unit): ActrType = ActrTypeBui
  * ```
  */
 fun actrType(
-    manufacturer: String,
+    publisher: String,
     name: String,
     version: String,
-): ActrType = ActrType(manufacturer = manufacturer, name = name, version = version)
+): ActrType = ActrType(publisher = publisher, name = name, version = version)
 
 /** Builder for ActrType. */
 class ActrTypeBuilder {
-    var manufacturer: String = ""
+    var publisher: String = ""
     var name: String = ""
     var version: String = ""
 
     fun build(): ActrType {
-        require(manufacturer.isNotBlank()) { "manufacturer must not be blank" }
+        require(publisher.isNotBlank()) { "publisher must not be blank" }
         require(name.isNotBlank()) { "name must not be blank" }
         require(version.isNotBlank()) { "version must not be blank" }
-        return ActrType(manufacturer = manufacturer, name = name, version = version)
+        return ActrType(publisher = publisher, name = name, version = version)
     }
 }
 
@@ -74,12 +75,12 @@ class ActrTypeBuilder {
 // ============================================================================
 
 /** Convert ActrType to string representation. */
-fun ActrType.toTypeString(): String = "$manufacturer:$name:$version"
+fun ActrType.toTypeString(): String = "$publisher/$name@$version"
 
 /** Check if this type matches a type string. */
 fun ActrType.matches(typeString: String): Boolean {
     val other = typeString.toActrType()
-    return manufacturer == other.manufacturer && name == other.name
+    return publisher == other.publisher && name == other.name
 }
 
 // ============================================================================
@@ -92,9 +93,8 @@ fun ActrType.matches(typeString: String): Boolean {
  * Example:
  * ```kotlin
  * val id = actrId {
- *     realm = 2281844430u
- *     serialNumber = 12345uL
- *     type = "acme:EchoService:1.0.0"
+ *     realm = "k7m2q9xh@acme.com"
+ *     serialNumber = 0x2af01uL
  * }
  * ```
  */
@@ -102,35 +102,13 @@ inline fun actrId(builder: ActrIdBuilder.() -> Unit): ActrId = ActrIdBuilder().a
 
 /** Builder for ActrId. */
 class ActrIdBuilder {
-    var realm: UInt = 0u
+    /** Realm name, `<realm_id>@<domain>`. */
+    var realm: String = ""
     var serialNumber: ULong = 0uL
-    private var _type: ActrType? = null
-
-    /** Set the actor type from a string. */
-    var type: String
-        get() = _type?.toTypeString() ?: ""
-        set(value) {
-            _type = value.toActrType()
-        }
-
-    /** Set the actor type directly. */
-    fun type(actrType: ActrType) {
-        _type = actrType
-    }
-
-    /** Set the actor type with manufacturer, name, and version. */
-    fun type(
-        manufacturer: String,
-        name: String,
-        version: String,
-    ) {
-        _type = ActrType(manufacturer = manufacturer, name = name, version = version)
-    }
 
     fun build(): ActrId {
-        require(realm > 0u) { "realm must be set" }
-        requireNotNull(_type) { "type must be set" }
-        return ActrId(realm = Realm(realmId = realm), serialNumber = serialNumber, type = _type!!)
+        require(realm.isNotBlank()) { "realm must be set" }
+        return ActrId(realm = realm, serialNumber = serialNumber)
     }
 }
 
@@ -138,15 +116,12 @@ class ActrIdBuilder {
 // ActrId Extensions
 // ============================================================================
 
-/** Get the realm ID. */
-val ActrId.realmId: UInt
-    get() = realm.realmId
+/** RealmId part of the Realm name. */
+val ActrId.realmId: String
+    get() = realm.substringBefore('@', missingDelimiterValue = "")
 
-/** Get a short string representation. */
-fun ActrId.toShortString(): String = "${type.manufacturer}:${type.name}@${serialNumber.toString(16)}"
-
-/** Get a full string representation. */
-fun ActrId.toFullString(): String = "${type.manufacturer}:${type.name}@${serialNumber.toString(16)}:${realm.realmId}"
+/** Canonical form `<serial_hex>.<realm_id>@<domain>`. */
+fun ActrId.toFullString(): String = "${serialNumber.toString(16)}.$realm"
 
 // ============================================================================
 // DataChunk Builders
@@ -244,13 +219,3 @@ fun DataChunk.hasMetadata(key: String): Boolean = metadata.any { it.key == key }
 
 /** Get metadata as a Map. */
 fun DataChunk.metadataMap(): Map<String, String> = metadata.associate { it.key to it.value }
-
-// ============================================================================
-// Realm Builders
-// ============================================================================
-
-/** Create a Realm from a realm ID. */
-fun realm(id: UInt): Realm = Realm(realmId = id)
-
-/** Create a Realm from an Int. */
-fun realm(id: Int): Realm = Realm(realmId = id.toUInt())

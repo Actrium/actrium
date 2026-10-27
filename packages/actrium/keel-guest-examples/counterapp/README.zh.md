@@ -1,7 +1,7 @@
 # Counter Keel Guest
 
 Counter 是一个可复用的 `keel.guest/1` 最小 Workload，用于验证 Actrium Actor
-Host。它只通过符合 `actr-package/1` 的 `.actr` 包分发。
+Host。它只通过符合 `actr-package/2` 的 `.actr` 包分发。
 
 在当前目录执行：
 

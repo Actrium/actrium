@@ -22,7 +22,9 @@ use actr_protocol::{
 };
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
+use axum::http::{HeaderMap, header::SEC_WEBSOCKET_PROTOCOL};
 use axum::response::IntoResponse;
+use base64::Engine as _;
 use bytes::Bytes;
 use ed25519_dalek::Signer;
 use futures_util::{SinkExt, StreamExt};
@@ -31,17 +33,13 @@ use tokio::sync::mpsc;
 
 use crate::state::{MockState, RegisteredActor};
 
-/// Query parameters the real actrix gate accepts (actor_id, key_id, claims,
-/// signature). The mock uses `actor_id` to tie incoming WebSocket connections
-/// back to a previously HTTP-registered actor so that route discovery works
-/// even when the actor never sends a `PeerToSignaling::RegisterRequest`.
+/// Legacy test-only query parameter. Production clients carry their actor
+/// identity in the `x-actr-id` upgrade header.
 #[derive(Debug, Default, Deserialize)]
-#[allow(dead_code)]
 pub struct WsQuery {
     actor_id: Option<String>,
-    key_id: Option<String>,
+    /// Base64 `IdentityClaims`, sent by native clients next to `actor_id`.
     claims: Option<String>,
-    signature: Option<String>,
 }
 
 /// Axum handler: upgrades the request to a WebSocket and hands it to the
@@ -49,16 +47,49 @@ pub struct WsQuery {
 pub async fn ws_upgrade_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsQuery>,
+    headers: HeaderMap,
     State(state): State<Arc<MockState>>,
 ) -> impl IntoResponse {
-    let actor_id_param = params.actor_id.clone();
-    ws.on_upgrade(move |socket| handle_connection(socket, state, actor_id_param))
+    let actor_id_param = headers
+        .get("x-actr-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToString::to_string)
+        .or_else(|| browser_actor_id(&headers))
+        .or(params.actor_id);
+    let claimed_type = params.claims.as_deref().and_then(claims_actor_type);
+    ws.protocols(["actr.v1"])
+        .on_upgrade(move |socket| handle_connection(socket, state, actor_id_param, claimed_type))
+}
+
+/// Actor type carried in the credential claims. The mock does not verify the
+/// signature; it only needs the type for directly connected actors.
+fn claims_actor_type(claims_b64: &str) -> Option<actr_protocol::ActrType> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(claims_b64)
+        .ok()?;
+    actr_protocol::IdentityClaims::decode(bytes.as_slice())
+        .ok()
+        .map(|claims| claims.actor_type)
+}
+
+fn browser_actor_id(headers: &HeaderMap) -> Option<String> {
+    let encoded = headers
+        .get_all(SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(',').map(str::trim))
+        .find_map(|protocol| protocol.strip_prefix("actr.id."))?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 async fn handle_connection(
     socket: WebSocket,
     state: Arc<MockState>,
     actor_id_param: Option<String>,
+    claimed_type: Option<actr_protocol::ActrType>,
 ) {
     state.connection_count.fetch_add(1, Ordering::SeqCst);
     let connection_generation = state.websocket_generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -74,12 +105,12 @@ async fn handle_connection(
         .await
         .insert(client_id.clone(), client_tx);
 
-    // If the peer connected with `?actor_id=...` (web/service-worker path
-    // after HTTP register, plus integration tests that pre-pick actor IDs),
-    // bind its registry entry to this WS client_id so relays can reach it.
+    // If the peer supplied an Actor ID through native upgrade headers or the
+    // browser subprotocol transport, bind its registry entry to this WS
+    // client_id so relays can reach it.
     //
     // If the actor was *not* previously HTTP-registered, lazily create a
-    // registry stub. Production AIS bootstraps via HTTP first; integration
+    // registry stub. Production Issuer bootstraps via HTTP first; integration
     // tests skip that step and connect WS directly with a synthetic credential.
     // Auto-binding restores parity with the legacy mock-signaling broadcast
     // fallback without weakening the rebind diagnostic below.
@@ -93,7 +124,7 @@ async fn handle_connection(
                     // TD-004 defensive WARN: overwriting a non-empty client_id
                     // means a second WS is rebinding the same registry row;
                     // the previous session silently loses its relay binding.
-                    // Useful for spotting AIS credential reuse across tabs.
+                    // Useful for spotting Issuer credential reuse across tabs.
                     if !entry.client_id.is_empty() && entry.client_id != client_id {
                         rebound_from = Some(entry.client_id.clone());
                     }
@@ -105,7 +136,7 @@ async fn handle_connection(
             if !found {
                 registry.push(crate::state::RegisteredActor {
                     actr_id: actr_id.clone(),
-                    actr_type: actr_id.r#type.clone(),
+                    actr_type: claimed_type.unwrap_or_default(),
                     client_id: client_id.clone(),
                     ws_address: None,
                     service_spec: None,
@@ -268,7 +299,7 @@ async fn handle_peer_to_server(
 
             tracing::info!(
                 serial = register_ok.actr_id.serial_number,
-                manufacturer = req.actr_type.manufacturer,
+                publisher = req.actr_type.publisher,
                 name = req.actr_type.name,
                 "mock-actrix: registered actor (ws)"
             );
@@ -279,7 +310,7 @@ async fn handle_peer_to_server(
 /// Build a `RegisterOk` for the given `RegisterRequest`.
 ///
 /// This is the shared code path used by both the WS signaling handler and the
-/// `POST /register` HTTP handler (so `AisClient::register_with_manifest`
+/// `POST /register` HTTP handler (so `IssuerClient::register_with_manifest`
 /// and the WebSocket bootstrap always see identical responses).
 pub async fn build_register_ok(
     req: &RegisterRequest,
@@ -288,29 +319,41 @@ pub async fn build_register_ok(
     let serial = state.next_serial.fetch_add(1, Ordering::SeqCst);
 
     let actr_id = ActrId {
-        realm: req.realm,
+        realm: req.realm.clone(),
         serial_number: serial,
-        r#type: req.actr_type.clone(),
     };
 
     let claims = actr_protocol::IdentityClaims {
-        realm_id: req.realm.realm_id,
+        realm: req.realm.clone(),
+        protocol_version: 1,
+        issuer: req.realm.clone(),
+        provider: "provider.example".to_string(),
+        audience: "actr.signaling".to_string(),
         // Use the full ActrId string representation so WebSocketGate's
         // credential verifier can match it against the X-Actr-Source-ID header.
         actor_id: actr_id.to_string_repr(),
         expires_at: chrono::Utc::now().timestamp() as u64 + 86400,
+        actor_type: req.actr_type.clone(),
+        member: "member-1".to_string(),
+        client_key: "0000000000000000".to_string(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     let claims_bytes = claims.encode_to_vec();
-    let signature = state.ais_signing_key().sign(&claims_bytes);
-    let verifying_key = state.ais_signing_key().verifying_key();
+    let signature = state.issuer_signing_key().sign(&claims_bytes);
+    let verifying_key = state.issuer_signing_key().verifying_key();
 
     let credential = AIdCredential {
-        key_id: state.ais_signing_key_id(),
+        key_id: state.issuer_signing_key_id(),
         claims: claims_bytes.into(),
         signature: signature.to_bytes().to_vec().into(),
     };
 
     let turn_credential = TurnCredential {
+        protocol_version: 1,
+        realm: req.realm.clone(),
+        provider: "provider.example".to_string(),
+        audience: "actr.turn".to_string(),
         username: format!("{}:{}", chrono::Utc::now().timestamp() + 86400, serial),
         password: format!("mock-turn-{serial:016x}"),
         expires_at: chrono::Utc::now().timestamp() as u64 + 86400,
@@ -326,7 +369,7 @@ pub async fn build_register_ok(
         }),
         signaling_heartbeat_interval_secs: 30,
         signing_pubkey: verifying_key.to_bytes().to_vec().into(),
-        signing_key_id: state.ais_signing_key_id(),
+        signing_key_id: state.issuer_signing_key_id(),
         renewal_token: Some(mock_renewal_token(serial).into()),
         renewal_token_expires_at: Some(prost_types::Timestamp {
             seconds: chrono::Utc::now().timestamp() + 86400,
@@ -389,7 +432,7 @@ async fn handle_actr_to_server(
             tracing::info!(
                 count = candidates.len(),
                 skipped_unbound,
-                target_type = format!("{}.{}", req.target_type.manufacturer, req.target_type.name),
+                target_type = format!("{}.{}", req.target_type.publisher, req.target_type.name),
                 "mock-actrix: route candidates response"
             );
 
@@ -441,7 +484,7 @@ async fn handle_actr_to_server(
         }
 
         actr_to_signaling::Payload::GetSigningKeyRequest(req) => {
-            let verifying_key = state.ais_signing_key().verifying_key();
+            let verifying_key = state.issuer_signing_key().verifying_key();
             send_response(
                 sender_id,
                 envelope,
@@ -465,9 +508,9 @@ async fn handle_actr_to_server(
             let entries: Vec<_> = registry
                 .iter()
                 .filter(|e| {
-                    req.manufacturer
+                    req.publisher
                         .as_ref()
-                        .is_none_or(|m| &e.actr_type.manufacturer == m)
+                        .is_none_or(|m| &e.actr_type.publisher == m)
                 })
                 .map(|e| {
                     let fingerprint = e
@@ -661,6 +704,7 @@ async fn handle_actr_relay(
                 credential: AIdCredential::default(),
                 target: role_neg.from.clone(),
                 delivery_context: None,
+                source_type: registered_type(state, &role_neg.to).await,
                 payload: Some(actr_relay::Payload::RoleAssignment(
                     actr_protocol::RoleAssignment {
                         is_offerer: from_is_offerer,
@@ -681,6 +725,7 @@ async fn handle_actr_relay(
                 credential: AIdCredential::default(),
                 target: role_neg.to.clone(),
                 delivery_context: None,
+                source_type: registered_type(state, &role_neg.from).await,
                 payload: Some(actr_relay::Payload::RoleAssignment(
                     actr_protocol::RoleAssignment {
                         is_offerer: !from_is_offerer,
@@ -773,6 +818,11 @@ async fn forward_relay_to_target(
     sender_id: &str,
     state: &Arc<MockState>,
 ) -> MockRelayEgress {
+    // Like Signaling, stamp the source Actor type from the registry; the
+    // sender's value is discarded.
+    let mut relay = relay.clone();
+    relay.source_type = registered_type(state, &relay.source).await;
+
     // Forward relay to target by ActrId lookup.
     let target_id = &relay.target;
     let client_map = state.client_to_actr_id.read().await;
@@ -954,6 +1004,21 @@ fn collect_reachable_route_candidates(
     (candidates, ws_address_map, skipped_unbound)
 }
 
+/// Actor type recorded for `actr_id`, newest registration first.
+async fn registered_type(
+    state: &Arc<MockState>,
+    actr_id: &ActrId,
+) -> Option<actr_protocol::ActrType> {
+    state
+        .registry
+        .read()
+        .await
+        .iter()
+        .rev()
+        .find(|entry| entry.actr_id == *actr_id)
+        .map(|entry| entry.actr_type.clone())
+}
+
 /// Parse an `ActrId` from the `actor_id` query parameter sent by clients
 /// after HTTP registration.
 fn parse_actor_id(s: &str) -> Option<ActrId> {
@@ -969,7 +1034,7 @@ mod tests {
     use crate::state::{MockState, RegisteredActor};
     use actr_protocol::prost::Message as ProstMessage;
     use actr_protocol::{
-        AIdCredential, ActrId, ActrRelay, ActrType, Realm, RegisterRequest, RelayDeliveryContext,
+        AIdCredential, ActrId, ActrRelay, ActrType, RegisterRequest, RelayDeliveryContext,
         RelayDeliveryStatus, RoleNegotiation, SIGNALING_ENVELOPE_VERSION, SessionDescription,
         SignalingEnvelope, SignalingToActr, actr_relay, session_description::Type as SdpType,
         signaling_envelope, signaling_to_actr,
@@ -981,23 +1046,18 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
-    fn actor(serial: u64, name: &str) -> ActrId {
+    fn actor(serial: u64) -> ActrId {
         ActrId {
-            realm: Realm { realm_id: 7 },
+            realm: "mock@example.com".to_string(),
             serial_number: serial,
-            r#type: ActrType {
-                manufacturer: "acme".to_string(),
-                name: name.to_string(),
-                version: "0.1.0".to_string(),
-            },
         }
     }
 
     fn registered_actor(serial: u64, name: &str, client_id: &str) -> RegisteredActor {
         RegisteredActor {
-            actr_id: actor(serial, name),
+            actr_id: actor(serial),
             actr_type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: name.to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -1021,22 +1081,20 @@ mod tests {
         let state = test_state();
         let req = RegisterRequest {
             actr_type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "EchoService".to_string(),
                 version: "0.1.0".to_string(),
             },
-            realm: Realm { realm_id: 7 },
+            realm: "mock@example.com".to_string(),
             service_spec: None,
             acl: None,
             service: None,
             ws_address: None,
             manifest_raw: None,
-            mfr_signature: None,
+            publisher_signature: None,
             target: None,
             auth_mode: None,
-            manufacturer_auth_signature: None,
-            manufacturer_auth_signed_at: None,
-            manufacturer_auth_nonce: None,
+            signing_public_key: None,
         };
 
         let ok = build_register_ok(&req, &state).await;
@@ -1049,9 +1107,9 @@ mod tests {
 
     #[test]
     fn role_negotiation_targets_only_from_and_to() {
-        let from = actor(1, "client-a");
-        let to = actor(2, "server");
-        let bystander = actor(3, "client-b");
+        let from = actor(1);
+        let to = actor(2);
+        let bystander = actor(3);
 
         let mut client_map = HashMap::new();
         client_map.insert("ws-from".to_string(), from.clone());
@@ -1067,8 +1125,8 @@ mod tests {
 
     #[test]
     fn role_negotiation_falls_back_to_sender_when_from_not_bound() {
-        let from = actor(1, "client-a");
-        let to = actor(2, "server");
+        let from = actor(1);
+        let to = actor(2);
 
         let mut client_map = HashMap::new();
         client_map.insert("ws-to".to_string(), to.clone());
@@ -1082,9 +1140,9 @@ mod tests {
 
     #[test]
     fn route_candidates_skip_unbound_history_rows() {
-        let source = actor(10, "echo-client-app");
+        let source = actor(10);
         let target_type = ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "EchoService".to_string(),
             version: "0.1.0".to_string(),
         };
@@ -1098,17 +1156,17 @@ mod tests {
         let (candidates, ws_address_map, skipped_unbound) =
             collect_reachable_route_candidates(&registry, &source, &target_type);
 
-        assert_eq!(candidates, vec![actor(4, "EchoService")]);
+        assert_eq!(candidates, vec![actor(4)]);
         assert_eq!(ws_address_map.len(), 1);
-        assert_eq!(ws_address_map[0].candidate_id, actor(4, "EchoService"));
+        assert_eq!(ws_address_map[0].candidate_id, actor(4));
         assert_eq!(skipped_unbound, 2);
     }
 
     #[tokio::test]
     async fn relay_forwarding_re_envelopes_but_preserves_sdp_exchange_id() {
         let state = test_state();
-        let source = actor(1, "client");
-        let target = actor(2, "service");
+        let source = actor(1);
+        let target = actor(2);
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         state
@@ -1121,11 +1179,18 @@ mod tests {
             .write()
             .await
             .insert("target-ws".to_string(), tx);
+        state
+            .registry
+            .write()
+            .await
+            .push(registered_actor(1, "client", "source-ws"));
 
         let relay = ActrRelay {
             source: source.clone(),
             credential: AIdCredential::default(),
             target: target.clone(),
+            // The sender's value is discarded and replaced from the registry.
+            source_type: Some(ActrType::default()),
             delivery_context: None,
             payload: Some(actr_relay::Payload::SessionDescription(
                 SessionDescription {
@@ -1158,6 +1223,10 @@ mod tests {
         let Some(signaling_envelope::Flow::ActrRelay(forwarded_relay)) = forwarded.flow else {
             panic!("expected forwarded ActrRelay");
         };
+        assert_eq!(
+            forwarded_relay.source_type.map(|t| t.name),
+            Some("client".to_string())
+        );
         let Some(actr_relay::Payload::SessionDescription(sd)) = forwarded_relay.payload else {
             panic!("expected forwarded SessionDescription");
         };
@@ -1167,8 +1236,8 @@ mod tests {
     #[tokio::test]
     async fn delivery_result_echoes_context_and_correlates_to_request() {
         let state = test_state();
-        let source = actor(1, "client");
-        let target = actor(2, "missing-service");
+        let source = actor(1);
+        let target = actor(2);
         let (sender_tx, mut sender_rx) = mpsc::unbounded_channel();
         state
             .client_to_actr_id
@@ -1185,6 +1254,7 @@ mod tests {
             source: source.clone(),
             credential: AIdCredential::default(),
             target: target.clone(),
+            source_type: None,
             delivery_context: Some(RelayDeliveryContext {
                 controller_lifecycle_id: 7,
                 transport_epoch: 11,
@@ -1192,7 +1262,6 @@ mod tests {
                 negotiation_epoch: Some(29),
             }),
             payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
-                realm_id: source.realm.realm_id,
                 from: source.clone(),
                 to: target.clone(),
             })),
@@ -1252,12 +1321,13 @@ mod tests {
     #[tokio::test]
     async fn relay_forwarding_classifies_unbound_target_as_unavailable() {
         let state = test_state();
-        let source = actor(1, "client");
-        let target = actor(2, "missing-service");
+        let source = actor(1);
+        let target = actor(2);
         let relay = ActrRelay {
             source: source.clone(),
             credential: AIdCredential::default(),
             target: target.clone(),
+            source_type: None,
             delivery_context: None,
             payload: Some(actr_relay::Payload::SessionDescription(
                 SessionDescription {
@@ -1285,8 +1355,8 @@ mod tests {
     #[tokio::test]
     async fn relay_forwarding_classifies_send_failure_as_rejection_not_unavailable() {
         let state = test_state();
-        let source = actor(1, "client");
-        let target = actor(2, "service");
+        let source = actor(1);
+        let target = actor(2);
         // The target session is bound but its channel is closed: the egress
         // failed, which production reports as an ordinary rejection.
         let (tx, rx) = mpsc::unbounded_channel();
@@ -1301,11 +1371,18 @@ mod tests {
             .write()
             .await
             .insert("target-ws".to_string(), tx);
+        state
+            .registry
+            .write()
+            .await
+            .push(registered_actor(1, "client", "source-ws"));
 
         let relay = ActrRelay {
             source: source.clone(),
             credential: AIdCredential::default(),
             target: target.clone(),
+            // The sender's value is discarded and replaced from the registry.
+            source_type: Some(ActrType::default()),
             delivery_context: None,
             payload: Some(actr_relay::Payload::SessionDescription(
                 SessionDescription {

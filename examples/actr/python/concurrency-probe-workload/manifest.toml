@@ -3,7 +3,7 @@ exports = ["protos/local/concurrency.proto"]
 
 [package]
 name = "ConcurrencyProbeWorkload"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.2.0"
 description = "Generated Python concurrency probe workload for the run_concurrent e2e suite"
 authors = ["Actr Dev Team"]

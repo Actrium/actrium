@@ -3,12 +3,13 @@ edition = 1
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 33554434
-realm_secret = "rs_AclExampleSecret123456"
+realm = "acl-demo@example.com"
+# Written by `actr realm join` (the start script runs it).
+realm_client_key = "realm-client.json"
 
 [discovery]
 visible = true
@@ -24,7 +25,7 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:allowed-greeter-client:1.0.0"
+type = "acme/allowed-greeter-client@1.0.0"
 
 [scripts]
 dev = "cargo run"

@@ -470,6 +470,8 @@ impl SignalingMessageClass {
 pub enum SignalingFaultRule {
     Deliver,
     Drop,
+    /// Retain messages until the test explicitly releases this directed class.
+    Hold,
     Delay(Duration),
     /// Delay this message so a later message can overtake it.
     Reorder(Duration),
@@ -559,6 +561,8 @@ struct DirectedSignalingFaultState {
     /// Cancellation is route-scoped: healing A-B must not cancel delayed
     /// signaling that belongs to A-C or any other independent peer link.
     deferred_cancels: Mutex<std::collections::HashMap<SignalingRouteKey, DeferredSignalingRoute>>,
+    held_releases:
+        Mutex<std::collections::HashMap<SignalingFaultKey, tokio_util::sync::CancellationToken>>,
     deferred_idle: tokio::sync::Notify,
     started_at: Instant,
     delivered: AtomicUsize,
@@ -578,6 +582,7 @@ impl Default for DirectedSignalingFaultState {
             observed: Mutex::new(SignalingObservation::default()),
             changed: tokio::sync::Notify::new(),
             deferred_cancels: Mutex::new(std::collections::HashMap::new()),
+            held_releases: Mutex::new(std::collections::HashMap::new()),
             deferred_idle: tokio::sync::Notify::new(),
             started_at: Instant::now(),
             delivered: AtomicUsize::new(0),
@@ -673,7 +678,36 @@ impl DirectedSignalingFaultRegistry {
             });
     }
 
+    /// Release already-held messages and deliver future messages of this class.
+    /// The observation lock makes release atomic with publishing a Hold hit.
+    pub fn release_held(&self, from: &ActrId, to: &ActrId, class: SignalingMessageClass) {
+        let _observed = self
+            .state
+            .observed
+            .lock()
+            .expect("signaling observation lock poisoned");
+        self.set_rule(from.clone(), to.clone(), class, SignalingFaultRule::Deliver);
+        if let Some(release) = self
+            .state
+            .held_releases
+            .lock()
+            .expect("signaling hold lock poisoned")
+            .remove(&SignalingFaultKey {
+                from: from.clone(),
+                to: to.clone(),
+                class,
+            })
+        {
+            release.cancel();
+        }
+    }
+
     pub fn heal_pair(&self, a: &ActrId, b: &ActrId) {
+        let _observed = self
+            .state
+            .observed
+            .lock()
+            .expect("signaling observation lock poisoned");
         self.state
             .rules
             .lock()
@@ -698,9 +732,21 @@ impl DirectedSignalingFaultRegistry {
                     || (&selector.key.from == b && &selector.key.to == a))
             });
         self.cancel_deferred_pair(a, b);
+        self.state
+            .held_releases
+            .lock()
+            .expect("signaling hold lock poisoned")
+            .retain(|key, _| {
+                !((&key.from == a && &key.to == b) || (&key.from == b && &key.to == a))
+            });
     }
 
     pub fn clear(&self) {
+        let _observed = self
+            .state
+            .observed
+            .lock()
+            .expect("signaling observation lock poisoned");
         self.state
             .rules
             .lock()
@@ -717,6 +763,11 @@ impl DirectedSignalingFaultRegistry {
             .expect("signaling exchange-rule lock poisoned")
             .clear();
         self.cancel_all_deferred();
+        self.state
+            .held_releases
+            .lock()
+            .expect("signaling hold lock poisoned")
+            .clear();
     }
 
     pub fn active_rule_count(&self) -> usize {
@@ -898,14 +949,14 @@ impl DirectedSignalingFaultRegistry {
     /// visible — so a test woken by `wait_for_hits_after` is guaranteed that
     /// its next `trace()` snapshot includes the hit's event.
     ///
-    /// Lock order: `observed` → `exchange_rules` → `nth_rules` → `rules`.
-    /// Every other accessor takes at most one of these locks, so the nesting
-    /// cannot deadlock.
+    /// Lock order: `observed` first, then one of the policy/deferred locks.
+    /// Release and healing use the same order to fence newly held messages.
     fn decision_and_record(
         &self,
         from: &ActrId,
         to: &ActrId,
         message: &SignalingMessage,
+        local_id: &super::signaling::SharedLocalId,
     ) -> SignalingDecision {
         let class = SignalingMessageClass::of(message);
         let exact = SignalingFaultKey {
@@ -990,6 +1041,20 @@ impl DirectedSignalingFaultRegistry {
             .unwrap_or(SignalingFaultRule::Deliver);
         drop(rules);
 
+        // Register both release and cancellation before exposing the hit. A test
+        // can then release/heal immediately after wait_for_hits_after returns.
+        let hold = (rule == SignalingFaultRule::Hold).then(|| {
+            let release = self
+                .state
+                .held_releases
+                .lock()
+                .expect("signaling hold lock poisoned")
+                .entry(exact.clone())
+                .or_default()
+                .clone();
+            let cancel = self.deferred_token(from, to, local_id);
+            (release, cancel)
+        });
         observed.trace.push(SignalingTraceEvent {
             from: from.clone(),
             to: to.clone(),
@@ -1005,6 +1070,7 @@ impl DirectedSignalingFaultRegistry {
         drop(observed);
         self.state.changed.notify_one();
         SignalingDecision {
+            hold,
             class,
             rule,
             ordinal,
@@ -1020,11 +1086,16 @@ impl DirectedSignalingFaultRegistry {
         to: &ActrId,
         message: &SignalingMessage,
     ) -> SignalingFaultRule {
-        self.decision_and_record(from, to, message).rule
+        self.decision_and_record(from, to, message, &from.clone().into())
+            .rule
     }
 }
 
 struct SignalingDecision {
+    hold: Option<(
+        tokio_util::sync::CancellationToken,
+        tokio_util::sync::CancellationToken,
+    )>,
     class: SignalingMessageClass,
     rule: SignalingFaultRule,
     ordinal: usize,
@@ -1078,7 +1149,9 @@ impl<T> DirectedSignalingTransport<T> {
 impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTransport<T> {
     async fn send(&self, to: ActrId, message: SignalingMessage) -> Result<(), String> {
         let local_id = self.local_id.get();
-        let decision = self.faults.decision_and_record(&local_id, &to, &message);
+        let decision = self
+            .faults
+            .decision_and_record(&local_id, &to, &message, &self.local_id);
         match decision.rule {
             SignalingFaultRule::Deliver => {
                 self.faults.state.delivered.fetch_add(1, Ordering::Relaxed);
@@ -1086,6 +1159,24 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTr
             }
             SignalingFaultRule::Drop => {
                 self.faults.state.dropped.fetch_add(1, Ordering::Relaxed);
+            }
+            SignalingFaultRule::Hold => {
+                let (release, cancel) = decision.hold.expect("Hold decision has a release gate");
+                let inner = self.inner.clone();
+                let state = self.faults.state.clone();
+                state.deferred_inflight.fetch_add(1, Ordering::AcqRel);
+                tokio::spawn(async move {
+                    tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => {}
+                        _ = release.cancelled() => {
+                            state.delivered.fetch_add(1, Ordering::Relaxed);
+                            let _ = inner.send(to, message).await;
+                        }
+                    }
+                    state.deferred_inflight.fetch_sub(1, Ordering::AcqRel);
+                    state.deferred_idle.notify_one();
+                });
             }
             SignalingFaultRule::Delay(delay) => {
                 self.faults.state.delayed.fetch_add(1, Ordering::Relaxed);

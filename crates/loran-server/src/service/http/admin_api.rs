@@ -1,20 +1,25 @@
+use actr_protocol::realm_profile::RealmPackage;
 use actrix_sdk::control::{
     AdminApiService, ConfigType, CreateRealmRequest, NonceCredential, RealmInfo, UpdateRealmRequest,
 };
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{ConnectInfo, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
 };
+use issuer::realm_profile::ProfileChange;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use platform::config::AdminUiConfig;
 use platform::monitoring::MetricsStore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::net::SocketAddr;
 use std::sync::Arc;
+
+mod login_admission;
 
 // ── State ──────────────────────────────────────────────────────
 
@@ -35,6 +40,12 @@ struct Claims {
     sub: String,
     exp: u64,
     iat: u64,
+    /// ADM-07: Fingerprint of the password hash in effect when this token was
+    /// issued. The auth middleware rejects the token once the live
+    /// `password_hash` changes. The field is mandatory, so tokens minted before
+    /// this claim existed (or with it stripped) fail to deserialize and are
+    /// rejected fail-closed.
+    pwd_ver: String,
 }
 
 #[derive(Deserialize)]
@@ -74,7 +85,21 @@ pub async fn auth_middleware(
     validation.validate_exp = true;
 
     match jsonwebtoken::decode::<Claims>(token, &key, &validation) {
-        Ok(_) => next.run(request).await,
+        Ok(data) => {
+            // ADM-07: Reject tokens issued under a superseded password hash.
+            // After the admin rotates `password_hash` and reloads, the state is
+            // rebuilt with the new hash, so the recomputed pwd_ver no longer
+            // matches tokens signed against the old one — logging out all
+            // existing sessions.
+            if data.claims.pwd_ver != state.config.password_version() {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Invalid or expired token"})),
+                )
+                    .into_response();
+            }
+            next.run(request).await
+        }
         Err(_) => (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "Invalid or expired token"})),
@@ -87,25 +112,39 @@ pub async fn auth_middleware(
 
 async fn login(
     State(state): State<Arc<AdminApiState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(body): Json<LoginRequest>,
 ) -> impl IntoResponse {
-    use subtle::ConstantTimeEq;
-    let expected = state.config.password.as_bytes();
-    let provided = body.password.as_bytes();
-
-    let is_match = if expected.len() == provided.len() {
-        expected.ct_eq(provided).into()
-    } else {
-        false
+    let admission = login_admission::LoginAdmission::process();
+    let permit = match admission.try_acquire(peer.ip(), &state.config.login_limits) {
+        Ok(permit) => permit,
+        Err(retry_after) => {
+            // Keep rejected floods cheap; verified attempts below retain the
+            // security audit without generating an unbounded denial log stream.
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(header::RETRY_AFTER, retry_after.to_string())],
+                Json(json!({"error": "Too many login attempts"})),
+            )
+                .into_response();
+        }
     };
+    let is_match =
+        login_admission::verify(body.password, state.config.password_hash.clone(), permit).await;
 
     if !is_match {
+        // ADM-03: Record failed admin login on the security channel. The source
+        // IP is included; the submitted password is never logged.
+        log_login_attempt(peer.ip(), false);
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "Invalid password"})),
         )
             .into_response();
     }
+
+    // ADM-03: Record successful credential verification on the security channel.
+    log_login_attempt(peer.ip(), true);
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -116,6 +155,9 @@ async fn login(
         sub: "admin".to_string(),
         iat: now,
         exp: now + state.config.session_expiry_secs,
+        // ADM-07: Bind the token to the current password hash so rotation
+        // invalidates it immediately.
+        pwd_ver: state.config.password_version(),
     };
 
     let key = EncodingKey::from_secret(&state.jwt_secret);
@@ -211,11 +253,17 @@ async fn list_realms(State(state): State<Arc<AdminApiState>>) -> impl IntoRespon
 
 #[derive(Deserialize)]
 struct CreateRealmBody {
-    name: String,
+    realm: String,
     #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
     expires_at: u64,
+    /// Package and display name of the first Realm Profile; the package is
+    /// required for Realms under the Provider domain.
+    #[serde(default)]
+    package: Option<RealmPackage>,
+    #[serde(default)]
+    display_name: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -231,19 +279,23 @@ async fn create_realm(
     }
 
     let req = CreateRealmRequest {
-        realm_id: None,
-        name: body.name,
+        realm: body.realm,
         enabled: body.enabled,
         credential: dummy_credential(),
         expires_at: body.expires_at,
-        status: None,
-        secret_current_hash: None,
-        secret_previous_hash: None,
-        secret_previous_valid_until: None,
     };
 
-    match state.service.create_realm_with_secret_direct(req).await {
-        Ok((resp, realm_secret)) => {
+    let profile = ProfileChange {
+        package: body.package,
+        display_name: body.display_name,
+        ..Default::default()
+    };
+    match state
+        .service
+        .create_realm_with_invite_direct(req, profile)
+        .await
+    {
+        Ok((resp, owner_invite)) => {
             let status = if resp.success {
                 StatusCode::CREATED
             } else {
@@ -251,11 +303,16 @@ async fn create_realm(
             };
             (
                 status,
+                // ADM-09: response carries the owner invite; forbid caching.
+                [(header::CACHE_CONTROL, "no-store")],
                 Json(json!({
                     "success": resp.success,
                     "error_message": resp.error_message,
                     "realm": resp.realm.as_ref().map(realm_info_to_json),
-                    "realm_secret": realm_secret,
+                    "owner_invite": owner_invite.as_ref().map(|invite| &invite.invite),
+                    "owner_invite_expires_at": owner_invite
+                        .as_ref()
+                        .map(|invite| platform::realm::membership::rfc3339(invite.expires_at)),
                 })),
             )
                 .into_response()
@@ -264,24 +321,155 @@ async fn create_realm(
     }
 }
 
-async fn rotate_realm_secret(
+// ── Identity re-confirmation ───────────────────────────────────
+//
+// A Realm domain or publisher whose served signing keys do not chain to the
+// pinned keys is refused until the operator compares both and confirms the
+// new ones (`authority-discovery.md` section 4.4 step 6).
+
+#[derive(Deserialize)]
+struct ConfirmIdentityRequest {
+    /// The `fetched.digest` the operator reviewed.
+    digest: String,
+}
+
+/// Fetch an authority descriptor for the operator, uncached so a review sees
+/// what the domain serves now.
+async fn fetch_descriptor(url: String) -> Result<Arc<[u8]>, platform::net::FetchError> {
+    platform::net::fetch_public_json(&url, 5)
+        .await
+        .map(Arc::from)
+}
+
+fn identity_response(result: Result<Value, issuer::realm_management::ManagementError>) -> Response {
+    match result {
+        Ok(view) => (StatusCode::OK, Json(view)).into_response(),
+        Err(error) => (
+            error.status(),
+            Json(json!({ "success": false, "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Record a confirmed identity change on the audit channel.
+fn audit_identity_confirmed(resource: &str, id: &str, confirmed: &Value) {
+    use platform::recording::{AuditPayload, Record, RecordLevel, emit_with_callsite};
+
+    let mut record =
+        Record::<{ platform::recording::CHANNEL_AUDIT }>::new("admin.identity.confirm");
+    record.common.actor = Some("admin".to_string());
+    record.common.level = RecordLevel::Warn;
+    record.audit = Some(AuditPayload {
+        action: "identity.confirm".to_string(),
+        resource: resource.to_string(),
+        resource_id: Some(id.to_string()),
+        reason: Some("operator confirmed new signing keys".to_string()),
+        remote_addr: None,
+        session_id: None,
+        before: confirmed.get("previous").cloned(),
+        after: confirmed.get("pinned").cloned(),
+    });
+    let _ = emit_with_callsite(record, file!(), line!(), module_path!());
+}
+
+async fn get_realm_domain_identity(Path(domain): Path<String>) -> Response {
+    identity_response(issuer::identity::realm_domain_identity(&domain, fetch_descriptor).await)
+}
+
+async fn confirm_realm_domain_identity(
     State(state): State<Arc<AdminApiState>>,
-    Path(realm_id): Path<u32>,
+    Path(domain): Path<String>,
+    Json(request): Json<ConfirmIdentityRequest>,
+) -> Response {
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+    let result =
+        issuer::identity::confirm_realm_domain_identity(&domain, &request.digest, fetch_descriptor)
+            .await;
+    if let Ok(confirmed) = &result {
+        audit_identity_confirmed("realm_domain", &domain, confirmed);
+    }
+    identity_response(result)
+}
+
+async fn get_publisher_identity(Path(publisher): Path<String>) -> Response {
+    identity_response(issuer::identity::publisher_identity(&publisher, fetch_descriptor).await)
+}
+
+async fn confirm_publisher_identity(
+    Path(publisher): Path<String>,
+    Json(request): Json<ConfirmIdentityRequest>,
+) -> Response {
+    let result =
+        issuer::identity::confirm_publisher_identity(&publisher, &request.digest, fetch_descriptor)
+            .await;
+    if let Ok(confirmed) = &result {
+        audit_identity_confirmed("publisher", &publisher, confirmed);
+    }
+    identity_response(result)
+}
+
+/// A new owner invite for an active Realm under the Provider domain or
+/// without a Realm Profile (owner recovery); earlier unused owner invites
+/// stop working.
+async fn issue_owner_invite(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
 ) -> impl IntoResponse {
     if !state.realm_writes_enabled {
         return realm_writes_disabled_response();
     }
 
-    match state.service.rotate_realm_secret_direct(realm_id).await {
-        Ok(result) => (
+    match state.service.issue_owner_invite_direct(&realm).await {
+        Ok(invite) => (
             StatusCode::OK,
+            [(header::CACHE_CONTROL, "no-store")],
             Json(json!({
                 "success": true,
-                "realm_id": result.realm_id,
-                "realm_secret": result.realm_secret,
-                "previous_valid_until": result.previous_valid_until,
-                "grace_seconds": result.grace_seconds,
+                "realm": realm,
+                "owner_invite": invite.invite,
+                "expires_at": platform::realm::membership::rfc3339(invite.expires_at),
             })),
+        )
+            .into_response(),
+        Err(status) if status.code() == tonic::Code::FailedPrecondition => (
+            StatusCode::CONFLICT,
+            Json(json!({ "success": false, "error": status.message() })),
+        )
+            .into_response(),
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
+/// Members, clients and open invites of a Realm, read-only.
+async fn list_realm_members(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+) -> impl IntoResponse {
+    match state.service.list_realm_members_direct(&realm).await {
+        Ok(members) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "members": members["members"], "invites": members["invites"] })),
+        )
+            .into_response(),
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
+async fn rotate_realm_issuer_key(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+) -> impl IntoResponse {
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+
+    match state.service.rotate_realm_issuer_key_direct(&realm).await {
+        Ok(key_id) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "realm": realm, "key_id": key_id })),
         )
             .into_response(),
         Err(status) => grpc_status_to_response(status),
@@ -290,9 +478,9 @@ async fn rotate_realm_secret(
 
 async fn get_realm(
     State(state): State<Arc<AdminApiState>>,
-    Path(realm_id): Path<u32>,
+    Path(realm): Path<String>,
 ) -> impl IntoResponse {
-    match state.service.get_realm_direct(realm_id).await {
+    match state.service.get_realm_direct(&realm).await {
         Ok(resp) => {
             let status = if resp.success {
                 StatusCode::OK
@@ -313,15 +501,18 @@ async fn get_realm(
     }
 }
 
+/// `enabled: false` suspends the Realm and `true` resumes it. The Realm name
+/// never changes.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct UpdateRealmBody {
-    name: Option<String>,
     enabled: Option<bool>,
+    expires_at: Option<u64>,
 }
 
 async fn update_realm(
     State(state): State<Arc<AdminApiState>>,
-    Path(realm_id): Path<u32>,
+    Path(realm): Path<String>,
     Json(body): Json<UpdateRealmBody>,
 ) -> impl IntoResponse {
     if !state.realm_writes_enabled {
@@ -329,15 +520,10 @@ async fn update_realm(
     }
 
     let req = UpdateRealmRequest {
-        realm_id,
-        name: body.name,
+        realm,
         enabled: body.enabled,
         credential: dummy_credential(),
-        status: None,
-        expires_at: None,
-        secret_current_hash: None,
-        secret_previous_hash: None,
-        secret_previous_valid_until: None,
+        expires_at: body.expires_at,
     };
 
     match state.service.update_realm_direct(req).await {
@@ -361,30 +547,57 @@ async fn update_realm(
     }
 }
 
-async fn delete_realm(
+async fn retire_realm(
     State(state): State<Arc<AdminApiState>>,
-    Path(realm_id): Path<u32>,
+    Path(realm): Path<String>,
 ) -> impl IntoResponse {
     if !state.realm_writes_enabled {
         return realm_writes_disabled_response();
     }
 
-    match state.service.delete_realm_hard_direct(realm_id).await {
+    match state.service.retire_realm_direct(&realm).await {
         Ok(resp) => {
             let status = if resp.success {
                 StatusCode::OK
             } else {
-                StatusCode::NOT_FOUND
+                StatusCode::BAD_REQUEST
             };
             (
                 status,
                 Json(json!({
                     "success": resp.success,
                     "error_message": resp.error_message,
+                    "realm": resp.realm.as_ref().map(realm_info_to_json),
                 })),
             )
                 .into_response()
         }
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
+/// The accepted Realm Profile, as signed.
+async fn get_realm_profile(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+) -> impl IntoResponse {
+    match state.service.get_realm_profile_direct(&realm).await {
+        Ok(Some(document)) => {
+            let profile: Value = serde_json::from_str(&document).unwrap_or(Value::Null);
+            (
+                StatusCode::OK,
+                Json(json!({ "success": true, "profile": profile })),
+            )
+                .into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "success": false,
+                "error_message": format!("Realm {realm} has no Realm Profile"),
+            })),
+        )
+            .into_response(),
         Err(status) => grpc_status_to_response(status),
     }
 }
@@ -418,6 +631,13 @@ async fn update_config(
     Path((config_type, config_key)): Path<(i32, String)>,
     Json(body): Json<UpdateConfigBody>,
 ) -> impl IntoResponse {
+    // The config store accepts arbitrary keys with no namespace separation, so
+    // runtime config feeding realm services (TURN secret, signer, bind
+    // addresses) is writable here. Same lock as the realm write endpoints.
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+
     let ct = ConfigType::try_from(config_type).unwrap_or(ConfigType::Unspecified);
     match state
         .service
@@ -516,11 +736,20 @@ async fn save_config_file(
     State(state): State<Arc<AdminApiState>>,
     Json(body): Json<SaveConfigBody>,
 ) -> impl IntoResponse {
-    match state.service.save_config_file_direct(&body.content).await {
+    // superv_managed is the inverse of realm_writes_enabled: when the realm is
+    // supervisor-managed the Admin UI is read-only for the control plane, so
+    // control.* edits via config-file save are rejected downstream.
+    let superv_managed = !state.realm_writes_enabled;
+    match state
+        .service
+        .save_config_file_direct(&body.content, superv_managed)
+        .await
+    {
         Ok(()) => (StatusCode::OK, Json(json!({"saved": true}))).into_response(),
         Err(status) => {
             let http_status = match status.code() {
                 tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+                tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
             (
@@ -547,32 +776,6 @@ async fn get_service_detail(
 async fn get_signer_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
     match state.service.get_signer_keys_direct().await {
         Ok(result) => (StatusCode::OK, Json(serde_json::to_value(result).unwrap())).into_response(),
-        Err(status) => grpc_status_to_response(status),
-    }
-}
-
-async fn cleanup_signer_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
-    match state.service.cleanup_signer_keys_direct().await {
-        Ok(result) => (StatusCode::OK, Json(serde_json::to_value(result).unwrap())).into_response(),
-        Err(status) => grpc_status_to_response(status),
-    }
-}
-
-async fn get_ais_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
-    match state.service.get_ais_keys_direct().await {
-        Ok(keys) => (StatusCode::OK, Json(json!({"keys": keys}))).into_response(),
-        Err(status) => grpc_status_to_response(status),
-    }
-}
-
-/// Rotate the AIS signing key through the shared issuer (JWT-protected).
-async fn rotate_ais_key(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
-    match state.service.rotate_ais_signing_key_direct().await {
-        Ok(new_key_id) => (
-            StatusCode::OK,
-            Json(json!({"status": "success", "new_key_id": new_key_id})),
-        )
-            .into_response(),
         Err(status) => grpc_status_to_response(status),
     }
 }
@@ -610,6 +813,14 @@ async fn set_override(
     Path(key): Path<String>,
     Json(body): Json<SetOverrideBody>,
 ) -> impl IntoResponse {
+    // Overrides apply to arbitrary config keys with no namespace separation;
+    // while the realm is supervisor-managed the local Admin UI must not be
+    // able to override (or shadow supervisor-set overrides on) realm-serving
+    // config.
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+
     match state
         .service
         .set_override_direct(&key, &body.value, "admin")
@@ -628,6 +839,12 @@ async fn delete_override(
     State(state): State<Arc<AdminApiState>>,
     Path(key): Path<String>,
 ) -> impl IntoResponse {
+    // Deleting an override can silently revert realm-serving config to file
+    // defaults; locked down together with set_override.
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+
     match state.service.delete_override_direct(&key).await {
         Ok(deleted) => (
             StatusCode::OK,
@@ -761,7 +978,10 @@ async fn serve_spa() -> impl IntoResponse {
 
 // ── Router builder ─────────────────────────────────────────────
 
-pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Router>) -> Router {
+pub fn build_admin_api_router(
+    state: Arc<AdminApiState>,
+    publisher_registry_router: Option<Router>,
+) -> Router {
     let authed_api = Router::new()
         .route("/admin/api/capabilities", get(get_admin_capabilities))
         .route("/admin/api/node", get(get_node_info))
@@ -771,12 +991,26 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Rout
         .route("/admin/api/node/restart", post(restart_node))
         .route("/admin/api/realms", get(list_realms))
         .route("/admin/api/realms", post(create_realm))
-        .route("/admin/api/realms/{id}", get(get_realm))
-        .route("/admin/api/realms/{id}", put(update_realm))
-        .route("/admin/api/realms/{id}", delete(delete_realm))
+        .route("/admin/api/realms/{realm}", get(get_realm))
+        .route("/admin/api/realms/{realm}", put(update_realm))
         .route(
-            "/admin/api/realms/{id}/secret/rotate",
-            post(rotate_realm_secret),
+            "/admin/api/realms/{realm}/issuer-key/rotate",
+            post(rotate_realm_issuer_key),
+        )
+        .route("/admin/api/realms/{realm}/retire", post(retire_realm))
+        .route("/admin/api/realms/{realm}/profile", get(get_realm_profile))
+        .route(
+            "/admin/api/realms/{realm}/owner-invite",
+            post(issue_owner_invite),
+        )
+        .route("/admin/api/realms/{realm}/members", get(list_realm_members))
+        .route(
+            "/admin/api/identity/realm-domains/{domain}",
+            get(get_realm_domain_identity).post(confirm_realm_domain_identity),
+        )
+        .route(
+            "/admin/api/identity/publishers/{publisher}",
+            get(get_publisher_identity).post(confirm_publisher_identity),
         )
         .route(
             "/admin/api/config/{config_type}/{config_key}",
@@ -801,12 +1035,6 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Rout
         )
         // Service detail routes — specific routes before parameterized
         .route("/admin/api/services/signer/keys", get(get_signer_keys))
-        .route(
-            "/admin/api/services/signer/keys/cleanup",
-            post(cleanup_signer_keys),
-        )
-        .route("/admin/api/services/ais/keys", get(get_ais_keys))
-        .route("/admin/api/services/ais/keys/rotate", post(rotate_ais_key))
         .route("/admin/api/services/{name}", get(get_service_detail))
         .route("/admin/api/network/probe/{port}", get(probe_port))
         .route("/admin/api/metrics/timeseries", get(get_metrics_timeseries));
@@ -818,10 +1046,10 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Rout
         ))
         .with_state(state.clone());
 
-    // Nest MFR router under /admin/api/mfr with auth (if provided)
-    let authed_mfr = mfr_router.map(|mfr| {
+    // Nest Publisher Registry management behind Admin authentication.
+    let authed_publisher_registry = publisher_registry_router.map(|publisher| {
         Router::new()
-            .nest("/admin/api/mfr", mfr)
+            .nest("/admin/api/publishers", publisher)
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 auth_middleware,
@@ -832,19 +1060,85 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Rout
         .route("/admin/api/auth/login", post(login))
         .with_state(state.clone());
 
+    // ADM-09: Attach hardening response headers (CSP, nosniff, no-referrer) to
+    // the whole Admin UI tree.
     let spa = Router::new()
         .route("/admin/{*path}", get(serve_spa))
-        .route("/admin", get(serve_spa));
+        .route("/admin", get(serve_spa))
+        .layer(middleware::from_fn(admin_security_headers));
 
     let combined = public.merge(authed_api).merge(spa);
-    if let Some(mfr) = authed_mfr {
-        combined.merge(mfr)
+    if let Some(publisher) = authed_publisher_registry {
+        combined.merge(publisher)
     } else {
         combined
     }
 }
 
 // ── Helpers ────────────────────────────────────────────────────
+
+/// ADM-03: Emit an admin login attempt on the security channel.
+///
+/// Records the outcome and source IP for both success and failure. The
+/// submitted password is never included.
+fn log_login_attempt(source_ip: std::net::IpAddr, success: bool) {
+    use platform::recording::{
+        CHANNEL_SECURITY, Outcome, Record, RecordLevel, SecurityPayload, SecuritySeverity,
+        emit_with_callsite,
+    };
+
+    let mut record = Record::<{ CHANNEL_SECURITY }>::new("admin.auth.login");
+    record.common.actor = Some("admin".to_string());
+    record.common.level = if success {
+        RecordLevel::Info
+    } else {
+        RecordLevel::Warn
+    };
+    record.common.outcome = if success {
+        Outcome::Success
+    } else {
+        Outcome::Denied
+    };
+    record.security = Some(SecurityPayload {
+        control: "admin.auth.login".to_string(),
+        severity: if success {
+            SecuritySeverity::Low
+        } else {
+            SecuritySeverity::Medium
+        },
+        category: Some("authn".to_string()),
+        subject: Some("admin".to_string()),
+        source_addr: Some(source_ip.to_string()),
+        destination_addr: None,
+        evidence: None,
+    });
+    let _ = emit_with_callsite(record, file!(), line!(), module_path!());
+}
+
+/// ADM-09: Attach hardening response headers to every Admin UI response.
+///
+/// tower-http's `set-header` feature is not enabled in this build, so we add the
+/// static headers through a small axum middleware instead of `SetResponseHeaderLayer`
+/// (no new dependency). Applied to the `/admin` SPA tree.
+async fn admin_security_headers(request: axum::extract::Request, next: Next) -> Response {
+    use axum::http::HeaderValue;
+
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'self'; frame-ancestors 'none'"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    response
+}
 
 fn dummy_credential() -> NonceCredential {
     NonceCredential {
@@ -866,23 +1160,13 @@ fn realm_writes_disabled_response() -> Response {
 }
 
 fn realm_info_to_json(info: &RealmInfo) -> Value {
-    let secret_rotation_state = info.secret_rotation_state.as_ref().map(|s| {
-        json!({
-            "current_hash_preview": s.current_hash_preview,
-            "previous_hash_preview": s.previous_hash_preview,
-            "previous_valid_until": s.previous_valid_until,
-        })
-    });
-
     json!({
-        "realm_id": info.realm_id,
-        "name": info.name,
+        "realm": info.realm,
         "enabled": info.enabled,
         "created_at": info.created_at,
         "updated_at": info.updated_at,
         "expires_at": info.expires_at,
         "status": info.status,
-        "secret_rotation_state": secret_rotation_state,
     })
 }
 

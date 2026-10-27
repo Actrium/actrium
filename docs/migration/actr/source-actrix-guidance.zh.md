@@ -1,5 +1,7 @@
 # AGENTS.md - AI 开发助手指南
 
+> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../../GLOSSARY.zh.md)「历史名称对照」。
+
 本文档专为 AI 代码助手（如 Claude Code、GitHub Copilot、Cursor 等）设计，提供项目的开发规范和最佳实践。
 
 ## 项目概览

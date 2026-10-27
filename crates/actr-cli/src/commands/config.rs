@@ -17,8 +17,8 @@ use toml::Value;
 
 /// All known schema field paths — used to validate `set` keys.
 const KNOWN_KEYS: &[&str] = &[
-    "mfr.manufacturer",
-    "mfr.keychain",
+    "publisher.name",
+    "publisher.keychain",
     "codegen.language",
     "codegen.output",
     "codegen.clean_before_generate",
@@ -30,9 +30,9 @@ const KNOWN_KEYS: &[&str] = &[
     "ui.color",
     "ui.non_interactive",
     "network.signaling_url",
-    "network.ais_endpoint",
-    "network.realm_id",
-    "network.realm_secret",
+    "network.issuer_endpoint",
+    "network.realm",
+    "network.realm_client_key",
     "storage.hyper_data_dir",
 ];
 
@@ -60,14 +60,14 @@ pub struct ConfigCommand {
 pub enum ConfigSubcommand {
     /// Set a configuration key to a value
     Set {
-        /// Configuration key (e.g., mfr.manufacturer)
+        /// Configuration key (e.g., publisher.name)
         key: String,
         /// Value to assign
         value: String,
     },
     /// Get the current value of a configuration key
     Get {
-        /// Configuration key (e.g., mfr.manufacturer)
+        /// Configuration key (e.g., publisher.name)
         key: String,
     },
     /// List all known schema fields with current effective values
@@ -79,7 +79,7 @@ pub enum ConfigSubcommand {
     },
     /// Remove a configuration key
     Unset {
-        /// Configuration key to remove (e.g., mfr.manufacturer)
+        /// Configuration key to remove (e.g., publisher.name)
         key: String,
     },
     /// Validate syntax and schema of all config files
@@ -256,11 +256,11 @@ impl ConfigCommand {
             .unwrap_or_else(|_| Value::String(raw_value.to_string()));
 
         match key {
-            "mfr.manufacturer" => {
-                config.mfr.manufacturer = Some(value_to_string(&parsed_value)?);
+            "publisher.name" => {
+                config.publisher.name = Some(value_to_string(&parsed_value)?);
             }
-            "mfr.keychain" => {
-                config.mfr.keychain = Some(value_to_string(&parsed_value)?);
+            "publisher.keychain" => {
+                config.publisher.keychain = Some(value_to_string(&parsed_value)?);
             }
             "codegen.language" => {
                 config.codegen.language = Some(value_to_string(&parsed_value)?);
@@ -283,14 +283,14 @@ impl ConfigCommand {
             "network.signaling_url" => {
                 config.network.signaling_url = Some(value_to_string(&parsed_value)?);
             }
-            "network.ais_endpoint" => {
-                config.network.ais_endpoint = Some(value_to_string(&parsed_value)?);
+            "network.issuer_endpoint" => {
+                config.network.issuer_endpoint = Some(value_to_string(&parsed_value)?);
             }
-            "network.realm_id" => {
-                config.network.realm_id = Some(value_to_u32(&parsed_value, key)?);
+            "network.realm" => {
+                config.network.realm = Some(value_to_realm(&parsed_value, key)?);
             }
-            "network.realm_secret" => {
-                config.network.realm_secret = Some(value_to_string(&parsed_value)?);
+            "network.realm_client_key" => {
+                config.network.realm_client_key = Some(value_to_string(&parsed_value)?);
             }
             "storage.hyper_data_dir" => {
                 config.storage.hyper_data_dir = Some(value_to_string(&parsed_value)?);
@@ -321,14 +321,14 @@ impl ConfigCommand {
     /// Remove a key from a `CliConfig` struct.
     fn unset_key_from_config(config: &mut CliConfig, key: &str) -> Result<bool> {
         let was_set = match key {
-            "mfr.manufacturer" => {
-                let had = config.mfr.manufacturer.is_some();
-                config.mfr.manufacturer = None;
+            "publisher.name" => {
+                let had = config.publisher.name.is_some();
+                config.publisher.name = None;
                 had
             }
-            "mfr.keychain" => {
-                let had = config.mfr.keychain.is_some();
-                config.mfr.keychain = None;
+            "publisher.keychain" => {
+                let had = config.publisher.keychain.is_some();
+                config.publisher.keychain = None;
                 had
             }
             "codegen.language" => {
@@ -366,19 +366,19 @@ impl ConfigCommand {
                 config.network.signaling_url = None;
                 had
             }
-            "network.ais_endpoint" => {
-                let had = config.network.ais_endpoint.is_some();
-                config.network.ais_endpoint = None;
+            "network.issuer_endpoint" => {
+                let had = config.network.issuer_endpoint.is_some();
+                config.network.issuer_endpoint = None;
                 had
             }
-            "network.realm_id" => {
-                let had = config.network.realm_id.is_some();
-                config.network.realm_id = None;
+            "network.realm" => {
+                let had = config.network.realm.is_some();
+                config.network.realm = None;
                 had
             }
-            "network.realm_secret" => {
-                let had = config.network.realm_secret.is_some();
-                config.network.realm_secret = None;
+            "network.realm_client_key" => {
+                let had = config.network.realm_client_key.is_some();
+                config.network.realm_client_key = None;
                 had
             }
             "storage.hyper_data_dir" => {
@@ -467,10 +467,14 @@ impl ConfigCommand {
         // Resolve effective config to show all fields with current values
         let effective = resolve_effective_cli_config()?;
         let lines: Vec<String> = vec![
-            format!("mfr.manufacturer = {}", effective.mfr.manufacturer),
+            format!("publisher.name = {}", effective.publisher.name),
             format!(
-                "mfr.keychain = {}",
-                effective.mfr.keychain.as_deref().unwrap_or("<not set>")
+                "publisher.keychain = {}",
+                effective
+                    .publisher
+                    .keychain
+                    .as_deref()
+                    .unwrap_or("<not set>")
             ),
             format!("codegen.language = {}", effective.codegen.language),
             format!("codegen.output = {}", effective.codegen.output),
@@ -489,22 +493,21 @@ impl ConfigCommand {
                 "network.signaling_url = {}",
                 effective.network.signaling_url
             ),
-            format!("network.ais_endpoint = {}", effective.network.ais_endpoint),
             format!(
-                "network.realm_id = {}",
-                effective
-                    .network
-                    .realm_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "<not set>".to_string())
+                "network.issuer_endpoint = {}",
+                effective.network.issuer_endpoint
             ),
             format!(
-                "network.realm_secret = {}",
+                "network.realm = {}",
+                effective.network.realm.as_deref().unwrap_or("<not set>")
+            ),
+            format!(
+                "network.realm_client_key = {}",
                 effective
                     .network
-                    .realm_secret
+                    .realm_client_key
                     .as_deref()
-                    .unwrap_or("<not set>")
+                    .map_or("<not set>".into(), |path| path.display().to_string())
             ),
             format!(
                 "storage.hyper_data_dir = {}",
@@ -638,11 +641,12 @@ fn value_to_bool(v: &Value, key: &str) -> Result<bool> {
     }
 }
 
-fn value_to_u32(v: &Value, key: &str) -> Result<u32> {
-    // Accept both numbers and strings (e.g., `1001` or `"1001"`).
+/// Convert a TOML Value to a Realm name (`<realm_id>@<domain>`).
+fn value_to_realm(v: &Value, key: &str) -> Result<String> {
     let s = value_to_string(v)?;
-    s.parse::<u32>()
-        .map_err(|_| anyhow::anyhow!("Key '{}' expects a positive integer, got '{}'", key, s))
+    actr_protocol::uri::parse_realm_name(&s)
+        .map_err(|e| anyhow::anyhow!("Key '{}' expects a Realm name, got '{}': {}", key, s, e))?;
+    Ok(s)
 }
 
 #[cfg(test)]

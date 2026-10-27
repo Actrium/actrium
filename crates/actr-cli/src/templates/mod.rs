@@ -25,7 +25,7 @@ pub use crate::commands::SupportedLanguage;
 
 pub const DEFAULT_ACTR_WORKLOAD_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_ACTR_SWIFT_VERSION: &str = "0.1.15";
-pub const DEFAULT_MANUFACTURER: &str = "acme";
+pub const DEFAULT_PUBLISHER: &str = "acme";
 
 /// Project template options
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize)]
@@ -82,10 +82,10 @@ pub struct TemplateContext {
     pub project_name_pascal: String,
     #[serde(rename = "SIGNALING_URL")]
     pub signaling_url: String,
-    #[serde(rename = "AIS_ENDPOINT_URL")]
-    pub ais_endpoint_url: String,
-    #[serde(rename = "MANUFACTURER")]
-    pub manufacturer: String,
+    #[serde(rename = "ISSUER_ENDPOINT_URL")]
+    pub issuer_endpoint_url: String,
+    #[serde(rename = "PUBLISHER")]
+    pub publisher: String,
     #[serde(rename = "SERVICE_NAME")]
     pub service_name: String,
     #[serde(rename = "WORKLOAD_NAME")]
@@ -97,8 +97,9 @@ pub struct TemplateContext {
     #[serde(rename = "ACTR_LOCAL_PATH")]
     pub actr_local_path: Option<String>,
 
-    #[serde(rename = "REALM_ID")]
-    pub realm_id: u64,
+    /// Realm name (`<realm_id>@<domain>`) written to `[deployment] realm`.
+    #[serde(rename = "REALM")]
+    pub realm: String,
     #[serde(rename = "STUN_URLS")]
     pub stun_urls: String,
     #[serde(rename = "TURN_URLS")]
@@ -114,7 +115,7 @@ impl TemplateContext {
     pub fn new(
         project_name: &str,
         signaling_url: &str,
-        manufacturer: &str,
+        publisher: &str,
         service_name: &str,
         is_service: bool,
     ) -> Self {
@@ -124,14 +125,14 @@ impl TemplateContext {
             project_name_snake: to_snake_case(project_name),
             project_name_pascal: project_name_pascal.clone(),
             signaling_url: signaling_url.to_string(),
-            ais_endpoint_url: derive_ais_endpoint_url(signaling_url),
-            manufacturer: manufacturer.to_string(),
+            issuer_endpoint_url: derive_issuer_endpoint_url(signaling_url),
+            publisher: publisher.to_string(),
             service_name: service_name.to_string(),
             workload_name: format!("{}Workload", project_name_pascal),
             actr_swift_version: DEFAULT_ACTR_SWIFT_VERSION.to_string(),
             actr_workload_version: DEFAULT_ACTR_WORKLOAD_VERSION.to_string(),
             actr_local_path: resolve_actr_swift_local_path(),
-            realm_id: 2368266035,
+            realm: String::new(),
             stun_urls: r#"["stun:loran1.actrium-dev.example:3478"]"#.to_string(),
             turn_urls: r#"["turn:loran1.actrium-dev.example:3478"]"#.to_string(),
             is_service,
@@ -142,14 +143,14 @@ impl TemplateContext {
     pub async fn new_with_versions(
         project_name: &str,
         signaling_url: &str,
-        manufacturer: &str,
+        publisher: &str,
         service_name: &str,
         is_service: bool,
     ) -> Self {
         let mut ctx = Self::new(
             project_name,
             signaling_url,
-            manufacturer,
+            publisher,
             service_name,
             is_service,
         );
@@ -165,7 +166,7 @@ impl TemplateContext {
     }
 }
 
-fn derive_ais_endpoint_url(signaling_url: &str) -> String {
+fn derive_issuer_endpoint_url(signaling_url: &str) -> String {
     let trimmed = signaling_url.trim_end_matches('/');
     if trimmed.is_empty() {
         return String::new();
@@ -180,13 +181,13 @@ fn derive_ais_endpoint_url(signaling_url: &str) -> String {
     };
 
     if let Some(prefix) = scheme_normalized.strip_suffix("/signaling/ws") {
-        format!("{prefix}/ais")
+        format!("{prefix}/issuer")
     } else if let Some(prefix) = scheme_normalized.strip_suffix("/signaling") {
-        format!("{prefix}/ais")
+        format!("{prefix}/issuer")
     } else if let Some(prefix) = scheme_normalized.strip_suffix("/ws") {
-        format!("{prefix}/ais")
+        format!("{prefix}/issuer")
     } else {
-        format!("{scheme_normalized}/ais")
+        format!("{scheme_normalized}/issuer")
     }
 }
 

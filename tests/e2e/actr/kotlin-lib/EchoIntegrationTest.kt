@@ -107,6 +107,7 @@ class EchoIntegrationTest {
     fun testEchoRecoversAfterShortAndLongBackground(): Unit = runBlocking {
         Log.i(TAG, "=== Kotlin Echo integration test (linked mode + monitoring) ===")
         copyAsset("actr.toml")
+        copyAsset("realm-client.json")
         val manifestPath = copyAsset("manifest.toml")
         val shortBackgroundSeconds =
             backgroundDurationSeconds(
@@ -121,7 +122,7 @@ class EchoIntegrationTest {
         val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
         val actorType = Manifest.from(File(manifestPath)).packageType()
-        Log.i(TAG, "Actor type: ${actorType.manufacturer}:${actorType.name}:${actorType.version}")
+        Log.i(TAG, "Actor type: ${actorType.publisher}/${actorType.name}@${actorType.version}")
 
         val workload = __PACKAGE__.UnifiedWorkload()
         val lifecycle = __PACKAGE__.UnifiedLifecycleAdapter(workload)

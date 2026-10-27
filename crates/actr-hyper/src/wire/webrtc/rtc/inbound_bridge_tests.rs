@@ -6,7 +6,7 @@ use crate::inbound::DataChunkRegistry;
 use crate::inbound::dispatcher::InboundDispatcher;
 use crate::wire::webrtc::rtc::status::LaneKind;
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrId, ActrType, DataChunk, Realm};
+use actr_protocol::{ActrId, DataChunk};
 use actr_runtime_mailbox::{Mailbox, MailboxStats, MessagePriority, MessageRecord, StorageResult};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -20,13 +20,8 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn test_id(serial: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".into(),
         serial_number: serial,
-        r#type: ActrType {
-            manufacturer: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
     }
 }
 
@@ -91,6 +86,7 @@ impl Mailbox for BlockingMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
+        _from_type: Option<Vec<u8>>,
         _payload: Vec<u8>,
         _priority: MessagePriority,
     ) -> StorageResult<Uuid> {
@@ -153,6 +149,7 @@ impl Mailbox for CapturingMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
+        _from_type: Option<Vec<u8>>,
         payload: Vec<u8>,
         _priority: MessagePriority,
     ) -> StorageResult<Uuid> {
@@ -191,7 +188,11 @@ async fn bridge_routes_rpc_to_mailbox() {
     let pending: crate::transport::correlation::PendingRequestsMap =
         std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
-    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        registry,
+        Default::default(),
+    ));
     let mailbox = CapturingMailbox::new();
     let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -231,7 +232,11 @@ async fn bridge_preserves_data_chunk_order_per_lane() {
     });
     registry.register("ordered-stream".to_string(), callback);
 
-    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        registry,
+        Default::default(),
+    ));
     let slot: MailboxSlot = Arc::new(RwLock::new(Some(CapturingMailbox::new())));
     let shutdown = tokio_util::sync::CancellationToken::new();
     let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
@@ -271,6 +276,7 @@ async fn bridge_rpc_lanes_share_one_fifo_worker() {
     let dispatcher = Arc::new(InboundDispatcher::new(
         pending,
         Arc::new(DataChunkRegistry::new()),
+        Default::default(),
     ));
     let mailbox = CapturingMailbox::blocking_first();
     let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
@@ -346,7 +352,11 @@ async fn bridge_keeps_traffic_classes_independent() {
     registry.register("reliable-stream".to_string(), callback.clone());
     registry.register("latency-first-stream".to_string(), callback);
 
-    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        registry,
+        Default::default(),
+    ));
     let mailbox = CapturingMailbox::blocking_first();
     let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -420,6 +430,7 @@ async fn bridge_admission_is_shared_across_classes() {
     let dispatcher = Arc::new(InboundDispatcher::new(
         pending,
         Arc::new(DataChunkRegistry::new()),
+        Default::default(),
     ));
     let mailbox = CapturingMailbox::blocking_first();
     let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
@@ -486,7 +497,11 @@ async fn bridge_drops_message_when_mailbox_not_set() {
     let pending: crate::transport::correlation::PendingRequestsMap =
         std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
-    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        registry,
+        Default::default(),
+    ));
     let slot: MailboxSlot = Arc::new(RwLock::new(None)); // mailbox not set
     let shutdown = tokio_util::sync::CancellationToken::new();
     let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
@@ -511,7 +526,11 @@ async fn bridge_shutdown_cancels_a_blocked_dispatch_and_converges() {
     let pending: crate::transport::correlation::PendingRequestsMap =
         std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
-    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        registry,
+        Default::default(),
+    ));
     let mailbox = Arc::new(BlockingMailbox {
         entered: Notify::new(),
     });

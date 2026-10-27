@@ -1,23 +1,29 @@
 # loran-packages
 
-`loran-packages` is Loran's reusable implementation of the
-`actr-packages/1` protocol role. It maps opaque Actr URI Targets to immutable
-package release metadata and serves the corresponding `.actr` artifacts.
+`loran-packages` is Loran's content-addressed hosting for `.actr` files. It is
+a plain static download service: each configured file is served by its
+SHA-256 digest, so a Realm Profile's `package.href` may point at it.
 
-The component is independent of authority discovery and MFR:
+The component does not resolve URI targets and is not advertised in the
+authority descriptor. It is independent of authority discovery and of the
+Publisher Registry:
 
-- `/.well-known/actr` advertises its endpoint with `rel=packages`;
-- MFR manages publishers, keys, signing authority, and publication audit;
-- `loran-packages` resolves Targets and distributes package bytes.
+- `/.well-known/actr` publishes the authority descriptor;
+- the Publisher Registry manages publishers, keys, signing authority, and publication audit;
+- `loran-packages` serves package bytes.
 
-The default Loran daemon mounts the component at `/actr/packages`. A deployment
-can run the component without a local authority document, or advertise another
-compatible package service from its authority document.
+The default Loran daemon mounts the component at `/actr/packages`. Local files
+are listed under `[services.packages]` as absolute `.actr` paths:
 
-Local-file Targets are configured under `[[services.packages.targets]]` with
-an absolute `.actr` artifact path. The Target is matched exactly and never
-translated into a filesystem path. Resolve responses bind the artifact size
-and SHA-256 digest; download URLs carry that digest and are rejected if the
-configured bytes change.
+```toml
+[services.packages]
+artifacts = ["/srv/actr/packages/echo-ui-1.0.0.actr"]
+```
 
-See the [Actr Package Resolution specification](../../actr/protocols/package-resolution.md).
+Each file is served at `/actr/packages/artifact?sha256=<digest>`. The digest is
+computed at startup; a file whose bytes change afterwards is no longer served
+under the old digest. Consumers still verify the SHA-256 given by the Realm
+Profile. Package hosting can equally move to another Loran node, an object
+store, or a CDN without changing the Actor.
+
+See the [Actr Realm Profile specification](../../actr/protocols/realm-profile.md).

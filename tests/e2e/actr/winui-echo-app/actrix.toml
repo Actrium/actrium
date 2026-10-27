@@ -11,6 +11,9 @@ head = "admin_ui"
 [control.admin_ui]
 password = "e2e-test-password"
 
+[authority]
+uri = "actr://localhost"
+
 [bind.http]
 domain_name = "127.0.0.1"
 advertised_ip = "127.0.0.1"
@@ -30,13 +33,11 @@ advertised_port = __ICE_PORT__
 relay_port_range = "49152-49200"
 realm = "local.actrix"
 
-[services.ks]
-
 [services.signer]
 
-[services.ais]
+[services.issuer]
 
-[services.ais.server]
+[services.issuer.server]
 renewal_token_secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 [services.signaling]

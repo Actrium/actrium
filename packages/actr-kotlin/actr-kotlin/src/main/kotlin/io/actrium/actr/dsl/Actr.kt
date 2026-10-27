@@ -10,7 +10,7 @@
  * val ref = node.start()
  *
  * // Discover and call remote services
- * val echoService = ref.discoverOne("acme:EchoService:1.0.0")
+ * val echoService = ref.discoverOne("acme/EchoService@1.0.0")
  * val response = ref.call("echo.EchoService.Echo", request)
  *
  * // Send data stream
@@ -475,7 +475,7 @@ class ActrNode private constructor(
      * Example:
      * ```kotlin
      * node.withStartedActor { ref ->
-     *     val target = ref.discoverOne("acme:EchoService:1.0.0")
+     *     val target = ref.discoverOne("acme/EchoService@1.0.0")
      *     val response = ref.call("echo.EchoService.Echo", payload)
      * }
      * // Actor is automatically shut down after the block
@@ -781,7 +781,7 @@ suspend fun linkedWithMonitoring(
 /**
  * Discover actors of the specified type using a type string.
  *
- * @param typeString Actor type in "manufacturer:name:version" format (e.g., "acme:EchoService:1.0.0")
+ * @param typeString Actor type in "publisher/program@version" format (e.g., "acme/EchoService@1.0.0")
  * @param count Maximum number of candidates to return (default: 1)
  * @return List of discovered actor IDs
  */
@@ -793,7 +793,7 @@ suspend fun ActrRef.discover(
 /**
  * Discover a single actor of the specified type.
  *
- * @param typeString Actor type in "manufacturer:name:version" format
+ * @param typeString Actor type in "publisher/program@version" format
  * @return The first discovered actor ID, or null if none found
  */
 suspend fun ActrRef.discoverOne(typeString: String): ActrId? = discover(typeString, 1u).firstOrNull()

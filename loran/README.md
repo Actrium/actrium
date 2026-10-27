@@ -8,15 +8,15 @@ The public bootstrap roles remain separate even when one Loran process serves
 them together:
 
 - `/.well-known/actr` publishes the authority descriptor;
-- `loran-packages` resolves opaque Targets and serves content-addressed `.actr`
-  artifacts;
-- MFR manages publisher identity, signing authority, and publication audit;
-- signaling, AIS, and ICE remain independent runtime services.
+- `loran-packages` hosts content-addressed `.actr` files that a Realm Profile's
+  `package.href` may point to;
+- the Publisher Registry manages publisher identity, signing authority, and
+  publication audit;
+- signaling, the Issuer, and ICE remain independent runtime services.
 
-Package distribution is configured under `[services.packages]`, not inside an
-Actor package. This keeps the mapping from a stable Target to a deployed
-release in the authority's operational configuration. It can later be moved
-to another Loran node, an object store, or a CDN without changing the Actor.
+Package hosting is configured under `[services.packages]`, not inside an
+Actor package. It can later be moved to another Loran node, an object store,
+or a CDN without changing the Actor.
 
 `config/` and `deploy/` define how the suite is assembled and operated. The
 main daemon is under `../crates/loran-server/`; reusable services live in the

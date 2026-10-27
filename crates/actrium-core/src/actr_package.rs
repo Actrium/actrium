@@ -174,10 +174,10 @@ mod tests {
     use super::*;
 
     const MANIFEST: &str = r##"
-format = "actr-package/1"
+format = "actr-package/2"
 
 [actor]
-manufacturer = "actrium"
+publisher = "actrium"
 name = "echo-ui"
 version = "0.1.0"
 
@@ -196,7 +196,7 @@ required-capabilities = ["ui.render"]
 
 [signature]
 algorithm = "ed25519"
-key-id = "mfr-test"
+key-id = "publisher-test"
 
 [[files]]
 path = "workload/guest.js"

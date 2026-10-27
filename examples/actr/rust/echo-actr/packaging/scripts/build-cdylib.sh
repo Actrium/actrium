@@ -81,7 +81,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 cat > "$TMP_CONFIG" <<EOF
 [package]
-manufacturer = "actrium"
+publisher = "actrium"
 name = "EchoService"
 version = "$VERSION"
 description = "Signed Echo guest actor distributed as an ActrPackage"

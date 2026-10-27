@@ -8,13 +8,13 @@
 |---|---|---|
 | Publisher | 规范化域名 | 当前谁控制发布入口 |
 | Program Release | `publisher/program@version` + digest | 要运行哪一组不可变字节 |
-| Service Actor | ActorId + Realm credential | 当前在与哪个运行实例通信 |
+| Service | ActorId + Actor credential | 当前在与哪个运行实例通信 |
 
 HTTPS 不能证明程序无恶意；Marketplace 审核不能证明网络中的 Actor 身份；Actor credential 也不能证明本地加载的 Guest 是正确版本。
 
 ## 2. Publisher 身份
 
-### 2.1 域名即命名空间
+### 2.1 域名即 Publisher ID
 
 Publisher 约定使用域名是合理的，因为它直接复用：
 
@@ -30,33 +30,36 @@ Actrium 不维护另一套全局 Publisher ID 注册中心。
 
 ### 2.2 Publisher Profile
 
-固定入口：
+Publisher Profile 作为 authority descriptor 的可选成员 `publisher` 发布在该域名唯一的 bootstrap 资源中：
 
 ```text
-GET https://<publisher>/.well-known/actrium-publisher.json
+GET https://<publisher>/.well-known/actr
 ```
 
-这是由 Publisher 身份域名直接导出的 bootstrap URL，必须使用标准 HTTPS 443，不能从 `actr://` 中另带端口。Profile 验证成功后，它声明的 `programResolver`、CDN 和其他服务 endpoint 可以使用显式端口。
+`publisher` 成员已在 Actr Authority Discovery §4.5 定义；按 authority-discovery 的规定，`/.well-known/actr` 之下不定义子路径，因此 Publisher 不另设 well-known 文件。同一份 descriptor 还可以承载 `realm_signing_keys`（若该域名下也有 Realm）与 `services`。
 
-bootstrap 不跟随跨 Origin redirect；需要迁移入口时，旧 Profile 应签名委派新的 resolver 或 root rotation。
+bootstrap URL 由 Publisher 身份域名直接导出，必须使用标准 HTTPS 443。
 
-至少包含：
+获取 descriptor 时遵循 authority-discovery 的 redirect 规则：最多 5 次、每跳必须 HTTPS，redirect 目标不成为新的 authority，仍须用原 Publisher 域名验证 `authority` 绑定。`publisher` 成员的有效性只取决于其自身签名与固定的 root/key history，不取决于从哪个 origin 取得。
 
-- schema version；
-- 规范化 Publisher 域名；
-- 当前和历史 Profile continuity keys；
+`publisher` 成员字段使用 snake_case，至少包含：
+
+- `schema`：`actr.publisher/v1`；
+- `domain`：规范化 Publisher 域名，必须与 descriptor `authority` 的主机名一致；
+- 当前和历史 Publisher Profile 签名 key（`profile_signing_keys`）；
 - 当前和历史 package signing keys；
 - key id、算法、有效期与撤销状态；
-- Program resolver base；
 - 安全联系地址；
 - 可选 Marketplace/透明日志声明。
 
-第一次获取时，信任来自 URL hostname 的 Web PKI，或来自企业预置的 Publisher root pin；Profile 内携带的 root 不能循环地自证可信。接受首个 Profile 后，Actrium 固定 root/key history，后续 Profile 必须：
+第一次获取时，信任来自 URL hostname 的 Web PKI，或来自企业预置的 Publisher root pin；Publisher Profile 内携带的 root 不能循环地自证可信。接受首个 Publisher Profile 后，Actrium 固定 root/key history，后续 Publisher Profile 必须：
 
-- 按 RFC 8785 JCS 规范化签名 payload，再验证 detached Ed25519 签名；
+- 按 RFC 8785 JCS 规范化签名 payload（`publisher` 成员去掉其 `signature` 字段），再验证 detached Ed25519 签名；
 - 携带单调递增的 `sequence`、签发时间和到期时间；
 - 通过旧 root 签名的轮换链引入新 root；
 - 拒绝回滚、过期和未授权换根。
+
+descriptor 中 `publisher` 以外的部分不签名，不参与 Publisher 信任判断。
 
 offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/离线保存可由 Marketplace 或企业策略提高；wire protocol 必须支持它。
 
@@ -64,55 +67,20 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 
 域名控制只决定未来发布入口，不得静默改写历史：
 
-- 已安装 `coordinate + digest + signing key` 可继续离线运行；
+- 已安装 `Program Release + digest + signing key` 可继续离线运行；
 - 新 key 与历史 key 无可验证轮换链时，视为 Publisher ownership change；
 - 已安装版本不得因当前域名返回不同包而变化；
 - 新安装或更新必须显示身份变化；
 - 高风险策略可以要求 Marketplace/组织管理员再次批准。
 
-## 3. Coordinate 到 package 的确定性解析
+## 3. 包从哪来
 
-Profile 的 `programResolver` 决定解析基址。未显式声明时，默认值为：
+平台不负责「按程序名找包」。包只有两个来源：
 
-```text
-https://<publisher>/.well-known/actrium/v1/programs/<program>/<version>/release.json
-```
+- **打开实例**：Realm Profile 的 `package` 给出下载地址、SHA-256 与 Actor 类型（[Actr Realm Profile](../../../actr/protocols/realm-profile.zh.md)）；
+- **新建实例**：用户在 Program Catalog、Marketplace、本地文件或一个包地址中选定。发现程序、查询新版本属于 Marketplace 与 Publisher 自己的渠道。
 
-默认地址仍使用标准 HTTPS 443；经过已验证 Profile 委派的 resolver 可以位于其他 HTTPS Origin，也可以使用非标准端口。
-
-`release.json` 是小型、可缓存的发布描述，至少包含：
-
-```json
-{
-  "schemaVersion": 1,
-  "publisher": "notes.example",
-  "program": "team-notes",
-  "version": "1.4.2",
-  "packageUrl": "https://cdn.notes.example/actr/team-notes/1.4.2/package.actr",
-  "packageSha256": "<64-hex>",
-  "packageSize": 4829012,
-  "signingKeyId": "ed25519:2026-q2",
-  "publishedAt": "2026-06-01T10:00:00Z",
-  "status": "active",
-  "signature": {
-    "keyId": "ed25519:2026-q2",
-    "algorithm": "Ed25519",
-    "value": "<base64>"
-  }
-}
-```
-
-要求：
-
-- 路径中的 program/version 与响应一致；
-- production 只允许 HTTPS；
-- 可 3xx 跳转到 CDN，但最终 package 必须匹配 Publisher 描述中的 digest；
-- release metadata 需要短缓存和过期时间；
-- release descriptor 必须按 JCS 规范化并由 Profile 授权的 key 做 detached signature；
-- package 本身可长期 immutable cache；
-- 同一 coordinate 返回不同 digest 时 hard fail。
-
-这保证 `publisher/program@version` 能确定地下载一个合法 `.actr` workload 包，同时允许 Publisher 在可信 Profile 委派后自主选择 resolver、CDN 和端口。
+无论来源，验证都一样：核对 SHA-256，再用 Publisher Profile 的包签名 key 验证包签名（第 8 节）。下载地址放在哪里都不影响安全。
 
 ## 4. 一个 Program Release，一个 `.actr` 包
 
@@ -120,7 +88,7 @@ https://<publisher>/.well-known/actrium/v1/programs/<program>/<version>/release.
 
 Actrium Program Release 直接复用 Actr `.actr` 包：
 
-- 可执行主体是 Primary Service workload；
+- 可执行主体是 Service workload；
 - Keel Guest 作为签名包资源；
 - Front–Service proto/contract 作为签名包资源；
 - 图标、静态资源、默认配置进入资源区；
@@ -141,7 +109,7 @@ package.actr
 │   ├── guest.bundle.js
 │   └── capability-manifest.json
 ├── proto/
-│   └── primary-service.proto
+│   └── service.proto
 └── assets/
     ├── icon.png
     └── ...
@@ -161,7 +129,7 @@ Manifest 签名必须绑定所有资源 hash，因此替换 Guest、contract 或
 - 未在 manifest 中列出的可执行脚本；
 - 运行时从网络替换的 Guest 入口。
 
-Publisher 只能提供 Guest 与声明；Host 实现永远随 Actrium 客户端发布。
+Publisher 只能提供 Guest 与声明；Actr Host 实现永远随 Actrium 客户端发布。
 
 ## 5. Service workload 政策
 
@@ -194,7 +162,7 @@ Native Service 不能改变 Front 仍只允许 Keel Guest 的规则。
 
 Native workload 必须进一步区分：
 
-- `NativeCdylib`：加载进 Host 地址空间；不能证明出口闭合，第三方实例不得为绿；
+- `NativeCdylib`：加载进 Actr Host 地址空间；不能证明出口闭合，第三方实例不得为绿；
 - `NativeCapsule`：独立受限进程，只有在 OS sandbox、无原始网络/文件、sealed libraries 和 brokered IPC 全部生效时，才可能评为 `CONTROLLED`；
 - `NativeTrusted`：Actrium 自带或企业预置 TCB，不属于开放 Marketplace trust tier。
 
@@ -202,7 +170,7 @@ v1 Marketplace 仍只开放 WASM Service。Native Capsule 是桌面优先的后�
 
 ### 5.3 UI-only 程序
 
-v1 不引入“没有 Service 的页面应用”特例。工具链为 UI-only 程序生成一个平台定义的最小 WASM Service Component：
+v1 不引入「没有 Service 的页面应用」特例。工具链为 UI-only 程序生成一个平台定义的最小 WASM Service Component：
 
 - 它仍有与 Program Release 相同的 ActrType 和独立 ActorId；
 - 默认没有 Workspace 和外部网络能力；
@@ -210,13 +178,13 @@ v1 不引入“没有 Service 的页面应用”特例。工具链为 UI-only �
 - 同样经过包签名、资源限制和 Service 生命周期；
 - Publisher 不能用它绕过 Host API 或注入 native code。
 
-因此所有 app Tab 仍统一 Attach 一个 Primary Service，差别只在业务 Service 是否包含自定义逻辑。
+因此所有 app Tab 仍统一 Attach 一个 Service，差别只在它是否包含自定义逻辑。
 
 ## 6. Actrium Manifest 扩展
 
 Actr 基础 manifest 继续提供：
 
-- manufacturer/publisher；
+- publisher；
 - name/program；
 - version；
 - binary target/kind/hash；
@@ -242,7 +210,7 @@ contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:..."
 
 [actrium.service]
-primary_contract = "proto/primary-service.proto"
+contract = "proto/service.proto"
 protocol_fingerprint = "sha256:..."
 
 [actrium.service.workspace]
@@ -261,7 +229,7 @@ data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
 [[actrium.privacy.actor_egress]]
-actr_type = "notes.example:index-worker:1.4.2"
+actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
 ```
@@ -270,7 +238,7 @@ data_classes = ["private"]
 
 ## 7. 权限、组件和配额声明
 
-包声明的是“申请”，不是实际授权：
+包声明的是「申请」，不是实际授权：
 
 ```text
 effective capabilities =
@@ -291,19 +259,17 @@ Manifest 至少声明：
 - Workspace access mode；
 - Guest heap、单次执行时间、render op；
 - Service memory/fuel/storage/network；
-- 最低 Host/SDK/contract 版本。
+- 最低 Actr Host/SDK/contract 版本。
 - 数据分类、预期 Actor 出口、terminal egress、required/optional 和最低节点结论。
 
 新增高风险权限必须发布新版本，并在升级时重新确认。
 
-Privacy Declaration 是静态 allowlist 和安装说明，不是运行时隐私图的权威来源。Host 必须把 WASM imports、实际 capability 与实际 edge 对照声明；Publisher 把依赖标记为 optional 也不能覆盖 Host 根据真实数据流做出的闭包判断。
+Privacy Declaration 是静态 allowlist 和安装说明，不是运行时隐私图的权威来源。Actr Host 必须把 WASM imports、实际 capability 与实际 edge 对照声明；Publisher 把依赖标记为 optional 也不能覆盖 Actr Host 根据真实数据流做出的闭包判断。
 
 ## 8. 下载与验证流水线
 
 ```text
-URI coordinate
-  → Publisher Profile
-  → Release metadata
+Realm Profile package / 用户选定的包
   → HTTPS download
   → package digest
   → package signature/key history
@@ -320,19 +286,18 @@ URI coordinate
 
 1. 校验 Publisher DNS/IDNA；
 2. TLS 和 hostname；
-3. Publisher Profile；
-4. release coordinate；
-5. 下载大小上限；
-6. package SHA-256；
-7. Ed25519 key id 和签名；
-8. ZIP path、文件数、压缩比和解压总量；
-9. manifest 的 publisher/program/version；
-10. binary kind/target；
-11. 每个 resource/proto/lock hash；
-12. Guest 静态依赖和 capability manifest；
-13. Service WASM imports；
-14. Host API、Keel API 与 contract 兼容性；
-15. 本地/组织安全策略。
+3. 下载大小上限；
+4. package SHA-256；
+5. manifest 声明的 publisher 的 Publisher Profile；
+6. Ed25519 key id 和签名；
+7. ZIP path、文件数、压缩比和解压总量；
+8. manifest 的 publisher/program/version；
+9. binary kind/target；
+10. 每个 resource/proto/lock hash；
+11. Guest 静态依赖和 capability manifest；
+12. Service WASM imports；
+13. Host API、Keel API 与 contract 兼容性；
+14. 本地/组织安全策略。
 
 任何一步失败都不得把部分内容交给 Keel 或 Service runtime。
 
@@ -356,8 +321,8 @@ Actrium 本地以以下联合键保存：
 规则：
 
 - 第一次接受后固定 digest；
-- 后续同 coordinate 不同 digest = `PACKAGE_EQUIVOCATION`；
-- 不能用“Publisher 更新了文件”覆盖缓存；
+- 同一 Program Release 出现不同 digest = `PACKAGE_EQUIVOCATION`；
+- 不能用「Publisher 更新了文件」覆盖缓存；
 - 更新必须使用新 SemVer；
 - Service 实例固定其 package digest；
 - 缓存清理不能删除仍被 Service 引用的 digest；
@@ -371,7 +336,7 @@ Actrium 本地以以下联合键保存：
 
 - 当前域名控制证明；
 - 传输机密性与完整性；
-- Profile 和 release metadata 的来源；
+- Publisher Profile 的来源；
 - 标准代理/CDN/缓存能力。
 
 ### Package 签名与 digest 提供
@@ -393,16 +358,16 @@ Marketplace 可以：
 - 记录 Publisher 验证；
 - 静态/动态审核；
 - 风险评级；
-- 记录已见 coordinate/digest；
+- 记录已见 Program Release/digest；
 - 发布撤销和恶意软件情报；
 - 提供缓存或镜像。
 
 Marketplace 不可以：
 
-- 为第三方抢注其域名命名空间；
+- 为第三方抢注其域名；
 - 静默替换 Publisher package；
 - 用市场登录身份替代 Publisher 域名；
-- 因“已审核”绕过 Actrium 权限；
+- 因「已审核」绕过 Actrium 权限；
 - 把下架与 Service/Workspace 自动删除等同。
 
 ## 12. 撤销政策
@@ -418,7 +383,7 @@ Marketplace 不可以：
 
 撤销记录必须包含：
 
-- coordinate/digest/key；
+- Program Release/digest/key；
 - 原因；
 - 发布时间；
 - 发布者或市场签名；
@@ -434,13 +399,12 @@ Program Catalog 可以提示新版本，但 Service 不自动原地升级。
 v1 升级：
 
 1. 安装新 Program Release；
-2. 创建新 Service Actor，获得新 ActorId；
+2. 在同一 Realm 内创建新 Service，获得新 ActorId；
 3. 旧 Service 生成迁移快照；
 4. 显式交接 Workspace lease；
 5. 新 Service 导入并验证；
-6. 用户确认切换；
-7. 新 Tab URI 使用新 ActorId；
-8. 旧 Service 保留回滚窗口后归档。
+6. 用户确认切换，随后以 `publish_profile` 发布 `package` 指向新包的 Realm Profile；
+7. 旧 Service 保留回滚窗口后归档；回滚即再发布一份指回旧包、`sequence` 更高的 Realm Profile。
 
 这样避免 ActorId 中版本与实际 workload 不一致，也让失败回滚可解释。
 
@@ -449,7 +413,7 @@ v1 升级：
 支持：
 
 - 本地 `.actr` 文件；
-- `actr-dev://` HTTPS Origin；
+- localhost、回环地址或显式信任的私有 CA 上的包地址；
 - 本地开发 signing key；
 - 热更新 Guest；
 - 未发布 Program Catalog entry。

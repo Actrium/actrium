@@ -9,7 +9,7 @@ const ENABLE_SERVICES = [
   { name: "Signaling", bit: 1 },
   { name: "STUN", bit: 2 },
   { name: "TURN", bit: 4 },
-  { name: "AIS", bit: 8 },
+  { name: "Issuer", bit: 8 },
   { name: "Signer", bit: 16 },
 ] as const;
 

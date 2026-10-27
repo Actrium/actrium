@@ -5,7 +5,7 @@
 
 use crate::error::Result;
 use crate::raw::{
-    RawAisEndpointConfig, RawDeploymentConfig, RawDiscoveryConfig, RawObservabilityConfig,
+    RawDeploymentConfig, RawDiscoveryConfig, RawIssuerEndpointConfig, RawObservabilityConfig,
     RawSignalingConfig, RawStorageConfig, RawWebRtcConfig, RawWebSocketConfig,
 };
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ use std::str::FromStr;
 /// url = "ws://localhost:8081/signaling/ws"
 ///
 /// [deployment]
-/// realm_id = 33554432
+/// realm = "k7m2q9xh@example.com"
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeRawConfig {
@@ -37,9 +37,9 @@ pub struct RuntimeRawConfig {
     #[serde(default)]
     pub signaling: RawSignalingConfig,
 
-    /// AIS (Actor Identity Service) endpoint
+    /// Issuer endpoint
     #[serde(default)]
-    pub ais_endpoint: RawAisEndpointConfig,
+    pub issuer_endpoint: RawIssuerEndpointConfig,
 
     /// Deployment parameters (realm, etc.)
     #[serde(default)]
@@ -103,7 +103,7 @@ pub struct RuntimeRawConfig {
     /// # or
     /// [[trust]]
     /// kind = "registry"
-    /// endpoint = "http://ais.example.com/ais"
+    /// endpoint = "http://issuer.example.com/issuer"
     /// ```
     #[serde(default)]
     pub trust: Vec<crate::config::TrustAnchor>,
@@ -251,7 +251,7 @@ edition = 1
 url = "ws://localhost:8081/signaling/ws"
 
 [deployment]
-realm_id = 1001
+realm = "k7m2q9xh@example.com"
 "#;
         let config = RuntimeRawConfig::from_str(toml_content).unwrap();
         assert_eq!(config.edition, 1);
@@ -259,7 +259,10 @@ realm_id = 1001
             config.signaling.url.as_deref(),
             Some("ws://localhost:8081/signaling/ws")
         );
-        assert_eq!(config.deployment.realm_id, Some(1001));
+        assert_eq!(
+            config.deployment.realm.as_deref(),
+            Some("k7m2q9xh@example.com")
+        );
     }
 
     #[test]
@@ -270,12 +273,12 @@ edition = 1
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 33554432
-realm_secret = "rs_test123"
+realm = "k7m2q9xh@example.com"
+realm_client_key = "keys/realm-client.json"
 
 [discovery]
 visible = true
@@ -306,7 +309,7 @@ tier = "premium"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoService:1.0.0"
+type = "acme/EchoService@1.0.0"
 
 [scripts]
 dev = "cargo run"
@@ -315,12 +318,12 @@ test = "cargo test"
         let config = RuntimeRawConfig::from_str(toml_content).unwrap();
         assert_eq!(config.edition, 1);
         assert_eq!(
-            config.ais_endpoint.url.as_deref(),
-            Some("http://localhost:8081/ais")
+            config.issuer_endpoint.url.as_deref(),
+            Some("http://localhost:8081/issuer")
         );
         assert_eq!(
-            config.deployment.realm_secret.as_deref(),
-            Some("rs_test123")
+            config.deployment.realm_client_key.as_deref(),
+            Some(std::path::Path::new("keys/realm-client.json"))
         );
         assert_eq!(config.discovery.visible, Some(true));
         assert!(!config.webrtc.force_relay);
@@ -364,7 +367,7 @@ edition = 1
 url = "ws://localhost:8081/signaling/ws"
 
 [deployment]
-realm_id = 1001
+realm = "k7m2q9xh@example.com"
 
 [package]
 path = "dist/service.actr"
@@ -388,7 +391,7 @@ edition = 1
 url = "ws://localhost:8081/signaling/ws"
 
 [deployment]
-realm_id = 1001
+realm = "k7m2q9xh@example.com"
 
 [storage]
 hyper_data_dir = ".hyper"

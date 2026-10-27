@@ -54,8 +54,8 @@ pub struct RawPackageConfig {
     /// Package name (also used as the actor type name)
     pub name: String,
 
-    /// Manufacturer identifier (e.g., "acme")
-    pub manufacturer: String,
+    /// Publisher identifier (e.g., "acme")
+    pub publisher: String,
 
     /// Semantic version (e.g., "1.0.0"). Defaults to empty string if not specified.
     #[serde(default)]
@@ -123,7 +123,7 @@ impl RawPackageConfig {
         Ok(crate::config::PackageInfo {
             name: self.name.clone(),
             actr_type: actr_protocol::ActrType {
-                manufacturer: self.manufacturer.clone(),
+                publisher: self.publisher.clone(),
                 name: self.name,
                 version: self.version,
             },
@@ -142,10 +142,10 @@ pub enum RawDependency {
     /// Example:
     /// ```toml
     /// [dependencies]
-    /// echo = { actr_type = "acme:echo-service:1.0.0", service = "EchoService:abc1f3d" }
+    /// echo = { actr_type = "acme/echo-service@1.0.0", service = "EchoService:abc1f3d" }
     /// ```
     Specified {
-        /// Full ActrType string: "manufacturer:name:version"
+        /// Full ActrType string: "publisher/program@version"
         #[serde(rename = "actr_type")]
         actr_type: String,
 
@@ -154,9 +154,10 @@ pub enum RawDependency {
         #[serde(default)]
         service: Option<String>,
 
-        /// Optional cross-realm override. Defaults to self realm.
+        /// Optional cross-Realm override: a Realm name `<realm_id>@<domain>`.
+        /// Defaults to the Actor's own Realm.
         #[serde(default)]
-        realm: Option<u32>,
+        realm: Option<String>,
     },
 
     /// Empty dependency declaration: {} (populated by actr deps install)
@@ -169,7 +170,7 @@ pub struct RawSystemConfig {
     pub signaling: RawSignalingConfig,
 
     #[serde(default)]
-    pub ais_endpoint: RawAisEndpointConfig,
+    pub issuer_endpoint: RawIssuerEndpointConfig,
 
     #[serde(default)]
     pub deployment: RawDeploymentConfig,
@@ -228,23 +229,30 @@ pub struct RawSignalingConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RawAisEndpointConfig {
+pub struct RawIssuerEndpointConfig {
     #[serde(default)]
     pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawDeploymentConfig {
+    /// Realm name `<realm_id>@<domain>`
     #[serde(default)]
-    pub realm_id: Option<u32>,
+    pub realm: Option<String>,
 
-    /// Realm secret for AIS registration authentication
+    /// Realm client key file from `actr realm join`, which signs the
+    /// Issuer requests; relative to the config file's directory.
     #[serde(default)]
-    pub realm_secret: Option<String>,
+    pub realm_client_key: Option<PathBuf>,
 
-    /// AIS (Actor Identity Service) HTTP endpoint, e.g. `"http://ais.example.com:8080"`.
+    /// Tombstone: the removed shared `realm_secret`. Kept only to produce a
+    /// migration error.
+    #[serde(default, rename = "realm_secret")]
+    pub removed_realm_secret: Option<String>,
+
+    /// Issuer HTTP endpoint, e.g. `"http://issuer.example.com:8080"`.
     #[serde(default)]
-    pub ais_endpoint: Option<String>,
+    pub issuer_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -374,8 +382,29 @@ impl FromStr for ManifestRawConfig {
     type Err = crate::error::ConfigError;
 
     fn from_str(s: &str) -> Result<Self> {
+        reject_legacy_publisher_key(s)?;
         toml::from_str(s).map_err(Into::into)
     }
+}
+
+const LEGACY_PUBLISHER_KEY: &str = "manufacturer";
+
+/// Rejects manifests that still use the retired `[package]` publisher key,
+/// pointing at the rename instead of reporting a generic missing field.
+fn reject_legacy_publisher_key(s: &str) -> Result<()> {
+    let Ok(value) = s.parse::<toml::Table>() else {
+        return Ok(());
+    };
+    let legacy = value
+        .get("package")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|package| package.contains_key(LEGACY_PUBLISHER_KEY));
+    if legacy {
+        return Err(crate::error::ConfigError::ValidationError(format!(
+            "`package.{LEGACY_PUBLISHER_KEY}` is no longer supported; rename it to `package.publisher`"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -390,7 +419,7 @@ exports = ["proto/test.proto"]
 
 [package]
 name = "test-service"
-manufacturer = "acme"
+publisher = "acme"
 
 [dependencies]
 user-service = {}
@@ -411,7 +440,7 @@ run = "cargo run"
         let toml_content = r#"
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 [dependencies]
 user-service = {}
 "#;
@@ -425,9 +454,9 @@ user-service = {}
         let toml_content = r#"
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 [dependencies]
-shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:abc123", realm = 9999 }
+shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:abc123", realm = "other@example.com" }
 "#;
         let config = ManifestRawConfig::from_str(toml_content).unwrap();
         let dep = config.dependencies.get("shared").unwrap();
@@ -437,9 +466,9 @@ shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:a
             realm,
         } = dep
         {
-            assert_eq!(actr_type, "acme:logging-service:1.0.0");
+            assert_eq!(actr_type, "acme/logging-service@1.0.0");
             assert_eq!(service.as_deref(), Some("LoggingService:abc123"));
-            assert_eq!(*realm, Some(9999));
+            assert_eq!(realm.as_deref(), Some("other@example.com"));
         } else {
             panic!("Expected Specified");
         }
@@ -450,9 +479,9 @@ shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:a
         let toml_content = r#"
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 [dependencies]
-shared = { actr_type = "acme:logging-service:1.0.0" }
+shared = { actr_type = "acme/logging-service@1.0.0" }
 "#;
         let config = ManifestRawConfig::from_str(toml_content).unwrap();
         let dep = config.dependencies.get("shared").unwrap();
@@ -461,6 +490,19 @@ shared = { actr_type = "acme:logging-service:1.0.0" }
         } else {
             panic!("Expected Specified");
         }
+    }
+
+    #[test]
+    fn test_rejects_legacy_publisher_key() {
+        let toml_content = r#"
+[package]
+name = "echo"
+manufacturer = "acme"
+"#;
+        let error = ManifestRawConfig::from_str(toml_content).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("package.manufacturer"), "{message}");
+        assert!(message.contains("package.publisher"), "{message}");
     }
 }
 

@@ -18,8 +18,8 @@ use crate::core::{
 #[derive(Debug, Clone)]
 pub struct StandaloneDiscoverConfig {
     pub endpoint: url::Url,
-    pub realm_id: u64,
-    pub realm_secret: String,
+    pub realm: String,
+    pub realm_client_key: PathBuf,
 }
 
 fn validate_export_component<'a>(value: &'a str, label: &str) -> Result<&'a str> {
@@ -84,9 +84,9 @@ fn write_exported_proto(output_dir: &Path, name: &str, content: &str) -> Result<
     actr registry discover --list-only\n\n  \
     # Discover services on a remote actrix server (standalone, no local project needed)\n  \
     actr registry discover --list-only \\\n    \
-    --endpoint http://127.0.0.1:9080/ais \\\n    \
-    --realm-id 33554433 \\\n    \
-    --realm-secret rs_xxx"
+    --endpoint http://127.0.0.1:9080/issuer \\\n    \
+    --realm dev@example.com \\\n    \
+    --realm-client-key ~/.actr/realms/dev.json"
 )]
 pub struct DiscoveryCommand {
     /// Service name filter pattern (e.g., user-*)
@@ -105,33 +105,31 @@ pub struct DiscoveryCommand {
     #[arg(long)]
     pub list_only: bool,
 
-    /// Standalone mode: actrix AIS endpoint URL (e.g. http://127.0.0.1:9080/ais)
+    /// Standalone mode: actrix Issuer endpoint URL (e.g. http://127.0.0.1:9080/issuer)
     ///
-    /// When specified together with --realm-id and --realm-secret, runs in standalone
+    /// When specified together with --realm and --realm-client-key, runs in standalone
     /// mode that doesn't require a local project's manifest.toml / actr.toml.
     #[arg(long, value_name = "URL")]
     pub endpoint: Option<url::Url>,
 
-    /// Standalone mode: realm ID to query against
-    #[arg(long, value_name = "REALM_ID")]
-    pub realm_id: Option<u64>,
+    /// Standalone mode: Realm name to query against (`<realm_id>@<domain>`)
+    #[arg(long, value_name = "REALM")]
+    pub realm: Option<String>,
 
-    /// Standalone mode: realm secret for authentication
-    #[arg(long, value_name = "SECRET")]
-    pub realm_secret: Option<String>,
+    /// Standalone mode: Realm client key file from `actr realm join`
+    #[arg(long, value_name = "FILE")]
+    pub realm_client_key: Option<PathBuf>,
 }
 
 impl DiscoveryCommand {
     /// If all three standalone flags are provided, return a `StandaloneDiscoverConfig`.
     pub fn standalone_config(&self) -> Option<StandaloneDiscoverConfig> {
-        match (&self.endpoint, self.realm_id, &self.realm_secret) {
-            (Some(endpoint), Some(realm_id), Some(secret)) if !secret.is_empty() => {
-                Some(StandaloneDiscoverConfig {
-                    endpoint: endpoint.clone(),
-                    realm_id,
-                    realm_secret: secret.clone(),
-                })
-            }
+        match (&self.endpoint, &self.realm, &self.realm_client_key) {
+            (Some(endpoint), Some(realm), Some(key)) => Some(StandaloneDiscoverConfig {
+                endpoint: endpoint.clone(),
+                realm: realm.clone(),
+                realm_client_key: key.clone(),
+            }),
             _ => None,
         }
     }
@@ -276,8 +274,8 @@ impl DiscoveryCommand {
             auto_install,
             list_only: false,
             endpoint: None,
-            realm_id: None,
-            realm_secret: None,
+            realm: None,
+            realm_client_key: None,
         }
     }
 
@@ -289,8 +287,8 @@ impl DiscoveryCommand {
             auto_install: args.auto_install,
             list_only: args.list_only,
             endpoint: args.endpoint.clone(),
-            realm_id: args.realm_id,
-            realm_secret: args.realm_secret.clone(),
+            realm: args.realm.clone(),
+            realm_client_key: args.realm_client_key.clone(),
         }
     }
 

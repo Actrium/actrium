@@ -6,11 +6,11 @@ path = "/tmp/echo-actr-verify.xbiEWu/echo-actr-50/dist/actrium-EchoService-1.0.0
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 1001
+realm = "package-echo@example.com"
 
 
 [discovery]
@@ -31,8 +31,8 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:package-echo-client-guest:0.1.0"
+type = "acme/package-echo-client-guest@0.1.0"
 
 [[trust]]
 kind = "registry"
-endpoint = "http://localhost:8081/ais"
+endpoint = "http://localhost:8081/issuer"

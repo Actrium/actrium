@@ -1,11 +1,11 @@
 # 部署助手
 
-用 Rust 编写的现代化、交互式 Actrix 辅助服务部署助手。
+用 Rust 编写的现代化、交互式 Loran 辅助服务部署助手。
 
 ## 功能特性
 
 - 🚀 **交互式命令行**: 使用 `dialoguer` 提供用户友好的菜单和提示
-- ⚙️ **服务选择**: 选择启用的服务（信令、STUN、TURN、Ais）
+- ⚙️ **服务选择**: 选择启用的服务（信令、STUN、TURN、Issuer）
 - 🌐 **网络配置**: 自动 IP 检测和端口配置
 - 🔒 **SSL 设置**: 自动化 SSL 证书配置
 - 👥 **用户管理**: 自动创建用户/组并设置正确权限
@@ -95,10 +95,10 @@ cargo build --release -p deploy
 - **信令服务**（位 1）: WebSocket 信令服务
 - **STUN**（位 2）: 用于 NAT 穿越的 STUN 服务器
 - **TURN**（位 4）: TURN 中继服务器（包含 STUN 功能）
-- **Ais 服务**（位 8）: ActorRTC 身份服务
+- **Issuer 服务**（位 8）: ActorRTC 身份服务
 
 服务根据选择自动配置：
-- 仅当选择信令或 Ais 服务时才提示 HTTP/HTTPS 配置
+- 仅当选择信令或 Issuer 服务时才提示 HTTP/HTTPS 配置
 - 仅当选择 STUN 或 TURN 时才提示 ICE 端口配置
 - 仅当选择 TURN 时才提示 TURN 域配置
 - 用户/组配置根据服务选择提供适当的默认值

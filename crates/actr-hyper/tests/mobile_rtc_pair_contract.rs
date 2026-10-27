@@ -44,8 +44,11 @@ fn pause_after_first_fragment() -> (
                 }
                 let tx = { event_tx.lock().expect("fragment hook lock poisoned").take() };
                 if let Some(tx) = tx {
+                    let resumed = release.notified();
+                    tokio::pin!(resumed);
+                    resumed.as_mut().enable();
                     let _ = tx.send(event);
-                    release.notified().await;
+                    resumed.await;
                 }
             })
         })
@@ -214,23 +217,46 @@ async fn p01_a_only_short_background_uses_production_feed_and_soft_recovers() {
         .wait_state(&pair.id(PairEndpoint::B), WAIT, |state| !state.sendable)
         .await
         .expect("the production hook must expose A as not sendable");
-    let blocked_send = tokio::time::timeout(
-        Duration::from_secs(2),
-        pair.rpc(PairEndpoint::A, PairEndpoint::B, "p01_blocked_send"),
-    )
-    .await
-    .expect("business admission while gated must be bounded");
-    assert!(
-        blocked_send.is_err(),
-        "mobile business must not admit a new send while the public state is not sendable"
-    );
-    assert_eq!(
-        pair.harness()
-            .peer(pair.serial(PairEndpoint::A))
-            .pending_count()
-            .await,
-        0
-    );
+    {
+        let blocked_send =
+            pair.rpc_with_timeout(PairEndpoint::A, PairEndpoint::B, "p01_blocked_send", 300);
+        tokio::pin!(blocked_send);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut blocked_send)
+                .await
+                .is_err(),
+            "a reliable call must wait while the backgrounded peer can recover"
+        );
+        assert_eq!(
+            pair.harness()
+                .peer(pair.serial(PairEndpoint::A))
+                .pending_count()
+                .await,
+            0,
+            "readiness waiting must not register an in-flight RPC"
+        );
+        let blocked_send = tokio::time::timeout(Duration::from_secs(2), &mut blocked_send)
+            .await
+            .expect("business admission while gated must be bounded");
+        assert!(
+            matches!(blocked_send, Err(ActrError::TimedOut)),
+            "an unsubmitted call must time out at its own deadline: {blocked_send:?}"
+        );
+        assert_eq!(
+            pair.harness()
+                .peer(pair.serial(PairEndpoint::B))
+                .request_count("p01_blocked_send"),
+            0,
+            "the backgrounded peer must not send the waiting request"
+        );
+        assert_eq!(
+            pair.harness()
+                .peer(pair.serial(PairEndpoint::A))
+                .pending_count()
+                .await,
+            0
+        );
+    }
     pair.foreground(PairEndpoint::A, Duration::from_secs(5))
         .await;
 
@@ -675,9 +701,20 @@ async fn p08_b_detects_failure_before_a_platform_callback_without_duplicate_reco
     let mut pair = MobileRtcPairHarness::new(51_072, 51_071).await;
     pair.establish(ConnectionInitiator::A).await;
     let initial = pair.wait_pair_ready(WAIT).await;
-    pair.set_rtc_fault(LinkDirection::Both, PacketRule::Blackhole)
-        .await;
-    pair.wait_rtc_fault_hit(Duration::from_secs(10)).await;
+    // A two-way blackhole races both detectors and can exhaust an attempt
+    // before B notices it. Inject B's failure fact and retain the first Offer
+    // so the late A callback is tested against a known in-flight exchange.
+    pair.set_signaling_fault(
+        LinkDirection::AToB,
+        SignalingMessageClass::IceRestartOffer,
+        SignalingFaultRule::Hold,
+    );
+    pair.harness()
+        .peer(pair.serial(PairEndpoint::B))
+        .rtc
+        .disconnect_peer(&pair.id(PairEndpoint::A))
+        .await
+        .expect("B failure fact accepted by the active controller");
     pair.wait_not_sendable(PairEndpoint::B, WAIT).await;
 
     pair.harness()
@@ -716,12 +753,17 @@ async fn p08_b_detects_failure_before_a_platform_callback_without_duplicate_reco
     );
 
     pair.background(PairEndpoint::A).await;
-    pair.heal_rtc_faults().await;
     pair.foreground(PairEndpoint::A, Duration::from_secs(5))
         .await;
     pair.network_path(PairEndpoint::A, 1, NetworkAvailability::Available, wifi())
         .await;
+    pair.harness().signaling_faults.release_held(
+        &pair.id(PairEndpoint::A),
+        &pair.id(PairEndpoint::B),
+        SignalingMessageClass::IceRestartOffer,
+    );
     let restored = pair.wait_pair_ready(WAIT).await;
+    pair.heal_signaling_faults();
     assert_eq!(restored.a_to_b.pc_generation, initial.a_to_b.pc_generation);
     assert_eq!(restored.b_to_a.pc_generation, initial.b_to_a.pc_generation);
     assert_eq!(

@@ -3,18 +3,19 @@ exports = []
 
 [package]
 name = "echo-client-app"
-manufacturer = "acme"
+publisher = "acme"
+version = "1.0.0"
 description = "Echo Client Example"
 
 [dependencies]
-EchoService = { actr_type = "acme+EchoService" }
-EchoTwiceService = { actr_type = "acme+EchoTwiceService" }
+EchoService = { actr_type = "acme/EchoService@1.0.0" }
+EchoTwiceService = { actr_type = "acme/EchoTwiceService@1.0.0" }
 
 [system.signaling]
 url = "wss://loran1.actrium-dev.example/signaling/ws"
 
 [system.deployment]
-realm_id = 2368266035
+realm = "echo@example.com"
 
 [system.discovery]
 visible = true
@@ -28,4 +29,4 @@ turn_urls = ["turn:loran1.actrium-dev.example:3478"]
 
 [[acl.rules]]
 permission = "allow"
-types = ["acme+EchoService", "acme+EchoTwiceService"]
+types = ["acme/EchoService@1.0.0", "acme/EchoTwiceService@1.0.0"]

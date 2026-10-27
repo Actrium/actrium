@@ -144,10 +144,10 @@ rustls-webpki = { version = "0.103.16", default-features = false }
 rustls-pki-types = { version = "1.9", features = ["std"] }
 tokio-rustls = { version = "0.26.2", features = ["logging"] }
 nonce-auth = { version = "0.6.3" }
-ecies = { version = "0.2", features = ["std"] }
 reqwest = { version = "0.12.24", features = ["json"] }
 serial_test = "3.0"
 hex = "0.4.3"
+hkdf = "0.12"
 hmac = "0.12"
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls",

@@ -114,6 +114,7 @@ let SW_BROADCAST = null;
 
 /** @type {import('@actrium/actr-web').SwRuntimeConfig | null} */
 let RUNTIME_CONFIG = null;
+let RUNTIME_CLIENT_KEY_ID = null;
 
 function canonicalRuntimeConfig(value) {
   if (Array.isArray(value)) {
@@ -129,10 +130,13 @@ function canonicalRuntimeConfig(value) {
   return value;
 }
 
-function runtimeConfigsEqual(left, right) {
+function runtimeConfigsEqual(left, right, rightKeyId = right.realm_client_key?.key_id) {
+  const { realm_client_key: leftKey, ...leftConfig } = left;
+  const { realm_client_key: rightKey, ...rightConfig } = right;
   return (
-    JSON.stringify(canonicalRuntimeConfig(left)) ===
-    JSON.stringify(canonicalRuntimeConfig(right))
+    (!leftKey || leftKey.key_id === rightKeyId) &&
+    JSON.stringify(canonicalRuntimeConfig(leftConfig)) ===
+    JSON.stringify(canonicalRuntimeConfig(rightConfig))
   );
 }
 
@@ -158,13 +162,13 @@ function verifiedPackageActrType(extracted) {
   } catch (error) {
     throw new Error('[SW] Verified package manifest JSON is invalid: ' + String(error));
   }
-  const fields = ['manufacturer', 'name', 'version'];
+  const fields = ['publisher', 'name', 'version'];
   for (const field of fields) {
     if (typeof manifest[field] !== 'string' || manifest[field].trim() === '') {
       throw new Error(`[SW] Verified package manifest is missing ${field}`);
     }
   }
-  return `${manifest.manufacturer}:${manifest.name}:${manifest.version}`;
+  return `${manifest.publisher}/${manifest.name}@${manifest.version}`;
 }
 
 let wasmReady = false;
@@ -173,7 +177,100 @@ let wsProbeDone = false;
 
 const clientPorts = new Map();
 const browserToSwClient = new Map();
+const clientRegistrations = new Map();
+const pendingRegistrations = new Set();
 let staleCleanupTimer = null;
+
+function releaseUnusedKeyBinding() {
+  if (clientRegistrations.size || pendingRegistrations.size) return;
+  // Keep the public configuration: the verified workload is still loaded.
+  // Only its unused key binding may be replaced by a subsequent import.
+  if (RUNTIME_CONFIG) delete RUNTIME_CONFIG.realm_client_key;
+  RUNTIME_CLIENT_KEY_ID = null;
+}
+
+function detachClient(registration) {
+  const { clientId, port } = registration;
+  if (clientRegistrations.get(clientId) !== registration) return;
+  clientRegistrations.delete(clientId);
+  if (clientPorts.get(clientId) === port) clientPorts.delete(clientId);
+  for (const [browserId, swClientId] of browserToSwClient.entries()) {
+    if (swClientId === clientId) browserToSwClient.delete(browserId);
+  }
+}
+
+async function unregisterClient(clientId, expected) {
+  const registration = clientRegistrations.get(clientId);
+  if (!registration || (expected && registration !== expected)) return;
+  if (registration.cleanup) return registration.cleanup;
+  registration.cancelled = true;
+  // A registration can finish after its page closes. Its completion path
+  // must unregister that runtime instead of publishing a late runtime_ready.
+  registration.cleanup = (async () => {
+    await registration.done;
+    if (clientRegistrations.get(clientId) !== registration) return;
+    if (wasmReady) await wasm_bindgen.unregister_client(clientId);
+    detachClient(registration);
+    registration.port.close();
+    releaseUnusedKeyBinding();
+  })();
+  try {
+    await registration.cleanup;
+  } catch (error) {
+    registration.cleanup = null;
+    throw error;
+  }
+}
+
+async function registerClient(registration) {
+  const { clientId, config, port } = registration;
+  let failure;
+  try {
+    await ensureWasmReady();
+    if (registration.cancelled) return;
+    const clientKeyId = await wasm_bindgen.register_client(clientId, config, port);
+    if (registration.cancelled) return;
+    if (typeof clientKeyId !== 'string' || !clientKeyId) {
+      throw new Error('[SW] Host did not return a Realm client key ID');
+    }
+    if (RUNTIME_CLIENT_KEY_ID !== null && RUNTIME_CLIENT_KEY_ID !== clientKeyId) {
+      throw new Error('[SW] Host registered a different Realm client key');
+    }
+    // Imported and IndexedDB-restored clients must share the same binding.
+    // Use the validated Host result rather than guessing from the input.
+    RUNTIME_CLIENT_KEY_ID = clientKeyId;
+    registration.registered = true;
+    delete config.realm_client_key;
+    console.log('[SW] Client registered (WBG):', clientId);
+    emitSwLog('info', 'client_registered', { clientId, variant: 'wbg' });
+    port.postMessage({ type: 'runtime_ready' });
+  } catch (error) {
+    failure = error && error.message ? error.message : String(error);
+    console.error('[SW] register_client failed:', error);
+    emitSwLog('error', 'register_client_failed', { clientId, error: String(error) });
+  } finally {
+    if (!registration.registered || registration.cancelled) {
+      try {
+        if (wasmReady) await wasm_bindgen.unregister_client(clientId);
+        detachClient(registration);
+      } catch (error) {
+        // Retain the binding if cleanup cannot confirm the runtime is gone.
+        console.error('[SW] failed registration cleanup:', error);
+      }
+    }
+    pendingRegistrations.delete(registration);
+    releaseUnusedKeyBinding();
+    if (registration.cancelled) port.close();
+  }
+  if (failure !== undefined && !registration.cancelled) {
+    try {
+      port.postMessage({ type: 'runtime_error', error: failure });
+      port.close();
+    } catch (_) {
+      /* page may already be gone */
+    }
+  }
+}
 
 async function cleanupStaleClients() {
   if (!wasmReady) return;
@@ -183,10 +280,8 @@ async function cleanupStaleClients() {
     for (const [browserId, swClientId] of browserToSwClient.entries()) {
       if (!activeIds.has(browserId)) {
         console.log('[SW] Cleaning up stale client:', swClientId, '(browser:', browserId, ')');
-        browserToSwClient.delete(browserId);
-        clientPorts.delete(swClientId);
         try {
-          await wasm_bindgen.unregister_client(swClientId);
+          await unregisterClient(swClientId);
         } catch (e) {
           console.warn('[SW] unregister_client error for', swClientId, ':', e);
         }
@@ -227,29 +322,24 @@ function emitSwLog(level, message, detail) {
 // Schema adapters between sw-host (camelCase) and actr-web-abi guest
 // (kebab-case, from serde with `#[serde(rename = "...")]`).
 //
-// sw-host's `actr_id_to_js` emits `{ realm: { realmId }, serialNumber,
-// type: { manufacturer, name, version } }` (camelCase, the WBG guest's
-// `serde-wasm-bindgen` shape).
-// actr-web-abi `ActrId` deserialises from `{ realm: { "realm-id" },
-// "serial-number", type: {...} }`.
+// sw-host's `actr_id_to_js` emits `{ realm, serialNumber }` (camelCase, the
+// WBG guest's `serde-wasm-bindgen` shape; `realm` is the Realm name).
+// actr-web-abi `ActrId` deserialises from `{ realm, "serial-number" }`.
 // ─────────────────────────────────────────────────────────────────────────
 
 function actrIdCamelToKebab(id) {
   if (id == null) return id;
   return {
-    realm: { 'realm-id': id.realm && id.realm.realmId },
+    realm: id.realm,
     'serial-number': id.serialNumber,
-    // `type` is a WIT-reserved-ish name; both sides keep the key as `type`.
-    type: id.type,
   };
 }
 
 function actrIdKebabToCamel(id) {
   if (id == null) return id;
   return {
-    realm: { realmId: id.realm && id.realm['realm-id'] },
+    realm: id.realm,
     serialNumber: id['serial-number'],
-    type: id.type,
   };
 }
 
@@ -329,7 +419,7 @@ function installActrHostGlobals() {
   };
 
   self.actrHostDiscover = async function (requestId, targetType) {
-    // `targetType` is `ActrType { manufacturer, name, version }` —
+    // `targetType` is `ActrType { publisher, name, version }` —
     // identical shape on both sides.
     try {
       const id = await wasm_bindgen.host_discover_async(requestId, targetType);
@@ -567,6 +657,7 @@ async function ensureWasmReady() {
     // A failed first configuration must not permanently poison this worker.
     // No workload has been registered successfully at this point.
     RUNTIME_CONFIG = null;
+    RUNTIME_CLIENT_KEY_ID = null;
     wasmInitPromise = null;
     throw error;
   }
@@ -654,16 +745,9 @@ self.addEventListener('message', async (event) => {
     const clientId = event.data.clientId;
     if (!clientId) return;
     try {
-      await ensureWasmReady();
-      await wasm_bindgen.unregister_client(clientId);
+      await unregisterClient(clientId);
     } catch (e) {
       console.warn('[SW] top-level unregister_client error for', clientId, ':', e);
-    }
-    clientPorts.delete(clientId);
-    for (const [browserId, swClientId] of browserToSwClient.entries()) {
-      if (swClientId === clientId) {
-        browserToSwClient.delete(browserId);
-      }
     }
     emitSwLog('info', 'client_unregistered', { clientId, variant: 'wbg', source: 'top-level' });
     return;
@@ -676,6 +760,11 @@ self.addEventListener('message', async (event) => {
   const port = event.data.port;
   const clientId = event.data.clientId;
   if (!port || !clientId) return;
+  if (clientRegistrations.has(clientId)) {
+    port.postMessage({ type: 'runtime_error', error: '[SW] Client ID is already in use' });
+    port.close();
+    return;
+  }
 
   if (event.data.runtimeConfig) {
     let candidateConfig;
@@ -695,7 +784,17 @@ self.addEventListener('message', async (event) => {
     }
     if (!RUNTIME_CONFIG) {
       RUNTIME_CONFIG = candidateConfig;
-    } else if (!runtimeConfigsEqual(candidateConfig, RUNTIME_CONFIG)) {
+      RUNTIME_CLIENT_KEY_ID = candidateConfig.realm_client_key?.key_id ?? null;
+    } else if (
+      !clientRegistrations.size &&
+      !pendingRegistrations.size &&
+      runtimeConfigsEqual({ ...candidateConfig, realm_client_key: undefined }, RUNTIME_CONFIG)
+    ) {
+      // A rejected/cancelled import has no remaining users. Rebind only the
+      // key; a different workload, Realm or Issuer still requires a new worker.
+      RUNTIME_CONFIG = candidateConfig;
+      RUNTIME_CLIENT_KEY_ID = candidateConfig.realm_client_key?.key_id ?? null;
+    } else if (!runtimeConfigsEqual(candidateConfig, RUNTIME_CONFIG, RUNTIME_CLIENT_KEY_ID)) {
       const message =
         '[SW] This Service Worker is already bound to a different runtime/package configuration';
       emitSwLog('error', 'runtime_config_mismatch', { clientId, message });
@@ -709,6 +808,14 @@ self.addEventListener('message', async (event) => {
     }
   }
 
+  let startRegistration;
+  const registration = { clientId, port, config: RUNTIME_CONFIG, cancelled: false, registered: false };
+  registration.done = new Promise((resolve) => {
+    startRegistration = resolve;
+  }).then(() => registerClient(registration));
+  clientRegistrations.set(clientId, registration);
+  pendingRegistrations.add(registration);
+
   const browserId = event.source && event.source.id;
   if (browserId) {
     const previousClientId = browserToSwClient.get(browserId);
@@ -719,18 +826,8 @@ self.addEventListener('message', async (event) => {
         'browser:',
         browserId
       );
-      const previousPort = clientPorts.get(previousClientId);
-      if (previousPort) {
-        try {
-          previousPort.close();
-        } catch (_) {
-          /* ignore */
-        }
-        clientPorts.delete(previousClientId);
-      }
       try {
-        await ensureWasmReady();
-        await wasm_bindgen.unregister_client(previousClientId);
+        await unregisterClient(previousClientId);
       } catch (e) {
         console.warn('[SW] remap unregister_client error for', previousClientId, ':', e);
       }
@@ -761,6 +858,16 @@ self.addEventListener('message', async (event) => {
   let portMessageChain = Promise.resolve();
 
   async function processPortMessage(message) {
+    if (message && message.type === 'unregister_client') {
+      try {
+        await unregisterClient(clientId, registration);
+        emitSwLog('info', 'client_unregistered', { clientId, variant: 'wbg' });
+      } catch (error) {
+        console.error('[SW] unregister_client failed:', error);
+        emitSwLog('error', 'unregister_client_failed', { clientId, error: String(error) });
+      }
+      return;
+    }
     try {
       await ensureWasmReady();
     } catch (error) {
@@ -813,22 +920,6 @@ self.addEventListener('message', async (event) => {
         }
         break;
 
-      case 'unregister_client':
-        try {
-          await wasm_bindgen.unregister_client(clientId);
-          clientPorts.delete(clientId);
-          for (const [browserId, swClientId] of browserToSwClient.entries()) {
-            if (swClientId === clientId) {
-              browserToSwClient.delete(browserId);
-            }
-          }
-          emitSwLog('info', 'client_unregistered', { clientId, variant: 'wbg' });
-        } catch (error) {
-          console.error('[SW] unregister_client failed:', error);
-          emitSwLog('error', 'unregister_client_failed', { clientId, error: String(error) });
-        }
-        break;
-
       default:
         console.log('[SW] unknown message type:', message.type);
         break;
@@ -847,26 +938,5 @@ self.addEventListener('message', async (event) => {
 
   port.start();
 
-  ensureWasmReady()
-    .then(async () => {
-      if (!RUNTIME_CONFIG) {
-        throw new Error('[SW] RUNTIME_CONFIG not received from main thread');
-      }
-      await wasm_bindgen.register_client(clientId, RUNTIME_CONFIG, port);
-      console.log('[SW] Client registered (WBG):', clientId);
-      emitSwLog('info', 'client_registered', { clientId, variant: 'wbg' });
-      port.postMessage({ type: 'runtime_ready' });
-    })
-    .catch((error) => {
-      console.error('[SW] register_client failed:', error);
-      emitSwLog('error', 'register_client_failed', { clientId, error: String(error) });
-      try {
-        port.postMessage({
-          type: 'runtime_error',
-          error: error && error.message ? error.message : String(error),
-        });
-      } catch (_) {
-        /* port may be closed */
-      }
-    });
+  startRegistration();
 });

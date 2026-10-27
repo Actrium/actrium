@@ -2,138 +2,112 @@
 
 > 本文件给出可讨论的 v1 wire shape。字段名和 endpoint path 在 P0 schema 冻结前可以调整；对象边界、身份与安全语义不得改变。
 
-## 1. URI 样例
+## 1. Realm 链接样例
 
-### Create
-
-```text
-actr://notes.example/team-notes@1.4.2
-```
-
-### Create + Guest route
+语法见 [Actr URI](../../../actr/protocols/uri.zh.md)。
 
 ```text
-actr://notes.example/team-notes@1.4.2/today?filter=assigned
+actr://acme.com/k7m2q9xh                         ; 打开实例 k7m2q9xh@acme.com
+actr://acme.com/notes/today?filter=assigned      ; 显式可读 RealmId，带页面路径与 query
+https://acme.com/i/k7m2q9xh                      ; https 形式，acme.com 声明了 links: ["/i/"]
+actr://acme.com/2af01.k7m2q9xh                   ; 实例里的某个 Actor（ActorId 2af01.k7m2q9xh@acme.com）
+actr://<installation-id>.actr.alt/h3x8p2wq       ; 本机 Realm，不可分享
 ```
 
-### Attach
+RealmId 默认由 Actrium 随机生成（base32 小写短串，不含程序名），可读名称写入 Realm Profile 的 `display_name`；用户可在新建确认页显式改用可读 RealmId，如上例的 `notes`。
 
-```text
-actr://notes.example/team-notes@1.4.2/today?service=2af01%4042~dns%3Ateam.example%2Fnotes.example%3Ateam-notes%3A1.4.2
-```
+实例里的 Actor 以 ActorId 标识，例如 `2af01.k7m2q9xh@acme.com`：去掉 `2af01.` 即 Realm 名。它的链接形式是 `actr://acme.com/2af01.k7m2q9xh`；程序升级替换 Actor 后这类链接失效，分享时默认用实例链接。程序身份 `publisher/program@version` 由包 manifest 与 Actor credential 携带。
 
-解码后的 v1 ActorId：
-
-```text
-2af01@42~dns:team.example/notes.example:team-notes:1.4.2
-```
-
-当前 Actr 的 legacy `2af01@42/notes.example:team-notes:1.4.2` 缺 Realm authority，只能通过显式导入流程补足，不能作为 portable Attach URI。
-
-### Development
-
-```text
-actr-dev://localhost:7443/team-notes@0.0.0-dev
-```
+旧格式（`actr://notes.example/team-notes@1.4.2?service=…`、只含数值 `realm_id` 的 `2af01@42/notes.example:team-notes:1.4.2`）一律拒绝，只能经显式迁移工具导入。
 
 ## 2. Publisher Profile
 
-入口：
+Publisher Profile 是 authority descriptor 的可选成员 `publisher`（已在 Actr Authority Discovery §4.5 定义），入口为 Publisher 域名唯一的 bootstrap 资源：
 
 ```text
-https://notes.example/.well-known/actrium-publisher.json
+https://notes.example/.well-known/actr
 ```
 
-样例：
+样例（`publisher` 成员使用 snake_case；`domain` 必须与 `authority` 的主机名一致）：
 
 ```json
 {
-  "schemaVersion": 1,
-  "sequence": 17,
-  "publisher": "notes.example",
-  "programResolver": "https://notes.example/.well-known/actrium/v1/programs/",
-  "profileSigningKeys": [
+  "version": 1,
+  "authority": "actr://notes.example",
+  "services": [
     {
-      "id": "publisher-root-1",
-      "algorithm": "Ed25519",
-      "publicKey": "<base64>",
-      "status": "active"
+      "rel": "contracts",
+      "href": "https://notes.example/actr/contracts"
     }
   ],
-  "keys": [
-    {
-      "id": "ed25519:2026-q2",
+  "publisher": {
+    "schema": "actr.publisher/v1",
+    "sequence": 17,
+    "domain": "notes.example",
+    "profile_signing_keys": [
+      {
+        "id": "publisher-root-1",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "status": "active"
+      }
+    ],
+    "keys": [
+      {
+        "id": "actr-pub-3f9a1c0d2b7e4a61",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "not_before": "2026-04-01T00:00:00Z",
+        "not_after": "2027-04-01T00:00:00Z",
+        "status": "active"
+      },
+      {
+        "id": "actr-pub-8c2e5b7d1a4f9e03",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "not_before": "2025-01-01T00:00:00Z",
+        "not_after": "2026-06-30T00:00:00Z",
+        "status": "retired"
+      }
+    ],
+    "security_contact": "mailto:security@notes.example",
+    "profile_issued_at": "2026-07-29T00:00:00Z",
+    "profile_expires_at": "2026-08-29T00:00:00Z",
+    "signature": {
+      "key_id": "publisher-root-1",
       "algorithm": "Ed25519",
-      "publicKey": "<base64>",
-      "notBefore": "2026-04-01T00:00:00Z",
-      "notAfter": "2027-04-01T00:00:00Z",
-      "status": "active"
-    },
-    {
-      "id": "ed25519:2025",
-      "algorithm": "Ed25519",
-      "publicKey": "<base64>",
-      "notBefore": "2025-01-01T00:00:00Z",
-      "notAfter": "2026-06-30T00:00:00Z",
-      "status": "retired"
+      "value": "<base64>"
     }
-  ],
-  "securityContact": "mailto:security@notes.example",
-  "profileIssuedAt": "2026-07-29T00:00:00Z",
-  "profileExpiresAt": "2026-08-29T00:00:00Z",
-  "signature": {
-    "keyId": "publisher-root-1",
-    "algorithm": "Ed25519",
-    "value": "<base64>"
   }
 }
 ```
 
-`signature` 对象本身不进入 payload；其余 JSON 按 RFC 8785 JCS 规范化后做 detached Ed25519 验证。`sequence` 必须单调递增。
+`publisher.signature` 对象本身不进入 payload；`publisher` 成员的其余 JSON 按 RFC 8785 JCS 规范化后做 detached Ed25519 验证。`sequence` 必须单调递增。descriptor 中 `publisher` 以外的部分不签名，不参与 Publisher 信任判断。`profile_signing_keys` 与可选的 `rotations` 的格式、接受与轮换规则同 `realm_signing_keys`（Actr Authority Discovery §4.4）。包签名 key 的 `id` 由公钥算出，与 manifest `signing_key_id` 相同；`keys` 至多 8 项、其中 `active` 至多 2 项，轮换时先发布新 key、至少 24 小时后再用它签包（[Actor Package](../../../actr/protocols/actor-package.zh.md) §6.8）。
 
-## 3. Release metadata
+## 3. 包下载
 
-入口：
-
-```text
-https://notes.example/.well-known/actrium/v1/programs/team-notes/1.4.2/release.json
-```
-
-样例：
+实例运行哪个包，写在其 Realm Profile 的 `package` 中（样例见 §6.2）：
 
 ```json
-{
-  "schemaVersion": 1,
-  "publisher": "notes.example",
-  "program": "team-notes",
-  "version": "1.4.2",
-  "packageUrl": "https://cdn.notes.example/actr/team-notes/1.4.2/package.actr",
-  "packageSha256": "f6d4...64hex",
-  "packageSize": 4829012,
-  "signingKeyId": "ed25519:2026-q2",
-  "publishedAt": "2026-06-01T10:00:00Z",
-  "status": "active",
-  "metadataExpiresAt": "2026-08-01T00:00:00Z",
-  "signature": {
-    "keyId": "ed25519:2026-q2",
-    "algorithm": "Ed25519",
-    "value": "<base64>"
-  }
+"package": {
+  "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+  "sha256": "<64 hex>",
+  "type": "notes.example/team-notes@1.4.2"
 }
 ```
 
-Release 的 `signature` 同样排除在 JCS payload 外，并由 Publisher Profile 授权的 signing key 验证。
+Actrium 按 [Realm Profile 协议](../../../actr/protocols/realm-profile.zh.md)第 6 节下载 `href`（不带 credential 的 HTTPS GET）、核对 `sha256`，再用 Publisher Profile（§2）中的包签名 key 验证 manifest 签名；manifest 声明的 Actor 类型即该实例的程序。下载地址可以在任何位置（Publisher CDN、Loran 包托管、对象存储），不是信任源。
 
 ## 4. `.actr` Manifest
 
 示意：
 
 ```toml
-manufacturer = "notes.example"
+publisher = "notes.example"
 name = "team-notes"
 version = "1.4.2"
 signature_algorithm = "ed25519"
-signing_key_id = "ed25519:2026-q2"
+signing_key_id = "actr-pub-3f9a1c0d2b7e4a61"
 
 [binary]
 path = "bin/service.wasm"
@@ -160,7 +134,7 @@ contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:<digest>"
 
 [actrium.service]
-primary_contract = "proto/primary-service.proto"
+contract = "proto/service.proto"
 protocol_fingerprint = "sha256:<digest>"
 
 [actrium.service.workspace]
@@ -181,13 +155,13 @@ data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
 [[actrium.privacy.actor_egress]]
-actr_type = "notes.example:index-worker:1.4.2"
+actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
 
 [actrium.permissions.front]
 capabilities = [
-  "primary-service",
+  "service",
   "host:clipboard.write",
   "host:notifications"
 ]
@@ -236,8 +210,8 @@ path = "assets/icon.png"
 hash = "<sha256>"
 
 [[proto_files]]
-name = "primary-service.proto"
-path = "proto/primary-service.proto"
+name = "service.proto"
+path = "proto/service.proto"
 hash = "<sha256>"
 
 [lock_file]
@@ -274,11 +248,11 @@ ipc = ["actr.capability.v1"]
     "react",
     "react/jsx-runtime",
     "keel/guest",
-    "host:primary-service",
+    "host:service",
     "host:clipboard"
   ],
   "hostModules": {
-    "primary-service": {
+    "service": {
       "rpc": [
         "notes.v1.NoteService.List",
         "notes.v1.NoteService.Get",
@@ -307,99 +281,161 @@ ipc = ["actr.capability.v1"]
 
 Actrium 不能只信这个文件；安装分析结果必须与它一致。
 
-## 6. Realm Profile
+## 6. Realm 签名 key 与 Realm Profile
 
-入口：
+### 6.1 Realm 签名 key：authority descriptor 扩展
+
+域名的 Realm 签名 key 发布在该域名的 descriptor 中：
 
 ```text
-https://team.example/.well-known/actrium-realm.json
+https://acme.com/.well-known/actr
+```
+
+样例（`realm_signing_keys` 成员与 `realms` relation 已在 Actr Authority Discovery §4.3–4.4 定义）：
+
+```json
+{
+  "version": 1,
+  "authority": "actr://acme.com",
+  "services": [
+    {
+      "rel": "signaling",
+      "href": "wss://signal.provider.example/actr",
+      "protocol": "actr-signaling/1"
+    },
+    {
+      "rel": "ice-config",
+      "href": "https://rtc.provider.example/actr/ice",
+      "protocol": "actr-ice-config/1"
+    },
+    {
+      "rel": "realms",
+      "href": "https://realms.provider.example/acme.com",
+      "protocol": "actr-realm-profile/1"
+    }
+  ],
+  "links": ["/i/"],
+  "realm_signing_keys": {
+    "sequence": 3,
+    "keys": [
+      {
+        "id": "rs-2026-1",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "status": "active"
+      },
+      {
+        "id": "rs-2025-1",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "status": "retired"
+      }
+    ],
+    "rotations": [
+      {
+        "from": "rs-2025-1",
+        "to": "rs-2026-1",
+        "sequence": 2,
+        "signature": "<base64>"
+      }
+    ],
+    "signature": {
+      "key_id": "rs-2026-1",
+      "algorithm": "Ed25519",
+      "value": "<base64>"
+    }
+  }
+}
+```
+
+`realm_signing_keys.keys` 是该域名下所有 Realm 的长期信任根；`rotations` 中每一项由 `from` key 对 `{from, to, public_key, sequence}` 的 JCS 形式签名，`sequence` 为引入该轮换时的成员 `sequence`；从 `keys` 移除某个 key 即吊销它签过的全部 Realm Profile；`realm_signing_keys.signature` 由某个 `active` key 对去掉 `signature` 后的该成员 JCS 规范化结果签名，覆盖 `sequence`。descriptor 其余部分不签名，也不列出 Realm 清单。`links` 声明 `https://acme.com/i/<realm_id>…` 是 Realm 链接的 https 形式（Actr Authority Discovery §4.6），前缀由域名自选，没有默认值。`services` 中的 signaling、ice-config 等服务于该 authority 自身，与该域名下的 Realm 无关；访问 Realm 只使用其 Realm Profile 指定的 Realm Infra Provider，Realm Profile 不可用、无效或退役时不得使用任何其他 Realm Infra Provider。Realm Infra Provider 自身的 descriptor（`https://provider.example/.well-known/actr`）另以 `realm-management` link（protocol `actr-realm-management/1`）公布管理请求端点。
+
+### 6.2 Realm Profile
+
+入口为 `realms` relation 的 `href` 加 `realm_id`：
+
+```text
+https://realms.provider.example/acme.com/k7m2q9xh
 ```
 
 样例：
 
 ```json
 {
-  "schemaVersion": 1,
+  "schema": "actr.realm/v1",
   "sequence": 31,
   "realm": {
-    "domain": "team.example",
-    "realmId": 42,
-    "displayName": "Example Team",
+    "name": "k7m2q9xh@acme.com",
+    "display_name": "Acme Notes",
     "status": "active"
   },
-  "profileSigningKeys": [
-    {
-      "id": "realm-root-1",
-      "algorithm": "Ed25519",
-      "publicKey": "<base64>",
-      "status": "active"
-    }
-  ],
+  "package": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "<64 hex>",
+    "type": "notes.example/team-notes@1.4.2"
+  },
   "issuer": {
-    "url": "https://identity.team.example",
+    "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
       {
-        "id": "realm-key-2026-2",
+        "id": "7",
         "algorithm": "Ed25519",
-        "publicKey": "<base64>",
+        "public_key": "<base64>",
         "status": "active"
       }
     ]
   },
-  "signaling": [
-    {
-      "url": "wss://signal-a.team.example/ws",
-      "priority": 10,
-      "controlPlaneId": "team.example/v1",
-      "ticketAudience": "signal-a"
-    },
-    {
-      "url": "wss://signal.provider.example:8443/ws",
-      "priority": 20,
-      "controlPlaneId": "team.example/v1",
-      "ticketAudience": "signal-b"
-    }
-  ],
-  "ice": [
-    {
-      "urls": ["stun:stun.team.example:3478"]
-    },
-    {
-      "urls": ["turns:turn.provider.example:5349"],
-      "credentialAudience": "turn-pool-1"
-    }
-  ],
-  "policy": {
-    "membership": "invite-only",
-    "crossRealm": false,
-    "offlineCredentialGraceSeconds": 0
+  "provider": {
+    "id": "provider.example",
+    "signaling": [
+      {
+        "url": "wss://signal-a.provider.example/ws",
+        "priority": 10,
+        "control_plane_id": "provider.example/v1",
+        "ticket_audience": "signal-a"
+      },
+      {
+        "url": "wss://signal-b.provider.example:8443/ws",
+        "priority": 20,
+        "control_plane_id": "provider.example/v1",
+        "ticket_audience": "signal-b"
+      }
+    ],
+    "ice": [
+      {
+        "urls": ["stun:stun.provider.example:3478"]
+      },
+      {
+        "urls": ["turns:turn.provider.example:5349"],
+        "credential_audience": "turn-pool-1"
+      }
+    ]
   },
-  "profileIssuedAt": "2026-07-29T00:00:00Z",
-  "profileExpiresAt": "2026-08-29T00:00:00Z",
+  "policy": {
+    "membership": "invite-only"
+  },
+  "issued_at": "2026-07-29T00:00:00Z",
   "signature": {
-    "keyId": "realm-root-1",
+    "key_id": "rs-2026-1",
     "algorithm": "Ed25519",
     "value": "<base64>"
   }
 }
 ```
 
-多个 signaling endpoint 共享 `controlPlaneId`，表示它们是同一 Realm presence/control plane 的副本或故障切换入口，而不是 v1 federation。
+`signature` 由 `realm_signing_keys` 中的 `active` key 签署；Actor credential 的 issuer 即 `realm.name`，存放位置不影响有效性；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Realm Infra Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Realm Infra Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。`package` 给出该实例运行的包（§3），升级程序即发布 `package` 不同、`sequence` 更高的 Realm Profile。同一 Realm Infra Provider 下轮换 Realm issuer key 或变更端点时同样发布更高 `sequence` 的 Realm Profile；退役时发布 `status` 为 `retired` 的新 Realm Profile，永久有效。
 
 ## 7. Service Inventory Record
 
 ```json
 {
-  "actorId": "2af01@42~dns:team.example/notes.example:team-notes:1.4.2",
+  "realm": "notes@acme.com",
+  "serviceActorId": "2af01.notes@acme.com",
   "program": {
     "publisher": "notes.example",
     "name": "team-notes",
     "version": "1.4.2",
     "packageDigest": "sha256:..."
-  },
-  "realm": {
-    "domain": "team.example",
-    "realmId": 42
   },
   "workspaceId": "ws_01...",
   "runtime": {
@@ -433,7 +469,7 @@ https://team.example/.well-known/actrium-realm.json
   },
   "capability": "host:clipboard.write",
   "scope": {
-    "serviceActorId": "2af01@42~dns:team.example/notes.example:team-notes:1.4.2",
+    "serviceActorId": "2af01.notes@acme.com",
     "workspaceId": "ws_01..."
   },
   "decision": "allow-while-open",
@@ -460,7 +496,7 @@ Guest 只读：
   },
   "session": {
     "connection": "p2p",
-    "realmDisplayName": "Example Team"
+    "realmDisplayName": "Acme Notes"
   },
   "workspace": {
     "displayName": "Team Notes",
@@ -477,7 +513,7 @@ Guest 只读：
 - session id/secret；
 - Workspace path；
 - Actor arbitrary call API；
-- Realm secret；
+- Realm 客户端 key；
 - signaling/TURN endpoint credential。
 
 ### 9.1 隐私状态上下文
@@ -491,13 +527,13 @@ Guest 只能看到最小化的用户可见摘要：
     "ready": true,
     "policyId": "actrium.consumer.default",
     "workloadKind": "wasm-component",
-    "applicationStateId": "…",
+    "applicationStateDigest": "…",
     "expiresAt": "2026-07-29T12:01:15Z"
   }
 }
 ```
 
-Guest 不获得 Actor 图、原始 evidence、attestation token 或被隐藏的 ActorId。完整对象见 [13](13-privacy-state-and-aggregation.md)；语义见 [docs/security](../../security/README.zh.md)。
+Guest 不获得 Actor 图、原始 evidence、attestation token 或被隐藏的 ActorId。完整对象见 [13](13-privacy-state-and-aggregation.md)；语义见 [docs/security](../../architecture/security/actrium/README.zh.md)。
 
 ## 10. 系统协议错误码
 
@@ -505,16 +541,9 @@ Guest 不获得 Actor 图、原始 evidence、attestation token 或被隐藏的 
 
 ```text
 URI_SCHEME_INVALID
-URI_PUBLISHER_INVALID
-URI_PORT_NOT_ALLOWED
-URI_PROGRAM_INVALID
-URI_VERSION_REQUIRED
-URI_VERSION_INVALID
-URI_RESERVED_DUPLICATE
-URI_ACTOR_ID_INVALID
-URI_ACTOR_TYPE_MISMATCH
-URI_REALM_REQUIRED
-URI_REALM_MISMATCH
+URI_DOMAIN_INVALID
+URI_LABEL_INVALID
+URI_LEGACY_FORM
 URI_LOCAL_REALM_FOREIGN
 ```
 
@@ -525,8 +554,6 @@ PUBLISHER_PROFILE_INVALID
 PUBLISHER_PROFILE_EXPIRED
 PUBLISHER_PROFILE_ROLLBACK
 PUBLISHER_IDENTITY_CHANGED
-RELEASE_NOT_FOUND
-RELEASE_SIGNATURE_INVALID
 PACKAGE_DOWNLOAD_FAILED
 PACKAGE_DIGEST_MISMATCH
 PACKAGE_EQUIVOCATION
@@ -542,12 +569,17 @@ SERVICE_IMPORT_FORBIDDEN
 ### Realm/Identity
 
 ```text
+REALM_KEYS_INVALID
+REALM_DOMAIN_UNTRUSTED
+REALM_SIGNING_KEY_CHANGED
+REALM_PROFILE_UNAVAILABLE
 REALM_PROFILE_INVALID
-REALM_PROFILE_EXPIRED
+REALM_INFRA_PROVIDER_MISMATCH
 REALM_PROFILE_ROLLBACK
+REALM_RETIRED
 REALM_LOGIN_REQUIRED
 REALM_MEMBERSHIP_REVOKED
-DEVICE_REVOKED
+CLIENT_REVOKED
 INVITE_EXPIRED
 INVITE_ALREADY_USED
 INVITE_REVOKED
@@ -564,6 +596,7 @@ SERVICE_SUSPENDED
 SERVICE_OFFLINE
 SERVICE_UNREACHABLE
 SERVICE_NOT_FOUND
+SERVICE_ACTOR_TYPE_MISMATCH
 SERVICE_MIGRATING
 SERVICE_TRASHED
 SERVICE_DELETED
@@ -734,36 +767,7 @@ closed
 
 ## 12. 术语表
 
-| 术语 | 定义 |
-|---|---|
-| Actrium | Actrium 程序浏览器与宿主平台 |
-| Actr | Actor 通信、身份、发现和 workload runtime 框架 |
-| Keel | 沙箱化动态原生 UI 的 Host/Guest runtime |
-| Program | Publisher 命名空间内的程序 |
-| Program Release | `publisher/program@version` 对应的不可变包 |
-| Publisher | 以规范化 DNS 域名标识的发布者 |
-| `.actr` package | Actr 签名 workload 包；在 Actrium 中同时携带 Service 与 Keel Guest 资源 |
-| Tab | 用户交互容器 |
-| Front Actor | 每个 resident app Tab 的短生命周期、Actrium 固定 Native workload Actor |
-| Keel Guest | Publisher 唯一可定制的前台代码 |
-| Primary Service | Front 唯一绑定的有状态业务 Actor |
-| Auxiliary Actor | 由 Primary Service 编排的后台 Actor |
-| ActorId | 携带 Realm authority、持久且密码学绑定的精确 Actor 身份 |
-| ActrType | publisher/manufacturer + name/program + version |
-| Workspace | Service 持有的业务数据 capability |
-| Realm | Actor 身份、准入、ACL 和网络 Provider 的逻辑治理域 |
-| Signaling | presence、发现与 WebRTC 协商控制面 |
-| STUN | NAT 映射发现 |
-| TURN | P2P 不可达时的受控流量中继 |
-| Capability | Host 明确授予 Guest/Service 的最小能力 |
-| Package digest | 精确 Program Release 的不可变内容指纹 |
-| Attachment lease | Front 使用 Service 的短期会话租约 |
-| Marketplace | 程序发现、审核和撤销信息服务，不是 Publisher 命名权威 |
-| 应用图 | 有效 `Transfer(ActorId)` 形成的无根连通分量 |
-| ActorAssurance | 验证者针对准确 `ActorStateId` 的节点结论；禁止自签 |
-| ApplicationAssurance | 当前就绪切面的汇聚结论 |
-| Ready | 快照当前且全部成员 ACTIVE；展示颜色的前提 |
-| Native Capsule | 在独立 OS sandbox 中运行、只开放 Host brokered IPC 的 Native workload |
+本文档使用的术语统一定义在[术语表](../../GLOSSARY.zh.md)，此处不再重复。
 
 ## 13. 规范与实现参考
 

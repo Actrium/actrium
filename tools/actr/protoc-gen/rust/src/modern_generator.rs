@@ -880,7 +880,7 @@ mod tests {
 
         assert!(code.contains("pub trait DemoClientAppHandler"));
         assert!(!code.contains("DemoClientAppWorkload"));
-        assert!(!code.contains("manufacturer"));
+        assert!(!code.contains("publisher"));
         assert!(!code.contains("discover_route_candidate"));
         assert!(!code.contains("call_raw"));
     }

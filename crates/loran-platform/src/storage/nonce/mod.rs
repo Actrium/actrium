@@ -6,4 +6,4 @@ pub mod db_nonce_entry;
 pub mod sqlite_nonce_storage;
 
 pub use db_nonce_entry::DbNonceEntry;
-pub use sqlite_nonce_storage::SqliteNonceStorage;
+pub use sqlite_nonce_storage::{SqliteNonceStorage, run_nonce_cleanup};

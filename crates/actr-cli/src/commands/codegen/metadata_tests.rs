@@ -17,7 +17,7 @@ fn svc_model(name: &str, side: super::super::ProtoSide) -> ServiceModel {
             reply_mode: ReplyMode::Return,
             route_key: "echo.EchoService.Echo".into(),
         }],
-        actr_type: Some("acme:Echo:1.0.0".into()),
+        actr_type: Some("acme/Echo@1.0.0".into()),
     }
 }
 
@@ -130,22 +130,22 @@ exports = []
 
 [package]
 name = "DataStreamApp"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
-ask-service = { actr_type = "acme:AskService:1.0.0" }
-pkg-a = { actr_type = "acme:PackageA:1.0.0" }
-ask = { actr_type = "acme:NestedAsk:1.0.0" }
+ask-service = { actr_type = "acme/AskService@1.0.0" }
+pkg-a = { actr_type = "acme/PackageA@1.0.0" }
+ask = { actr_type = "acme/NestedAsk@1.0.0" }
 
 [system.signaling]
 url = "ws://127.0.0.1:8080"
 
-[system.ais_endpoint]
-url = "http://127.0.0.1:8080/ais"
+[system.issuer_endpoint]
+url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 "#,
     )
     .unwrap();

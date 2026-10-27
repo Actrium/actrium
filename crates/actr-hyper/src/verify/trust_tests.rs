@@ -8,7 +8,7 @@ fn make_minimal_package(signing_key: &SigningKey) -> Vec<u8> {
 
 fn make_package_with_binary(signing_key: &SigningKey, binary: &[u8]) -> Vec<u8> {
     let manifest = actr_pack::PackageManifest {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "Test".to_string(),
         version: "1.0.0".to_string(),
         binary: actr_pack::BinaryEntry {
@@ -46,7 +46,7 @@ async fn static_trust_accepts_valid_package() {
 
     let trust = StaticTrust::new(vk.to_bytes()).unwrap();
     let verified = trust.verify_package(&pkg).await.unwrap();
-    assert_eq!(verified.manifest.manufacturer, "test-mfr");
+    assert_eq!(verified.manifest.publisher, "test-publisher");
 }
 
 #[tokio::test]
@@ -89,7 +89,7 @@ async fn chain_first_match_wins() {
 
     let chain = ChainTrust::of(wrong, right);
     let verified = chain.verify_package(&pkg).await.unwrap();
-    assert_eq!(verified.manifest.manufacturer, "test-mfr");
+    assert_eq!(verified.manifest.publisher, "test-publisher");
 }
 
 #[tokio::test]
@@ -160,10 +160,10 @@ async fn chain_trust_empty_chain_errors() {
 #[tokio::test]
 async fn registry_trust_rejects_package_without_signing_key_id() {
     // Build a package whose manifest has no signing_key_id. RegistryTrust
-    // must surface InvalidManifest before hitting the AIS cache.
+    // must surface InvalidManifest before hitting the Issuer cache.
     let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
     let manifest = actr_pack::PackageManifest {
-        manufacturer: "m".into(),
+        publisher: "m".into(),
         name: "n".into(),
         version: "1.0.0".into(),
         binary: actr_pack::BinaryEntry {
@@ -190,7 +190,7 @@ async fn registry_trust_rejects_package_without_signing_key_id() {
     })
     .unwrap();
 
-    let registry = RegistryTrust::new("http://ais.invalid");
+    let registry = RegistryTrust::new("http://issuer.invalid");
     let err = registry.verify_package(&pkg).await.unwrap_err();
     assert!(
         matches!(err, HyperError::InvalidManifest(_)),

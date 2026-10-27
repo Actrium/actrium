@@ -11,7 +11,7 @@ turn_urls = ["turn:loran1.actrium-dev.example:3478"]
 force_relay = true
 
 [system.deployment]
-realm_id = 2368266035
+realm = "demo@example.com"
 
 [system.discovery]
 visible = true
@@ -27,8 +27,8 @@ tracing_service_name = "android-echo-client"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoService:1.0.0"
+type = "acme/EchoService@1.0.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:DataStreamConcurrentServer:1.0.0"
+type = "acme/DataStreamConcurrentServer@1.0.0"

@@ -49,6 +49,38 @@ pub mod utils {
             }
         })
         .await;
+
+        // Tests share the process-global database, so reset application rows
+        // while the `serial` test guard is held by callers.
+        let pool = crate::storage::db::get_database().get_pool();
+        let mut transaction = pool.begin().await?;
+        for table in [
+            "actoracl",
+            "pending_registration",
+            "issued_actor_identity",
+            "issuer_renewal_token",
+            "issuer_control_attempt",
+            "publisher_publish_nonce",
+            "publisher_key_history",
+            "publisher_package",
+            "publisher",
+            "realm_issuer_key",
+            "realm_profile",
+            "realm_domain",
+            "realm_mgmt_nonce",
+            "realm_invite",
+            "realm_client_key",
+            "realm_member",
+            "realm",
+        ] {
+            sqlx::query(&format!("DELETE FROM {table}"))
+                .execute(&mut *transaction)
+                .await?;
+        }
+        sqlx::query("DELETE FROM sqlite_sequence")
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
         Ok(())
     }
 }

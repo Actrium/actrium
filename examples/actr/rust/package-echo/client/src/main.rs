@@ -3,7 +3,7 @@
 //! Mirrors the server host pattern:
 //! 1. Load signed client-guest .actr package
 //! 2. Hyper verifies and attaches the package workload
-//! 3. Register with AIS to obtain credential
+//! 3. Register with Issuer to obtain credential
 //! 4. Start ActrNode
 //! 5. Expose the local guest to either an interactive terminal or Actrium's
 //!    loopback-only Actor gateway.
@@ -298,7 +298,7 @@ async fn main() -> Result<()> {
     let package_info = actr_config::PackageInfo {
         name: manifest.name.clone(),
         actr_type: actr_protocol::ActrType {
-            manufacturer: manifest.manufacturer.clone(),
+            publisher: manifest.publisher.clone(),
             name: manifest.name,
             version: manifest.version,
         },
@@ -324,9 +324,9 @@ async fn main() -> Result<()> {
         .map(|v| v == "production")
         .unwrap_or(false)
     {
-        let ais_endpoint =
-            env::var("AIS_ENDPOINT").unwrap_or_else(|_| "http://localhost:8081/ais".to_string());
-        let base_endpoint = ais_endpoint.trim_end_matches("/ais").to_string();
+        let issuer_endpoint =
+            env::var("ISSUER_ENDPOINT").unwrap_or_else(|_| "http://localhost:8081/issuer".to_string());
+        let base_endpoint = issuer_endpoint.trim_end_matches("/issuer").to_string();
         info!("🔐 Using RegistryTrust (base endpoint: {})", base_endpoint);
         Arc::new(RegistryTrust::new(base_endpoint))
     } else {
@@ -354,17 +354,17 @@ async fn main() -> Result<()> {
         .inspect_err(|e| error!("❌ Node attach failed: {:?}", e))?;
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // 4. Register with AIS
+    // 4. Register with Issuer
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    let ais_endpoint =
-        env::var("AIS_ENDPOINT").unwrap_or_else(|_| "http://localhost:8081/ais".to_string());
-    info!("🔐 Registering with AIS at {}", ais_endpoint);
+    let issuer_endpoint =
+        env::var("ISSUER_ENDPOINT").unwrap_or_else(|_| "http://localhost:8081/issuer".to_string());
+    info!("🔐 Registering with Issuer at {}", issuer_endpoint);
 
     let registered = attached
-        .register(&ais_endpoint)
+        .register(&issuer_endpoint)
         .await
-        .inspect_err(|e| error!("❌ AIS registration failed: {:?}", e))?;
-    info!("✅ AIS registration successful");
+        .inspect_err(|e| error!("❌ Issuer registration failed: {:?}", e))?;
+    info!("✅ Issuer registration successful");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 5. Start ActrNode

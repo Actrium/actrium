@@ -8,9 +8,9 @@ edition = 1
 
 [package]
 name = "EchoApp"
-manufacturer = "actrium"
+publisher = "actrium"
 version = "0.1.0"
 description = "Actrium EchoApp — Windows linked runtime (actr-cabi)"
 
 [dependencies]
-echo = { actr_type = "actrium:EchoService:1.0.0" }
+echo = { actr_type = "actrium/EchoService@1.0.0" }

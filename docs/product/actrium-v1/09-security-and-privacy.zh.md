@@ -1,6 +1,6 @@
 # 09. 安全与隐私
 
-> 隐私与保障语义以 [docs/security](../../security/README.zh.md) 为准。本章写 Actrium 威胁、权限、沙箱和秘密管理；颜色与图汇聚见 [13](13-privacy-state-and-aggregation.md)。
+> 隐私与保障语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章写 Actrium 威胁、权限、沙箱和秘密管理；颜色与图汇聚见 [13](13-privacy-state-and-aggregation.md)。
 
 ## 1. 安全目标
 
@@ -9,7 +9,7 @@ Actrium 必须保证：
 1. 用户知道运行的代码来自哪个 Publisher、哪个不可变版本；
 2. Publisher Guest 不能替换或扩展受信 Front Host；
 3. Guest 只能使用声明且授权的 capability；
-4. Front 只能把业务请求发给绑定的 Primary Service；
+4. Front 只能把业务请求发给绑定的 Service；
 5. ActorId 被密码学 credential 证明，而不是信令服务器口头声明；
 6. Workspace secret、Actor key 和 session secret 不进入 URI；
 7. 信令/TURN 被视为有元数据与可用性权力的基础设施；
@@ -41,7 +41,7 @@ flowchart LR
     SH -->|credentials/transport| R
 ```
 
-受信 Host 仍可能有漏洞；“受信”表示它在平台可信计算基内，不表示无需审计。
+受信 Actr Host 仍可能有漏洞；「受信」表示它在平台可信计算基内，不表示无需审计。
 
 ## 3. 资产
 
@@ -49,10 +49,10 @@ flowchart LR
 
 - Workspace 内容；
 - Actor 长期私钥；
-- Realm membership/refresh material；
+- Realm 客户端 key、未用的 Realm 邀请与 renewal token；
 - Service 状态与 snapshot；
-- Provider credential；
-- 用户身份和 ACL；
+- Workspace Provider credential；
+- 用户身份和应用权限；
 - package signing key；
 - Service session secret。
 
@@ -61,6 +61,7 @@ flowchart LR
 - ActorId；
 - Program/Service 使用记录；
 - Realm membership；
+- Realm 名（暴露域名与实例名）；
 - IP、在线时间、连接图；
 - Workspace 显示名和位置；
 - 权限授予；
@@ -73,7 +74,7 @@ flowchart LR
 - 恶意 Keel Guest；
 - 恶意 Service workload；
 - 恶意或失陷的 Marketplace；
-- 恶意 Realm、signaling 或 TURN Provider；
+- 恶意 Realm、signaling 或 TURN Realm Infra Provider；
 - 同设备其他进程；
 - 有本机权限的攻击者；
 - 被盗设备；
@@ -85,26 +86,30 @@ flowchart LR
 
 | 威胁 | 控制 |
 |---|---|
-| 同版本异包 | coordinate→digest 固定、包签名、equivocation hard fail |
+| 同版本异包 | Realm Profile 固定 package SHA-256、包签名、equivocation hard fail |
 | CDN/缓存篡改 | HTTPS + package digest + Ed25519 |
 | Zip slip/zip bomb | 路径拒绝、文件数/总量/压缩比限制、原子解压 |
 | Guest require 任意模块 | 构建与安装双重白名单、runtime resolver fail-closed |
 | Guest 直接联网 | 无默认 fetch/socket；`host:net` capability + allowlist |
 | Image 隐式联网/自带 header | ActriumSafeImage 只用 asset id 或受控 URL |
-| Guest 调任意 Actor | 只暴露固定 PrimaryService capability |
-| Guest 伪造用户/权限 | Host 附加不可覆盖的 session metadata |
+| Guest 调任意 Actor | 只暴露固定 Service capability |
+| Guest 伪造用户/权限 | Actr Host 附加不可覆盖的 session metadata |
 | Guest 无限循环 | QuickJS interrupt timeout、可销毁 runtime |
 | Guest 内存耗尽 | per-Guest heap cap、payload/render limits |
 | Bridge/组件滥用 | schema、组件/props/event/RemoteRef 白名单 |
 | Service 逃逸 | WASM Component、import allowlist、fuel/memory/I/O quota |
 | Workspace 路径穿越 | brokered root handle、路径规范化、symlink policy |
 | 多 Service 同时写 | exclusive writer lease |
-| URL 批量创建 | 确认、creation intent 幂等、来源限流和配额 |
-| URL 泄露权限 | ActorId 非 capability，URI 无 token |
-| Actor 冒充 | Realm credential、Actor key proof、challenge |
-| 客户端伪装成官方 Actrium Front | Service 默认不信任客户端实现；受管场景另验 platform/runtime attestation |
-| 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Host 闭合 |
-| Service 隐瞒辅助 Actor | 无根图须发现入边；漏评不得绿 |
+| 批量创建实例 | 用户确认、creation intent 幂等、来源限流和配额 |
+| 链接泄露权限 | Realm 链接与 ActorId 都不是凭证，URI 不含任何 token |
+| Actor 冒充 | Actor credential、Actor key proof、challenge |
+| Realm 邀请泄露 | 一次性、可过期，兑换时须用新 Realm 客户端 key 签名并原子消耗；签发者可撤销未用邀请，owner 可移除误入成员；邀请不进入 URI |
+| 客户端丢失或被盗 | 每个客户端独立的 Realm 客户端 key，成员或 owner 可单独撤销；撤销立即拒绝新 Actor credential 并断开其 signaling/TURN；owner 丢失全部客户端时经 Realm 签名 key 持有方或 Realm Infra Provider 运营者签发的 owner 邀请恢复 |
+| 低权限成员冒充 Service 或改写其连接 ACL | 该实例程序（Realm Profile `package.type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 客户端注册；注册携带的连接 ACL 只作用于所注册 Actor 自己的类型 |
+| 伪造或回滚 Realm Profile | Realm Profile 必须由已固定的 Realm 签名 key 签名；首次信任经 Web PKI 或企业 pin；Realm 签名 key 变化须有有效轮换链；`sequence` 单调、`provider.id` 不可变、已退役 Realm 拒绝；Realm Profile 不过期，客户端定期刷新；取不到、验不过或已退役的 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Infra Provider |
+| 客户端伪装成官方 Actrium Front | Actor credential 不证明对端代码；平台提供可选的 platform/runtime attestation |
+| 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Actr Host 闭合 |
+| Service 隐瞒 Realm 内的其他 Actor | 无根图须发现入边；漏评不得绿 |
 | WASM 声明与实际出口不同 | 比较 manifest、imports、有效声明和实际边；确认未声明出口则为 `UNCONTROLLED` |
 | 同进程 Native 绕过 broker | 第三方 NativeCdylib 保持 `UNKNOWN` 或确认后为 `UNCONTROLLED`；不得洗绿 |
 | signaling/TURN 观察或篡改 payload | Actor Secure Envelope、双向身份与 transcript 绑定；relay 不持有 payload key |
@@ -112,13 +117,13 @@ flowchart LR
 | 云管理员或 Hypervisor 读取 Agent 明文 | secret policy 要求 TEE/CC；通过远程证明后才释放数据密钥 |
 | 合法 TEE 证明被转发到恶意实例 | Evidence 绑定 nonce、Actor/runtime、workload digest、policy、audience 和 ephemeral key |
 | 只有 CPU TEE、GPU/NPU 仍暴露明文 | CPU+Guest+driver+IOMMU/link+device firmware/memory composite attestation |
-| 厂商自报“支持机密计算” | versioned Verifier adapter、vendor trust root、Reference Values、Endorsements、TCB 撤销与负向测试 |
+| 厂商自报「支持机密计算」 | versioned Verifier adapter、vendor trust root、Reference Values、Endorsements、TCB 撤销与负向测试 |
 | CC 内恶意 workload 主动外泄 | CC 不替代 WASM/Native confinement、egress closure 与 output control |
 | 合法 Actor 响应偷带 secret | data-class schema、declassification capability、输出大小/目标/用途 gate |
 | 新 Actor 先收数据后验证 | pending edge 同步 gate；Mark 通过前不发送业务 payload |
 | 一个下游 AA 过期但整体仍绿 | `Ready` 要求当前指针；过期不得展示绿 |
 | 截断大图后误判隐私 | 超限不得截断后发绿 |
-| 配置回滚复活已废除的旧 Capability / 旧结论 | `ActorState.revision` 单调递增并进入状态根；回滚得到新 `ActorStateId`，旧绑定永久不匹配 |
+| 配置回滚复活已废除的旧 Actor Grant / 旧结论 | `ActorState.revision` 单调递增并进入状态根；回滚得到新 `ActorStateDigest`，旧绑定永久不匹配 |
 | 把对端 Actor 伪装成 HTTPS 汇绕过跨 Principal 评分 | 可出示 Actr 身份的端点必须按 Actor 目标评定；类别不可判定保持 `UNKNOWN` |
 | 回拨本地时钟复活过期证据、结论或凭证 | 执行方与评定方用于期限 / 有效期核对的时钟均不可回拨 |
 | 信令重放 | 一次性 ticket、nonce、短有效期 |
@@ -144,7 +149,7 @@ publisher
 + capability
 + scope
 + workspace/service
-+ principal/device
++ principal/client
 ```
 
 不能只按程序显示名记住。
@@ -210,7 +215,7 @@ Service:
 
 - 固定 QuickJS；
 - 不注入 fetch、WebSocket、filesystem、process、native module；
-- Host module dispatch 未声明即拒绝；
+- Actr Host module dispatch 未声明即拒绝；
 - input/output/event schema；
 - deadline、rate limit、payload limit；
 - timer/callback 清理；
@@ -219,7 +224,7 @@ Service:
 
 ### 7.3 组件控制
 
-组件 props 不是“普通 UI 数据”就自动安全。Actrium 必须检查：
+组件 props 不是「普通 UI 数据」就自动安全。Actrium 必须检查：
 
 - URL 和 header；
 - 文件/asset reference；
@@ -243,7 +248,7 @@ Service:
 | S3 OS process isolation | 桌面长期目标 | helper process/AppContainer/XPC |
 | T1 Trusted Native | Actrium 第一方/企业 | 原生 workload，高信任 |
 
-不得把 S1 文案写成“进程级隔离”。QuickJS 是 C 引擎，Host/Bridge/组件层漏洞仍可能跨越语言沙箱。
+不得把 S1 文案写成「进程级隔离」。QuickJS 是 C 引擎，Actr Host/Bridge/组件层漏洞仍可能跨越语言沙箱。
 
 ## 9. Service workload 安全
 
@@ -283,26 +288,26 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 
 ## 11. Actor/Session 安全
 
-- ActorId 必须与 public key 和 Realm credential 绑定；
-- `ActorState` 修订号单调递增；配置回滚不复现旧 `ActorStateId`，旧 credential/Capability 不复活；
+- ActorId 必须与 public key 和 Actor credential 绑定；
+- `ActorState` 修订号单调递增；配置回滚不复现旧 `ActorStateDigest`，旧 credential/Actor Grant 不复活；
 - credential 短期、可撤销；
 - Service长期 key 不出安全存储；
 - signaling ticket 一次性；
 - Attach challenge 双向；
 - session id 不可预测；
-- session metadata 由 Host 添加；
+- session metadata 由 Actr Host 添加；
 - lease 到期后消息拒绝；
 - replay/idempotency key 窗口明确；
-- `service` URI mismatch 直接失败；
+- Service 的 Actor 类型与 Realm Profile 所指包不一致时直接失败；
 - Service offline 不 fallback。
 
-ActorType、Host 版本和 package digest 的客户端声明不构成 runtime attestation；Service 的数据权限与业务授权不能依赖这些自报字段。
+平台事实边界：Actor credential 证明 Actor key、身份与 claims，不证明对端实际运行的代码；Actor 类型、Actr Host 版本和 package digest 的客户端声明也不构成 runtime attestation。应用如何应对见[应用开发建议](app-development-guidance.zh.md)。
 
 ## 12. Workspace 安全
 
 - Front/Guest 无路径；
 - Service 使用 brokered handle；
-- Provider credential 独立；
+- Workspace Provider credential 独立；
 - 路径 canonicalization；
 - symlink/hardlink policy；
 - 原子写；
@@ -319,13 +324,14 @@ ActorType、Host 版本和 package digest 的客户端声明不构成 runtime at
 
 | Secret | 存储 | 暴露范围 |
 |---|---|---|
-| Device key | OS secure storage | Identity Manager |
-| Service Actor key | OS secure storage | Service runtime bootstrap |
-| Realm refresh material | OS secure storage | Realm Manager |
+| Realm 客户端 key（每个 Realm 独立生成，Actrium 内部如何生成不对外规定） | OS secure storage | Identity Manager |
+| Service key | OS secure storage | Service runtime bootstrap |
+| renewal token（Actor credential 续期用，绑定 Realm 客户端 key） | OS secure storage | Realm Manager |
 | signaling ticket | 内存 | signaling client，一次性 |
 | TURN credential | 内存 | ICE stack，短期 |
 | Workspace credential | OS secure storage | Workspace broker |
 | session secret | Front/Service Host 内存 | Guest 不可见 |
+| 未用的 Realm 邀请 | 带外渠道，兑换一次即失效 | 接收者；Realm Infra Provider 只存其哈希 |
 
 禁止：
 
@@ -375,7 +381,8 @@ ActorType、Host 版本和 package digest 的客户端声明不构成 runtime at
 
 - Actrium Host 安全更新可要求重启 Front；
 - package 撤销按等级处理；
-- Realm key 撤销立即影响新连接；
+- Realm issuer key 或 Realm 签名 key 撤销立即影响新连接；
+- Realm 客户端 key 撤销或成员移除立即拒绝新 Actor credential，并关闭其 Actor 的 signaling 连接与 TURN allocation；
 - 已建立 session 最迟在 credential/lease 到期终止；
 - compromised Publisher key 的历史可信版本按签名时间和撤销范围判断；
 - emergency blocklist 必须签名、过期、可审计；
@@ -392,7 +399,9 @@ Actrium 不应默认建立中心化账户或同步服务。用户数据流向取
 - Publisher API；
 - Marketplace。
 
-安装页和安全中心必须提供“数据会去哪里”的分层说明，而不是一个总隐私开关。
+安装页和安全中心必须提供「数据会去哪里」的分层说明，而不是一个总隐私开关。
+
+Realm 名出现在分享的 Realm 链接中，会暴露 Realm 域名与 RealmId（`realm_id`）。Actrium 默认为实例生成完全随机的 RealmId（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 RealmId 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actrium 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。Realm Infra Provider 与持有方的签名服务知道自己为谁创建了哪些实例（它们本来就是签名方），实例成员看不到这一点；客户端名称由客户端自定，默认不含个人信息。
 
 ## 17. 安全开发要求
 
@@ -401,7 +410,7 @@ Actrium 不应默认建立中心化账户或同步服务。用户数据流向取
 - WASM import validation；
 - archive extraction property tests；
 - session replay/lease tests；
-- Realm key rotation/rollback tests；
+- Realm 签名 key 轮换链、Realm Profile `sequence` 回滚与 Realm issuer key 轮换 tests；
 - signaling/TURN credential leakage tests；
 - capability policy differential tests；
 - 多 Tab 资源隔离故障注入；
@@ -411,7 +420,7 @@ Actrium 不应默认建立中心化账户或同步服务。用户数据流向取
 
 ## 18. 应用保障
 
-应用隐私不是 Publisher 自报的一个布尔字段。Actrium 必须按 [13](13-privacy-state-and-aggregation.md) 和 [docs/security](../../security/README.zh.md) 处理：
+应用隐私不是 Publisher 自报的一个布尔字段。Actrium 必须按 [13](13-privacy-state-and-aggregation.md) 和 [docs/security](../../architecture/security/actrium/README.zh.md) 处理：
 
 - 图无根，由有效 Actor `Transfer` 形成；Front 只定位；
 - WASM 通过声明 + import / 有效能力 / 出口闭包度量；

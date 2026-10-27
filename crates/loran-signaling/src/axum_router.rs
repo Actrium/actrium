@@ -2,8 +2,11 @@
 //!
 //! Provides an Axum Router adapter for SignalingServer
 
-use crate::server::{SignalingServer, SignalingServerHandle};
-use actr_protocol::{AIdCredential, ActrId};
+#[cfg(test)]
+mod revocation_tests;
+
+use crate::server::SignalingServer;
+use actr_protocol::{AIdCredential, ActrId, ActrType, IdentityClaims};
 use anyhow::{Context as _, Result};
 use axum::{
     Router,
@@ -18,6 +21,8 @@ use base64::Engine as _;
 use platform::aid::credential::validator::AIdCredentialValidator;
 use platform::config::ActrixConfig;
 use platform::monitoring::ServiceCounters;
+use platform::realm::Realm as RealmEntity;
+use prost::Message as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
@@ -90,9 +95,10 @@ pub async fn create_signaling_router_with_config_and_counters(
         .map(|sc| sc.server.egress.clone())
         .unwrap_or_default();
     let mut server = SignalingServer::with_egress_config(egress_config);
+    server.provider_id = config.authority.provider_id().map_err(anyhow::Error::msg)?;
 
-    // Initialize ServiceRegistry persistent cache (for restart recovery)
-    let cache_ttl_secs = crate::service_registry_storage::DEFAULT_SERVICE_TTL_SECS;
+    // Initialize ActorRegistry persistent cache (for restart recovery)
+    let cache_ttl_secs = crate::actor_registry_storage::DEFAULT_SERVICE_TTL_SECS;
 
     if !config.sqlite_path.exists() {
         std::fs::create_dir_all(&config.sqlite_path).with_context(|| {
@@ -104,7 +110,7 @@ pub async fn create_signaling_router_with_config_and_counters(
     }
     let cache_db_file = config.sqlite_path.join("signaling_cache.db");
 
-    match crate::service_registry_storage::ServiceRegistryStorage::new(
+    match crate::actor_registry_storage::ActorRegistryStorage::new(
         &cache_db_file,
         Some(cache_ttl_secs),
     )
@@ -113,13 +119,13 @@ pub async fn create_signaling_router_with_config_and_counters(
         Ok(storage) => {
             let storage_arc = Arc::new(storage);
             platform::recording::info!(
-                "✅ ServiceRegistry cache initialized at: {}",
+                "✅ ActorRegistry cache initialized at: {}",
                 cache_db_file.display()
             );
 
-            // Set storage on ServiceRegistry
+            // Set storage on ActorRegistry
             {
-                let mut registry = server.service_registry.write().await;
+                let mut registry = server.actor_registry.write().await;
                 registry.set_storage(storage_arc.clone());
 
                 // Restore service list from cache
@@ -170,20 +176,20 @@ pub async fn create_signaling_router_with_config_and_counters(
             });
         }
         Err(e) => {
-            platform::recording::warn!("⚠️  Failed to initialize ServiceRegistry cache: {:?}", e);
+            platform::recording::warn!("⚠️  Failed to initialize ActorRegistry cache: {:?}", e);
             platform::recording::warn!(
                 "    Service discovery will work but won't survive restarts"
             );
         }
     }
 
-    // Start the periodic cleanup task for the ServiceRegistry memory table (cleanup expired services, avoid stale connections)
+    // Start the periodic cleanup task for the ActorRegistry memory table (cleanup expired services, avoid stale connections)
     {
-        let registry_for_cleanup = server.service_registry.clone();
+        let registry_for_cleanup = server.actor_registry.clone();
         let cancel_for_registry = cancel.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-                crate::service_registry::CLEANUP_INTERVAL_SECS,
+                crate::actor_registry::CLEANUP_INTERVAL_SECS,
             ));
             loop {
                 tokio::select! {
@@ -239,6 +245,10 @@ pub async fn create_signaling_router_with_config_and_counters(
         counters,
         require_url_auth: true,
     };
+    tokio::spawn(crate::server::follow_realm_retirements(
+        state.server.handle(),
+        cancel.clone(),
+    ));
 
     let router = Router::new()
         .route("/ws", get(websocket_handler))
@@ -282,7 +292,14 @@ async fn websocket_handler(
             }
         };
 
-        match AIdCredentialValidator::check(&credential, actor_id.realm.realm_id).await {
+        let (actor_type, client_key) = match AIdCredentialValidator::check(
+            &credential,
+            &actor_id.realm,
+            &state.server.provider_id,
+            "actr.signaling",
+        )
+        .await
+        {
             Ok((claims, _in_tolerance)) => {
                 let expected_actor_id = actor_id.to_string_repr();
                 if claims.actor_id != expected_actor_id {
@@ -294,6 +311,7 @@ async fn websocket_handler(
                     );
                     return axum::http::StatusCode::UNAUTHORIZED.into_response();
                 }
+                (claims.actor_type, claims.client_key)
             }
             Err(e) => {
                 platform::recording::warn!(
@@ -303,15 +321,53 @@ async fn websocket_handler(
                 );
                 return axum::http::StatusCode::UNAUTHORIZED.into_response();
             }
+        };
+
+        // Only a Realm that is served accepts connections.
+        if let Err(e) = RealmEntity::validate_realm(&actor_id.realm).await {
+            let (code, message) = RealmEntity::map_validation_error(e);
+            platform::recording::warn!(
+                "🚫 WebSocket Realm refused: ip={} reason={}",
+                client_ip,
+                message
+            );
+            return axum::http::StatusCode::from_u16(code as u16)
+                .unwrap_or(axum::http::StatusCode::FORBIDDEN)
+                .into_response();
         }
 
-        Some((actor_id, credential))
+        // A disabled Actor (revoked, or its Realm client key revoked) does
+        // not connect again, nor does a credential of a key a reissue moved
+        // the Actor from.
+        match platform::realm::membership::credential_refused(&actor_id, &client_key).await {
+            Ok(false) => {}
+            Ok(true) => {
+                platform::recording::warn!(
+                    "🚫 WebSocket Actor refused: ip={} actor={} is disabled or its credential key was replaced",
+                    client_ip,
+                    actor_id.to_string_repr()
+                );
+                return axum::http::StatusCode::FORBIDDEN.into_response();
+            }
+            Err(e) => {
+                platform::recording::warn!("WebSocket Actor state lookup failed: {}", e);
+                return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+        }
+
+        Some((actor_id, actor_type, credential))
     } else {
         // The bare router is an in-process integration fixture: it skips
         // credential validation, but still binds a syntactically valid URL
-        // identity so the production relay path can address the connection.
+        // identity (with the Actor type read from the unverified claims) so
+        // the production relay path can address the connection.
         // Production always uses `require_url_auth=true` above.
-        parse_url_identity(&params).ok()
+        parse_url_identity(&params)
+            .ok()
+            .and_then(|(actor_id, credential)| {
+                let claims = IdentityClaims::decode(credential.claims.as_ref()).ok()?;
+                Some((actor_id, claims.actor_type, credential))
+            })
     };
 
     let webrtc_role = params.get("webrtc_role").cloned();
@@ -342,7 +398,7 @@ async fn handle_websocket(
     socket: WebSocket,
     state: SignalingState,
     client_ip: std::net::IpAddr,
-    url_identity: Option<(ActrId, AIdCredential)>,
+    url_identity: Option<(ActrId, ActrType, AIdCredential)>,
     webrtc_role: Option<String>,
 ) {
     platform::recording::info!("📡 New WebSocket connection: IP={}", client_ip);
@@ -357,26 +413,16 @@ async fn handle_websocket(
         limiter.increment_connection(client_ip).await;
     }
 
-    // Create SignalingServerHandle
-    let server_handle = SignalingServerHandle {
-        clients: state.server.clients.clone(),
-        actor_id_index: state.server.actor_id_index.clone(),
-        service_registry: state.server.service_registry.clone(),
-        presence_manager: state.server.presence_manager.clone(),
-        connection_rate_limiter: state.server.connection_rate_limiter.clone(),
-        message_rate_limiter: state.server.message_rate_limiter.clone(),
-        egress_config: state.server.egress_config.clone(),
-        target_rate_limiter: state.server.target_rate_limiter.clone(),
-        queue_metrics: state.server.queue_metrics.clone(),
-    };
+    let server_handle = state.server.handle();
 
     // Call SignalingServer's WebSocket handler function
-    if let Err(e) = crate::handle_websocket_connection(
+    if let Err(e) = crate::server::handle_websocket_connection_inner(
         socket,
         server_handle,
         Some(client_ip),
         url_identity,
         webrtc_role,
+        state.require_url_auth,
     )
     .await
     {

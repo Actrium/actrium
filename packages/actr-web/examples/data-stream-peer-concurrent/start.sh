@@ -101,10 +101,10 @@ check_dependencies() {
     echo ""
 }
 
-# ── mock-actrix (signaling + AIS server) ──
+# ── mock-actrix (signaling + Issuer server) ──
 
 build_or_find_mock_actrix() {
-    log_step "Checking mock-actrix (signaling + AIS server)..."
+    log_step "Checking mock-actrix (signaling + Issuer server)..."
     MOCK_ACTRIX_CMD=""
 
     if [ -x "$ACTR_ROOT/target/debug/mock-actrix" ]; then
@@ -175,17 +175,17 @@ start_mock_actrix() {
 # ── Realm setup ──
 
 setup_realm() {
-    log_step "Setting up realm (AIS identity)..."
+    log_step "Setting up realm (Issuer identity)..."
 
-    # realm_id is hardcoded in config.ts files
-    local REALM_ID=2368266035
+    # The Realm name is hardcoded in config.ts files
+    local REALM=data-stream@example.com
 
-    log_info "Creating realm $REALM_ID..."
+    log_info "Creating realm $REALM..."
     curl -fsS -X POST "$ACTRIX_HTTP_URL/admin/realms" \
         -H 'content-type: application/json' \
-        --data "{\"id\": $REALM_ID, \"name\": \"data-stream-realm\"}" >/dev/null
+        --data "{\"realm\": \"$REALM\"}" >/dev/null
 
-    log_success "Realm setup complete (realm_id=$REALM_ID)"
+    log_success "Realm setup complete (realm=$REALM)"
     echo ""
 }
 

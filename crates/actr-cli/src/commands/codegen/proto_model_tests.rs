@@ -67,7 +67,7 @@ fn parse_rejects_proto_path_escaping_proto_root() {
     let config_path = tmp.path().join("manifest.toml");
     std::fs::write(
         &config_path,
-        "edition = 1\nexports = []\n[package]\nname = \"Demo\"\nmanufacturer = \"acme\"\nversion = \"0.1.0\"\n[system.signaling]\nurl = \"ws://127.0.0.1:8080\"\n[system.ais_endpoint]\nurl = \"http://127.0.0.1:8080/ais\"\n[system.deployment]\nrealm_id = 1001\n",
+        "edition = 1\nexports = []\n[package]\nname = \"Demo\"\npublisher = \"acme\"\nversion = \"0.1.0\"\n[system.signaling]\nurl = \"ws://127.0.0.1:8080\"\n[system.issuer_endpoint]\nurl = \"http://127.0.0.1:8080/issuer\"\n[system.deployment]\nrealm = \"dev@example.com\"\n",
     )
     .unwrap();
     let config = ConfigParser::from_manifest_file(&config_path).unwrap();

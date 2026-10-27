@@ -2,475 +2,499 @@
 
 ## 1. Information architecture
 
-Actrium The primary product sector consists of five components:
+Actrium's top-level product surface has five parts:
 
 ```text
 Actrium Shell
-├── Tab With Address Bar
-├── Program Catalog(Processor library)
-├── Service Inventory(Examples repository)
-├── Realm & Identity(identity and networking)
-└── Security Center(authorities, risks, revocations and audits)
+├── Tab and address bar
+├── Program Catalog (program library)
+├── Service Inventory (instance inventory)
+├── Realm & Identity (identity and networking)
+└── Security Center (permissions, risk, revocation and audit)
 ```
 
 ### 1.1 Program Catalog
 
-Answer“What can I run?”:
+Answers "What can I run?":
 
-- (a) The installed program;
-- Marketplace Collection or recommendation;
-- Publisher Direct sources;
-- Local import and development programs;
-- Each program is known to be,digest, source and status of update.
+- Installed programs;
+- Marketplace favorites or recommendations;
+- Direct Publisher sources;
+- Local imports and development programs;
+- Each program's known version, digest, source and update status.
 
 ### 1.2 Service Inventory
 
-Answer“What have I created?”:
+Answers "What have I already created?":
 
-- Service ActorId;
-- (a) A precise version of the procedure and the procedure;
-- Workspace Display name;
-- Local/Remote (a) Run location;
-- Realm;
-- (a) Life cycle, accessibility, health and session occupation of four sets of independence;
-- Recent Open Time and Current Tab;
-- Start, stop, open, export links, move, archive, move to the wastebin and clean up.
+- Instance address (Realm link) and Realm name;
+- Program and exact version;
+- Workspace display name;
+- Local/Remote run location;
+- Four independent status groups: lifecycle, reachability, health and session occupancy;
+- Last-opened time and current Tab;
+- Actions: start, stop, open, export link, migrate, archive, move to trash and purge.
 
-Program with Service It must be. UI separates from the data model. Installing a program does not equal the created instance; deleting the program cache does not equal the deleted Workspace.
+Program and Service must be kept separate in the UI and the data model. Installing a program does not mean an instance has been created; deleting a program's cache does not mean deleting the Workspace.
 
-## 2. Address Bar
+## 2. Address bar
 
-The address bar also expresses three questions:
+The address bar shows the instance address (Realm link, see [04](04-uri-and-resolution.md)) and answers three questions:
 
-| Information | Source | User problems |
+| Information | Source | User question |
 |---|---|---|
-| `publisher/program@version` | URI Subject | I'm running which version of who's issuing? |
-| `service=<ActorId>` | URI Query Parameters | Am I creating, or is there a connection to any existing example? |
-| Realm authority | Service ActorId;Create Optional `realm` Parameters | This. Actor In what trust?/In the domain? |
+| Realm name | The address itself (`actr://<Realm domain>/<realm_id>`) | Which instance is this? Who is the trust root? |
+| Program (Publisher, program name, version) | The manifest of the package the Realm Profile points to | Which Publisher published which version this instance runs? |
+| Page path | The part of the address after the RealmId | Which page of the app am I on? |
 
-### 2.1 Security instructions
+### 2.1 Security indicators
 
-The security control on the left side of the address bar must show:
+The security control on the left of the address bar must show:
 
-- Current application security: green / Yellow / red, or re-validation;
-- Publisher Domain name and verified/development/revoked (a) Status;
-- Current package digest Short fingerprints;
-- Realm Name;
-- Service Connection status:local, P2P, TURN relayed, offline;
-- Is there a high-risk mandate for the current mandate?
+- Current application assurance: green / yellow / red, or re-validating;
+- Publisher domain and verified/development/revoked status;
+- Short fingerprint of the current package digest;
+- Realm name and its Realm domain; when the Realm domain equals or belongs to the Realm Infra Provider ID, state that the trust root is that Realm Infra Provider, otherwise the trust root is the Realm domain;
+- Service connection status: local, P2P, TURN relayed, offline;
+- Whether the current permissions include a high-risk grant.
 
-It's not just about a vague one.“Lock”Icons TLS♪ Pack safe,Actor Identity and authority are mixed.
+A single, ambiguous "lock" icon must not conflate TLS, package security, Actor identity and permissions.
 
-Just... `Ready` And apply the conclusion to `CONTROLLED` . Yellow does not equal known leaks, but does not show green either. Hang up or cut out shows 'revalidating' when you have expired / The current strategy must be visible on the click.Actor Number,workload Type, declared export, weakest item, trusted certifier and validity period.
+Green can only be shown when the current facet is `Ready` and the application conclusion is `CONTROLLED`. Yellow does not mean a known leak, but it likewise cannot show green. While suspended or when a facet has expired, show "re-validating / communication blocked". Clicking must reveal the current policy, Actor count, workload kinds, declared exports, the weakest item, the trusted verifier and the conclusion's validity period.
 
-### 2.2 Create visible differences with connections
+### 2.2 Visible difference between creating and opening
 
-- None `service`: Show“New instance will be created”.
-- Yes. `service`: Show example name or ActorId Short prints, tips.“Connect existing instance”.
-- The address bar must be immediately made a belt after the creation is completed `service` Regularization of the URI.
-- Keep address bar when connection failed URI,do not automatically delete `service`.
+- Creating an instance happens on the Shell's new-instance page; it shows "a new instance will be created" and the domain the new Realm will be in; the new-instance page corresponds to no link and cannot be bookmarked or shared.
+- Opening a link shows the instance name (`display_name`) and Realm name, with the hint "opening an existing instance".
+- Once creation completes, the address bar immediately switches to the new instance's canonical address.
+- If opening fails, the address bar keeps the original address.
 
-## 3. First Start
+## 3. First launch
 
-Actrium The following configurations were completed for the first start:
+Actrium completes the following setup on first launch:
 
-1. Yes. OS Create a device key in a secure storage;
-2. Create a Belt `local:<installation-id>` authority Local Realm;
-3. Set the default new position to“This machine.”;
-4. Allow users to join the organization later Realm;
-5. Presentation Program Catalog and Service Inventory (b) Distinction;
-6. Default to close anonymous telemetry and development mode.
+1. Initializes the Actrium key store in OS secure storage (used to generate each Realm's client key);
+2. Randomly generates an `installation-id`; the local Realm uses the pseudo-domain `<installation-id>.actr.alt`;
+3. Sets the default location for new instances to "this machine", i.e. new instances use the local Realm;
+4. Lets the user later trust a Realm domain, or join another instance's Realm via a Realm invitation;
+5. Shows the difference between Program Catalog and Service Inventory;
+6. Turns off anonymous telemetry and development mode by default.
 
-Local Realm Allow offline running of the machine Front with ServiceBut it's... URI Just in there. Actrium Installs a parseable device. Cross-device connection requires a first handing Service Move to Belt DNS authority Networking of the Internet Realm.
+First launch creates no Realm; each local instance gets its own local Realm when it is created. The local Realm lets the local Front and Service run offline, but its address can only be resolved within that Actrium installation. Cross-device connection requires first migrating the instance to a new Realm under a Realm domain, which yields a new address.
 
-## 4. Installer
+## 4. Installing programs
 
 ### 4.1 From Marketplace
 
-1. User-opening program details;
-2. Actrium Show Publisher, version,digest, powers,Workspace (a) Modes and market audit status;
-3. Actrium From Publisher HTTPS Inlet parsing and downloading `.actr`;
-4. Verify HTTPS, Publisher key, bag signature,digestCompatibility and compression restrictions;
-5. Records Program Release;
-6. Cache program only, not automatically created Service, unless the user clicks“Create instance”.
+1. The user opens the program's detail page;
+2. Actrium shows the Publisher, version, digest, permissions, Workspace mode and marketplace review status;
+3. Actrium downloads the `.actr` from the package address given by the Marketplace or Publisher;
+4. Verifies HTTPS, the Publisher key, the package signature, the digest, compatibility and archive limits;
+5. Records the Program Release;
+6. Only caches the program; it does not automatically create a Service unless the user clicks "Create instance".
 
-Marketplace The downloaded address returned is not the ultimate source of trust;Actrium We have to go back. Publisher Valid metadata or verifications Publisher Signature and digest.
+The download address is not the trust source; Actrium relies on the package signature (verified against the Publisher Profile) and the digest.
 
-### 4.2 From `actr://` URI
+### 4.2 When opening a link
 
-If Program Release Not installed:
+If the package is not yet installed, handle it per [04 §3](04-uri-and-resolution.md): confirm first, then download and verify; canceling produces no Service or Front Actor.
 
-- (a) Enter the controlled installation page first;
-- Displays the full source and permission;
-- Continue after installation is successful Create/Attach Intent;
-- Uninstalled does not generate Service or Front Actor.
+### 4.3 Local import
 
-### 4.3 Local Import
+For a local `.actr` package:
 
-Local `.actr` Package:
+- It must still pass structure, hash and signature checks;
+- If the signing key does not belong to a verified domain, mark it "local development identity";
+- It must not occupy the trusted record of a verified Publisher with the same name;
+- It is not automatically synced to other devices;
+- The development marker is always shown while it runs.
 
-- It must still be adopted through structures,hash and signature checks;
-- Signature key Mark as if not a validated domain name“Locally developed identity”;
-- No use of the same name verified Publisher (a) Credible records;
-- Do not automatically synchronize to other devices;
-- Displays the development tags at all times of running.
+## 5. Creating an instance
 
-## 5. Create instance
-
-### 5.1 Main Process
+### 5.1 Main flow
 
 ```mermaid
 sequenceDiagram
     actor U as User
     participant A as Actrium Shell
-    participant P as Package Resolver
+    participant P as Package verification
     participant M as Service Manager
-    participant S as Service Actor
+    participant S as Service
     participant F as Front Actor
 
-    U->>A: Open None service It's... actr:// URI
-    A->>P: Parsing and Validating Program Release
+    U->>A: Click "Create instance" in Program Catalog (or import a package, or enter a package address)
+    A->>P: Download and verify the package
     P-->>A: package digest + manifest
-    A->>U: (a) Competence,Realm, Workspace Confirm.
+    A->>U: Confirm permissions, Realm domain and RealmId, and Workspace
     U-->>A: Confirm creation
-    A->>M: Create(idempotency_key, package, workspace, realm)
-    M->>S: Enduring identity and startup Service
+    A->>M: Create(idempotency_key, package, workspace, domain, realm_id, display_name)
+    M->>M: Obtain authorization from the Realm signing key holder
+    M->>M: Realm Infra Provider creates a pending Realm
+    M->>M: Sign the Realm Profile (including package) and submit it for activation; Realm becomes active
+    M->>M: Redeem the owner invite and become the Realm's owner (obtain Realm membership)
+    M->>S: Persist identity within the new Realm and start the Service
     S-->>M: stable ActorId
     M-->>A: Service record + ActorId
-    A->>A: replace URI with service=ActorId
-    A->>F: Start Fixed Native Front workload
+    A->>A: Replace the address bar with the new instance's Realm link
+    A->>F: Start the fixed Native Front workload
     F->>S: Attach handshake
     S-->>F: session lease + contract
-    F->>F: Loaded Authentic Keel Guest
-    A-->>U: Show Programs
+    F->>F: Load the verified Keel Guest
+    A-->>U: Show the program
 ```
 
-### 5.2 Workspace Selection
+### 5.2 Realm domain and RealmId
 
-Manifest Three dimensions must be declared separately and cannot be pressed into one enumerator:
+Every new instance creates a new Realm. The confirmation page shows:
+
+- Realm domain: creates a local Realm by default; any trusted Realm domain can be chosen. Without a domain, no Realm is allocated (except the local Realm); a user without their own domain uses a Realm that a Realm Infra Provider allocates under its own domain;
+- `realm_id`: by default Actrium generates a fully random short string (e.g. `k7m2q9xh`, lowercase base32) containing no program name or user input; a readable name goes into `display_name`, shown to the user, appearing only locally and in the Realm Profile, never in the ActorId; the user may also explicitly choose a readable `realm_id` (e.g. `notes`), and the confirmation page warns that a readable name will be exposed in shared links;
+- Creation must be authorized by the Realm signing key holder of that Realm domain: the holder's signing service authenticates the current user under its own policy and signs the Actr management envelope and the Realm Profile; after activation it hands the one-time owner invite back to Actrium, which redeems it at once, so the creator is the Realm's only owner; the confirmation page shows that Realm domain as the trust root (delegated custody is invisible to the user);
+- When the Realm domain equals or belongs to the Realm Infra Provider ID, v1 offers no self-service creation: the user contacts that Realm Infra Provider's operator, who creates the Realm and hands the owner invite to the user out of band; the user chooses "Join with an invitation" on the identity page, and after redeeming it Actrium creates the Service and Front in that Realm; the confirmation page states that the trust root is that Realm Infra Provider. Self-service creation with a Realm Infra Provider account is a later capability;
+- If authorization is refused or the holder is unreachable, a clear error is shown, with no fallback to another Realm domain.
+
+If the Realm domain is not yet trusted, first-time trust must be completed on the confirmation page.
+
+The RealmId cannot be changed after creation; a RealmId already used within the same Realm domain cannot be reused.
+
+### 5.3 Workspace selection
+
+The manifest must declare three dimensions separately; they cannot be squeezed into one enum:
 
 - requirement: `none`, `optional` or `required`;
 - provisioning: `managed` or `user-selected`;
 - access: `read-only` or `read-write`.
 
-It can also limit the permission. Providerfor example `managed-store`, `local-folder`, `cloud-drive` or `remote-repository`.`managed` It's a configuration, no.“Do you need it? Workspace”;`read-only` It is a mode of access and not a life cycle model.
+It may also restrict the allowed Workspace Providers, e.g. `managed-store`, `local-folder`, `cloud-drive` or `remote-repository`. `managed` is a configuration method, not "whether a Workspace is needed"; `read-only` is an access mode, not a lifecycle mode.
 
-Selector display:
+The selector shows:
 
-- Provider;
-- Path or logical position;
-- (b) Reading and writing patterns;
-- Is there anything else? Service (a) Occupation;
-- Backup and synchronization capabilities;
-- Delete Service Time Workspace - The way it's handled.
+- Workspace Provider;
+- Path or logical location;
+- Read/write mode;
+- Whether another Service already occupies it;
+- Backup and sync capabilities;
+- How the Workspace is handled when the Service is deleted.
 
-### 5.3 Create a Tile etc.
+### 5.4 Create idempotency
 
-The same navigation service must carry local `creation_intent_id`:
+Every creation must carry a locally persisted `idempotency_key`:
 
-- UI Re-draw, re-test the network, back-up and re-test the package;
-- Create Successful But Front When the start failed,Service Still in. Inventorypage availability“Retry Connection”;
-- User again visible opens the same no-no `service` URI, new Create Intent, needs to be reconfirmed;
-- Short-term bulk triggers from external sources must be subject to quotas and speed limits.
+- UI redraws, network retries, back-then-forward, and package download retries must not create duplicates;
+- If creation succeeds but the Front fails to start, the Service still enters the Inventory, and the page offers "retry connection";
+- Clicking "Create instance" again means a new creation, requiring reconfirmation;
+- Bulk creation triggered from an external source in a short time must be subject to quota and rate limits.
 
-## 6. Connection already exists
+Creation proceeds in the order "holder authorization → pending Realm → sign the Realm Profile and submit it for activation → Realm active → create Service":
 
-### 6.1 Main Process
+- If any step before the Realm becomes active fails, no Service is created and no half-finished instance appears in the Inventory; the page states which step failed (authorization refused, Realm Infra Provider unreachable, Realm Profile publication failed) and offers a retry;
+- The default random RealmId is generated once when creation begins and persisted with it; a retry never regenerates it;
+- A retry reuses the same `idempotency_key`, continuing the same pending Realm and the same RealmId, without creating a duplicate; if the Realm was already activated but the response was lost, the retry only returns its state, and the owner invite is reissued with `reissue_owner_invite`;
+- If the user abandons it, the Realm Infra Provider automatically cleans up the pending Realm on expiry.
 
-1. Parsing URI;
-2. From Service ActorId Parsing Realm authority;
-3. Authentication ActorId Medium `ActrType` with URI coordinate (a) Full consistency;
-4. Ensure accuracy Program Release Installed and Matched digest;
-5. Connection Aspect ActorId;
-6. Completion of the status of the parties and challenge Validation;
-7. Consultations Front–Service contract;
-8. Getting a monopoly lease;
-9. Load Keel Guest.
+## 6. Connecting to an existing instance
 
-### 6.2 This machine is open again.
+### 6.1 Main flow
 
-If active Tab Connect to the same ActorId:
+1. Resolve the Realm link to get the Realm name;
+2. Fetch that domain's Realm signing key and Realm Profile and verify the signature;
+3. Per the Realm Profile's `package`, ensure the package is installed and the digest matches;
+4. Via the Realm Infra Provider specified by the Realm Profile, find within that Realm the Service whose Actor type matches the package;
+5. Complete mutual identity and challenge verification;
+6. Negotiate the Front–Service contract;
+7. Obtain the exclusive lease;
+8. Load the Keel Guest.
 
-- Default Focus Already Tab;
-- User visible selection“In New Tab Open”I'm not sure if I'm going to be able to do this.v1 The example is suggested as a monopolistic session;
-- Do not create a second Service;
-- Unsame Type Service Alternative.
+### 6.2 Reopening locally
 
-### 6.3 Far-Wide occupied
+If an active Tab already has this instance open:
 
-Page display:
+- Focus the existing Tab by default;
+- When the user explicitly chooses "open in new Tab", v1 warns that the instance is an exclusive session;
+- No second Service is created;
+- It is not replaced by a Service of the same type.
 
-- (a) The publicly available name of the current session-in-occupying device;
-- lease (a) The expected expiry date;
-- “Wait”“Request for takeover”“Cancel”Operations;
-- The takeover must be Service policy , and the current user permissions are determined.
+### 6.3 Occupied remotely
 
-## 7. Tab Behaviour
+The page shows:
 
-Actrium UI There are two types of them. Tab:
+- The public name of the device currently occupying the session;
+- The lease's expected expiry;
+- "Wait", "Request takeover", "Cancel" actions;
+- Takeover must be decided by Service policy and the current user's permissions.
 
-- **Shell Navigation Tab**: Install, create confirmation, error details,Program and Service managing pages;it does not represent application running, so it can not be Front Actor.
-- **Resident App Tab**: in loading, running or suspended application page; one must be present at any given time live Front ActorAnd... Front Completed Attach There's one right after. Primary Service.
+## 7. Tab behavior
 
-Use page to be phased out under memory pressure dormant State, not at this time. Front;reactivated must be rebuilt Front and Attach Original Service. The product book says“Every one. Tab One. Actor”Special finger. resident app Tab♪ Not all ♪ Shell A hibernation record on a page or disk.
+There are two kinds of Tab in the Actrium UI:
 
-### 7.1 New
+- **Shell Navigation Tab**: installation, creation confirmation, error detail, Program and Service management pages; it does not represent a running application, so it can have no Front Actor.
+- **Resident App Tab**: an application page that is loading, running or suspended; at any moment there must be exactly one live Front Actor, and once the Front has completed Attach, exactly one Service.
 
-- Create URI: Go Create Intent.
-- Connection URI: Go Attach Intent.
-- From Service Inventory Points“Open”: Construct a connection URI.
+A page evicted under memory pressure enters the dormant state, in which it may temporarily have no Front; reactivating it must rebuild the Front and Attach to the original Service. The product copy "one Actor per Tab" refers specifically to resident app Tabs, not to every Shell page or dormant record on disk.
+
+### 7.1 Creating
+
+- Creating an instance: opens the Shell's new-instance page and follows the flow in section 5.
+- Opening an instance link: connects to that instance.
+- Clicking "Open" from Service Inventory: uses that instance's address.
 
 ### 7.2 Refresh
 
-Refresh Only Rebuild Front/Keel Guest And reconnect to the same Service:
+Refresh only rebuilds the Front/Keel Guest and reconnects to the same Service:
 
-- Do Not Create Service;
-- No re-linking Workspace;
-- (a) No upgrade;
-- Guest Temporary UI The state of operation can be lost and the state of business cannot be lost.
+- Does not create a Service;
+- Does not rebind the Workspace;
+- Does not upgrade the version;
+- The Guest's temporary UI state may be lost; business state must not be lost.
 
-If the address is still before it is created, refresh and continue with one `creation_intent_id` Or go back to the confirmation page.
+Refreshing the new-instance page continues the same `idempotency_key` or returns to the confirmation page.
 
-### 7.3 Close
+### 7.3 Closing
 
-Close Tab:
+Closing a Tab:
 
-1. Undo Front session capability;
-2. Send `Detach`;
-3. Destruction Keel Engine;
-4. Destruction Front Actor;
-5. Reservations Service, Workspace And a record of the cases.
+1. Revokes the Front session capability;
+2. Sends `Detach`;
+3. Destroys the Keel Engine;
+4. Destroys the Front Actor;
+5. Keeps the Service, Workspace and instance record.
 
-Close is not to stop, let alone delete.
+Closing is not stopping, still less deleting.
 
-### 7.4 Backstage and Recovery
+### 7.4 Background and recovery
 
-- Backstage. Tab Call `Engine.pause()`, Freeze Guest timer and the delivery of events;
-- Service Continued operation is determined by the case-by-case strategy and platform capacity;
-- When Restore `resume()` And send life cycle events;
-- It can be destroyed under memory pressure. Front♪ Rebuild and recreate when you get back to the front desk Attach;
-- Guest No presumption. JS heap Permanent.
+- A backgrounded Tab calls `Engine.pause()`, freezing the Guest's timers and event delivery;
+- Whether the Service keeps running is decided by instance policy and platform capability;
+- On resume, calls `resume()` and sends lifecycle events;
+- Under memory pressure the Front may be destroyed and rebuilt and re-Attached when brought back to the foreground;
+- The Guest must not assume the JS heap persists forever.
 
 ### 7.5 Crash
 
-Front Crash page provides:
+The Front crash page offers:
 
-- Reload Front;
+- Reload the Front;
 - View the error summary;
-- (a) Disables the new privileges;
-- Opens the case management;
-- Reporting procedures.
+- Temporarily disable newly granted permissions;
+- Open instance management;
+- Report the program.
 
-Guest Collapse cannot automatically restart Service.Service The crash shows a separate state and allows a strategic restart of the same ActorId.
+A Guest crash must not automatically restart the Service. A Service crash shows a separate state and allows restarting the same ActorId per policy.
 
-## 8. History, collection and sharing
+## 8. History, favorites and sharing
 
-### 8.1 Two types of collection
+### 8.1 Favorites
 
-Actrium A clear distinction must be made between:
-
-- **Program Template Collection**: Not included `service`, each time you open it, you create a new instance.
-- **Example Collection**: Ham `service`Back to the same Service.
-
-UI It's not all about writing.“Collection Pages”.
+Everything favorited in the address bar is an instance; opening it returns to the same instance. To favorite a program for frequent use, favorite the program in Program Catalog and create instances from there; the two pieces of copy must not be conflated.
 
 ### 8.2 History
 
-- Only standardized connections are recorded after successful creation URI;
-- Create confirmation page to record non-persistent navigation events without synchronizing history;
-- ActorId It's not a secret, but the history sync settings should allow the user to exclude the example URI;
-- URL No record of it. credential, Workspace path Or invitation. token.
+- Only the instance's canonical address is recorded after a successful creation;
+- The creation confirmation page may be recorded as a non-persistent navigation event, not added to synced history;
+- The instance address is not a secret, but history-sync settings should let the user exclude instance addresses;
+- The URL must never record a credential, Workspace path or Realm invitation.
 
-### 8.3 Share
+### 8.3 Sharing
 
-Share Examples URIShare addresses only, not automatically granted access:
+Sharing an instance shares only the address; it does not automatically grant access. If the Realm domain declares `links`, share the https form so the recipient can open an explanatory web page even without Actrium; otherwise share the `actr://` form.
 
-- The recipient still needs to be part of Realm;
-- Service ACL (b) Must allow;
-- Invited for adoption Realm/Service (a) The completion of the independent delegation process;
-- bearer token Do Not Enter URI query or fragment.
+- The recipient still needs to join that instance's Realm;
+- Application permissions must allow it;
+- The invitation is a one-time Realm invitation issued by the owner (see Section 15);
+- The bearer token never enters the URI's query or fragment;
+- The instance address exposes the Realm domain and RealmId; warn about this before sharing a private instance, with an extra warning if the instance uses a readable RealmId.
 
-Local Realm No examples. portable link.“Copy Link”Only clearly marked links can be copied; migration to network must take place before genuine sharing Realm, and get new ActorId.
+Local Realm instances cannot be shared; "copy link" is disabled. To share, the instance must first be migrated to a new Realm under a Realm domain, yielding a new address.
 
-## 9. Program Catalog Experience
+## 9. Program Catalog experience
 
 Each program shows:
 
-- Publisher Domain names;
-- (a) Name and description of the procedure;
-- (a) The installed version;
+- Publisher domain;
+- Program name and description;
+- Installed version;
 - package digest;
-- Marketplace Source and audit marking;
-- (a) Summary of competence;
-- Workspace (a) Modes;
-- Number of examples created;
-- (a) Update, withdraw, compatibility;
-- “Create instance”“View Examples”“Remove Cache”.
+- Marketplace source and review marker;
+- Permission summary;
+- Workspace mode;
+- Number of instances created;
+- Update, revocation and compatibility status;
+- "Create instance", "View instances", "Remove cache".
 
-“Remove Cache”If there is still one, Service Use this digest, the required copy for running shall be refused or retained.
+If a Service still uses that digest, "Remove cache" should either be refused or retain the copy needed to keep it running.
 
-Program Catalog Show Only Release assurance(Signed,digest, revocation, review) cannot pre-describe a future example of operation or a whole application to green.
+Program Catalog can only show Release assurance (signature, digest, revocation, review); it must not claim in advance that some future running instance or the whole application graph will be green.
 
-## 10. Service Inventory Experience
+## 10. Service Inventory experience
 
-Each example shows that:
+Each instance shows:
 
-- (a) User name;
-- ActorId Short fingerprints and copying entrances;
+- User-given name;
+- Realm name and a "copy link" entry;
 - Program Release;
 - Workspace;
-- Realm;
-- Local/(a) Far end;
-- (a) State of operation;
+- Local/Remote;
+- Running status;
 - Current session;
-- (a) Competence;
-- Recent Backup/Scratch;
-- Create, recently open.
+- Permissions;
+- Most recent backup/snapshot;
+- Created and last-opened time.
 
-Service Inventory You can show the application conclusions and time of the last observation, but only if it is marked as a historical snapshot. `Ready` , the address bar is then displayed in real time colours.
+Service Inventory may show the last observed application conclusion and its time, but it must be marked as a historical snapshot. The address bar shows a live color only once the current facet is `Ready`.
 
-Operating syntax:
+Action semantics:
 
-| Operation | Service | Workspace |
+| Action | Service | Workspace |
 |---|---|---|
-| Open | Attach | No change. |
-| Stop | Offline but maintain identity | No change. |
-| Start | Use the same ActorId Restore | No change. |
-| Archive | Stop and hide from the default list | No change. |
-| Move to Wastebin | Stop and hide, keep identity and example status | No change. |
-| Restore | With the same ActorId Back stopped | No change. |
-| Clear instance completely | Unidentify, Delete key/storeReservations tombstone | Default Reservations |
-| Delete Workspace | Do not remove Service | High-risk re-acknowledged |
-| Upgrade | Create New Service And move. | Visible Intersection |
+| Open | Attach | Unchanged |
+| Stop | Offline but identity kept | Unchanged |
+| Start | Restore with the same ActorId | Unchanged |
+| Archive | Stop and hide from the default list | Unchanged |
+| Move to trash | Stop and hide, keep identity and instance state | Unchanged |
+| Restore | Return to stopped with the same ActorId | Unchanged |
+| Purge instance | Revoke identity, delete key/store, keep a local instance tombstone | Kept by default |
+| Delete Workspace | Does not implicitly delete the Service | High-risk reconfirmation |
+| Upgrade | Create a new Service and migrate | Explicit handoff |
 
-## 11. Misperception
+## 11. Error experience
 
-Error page must distinguish between:
+Error pages must distinguish:
 
-| Error | User Meaning | Main Operations |
+| Error | User meaning | Primary action |
 |---|---|---|
-| Program not found | Publisher No version available | Check address, select installed version |
-| Publisher untrusted | Domain name or key Untrusted | View Certificate/Development Mode |
-| Digest conflict | Different content for the same version | Stop running, view security reports |
-| Package revoked | Version revoked | View cause, separate or delete |
-| Realm unknown | I don't know how to verify it./Chile | Import Realm Profile |
-| Service offline | Exact examples not available online | Retry, view examples; only locally known stopped , and then start it. |
-| Permission denied | I found it, but I didn't have the right. Attach | Request for authorization |
-| Session occupied | Monarchy lease Intended | Waiting for or requesting takeover |
-| Identity mismatch | Actor Identities or types not in line | Hard Stop |
-| Contract mismatch | Front/Service The protocol is incompatible. | Install correct version or migration |
-| Workspace unavailable | Provider/Evidence/Lock error | Rehabilitation Workspace,do not create Service |
-| Guest crashed | Front-office code failed | Reload Front |
-| Service crashed | Back-office instance failed | Restart Same ActorIdChecking logs |
-| Guaranteed to yellow | The necessary facts cannot be confirmed. | View workload Type / Declaration, restriction of protected data |
-| Guaranteed Red | Confirmed uncontrolled export or import Retain | Stop data paths, view the weakest |
-| Figure incomplete | Could not close temporary folder: %s | Disable from using protected capacity or moving to support Host |
+| Package unavailable | The package the Realm Profile points to failed to download, or its digest/signature does not match | Retry; contact the instance admin |
+| Publisher untrusted | The Publisher domain or key is not trusted | View certificate/development mode |
+| Digest conflict | Different content appears for the same version | Block running, view security report |
+| Package revoked | The version has been revoked | View reason, run isolated or delete |
+| Domain untrusted | The instance's Realm domain is not yet trusted | View the Realm domain and key fingerprint, confirm trust |
+| Domain authorization failed | The Realm signing key holder refused authorization or was unreachable, so the instance cannot be created under that Realm domain | Contact that domain's admin, or use the local Realm or another Realm domain |
+| Realm not joined | The Realm domain is trusted, but the instance's Realm has not been joined | Join with a Realm invitation, or request one |
+| Invite expired / used / revoked | The Realm invitation has expired, has been used or has been revoked (each shown separately) | Ask the owner for a new invitation |
+| Invite realm mismatch | The invitation belongs to another instance's Realm | Check which instance to join and use its invitation |
+| Client revoked / Removed from Realm | This client has been revoked, or this member has been removed from the instance's Realm | Ask the owner for a new invitation; local data is kept |
+| Realm retired | This instance's Realm has been retired | View archive information; do not create a replacement instance |
+| Service offline | The exact instance is not online | Retry, view the instance; offer start only when locally known to be stopped |
+| Permission denied | Found, but not authorized to Attach | Request authorization |
+| Session occupied | The exclusive lease is occupied | Wait or request takeover |
+| Identity mismatch | Actor identity or type does not match | Hard block |
+| Contract mismatch | Front/Service protocol is incompatible | Install the correct version or migrate |
+| Workspace unavailable | Workspace Provider/credential/lock error | Fix the Workspace, do not create a new Service |
+| Guest crashed | Front-end code failed | Reload the Front |
+| Service crashed | Background instance failed | Restart the same ActorId, view logs |
+| Assurance yellow | A necessary fact could not be confirmed | View workload type/declaration, restrict protected data |
+| Assurance red | Confirmed uncontrolled export or Retain | Block the data path, view the weakest item |
+| Graph incomplete | Cannot prove the rootless graph was fully discovered | Disable the protected capability, or migrate to a supported Actr Host |
 
-The error page should not be used in uniform“Could not close temporary folder: %s”Hide security differences.
+The error page must not hide security differences behind a generic "could not connect".
 
 ## 12. Developer experience
 
-Developer model provides:
+Developer mode provides:
 
-- Import Local `.actr`;
-- Configure `actr-dev://` HTTPS Origin;
-- View manifest, digest, contract with capability;
-- Hot Update Guest, but new developments are used every time a change is made digest;
-- Start Local Realm/Service;
-- Inspection Front–Service RPC;
-- View Keel render ops, CPU, heap, timer and capability Call;
-- Simulation permission denied, offline,TURN, Service Crash and Front Rebuild.
+- Import a local `.actr`;
+- Use a package address on localhost or a private CA (marked as a development source);
+- View the manifest, digest, contract and capabilities;
+- Hot-reload the Guest, but each change uses a new development digest;
+- Start a local Realm and Service;
+- Inspect Front–Service RPC;
+- View Keel render ops, CPU, heap, timers and capability calls;
+- Simulate permission denial, offline, TURN, Service crash and Front rebuild.
 
-Development mode does not change official URI and official Publisher Rule of trust.
+Developer mode does not change the trust rules for production addresses and production Publishers.
 
 ## 13. Accessibility and internationalization
 
-- All safety conditions cannot be based solely on colour;
-- ActorId, digest (i) and domain names to support copying and screen readers to read short descriptions;
-- IDNA Domain name is also available Unicode Show and ASCII A-label Inspection;
-- Permissions are described as user behavior, not exposed to the bottom API (a) Name;
-- Keyboard Navigation, Dynamic Fonts, High Contrast and Reduce Motion Yes MUST;
-- The error code is stable, and the display is localized.
+- No security state may rely on color alone;
+- ActorId, digest and Realm domain support copying and a short screen-reader-readable description;
+- IDNA domain names provide both Unicode display and ASCII A-label inspection;
+- Permission copy describes user actions, not underlying API names;
+- Keyboard navigation, dynamic font size, high contrast and Reduce Motion are MUST;
+- Error codes are stable; display text is localizable.
 
-## 14. Realm, equipment and identity experience
+## 14. Realm, device and identity experience
 
-Actrium The identity page supports at least:
+A Realm corresponds to a single instance, so the identity page is organized in two layers: trusted Realm domains, and joined Realms (instances). It supports at least:
 
-- Add Realm: Login, equipment registration and registration through an organizational domain name or one-time invitation Profile (b) Fixed;
-- Re-accreditation:credential Pause new ones when due or when asked by the administrator Attach, preserve local data and guide recovery;
-- Equipment cancelled: equipment, final activity time and hosting Service;deactivation of equipment credential (a) Ineffectiveness;
-- Leave Realm: First state the impact Service, Workspace We're not moving in quietly. Local Realm;
-- Realm key Change: display of signed rotation chain; processing by identity change when no valid rotation chain exists;
-- Restore: Only encrypted backup or remote host data will be restored after the equipment is lost, and no commitment to restore never-backed Actor Private key.
+- Trusting a Realm domain: on first encountering a Realm domain, fetch that domain's Realm signing key over HTTPS from its authority descriptor (`https://<domain>/.well-known/actr`), show the domain and key fingerprint, and pin it after confirmation by the user or organization policy;
+- Joining a Realm: paste or scan a one-time Realm invitation to join an instance's Realm, completing client registration and obtaining Realm membership; Actrium performs each Realm's client registration automatically, without requiring the user to configure it per Realm; each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client through it;
+- Re-authentication: when a credential expires or the admin requires it, pause new Attach attempts, keep local data and guide the user to recover;
+- Adding a client: on a joined client, issue an "add a client" invitation for yourself and redeem it on the new client;
+- Client revocation: list clients, last activity time and hosted Services; a member can revoke its own clients and the owner can revoke any member's clients; after revocation, that client's Realm client key registration becomes invalid, it can no longer obtain Actor credentials, and its Actors are disconnected from signaling and TURN at once; revoking the client that hosts the Service takes the instance offline, so warn first;
+- Member management (owner only): list members and roles, issue and revoke invitations, change roles, remove members (which also revokes all their clients), and transfer ownership to another member;
+- Leaving a Realm: means losing access to that instance, and all of this member's clients are revoked with it; first explain the affected Services, Workspaces and sharing relationships, and never silently migrate to the local Realm; the owner must transfer ownership first;
+- Realm signing key change: show the signed rotation chain; without a valid rotation chain, treat it as an identity change and reconfirm trust;
+- Recovery: after a device is lost, only encrypted backups or data on a remote host can be recovered; there is no promise to recover an Actor private key that was never backed up; a member revokes the lost client from another client, or requests an "add a client" invitation from the owner; when the owner has lost all its clients, it requests a new owner invite from the Realm signing key holder or the Realm Infra Provider's operator, and redeeming it revokes all previous clients.
 
-Add Realm Not equal to all Service The right of access; it only establishes membership and equipment, and actual Attach Still by Service ACL Decision.
+Trusting a Realm domain does not join any Realm within it; joining a Realm only establishes a Realm client identity — actual Attach is still governed by application permissions. Realm-domain-level SSO/directory is a later capability; v1 does not include it.
 
-## 15. Share, invite and ACL
+## 15. Sharing, invitations and application permissions
 
-Service The smallest ACL The role is:
+The minimum application-permission roles for a Service are:
 
-| Role | Capacity |
+| Role | Capability |
 |---|---|
-| owner | Management ACLand removal of waste |
-| editor | Attach And press contract Modify Business Status |
-| viewer | Read-only Attach;availability depends on the procedure contract |
+| owner | Manage application permissions, migration, trash and purge |
+| editor | Attach and modify business state per the contract |
+| viewer | Read-only Attach; availability depends on the program's contract |
 
-Sharing process:
+Each instance has exactly one owner, its creator; the owner can transfer ownership to another member (the previous owner becomes an editor by default), and v1 does not support several owners. The Realm Infra Provider keeps each member's role with the member record and writes it into the Actor credential; the Service reads it from the Front's credential and enforces it.
 
-1. owner Selection of members/(a) The subject, role and expiry of the organization;
-2. Service or Realm issuer (a) Generate a one-time invitation;
-3. Invite for transmission via the independent safe passage, not written in `actr://` URI;
-4. Recipient login target Realmand accepted the invitation;
-5. Service ACL Record the subject and role, and the invitation expires;
-6. owner It can be revoked. ACL; the next call must fail and active sessions are strategically terminated or reduced immediately.
+Sharing flow:
 
-Only copy instance URI No change. ACL. Expire, used, revoked and Realm The mismatch must be different.
+1. The owner picks a role (editor or viewer) and an expiry;
+2. That instance Realm's Issuer generates a one-time Realm invitation (text `ri_…`) carrying the Realm name, optionally embedding the Realm Profile;
+3. The invitation travels over an independent secure channel, never written into the `actr://` URI;
+4. The recipient trusts the domain (if not yet trusted) and redeems the invitation to join the Realm as a member with that role;
+5. The invitation is immediately invalidated; the owner can revoke an unused invitation before it is redeemed;
+6. The owner can change a member's role or remove the member: removal immediately stops that member from obtaining Actor credentials and connecting to signaling and TURN, and the Service ends already established sessions at the latest when their credential expires; a role change takes effect in the member's next credential.
 
-## 16. Time for delegation of authority
+Merely copying the instance address does not change application permissions. Expired, already-used, revoked and Realm-mismatched invitations must produce distinct errors.
 
-- Install Pages Only package Requested capability, does not grant operational privileges;
-- Granted on creation Service, Workspace and long-term back-office capacity, and to be included in the grant;
-- Front The interactive capabilities of cameras, microphones, clipboard, etc., are requested on a first-time basis, optional“This session only”;
-- Administrator policy You can refuse or restrain in advance. scopeBut not in UI Concealed as user consent;
-- Undo duration grant I'm not sure.Host It has to be terminated immediately. capability handle; and to end its continued use;
-- Far Service The host-level privileges are managed by remote host(s); local Actrium Only the result of the signed declaration can be shown, and no other host can be modified for the user OS Permissions.
+## 16. When permissions are granted
 
-## 17. Far Service Sources and management of borders
+- The install page shows only the capabilities the package requests; it grants no running permission;
+- At creation time, Service, Workspace and long-running background capabilities are granted and written as a persistent grant;
+- The Front's interactive capabilities — camera, microphone, clipboard, etc. — are requested just-in-time on first use, with an optional "this session only";
+- Admin policy can pre-deny or constrain scope, but must not disguise this as user consent in the UI;
+- After a persistent grant is revoked, the Actr Host must immediately invalidate the related capability handles and end any calls still using them;
+- A remote Service's host-level permissions are managed by the remote host; the local Actrium can only show the result of a signed declaration, and cannot modify another host's OS permissions on the user's behalf.
 
-v1 It's... Create Intent Only in the current Actrium Supported Local Service Host Up. Faraway Service Access through: Inventory:
+## 17. Remote Service origin and management boundary
 
-- Opened already Attach URI;
-- Accept Service (a) Invitations;
-- Encryption from the same user Inventory Sync the example address;
-- Vivid import of signed Service Metadata.
+In v1, creating an instance only happens on a local Service Host that the current Actrium supports. A remote Service enters the Inventory through:
 
-Actrium Only a separate host at the far end management capability , and only if you are able to start, stop, migrate or clear remotely Service;or only provided Attach, request authorization and view the verifiable status.iOS/Android Go, go, go!“Long-term online”The common server host and cloud movement does not belong to the mobile side. Actrium v1 Client range.
+- Opening an existing instance's link;
+- Accepting a Service invitation;
+- Syncing an instance address from the same user's encrypted Inventory;
+- Explicitly importing signed Service metadata.
 
-## 18. Guest Navigation syntax
+Actrium can remotely start, stop, migrate or purge a Service only when the remote host has separately granted it a management capability; otherwise it can only Attach, request authorization and view verifiable state. On iOS/Android, "long-running" usually means connecting to a desktop, server or other remote host — it does not mean the mobile client can arbitrarily create cloud-side processes. General-purpose server hosts and cloud scheduling are outside the scope of the Actrium v1 client.
 
-Guest Can't just rewrite it. Shell Address Bar, only callable `host:navigate`:
+## 18. Guest navigation semantics
 
-- Same Program Inside route/query Use `push` or `replace`,Pretain Current `service`;
-- Jump to None `service` It's... `actr://` URI It triggers new ones. Create Intent and confirmation pages;
-- Jump to another instance to trigger Attach Intent, cannot put the current capability Bring it over;
-- `https://` Hand over the outer chain to the system browser or be controlled WebViewand displays the target domain name;
-- route and query (a) Must be bound by long, character and sensitive field policies;
-- back/forward Replaying is normative. URIDo not redo permissions token or RPC.
+The Guest cannot rewrite the Shell's address bar directly; it can only call `host:navigate`:
 
-## 19. Publisher Develop and release paths
+- Route/query changes within the same instance use `push` or `replace`;
+- Navigating to another instance's link opens that instance; it cannot carry the current capability along;
+- The Guest cannot create a new instance via a link;
+- `https://` external links are handed to the system browser or a controlled WebView, showing the target domain;
+- Route and query are subject to length, character and sensitive-field policy;
+- Back/forward replays the canonical address, not application-permission tokens or RPC.
 
-The official tool chain should provide a repetitious process:
+## 19. Publisher development and publishing path
+
+The official toolchain should provide a repeatable flow:
 
 ```text
 actrium init
-→ Prepared Keel Guest, Service Component with contract
+→ write the Keel Guest, Service Component and contract
 → build
-→ validate(schema, capability, hash)
+→ validate (schema, capability, hash, sandbox compatibility)
 → sign
-→ Generate/Update Publisher Profile with Release Descriptor
-→ Upload package
-→ Press from the public network coordinate Readback Authentication
-→ Optional submission Marketplace Audit
+→ generate/update the Publisher Profile
+→ upload the package
+→ read it back from the package address and check the digest and signature
+→ optionally submit for Marketplace review
 ```
 
-Publisher key Create, rotate, undo and offline root The backup must have a clear command and recovery statement. `actr-dev://`, the exact version that has been issued cannot be overwritten.
+Publisher key creation, rotation, revocation and offline root backup must have clear commands and recovery instructions. Development hot-reload serves development sources only; it cannot overwrite an already-published exact version.

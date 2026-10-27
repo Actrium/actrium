@@ -15,7 +15,7 @@ use prost::Message as ProstMessage;
 
 use echo::{EchoRequest, EchoResponse};
 
-const ECHO_SERVICE_MANUFACTURER: &str = "actrium";
+const ECHO_SERVICE_PUBLISHER: &str = "e2e.actrium.example";
 const ECHO_SERVICE_NAME: &str = "EchoService";
 
 fn echo_service_version() -> String {
@@ -126,7 +126,7 @@ async fn resolve_server<C: Context>(
 
 async fn discover_server<C: Context>(ctx: &C) -> ActorResult<ActrId> {
     let target_type = ActrType {
-        manufacturer: ECHO_SERVICE_MANUFACTURER.to_string(),
+        publisher: ECHO_SERVICE_PUBLISHER.to_string(),
         name: ECHO_SERVICE_NAME.to_string(),
         version: echo_service_version(),
     };

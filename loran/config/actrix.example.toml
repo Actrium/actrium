@@ -5,50 +5,60 @@
 #   ││││└─ Signaling (00001 = 1)
 #   │││└── STUN      (00010 = 2)
 #   ││└─── TURN      (00100 = 4)
-#   │└──── AIS       (01000 = 8)
-#   └───── KS        (10000 = 16)
+#   │└──── Issuer       (01000 = 8)
+#   └───── Signer    (10000 = 16)
 #
 # All services are controlled by this bitmask. No individual enabled fields are needed.
 #
 # Examples:
 #   31 (0b11111) = All services (1+2+4+8+16)
-#   22 (0b10110) = KS + TURN + STUN (16+4+2)
+#   22 (0b10110) = Signer + TURN + STUN (16+4+2)
 #   6  (0b00110) = TURN + STUN (4+2)
 #   4  (0b00100) = TURN only
 #   2  (0b00010) = STUN only
 #   1  (0b00001) = Signaling only
-#   8  (0b01000) = AIS only
-#   16 (0b10000) = KS only
-enable = 22
+#   8  (0b01000) = Issuer only
+#   16 (0b10000) = Signer only
+enable = 31
 
 # Instance identifier (used for monitoring and tracing)
 name = "actrix-01"
 
 # Environment: dev/prod/test
-# - dev: allows HTTP, relaxed security
+# - dev: allows HTTP for local development
 # - prod: enforces HTTPS, strict security
 # - test: for automated testing
-env = "dev"
+env = "prod"
 
 # SQLite database storage directory path
 # Main database file will be stored as {sqlite_path}/actrix.db
 sqlite_path = "database"
 
-# Geographic location tag (for multi-region deployment monitoring)
-# Format: cloud-provider,region,zone
-# Examples: "aws,us-west-2,zone-a", "aliyun,beijing,zone-b"
-location_tag = "local,dev,default"
+# Opaque deployment location label used only for observability.
+# Realm v1 is single-node and does not use this for routing or HA.
+location_tag = "single-node"
 
-# Shared PSK for inter-service authentication
-# IMPORTANT: Change this in production!
-# Generate a strong key: openssl rand -hex 32
-actrix_shared_key = "example-key-please-replace-with-secure-random-value-32chars+"
+# Shared PSK for inter-service authentication.
+# REQUIRED: replace this fail-closed placeholder before startup.
+# Generate: openssl rand -hex 32
+actrix_shared_key = "<generate-with-openssl-rand-hex-32>"
 
-# Public Actr authority discovery. Production mode requires TLS, and this URI
-# must match the advertised bind.http domain and port exactly.
+# Public Actr authority. The URI is actr://<domain> without a port; its domain
+# is the Realm Infra Provider ID, required when Issuer, Signaling or TURN is enabled.
+# `enabled` serves /.well-known/actr (production requires TLS; the domain must
+# match bind.http). `links` lists Realm link path prefixes, e.g. ["/i/"].
 [authority]
 enabled = false
-# uri = "actr://localhost:8080"
+uri = "actr://realm.example.com"
+# links = ["/i/"]
+
+# Realm hosting limits. One Loran instance hosts many Realms.
+[realm]
+# max_realms = 1              # pending + active Realms; unset = no limit
+# max_publishers = 1000       # publishers register_publisher may register
+# max_members_per_realm = 1000      # active members of a Realm
+# max_clients_per_member = 20       # unrevoked Realm client keys of a member
+# max_open_invites_per_realm = 100  # unused, unexpired invites of a Realm
 
 # Recording pipeline (logging + tracing)
 [recording]
@@ -96,9 +106,9 @@ filter = "lifecycle"         # start/stop, deploy, reload
 # htpasswd_file = "/etc/actrix/monitoring.htpasswd"
 
 # Per-service override example:
-# [monitoring.services.ks]
+# [monitoring.services.signer]
 # allowed_ips = ["192.168.1.0/24"]
-# htpasswd_file = ""  # disable Basic Auth for KS endpoints
+# htpasswd_file = ""  # disable Basic Auth for Signer endpoints
 
 # Process management (optional)
 # pid = "/var/run/actrix.pid"  # (optional)
@@ -111,16 +121,28 @@ filter = "lifecycle"         # start/stop, deploy, reload
 
 [bind]
 # HTTP/HTTPS binding (unified)
-# Configure cert + key to enable HTTPS, otherwise plain HTTP
+# Production requires cert + key. Development may use plain HTTP.
 [bind.http]
-domain_name = "localhost"
-advertised_ip = "127.0.0.1"
+domain_name = "realm.example.com"
+advertised_ip = "203.0.113.10"
 ip = "::"
 port = 8080
 # advertised_port = 8080  # (optional, defaults to port)
-# TLS — uncomment to enable HTTPS:
-# cert = "certificates/server.crt"
-# key = "certificates/server.key"
+cert = "/etc/actrix/tls/fullchain.pem"
+key = "/etc/actrix/tls/privkey.pem"
+
+# Dedicated Signer gRPC listener (SGN-02).
+# The Signer signing oracle is served on its own listener instead of the shared
+# bind.http port. When [bind.signer] is omitted the Signer defaults to
+# loopback-only on bind.http.port + 1 (e.g. 8081 here), matching the
+# services.signer.expose = "loopback" default. Uncomment to override.
+# A non-loopback ip publishes the oracle and, in prod, requires Signer mTLS
+# (services.signer.require_mtls = true with mtls_ca_cert/mtls_cert/mtls_key).
+# [bind.signer]
+# domain_name = "realm.example.com"
+# advertised_ip = "127.0.0.1"
+# ip = "127.0.0.1"
+# port = 8081
 
 # ICE services (STUN/TURN)
 [bind.ice]
@@ -143,39 +165,39 @@ relay_port_range = "49152-65535"
 
 # TURN realm
 realm = "actrix.example.com"
+# REQUIRED: stable TURN secret. Rotating it invalidates outstanding TURN
+# credentials, so rotate through an explicit maintenance procedure.
+# Must be independent from every other secret in this file (no reuse).
+# Generate: openssl rand -base64 48
+turn_secret = "<generate-distinct-turn-secret-openssl-rand-base64-48>"
 
 # ============================================================================
 # Service Configuration (optional)
 # ============================================================================
-# All HTTP services share the instance-level HTTP/HTTPS port (bind.http/bind.https)
+# All HTTP services share the instance-level HTTP/HTTPS port (bind.http).
 #
-# Key Server (KS) Configuration (optional)
+# Signer configuration
 # Service enablement is controlled by the bitmask (enable field)
-# Set ENABLE_KS bit (16) in the enable field to enable this service
-[services.ks]
-
-[services.ks.storage]
-backend = "sqlite"
-key_ttl_seconds = 3600
-
-[services.ks.storage.sqlite]
-path = "ks.db"
-
+# Set ENABLE_SIGNER bit (16) in the enable field to enable this service
 [services.signer]
-tolerance_seconds = 3600
+# Required in production. The environment value must be 32 random bytes
+# encoded as 64 hex characters or 44-character Base64.
+kek_env = "ACTRIX_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
-key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 
-# AIS (Actor Identity Service) Configuration (optional)
+# Issuer (Actor Identity Service) Configuration (optional)
 # Service enablement is controlled by the bitmask (enable field)
-# Set ENABLE_AIS bit (8) in the enable field to enable this service
-[services.ais]
+# Set ENABLE_ISSUER bit (8) in the enable field to enable this service
+[services.issuer]
 
-[services.ais.server]
+[services.issuer.server]
+# Stable allocation for this single node. A future multi-node deployment must
+# assign a distinct worker_id (0..31) to each concurrent issuer.
+worker_id = 0
 # signaling_heartbeat_interval_secs = 30  # (optional, default: 30)
 # token_ttl_secs = 3600  # (optional, default: 3600)
 # Renewal token TTL in seconds (default: 86400 = 24 hours)
@@ -185,29 +207,27 @@ key_ttl_seconds = 3600
 # renewal_rotation_window_secs = 21600
 # Base64-encoded secret for deterministic renewal token rotation.
 # Must decode to at least 32 bytes. Must be identical across the actrix cluster.
-# Generate: openssl rand -base64 32
-# renewal_token_secret = "..."
+# Must be independent from every other secret in this file (no reuse).
+# REQUIRED. Generate: openssl rand -base64 48
+renewal_token_secret = "<generate-distinct-renewal-token-secret-openssl-rand-base64-48>"
 
-# AIS automatically uses local KS if enabled, or configure explicitly (optional):
-# [services.ais.dependencies.ks]
-# endpoint = "http://remote-ks:8080"  # gRPC endpoint (reuses the instance main port)
+# Issuer automatically uses the local Signer if enabled, or configure one explicitly:
+# [services.issuer.dependencies.signer]
+# endpoint = "https://signer.internal.example:8443"
 
-# MFR (Manufacturer Registry) Configuration (optional)
+# Publisher Registry configuration (optional)
 # Controls publish nonce retention for audit / replay investigation.
-[services.mfr]
+[services.publisher_registry]
 # How long to retain expired/used publish nonces, in seconds.
 # Default: 86400 (24 hours)
 # nonce_retain_secs = 86400
 
-# Actor package Target resolution and .actr downloads are an independent
-# service. They may run here even when this process does not serve the
-# authority discovery document.
+# Content-addressed .actr hosting is an independent static download service.
+# Each file is served at /actr/packages/artifact?sha256=<digest>, which a
+# Realm Profile package.href may point to. It may run here even when this
+# process does not serve the authority discovery document.
 # [services.packages]
-#
-# [[services.packages.targets]]
-# target = "apps/echo"
-# artifact = "/srv/actr/packages/echo-ui-1.0.0.actr"
-# profile = "keel.guest/1"
+# artifacts = ["/srv/actr/packages/echo-ui-1.0.0.actr"]
 
 # Signaling Service Configuration (optional)
 # Service enablement is controlled by the bitmask (enable field)
@@ -229,25 +249,12 @@ ws_path = "/signaling"
 # per_second = 10  # (optional, default: 10)
 # burst_size = 50  # (optional, default: 50)
 
-# Per-client egress queue bounds (optional, all have safe defaults; issue #351).
-# Bounds the messages/bytes queued to a single client, caps single inbound frame
-# size, and disconnects slow/non-reading clients after the enqueue/write deadline.
-# [services.signaling.server.egress]
-# max_messages = 256            # (optional, default: 256) data messages queued per client
-# max_bytes = 1048576           # (optional, default: 1 MiB) encoded bytes queued per client
-# max_control_messages = 32     # (optional, default: 32) Ping/Pong/Close queued per client
-# max_frame_bytes = 262144      # (optional, default: 256 KiB) max single inbound frame
-# enqueue_timeout_ms = 2000     # (optional, default: 2000) full-queue enqueue deadline
-# write_timeout_ms = 5000       # (optional, default: 5000) single WebSocket write deadline
-# target_rate_per_second = 200  # (optional, default: 200) per-target aggregate msg/s
-# target_bytes_per_second = 1048576  # (optional, default: 1 MiB/s) per-target aggregate bytes/s
-
 # Signaling dependencies (optional, auto-discovered if local services enabled)
-# [services.signaling.dependencies.ks]
-# endpoint = "http://remote-ks:8080"  # (optional, gRPC endpoint)
+# [services.signaling.dependencies.signer]
+# endpoint = "https://signer.internal.example:8443"  # (optional, gRPC endpoint)
 #
-# [services.signaling.dependencies.ais]
-# endpoint = "http://remote-ais:8080"  # (optional)
+# [services.signaling.dependencies.issuer]
+# endpoint = "http://remote-issuer:8080"  # (optional)
 
 # ============================================================================
 # Control Plane (always enabled, shared with main HTTP port)
@@ -266,10 +273,21 @@ ws_path = "/signaling"
 [control.admin_ui]
 # Enable the local web console under /admin (default: true).
 enabled = true
-# Login password for Admin UI (required when admin_ui is enabled, min 8 chars).
-password = "changeme"
+# REQUIRED: Argon2id PHC string. Plaintext passwords are rejected.
+# Example generation (argon2 CLI):
+#   printf '%s' "$ACTRIX_ADMIN_PASSWORD" |
+#     argon2 "$(openssl rand -base64 18)" -id -e -m 16 -t 3 -p 1
+password_hash = "<generate-argon2id-phc>"
 # JWT session expiry in seconds (default: 86400 = 24h)
 session_expiry_secs = 86400
+
+# Login token buckets and password-verification concurrency (no waiting queue).
+[control.admin_ui.login_limits]
+per_ip_per_minute = 30
+per_ip_burst = 10
+global_per_minute = 120
+global_burst = 20
+max_concurrent = 2
 
 [control.grpc_api]
 # Enable the supervisor-facing NodeAdminService gRPC API under
@@ -280,78 +298,6 @@ enabled = false
 node_id = "actrix-node-01"
 node_name = "actrix-edge-01"
 # Shared secret (hex, >= 64 chars) used to sign mutable control-plane ops.
-# Required when grpc_api is enabled.
-shared_secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+# Required only when grpc_api is enabled. Keep empty otherwise.
+shared_secret = ""
 max_clock_skew_secs = 300
-
-# ============================================================================
-# Production Configuration Example
-# ============================================================================
-# This section demonstrates a production-ready configuration.
-# Copy and modify these settings for production deployment.
-#
-# Key differences from development:
-# - env = "prod"
-# - recording.sink = "file:///var/log/actrix/actrix.log"
-# - HTTPS with valid certificates
-# - Real public IP for TURN
-# - optional per-channel sink override for OTLP
-# - Strong actrix_shared_key
-#
-# Example production config:
-#
-# enable = 22
-# name = "actrix-prod-01"
-# env = "prod"
-# [recording]
-# sink = "file:///var/log/actrix/actrix.log"
-# service_name = "actrix-prod-01"
-# [recording.audit]
-# filter = "all"
-# sink = "otlp+grpc://otel-collector.internal:4317"
-# [recording.security]
-# filter = "all"
-# 
-# sqlite_path = "/var/lib/actrix"
-# location_tag = "aws,us-west-2,zone-a"
-# actrix_shared_key = "REPLACE_WITH_STRONG_RANDOM_KEY_MINIMUM_32_CHARS"
-# pid = "/var/run/actrix.pid"
-# user = "actrix"
-# group = "actrix"
-#
-# [bind.http]
-# domain_name = "actrix.example.com"
-# advertised_ip = "203.0.113.10"
-# ip = "::"
-# port = 443
-# cert = "/etc/actrix/tls/fullchain.pem"
-# key = "/etc/actrix/tls/privkey.pem"
-#
-# [bind.ice]
-# ip = "0.0.0.0"
-# port = 3478
-# advertised_ip = "203.0.113.10"  # Your actual public IP
-# advertised_port = 3478
-#
-# [turn]
-# relay_port_range = "49152-65535"
-# realm = "actrix.example.com"
-
-# ACL (Access Control List) Configuration
-[acl]
-# Enable ACL enforcement for Presence, Discovery, and Relay
-# When enabled, ACL checks are performed for:
-# - Presence notifications (ActrUpEvent)
-# - Service discovery (DiscoveryRequest)
-# - WebRTC relay (ActrRelay)
-enabled = true
-
-# Default policy when no ACL rule exists
-# - "deny": Deny discovery/relay if no ACL rule found (recommended, secure by default)
-# - "allow": Allow discovery/relay if no ACL rule found (insecure, use only for testing)
-default_policy = "deny"
-
-# Note: ACL rules are stored in SQLite database (actoracl table)
-# Example rules (inserted via SQL or application API):
-# INSERT INTO actoracl (realm_id, from_type, to_type, access) VALUES (1, 'user', 'service', 1);
-# INSERT INTO actoracl (realm_id, from_type, to_type, access) VALUES (1, 'anonymous', 'admin', 0);

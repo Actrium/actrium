@@ -30,7 +30,7 @@ pub struct InstallCommand {
     #[arg(value_name = "PACKAGE")]
     pub packages: Vec<String>,
 
-    /// Actor type for the dependency (format: manufacturer:name:version, e.g., acme:EchoService:1.0.0).
+    /// Actor type for the dependency (format: publisher/program@version, e.g., acme/EchoService@1.0.0).
     /// When specified, the PACKAGE argument is treated as an alias.
     #[arg(long, value_name = "TYPE")]
     pub actr_type: Option<String>,
@@ -101,7 +101,7 @@ impl Command for InstallCommand {
             let actr_type = ActrType::from_string_repr(actr_type_str).map_err(|_| {
                 ActrCliError::InvalidArgument {
                     message: format!(
-                        "Invalid actr_type format '{}'. Expected format: manufacturer:name:version (e.g., acme:EchoService:1.0.0)",
+                        "Invalid actr_type format '{}'. Expected format: publisher/program@version (e.g., acme/EchoService@1.0.0)",
                         actr_type_str
                     ),
                 }
@@ -410,11 +410,11 @@ impl InstallCommand {
         println!("  ├─ 🏷️  Actor Type: {}", actr_type.to_string_repr());
 
         // Discover service by dependencies value (actr_type)
-        // Step 1: Build lookup key from manufacturer:name (matching service registration convention)
+        // Step 1: Match any version of publisher/program in the discovered types
         // Step 2: Filter by version from the full actr_type
         let service_discovery = install_pipeline.validation_pipeline().service_discovery();
 
-        let lookup_key = format!("{}:{}", actr_type.manufacturer, actr_type.name);
+        let lookup_key = format!("{}/{}@*", actr_type.publisher, actr_type.name);
         let filter = crate::core::ServiceFilter {
             name_pattern: Some(lookup_key.clone()),
             version_range: None,
@@ -427,7 +427,7 @@ impl InstallCommand {
         let matching_service = services
             .iter()
             .find(|s| {
-                s.actr_type.manufacturer == actr_type.manufacturer
+                s.actr_type.publisher == actr_type.publisher
                     && s.actr_type.name == actr_type.name
                     && s.actr_type.version == actr_type.version
             })

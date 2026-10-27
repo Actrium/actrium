@@ -1,6 +1,6 @@
 [package]
 name = "WsEchoService"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "WebSocket Echo Server - Echo service over a direct WebSocket transport"
 authors = ["Actr Dev Team"]

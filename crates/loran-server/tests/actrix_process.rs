@@ -1,6 +1,6 @@
 use actrix_sdk::testing::{
-    self, CreateRealmRequest, CredentialPayload, DeleteRealmRequest, GetNodeInfoRequest,
-    ListRealmsRequest, NodeAdminServiceClient, ShutdownRequest, UpdateRealmRequest,
+    self, CreateRealmRequest, CredentialPayload, GetNodeInfoRequest, ListRealmsRequest,
+    NodeAdminServiceClient, RetireRealmRequest, ShutdownRequest, UpdateRealmRequest,
 };
 use nonce_auth::CredentialBuilder;
 use platform::storage::db::Database;
@@ -98,11 +98,21 @@ fn choose_port() -> u16 {
     {
         return p;
     }
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("bind ephemeral port")
-        .local_addr()
-        .expect("read bound local addr")
-        .port()
+    // The dedicated Signer listener (SGN-02) defaults to bind.http.port + 1, so
+    // each actrix process spawned here occupies two consecutive TCP ports.
+    // Probe that the successor is also free so a parallel test's HTTP port
+    // cannot deterministically collide with this process's Signer port.
+    for _ in 0..256 {
+        let http = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = http.local_addr().expect("read bound local addr").port();
+        if port == u16::MAX {
+            continue;
+        }
+        if std::net::TcpListener::bind(("127.0.0.1", port + 1)).is_ok() {
+            return port;
+        }
+    }
+    panic!("failed to reserve a TCP port whose successor is also free for the Signer listener");
 }
 
 fn choose_udp_port() -> u16 {
@@ -129,6 +139,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -150,7 +163,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -180,6 +193,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,otlp"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -198,10 +214,10 @@ relay_port_range = "49152-65535"
 realm = "actrix.local"
 
 [services.signer]
-# defaults
+kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -233,6 +249,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,signer-kek"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -254,7 +273,7 @@ realm = "actrix.local"
 kek = "{kek}"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -284,6 +303,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,custom-pid"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -305,7 +327,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -333,6 +355,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,no-pid"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -354,7 +379,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -428,6 +453,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -449,7 +477,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -487,6 +515,9 @@ pid = "{pid}"
 user = "{user}"
 group = "{group}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -508,7 +539,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -538,6 +569,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -559,7 +593,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -588,6 +622,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,http-bind-ip"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -609,7 +646,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -638,6 +675,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,control-grpc"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -697,6 +737,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,all-in-one"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -719,7 +762,7 @@ realm = "actrix.local"
 
 [control.admin_ui]
 enabled = true
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [control.grpc_api]
 enabled = true
@@ -757,6 +800,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,ice"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -773,9 +819,10 @@ port = {ice_port}
 [turn]
 relay_port_range = "49152-65535"
 realm = "actrix.local"
+turn_secret = "test-turn-secret-0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -790,7 +837,7 @@ password = "testpassword123"
     config_path
 }
 
-fn write_ks_without_http_or_https_bind_config(dir: &Path, ice_port: u16) -> PathBuf {
+fn write_signer_without_http_or_https_bind_config(dir: &Path, ice_port: u16) -> PathBuf {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
     let config_path = dir.join("config.toml");
@@ -821,7 +868,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -834,7 +881,7 @@ password = "testpassword123"
     config_path
 }
 
-fn write_prod_ks_without_https_bind_config(dir: &Path, port: u16) -> PathBuf {
+fn write_prod_signer_without_https_bind_config(dir: &Path, port: u16) -> PathBuf {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
     let config_path = dir.join("config.toml");
@@ -849,6 +896,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,prod-no-https"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -868,10 +918,10 @@ relay_port_range = "49152-65535"
 realm = "actrix.local"
 
 [services.signer]
-# defaults
+kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -884,13 +934,17 @@ password = "testpassword123"
     config_path
 }
 
-fn write_ks_https_only_with_missing_tls_files_config(dir: &Path, port: u16, env: &str) -> PathBuf {
+fn write_signer_https_only_with_missing_tls_files_config(
+    dir: &Path,
+    port: u16,
+    env: &str,
+) -> PathBuf {
     let cert_path = dir.join("missing-cert.pem");
     let key_path = dir.join("missing-key.pem");
-    write_ks_https_only_config(dir, port, env, &cert_path, &key_path)
+    write_signer_https_only_config(dir, port, env, &cert_path, &key_path)
 }
 
-fn write_ks_https_only_config(
+fn write_signer_https_only_config(
     dir: &Path,
     port: u16,
     env: &str,
@@ -912,6 +966,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,https-missing-tls"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -932,10 +989,13 @@ relay_port_range = "49152-65535"
 realm = "actrix.local"
 
 [services.signer]
-# defaults
+kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
+
+[monitoring]
+allowed_ips = ["127.0.0.1/32", "::1/128"]
 
 [recording]
 
@@ -978,8 +1038,18 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
     let client = reqwest::Client::new();
     let start = Instant::now();
     let is_signer_health = url.ends_with("/signer/health");
-    let ks_grpc_endpoint = if is_signer_health {
-        Some(url.trim_end_matches("/signer/health").to_string())
+    // SGN-02: the Signer gRPC signing oracle runs on its own dedicated listener,
+    // not the shared HTTP base. These process configs omit [bind.signer], so the
+    // Signer uses the loopback default of HTTP port + 1. Derive that endpoint for
+    // the gRPC readiness probe (the /signer/health HTTP route stays on base).
+    let signer_grpc_endpoint = if is_signer_health {
+        let base = url.trim_end_matches("/signer/health");
+        let http_port: u16 = base
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse().ok())
+            .expect("signer health url must end with :port");
+        Some(format!("http://127.0.0.1:{}", http_port + 1))
     } else {
         None
     };
@@ -991,7 +1061,7 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
 
         if is_signer_health {
             let config = GrpcClientConfig {
-                endpoint: ks_grpc_endpoint
+                endpoint: signer_grpc_endpoint
                     .as_ref()
                     .expect("signer grpc endpoint should exist")
                     .clone(),
@@ -1239,7 +1309,7 @@ async fn wait_for_control_grpc(
     }
 }
 
-async fn wait_for_ks_grpc_client(
+async fn wait_for_signer_grpc_client(
     endpoint: &str,
     shared_key: &str,
     child: &mut Child,
@@ -1332,11 +1402,11 @@ fn build_list_realms_credential(shared_secret: &[u8]) -> testing::NonceCredentia
     testing::nonce_auth::to_proto_credential(credential)
 }
 
-fn build_delete_realm_credential(shared_secret: &[u8], realm_id: u32) -> testing::NonceCredential {
-    let payload = format!("delete_realm:{TEST_CONTROL_NODE_ID}:{realm_id}");
+fn build_retire_realm_credential(shared_secret: &[u8], realm: &str) -> testing::NonceCredential {
+    let payload = format!("retire_realm:{TEST_CONTROL_NODE_ID}:{realm}");
     let credential = CredentialBuilder::new(shared_secret)
         .sign(payload.as_bytes())
-        .expect("build delete realm credential");
+        .expect("build retire realm credential");
     testing::nonce_auth::to_proto_credential(credential)
 }
 
@@ -1429,8 +1499,9 @@ async fn actrix_starts_serves_health_and_shuts_down() {
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
-    let grpc_endpoint = format!("http://127.0.0.1:{port}");
-    let mut grpc_client = wait_for_ks_grpc_client(
+    // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
+    let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
+    let mut grpc_client = wait_for_signer_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
         &mut child,
@@ -1445,7 +1516,7 @@ async fn actrix_starts_serves_health_and_shuts_down() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_ks_grpc_health_and_key_lifecycle() {
+async fn actrix_signer_grpc_health_and_key_lifecycle() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
@@ -1454,9 +1525,10 @@ async fn actrix_ks_grpc_health_and_key_lifecycle() {
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
-    let grpc_endpoint = format!("http://127.0.0.1:{port}");
+    // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
+    let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
 
-    let mut grpc_client = wait_for_ks_grpc_client(
+    let mut grpc_client = wait_for_signer_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
         &mut child,
@@ -1466,13 +1538,11 @@ async fn actrix_ks_grpc_health_and_key_lifecycle() {
     let grpc_health = grpc_client.health_check().await.expect("grpc health check");
     assert_eq!(grpc_health, "healthy");
 
-    let (key_id, _public_key, expires_at, tolerance_seconds) = grpc_client
-        .generate_signing_key()
+    let (key_id, public_key) = grpc_client
+        .ensure_named_key("test")
         .await
-        .expect("grpc generate key");
-    assert!(key_id > 0, "generated key_id should be positive");
-    assert!(expires_at > 0, "generated key should have expiration");
-    assert!(tolerance_seconds > 0, "tolerance should be positive");
+        .expect("grpc ensure named key");
+    assert!(key_id > 0, "key_id should be positive");
 
     let signature = grpc_client
         .sign(key_id, b"test-message")
@@ -1480,12 +1550,11 @@ async fn actrix_ks_grpc_health_and_key_lifecycle() {
         .expect("grpc sign with generated key");
     assert_eq!(signature.len(), 64, "Ed25519 signature should be 64 bytes");
 
-    let (_, sign_expires_at, sign_tolerance_seconds) = grpc_client
+    let fetched = grpc_client
         .get_verifying_key(key_id)
         .await
         .expect("grpc get verifying key");
-    assert_eq!(sign_expires_at, expires_at);
-    assert_eq!(sign_tolerance_seconds, tolerance_seconds);
+    assert_eq!(fetched, public_key);
 
     let missing_key_err = grpc_client
         .sign(key_id.saturating_add(1_000_000), b"test")
@@ -1503,7 +1572,7 @@ async fn actrix_ks_grpc_health_and_key_lifecycle() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_ks_grpc_rejects_invalid_shared_secret() {
+async fn actrix_signer_grpc_rejects_invalid_shared_secret() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
@@ -1512,8 +1581,9 @@ async fn actrix_ks_grpc_rejects_invalid_shared_secret() {
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
-    let grpc_endpoint = format!("http://127.0.0.1:{port}");
-    let _ready_client = wait_for_ks_grpc_client(
+    // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
+    let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
+    let _ready_client = wait_for_signer_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
         &mut child,
@@ -1535,13 +1605,13 @@ async fn actrix_ks_grpc_rejects_invalid_shared_secret() {
         .await
         .expect("grpc client should connect before auth checks");
     let err = bad_client
-        .generate_signing_key()
+        .ensure_named_key("test")
         .await
         .expect_err("invalid shared secret should be rejected");
     let err_text = err.to_string();
     assert!(
         err_text.contains("Unauthenticated") || err_text.to_lowercase().contains("authentication"),
-        "expected authentication failure from grpc generate_signing_key, got: {err_text}"
+        "expected authentication failure from grpc ensure_named_key, got: {err_text}"
     );
 
     let admin_health_url = format!("http://127.0.0.1:{port}/admin/health");
@@ -1558,7 +1628,7 @@ async fn actrix_ks_grpc_rejects_invalid_shared_secret() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_ks_grpc_health_and_key_lifecycle_with_valid_kek() {
+async fn actrix_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_signer_kek(tmp.path(), port, TEST_VALID_KEK_HEX);
@@ -1567,22 +1637,21 @@ async fn actrix_ks_grpc_health_and_key_lifecycle_with_valid_kek() {
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
-    let grpc_endpoint = format!("http://127.0.0.1:{port}");
+    // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
+    let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
 
-    let mut grpc_client = wait_for_ks_grpc_client(
+    let mut grpc_client = wait_for_signer_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
         &mut child,
         &log_path,
     )
     .await;
-    let (key_id, _public_key, expires_at, tolerance_seconds) = grpc_client
-        .generate_signing_key()
+    let (key_id, public_key) = grpc_client
+        .ensure_named_key("test")
         .await
-        .expect("grpc generate key with kek");
+        .expect("grpc ensure named key with kek");
     assert!(key_id > 0);
-    assert!(expires_at > 0);
-    assert!(tolerance_seconds > 0);
 
     let signature = grpc_client
         .sign(key_id, b"test-message")
@@ -1590,19 +1659,18 @@ async fn actrix_ks_grpc_health_and_key_lifecycle_with_valid_kek() {
         .expect("grpc sign with kek");
     assert_eq!(signature.len(), 64);
 
-    let (_, fetched_expires_at, fetched_tolerance) = grpc_client
+    let fetched = grpc_client
         .get_verifying_key(key_id)
         .await
         .expect("grpc get verifying key with kek");
-    assert_eq!(fetched_expires_at, expires_at);
-    assert_eq!(fetched_tolerance, tolerance_seconds);
+    assert_eq!(fetched, public_key);
 
     graceful_shutdown(child);
 }
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_ks_kek_is_invalid() {
+async fn actrix_exits_when_signer_kek_is_invalid() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_signer_kek(tmp.path(), port, "invalid-kek");
@@ -1614,7 +1682,7 @@ async fn actrix_exits_when_ks_kek_is_invalid() {
         if let Some(status) = child.try_wait().expect("check child status") {
             assert!(
                 !status.success(),
-                "process should fail fast when KS KEK is invalid"
+                "process should fail fast when Signer KEK is invalid"
             );
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             assert!(
@@ -1629,7 +1697,7 @@ async fn actrix_exits_when_ks_kek_is_invalid() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when KS KEK is invalid");
+            panic!("actrix should fail fast when Signer KEK is invalid");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -1954,26 +2022,46 @@ async fn actrix_exports_spans_to_otlp_grpc_sink() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_starts_with_user_and_group_set_on_non_root() {
+async fn actrix_privilege_drop_config_behaves_by_uid() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_user_group(tmp.path(), port, "nobody", "nogroup");
     let log_path = tmp.path().join("actrix-user-group.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
-    let health_url = format!("http://127.0.0.1:{port}/metrics");
-    wait_for_health(&health_url, &mut child, &log_path).await;
-
-    graceful_shutdown(child);
-
     #[cfg(unix)]
-    {
-        if unsafe { libc::geteuid() } != 0 {
-            let log = fs::read_to_string(&log_path).unwrap_or_default();
-            assert!(
-                log.contains("cannot switch user/group"),
-                "expected non-root privilege-drop warning in logs, got: {log}"
-            );
+    let is_root = unsafe { libc::geteuid() } == 0;
+    #[cfg(not(unix))]
+    let is_root = false;
+
+    if is_root {
+        // As root the configured user/group can actually be dropped to, so the
+        // daemon starts and serves normally.
+        let health_url = format!("http://127.0.0.1:{port}/metrics");
+        wait_for_health(&health_url, &mut child, &log_path).await;
+        graceful_shutdown(child);
+    } else {
+        // As non-root a configured privilege drop cannot happen, so the daemon
+        // must fail closed rather than silently run over-privileged.
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().expect("check child status") {
+                assert!(
+                    !status.success(),
+                    "non-root process should refuse to start when user/group drop is configured"
+                );
+                let log = fs::read_to_string(&log_path).unwrap_or_default();
+                assert!(
+                    log.contains("not running as root") || log.contains("refusing to start"),
+                    "expected fail-closed privilege-drop message, got: {log}"
+                );
+                return;
+            }
+            if start.elapsed() > START_TIMEOUT {
+                graceful_shutdown(child);
+                panic!("actrix should fail fast when privilege drop is configured on non-root");
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 }
@@ -2166,22 +2254,22 @@ async fn actrix_exits_on_incompatible_existing_schema() {
     fs::create_dir_all(&data_dir).expect("create data dir");
 
     // Pre-create a deliberately incompatible schema:
-    // `realm` exists but misses required `name` column, so `idx_realm_name` index creation
-    // will fail on startup.
+    // `actoracl` exists but misses the required `realm` column, so
+    // `idx_actoracl_realm` index creation will fail on startup.
     let db = Database::new(&data_dir)
         .await
         .expect("precreate db with default schema");
-    db.execute("DROP TABLE IF EXISTS realm")
+    db.execute("DROP TABLE IF EXISTS actoracl")
         .await
-        .expect("drop realm table");
+        .expect("drop actoracl table");
     db.execute(
-        "CREATE TABLE realm (
+        "CREATE TABLE actoracl (
             rowid INTEGER PRIMARY KEY AUTOINCREMENT,
             label TEXT NOT NULL
         )",
     )
     .await
-    .expect("create incompatible realm table");
+    .expect("create incompatible actoracl table");
 
     let config_path =
         write_config_with_sqlite_path(tmp.path(), port, &data_dir.display().to_string());
@@ -2198,8 +2286,8 @@ async fn actrix_exits_on_incompatible_existing_schema() {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             let log_lower = log.to_lowercase();
             assert!(
-                log_lower.contains("name")
-                    || log_lower.contains("idx_realm_name")
+                log_lower.contains("realm")
+                    || log_lower.contains("idx_actoracl_realm")
                     || log_lower.contains("database"),
                 "expected schema/index failure hint in logs, got: {log}"
             );
@@ -2258,7 +2346,7 @@ async fn actrix_exits_when_control_grpc_shared_secret_is_invalid() {
 async fn actrix_exits_when_http_service_has_no_http_or_https_bind_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let ice_port = choose_port();
-    let config_path = write_ks_without_http_or_https_bind_config(tmp.path(), ice_port);
+    let config_path = write_signer_without_http_or_https_bind_config(tmp.path(), ice_port);
     let log_path = tmp.path().join("actrix-no-http-bind.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2292,7 +2380,7 @@ async fn actrix_exits_when_http_service_has_no_http_or_https_bind_config() {
 async fn actrix_exits_in_production_without_https_bind_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_prod_ks_without_https_bind_config(tmp.path(), port);
+    let config_path = write_prod_signer_without_https_bind_config(tmp.path(), port);
     let log_path = tmp.path().join("actrix-prod-no-https.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2326,7 +2414,8 @@ async fn actrix_exits_in_production_without_https_bind_config() {
 async fn actrix_exits_when_dev_https_fallback_tls_files_are_missing() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_ks_https_only_with_missing_tls_files_config(tmp.path(), port, "dev");
+    let config_path =
+        write_signer_https_only_with_missing_tls_files_config(tmp.path(), port, "dev");
     let log_path = tmp.path().join("actrix-dev-https-missing-tls.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2362,7 +2451,8 @@ async fn actrix_exits_when_dev_https_fallback_tls_files_are_missing() {
 async fn actrix_exits_when_prod_https_tls_files_are_missing() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_ks_https_only_with_missing_tls_files_config(tmp.path(), port, "prod");
+    let config_path =
+        write_signer_https_only_with_missing_tls_files_config(tmp.path(), port, "prod");
     let log_path = tmp.path().join("actrix-prod-https-missing-tls.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2376,10 +2466,10 @@ async fn actrix_exits_when_prod_https_tls_files_are_missing() {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             let log_lower = log.to_lowercase();
             assert!(
-                log_lower.contains("https")
-                    && (log_lower.contains("no such file")
-                        || log_lower.contains("failed to")
-                        || log_lower.contains("pem")),
+                log_lower.contains("no such file")
+                    || log_lower.contains("failed to")
+                    || log_lower.contains("pem")
+                    || log_lower.contains("missing-cert"),
                 "expected prod TLS file error in logs, got: {log}"
             );
             return;
@@ -2399,7 +2489,8 @@ async fn actrix_serves_https_health_in_dev_when_only_https_bind_is_configured() 
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (cert_path, key_path) = write_test_tls_cert_pair(tmp.path());
-    let config_path = write_ks_https_only_config(tmp.path(), port, "dev", &cert_path, &key_path);
+    let config_path =
+        write_signer_https_only_config(tmp.path(), port, "dev", &cert_path, &key_path);
     let log_path = tmp.path().join("actrix-dev-https.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2428,7 +2519,8 @@ async fn actrix_serves_https_health_in_prod_with_valid_tls_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (cert_path, key_path) = write_test_tls_cert_pair(tmp.path());
-    let config_path = write_ks_https_only_config(tmp.path(), port, "prod", &cert_path, &key_path);
+    let config_path =
+        write_signer_https_only_config(tmp.path(), port, "prod", &cert_path, &key_path);
     let log_path = tmp.path().join("actrix-prod-https.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2535,7 +2627,7 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
         .post(format!("http://127.0.0.1:{port}/admin/api/realms"))
         .bearer_auth(token)
         .json(&serde_json::json!({
-            "name": "ui-created-while-managed",
+            "realm": "ui-created-while-managed@example.com",
             "enabled": true
         }))
         .send()
@@ -2543,12 +2635,53 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
         .expect("admin ui create realm request");
     assert_eq!(create_resp.status(), reqwest::StatusCode::FORBIDDEN);
 
+    // Identity re-confirmation: admin only, and a Realm domain's is a Realm
+    // write.
+    let identity_url = format!("http://127.0.0.1:{port}/admin/api/identity/realm-domains/acme.com");
+    let unauthenticated = http_client
+        .get(&identity_url)
+        .send()
+        .await
+        .expect("unauthenticated identity request");
+    assert_eq!(unauthenticated.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let unpinned = http_client
+        .get(&identity_url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("identity request");
+    assert_eq!(unpinned.status(), reqwest::StatusCode::NOT_FOUND);
+    let confirm = http_client
+        .post(&identity_url)
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "digest": "0" }))
+        .send()
+        .await
+        .expect("identity confirmation");
+    assert_eq!(confirm.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // Owner invites are a Realm write; the member list is admin-only.
+    let realm_url = format!("http://127.0.0.1:{port}/admin/api/realms/test%40example.com");
+    let invite = http_client
+        .post(format!("{realm_url}/owner-invite"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("owner invite request");
+    assert_eq!(invite.status(), reqwest::StatusCode::FORBIDDEN);
+    let members = http_client
+        .get(format!("{realm_url}/members"))
+        .send()
+        .await
+        .expect("unauthenticated members request");
+    assert_eq!(members.status(), reqwest::StatusCode::UNAUTHORIZED);
+
     graceful_shutdown(child);
 }
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete() {
+async fn actrix_control_grpc_managed_realm_crud_by_name_and_retire() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
@@ -2561,47 +2694,57 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
     let endpoint = format!("http://127.0.0.1:{port}");
     let mut client = wait_for_control_grpc(&endpoint, &mut child, &log_path).await;
     let shared_secret = hex::decode(TEST_CONTROL_SHARED_SECRET).expect("decode shared secret");
-    let realm_id = 42_424;
+    let realm = "managed-crud@example.com";
+    let other_realm = "managed-other@acme.com";
 
-    let mut create_req = CreateRealmRequest {
-        realm_id: Some(realm_id),
-        name: "managed-crud".to_string(),
-        enabled: true,
-        credential: dummy_credential(),
-        expires_at: 1_900_000_000,
-        status: Some("Active".to_string()),
-        secret_current_hash: Some("hash-v1".to_string()),
-        secret_previous_hash: None,
-        secret_previous_valid_until: None,
+    let create = |realm: &str| {
+        let mut req = CreateRealmRequest {
+            realm: realm.to_string(),
+            enabled: true,
+            credential: dummy_credential(),
+            expires_at: 1_900_000_000,
+        };
+        req.credential = build_signed_credential(&shared_secret, &req);
+        req
     };
-    create_req.credential = build_signed_credential(&shared_secret, &create_req);
     let created = client
-        .create_realm(create_req)
+        .create_realm(create(realm))
         .await
         .expect("managed CreateRealm")
         .into_inner();
     assert!(created.success, "{:?}", created.error_message);
     let created_realm = created.realm.expect("created realm info");
-    assert_eq!(created_realm.realm_id, realm_id);
-    assert_eq!(created_realm.name, "managed-crud");
+    assert_eq!(created_realm.realm, realm);
+    assert_eq!(created_realm.status, "active");
+    // A new Realm's owner invite comes back once.
+    let invite = created.owner_invite.expect("owner invite");
     assert_eq!(
-        created_realm
-            .secret_rotation_state
-            .unwrap()
-            .current_hash_preview,
-        "hash-v1"
+        actr_protocol::realm_membership::RealmInvite::decode(&invite)
+            .expect("owner invite text")
+            .realm,
+        realm
     );
+    let again = client
+        .create_realm(create(realm))
+        .await
+        .expect("repeated managed CreateRealm")
+        .into_inner();
+    assert!(again.success, "{:?}", again.error_message);
+    assert_eq!(again.owner_invite, None);
+
+    // One instance hosts many Realms.
+    let other = client
+        .create_realm(create(other_realm))
+        .await
+        .expect("second managed CreateRealm")
+        .into_inner();
+    assert!(other.success, "{:?}", other.error_message);
 
     let mut update_req = UpdateRealmRequest {
-        realm_id,
-        name: Some("managed-crud-updated".to_string()),
+        realm: realm.to_string(),
         enabled: Some(false),
         credential: dummy_credential(),
-        status: Some("Suspended".to_string()),
         expires_at: Some(1_900_000_001),
-        secret_current_hash: Some("hash-v2".to_string()),
-        secret_previous_hash: Some("hash-v1".to_string()),
-        secret_previous_valid_until: Some(1_800_000_000),
     };
     update_req.credential = build_signed_credential(&shared_secret, &update_req);
     let updated = client
@@ -2611,20 +2754,20 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
         .into_inner();
     assert!(updated.success, "{:?}", updated.error_message);
     let updated_realm = updated.realm.expect("updated realm info");
-    assert_eq!(updated_realm.realm_id, realm_id);
-    assert_eq!(updated_realm.name, "managed-crud-updated");
-    assert!(!updated_realm.enabled);
-    assert_eq!(updated_realm.status, "Suspended");
+    assert_eq!(updated_realm.realm, realm);
+    assert!(!updated_realm.enabled, "enabled = false suspends the Realm");
+    assert_eq!(updated_realm.status, "active");
 
-    let deleted = client
-        .delete_realm(DeleteRealmRequest {
-            realm_id,
-            credential: build_delete_realm_credential(&shared_secret, realm_id),
+    let retired = client
+        .retire_realm(RetireRealmRequest {
+            realm: realm.to_string(),
+            credential: build_retire_realm_credential(&shared_secret, realm),
         })
         .await
-        .expect("managed DeleteRealm")
+        .expect("managed RetireRealm")
         .into_inner();
-    assert!(deleted.success, "{:?}", deleted.error_message);
+    assert!(retired.success, "{:?}", retired.error_message);
+    assert_eq!(retired.realm.expect("retired realm info").status, "retired");
 
     let listed = client
         .list_realms(ListRealmsRequest {
@@ -2633,15 +2776,24 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
             credential: build_list_realms_credential(&shared_secret),
         })
         .await
-        .expect("ListRealms after soft delete")
+        .expect("ListRealms after retire")
         .into_inner();
-    let realm = listed
+    let listed_realm = listed
         .realms
         .iter()
-        .find(|realm| realm.realm_id == realm_id)
-        .expect("soft-deleted realm should remain listed");
-    assert!(!realm.enabled);
-    assert_eq!(realm.status, "Inactive");
+        .find(|info| info.realm == realm)
+        .expect("retired realm should remain listed");
+    assert!(!listed_realm.enabled);
+    assert_eq!(listed_realm.status, "retired");
+    assert!(listed.realms.iter().any(|info| info.realm == other_realm));
+
+    // A retired Realm is never updated or recreated.
+    let recreated = client
+        .create_realm(create(realm))
+        .await
+        .expect("CreateRealm on retired name")
+        .into_inner();
+    assert!(!recreated.success, "retired Realm name must not be reused");
 
     graceful_shutdown(child);
 }

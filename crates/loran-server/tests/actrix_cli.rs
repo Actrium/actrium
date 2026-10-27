@@ -39,9 +39,10 @@ relay_port_range = "49152-65535"
 realm = "actrix.local"
 
 [services.signer]
+kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -87,14 +88,18 @@ advertised_port = 3478
 ip = "127.0.0.1"
 port = 0
 
+[monitoring]
+allowed_ips = ["127.0.0.1/32"]
+
 [turn]
 relay_port_range = "49152-65535"
 realm = "actrix.local"
 
 [services.signer]
+kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -251,7 +256,7 @@ fn actrix_test_command_fails_for_validation_errors() {
     assert!(!output.status.success(), "command should fail");
     assert!(
         stderr.contains("Configuration validation failed")
-            || stderr.contains("validation")
+            || stderr.contains("ServiceValidation")
             || stderr.contains("services.signer"),
         "unexpected stderr: {stderr}"
     );

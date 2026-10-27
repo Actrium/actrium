@@ -1,134 +1,102 @@
-# 05. Program Package with HTTPS Distribution
+# 05. Program Package and HTTPS Distribution
 
-## 1. Third-level identity.
+## 1. Three layers of identity
 
-The distribution design must separate three things:
+The distribution design must keep three things separate:
 
-| Layer | Identification | Prove what? |
+| Layer | Identifier | What it proves |
 |---|---|---|
-| Publisher | Normalize domain names | Who controls the launch entrance now? |
-| Program Release | `publisher/program@version` + digest | Which group to run is byte unvariable |
-| Service Actor | ActorId + Realm credential | What instance of operation is currently communicating with |
+| Publisher | Normalized domain name | Who currently controls the publishing entry point |
+| Program Release | `publisher/program@version` + digest | Which immutable set of bytes to run |
+| Service | ActorId + Actor credential | Which running instance is currently being talked to |
 
-HTTPS (a) The procedure cannot be proved to have been malicious;Marketplace Audits do not prove that there is a network. Actor (a) Identity;Actor credential It doesn't prove it's loaded locally. Guest Is the right version.
+HTTPS cannot prove a program is not malicious; Marketplace review cannot prove an Actor's identity on the network; an Actor credential cannot prove that the Guest loaded locally is the correct version either.
 
-## 2. Publisher Identity
+## 2. Publisher identity
 
-### 2.1 Domain name is Namespace
+### 2.1 The domain is the Publisher ID
 
-Publisher The agreement to use a domain name is reasonable because it is directly re-used:
+It is reasonable for a Publisher to use a domain name as its convention, because it directly reuses:
 
-- DNS Global uniqueness;
-- (a) Domain name ownership;
-- CA/TLS (a) Certificates;
+- DNS global uniqueness;
+- domain ownership management;
+- CA/TLS certificates;
 - HTTPS;
-- Transparency of certificates;
-- CDN, cache, agent and enterprise network facilities;
-- The organization has a security response capacity.
+- certificate transparency;
+- CDN, cache, proxy and enterprise network facilities;
+- an organization's existing security-response capability.
 
-Actrium Do not maintain another global set Publisher ID Registration centre.
+Actrium does not maintain a separate, global Publisher ID registry.
 
 ### 2.2 Publisher Profile
 
-Fixed entry:
+The Publisher Profile is published as the optional `publisher` member of the authority descriptor, in the domain's single bootstrap resource:
 
 ```text
-GET https://<publisher>/.well-known/actrium-publisher.json
+GET https://<publisher>/.well-known/actr
 ```
 
-It's from Publisher Directly exported identity domain bootstrap URL, standard must be used HTTPS 443♪ Can't come from ♪ `actr://` .Profile After the test was successful, it declared it. `programResolver`, CDN Other services endpoint You can use a visible port.
+The `publisher` member is defined in Actr Authority Discovery §4.5; per the authority-discovery rules, no sub-paths are defined under `/.well-known/actr`, so Publishers do not get a separate well-known file. The same descriptor may also carry `realm_signing_keys` (if the domain also has Realms) and `services`.
 
-bootstrap Do not follow the cross Origin redirect;when moving the entrance is required, old Profile New assignment by signature resolver or root rotation.
+The bootstrap URL is derived directly from the Publisher's identity domain and must use standard HTTPS on port 443.
 
-At least include:
+Fetching the descriptor follows the redirect rules of authority discovery: at most 5 hops, each over HTTPS; a redirect target never becomes a new authority, and the `authority` binding is still validated against the original Publisher domain. The validity of the `publisher` member depends only on its own signature and the pinned root/key history, not on the origin it was fetched from.
 
-- schema version;
-- Normative Publisher Domain names;
-- Current and Historical Profile continuity keys;
-- Current and Historical package signing keys;
-- key id(a) Algorithm, validity and revocation;
-- Program resolver base;
-- (b) Secure contact addresses;
-- Optional Marketplace/Transparency log statement.
+The `publisher` member's fields use snake_case and contain at least:
 
-The first time you get it, trust comes from URL hostname It's... Web PKIOr from the company. Publisher root pin;Profile Carrying root You can't prove it in a loop. Profile I'm not sure.Actrium Fixed root/key historyFollow-up Profile It is necessary to:
+- `schema`: `actr.publisher/v1`;
+- `domain`: the normalized Publisher domain, which must match the hostname of the descriptor's `authority`;
+- current and historical Publisher Profile signing keys (`profile_signing_keys`);
+- current and historical package signing keys;
+- key id, algorithm, validity period and revocation status;
+- a security contact address;
+- optional Marketplace/transparency-log statements.
 
-- Press RFC 8785 JCS Normative signature payload, revalidate detached Ed25519 Signature;
-- Handing a single-tone increment `sequence`and the time of issuance and expiry;
-- Through the old root New Signing Rotation Chain Introduction root;
-- The government has refused to roll back, expired and unauthorised.
+On first retrieval, trust comes from the Web PKI of the URL hostname, or from an enterprise-provisioned Publisher root pin; a root carried inside the Publisher Profile cannot vouch for itself in a circular way. After accepting the first Publisher Profile, Actrium pins the root/key history, and every later Publisher Profile must:
 
-offline root It's highly recommended. Publisher Mode of transportation, but hardware required/Offline Save by Marketplace or an enhanced corporate strategy;wire protocol It must be supported.
+- be signed over a payload normalized per RFC 8785 JCS (the `publisher` member with its `signature` field removed), then verified as a detached Ed25519 signature;
+- carry a monotonically increasing `sequence`, an issue time and an expiry time;
+- introduce any new root only through a rotation chain signed by the old root;
+- be rejected on rollback, expiry or unauthorized root change.
 
-### 2.3 Domain Name Transfer
+Parts of the descriptor outside `publisher` are unsigned and play no part in Publisher trust decisions.
 
-Domain name control only determines the future launch entrance and cannot rewrite history silently:
+An offline root is a strongly recommended Publisher operating practice, but whether hardware/offline storage is required can be raised further by Marketplace or enterprise policy; the wire protocol must support it.
 
-- Installed `coordinate + digest + signing key` (b) Can continue offline;
-- New key And history key When no chain of rotation is certified, consider Publisher ownership change;
-- The installed version should not change with the current domain name returning the different package;
-- New installation or updating must show identity changes;
-- High-risk strategies can be required. Marketplace/The organizational manager again approves.
+### 2.3 Domain transfer
 
-## 3. Coordinate Present. package ..the determination resolution of the
+Control of a domain only determines the future publishing entry point; it must not silently rewrite history:
 
-Profile It's... `programResolver` Determines the base address. When no visible statement, the default value is:
+- an already-installed `Program Release + digest + signing key` can keep running offline;
+- when a new key has no verifiable rotation chain from the historical key, treat it as a Publisher ownership change;
+- an already-installed version must not change just because the current domain now returns a different package;
+- a new install or update must display the identity change;
+- high-risk policy may require re-approval by the Marketplace or an organization admin.
 
-```text
-https://<publisher>/.well-known/actrium/v1/programs/<program>/<version>/release.json
-```
+## 3. Where a package comes from
 
-Default address still uses standard HTTPS 443;validated Profile Assigned resolver It can be located elsewhere. HTTPS Origin, and can also use non-standard ports.
+The platform is not responsible for "find the package by program name." A package has only two sources:
 
-`release.json` It is a small, cached publication description, which includes at least:
+- **Opening an instance**: the Realm Profile's `package` gives the download address, SHA-256 and Actor type ([Actr Realm Profile](../../../actr/protocols/realm-profile.md));
+- **Creating an instance**: the user selects one from the Program Catalog, the Marketplace, a local file, or a package address. Discovering programs and checking for new versions is the Marketplace's and the Publisher's own channel.
 
-```json
-{
-  "schemaVersion": 1,
-  "publisher": "notes.example",
-  "program": "team-notes",
-  "version": "1.4.2",
-  "packageUrl": "https://cdn.notes.example/actr/team-notes/1.4.2/package.actr",
-  "packageSha256": "<64-hex>",
-  "packageSize": 4829012,
-  "signingKeyId": "ed25519:2026-q2",
-  "publishedAt": "2026-06-01T10:00:00Z",
-  "status": "active",
-  "signature": {
-    "keyId": "ed25519:2026-q2",
-    "algorithm": "Ed25519",
-    "value": "<base64>"
-  }
-}
-```
+Whatever the source, verification is the same: check the SHA-256, then verify the package signature with the Publisher Profile's package signing key (§8). Where the download address is hosted has no bearing on security.
 
-Requests:
+## 4. One Program Release, one `.actr` package
 
-- in Path program/version Consistent with the response;
-- production Only allowed HTTPS;
-- Yeah. 3xx Jump to CDNBut eventually package It has to match. Publisher Description digest;
-- release metadata Short-cut caches and expiry times are required;
-- release descriptor You have to press it. JCS Regulate and by Profile Authorized. key Do it. detached signature;
-- package It can be long in itself. immutable cache;
-- Same coordinate Return Different digest Time hard fail.
+### 4.1 What the package is responsible for
 
-Promise. `publisher/program@version` A valid download with certainty. `.actr` workload Package, and allow Publisher It's credible. Profile Self-selection after assignment resolver, CDN And the port.
+Actrium's Program Release directly reuses the Actr `.actr` package:
 
-## 4. One. Program ReleaseOne. `.actr` Package
+- the executable body is the Service workload;
+- Keel Guest is a signed package resource;
+- the Front–Service proto/contract is a signed package resource;
+- icons, static assets and default configuration go into the resource area;
+- Actrium extension fields declare the front-end entry point, permissions, components, Workspace and compatibility range.
 
-### 4.1 Duties of the Mission
+Actrium does not invent a second installer layer wrapped around `.actr`.
 
-Actrium Program Release Directly reuse Actr `.actr` Package:
-
-- The main subject to execute is Primary Service workload;
-- Keel Guest (b) As a signature bag resource;
-- Front–Service proto/contract (b) As a signature bag resource;
-- Icons, static resources, default configurations into the resource area;
-- Actrium Extension field states front desk entrances, privileges, components,Workspace Compatibility.
-
-Actrium No more inventions of a charade `.actr` The second-floor installation package outside.
-
-### 4.2 Recommended Directory
+### 4.2 Recommended layout
 
 ```text
 package.actr
@@ -141,82 +109,82 @@ package.actr
 │   ├── guest.bundle.js
 │   └── capability-manifest.json
 ├── proto/
-│   └── primary-service.proto
+│   └── service.proto
 └── assets/
     ├── icon.png
     └── ...
 ```
 
-Manifest The signature must bind all resources hash, so replace Guest, contract Or the icon changes. package digest.
+The manifest signature must bind the hashes of all resources, so replacing the Guest, the contract or the icon all change the package digest.
 
-### 4.3 Nothing in the bag.
+### 4.3 What a package must not contain
 
-A formal third party package shall not contain:
+A formal third-party package must not contain:
 
-- Front Host Binary;
-- Keel Host Alternative realization;
-- Custom Host Module Achieved;
-- React Native Primary Plugins;
-- Front Dynamic libraries;
-- Not here. manifest The list of enforceable scripts;
-- Replaced from network on run Guest The entrance.
+- a Front Host binary;
+- an alternative Keel Host implementation;
+- a custom Host Module implementation;
+- React Native native plugins;
+- a Front dynamic library;
+- executable scripts not listed in the manifest;
+- a Guest entry point that is swapped in from the network at runtime.
 
-Publisher Only if you're available. Guest (a) With the declaration;Host "and will always be." Actrium Client release.
+A Publisher may only supply the Guest and its declarations; the Actr Host implementation always ships with the Actrium client.
 
-## 5. Service workload Policy
+## 5. Service workload policy
 
-### 5.1 Marketplace Default Level
+### 5.1 Marketplace default tier
 
-v1 Marketplace Third parties Service workload It must be:
+In v1, a third-party Service workload on the Marketplace must be:
 
 - WebAssembly Component Model;
-- Objective ABI Yes. Actrium Supports the list;
-- Pass. import/export allowlist;
-- - Yeah. fuel, wall-clock timeout, memory, table, stream and I/O Quotas;
-- All WorkspaceNetworks and networks Actor Capacity Service Host broker.
+- targeting an ABI on Actrium's supported list;
+- passing the import/export allowlist;
+- subject to fuel, wall-clock timeout, memory, table, stream and I/O quotas;
+- brokered by the Service Host for all Workspace, network and Actor capability.
 
 ### 5.2 Native Service
 
-Actr Existing native cdylib/linked workload Capability, but it's not equal to Marketplace By default, allow:
+Actr already has native cdylib/linked workload capability, but that does not mean the Marketplace should allow it by default:
 
-- native workload with Actrium (a) The process is more risky;
-- iOS The platform will not allow any random downloads of the machine code;
-- Dynamic inventory in ABI, signature and supply chain differences.
+- a native workload carries higher risk together with the Actrium process;
+- platforms such as iOS forbid arbitrarily downloading and executing native code;
+- dynamic libraries have ABI, signing and supply-chain differences.
 
-And so... Native Service Only for:
+So Native Service applies only to:
 
-- Actrium (a) The first party system;
-- (b) Corporate distribution;
-- Desktop development mode;
-- User explicitly accepted elevated trust tier.
+- Actrium's own first-party system programs;
+- enterprise-managed distribution;
+- desktop development mode;
+- an elevated trust tier the user has explicitly accepted.
 
-Native Service It can't change. Front Still allowed only Keel Guest Rule.
+Native Service does not change the rule that Front only ever allows a Keel Guest.
 
-Native workload A further distinction must be made:
+Native workloads must be further distinguished:
 
-- `NativeCdylib`: Load Host Address space; no export closure can be shown and no third-party examples may be green;
-- `NativeCapsule`: the process of independence restricted, only OS sandboxNo original network/Documentation,sealed libraries and brokered IPC It's possible to rate it as all effective. `CONTROLLED`;
-- `NativeTrusted`: Actrium Home or enterprise preset TCBIt's not open. Marketplace trust tier.
+- `NativeCdylib`: loaded into the Actr Host's address space; it cannot prove a closed egress boundary, and third-party instances must not be shown green;
+- `NativeCapsule`: an independent, restricted process; it can only be assessed as `CONTROLLED` when OS sandboxing, no raw network/file access, sealed libraries and brokered IPC are all in effect;
+- `NativeTrusted`: TCB shipped by Actrium itself or preset by an enterprise; not part of the open Marketplace trust tier.
 
-v1 Marketplace It's still open. WASM Service.Native Capsule It is the desktop priority follow-up capability, as specified in the table.[Privacy tags and condensation protocols](13-privacy-state-and-aggregation.md).
+The v1 Marketplace still opens only WASM Services. Native Capsule is a desktop-first follow-on capability; see [Privacy Marks and Aggregation Protocol](13-privacy-state-and-aggregation.md) for the constraints.
 
-### 5.3 UI-only Procedures
+### 5.3 UI-only programs
 
-v1 Do Not Include“No, I don't. Service Page Application”Special case. The tool chain is UI-only Program generates the smallest of a platform definition WASM Service Component:
+v1 does not introduce a special case for "a page app with no Service." The toolchain generates a platform-defined, minimal WASM Service Component for a UI-only program:
 
-- It still has a connection. Program Release Same ActrType Independence ActorId;
-- Default not Workspace and external network capacity;
-- Only achieved session, health And the least option available key-value contract;
-- Same as the signature, resource constraints and Service Life cycle;
-- Publisher You can't use it to bypass. Host API Or inject. native code.
+- it still has the same ActrType and an independent ActorId as the Program Release;
+- it has no Workspace or outbound network capability by default;
+- it implements only session, health and an optional minimal key-value contract;
+- it still goes through package signing, resource limits and the Service lifecycle the same way;
+- a Publisher cannot use it to bypass the Host API or inject native code.
 
-♪ So all ♪ app Tab Still unified. Attach One. Primary Service, the difference is business only Service Whether or not to include a custom logic.
+So every app Tab still uniformly Attaches to a Service; the only difference is whether that Service contains custom logic.
 
-## 6. Actrium Manifest Extension
+## 6. Actrium Manifest extensions
 
-Actr Foundation manifest Continue to provide:
+The Actr base manifest continues to provide:
 
-- manufacturer/publisher;
+- publisher;
 - name/program;
 - version;
 - binary target/kind/hash;
@@ -225,7 +193,7 @@ Actr Foundation manifest Continue to provide:
 - proto files;
 - dependency lock.
 
-Actrium Add:
+Actrium adds:
 
 ```toml
 [actrium]
@@ -242,7 +210,7 @@ contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:..."
 
 [actrium.service]
-primary_contract = "proto/primary-service.proto"
+contract = "proto/service.proto"
 protocol_fingerprint = "sha256:..."
 
 [actrium.service.workspace]
@@ -261,16 +229,16 @@ data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
 [[actrium.privacy.actor_egress]]
-actr_type = "notes.example:index-worker:1.4.2"
+actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
 ```
 
-See full examples[Reference Agreements](12-reference-spec.md).
+See the full example in [Reference Specification](12-reference-spec.md).
 
-## 7. Declaration of competence, components and quotas
+## 7. Permission, component and quota declarations
 
-The package says:“Applications”, not actually authorized:
+What a package declares is a "request," not an actual grant:
 
 ```text
 effective capabilities =
@@ -281,29 +249,27 @@ effective capabilities =
   ∩ current session scope
 ```
 
-Manifest At least declare:
+The manifest must declare at least:
 
 - Front capability;
 - Service capability;
-- Keel (a) Component collections;
-- outbound network domain;
+- the set of Keel components;
+- outbound network domains;
 - camera/microphone/clipboard/notification/location;
 - Workspace access mode;
-- Guest heapsingle execution time,render op;
+- Guest heap, single-execution time, render ops;
 - Service memory/fuel/storage/network;
-- Minimum Host/SDK/contract Version.
-- Data disaggregation, expected Actor Export,terminal egress, required/optional and the lowest conclusions.
+- minimum Actr Host/SDK/contract version;
+- data classes, expected Actor egress, terminal egress, required/optional, and the minimum node conclusion.
 
-Additional high-risk privileges must be issued and reconfirmed at the time of the upgrade.
+Adding a new high-risk permission requires a new version, and reconfirmation at upgrade time.
 
-Privacy Declaration It's static. allowlist and installation instructions are not the authoritative source of running privacy maps.Host We have to. WASM importsActual capability Compared to actual edge (a) A comparative statement;Publisher Mark Dependency as optional I can't cover it. Host The data flow is the basis of the closed package.
+The Privacy Declaration is a static allowlist and installation notice, not the authoritative source of the runtime privacy graph. The Actr Host must check WASM imports and actual capability against the actual edges against the declaration; a Publisher marking a dependency as optional cannot override the closure judgment the Actr Host makes from the real data flow.
 
-## 8. Download and verify current lines
+## 8. Download and verification pipeline
 
 ```text
-URI coordinate
-  → Publisher Profile
-  → Release metadata
+Realm Profile package / user-selected package
   → HTTPS download
   → package digest
   → package signature/key history
@@ -318,36 +284,35 @@ URI coordinate
 
 ### 8.1 Check order
 
-1. Verify Publisher DNS/IDNA;
+1. verify the Publisher's DNS/IDNA;
 2. TLS and hostname;
-3. Publisher Profile;
-4. release coordinate;
-5. (a) The download size limit;
-6. package SHA-256;
-7. Ed25519 key id and signatures;
-8. ZIP path, number of documents, total compression ratio and total decompression;
-9. manifest It's... publisher/program/version;
-10. binary kind/target;
-11. Every one. resource/proto/lock hash;
-12. Guest Static Dependency and capability manifest;
-13. Service WASM imports;
-14. Host API, Keel API with contract Compatibility;
-15. Local/Organizational security strategy.
+3. download size limit;
+4. package SHA-256;
+5. the Publisher Profile of the publisher declared in the manifest;
+6. Ed25519 key id and signature;
+7. ZIP path, file count, compression ratio and total decompressed size;
+8. the manifest's publisher/program/version;
+9. binary kind/target;
+10. every resource/proto/lock hash;
+11. the Guest's static dependencies and capability manifest;
+12. the Service WASM imports;
+13. Host API, Keel API and contract compatibility;
+14. local/organizational security policy.
 
-No one can fail to give a part of it to you. Keel or Service runtime.
+If any step fails, no part of the content may be handed to the Keel or Service runtime.
 
-### 8.2 Keel Loading Borders
+### 8.2 Keel loading boundary
 
-Keel `Engine.loadBundle(URL)` It is simply a loading mechanism, not a trust mechanism.Actrium It is necessary to:
+Keel's `Engine.loadBundle(URL)` is only a loading mechanism, not an installation trust mechanism. Actrium must:
 
-1. Download and authenticate on your own package;
-2. From content-addressed cache Read certified Guest bytes;
-3. Put Local bytes/code Here. Keel;
-4. Ban Guest Specify replacement on startup URL.
+1. download and verify the package itself;
+2. read the already-verified Guest bytes from the content-addressed cache;
+3. hand the local bytes/code to Keel;
+4. forbid the Guest from specifying an alternate URL at startup.
 
-## 9. Version is unchangeable
+## 9. Version immutability
 
-Actrium Locally saves with the following joint keys:
+Actrium stores locally under the following composite key:
 
 ```text
 (publisher, program, version, package_digest)
@@ -355,128 +320,127 @@ Actrium Locally saves with the following joint keys:
 
 Rules:
 
-- Fixed after first acceptance digest;
-- Follow-up and approval coordinate Different. digest = `PACKAGE_EQUIVOCATION`;
-- It's not working.“Publisher Updated Document”Override caches;
-- Update must use new SemVer;
-- Service Examples fixed package digest;
-- Cache Cleaning cannot delete still being Service Reference digest;
-- Redownload must be verified and fixed again digest Compare.
+- the digest is fixed after the first acceptance;
+- the same Program Release appearing with a different digest is `PACKAGE_EQUIVOCATION`;
+- "the Publisher updated the file" cannot be used to overwrite the cache;
+- an update must use a new SemVer;
+- a Service instance is fixed to its package digest;
+- cache cleanup must not delete a digest still referenced by a Service;
+- re-downloading must be re-verified and compared against the fixed digest.
 
-Local first-seen pin Only current installations can be protected;Marketplace Helps multiple clients match already seen digest. To provide a global view of all clients non-equivocation, need to be introduced into the public afterward append-only transparency log.v1 No singles. pin Exaggerated global transparency.
+A local first-seen pin only protects the current install; a Marketplace can help multiple clients compare digests they have seen. Providing global non-equivocation across all clients requires introducing a public, append-only transparency log later. v1 does not overstate a single-machine pin into global transparency.
 
-## 10. Signature and HTTPS Division of labour
+## 10. The division of labor between signing and HTTPS
 
-### HTTPS Provision
+### What HTTPS provides
 
-- Certificate of control of current domain name;
-- (a) Transfer of confidentiality and integrity;
-- Profile and release metadata (a) Sources of information;
-- Standard Agent/CDN/Cache capacity.
+- proof of current domain control;
+- transport confidentiality and integrity;
+- the origin of the Publisher Profile;
+- standard proxy/CDN/cache capability.
 
-### Package Signature and digest Provision
+### What package signing and digests provide
 
-- CDN(c) The integrity of the mirror and the setting;
-- Offline validation;
-- key rotation history;
-- (a) The exact version is not subject to change;
-- (a) Continue to operate when domain names are temporarily unavailable;
-- Test for the same name.
+- integrity across CDNs, mirrors and after being written to disk;
+- offline verification;
+- key-rotation history;
+- exact version immutability;
+- continued operation while the domain is temporarily unavailable;
+- detection of same-name-different-package.
 
-Both must be used simultaneously and not substitute for the other.
+Both must be used together; neither substitutes for the other.
 
 ## 11. Marketplace
 
-Marketplace This could include:
+A Marketplace may:
 
-- Search, classification and recommendation;
-- Records Publisher Validation;
-- Static/(a) Dynamic audits;
-- Risk rating;
-- We've got the record. coordinate/digest;
-- (b) Issuance of revocation and malicious software information;
-- Provides caches or mirrors.
+- search, categorize and recommend;
+- record Publisher verification;
+- do static/dynamic review;
+- give a risk rating;
+- record Program Releases/digests it has seen;
+- publish revocations and malware intelligence;
+- provide a cache or mirror.
 
-Marketplace You can't:
+A Marketplace may not:
 
-- (b) Acquiring for third parties the space for their domain names;
-- Silent Replace Publisher package;
-- Replace with market-entry identity Publisher Domain names;
-- Because“Audited”Around Actrium (a) Competence;
-- Put the lower shelf with Service/Workspace Automatically deletes the equivalent.
+- squat a domain on a third party's behalf;
+- silently replace a Publisher's package;
+- substitute a marketplace login identity for the Publisher domain;
+- bypass Actrium's permissions because something is "reviewed";
+- equate delisting with automatically deleting the Service/Workspace.
 
-## 12. Avoidance policy
+## 12. Revocation policy
 
-Ungrade:
+Revocation tiers:
 
-| Level | Behaviour |
+| Tier | Behavior |
 |---|---|
-| Advisory | Show risk and allow continuation |
-| Block new | Stop installation/New, with instance tips available |
-| Quarantine | Default stops and isolates already available instances, user/Administrators auditable |
-| Critical block | Stop Loading Guest/Service, retain data for the re-entry |
+| Advisory | show the risk, allow continuing |
+| Block new | block new installs/creations, prompt on existing instances |
+| Quarantine | stop and isolate existing instances by default, user/admin can audit and act |
+| Critical block | block loading the Guest/Service, keep a data-recovery entry point |
 
-The revocation record must contain:
+A revocation record must contain:
 
-- coordinate/digest/key;
-- Reasons;
-- (a) The time of publication;
-- (a) The issuer or market signature;
-- Recommended operations;
-- Whether impact is limited Guest, Service Or sign key.
+- Program Release/digest/key;
+- the reason;
+- the publication time;
+- the publisher's or marketplace's signature;
+- a recommended action;
+- whether it affects only the Guest, the Service, or the signing key.
 
-Undo does not automatically delete Workspace.
+Revocation does not automatically delete the Workspace.
 
-## 13. Update and Upgrade
+## 13. Update and upgrade
 
-Program Catalog You can suggest new versions, but... Service No automatic in situ upgrades.
+The Program Catalog may prompt about a new version, but a Service does not automatically upgrade in place.
 
-v1 Upgrade:
+v1 upgrade:
 
-1. Install new Program Release;
-2. Create New Service Actor, get new ActorId;
-3. Old Service (b) Generating migration snapshots;
-4. Visible Intersection Workspace lease;
-5. New Service Import and verify;
-6. User confirmation switch;
-7. New Tab URI Use New ActorId;
-8. Old Service Keeps the back-rolling window after the archive.
+1. install the new Program Release;
+2. create a new Service in the same Realm, obtaining a new ActorId;
+3. the old Service produces a migration snapshot;
+4. explicitly hand off the Workspace lease;
+5. the new Service imports and verifies;
+6. the user confirms the switch, after which a Realm Profile with `package` pointing at the new package is published via `publish_profile`;
+7. the old Service is archived after a rollback window; rolling back means publishing another Realm Profile, with a higher `sequence`, that points back at the old package.
 
-It's a way to avoid it. ActorId Medium version versus actual workload Inconsistencies also make it possible to roll back and back.
+This avoids a mismatch between the version in an ActorId and the workload actually running, and keeps a failed rollback explainable.
 
-## 14. Local development and self-building
+## 14. Local development and self-hosting
 
-Support:
+Supported:
 
-- Local `.actr` Documentation;
-- `actr-dev://` HTTPS Origin;
-- Local development signing key;
-- Hot Update Guest;
-- Not published Program Catalog entry.
+- a local `.actr` file;
+- a package address on localhost, a loopback address, or an explicitly trusted private CA;
+- a local development signing key;
+- hot-updating the Guest;
+- an unpublished Program Catalog entry.
 
-Limitation:
+Restrictions:
 
-- Every code change makes new dev digest;
-- Not validated key Do not inherit the same domain name formally Publisher (a) Competence;
-- Local package is not entered officially Marketplace;
-- The Internet,loopback, link-local URL Allows only in development models or business strategies;
-- Development package Not for circumventing Native Service Limit.
+- every code change produces a new dev digest;
+- an unverified key does not inherit the formal Publisher permissions of the same domain;
+- a local package does not enter the formal Marketplace;
+- private-network, loopback and link-local URLs are only allowed in development mode or under enterprise policy;
+- a development package must not be used to bypass Native Service restrictions.
 
-## 15. Cache & Offline
+## 15. Cache and offline
 
-Cache Press package digest Contents address:
+The cache is content-addressed by package digest:
 
 ```text
 cache/packages/sha256/<digest>/package.actr
 cache/extracted/sha256/<digest>/...
 ```
 
-Requests:
+Requirements:
 
-- Original package (a) Retain for re-certification;
-- extracted Only verified files package (a) Generation;
-- Atom writing;
-- (a) The downloading isolation was not completed;
-- Cache metadata records Publisher key (a) The time of validation;
-- Local Service Yes. Publisher Run fixed when offline digest;
-- Realm Evidence/Discontinuation is processed under the offline security policy and is not equivalent to package Could not close temporary folder: %s
+- the original package is kept, for re-verification;
+- extracted files are only ever produced from an already-verified package;
+- atomic writes;
+- incomplete downloads are isolated;
+- cache metadata records the Publisher key and verification time;
+- an existing local Service can keep running its fixed digest while the Publisher is offline;
+- expiry of Realm credentials/revocations is handled under offline security policy, and is not equivalent to package verification failure.

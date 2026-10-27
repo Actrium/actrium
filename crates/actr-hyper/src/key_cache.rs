@@ -1,6 +1,6 @@
-//! AisKeyCache - local cache for AIS signing public keys
+//! IssuerKeyCache - local cache for Issuer signing public keys
 //!
-//! During actor registration, the current AIS signing public key is obtained from RegisterOk
+//! During actor registration, the current Issuer signing public key is obtained from RegisterOk
 //! and cached here. Signature verification looks up by key_id; on miss, the `KeyFetcher`
 //! fetches and writes into the cache.
 //! Public keys need no secrecy; caching strategy is simple: retain permanently by key_id
@@ -19,23 +19,23 @@ use tokio::sync::RwLock;
 /// Public key fetching interface
 ///
 /// When a key_id is not found in the local cache, the implementor is responsible for
-/// fetching it from a remote source (e.g. AIS/signaling).
+/// fetching it from a remote source (e.g. Issuer/signaling).
 /// Returns `(key_id, pubkey_bytes)`, where `pubkey_bytes` must be a 32-byte Ed25519 raw public key.
 #[async_trait]
 pub(crate) trait KeyFetcher: Send + Sync {
     async fn fetch_key(&self, key_id: u32) -> HyperResult<(u32, Vec<u8>)>;
 }
 
-/// AIS Ed25519 signing public key cache
+/// Issuer Ed25519 signing public key cache
 ///
-/// Thread-safe, shared via `Arc<AisKeyCache>`.
-/// Public keys are stored permanently by key_id; key_id is monotonically assigned by AIS,
+/// Thread-safe, shared via `Arc<IssuerKeyCache>`.
+/// Public keys are stored permanently by key_id; key_id is monotonically assigned by Issuer,
 /// with very few actual entries.
-pub(crate) struct AisKeyCache {
+pub(crate) struct IssuerKeyCache {
     cache: RwLock<HashMap<u32, VerifyingKey>>,
 }
 
-impl AisKeyCache {
+impl IssuerKeyCache {
     /// Create a new empty cache, returned in an `Arc` wrapper for sharing
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -43,7 +43,7 @@ impl AisKeyCache {
         })
     }
 
-    /// Called during registration or renewal to write AIS signing public key into cache
+    /// Called during registration or renewal to write Issuer signing public key into cache
     ///
     /// `pubkey_bytes` must be a 32-byte Ed25519 raw public key.
     /// If key_id already exists, it is overwritten (should not normally occur, kept idempotent).
@@ -54,7 +54,7 @@ impl AisKeyCache {
         .map_err(|e| HyperError::InvalidManifest(format!("invalid signing pubkey: {e}")))?;
 
         self.cache.write().await.insert(key_id, verifying_key);
-        tracing::debug!(key_id, "AisKeyCache: pubkey written");
+        tracing::debug!(key_id, "IssuerKeyCache: pubkey written");
         Ok(())
     }
 
@@ -70,15 +70,15 @@ impl AisKeyCache {
         {
             let cache = self.cache.read().await;
             if let Some(key) = cache.get(&key_id) {
-                tracing::trace!(key_id, "AisKeyCache: cache hit");
+                tracing::trace!(key_id, "IssuerKeyCache: cache hit");
                 return Ok(*key);
             }
         }
 
         // Cache miss, fetch via fetcher
-        tracing::debug!(key_id, "AisKeyCache: cache miss, fetching pubkey");
+        tracing::debug!(key_id, "IssuerKeyCache: cache miss, fetching pubkey");
         let (returned_key_id, pubkey_bytes) = fetcher.fetch_key(key_id).await.map_err(|e| {
-            tracing::warn!(key_id, error = ?e, "AisKeyCache: pubkey fetch failed");
+            tracing::warn!(key_id, error = ?e, "IssuerKeyCache: pubkey fetch failed");
             e
         })?;
 
@@ -96,7 +96,7 @@ impl AisKeyCache {
             .insert(returned_key_id, verifying_key);
         tracing::debug!(
             key_id = returned_key_id,
-            "AisKeyCache: cached pubkey fetched from remote"
+            "IssuerKeyCache: cached pubkey fetched from remote"
         );
 
         Ok(verifying_key)

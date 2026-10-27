@@ -22,7 +22,7 @@ The package loading boundary is strict:
 
 1. download or open the `.actr` archive;
 2. verify the pinned archive digest when package resolution supplies one;
-3. read `manifest.toml` and require `actr-package/1` plus `keel.guest/1`;
+3. read `manifest.toml` and require `actr-package/2` plus `keel.guest/1`;
 4. verify every declared payload digest and the publisher signature;
 5. load only the workload entry declared by the manifest;
 6. grant only Host capabilities permitted by package and deployment policy.

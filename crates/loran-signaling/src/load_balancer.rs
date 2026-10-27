@@ -12,7 +12,7 @@
 //! # Usage example
 //! ```ignore
 //! use signaling::load_balancer::LoadBalancer;
-//! use signaling::service_registry::ServiceInfo;
+//! use signaling::actor_registry::ServiceInfo;
 //! use actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor;
 //!
 //! let mut candidates: Vec<ServiceInfo> = vec![]; // get candidate list
@@ -30,7 +30,7 @@
 //! // Returns a ranked list of candidate ActrIds
 //! ```
 
-use crate::service_registry::ServiceInfo;
+use crate::actor_registry::ServiceInfo;
 use actr_protocol::{
     ActrId, ServiceAvailabilityState, ServiceDependencyState,
     route_candidates_request::{NodeSelectionCriteria, node_selection_criteria::NodeRankingFactor},
@@ -372,23 +372,23 @@ impl LoadBalancer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{ActrType, Realm};
+    use actr_protocol::ActrType;
 
     fn create_test_service(serial: u64, name: &str) -> ServiceInfo {
         ServiceInfo {
             actor_id: ActrId {
                 serial_number: serial,
-                r#type: ActrType {
-                    manufacturer: "test".to_string(),
-                    name: name.to_string(),
-                    version: "1.0.0".to_string(),
-                },
-                realm: Realm { realm_id: 0 },
+                realm: "test@example.com".to_string(),
+            },
+            actor_type: ActrType {
+                publisher: "test".to_string(),
+                name: name.to_string(),
+                version: "1.0.0".to_string(),
             },
             service_name: name.to_string(),
             message_types: vec![],
             capabilities: None,
-            status: crate::service_registry::ServiceStatus::Available,
+            status: crate::actor_registry::ServiceStatus::Available,
             last_heartbeat_time_secs: 0,
             service_spec: None,
             acl: None,
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn test_sort_by_distance_with_client_location() {
-        use crate::service_registry::ServiceLocation;
+        use crate::actor_registry::ServiceLocation;
 
         // Client location: Beijing (39.9042, 116.4074)
         let client_location = Some((39.9042, 116.4074));

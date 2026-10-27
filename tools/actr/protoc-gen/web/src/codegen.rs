@@ -95,10 +95,10 @@ fn generate_inner(req: &WebCodegenRequest) -> Result<Vec<PathBuf>, String> {
 // ═══════════════════════════════════════════════════════════════════
 
 fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
-    let manufacturer = &req.manufacturer;
+    let publisher = &req.publisher;
     let actr_name = &req.actr_name;
     let signaling_url = &req.signaling_url;
-    let realm_id = req.realm_id;
+    let realm = &req.realm;
 
     let edition = req.edition();
     let exports = req.exports_list();
@@ -110,8 +110,8 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     for dep in &req.dependencies {
         if let Some(ref at) = dep.actr_type {
             dep_entries.push(format!(
-                "  '{}': {{ actr_type: '{}:{}:{}' }},",
-                dep.alias, at.manufacturer, at.name, at.version
+                "  '{}': {{ actr_type: '{}/{}@{}' }},",
+                dep.alias, at.publisher, at.name, at.version
             ));
         } else {
             dep_entries.push(format!("  '{}': {{}},", dep.alias));
@@ -165,11 +165,11 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     let version = &req.version;
     out.push_str("/** ActrType */\n");
     out.push_str(&format!("export const {type_export_name} = {{\n"));
-    out.push_str(&format!("  manufacturer: '{manufacturer}',\n"));
+    out.push_str(&format!("  publisher: '{publisher}',\n"));
     out.push_str(&format!("  name: '{actr_name}',\n"));
     out.push_str(&format!("  version: '{version}',\n"));
     out.push_str(&format!(
-        "  fullType: '{manufacturer}:{actr_name}:{version}',\n"
+        "  fullType: '{publisher}/{actr_name}@{version}',\n"
     ));
     out.push_str("} as const;\n\n");
 
@@ -204,9 +204,12 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     ));
     out.push_str("  },\n");
     out.push_str("  deployment: {\n");
-    out.push_str(&format!("    realm_id: {realm_id},\n"));
-    if !req.ais_endpoint.is_empty() {
-        out.push_str(&format!("    ais_endpoint: '{}',\n", req.ais_endpoint));
+    out.push_str(&format!("    realm: '{realm}',\n"));
+    if !req.issuer_endpoint.is_empty() {
+        out.push_str(&format!(
+            "    issuer_endpoint: '{}',\n",
+            req.issuer_endpoint
+        ));
     }
     out.push_str("  },\n");
     out.push_str("  discovery: {\n");
@@ -290,11 +293,11 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     out.push_str("// ── runtimeConfig (passed to Service Worker WASM registration) ──\n\n");
     out.push_str("/**\n * Service Worker runtime config\n * Passed from main thread to Service Worker via DOM_PORT_INIT\n */\n");
     out.push_str("export const runtimeConfig: SwRuntimeConfig = {\n");
-    if !req.ais_endpoint.is_empty() {
-        out.push_str(&format!("  ais_endpoint: '{}',\n", req.ais_endpoint));
+    if !req.issuer_endpoint.is_empty() {
+        out.push_str(&format!("  issuer_endpoint: '{}',\n", req.issuer_endpoint));
     }
     out.push_str("  signaling_url: system.signaling.url,\n");
-    out.push_str("  realm_id: system.deployment.realm_id,\n");
+    out.push_str("  realm: system.deployment.realm,\n");
     out.push_str(&format!("  client_actr_type: '{client_actr_type}',\n"));
     out.push_str(&format!("  target_actr_type: '{target_actr_type}',\n"));
     out.push_str("  service_fingerprint: '',\n");
@@ -305,7 +308,9 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     out.push_str(&format!("  package_url: '{package_url}',\n"));
     out.push_str(&format!("  runtime_wasm_url: '{runtime_wasm_url}',\n"));
     out.push_str("  // Trust anchors — pubkey_b64 is substituted by deploy tooling.\n");
-    out.push_str("  trust: [{ kind: 'static', pubkey_b64: '__MFR_PUBKEY_PLACEHOLDER__' }],\n");
+    out.push_str(
+        "  trust: [{ kind: 'static', pubkey_b64: '__PUBLISHER_PUBKEY_PLACEHOLDER__' }],\n",
+    );
     out.push_str("};\n\n");
 
     // ActorClientConfig
@@ -317,7 +322,7 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     );
     out.push_str("export const actrConfig: ActorClientConfig = {\n");
     out.push_str("  signalingUrl: system.signaling.url,\n");
-    out.push_str("  realm: String(system.deployment.realm_id),\n");
+    out.push_str("  realm: system.deployment.realm,\n");
     out.push_str("  iceServers: [\n");
     if !req.stun_urls.is_empty() {
         out.push_str("    ...system.webrtc.stun_urls.map((url) => ({ urls: url })),\n");
@@ -340,6 +345,17 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
 // ═══════════════════════════════════════════════════════════════════
 // ActorRef generation
 // ═══════════════════════════════════════════════════════════════════
+
+/// Split `publisher/program@version` into `(publisher, program)`.
+fn split_actr_type(actr_type: &str) -> (&str, &str) {
+    match actr_type.split_once('/') {
+        Some((publisher, rest)) => (
+            publisher,
+            rest.split_once('@').map_or(rest, |(name, _)| name),
+        ),
+        None => ("", actr_type),
+    }
+}
 
 fn gen_actor_ref(service: &ServiceInfo, req: &WebCodegenRequest) -> Result<String, String> {
     let service_name = &service.name;
@@ -399,15 +415,10 @@ fn gen_actor_ref(service: &ServiceInfo, req: &WebCodegenRequest) -> Result<Strin
     // ActrType
     let actr_type = service.actr_type.as_deref().unwrap_or("");
     if !actr_type.is_empty() {
-        let parts: Vec<&str> = actr_type.splitn(2, ':').collect();
-        let (mfr, name) = if parts.len() == 2 {
-            (parts[0], parts[1])
-        } else {
-            ("", actr_type)
-        };
+        let (publisher, name) = split_actr_type(actr_type);
         out.push_str("/**\n * ActrType definition\n */\n");
         out.push_str(&format!("export const {service_name}ActrType = {{\n"));
-        out.push_str(&format!("  manufacturer: '{mfr}',\n"));
+        out.push_str(&format!("  publisher: '{publisher}',\n"));
         out.push_str(&format!("  name: '{name}',\n"));
         out.push_str("};\n\n");
     }
@@ -1799,5 +1810,64 @@ mod tests {
                 .any(|file| file == "actr-gen-meta.json")
         );
         assert!(metadata["remote_services"][0].get("actr_type").is_none());
+    }
+
+    #[test]
+    fn split_actr_type_parses_slash_at_form() {
+        assert_eq!(split_actr_type("acme/Echo@1.0.0"), ("acme", "Echo"));
+        assert_eq!(
+            split_actr_type("acme/greeter.GreeterService@1.0.0"),
+            ("acme", "greeter.GreeterService")
+        );
+        assert_eq!(split_actr_type("Echo"), ("", "Echo"));
+    }
+
+    #[test]
+    fn actr_config_dependency_entry_uses_slash_at_actr_type_form() {
+        let req = WebCodegenRequest {
+            config_path: PathBuf::from("actr.toml"),
+            output_dir: PathBuf::from("src/generated"),
+            project_root: PathBuf::from("."),
+            overwrite_user_code: false,
+            package_name: "demo".to_string(),
+            publisher: "acme".to_string(),
+            actr_name: "demo".to_string(),
+            version: "0.1.0".to_string(),
+            description: String::new(),
+            authors: vec![],
+            license: String::new(),
+            tags: vec![],
+            signaling_url: "wss://signal.example.com".to_string(),
+            realm: "demo.example.com".to_string(),
+            visible_in_discovery: false,
+            issuer_endpoint: String::new(),
+            force_relay: false,
+            dependencies: vec![crate::request::DependencyInfo {
+                alias: "echo".to_string(),
+                actr_type: Some(crate::request::ActrTypeInfo {
+                    publisher: "acme".to_string(),
+                    name: "echo".to_string(),
+                    version: "1.0.0".to_string(),
+                }),
+            }],
+            stun_urls: vec![],
+            turn_urls: vec![],
+            observability: crate::request::ObservabilityInfo {
+                filter_level: "info".to_string(),
+                tracing_enabled: false,
+                tracing_endpoint: String::new(),
+                tracing_service_name: String::new(),
+            },
+            raw_toml: String::new(),
+            local_services: vec![],
+            remote_services: vec![],
+            files: vec![],
+            dispatch_spec_path: None,
+            dispatch_spec_hash: None,
+        };
+
+        let content = gen_actr_config(&req).unwrap();
+        assert!(content.contains("actr_type: 'acme/echo@1.0.0'"));
+        assert!(!content.contains("acme:echo:1.0.0"));
     }
 }

@@ -6,21 +6,37 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/realm-scenarios.sh"
 
-HTTP_PORT=8081
-ICE_PORT=3478
-REALM_ID=""
+# Keep the provenance matrix independent of the Realm creation matrix.
+REALM_MODE="${REALM_MODE:-legacy}"
+case "$REALM_MODE" in
+    legacy|provider|external) ;;
+    *) fail "Unknown REALM_MODE: $REALM_MODE" ;;
+esac
+REALM_STAGE="${REALM_STAGE:-full}"
+case "$REALM_STAGE" in full|profile) ;; *) fail "Unknown REALM_STAGE: $REALM_STAGE" ;; esac
+if [ "$REALM_STAGE" = profile ] && [ "$REALM_MODE" = legacy ]; then
+    fail "REALM_STAGE=profile requires a provider or external Realm"
+fi
+
+HTTP_PORT="${HTTP_PORT:-8081}"
+ICE_PORT="${ICE_PORT:-3478}"
+REALM=""
 ADMIN_PASSWORD="e2e-test-password"
-MANUFACTURER="actrium"
-CLIENT_MANUFACTURER="$MANUFACTURER"
+PUBLISHER="e2e.actrium.example"
+# The client guest is a realm consumer, not a verified publisher: it keeps a
+# non-dotted publisher so its linked registrations satisfy Issuer-01, which
+# reserves DNS-style names for package identities.
+CLIENT_PUBLISHER="e2e-actrium-local"
 CLIENT_GUEST_VERSION="0.1.0"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/package-runtime-echo"
-ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
-ACTRIX_TARGET_DIR="$E2E_TARGET_ROOT/actrix-bin"
-WORKSPACE_TARGET_DIR="$E2E_TARGET_ROOT/workspace"
-TEMP_SERVICE_TARGET_DIR="$E2E_TARGET_ROOT/temp-service"
+ACTR_TARGET_DIR="${ACTR_TARGET_DIR:-$E2E_TARGET_ROOT/actr-cli}"
+ACTRIX_TARGET_DIR="${ACTRIX_TARGET_DIR:-$E2E_TARGET_ROOT/actrix-bin}"
+WORKSPACE_TARGET_DIR="${WORKSPACE_TARGET_DIR:-$E2E_TARGET_ROOT/workspace}"
+TEMP_SERVICE_TARGET_DIR="${TEMP_SERVICE_TARGET_DIR:-$E2E_TARGET_ROOT/temp-service}"
 DEFAULT_MESSAGE="TmpFlow"
 
 BACKEND="cdylib"
@@ -51,20 +67,18 @@ if [[ "$BACKEND" != "cdylib" ]]; then
     fail "Only --backend cdylib is supported in this scenario"
 fi
 
-# MODE selects which registration path is exercised:
-#   path1                (default) published package, Path 1, full echo round-trip
-#   path1-with-keychain  published package + configured mfr.keychain (Path 1 ignores proof)
-#   path2-happy          unpublished package + runner proof → Path 2 success
-#   path2-no-proof       unpublished package, no keychain → Path 2 rejection
-#   path2-wrong-key      unpublished package, runner proof signed by unrelated key → rejection
-#   rotation             unpublished package, MFR key retired (pass) then revoked (reject)
-MODE="${MODE:-path1}"
+# MODE selects the scenario. The service host never holds the Publisher's
+# private key: it registers with the signed package and its Realm client key.
+#   unpublished  (default) full lifecycle without publishing the package to Loran
+#   published    optional Registry publication, same full runtime lifecycle
+#   rotation     unpublished package, Publisher key retired (pass) then revoked (reject)
+MODE="${MODE:-unpublished}"
 case "$MODE" in
-    path1|path1-with-keychain|path2-happy|path2-no-proof|path2-wrong-key|rotation) ;;
+    published|unpublished|rotation) ;;
     *) fail "Unknown MODE: $MODE" ;;
 esac
 
-for cmd in cargo curl jq sqlite3 python3 perl rustc lsof; do
+for cmd in cargo curl jq sqlite3 python3 perl rustc lsof timeout; do
     require_cmd "$cmd"
 done
 
@@ -86,23 +100,33 @@ ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
 CLIENT_RUNTIME_PATH="$RUN_DIR/client-runtime.toml"
 ACTRIX_DB="$SQLITE_DIR/actrix.db"
-SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/mfr.keychain.json"
+PUBLISHER_PRIVATE_DIR="$RUN_DIR/publisher-private"
+BUILDER_HOME="$RUN_DIR/home-builder"
+BUILDER_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+BUILDER_RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+SERVICE_KEYCHAIN="$PUBLISHER_PRIVATE_DIR/package.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
-PROVISIONED_KEYCHAIN="$RUN_DIR/mfr.keychain.json"
-PROVISIONED_PUBLIC_KEY="$RUN_DIR/mfr-public-key.json"
-CLIENT_GUEST_PACKAGE="$DIST_DIR/${CLIENT_MANUFACTURER}-pkg-runtime-echo-client-guest-${CLIENT_GUEST_VERSION}-cdylib.actr"
+PROVISIONED_KEYCHAIN="$SERVICE_KEYCHAIN"
+PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
+CLIENT_GUEST_PACKAGE="$DIST_DIR/${CLIENT_PUBLISHER}-pkg-runtime-echo-client-guest-${CLIENT_GUEST_VERSION}-cdylib.actr"
 CLIENT_GUEST_PUBLIC_KEY="$DIST_DIR/public-key.json"
 
-mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT"
+umask 077
+mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT" "$PUBLISHER_PRIVATE_DIR" "$BUILDER_HOME"
+RUNTIME_LAUNCHER=(python3 "$SCRIPT_DIR/lib/runtime-isolation.py" --private-dir "$PUBLISHER_PRIVATE_DIR" --)
 
 ACTRIX_PID=""
+HTTPS_PID=""
 SERVER_PID=""
 CLIENT_PID=""
 ACTR_CLI_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
-REALM_SECRET=""
+REALM_NAME_PREFIX="package-runtime-echo"
+REALM_OWNER_KEY=""
+REALM_CLIENT_KEY=""
+REALM_CLIENT_MEMBER_ID=""
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 
 cleanup() {
@@ -117,6 +141,9 @@ cleanup() {
     if [ -n "$ACTRIX_PID" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
         kill "$ACTRIX_PID" 2>/dev/null || true
     fi
+    if [ -n "$HTTPS_PID" ] && kill -0 "$HTTPS_PID" 2>/dev/null; then
+        kill "$HTTPS_PID" 2>/dev/null || true
+    fi
     wait 2>/dev/null || true
 
     if [ $status -eq 0 ] && [ "${KEEP_TMP:-0}" != "1" ]; then
@@ -126,10 +153,15 @@ cleanup() {
         echo "Artifacts preserved at: $RUN_DIR"
     fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 run_actr() {
-    CARGO_TARGET_DIR="$ACTR_TARGET_DIR" "$ACTR_CLI_BIN" "$@"
+    # pkg keygen writes ~/.actr/config.toml even with an explicit output.
+    # Isolate all CLI configuration while keeping the existing toolchain cache.
+    HOME="$BUILDER_HOME" CARGO_HOME="$BUILDER_CARGO_HOME" RUSTUP_HOME="$BUILDER_RUSTUP_HOME" \
+        CARGO_TARGET_DIR="$ACTR_TARGET_DIR" "$ACTR_CLI_BIN" "$@"
 }
 
 build_local_actr_cli() {
@@ -140,20 +172,21 @@ build_local_actr_cli() {
     success "actr CLI ready: $ACTR_CLI_BIN"
 }
 
-# Build actrix from the branch source into a cache dir and use it, rather than
-# trusting an `actrix` found on PATH (which may be a stale install that doesn't
-# serve the /mfr public routes or accept the current config schema). A caller
-# (CI) may pre-set ACTRIX_BIN to skip the build.
+# Build a test-only server whose injected transport serves the disposable
+# publisher's signed Profile. The production executable retains public HTTPS
+# discovery and has no fixture override, including in all-features builds.
 build_local_actrix() {
     if [ -n "${ACTRIX_BIN:-}" ] && [ -x "$ACTRIX_BIN" ]; then
-        success "Using caller-provided actrix: $ACTRIX_BIN"
+        "$ACTRIX_BIN" --list | grep -q '^package_runtime_fixture: test$' ||
+            fail "ACTRIX_BIN must be the actrix test binary containing package_runtime_fixture"
+        success "Using caller-provided actrix test fixture: $ACTRIX_BIN"
         return 0
     fi
     section "🔧 Building local actrix from source"
-    CARGO_TARGET_DIR="$ACTRIX_TARGET_DIR" cargo build \
+    CARGO_TARGET_DIR="$ACTRIX_TARGET_DIR" cargo test --no-run --message-format=json \
         --manifest-path "$REPO_ROOT/crates/loran-server/Cargo.toml" \
-        --bin actrix >/dev/null
-    ACTRIX_BIN="$ACTRIX_TARGET_DIR/debug/actrix"
+        --bin actrix >"$RUN_DIR/actrix-fixture-build.jsonl"
+    ACTRIX_BIN="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "actrix" and .profile.test == true and .executable != null) | .executable' "$RUN_DIR/actrix-fixture-build.jsonl" | tail -1)"
     [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
     export ACTRIX_BIN
     success "actrix ready: $ACTRIX_BIN"
@@ -170,12 +203,15 @@ render_runtime_configs() {
 
 start_actrix() {
     section "🚀 Starting local actrix"
-    kill_listener tcp "$HTTP_PORT"
-    kill_listener udp "$ICE_PORT"
+    if lsof -tiTCP:"$HTTP_PORT" -sTCP:LISTEN >/dev/null 2>&1 \
+        || lsof -tiUDP:"$ICE_PORT" >/dev/null 2>&1; then
+        fail "Realm E2E ports are occupied; set HTTP_PORT and ICE_PORT to unused ports"
+    fi
 
-    # ACTRIX_RUST_LOG lets path2 modes capture the debug Path 2 marker.
+    # ACTRIX_RUST_LOG lets modes capture the debug provenance marker.
     RUST_LOG="${ACTRIX_RUST_LOG:-${RUST_LOG:-info}}" \
-        "$ACTRIX_BIN" --config "$ACTRIX_CONFIG_PATH" >"$LOG_DIR/actrix.log" 2>&1 &
+        ACTR_PACKAGE_RUNTIME_FIXTURE=1 ACTR_PACKAGE_RUNTIME_CONFIG="$ACTRIX_CONFIG_PATH" \
+        "$ACTRIX_BIN" package_runtime_fixture --exact --ignored --nocapture >"$LOG_DIR/actrix.log" 2>&1 &
     ACTRIX_PID=$!
 
     if ! wait_for_http_ok "http://127.0.0.1:${HTTP_PORT}/signaling/health" 120; then
@@ -198,55 +234,22 @@ login_admin() {
     success "Admin API login succeeded"
 }
 
-warmup_ais_key() {
-    section "🔑 Warming up AIS signing key"
-    [ -n "${ADMIN_TOKEN:-}" ] || login_admin
-    local current_key_file="$RUN_DIR/ais-current-key.json"
-    local rotate_file="$RUN_DIR/ais-rotate-key.json"
+wait_for_signer() {
+    section "🔑 Waiting for Signer"
+    local health_file="$RUN_DIR/issuer-health.json"
     local attempt=0
 
     while [ $attempt -lt 60 ]; do
-        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/ais/current-key" >"$current_key_file" 2>/dev/null \
-            && [ "$(jq -r '.status // "missing"' "$current_key_file" 2>/dev/null)" = "success" ]; then
-            success "AIS signing key is ready"
+        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/issuer/health" >"$health_file" 2>/dev/null \
+            && [ "$(jq -r '.signer_service // "missing"' "$health_file" 2>/dev/null)" = "ok" ]; then
+            success "Signer is ready"
             return 0
         fi
-
-        curl -fsS -X POST \
-            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-            "http://127.0.0.1:${HTTP_PORT}/admin/api/services/ais/keys/rotate" \
-            >"$rotate_file" 2>/dev/null || true
         sleep 1
         attempt=$((attempt + 1))
     done
 
-    fail "AIS signing key warmup timed out"
-}
-
-ensure_realm() {
-    section "🪪 Creating realm via Admin API"
-    local create_file="$RUN_DIR/realm-create.json"
-    local realm_name="package-runtime-echo-${RUN_ID}"
-    curl -fsS \
-        -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/realms" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d "{\"name\":\"${realm_name}\",\"enabled\":true,\"expires_at\":0}" \
-        >"$create_file"
-
-    REALM_ID="$(json_field "$create_file" '.realm.realm_id')"
-    REALM_SECRET="$(json_field "$create_file" '.realm_secret')"
-
-    [ -n "$REALM_ID" ] || fail "Realm creation returned an empty realm id"
-    [ -n "$REALM_SECRET" ] || fail "Realm creation returned an empty realm secret"
-    # The secret is interpolated into TOML string literals below; URL-safe
-    # base64 stays inside that grammar, so reject anything else before it can
-    # make .actr/config.toml unparseable.
-    case "$REALM_SECRET" in
-        *[!A-Za-z0-9_-]*) fail "realm_secret has characters outside URL-safe base64" ;;
-    esac
-    success "Realm ${REALM_ID} created"
+    fail "Signer did not become ready"
 }
 
 append_workspace_patch() {
@@ -286,57 +289,13 @@ write_project_keychain_config() {
     local keychain_path="$2"
     mkdir -p "$project_dir/.actr"
     cat >"$project_dir/.actr/config.toml" <<EOF
-[mfr]
+[publisher]
 keychain = "$keychain_path"
 EOF
 }
 
-provision_mfr_keychain() {
-    section "🏷️  Provisioning MFR keychain via Admin API"
-    local apply_file="$RUN_DIR/mfr-apply.json"
-    local approve_file="$RUN_DIR/mfr-approve.json"
-    local now
-    now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-    curl -fsS \
-        -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/apply" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d "{\"github_login\":\"${MANUFACTURER}\",\"contact\":\"e2e@local.actr\"}" \
-        >"$apply_file"
-
-    local mfr_id
-    mfr_id="$(json_field "$apply_file" '.mfr_id')"
-
-    curl -fsS \
-        -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/admin/${mfr_id}/approve" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d '{}' \
-        >"$approve_file"
-
-    mkdir -p "$(dirname "$PROVISIONED_KEYCHAIN")"
-    jq -n \
-        --arg private_key "$(json_field "$approve_file" '.private_key')" \
-        --arg public_key "$(json_field "$approve_file" '.certificate.mfr_pubkey')" \
-        --arg created_at "$now" \
-        '{
-          created_at: $created_at,
-          note: "E2E manufacturer signing key issued by local actrix admin API",
-          private_key: $private_key,
-          public_key: $public_key
-        }' \
-        >"$PROVISIONED_KEYCHAIN"
-    chmod 600 "$PROVISIONED_KEYCHAIN" 2>/dev/null || true
-
-    jq -n \
-        --arg public_key "$(json_field "$approve_file" '.certificate.mfr_pubkey')" \
-        '{ public_key: $public_key }' \
-        >"$PROVISIONED_PUBLIC_KEY"
-
-    success "Generated manufacturer keychain for ${MANUFACTURER}"
+provision_publisher_keychain() {
+    provision_e2e_publisher
 }
 
 scaffold_service_guest() {
@@ -346,12 +305,11 @@ scaffold_service_guest() {
         --template echo \
         --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-        --manufacturer "$MANUFACTURER" \
+        --publisher "$PUBLISHER" \
+        --realm "$REALM" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
-    mkdir -p "$(dirname "$SERVICE_KEYCHAIN")"
-    cp "$PROVISIONED_KEYCHAIN" "$SERVICE_KEYCHAIN"
     cp "$PROVISIONED_PUBLIC_KEY" "$SERVICE_PUBLIC_KEY"
     write_project_keychain_config "$TMP_SERVICE_DIR" "$SERVICE_KEYCHAIN"
 
@@ -379,7 +337,7 @@ scaffold_service_guest() {
 
 build_service_package() {
     section "📦 Building the server package"
-    SERVICE_PACKAGE="$DIST_DIR/${MANUFACTURER}-EchoService-${SERVICE_VERSION}-${HOST_TARGET}.actr"
+    SERVICE_PACKAGE="$DIST_DIR/${PUBLISHER}-EchoService-${SERVICE_VERSION}-${HOST_TARGET}.actr"
 
     (
         cd "$TMP_SERVICE_DIR"
@@ -439,9 +397,9 @@ version = 1
 
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
-ais_endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
-realm_id = $REALM_ID
-realm_secret = "$REALM_SECRET"
+issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
+realm = "$REALM"
+realm_client_key = "$REALM_CLIENT_KEY"
 EOF
     (
         cd "$client_guest_dir"
@@ -468,94 +426,18 @@ EOF
     success "Client guest package ready"
 }
 
-seed_client_registry_state() {
-    section "🗂️  Seeding client registry metadata"
-    python3 - "$ACTRIX_DB" "$CLIENT_GUEST_PACKAGE" "$CLIENT_GUEST_PUBLIC_KEY" <<'PY'
-import base64
-import json
-import sqlite3
-import sys
-import time
-import zipfile
-
-import tomllib
-
-db_path, package_path, public_key_path = sys.argv[1:]
-now = int(time.time())
-key_expires_at = now + 365 * 24 * 3600
-
-with open(public_key_path, "r", encoding="utf-8") as fh:
-    public_key = json.load(fh)["public_key"]
-
-with zipfile.ZipFile(package_path, "r") as zf:
-    manifest = zf.read("manifest.toml").decode("utf-8")
-    signature = base64.b64encode(zf.read("manifest.sig")).decode("ascii")
-
-manifest_data = tomllib.loads(manifest)
-manufacturer = manifest_data["manufacturer"]
-name = manifest_data["name"]
-version = manifest_data["version"]
-target = manifest_data.get("binary", {}).get("target", "cdylib")
-type_str = f"{manufacturer}:{name}:{version}"
-
-conn = sqlite3.connect(db_path)
-try:
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT OR IGNORE INTO mfr
-            (name, public_key, contact, status, created_at, updated_at, verified_at, key_expires_at)
-        VALUES (?, ?, ?, 'active', ?, ?, ?, ?)
-        """,
-        (manufacturer, public_key, "e2e@local.actr", now, now, now, key_expires_at),
-    )
-    cur.execute(
-        """
-        UPDATE mfr
-           SET public_key = ?,
-               status = 'active',
-               updated_at = ?,
-               verified_at = ?,
-               key_expires_at = ?,
-               suspended_at = NULL,
-               revoked_at = NULL
-         WHERE name = ?
-        """,
-        (public_key, now, now, key_expires_at, manufacturer),
-    )
-    cur.execute("SELECT id FROM mfr WHERE name = ?", (manufacturer,))
-    mfr_id = cur.fetchone()[0]
-    cur.execute(
-        """
-        INSERT INTO mfr_package
-            (mfr_id, manufacturer, name, version, type_str, target, manifest, signature, status, published_at, revoked_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL)
-        ON CONFLICT(manufacturer, name, version, target) DO UPDATE SET
-            mfr_id = excluded.mfr_id,
-            type_str = excluded.type_str,
-            manifest = excluded.manifest,
-            signature = excluded.signature,
-            status = 'active',
-            published_at = excluded.published_at,
-            revoked_at = NULL
-        """,
-        (mfr_id, manufacturer, name, version, type_str, target, manifest, signature, now),
-    )
-    conn.commit()
-finally:
-    conn.close()
-PY
-
-    success "Client registry state seeded"
-}
-
+# The client package is verified by StaticTrust and registers as a development
+# identity. Only the service publisher is provisioned in the Registry.
 render_client_runtime_config() {
     render_template \
         "$SCRIPT_DIR/config/client-runtime.toml.tpl" \
         "$CLIENT_RUNTIME_PATH" \
-        "__REALM_ID__=$REALM_ID" \
+        "__HTTP_PORT__=$HTTP_PORT" \
+        "__ICE_PORT__=$ICE_PORT" \
+        "__REALM__=$REALM" \
         "__ECHO_SERVICE_VERSION__=$SERVICE_VERSION" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM_CLIENT_KEY__=$REALM_CLIENT_KEY"
+    apply_verified_realm_config "$CLIENT_RUNTIME_PATH"
 }
 
 run_client_and_assert() {
@@ -563,19 +445,25 @@ run_client_and_assert() {
     render_client_runtime_config
     CARGO_TARGET_DIR="$WORKSPACE_TARGET_DIR" cargo build --manifest-path "$SCRIPT_DIR/client/Cargo.toml" >/dev/null
 
+    # The isolated HOME only keeps the hyper data dir away from the
+    # developer's ~/.actr.
+    local client_home="$RUN_DIR/home-client"
+    mkdir -p "$client_home"
+
     (
         sleep 3
         echo "$TEST_INPUT"
         sleep 2
         echo "quit"
     ) | \
+        HOME="$client_home" \
         ECHO_ACTR_VERSION="$SERVICE_VERSION" \
+        ISSUER_ENDPOINT="http://127.0.0.1:${HTTP_PORT}/issuer" \
         CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
-        RUST_LOG="${RUST_LOG:-info}" \
-        CARGO_TARGET_DIR="$WORKSPACE_TARGET_DIR" \
-        cargo run --manifest-path "$SCRIPT_DIR/client/Cargo.toml" --bin package-runtime-echo-client \
+        RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
+        "${RUNTIME_LAUNCHER[@]}" "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
         >"$LOG_DIR/client.log" 2>&1 &
     CLIENT_PID=$!
 
@@ -609,8 +497,41 @@ run_client_and_assert() {
     fail "Expected echo reply not found"
 }
 
+# Removing the client's member revokes its Realm client key: the same client
+# host can no longer obtain an Actor credential.
+assert_removed_member_refused() {
+    section "🚫 Removing the client's member"
+    run_actr realm remove-member --key "$REALM_OWNER_KEY" "$REALM_CLIENT_MEMBER_ID" >/dev/null
+    run_actr realm members --key "$REALM_OWNER_KEY" >"$RUN_DIR/members.json"
+    [ "$(jq -r --arg id "$REALM_CLIENT_MEMBER_ID" \
+        '.members[] | select(.member_id == $id) | .status' "$RUN_DIR/members.json")" = "removed" ] ||
+        fail "The client's member is not listed as removed"
+
+    local client_home="$RUN_DIR/home-client-removed"
+    mkdir -p "$client_home"
+    local status=0
+    echo "quit" | \
+        HOME="$client_home" \
+        ECHO_ACTR_VERSION="$SERVICE_VERSION" \
+        ISSUER_ENDPOINT="http://127.0.0.1:${HTTP_PORT}/issuer" \
+        CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
+        CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
+        CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
+        RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
+        "${RUNTIME_LAUNCHER[@]}" timeout "${CLIENT_TIMEOUT_SECONDS:-40}" \
+        "$WORKSPACE_TARGET_DIR/debug/package-runtime-echo-client" \
+        >"$LOG_DIR/client-removed.log" 2>&1 || status=$?
+
+    if [ "$status" -ne 0 ] && grep -q "client_revoked" "$LOG_DIR/client-removed.log"; then
+        success "The removed member's client was refused a credential"
+        return 0
+    fi
+    cat "$LOG_DIR/client-removed.log" || true
+    fail "The removed member's client was not refused (exit status $status)"
+}
+
 # ============================================================================
-# Runner-signature / Path 2 mode helpers (P0 isolation + assertions)
+# Mode helpers
 # ============================================================================
 
 # Per-mode isolated HOME and hyper data dir, so actr run never touches the real
@@ -623,43 +544,25 @@ mk_isolated_env() {
     printf '%s\t%s\n' "$home_dir" "$hyper_dir"
 }
 
-# Write the mfr.keychain into the GLOBAL config of an isolated HOME (CWD-independent,
-# since resolve_effective_cli_config reads ~/.actr/config.toml via dirs::home_dir()).
-write_global_keychain_config() {
-    local home_dir="$1"
-    local keychain_path="$2"
-    mkdir -p "$home_dir/.actr"
-    cat >"$home_dir/.actr/config.toml" <<EOF
-[mfr]
-keychain = "$keychain_path"
-EOF
-}
-
-# E2: assert neither the isolated HOME nor the CWD carries a keychain config,
-# so build_runner_auth_provider() is deterministically None.
-assert_no_keychain_config() {
-    local home_dir="$1"
-    if [ -f "$home_dir/.actr/config.toml" ]; then
-        fail "E2 precondition violated: $home_dir/.actr/config.toml exists"
-    fi
-    if [ -f ".actr/config.toml" ]; then
-        fail "E2 precondition violated: CWD .actr/config.toml exists"
-    fi
-    success "Confirmed no keychain config present (provider will be None)"
-}
-
-# P0-2: assert no active mfr_package row for type_str+target, so the request
-# cannot accidentally pass via Path 1.
-assert_no_active_package() {
+# A public Publisher Profile/key cache is allowed; a package-publication row
+# for this release is not. Do not hide DB errors or ignore revoked rows.
+assert_no_package_record() {
     local type_str="$1"
     local target="$2"
     local count
-    count="$(sqlite3 "$ACTRIX_DB" \
-        "SELECT COUNT(*) FROM mfr_package WHERE type_str='$type_str' AND target='$target' AND status='active';" 2>/dev/null || echo 0)"
+    count="$(python3 - "$ACTRIX_DB" "$type_str" "$target" <<'PY'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as connection:
+    print(connection.execute(
+        'SELECT COUNT(*) FROM publisher_package WHERE type_str = ? AND target = ?',
+        sys.argv[2:4],
+    ).fetchone()[0])
+PY
+)"
     if [ "$count" != "0" ]; then
-        fail "Precondition violated: $count active mfr_package row(s) for type_str=$type_str target=$target (Path 1 would shadow Path 2)"
+        fail "Unexpected package-publication record(s): $count for $type_str / $target"
     fi
-    success "Confirmed no active published package for $type_str / $target"
+    success "Confirmed no package-publication record for $type_str / $target"
 }
 
 # Render the server runtime config (reuses the existing template).
@@ -667,9 +570,12 @@ render_server_runtime() {
     render_template \
         "$SCRIPT_DIR/config/server-runtime.toml.tpl" \
         "$SERVER_RUNTIME_PATH" \
+        "__HTTP_PORT__=$HTTP_PORT" \
+        "__ICE_PORT__=$ICE_PORT" \
         "__PACKAGE_PATH__=$SERVICE_PACKAGE" \
-        "__REALM_ID__=$REALM_ID" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM__=$REALM" \
+        "__REALM_CLIENT_KEY__=$REALM_OWNER_KEY"
+    apply_verified_realm_config "$SERVER_RUNTIME_PATH"
 }
 
 # Launch actr run fully isolated — independent HOME and --hyper-dir.
@@ -680,15 +586,25 @@ start_server_isolated() {
     local hyper_dir="$2"
     local log_name="${3:-server.log}"
     render_server_runtime
+    HOME="$home_dir" "${RUNTIME_LAUNCHER[@]}" python3 - "$SERVICE_KEYCHAIN" "$REALM_OWNER_KEY" <<'PY'
+import pathlib, sys
+try:
+    pathlib.Path(sys.argv[1]).read_bytes()
+except OSError:
+    pass
+else:
+    raise SystemExit('Runtime can read the Publisher signing key')
+assert pathlib.Path(sys.argv[2]).read_bytes(), 'Runtime cannot read its own Realm key'
+PY
     HOME="$home_dir" \
-        RUST_LOG="${RUST_LOG:-info}" \
+        RUST_LOG="${ACTR_E2E_RUST_LOG:-info}" \
         CARGO_TARGET_DIR="$ACTR_TARGET_DIR" \
-        "$ACTR_CLI_BIN" run -c "$SERVER_RUNTIME_PATH" --hyper-dir "$hyper_dir" \
+        "${RUNTIME_LAUNCHER[@]}" "$ACTR_CLI_BIN" run -c "$SERVER_RUNTIME_PATH" --hyper-dir "$hyper_dir" \
         >"$LOG_DIR/$log_name" 2>&1 &
     SERVER_PID=$!
 }
 
-# Poll for successful startup (Path 2 success surfaces as "ActrNode started").
+# Poll for successful startup ("ActrNode started").
 expect_server_started() {
     local log_name="${1:-server.log}"
     local attempt=0
@@ -698,7 +614,7 @@ expect_server_started() {
             fail "Server host exited before becoming ready (expected success)"
         fi
         if grep -q "ActrNode started" "$LOG_DIR/$log_name" 2>/dev/null; then
-            success "Server host started (AIS registration succeeded)"
+            success "Server host started (Issuer registration succeeded)"
             return 0
         fi
         sleep 1
@@ -708,16 +624,16 @@ expect_server_started() {
 }
 
 # Poll for expected rejection: server must exit non-zero and log a rejection.
-# Rejection can happen at two stages: AIS registration ("Failed to register with
-# AIS") for missing/wrong runner proof, or earlier at package attach
-# ("Failed to attach package: untrusted manufacturer") when the MFR key is
-# revoked and cert_cache cannot fetch the pubkey.
+# Rejection can happen at two stages: Issuer registration ("Failed to register with
+# Issuer"), or earlier at package attach ("Failed to attach package: untrusted
+# publisher") when the Publisher Registry key is revoked and cert_cache cannot
+# fetch the pubkey.
 expect_server_rejected() {
     local log_name="${1:-server.log}"
     local attempt=0
     while [ $attempt -lt 30 ]; do
         if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            if grep -qE "Failed to register with AIS|Failed to attach package|untrusted manufacturer" "$LOG_DIR/$log_name" 2>/dev/null; then
+            if grep -qE "Failed to register with Issuer|Failed to attach package|untrusted publisher" "$LOG_DIR/$log_name" 2>/dev/null; then
                 success "Server host rejected as expected"
                 return 0
             fi
@@ -741,38 +657,13 @@ stop_server() {
     SERVER_PID=""
 }
 
-# Assert actrix.log carries the Path 2 success marker (and NOT the Path 1 marker),
-# proving registration really went through Path 2. The source logs
-# "MFR manifest and manufacturer signature verification passed" (issuer.rs); we
-# match the stable "signature verification passed" substring so the assertion
-# survives the runner->manufacturer rename. Path 1 logs "MFR table lookup
-# passed", which carries no "signature" token, so the two are mutually exclusive.
-assert_path2_taken() {
-    if ! grep -q "signature verification passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Path 2 success marker not found in actrix.log (did it take Path 1?)"
+# Assert actrix.log shows the package verified with its Publisher identity
+# (not as a development identity).
+assert_publisher_provenance() {
+    if ! grep -q "Package provenance verified.*provenance=Publisher" "$LOG_DIR/actrix.log" 2>/dev/null; then
+        fail "Publisher provenance marker not found in actrix.log"
     fi
-    if grep -q "MFR table lookup passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Path 1 marker found in actrix.log (should have taken Path 2)"
-    fi
-    success "Confirmed registration went through Path 2"
-}
-
-# Symmetric counterpart to assert_path2_taken: assert registration went through
-# Path 1 (published package, registry table lookup) and NOT Path 2. This catches
-# a silent Path 1 -> Path 2 fallback: if the registry lookup were to miss (e.g.
-# a target/manifest-hash matching regression), a published package with a
-# configured keychain would still succeed via Path 2 and the mode would stay
-# green without actually exercising Path 1. Path 1 logs "MFR table lookup
-# passed" (issuer.rs); Path 2 logs "...signature verification passed", so the
-# two markers are mutually exclusive.
-assert_path1_taken() {
-    if ! grep -q "MFR table lookup passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Path 1 success marker not found in actrix.log (did registration fall through to Path 2, or was the registry lookup missed?)"
-    fi
-    if grep -q "signature verification passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Path 2 marker found in actrix.log (should have taken Path 1; published package must not need a runner proof)"
-    fi
-    success "Confirmed registration went through Path 1"
+    success "Confirmed registration kept the Publisher identity"
 }
 
 stop_actrix() {
@@ -787,106 +678,38 @@ stop_actrix() {
 # Mode flows
 # ============================================================================
 
-mode_path1_full_echo() {
-    # Original happy path: publish → run server → client echo round-trip.
-    # Server runs with an isolated empty HOME (no keychain) so it is hermetic
-    # and does not depend on the real ~/.actr/config.toml; a published package
-    # succeeds via Path 1 without any runner proof.
-    publish_service_package
+mode_runtime() {
+    if [ "$MODE" = published ]; then
+        publish_service_package
+    else
+        assert_no_package_record "${PUBLISHER}/EchoService@${SERVICE_VERSION}" "$HOST_TARGET"
+    fi
     local env
-    env="$(mk_isolated_env "p1")"
+    env="$(mk_isolated_env "$MODE")"
     local home_dir hyper_dir
     IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
     start_server_isolated "$home_dir" "$hyper_dir" "server.log"
     expect_server_started "server.log"
+    assert_publisher_provenance
     # Dependency installation resolves the service over signaling, so the
-    # published service must also be online before the client guest lockfile is
+    # service must also be online before the client guest lockfile is
     # generated. Reuse this server for the final echo round-trip.
     build_client_guest_package
-    seed_client_registry_state
     run_client_and_assert
-    stop_server
-}
-
-mode_path1_with_keychain() {
-    section "🧪 MODE=path1-with-keychain (Path 1 ignores configured keychain)"
-    publish_service_package
-    local env
-    env="$(mk_isolated_env "p1kc")"
-    local home_dir hyper_dir
-    IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-    write_global_keychain_config "$home_dir" "$SERVICE_KEYCHAIN"
-    start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    # A published package succeeds via Path 1 regardless of whether a keychain
-    # is configured. Assert Path 1 was actually taken (not a silent fallback to
-    # Path 2, which would also succeed here because the keychain holds key A).
-    expect_server_started "server.log"
-    assert_path1_taken
-    stop_server
-}
-
-mode_path2_happy() {
-    section "🧪 MODE=path2-happy (unpublished package + runner proof → Path 2 success)"
-    local type_str="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
-    assert_no_active_package "$type_str" "$HOST_TARGET"
-    local env
-    env="$(mk_isolated_env "p2h")"
-    local home_dir hyper_dir
-    IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-    write_global_keychain_config "$home_dir" "$SERVICE_KEYCHAIN"
-    start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    expect_server_started "server.log"
-    assert_path2_taken
-    stop_server
-}
-
-mode_path2_no_proof() {
-    section "🧪 MODE=path2-no-proof (unpublished package, no keychain → Path 2 rejection)"
-    local type_str="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
-    assert_no_active_package "$type_str" "$HOST_TARGET"
-    local env
-    env="$(mk_isolated_env "p2np")"
-    local home_dir hyper_dir
-    IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-    assert_no_keychain_config "$home_dir"
-    start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    expect_server_rejected "server.log"
-    # The no-proof rejection is deterministic: with no keychain the runtime
-    # sends manifest_raw + mfr_signature but no manufacturer_auth_* triple, so
-    # Path 2 must emit this marker before rejecting. Make it a hard assertion so
-    # a rejection at the wrong stage (e.g. attach-time) cannot pass this mode.
-    if ! grep -q "unpublished package requires" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Expected 'unpublished package requires ...' rejection marker in actrix.log (Path 2 no-proof rejection did not fire as expected)"
+    if [ "$REALM_MODE" != legacy ]; then
+        stop_server
+        start_server_isolated "$home_dir" "$hyper_dir" "server-restarted.log"
+        expect_server_started "server-restarted.log"
+        run_client_and_assert
     fi
-    stop_server
-}
-
-mode_path2_wrong_key() {
-    section "🧪 MODE=path2-wrong-key (runner proof signed by unrelated key → rejection)"
-    local type_str="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
-    assert_no_active_package "$type_str" "$HOST_TARGET"
-
-    local env
-    env="$(mk_isolated_env "p2wk")"
-    local home_dir hyper_dir
-    IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
-
-    # Generate an unrelated key B with an ISOLATED HOME: `actr pkg keygen`
-    # writes the keychain path into ~/.actr/config.toml, so it must not touch
-    # the real home (would pollute other modes that read the real config).
-    local wrong_keychain="$RUN_DIR/wrong-key.json"
-    HOME="$home_dir" run_actr pkg keygen --output "$wrong_keychain" --force >/dev/null
-    write_global_keychain_config "$home_dir" "$wrong_keychain"
-
-    start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    expect_server_rejected "server.log"
+    assert_removed_member_refused
     stop_server
 }
 
 mode_rotation() {
     section "🧪 MODE=rotation (retired key passes, revoked key rejects)"
-    local type_str="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
-    assert_no_active_package "$type_str" "$HOST_TARGET"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
+    assert_no_package_record "$type_str" "$HOST_TARGET"
 
     # The manifest's signing_key_id (key A) — needed to find the history_id after rotation.
     local signing_key_id
@@ -899,47 +722,80 @@ PY
 )"
     [ -n "$signing_key_id" ] || fail "Could not read signing_key_id from manifest"
 
-    # Look up the MFR id (provision_mfr_keychain created it for $MANUFACTURER).
-    local mfr_id
-    mfr_id="$(curl -fsS "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/admin/list" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        | jq -r ".[] | select(.name==\"${MANUFACTURER}\") | .id")"
-    [ -n "$mfr_id" ] || fail "Could not resolve mfr_id for ${MANUFACTURER}"
+    # Look up the publisher fixture row.
+    local publisher_id
+    publisher_id="$(sqlite3 "$ACTRIX_DB" "SELECT id FROM publisher WHERE name='${PUBLISHER}';")"
+    [ -n "$publisher_id" ] || fail "Could not resolve publisher_id for ${PUBLISHER}"
 
-    # --- Phase 1: rotate A→B (A archived as retired), then run with keychain A. ---
-    section "🔄 Phase 1: rotate key (A → retired), expect Path 2 success"
-    curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/admin/${mfr_id}/renew" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' -d '{}' >/dev/null
+    # --- Phase 1: rotate A→B (A archived as retired); the package signed by A still runs. ---
+    section "🔄 Phase 1: rotate key (A → retired), expect success"
+    local rotation_keychain="$PUBLISHER_PRIVATE_DIR/rotation-b.keychain.json"
+    run_actr pkg keygen --output "$rotation_keychain" --force >/dev/null
+    python3 - "$ACTRIX_DB" "$PUBLISHER" "$rotation_keychain" <<'PY'
+import base64
+import hashlib
+import json
+import sqlite3
+import sys
+import time
+
+db_path, publisher, keychain_path = sys.argv[1:]
+with open(keychain_path, encoding="utf-8") as stream:
+    public_key = json.load(stream)["public_key"]
+key_id = "actr-pub-" + hashlib.sha256(base64.b64decode(public_key, validate=True)).hexdigest()[:16]
+now = int(time.time())
+connection = sqlite3.connect(db_path, timeout=30)
+connection.execute("PRAGMA foreign_keys = ON")
+with connection:
+    row = connection.execute(
+        "SELECT id, key_id, public_key, COALESCE(verified_at, created_at) FROM publisher WHERE name = ?",
+        (publisher,),
+    ).fetchone()
+    if row is None:
+        raise SystemExit(f"publisher fixture not found: {publisher}")
+    publisher_id, old_key_id, old_public_key, old_created_at = row
+    connection.execute(
+        """
+        INSERT INTO publisher_key_history
+            (publisher_id, key_id, public_key, status, created_at, retired_at)
+        VALUES (?, ?, ?, 'retired', ?, ?)
+        """,
+        (publisher_id, old_key_id, old_public_key, old_created_at, now),
+    )
+    connection.execute(
+        """
+        UPDATE publisher
+        SET public_key = ?, key_id = ?, key_expires_at = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (public_key, key_id, now + 365 * 86400, now, publisher_id),
+    )
+connection.close()
+PY
 
     local env1
     env1="$(mk_isolated_env "rot1")"
     local home1 hyper1
     IFS=$'\t' read -r home1 hyper1 <<<"$env1"
-    write_global_keychain_config "$home1" "$SERVICE_KEYCHAIN"
     start_server_isolated "$home1" "$hyper1" "server-phase1.log"
     expect_server_started "server-phase1.log"
-    assert_path2_taken
+    assert_publisher_provenance
     stop_server
 
     # --- Phase 2: revoke key A by history_id (matched by signing_key_id, not array order). ---
     section "🚫 Phase 2: revoke retired key A, expect rejection"
-    local history_id
-    history_id="$(curl -fsS "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/admin/${mfr_id}/keys" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        | jq -r ".[] | select(.key_id==\"${signing_key_id}\") | .id")"
-    [ -n "$history_id" ] || fail "Could not find history_id for key ${signing_key_id}"
-    curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/admin/keys/${history_id}/revoke" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+    local revoked_rows
+    revoked_rows="$(sqlite3 "$ACTRIX_DB" \
+        "UPDATE publisher_key_history SET status='revoked' WHERE publisher_id=${publisher_id} AND key_id='${signing_key_id}'; SELECT changes();")"
+    [ "$revoked_rows" = "1" ] || fail "Could not revoke historical key ${signing_key_id}"
 
-    # Re-confirm no published package row, so rejection comes from KeyRevoked, not Path 1.
-    assert_no_active_package "$type_str" "$HOST_TARGET"
+    # Re-confirm no published package row, so rejection comes from KeyRevoked.
+    assert_no_package_record "$type_str" "$HOST_TARGET"
 
     local env2
     env2="$(mk_isolated_env "rot2")"
     local home2 hyper2
     IFS=$'\t' read -r home2 hyper2 <<<"$env2"
-    write_global_keychain_config "$home2" "$SERVICE_KEYCHAIN"
     start_server_isolated "$home2" "$hyper2" "server-phase2.log"
     expect_server_rejected "server-phase2.log"
     stop_server
@@ -949,37 +805,46 @@ PY
 # Main
 # ============================================================================
 
-section "🧪 Package Runtime Echo E2E (MODE=${MODE})"
+section "🧪 Package Runtime Echo E2E (MODE=${MODE}, REALM_MODE=${REALM_MODE})"
 echo "Run directory: $RUN_DIR"
 echo "Backend:       $BACKEND"
 echo "Message:       $TEST_INPUT"
 echo "Actrix binary: $ACTRIX_BIN"
 
+python3 "$SCRIPT_DIR/test_runtime_isolation.py"
 render_runtime_configs
 build_local_actr_cli
 build_local_actrix
-# Modes that assert which path was taken need the debug-level Path 1 / Path 2
-# verification markers ("MFR table lookup passed" / "...signature verification
-# passed") in actrix.log.
-case "$MODE" in
-    path1-with-keychain|path2-happy|rotation) export ACTRIX_RUST_LOG="info,actrix::observability=debug" ;;
-esac
+if [ "$REALM_MODE" != legacy ]; then prepare_realm_scenario; fi
+# Modes that assert the provenance need the debug-level "Package provenance
+# verified" marker in actrix.log.
+export ACTRIX_RUST_LOG="info,actrix::observability=debug"
 start_actrix
 login_admin
-warmup_ais_key
-ensure_realm
-provision_mfr_keychain
+wait_for_signer
+if [ "$REALM_MODE" = legacy ]; then ensure_realm; fi
+provision_publisher_keychain
 scaffold_service_guest
 build_service_package
+if [ "$REALM_MODE" != legacy ]; then create_profile_realm; fi
+if [ "$REALM_STAGE" = profile ]; then
+    # An explicit transport diagnostic, not a successful runtime Echo. Keep
+    # the default/full CI path unchanged and require retirement verification.
+    retire_profile_realm
+    assert_no_package_record "${PUBLISHER}/EchoService@${SERVICE_VERSION}" "$HOST_TARGET"
+    success "Realm Profile/package lifecycle (REALM_MODE=${REALM_MODE}, REALM_HTTPS=${REALM_HTTPS:-0}) passed; runtime Echo was not run"
+    exit 0
+fi
 
 case "$MODE" in
-    path1)               mode_path1_full_echo ;;
-    path1-with-keychain) mode_path1_with_keychain ;;
-    path2-happy)         mode_path2_happy ;;
-    path2-no-proof)      mode_path2_no_proof ;;
-    path2-wrong-key)     mode_path2_wrong_key ;;
-    rotation)            mode_rotation ;;
+    published|unpublished) mode_runtime ;;
+    rotation)    mode_rotation ;;
 esac
 
+if [ "$REALM_MODE" != legacy ]; then retire_profile_realm; fi
+if [ "$MODE" != published ]; then
+    assert_no_package_record "${PUBLISHER}/EchoService@${SERVICE_VERSION}" "$HOST_TARGET"
+fi
+
 echo ""
-success "Package runtime echo E2E (MODE=${MODE}) completed successfully"
+success "Package runtime echo E2E (MODE=${MODE}, REALM_MODE=${REALM_MODE}) completed successfully"

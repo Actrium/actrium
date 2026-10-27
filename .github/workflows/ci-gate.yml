@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop, "release-*"]
   pull_request:
-    branches: [main, "release-*"]
+    branches: [main, "release-*", "feat/realm-multi-instance"]
   workflow_dispatch:
     inputs:
       full_run:
@@ -121,8 +121,20 @@ jobs:
         uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: wasm32-unknown-unknown
+      - name: Use runner sccache
+        id: runner-sccache
+        run: |
+          # The runner image already pins this version. Avoid a release API
+          # request before every build when that supported binary is present.
+          if command -v sccache >/dev/null 2>&1 &&
+             [ "$(sccache --version)" = "sccache 0.18.0" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Run sccache-cache
+        if: steps.runner-sccache.outputs.ready != 'true'
         uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.18.0
       - name: Install wasm-pack
         run: |
           if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
@@ -233,7 +245,7 @@ jobs:
     needs: [determine, cli_web_assets]
     if: needs.determine.outputs.e2e_package_runtime == 'true'
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 45
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
@@ -246,7 +258,7 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update
-          sudo apt-get install -y jq sqlite3 lsof perl
+          sudo apt-get install -y jq sqlite3 lsof perl bubblewrap openssl
       # protoc 29.3 ships in the self-hosted runner image; skip the
       # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
@@ -274,8 +286,18 @@ jobs:
           test -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
           test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
           bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
-      - name: Run package runtime echo e2e (PR gate, MODE=path1)
+      - name: Verify Publisher signing-key isolation
+        run: python3 tests/e2e/actr/package-runtime-echo/test_runtime_isolation.py
+      - name: Verify HTTPS transport and certificate rejection
+        run: python3 tests/e2e/actr/package-runtime-echo/test_https_documents.py
+      - name: Run package runtime echo e2e without Registry publication
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
+      - name: Run provider and external domain Realms without Registry publication
+        run: bash tests/e2e/actr/package-runtime-echo/realm-matrix.sh
+      - name: Verify optional Registry publication
+        run: MODE=published bash tests/e2e/actr/package-runtime-echo/run.sh
+      - name: Verify retired and revoked Publisher signing keys
+        run: MODE=rotation bash tests/e2e/actr/package-runtime-echo/run.sh
 
   audit:
     name: Dependency Audit

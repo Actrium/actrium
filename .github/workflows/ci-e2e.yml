@@ -31,7 +31,7 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update
-          sudo apt-get install -y jq sqlite3 lsof perl
+          sudo apt-get install -y jq sqlite3 lsof perl bubblewrap openssl
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -46,8 +46,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
-      - name: Run package runtime echo e2e
+      - name: Verify Publisher signing-key isolation
+        run: python3 tests/e2e/actr/package-runtime-echo/test_runtime_isolation.py
+      - name: Verify HTTPS transport and certificate rejection
+        run: python3 tests/e2e/actr/package-runtime-echo/test_https_documents.py
+      - name: Run package runtime echo e2e without Registry publication
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
+      - name: Run provider and external domain Realms without Registry publication
+        run: bash tests/e2e/actr/package-runtime-echo/realm-matrix.sh
+      - name: Verify optional Registry publication
+        run: MODE=published bash tests/e2e/actr/package-runtime-echo/run.sh
+      - name: Verify retired and revoked Publisher signing keys
+        run: MODE=rotation bash tests/e2e/actr/package-runtime-echo/run.sh
 
   # The standalone Rust echo e2e (`cargo test --test e2e_rust_echo`) was
   # superseded by `package-runtime-echo` once the Rust service template moved

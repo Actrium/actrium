@@ -120,12 +120,12 @@ public class HostBridgeTests
     public void StreamChunk_record_carries_timestamp_nullability()
     {
         var metadata = new[] { new ActrStreamMetadata("content-type", "application/octet-stream") };
-        var annotated = new ActrStreamChunk("stream-1", [1, 2, 3], 7, 1234, "1a@7/acme:Ask:1.0.0", metadata);
+        var annotated = new ActrStreamChunk("stream-1", [1, 2, 3], 7, 1234, "1a.test@example.com", metadata);
         Assert.Equal(1234, annotated.TimestampMs);
         Assert.Equal("content-type", annotated.Metadata[0].Key);
         Assert.Equal("application/octet-stream", annotated.Metadata[0].Value);
 
-        var plain = new ActrStreamChunk("stream-1", [], 8, null, "1a@7/acme:Ask:1.0.0", []);
+        var plain = new ActrStreamChunk("stream-1", [], 8, null, "1a.test@example.com", []);
         Assert.Null(plain.TimestampMs);
         Assert.Equal(ActrStreamChunk.HasTimestampFlag, (byte)0x01);
     }

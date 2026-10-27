@@ -1,5 +1,7 @@
 # Realm 全流程梳理与补漏记录（2026-02-24）
 
+> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。文中 `realm_id`、`source_realm_id` 等为 2026-02 时的列名，现为 `realm`、`source_realm`（Realm 名）。
+
 ## 1. 目标与范围
 
 基于 `TODO-cross-realm.md` 对项目做 realm 全流程审计，重点覆盖：
@@ -138,3 +140,5 @@
 2. 依赖意图检查（`ServiceSpec.dependencies`）尚未接入判定链。  
 3. Admin UI 的跨 realm ACL 可视化编辑与审计展示待补。  
 4. 需进一步明确 gRPC 管控面下 realm secret 发放/轮转的统一接口形态（当前 Admin UI REST 已覆盖）。
+> 历史审计快照：用于解释旧问题，不代表当前 Realm v1 实现。
+> 当前契约见 `REALM_V1_ARCHITECTURE.zh.md` 与 `THREAT_MODEL_REALM_V1.zh.md`。

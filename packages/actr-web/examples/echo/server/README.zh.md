@@ -65,7 +65,7 @@ import { createActor } from '@actrium/actr-web';
 
 const actor = await createActor({
   signalingUrl: 'wss://signal.example.com',
-  realm: 12345,
+  realm: 'web-echo@example.com',
   serviceWorkerPath: '/actor.sw.js',
 });
 

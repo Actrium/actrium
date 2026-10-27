@@ -5,17 +5,17 @@
 # and ports, then read directly as runtime configuration by the C# host's
 # ActrCabiNode.FromConfig.
 #
-# The actor type is declared in manifest.toml (actrium:EchoApp:0.1.0).
+# The actor type is declared in manifest.toml (actrium/EchoApp@0.1.0).
 
 [signaling]
 url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
 
-[ais_endpoint]
-url = "http://__HOST__:__HTTP_PORT__/ais"
+[issuer_endpoint]
+url = "http://__HOST__:__HTTP_PORT__/issuer"
 
 [deployment]
-realm_id = __REALM_ID__
-realm_secret = "__REALM_SECRET__"
+realm = "__REALM__"
+realm_client_key = "__REALM_CLIENT_KEY__"
 
 [discovery]
 visible = true
@@ -42,4 +42,4 @@ turn_urls = ["turn:__ICE_HOST__:__ICE_PORT__"]
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:EchoService:1.0.0"
+type = "actrium/EchoService@1.0.0"

@@ -1,5 +1,7 @@
 # Actr 移动端双端 WebRTC 连接、生命周期与网络恢复测试方案
 
+> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../GLOSSARY.zh.md)「历史名称对照」。
+
 状态：Rust 阶段 A–D 已实现并完成严格补强，等待 CI 运行时验证；阶段 E/F 仍属于
 真机、系统网络与长稳门禁
 
@@ -53,7 +55,7 @@ Rust T3/T5 证据与仍需外部设备/系统环境完成的门禁，不能把�
    直接视为 offerer：
    - offerer/answerer 以 Actrix 返回给两端的 `RoleAssignment` 为准；
    - 无显式角色偏好时，Actrix 按
-     `(realm_id, serial_number, manufacturer, name)` 的逆序确定 offerer；
+     `(realm, serial_number)` 的逆序确定 offerer；
    - 角色定向用例必须通过测试 `ActrId` 或 `webrtc_role=answer` 偏好得到目标角色，
      不能在测试端伪造 `RoleAssignment`；
    - 只有专门的 glare 用例才允许双方同时发起。

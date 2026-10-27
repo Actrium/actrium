@@ -10,9 +10,9 @@ source "$SCRIPT_DIR/lib/readiness.sh"
 
 HTTP_PORT=8081
 ICE_PORT=3478
-REALM_ID=""
+REALM=""
 ADMIN_PASSWORD="e2e-test-password"
-MANUFACTURER="actrium"
+PUBLISHER="e2e.actrium.example"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/actrix.toml"
@@ -54,15 +54,15 @@ TMP_SERVICE_DIR="$TMP_SERVICE_ROOT/echo-actr-$RANDOM"
 TMP_APP_DIR="$TMP_SERVICE_ROOT/echo-app-$RANDOM"
 ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
-SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/mfr.keychain.json"
+SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
-PROVISIONED_KEYCHAIN="$RUN_DIR/mfr.keychain.json"
-PROVISIONED_PUBLIC_KEY="$RUN_DIR/mfr-public-key.json"
+PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
+PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
 ECHOAPP_ACTRIX_CONFIG="$TMP_APP_DIR/actr.toml"
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 ECHOAPP_PACKAGE_MANIFEST="$RUN_DIR/echoapp-package-manifest.toml"
 ECHOAPP_MARKER_BINARY="$RUN_DIR/echoapp-linked-identity.bin"
-ECHOAPP_PACKAGE="$DIST_DIR/${MANUFACTURER}-EchoApp-0.1.0-${HOST_TARGET}.actr"
+ECHOAPP_PACKAGE="$DIST_DIR/${PUBLISHER}-EchoApp-0.1.0-${HOST_TARGET}.actr"
 APP_STDOUT_LOG="$LOG_DIR/app.stdout.log"
 APP_STDERR_LOG="$LOG_DIR/app.stderr.log"
 APP_BUNDLE_ID="io.actrium.EchoApp"
@@ -84,7 +84,8 @@ ACTR_CLI_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
-REALM_SECRET=""
+REALM_OWNER_KEY=""
+REALM_CLIENT_KEY=""
 DEVICE_UDID=""
 
 # ──── Diagnostics ────
@@ -279,9 +280,9 @@ capture_diagnostics() {
             echo "=== signaling_cache.db ==="
             echo "--- Tables ---"
             sqlite3 "$db_path" ".tables" 2>/dev/null || true
-            echo "--- Service registry ---"
+            echo "--- Actor registry ---"
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
+                "SELECT actor_realm, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM actor_registry;" \
                 2>/dev/null || true
         } >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
@@ -320,7 +321,6 @@ sanitize_logs_for_upload() {
     mkdir -p "$dst_dir"
 
     local secrets=(
-        "$REALM_SECRET"
         "$ADMIN_PASSWORD"
         "$ADMIN_TOKEN"
     )
@@ -381,7 +381,7 @@ cleanup() {
     fi
     wait 2>/dev/null || true
 
-    # Remove generated project configs that contain the per-run realm secret.
+    # Remove generated project configs that name the per-run Realm client key.
     rm -f "$ECHOAPP_ACTRIX_CONFIG" "$TMP_APP_DIR/.actr/config.toml"
     rmdir "$TMP_APP_DIR/.actr" 2>/dev/null || true
 
@@ -539,64 +539,20 @@ write_project_keychain_config() {
     local keychain_path="$2"
     mkdir -p "$project_dir/.actr"
     cat >"$project_dir/.actr/config.toml" <<EOF
-[mfr]
-manufacturer = "$MANUFACTURER"
+[publisher]
+publisher = "$PUBLISHER"
 keychain = "$keychain_path"
 
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
-ais_endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
-realm_id = $REALM_ID
-realm_secret = "$REALM_SECRET"
+issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
+realm = "$REALM"
+realm_client_key = "$REALM_CLIENT_KEY"
 EOF
 }
 
-provision_mfr_keychain() {
-    section "🏷️  Provisioning MFR keychain via Admin API"
-    local apply_file="$RUN_DIR/mfr-apply.json"
-    local approve_file="$RUN_DIR/mfr-approve.json"
-    local now
-    now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-    curl -fsS \
-        -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/apply" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d "{\"github_login\":\"${MANUFACTURER}\",\"contact\":\"e2e@local.actr\"}" \
-        >"$apply_file"
-
-    local mfr_id
-    mfr_id="$(json_field "$apply_file" '.mfr_id')"
-
-    curl -fsS \
-        -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/admin/${mfr_id}/approve" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d '{}' \
-        >"$approve_file"
-
-    mkdir -p "$(dirname "$PROVISIONED_KEYCHAIN")"
-    jq -n \
-        --arg private_key "$(json_field "$approve_file" '.private_key')" \
-        --arg public_key "$(json_field "$approve_file" '.certificate.mfr_pubkey')" \
-        --arg created_at "$now" \
-        '{
-          created_at: $created_at,
-          note: "E2E manufacturer signing key issued by local actrix admin API",
-          private_key: $private_key,
-          public_key: $public_key
-        }' \
-        >"$PROVISIONED_KEYCHAIN"
-    chmod 600 "$PROVISIONED_KEYCHAIN" 2>/dev/null || true
-
-    jq -n \
-        --arg public_key "$(json_field "$approve_file" '.certificate.mfr_pubkey')" \
-        '{ public_key: $public_key }' \
-        >"$PROVISIONED_PUBLIC_KEY"
-
-    success "Generated manufacturer keychain for ${MANUFACTURER}"
+provision_publisher_keychain() {
+    provision_e2e_publisher
 }
 
 scaffold_service_guest() {
@@ -606,7 +562,8 @@ scaffold_service_guest() {
         --template echo \
         --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-        --manufacturer "$MANUFACTURER" \
+        --publisher "$PUBLISHER" \
+        --realm "$REALM" \
         "$TMP_SERVICE_DIR"
 
     pin_workspace_actr_dependencies "$TMP_SERVICE_DIR/Cargo.toml"
@@ -640,7 +597,7 @@ scaffold_service_guest() {
 
 build_service_package() {
     section "📦 Building and publishing the server package"
-    SERVICE_PACKAGE="$DIST_DIR/${MANUFACTURER}-EchoService-${SERVICE_VERSION}-${HOST_TARGET}.actr"
+    SERVICE_PACKAGE="$DIST_DIR/${PUBLISHER}-EchoService-${SERVICE_VERSION}-${HOST_TARGET}.actr"
 
     (
         cd "$TMP_SERVICE_DIR"
@@ -672,7 +629,7 @@ edition = 1
 
 [package]
 name = "EchoApp"
-manufacturer = "${MANUFACTURER}"
+publisher = "${PUBLISHER}"
 version = "0.1.0"
 description = "Actrium EchoApp linked runtime identity marker"
 
@@ -740,8 +697,8 @@ render_echoapp_config() {
         "__HOST__=127.0.0.1" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__REALM_ID__=$REALM_ID" \
-        "__REALM_SECRET__=$REALM_SECRET"
+        "__REALM__=$REALM" \
+        "__REALM_CLIENT_KEY__=$REALM_CLIENT_KEY"
     success "EchoApp actr.toml rendered"
 }
 
@@ -880,16 +837,16 @@ path = "${SERVICE_PACKAGE}"
 [signaling]
 url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:${HTTP_PORT}/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
-realm_id = ${REALM_ID}
-realm_secret = "${REALM_SECRET}"
+realm = "${REALM}"
+realm_client_key = "${REALM_OWNER_KEY}"
 
 [[trust]]
 kind = "registry"
-endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
+endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [discovery]
 visible = true
@@ -909,7 +866,7 @@ turn_urls = ["turn:127.0.0.1:${ICE_PORT}"]
 
 [[acl.rules]]
 permission = "allow"
-type = "${MANUFACTURER}:EchoApp:0.1.0"
+type = "${PUBLISHER}/EchoApp@0.1.0"
 EOF
 
     RUST_LOG="${RUST_LOG:-info}" \
@@ -953,14 +910,14 @@ check_service_ready() {
     local timeout="${SERVICE_READY_TIMEOUT_SECONDS:-60}"
     if ! wait_for_service_registration \
         "$db_path" \
-        "$REALM_ID" \
-        "$MANUFACTURER" \
+        "$REALM" \
+        "$PUBLISHER" \
         "EchoService" \
         "$timeout"; then
         echo "Service registrations observed before timeout:" >&2
         if [ -f "$db_path" ]; then
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
+                "SELECT actor_realm, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM actor_registry;" \
                 >&2 2>/dev/null || true
         else
             echo "  signaling_cache.db not found at $db_path" >&2
@@ -970,12 +927,12 @@ check_service_ready() {
     fi
 
     sqlite3 "$db_path" "
-        SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status
-        FROM service_registry
-        WHERE actor_realm_id = ${REALM_ID}
-          AND actor_manufacturer = '${MANUFACTURER}'
+        SELECT actor_realm, actor_publisher, actor_device_name, service_name, status
+        FROM actor_registry
+        WHERE actor_realm = '${REALM}'
+          AND actor_publisher = '${PUBLISHER}'
           AND actor_device_name = 'EchoService'
-          AND service_name = '${MANUFACTURER}:EchoService'
+          AND service_name = '${PUBLISHER}:EchoService'
           AND status = 'Available';
     " 2>/dev/null | while read -r line; do
         echo "  $line"
@@ -1114,9 +1071,9 @@ build_local_actr_cli
 build_local_actrix
 start_actrix
 login_admin
-warmup_ais_key
+wait_for_signer
 ensure_realm
-provision_mfr_keychain
+provision_publisher_keychain
 
 # Phase 2: Build service package and publish identities
 scaffold_service_guest

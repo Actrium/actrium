@@ -123,26 +123,19 @@ pub mod user_info_bridge_contract {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActrActorType {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
-    #[serde(default)]
     pub version: String,
 }
 
+/// Parse an Actor type in `publisher/program@version` form.
 pub fn parse_actr_actor_type(raw: &str) -> Option<ActrActorType> {
-    let trimmed = raw.trim();
-    let mut parts = trimmed.split('+');
-    let manufacturer = parts.next()?.trim();
-    let name = parts.next()?.trim();
-
-    if parts.next().is_some() || manufacturer.is_empty() || name.is_empty() {
-        return None;
-    }
+    let actr_type = actr_protocol::ActrType::from_string_repr(raw.trim()).ok()?;
 
     Some(ActrActorType {
-        manufacturer: manufacturer.to_string(),
-        name: name.to_string(),
-        version: String::new(),
+        publisher: actr_type.publisher,
+        name: actr_type.name,
+        version: actr_type.version,
     })
 }
 
@@ -372,19 +365,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_actr_actor_type_splits_existing_wire_format() {
-        let actor_type = parse_actr_actor_type(" actrium + app_server ").unwrap();
-        assert_eq!(actor_type.manufacturer, "actrium");
+    fn parse_actr_actor_type_splits_canonical_form() {
+        let actor_type = parse_actr_actor_type(" actrium/app_server@1.0.0 ").unwrap();
+        assert_eq!(actor_type.publisher, "actrium");
         assert_eq!(actor_type.name, "app_server");
-        assert_eq!(actor_type.version, "");
+        assert_eq!(actor_type.version, "1.0.0");
     }
 
     #[test]
-    fn parse_actr_actor_type_rejects_ambiguous_or_empty_values() {
+    fn parse_actr_actor_type_rejects_invalid_values() {
         assert!(parse_actr_actor_type("").is_none());
         assert!(parse_actr_actor_type("actrium").is_none());
-        assert!(parse_actr_actor_type("+server").is_none());
-        assert!(parse_actr_actor_type("actrium+").is_none());
-        assert!(parse_actr_actor_type("actrium+server+extra").is_none());
+        assert!(parse_actr_actor_type("actrium/server").is_none());
+        assert!(parse_actr_actor_type("/server@1.0.0").is_none());
+        assert!(parse_actr_actor_type("actrium/@1.0.0").is_none());
+        assert!(parse_actr_actor_type("actrium+server").is_none());
     }
 }

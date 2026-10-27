@@ -18,11 +18,11 @@ WinUI app (C#)  ──Call("cabi.EchoApp.Echo", EchoRequest bytes)──▶  Rus
                                                                        │
                                                        discover + call_raw
                                                                        ▼
-                                                          remote actrium:EchoService:1.0.0
+                                                          remote actrium/EchoService@1.0.0
 ```
 
 - `workload/` — Rust cdylib, `export_workload!("cabi.EchoApp")`. Its dispatcher
-  discovers `actrium:EchoService:1.0.0` and forwards raw bytes to
+  discovers `actrium/EchoService@1.0.0` and forwards raw bytes to
   `echo.EchoService.Echo`. Pure byte forwarder (no protobuf types).
 - `WinUiEchoApp/` — C# WinUI 3 app. `ActrService.cs` drives the node typestate
   chain (`InitRuntime → FromConfig → LinkWorkload → Register → Start → Call`),
@@ -50,7 +50,7 @@ Known risks / assumptions (see also the commit message):
   an active desktop user session.
 - **Native identity validation.** The app verifies the `cabi.EchoApp` workload
   and its `actr.e2e.echo-app` bundle ID, then sets
-  `actrium:EchoApp:0.1.0` before linking. This prevents the default local
+  `actrium/EchoApp@0.1.0` before linking. This prevents the default local
   actor type from being rejected by the EchoService ACL.
 - **Startup diagnostics.** `RuntimeLog.cs` writes startup, window lifecycle,
   and Actr typestate events to `ACTR_ECHOAPP_LOG_PATH`. On failure the E2E

@@ -2068,7 +2068,7 @@ mod tests {
 
         assert_eq!(actrium_core_c_api_version(), 1);
         assert_eq!(actrium_core_supported_contract_version(), 1);
-        assert_eq!(actrium_core_schema_version(), 1);
+        assert_eq!(actrium_core_schema_version(), 2);
         assert_eq!(actrium_core_runtime_schema_version(), 4);
     }
 

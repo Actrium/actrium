@@ -1,9 +1,9 @@
 namespace actrium_core {
-    /// Parse and validate an actr-package/1 TOML manifest.
+    /// Parse and validate an actr-package/2 TOML manifest.
     [Throws=CoreError]
     ActrPackageManifestInfo parse_actr_package_manifest(string source);
 
-    /// Validate an actr-package/1 TOML manifest without returning normalized fields.
+    /// Validate an actr-package/2 TOML manifest without returning normalized fields.
     [Throws=CoreError]
     void validate_actr_package_manifest(string source);
 
@@ -913,7 +913,7 @@ namespace actrium_core {
     /// Return the canonical ActrBridge native module/event/payload contract.
     ActrBridgeContractInfo actr_bridge_contract();
 
-    /// Parse an Actr actor type wire value in `manufacturer+name` format.
+    /// Parse an Actor type in `publisher/program@version` form.
     [Throws=CoreError]
     ActrActorTypeInfo parse_actr_actor_type(string raw);
 
@@ -1109,7 +1109,7 @@ dictionary ActrBridgeContractInfo {
 };
 
 dictionary ActrActorTypeInfo {
-    string manufacturer;
+    string publisher;
     string name;
     string version;
 };
@@ -1292,7 +1292,7 @@ dictionary CoreBookmarkRowInfo {
     string? app_id;
     i64 created_at_seconds;
     i64? last_used_at_seconds;
-    string? manufacturer;
+    string? publisher;
     string? notes;
     string? favicon;
 };
@@ -1304,7 +1304,7 @@ dictionary CoreBookmarkInfo {
     string? app_id;
     i64 created_at_seconds;
     i64? last_used_at_seconds;
-    string? manufacturer;
+    string? publisher;
     string? notes;
     string? favicon;
 };

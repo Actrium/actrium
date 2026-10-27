@@ -22,7 +22,7 @@ node --import tsx examples/echo-twice-server/index.ts
 
 Service details:
 
-- ActrType: `acme+EchoTwiceService`
+- ActrType: `acme/EchoTwiceService@1.0.0`
 - Route: `echo_twice.EchoTwiceService.EchoTwice`
 
 ## Echo Client

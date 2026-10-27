@@ -1,11 +1,15 @@
 //! Signer gRPC service implementation
 
-use crate::{error::SignerError, storage::KeyStorage};
+use crate::{
+    error::SignerError,
+    storage::KeyStorage,
+    types::{ensure_named_key_payload, retire_named_key_payload, sign_request_payload},
+};
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-// Import generated protobuf code
+// Import the generated protobuf code
 use actrix_proto::admin::v1::NonceCredential;
 use actrix_proto::signer::v1::signer_server::{Signer, SignerServer};
 use actrix_proto::signer::v1::*;
@@ -16,7 +20,6 @@ pub struct SignerGrpcService {
     pub storage: KeyStorage,
     pub nonce_storage: Arc<dyn NonceStorage + Send + Sync>,
     pub psk: String,
-    pub tolerance_seconds: u64,
 }
 
 impl SignerGrpcService {
@@ -25,23 +28,21 @@ impl SignerGrpcService {
         storage: KeyStorage,
         nonce_storage: N,
         psk: String,
-        tolerance_seconds: u64,
     ) -> Self {
         Self {
             storage,
             nonce_storage: Arc::new(nonce_storage),
             psk,
-            tolerance_seconds,
         }
     }
 
-    /// Verify the nonce credential of a request
+    /// Verify the request's nonce credential
     async fn verify_credential(
         &self,
         credential: &NonceCredential,
         request_payload: &str,
     ) -> Result<(), SignerError> {
-        // Convert protobuf NonceCredential to nonce_auth::NonceCredential
+        // Convert the protobuf NonceCredential into nonce_auth::NonceCredential
         let nonce_credential = nonce_auth::NonceCredential {
             timestamp: credential.timestamp,
             nonce: credential.nonce.clone(),
@@ -72,114 +73,32 @@ impl SignerGrpcService {
 
 #[tonic::async_trait]
 impl Signer for SignerGrpcService {
-    /// Generate a new Ed25519 signing key pair
-    async fn generate_signing_key(
-        &self,
-        request: Request<GenerateSigningKeyRequest>,
-    ) -> Result<Response<GenerateSigningKeyResponse>, Status> {
-        crate::recording::info!("Received gRPC GenerateSigningKey request");
-
-        let req = request.into_inner();
-
-        let request_data = "generate_signing_key";
-        self.verify_credential(&req.credential, request_data)
-            .await
-            .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
-
-        // Generate Ed25519 key pair (private key stored in backend)
-        let key_pair = self
-            .storage
-            .generate_and_store_key()
-            .await
-            .map_err(|e| Status::internal(format!("Failed to generate signing key: {e}")))?;
-
-        // Get the key record to obtain the expiration time
-        let key_record = self
-            .storage
-            .get_key_record(key_pair.key_id)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
-            .ok_or_else(|| Status::internal("Failed to get key record after creation"))?;
-
-        crate::recording::info!(
-            "Generated Ed25519 signing key with key_id: {}",
-            key_pair.key_id
-        );
-
-        let response = GenerateSigningKeyResponse {
-            key_id: key_pair.key_id,
-            verifying_key: key_pair.verifying_key,
-            expires_at: key_record.expires_at,
-            tolerance_seconds: self.tolerance_seconds,
-        };
-
-        Ok(Response::new(response))
-    }
-
-    /// Sign a message with the specified key (Ed25519)
+    /// Sign a message with the given key using Ed25519
     async fn sign(&self, request: Request<SignRequest>) -> Result<Response<SignResponse>, Status> {
         let req = request.into_inner();
         let key_id = req.key_id;
 
         crate::recording::info!("Received gRPC Sign request for key_id: {}", key_id);
 
-        // nonce payload is bound to a specific key_id to prevent reuse
-        let request_data = format!("sign:{key_id}");
+        // Bind authentication to both the selected key and the exact message.
+        let request_data = sign_request_payload(key_id, &req.message);
         self.verify_credential(&req.credential, &request_data)
             .await
-            .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
+            .map_err(Status::from)?;
 
-        // A key that has passed `expires_at` must not mint anything.
-        //
-        // Verifier caches drop verifying keys at
-        // `expires_at` with no tolerance, so a signature created now would be
-        // a born-invalid credential that fails every handshake with 401.
-        // The tolerance window below only keeps key
-        // material readable for `get_verifying_key` and cleanup; it never
-        // extends the signing window.
-        let key_record = self
-            .storage
-            .get_key_record(key_id)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
-            .ok_or_else(|| Status::not_found(format!("Key not found: {key_id}")))?;
-
-        if key_record.expires_at > 0 {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-
-            if crate::key_expired_for_signing(key_record.expires_at, now) {
-                crate::recording::warn!(
-                    "Key {} has expired; refusing to sign (expired_at={})",
-                    key_id,
-                    key_record.expires_at
-                );
-                return Err(Status::failed_precondition(format!(
-                    "Key {key_id} has expired; rotate before signing"
-                )));
-            }
-        }
-
-        // Signing is performed internally in the backend; private key does not leave Signer
+        // Sign inside the backend; the private key never leaves the Signer
         let signature = self
             .storage
             .sign(key_id, &req.message)
             .await
-            .map_err(|e| match e {
-                crate::error::SignerError::NotFound(_) => {
-                    Status::not_found(format!("Key not found: {key_id}"))
-                }
-                other => Status::internal(format!("Sign failed: {other}")),
-            })?;
+            .map_err(Status::from)?;
 
         crate::recording::info!("Signed message for key_id: {}", key_id);
 
         Ok(Response::new(SignResponse { signature }))
     }
 
-    /// Get the verifying public key for the specified key_id
+    /// Get the verifying public key for the given key_id
     async fn get_verifying_key(
         &self,
         request: Request<GetVerifyingKeyRequest>,
@@ -195,35 +114,72 @@ impl Signer for SignerGrpcService {
         let request_data = format!("get_verifying_key:{key_id}");
         self.verify_credential(&req.credential, &request_data)
             .await
-            .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
+            .map_err(Status::from)?;
 
         let key_record = self
             .storage
             .get_key_record(key_id)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
-            .ok_or_else(|| Status::not_found(format!("Key not found: {key_id}")))?;
+            .map_err(Status::from)?
+            .ok_or_else(|| Status::not_found("not found"))?;
 
-        // Check whether the tolerance period has been exceeded
-        if key_record.expires_at > 0 {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            if key_record.expires_at + self.tolerance_seconds < now {
-                crate::recording::warn!("Key {} has expired beyond tolerance period", key_id);
-                return Err(Status::not_found(format!("Key {key_id} has expired")));
-            }
-        }
-
-        crate::recording::debug!("Returning verifying key for key_id: {}", key_id);
+        crate::recording::debug!("Returning verifying key for key_id: {key_id}");
 
         Ok(Response::new(GetVerifyingKeyResponse {
             key_id,
             verifying_key: key_record.public_key,
-            expires_at: key_record.expires_at,
-            tolerance_seconds: self.tolerance_seconds,
         }))
+    }
+
+    /// Return the key with the given name, generating it if missing
+    async fn ensure_named_key(
+        &self,
+        request: Request<EnsureNamedKeyRequest>,
+    ) -> Result<Response<EnsureNamedKeyResponse>, Status> {
+        let req = request.into_inner();
+        self.verify_credential(&req.credential, &ensure_named_key_payload(&req.name))
+            .await
+            .map_err(Status::from)?;
+        if req.name.is_empty() {
+            return Err(Status::invalid_argument("key name is empty"));
+        }
+
+        let key_pair = self
+            .storage
+            .ensure_named_key(&req.name)
+            .await
+            .map_err(Status::from)?;
+        crate::recording::info!(
+            "Named key '{}' resolved to key_id: {}",
+            req.name,
+            key_pair.key_id
+        );
+
+        Ok(Response::new(EnsureNamedKeyResponse {
+            key_id: key_pair.key_id,
+            verifying_key: key_pair.verifying_key,
+        }))
+    }
+
+    /// Retire the named key; it never signs again
+    async fn retire_named_key(
+        &self,
+        request: Request<RetireNamedKeyRequest>,
+    ) -> Result<Response<RetireNamedKeyResponse>, Status> {
+        let req = request.into_inner();
+        self.verify_credential(&req.credential, &retire_named_key_payload(&req.name))
+            .await
+            .map_err(Status::from)?;
+        if req.name.is_empty() {
+            return Err(Status::invalid_argument("key name is empty"));
+        }
+
+        let key_id = self
+            .storage
+            .retire_named_key(&req.name)
+            .await
+            .map_err(Status::from)?;
+        Ok(Response::new(RetireNamedKeyResponse { key_id }))
     }
 
     /// Health check
@@ -234,16 +190,12 @@ impl Signer for SignerGrpcService {
         crate::recording::debug!("gRPC health check requested");
         let req = request.into_inner();
 
-        // Consistent with other methods: health also requires nonce-auth
+        // Like every other method, health also requires nonce-auth
         self.verify_credential(&req.credential, "health_check")
             .await
-            .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
+            .map_err(Status::from)?;
 
-        let key_count = self
-            .storage
-            .get_key_count()
-            .await
-            .map_err(|e| Status::internal(format!("Failed to get key count: {e}")))?;
+        let key_count = self.storage.get_key_count().await.map_err(Status::from)?;
 
         let response = HealthCheckResponse {
             status: "healthy".to_string(),
@@ -260,13 +212,12 @@ impl Signer for SignerGrpcService {
     }
 }
 
-/// Create a gRPC server
+/// Create the gRPC server
 pub fn create_grpc_service<N: NonceStorage + Send + Sync + 'static>(
     storage: KeyStorage,
     nonce_storage: N,
     psk: String,
-    tolerance_seconds: u64,
 ) -> SignerServer<SignerGrpcService> {
-    let service = SignerGrpcService::new(storage, nonce_storage, psk, tolerance_seconds);
+    let service = SignerGrpcService::new(storage, nonce_storage, psk);
     SignerServer::new(service)
 }

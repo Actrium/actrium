@@ -92,7 +92,7 @@ guest 侧 `wit-bindgen` 用 `async: true`，生成的 core wasm 里出现 `conte
                                        ▼
                         ┌─────────────────────────────┐
                         │ mock-actrix / real actrix    │
-                        │ (signaling + AIS + MFR)      │
+                        │ (signaling + Issuer + publisher)      │
                         └─────────────────────────────┘
 ```
 

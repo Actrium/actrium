@@ -254,38 +254,40 @@ if [ ! -f "$ACTRIX_DB" ]; then
     exit 1
 fi
 
-# Parse realm_id and realm_secret from server's actr.toml
-REALM_ID=$(grep -E '^\s*realm_id\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
-REALM_SECRET=$(grep -E '^\s*realm_secret\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
+# Parse realm from server's actr.toml
+REALM=$(grep -E '^\s*realm\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
 
-if [ -z "$REALM_ID" ] || [ -z "$REALM_SECRET" ]; then
-    echo -e "${RED}❌ Could not parse realm_id or realm_secret from $ECHO_SERVER_DIR/actr.toml${NC}"
+if [ -z "$REALM" ]; then
+    echo -e "${RED}❌ Could not parse realm from $ECHO_SERVER_DIR/actr.toml${NC}"
     exit 1
 fi
 
-echo "   realm_id     = $REALM_ID"
-echo "   realm_secret = ${REALM_SECRET:0:10}..."
+echo "   realm        = $REALM"
 
-# Hash the realm secret with SHA256 (matches Rust hash_realm_secret: hex(sha256(secret)))
-SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
 
-echo "   secret_hash  = ${SECRET_HASH:0:16}..."
 
 # Insert realm record (OR IGNORE to avoid duplicates)
-sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES ($REALM_ID, 'echo-example', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');"
+sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));"
 
 # Parse ACL rules from actr.toml files and insert into actoracl table
-# Server allows: acme:echo-client-app:1.0.0
-# Client allows: acme:EchoService:1.0.0
+# Server allows: acme/echo-client-app@1.0.0
+# Client allows: acme/EchoService@1.0.0
 # Note: access=1 means allow
 sqlite3 "$ACTRIX_DB" <<EOF
-INSERT OR IGNORE INTO actoracl (realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, 'acme:EchoService:1.0.0', 'acme:echo-client-app:1.0.0', 1);
-INSERT OR IGNORE INTO actoracl (realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, 'acme:echo-client-app:1.0.0', 'acme:EchoService:1.0.0', 1);
+INSERT OR IGNORE INTO actoracl (realm, from_type, to_type, access)
+VALUES ('$REALM', 'acme/EchoService@1.0.0', 'acme/echo-client-app@1.0.0', 1);
+INSERT OR IGNORE INTO actoracl (realm, from_type, to_type, access)
+VALUES ('$REALM', 'acme/echo-client-app@1.0.0', 'acme/EchoService@1.0.0', 1);
 EOF
 
 echo -e "${GREEN}✅ Realm and ACL setup completed (via sqlite3)${NC}"
+
+# Join the Realm: each actr.toml names its key file (`realm_client_key`).
+ACTR_CMD="${ACTR_GEN_CMD:-actr}" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
+    "$ACTRIX_DB" "$REALM" "http://localhost:8081/issuer" \
+    "$ECHO_SERVER_DIR/realm-client.json" "$ECHO_CLIENT_DIR/realm-client.json"
+echo -e "${GREEN}✅ Joined Realm $REALM${NC}"
+
 
 # Step 2.5: Build server binary (client code not generated yet)
 echo ""
@@ -338,7 +340,7 @@ fi
 sleep 2
 
 # Step 3.5: Install client dependencies and generate code
-# Client depends on server (acme:EchoService:1.0.0), so must be done AFTER server registers
+# Client depends on server (acme/EchoService@1.0.0), so must be done AFTER server registers
 echo ""
 echo "📎 Installing client dependencies (actr deps install)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

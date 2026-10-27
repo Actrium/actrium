@@ -3,7 +3,7 @@ exports = ["protos/local/echo.proto"]
 
 [package]
 name = "EchoService"
-manufacturer = "polyglot"
+publisher = "polyglot"
 version = "1.0.0"
 description = "polyglot-echo Echo workload (Wasm Component)"
 authors = []

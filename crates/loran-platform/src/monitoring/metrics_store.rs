@@ -15,6 +15,15 @@ use std::time::Duration;
 
 use tokio::sync::{Mutex, RwLock};
 
+/// Upper bound on latency samples retained per interval.
+///
+/// The latency buffer is fed from unauthenticated hot paths (e.g. the STUN
+/// receive loop), so it must never grow without limit. When the buffer is full
+/// the oldest sample is evicted (fixed-capacity ring), which keeps memory
+/// bounded regardless of traffic volume while preserving a representative tail
+/// for the p95 computation.
+const MAX_LATENCY_SAMPLES: usize = 4096;
+
 // ---------------------------------------------------------------------------
 // MetricSample
 // ---------------------------------------------------------------------------
@@ -50,7 +59,10 @@ pub struct ServiceCounters {
     /// Monotonic failed requests since last snapshot.
     pub failed_requests: AtomicU64,
     /// Latencies collected during the current interval, drained on snapshot.
-    latencies: Mutex<Vec<f64>>,
+    ///
+    /// Bounded to [`MAX_LATENCY_SAMPLES`] via a fixed-capacity ring so a flood
+    /// of `record_request` calls cannot exhaust memory.
+    latencies: Mutex<VecDeque<f64>>,
 }
 
 impl ServiceCounters {
@@ -59,7 +71,7 @@ impl ServiceCounters {
             active_conns: AtomicU32::new(0),
             total_requests: AtomicU64::new(0),
             failed_requests: AtomicU64::new(0),
-            latencies: Mutex::new(Vec::new()),
+            latencies: Mutex::new(VecDeque::with_capacity(MAX_LATENCY_SAMPLES)),
         }
     }
 
@@ -83,7 +95,11 @@ impl ServiceCounters {
         if !success {
             self.failed_requests.fetch_add(1, Ordering::Relaxed);
         }
-        self.latencies.lock().await.push(latency_ms);
+        let mut latencies = self.latencies.lock().await;
+        if latencies.len() == MAX_LATENCY_SAMPLES {
+            latencies.pop_front();
+        }
+        latencies.push_back(latency_ms);
     }
 
     /// Take a point-in-time snapshot and reset the delta counters.
@@ -96,9 +112,9 @@ impl ServiceCounters {
         let requests = self.total_requests.swap(0, Ordering::Relaxed);
         let failed_requests = self.failed_requests.swap(0, Ordering::Relaxed);
 
-        let mut lats = {
+        let mut lats: Vec<f64> = {
             let mut guard = self.latencies.lock().await;
-            std::mem::take(&mut *guard)
+            std::mem::take(&mut *guard).into()
         };
 
         let latency_p95_ms = compute_p95(&mut lats);

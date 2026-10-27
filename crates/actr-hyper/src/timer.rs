@@ -146,9 +146,9 @@ timer_inventory! {
         success: "backoff deadline", interrupt: "renewal task cancellation",
         expiry: "return retryable result", reset: "new renewal sequence", external: false
     },
-    AIS_CONTROL_ATTEMPT_RETRY => {
-        id: "ais.control_attempt.retry", owner: "ais_client", category: FailureBackoff,
-        duration: "server Retry-After or bounded exponential backoff, capped by CONTROL_ATTEMPT_RETRY_DEADLINE", arm: "an idempotent AIS request has an ambiguous transport result or an in-progress response",
+    ISSUER_CONTROL_ATTEMPT_RETRY => {
+        id: "issuer.control_attempt.retry", owner: "issuer_client", category: FailureBackoff,
+        duration: "server Retry-After or bounded exponential backoff, capped by CONTROL_ATTEMPT_RETRY_DEADLINE", arm: "an idempotent Issuer request has an ambiguous transport result or an in-progress response",
         success: "retry delay expires", interrupt: "request cancellation",
         expiry: "resend the exact protobuf request body", reset: "each retry until the absolute attempt deadline", external: false
     },
@@ -236,9 +236,9 @@ timer_inventory! {
         success: "supervisor acknowledges acceptance", interrupt: "response channel close",
         expiry: "return acceptance timeout without cancelling work", reset: "new submitted fact", external: false
     },
-    EXTERNAL_AIS_HTTP_REQUEST => {
-        id: "external.ais.http_request", owner: "reqwest", category: FailureDeadline,
-        duration: "fixed 30s client request timeout", arm: "AIS HTTP client sends a request",
+    EXTERNAL_ISSUER_HTTP_REQUEST => {
+        id: "external.issuer.http_request", owner: "reqwest", category: FailureDeadline,
+        duration: "fixed 30s client request timeout", arm: "Issuer HTTP client sends a request",
         success: "HTTP response future completes", interrupt: "request cancellation or client drop",
         expiry: "return reqwest timeout", reset: "new HTTP request only", external: true
     },

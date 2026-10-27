@@ -1,11 +1,14 @@
 # Metrics Ring Buffer — Design
 
+Status: implemented for the single-node v1 profile. This document explains the
+design; the source of truth is `platform/src/monitoring/metrics_store.rs`.
+
 Single-node, in-memory metrics store for lightweight health diagnostics.
 Not a replacement for log-based observability; purpose is fast local dashboards.
 
 ## 1. Data Requirements (from UI)
 
-Each **service** (Signaling / STUN / TURN / AIS / KS) needs four time-series:
+Each **service** (Signaling / STUN / TURN / Issuer / Issuer Signer) needs four time-series:
 
 | Metric           | Type    | Source                            | Semantics                  |
 |------------------|---------|-----------------------------------|----------------------------|
@@ -100,7 +103,7 @@ pub struct ServiceCounters {
 }
 ```
 
-Signaling, AIS, KS already have request handlers — instrument there.
+Signaling, Issuer, Issuer Signer already have request handlers — instrument there.
 STUN/TURN have packet-level processing — increment on allocate/bind.
 
 The 1-minute sampler reads these counters, computes deltas, resets the
@@ -109,7 +112,7 @@ latency tracker, and pushes a `MetricSample`.
 ## 5. API Endpoint
 
 `/admin/api/` is the BFF (Backend-For-Frontend) path used exclusively by
-the admin UI SPA. Defined in `actrixd/src/service/http/admin_api.rs`.
+the admin UI SPA. Defined in `crates/loran-server/src/service/http/admin_api.rs`.
 
 However, **MetricsStore itself lives in `control`** (always-on, no feature
 gate), so it's available regardless of whether admin-ui is compiled in.
@@ -147,7 +150,7 @@ platform::monitoring
 control::service
 └── AdminApiService      (add metrics_store field, query methods)
 
-actrixd::service::http::admin_api   (admin-ui feature only)
+loran-server service::http::admin_api   (admin-ui feature only)
 └── GET /admin/api/metrics/timeseries  (thin BFF route)
 ```
 
@@ -174,7 +177,7 @@ actrixd::service::http::admin_api   (admin-ui feature only)
 
 ## 8. Implementation Order
 
-1. **`ServiceCounters`** — add to `ServiceInfo`, instrument Signaling/AIS/KS request handlers and STUN/TURN packet paths.
+1. **`ServiceCounters`** — add to `ServiceInfo`, instrument Signaling/Issuer/Issuer Signer request handlers and STUN/TURN packet paths.
 2. **`MetricsStore`** — ring buffer + sampler task in `platform::monitoring`.
 3. **API endpoint** — wire into admin_api.
 4. **Frontend** — replace `DEMO_STATS` / `genSeries` with real API calls.

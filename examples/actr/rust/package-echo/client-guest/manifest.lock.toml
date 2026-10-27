@@ -5,7 +5,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "EchoService"
 alias = "EchoService"
-actr_type = "actrium:EchoService:0.2.2"
+actr_type = "actrium/EchoService@0.2.2"
 fingerprint = ""
 cached_at = "2026-08-06T00:00:00Z"
 

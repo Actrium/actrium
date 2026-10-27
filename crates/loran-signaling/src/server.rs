@@ -17,8 +17,8 @@
 //!   - Multi-factor ranking: power reserve, mailbox backlog, geographic distance, client stickiness
 //!   - Exact match priority strategy
 //! - ✅ Presence subscription (`SubscribeActrUpRequest` / `ActrUpEvent`)
-//! - ❌ Credential refresh has been migrated to AIS HTTP
-//! - ✅ Load metric storage (`handle_ping()` - stored in ServiceRegistry for load balancing)
+//! - ❌ Credential refresh has been migrated to Issuer HTTP
+//! - ✅ Load metric storage (`handle_ping()` - stored in ActorRegistry for load balancing)
 //!
 //! ## Pending Features (optional enhancements)
 //!
@@ -31,8 +31,8 @@
 //!    - Used for fine-grained inter-service access control
 
 use actr_protocol::{
-    AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ErrorResponse, PeerToSignaling,
-    Ping, Pong, Realm, RegisterResponse, RelayDeliveryContext, RelayDeliveryResult,
+    AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ErrorResponse, IdentityClaims,
+    PeerToSignaling, Ping, Pong, RegisterResponse, RelayDeliveryContext, RelayDeliveryResult,
     RelayDeliveryStatus, RoleAssignment, RoleNegotiation, SIGNALING_ENVELOPE_VERSION,
     SignalingEnvelope, SignalingToActr, actr_relay, actr_to_signaling, peer_to_signaling,
     register_response, signaling_envelope, signaling_to_actr,
@@ -40,7 +40,7 @@ use actr_protocol::{
 use futures_util::{SinkExt, StreamExt};
 use platform::aid::credential::validator::AIdCredentialValidator;
 use platform::config::signaling::EgressQueueConfig;
-use platform::realm::Realm as RealmEntity;
+use platform::realm::{Realm as RealmEntity, RealmStatus};
 use prost::Message as ProstMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -54,9 +54,9 @@ use uuid::Uuid;
 // Axum WebSocket
 use axum::extract::ws::{Message as WsMessage, WebSocket};
 
+use crate::actor_registry::ActorRegistry;
 use crate::load_balancer::LoadBalancer;
 use crate::presence::PresenceManager;
-use crate::service_registry::ServiceRegistry;
 #[cfg(feature = "opentelemetry")]
 use crate::trace::{extract_trace_context, inject_trace_context};
 use tracing::Instrument;
@@ -64,10 +64,7 @@ use tracing::Instrument;
 use tracing::instrument;
 
 fn type_key(actor_type: &ActrType) -> String {
-    format!(
-        "{}:{}:{}",
-        actor_type.manufacturer, actor_type.name, actor_type.version
-    )
+    actor_type.to_string_repr()
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -132,7 +129,7 @@ enum EnqueueError {
 ///
 /// The permit is returned to the byte budget when this value is dropped (on send
 /// completion, or on connection teardown/reset), so teardown never leaks a byte reservation.
-struct QueuedFrame {
+pub(crate) struct QueuedFrame {
     msg: WsMessage,
     byte_len: usize,
     _permit: OwnedSemaphorePermit,
@@ -151,6 +148,9 @@ pub struct ClientEgress {
     control_tx: tokio::sync::mpsc::Sender<WsMessage>,
     /// Data queue byte budget
     byte_budget: Arc<Semaphore>,
+    /// Cancelled when the server closes the connection but could not queue
+    /// a Close frame; the write task then ends the connection at once.
+    closed: tokio_util::sync::CancellationToken,
     /// The bound configuration applied to this client
     config: EgressQueueConfig,
     /// Shared observability counters
@@ -159,7 +159,7 @@ pub struct ClientEgress {
 
 impl ClientEgress {
     /// Build a bounded egress handle and its two consumers for a new connection
-    fn new(
+    pub(crate) fn new(
         config: EgressQueueConfig,
         metrics: Arc<SignalingQueueMetrics>,
     ) -> (
@@ -174,6 +174,7 @@ impl ClientEgress {
             data_tx,
             control_tx,
             byte_budget: Arc::new(Semaphore::new(config.max_bytes as usize)),
+            closed: tokio_util::sync::CancellationToken::new(),
             config,
             metrics,
         };
@@ -234,6 +235,19 @@ impl ClientEgress {
         })
     }
 
+    /// Close the connection: queue a Close frame, or, when the control queue
+    /// is full or closed, have the write task end the connection without one.
+    /// Returns whether the Close frame was queued.
+    fn close(&self, close_frame: axum::extract::ws::CloseFrame) -> bool {
+        let queued = self
+            .try_send_control(WsMessage::Close(Some(close_frame)))
+            .is_ok();
+        if !queued {
+            self.closed.cancel();
+        }
+        queued
+    }
+
     /// Current number of queued data messages (observability gauge)
     #[allow(dead_code)]
     fn depth(&self) -> usize {
@@ -254,8 +268,8 @@ pub struct SignalingServer {
     pub clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
     /// Index for looking up client_id by ActorId
     pub actor_id_index: Arc<RwLock<HashMap<ActrId, String>>>,
-    /// Service registry
-    pub service_registry: Arc<RwLock<ServiceRegistry>>,
+    /// Actor registry
+    pub actor_registry: Arc<RwLock<ActorRegistry>>,
     /// Presence subscription manager
     pub presence_manager: Arc<RwLock<PresenceManager>>,
     /// Connection rate limiter
@@ -268,6 +282,8 @@ pub struct SignalingServer {
     pub target_rate_limiter: Arc<crate::ratelimit::TargetRateLimiter>,
     /// Signaling queue observability counters (issue #351)
     pub queue_metrics: Arc<SignalingQueueMetrics>,
+    /// Realm Infra Provider ID that Actor credentials must carry
+    pub provider_id: String,
 }
 
 /// Client connection info
@@ -289,6 +305,9 @@ enum CleanupMode {
     ExplicitUnregister,
 }
 
+/// Maximum number of route candidates encoded for any wire request.
+const MAX_ROUTE_CANDIDATES: u32 = 64;
+
 struct StaleClient {
     id: String,
     egress: ClientEgress,
@@ -299,7 +318,7 @@ struct StaleClient {
 pub struct SignalingServerHandle {
     pub clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
     pub actor_id_index: Arc<RwLock<HashMap<ActrId, String>>>,
-    pub service_registry: Arc<RwLock<ServiceRegistry>>,
+    pub actor_registry: Arc<RwLock<ActorRegistry>>,
     pub presence_manager: Arc<RwLock<PresenceManager>>,
     pub connection_rate_limiter: Option<Arc<crate::ratelimit::ConnectionRateLimiter>>,
     pub message_rate_limiter: Option<Arc<crate::ratelimit::MessageRateLimiter>>,
@@ -309,6 +328,8 @@ pub struct SignalingServerHandle {
     pub target_rate_limiter: Arc<crate::ratelimit::TargetRateLimiter>,
     /// Signaling queue observability counters (issue #351)
     pub queue_metrics: Arc<SignalingQueueMetrics>,
+    /// Realm Infra Provider ID that Actor credentials must carry
+    pub provider_id: String,
 }
 impl SignalingServerHandle {
     /// Create a SignalingEnvelope
@@ -363,13 +384,265 @@ impl SignalingServer {
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             actor_id_index: Arc::new(RwLock::new(HashMap::new())),
-            service_registry: Arc::new(RwLock::new(ServiceRegistry::new())),
+            actor_registry: Arc::new(RwLock::new(ActorRegistry::new())),
             presence_manager: Arc::new(RwLock::new(PresenceManager::new())),
             connection_rate_limiter: None, // Initialized in axum_router based on config
             message_rate_limiter: None,    // Initialized in axum_router based on config
             egress_config,
             target_rate_limiter,
             queue_metrics: Arc::new(SignalingQueueMetrics::default()),
+            provider_id: String::new(),
+        }
+    }
+
+    /// A handle sharing this server's state
+    pub fn handle(&self) -> SignalingServerHandle {
+        SignalingServerHandle {
+            clients: self.clients.clone(),
+            actor_id_index: self.actor_id_index.clone(),
+            actor_registry: self.actor_registry.clone(),
+            presence_manager: self.presence_manager.clone(),
+            connection_rate_limiter: self.connection_rate_limiter.clone(),
+            message_rate_limiter: self.message_rate_limiter.clone(),
+            egress_config: self.egress_config.clone(),
+            target_rate_limiter: self.target_rate_limiter.clone(),
+            queue_metrics: self.queue_metrics.clone(),
+            provider_id: self.provider_id.clone(),
+        }
+    }
+}
+
+/// Follow Realm state changes and drop the state of every Realm that
+/// retires: first for Realms retired before this process started, then as
+/// retirements are announced. Likewise drop every Actor disabled by a
+/// revoked or replaced Realm client key.
+///
+/// `cancel` retires this server (a configuration reload builds a new one),
+/// but its connections stay open, so the task keeps following until the
+/// last of them is gone.
+pub async fn follow_realm_retirements(
+    server: SignalingServerHandle,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    let mut changes = platform::realm::changes::subscribe();
+    let mut actor_changes = platform::realm::changes::subscribe_actors();
+    retire_known_retired_realms(&server).await;
+    loop {
+        let change = tokio::select! {
+            _ = no_connections_after(&server, &cancel) => break,
+            change = changes.recv() => change,
+            actor = actor_changes.recv() => {
+                match actor {
+                    Ok(actor) => {
+                        disable_actor(&server, &actor).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        revalidate_known_actor_connections(&server).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+                continue;
+            }
+        };
+        match change {
+            Ok(realm) => {
+                if is_retired(&realm).await {
+                    retire_realm(&server, &realm).await;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                retire_known_retired_realms(&server).await;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
+/// Resolves once `cancel` fired and the server has no connections left.
+async fn no_connections_after(
+    server: &SignalingServerHandle,
+    cancel: &tokio_util::sync::CancellationToken,
+) {
+    cancel.cancelled().await;
+    while !server.clients.read().await.is_empty() {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+async fn is_retired(realm: &str) -> bool {
+    matches!(RealmEntity::get(realm).await, Ok(Some(r)) if r.status == RealmStatus::Retired)
+}
+
+/// Retire every Realm with registry rows or connections here that is retired.
+async fn retire_known_retired_realms(server: &SignalingServerHandle) {
+    let mut realms = server.actor_registry.read().await.realm_names();
+    realms.extend(
+        server
+            .clients
+            .read()
+            .await
+            .values()
+            .filter_map(|client| client.actor_id.as_ref().map(|id| id.realm.clone())),
+    );
+    realms.sort();
+    realms.dedup();
+    for realm in realms {
+        if is_retired(&realm).await {
+            retire_realm(&server.clone(), &realm).await;
+        }
+    }
+}
+
+/// Drop everything a retired Realm holds here: its Actor Registry rows (in
+/// memory and in the cache), presence subscriptions and live connections.
+///
+/// The registry and presence refuse the Realm first, so a connection or
+/// registration racing this call either is removed here or is refused and
+/// closes itself. Idempotent.
+pub async fn retire_realm(server: &SignalingServerHandle, realm: &str) {
+    platform::recording::info!("Realm {} retired: dropping its Signaling state", realm);
+    let storage = server.actor_registry.write().await.retire_realm(realm);
+    if let Some(storage) = storage
+        && let Err(e) = storage.delete_realm(realm).await
+    {
+        platform::recording::warn!("Failed to delete cached services of Realm {}: {}", realm, e);
+    }
+    server.presence_manager.write().await.retire_realm(realm);
+
+    let connections: Vec<(String, ClientEgress)> = server
+        .clients
+        .read()
+        .await
+        .iter()
+        .filter(|(_, client)| {
+            client
+                .actor_id
+                .as_ref()
+                .is_some_and(|actor| actor.realm == realm)
+        })
+        .map(|(id, client)| (id.clone(), client.egress.clone()))
+        .collect();
+    for (client_id, egress) in connections {
+        let close_frame = axum::extract::ws::CloseFrame {
+            code: axum::extract::ws::close_code::POLICY,
+            reason: "realm retired".into(),
+        };
+        if !egress.close(close_frame) {
+            platform::recording::warn!(
+                "Connection {} control queue full or closed; closing without a Close frame",
+                client_id
+            );
+        }
+        cleanup_client(&client_id, server, CleanupMode::ExplicitUnregister).await;
+    }
+}
+
+/// Recheck every live credential after losing actor-change notifications.
+async fn revalidate_known_actor_connections(server: &SignalingServerHandle) {
+    let mut actors: Vec<ActrId> = server
+        .clients
+        .read()
+        .await
+        .values()
+        .filter_map(|client| client.actor_id.clone())
+        .collect();
+    actors.sort();
+    actors.dedup();
+    for actor in actors {
+        disable_actor(server, &actor).await;
+    }
+}
+
+/// Close connections whose client key was revoked or replaced. Revalidate
+/// each credential so an actor-change notification preserves valid replacements.
+pub async fn disable_actor(server: &SignalingServerHandle, actor: &ActrId) {
+    let connections: Vec<(String, Option<AIdCredential>)> = server
+        .clients
+        .read()
+        .await
+        .iter()
+        .filter(|(_, client)| client.actor_id.as_ref() == Some(actor))
+        .map(|(id, client)| (id.clone(), client.credential.clone()))
+        .collect();
+    let mut refused = false;
+    for (client_id, credential) in connections {
+        if client_credential_refused(actor, credential.as_ref()).await {
+            refused = true;
+            close_refused_connection(server, &client_id).await;
+        }
+    }
+    if refused
+        || platform::realm::membership::actor_disabled(actor)
+            .await
+            .unwrap_or(false)
+    {
+        cleanup_refused_actor(server, actor).await;
+    }
+}
+
+async fn close_refused_connection(server: &SignalingServerHandle, client_id: &str) {
+    let connection = server
+        .clients
+        .read()
+        .await
+        .get(client_id)
+        .map(|client| (client.egress.clone(), client.actor_id.clone()));
+    if let Some((egress, actor)) = connection {
+        let close_frame = axum::extract::ws::CloseFrame {
+            code: axum::extract::ws::close_code::POLICY,
+            reason: "client revoked or replaced".into(),
+        };
+        if !egress.close(close_frame) {
+            platform::recording::warn!(
+                "Connection {} control queue full or closed; closing without a Close frame",
+                client_id
+            );
+        }
+        cleanup_client(client_id, server, CleanupMode::ExplicitUnregister).await;
+        if let Some(actor) = actor {
+            cleanup_refused_actor(server, &actor).await;
+        }
+    }
+}
+
+async fn cleanup_refused_actor(server: &SignalingServerHandle, actor: &ActrId) {
+    // Hold this guard through cleanup: a new connection cannot install its
+    // routing/presence state between the replacement check and deletion.
+    let clients = server.clients.read().await;
+    if clients
+        .values()
+        .any(|client| client.actor_id.as_ref() == Some(actor))
+    {
+        return;
+    }
+    if let Err(e) = server
+        .actor_registry
+        .write()
+        .await
+        .unregister_actor_durable(actor)
+        .await
+    {
+        platform::recording::warn!(
+            "Failed to delete cached services of Actor {}: {}",
+            actor.to_string_repr(),
+            e
+        );
+    }
+    server.presence_manager.write().await.unsubscribe_all(actor);
+}
+
+/// Fail closed if a credential's durable binding changed since URL authentication.
+async fn client_credential_refused(actor: &ActrId, credential: Option<&AIdCredential>) -> bool {
+    let Some(claims) =
+        credential.and_then(|credential| IdentityClaims::decode(credential.claims.as_ref()).ok())
+    else {
+        return true;
+    };
+    match platform::realm::membership::credential_refused(actor, &claims.client_key).await {
+        Ok(refused) => refused,
+        Err(error) => {
+            platform::recording::warn!("WebSocket Actor state recheck failed: {error}");
+            true
         }
     }
 }
@@ -379,8 +652,27 @@ pub async fn handle_websocket_connection(
     websocket: WebSocket,
     server: SignalingServerHandle,
     client_ip: Option<std::net::IpAddr>,
-    url_identity: Option<(ActrId, AIdCredential)>,
+    url_identity: Option<(ActrId, ActrType, AIdCredential)>,
     webrtc_role: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    handle_websocket_connection_inner(
+        websocket,
+        server,
+        client_ip,
+        url_identity,
+        webrtc_role,
+        true,
+    )
+    .await
+}
+
+pub(crate) async fn handle_websocket_connection_inner(
+    websocket: WebSocket,
+    server: SignalingServerHandle,
+    client_ip: Option<std::net::IpAddr>,
+    url_identity: Option<(ActrId, ActrType, AIdCredential)>,
+    webrtc_role: Option<String>,
+    require_client_auth: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4().to_string();
     platform::recording::info!(
@@ -393,19 +685,40 @@ pub async fn handle_websocket_connection(
     let (mut ws_sender, mut ws_receiver) = websocket.split();
 
     // Create a bounded egress queue for this connection (data + control dual channels + byte budget, issue #351)
-    let (egress, mut data_rx, mut control_rx) =
+    let (egress, data_rx, control_rx) =
         ClientEgress::new(server.egress_config.clone(), server.queue_metrics.clone());
     let write_timeout = Duration::from_millis(server.egress_config.write_timeout_ms as u64);
     let control_tx = egress.clone();
+    let closed = egress.closed.clone();
 
     // Register the client (including the bounded egress handle)
-    let (actor_id, credential) = match url_identity {
-        Some(identity) => (Some(identity.0), Some(identity.1)),
-        None => (None, None),
+    let (actor_id, actor_type, credential) = match url_identity {
+        Some((actor_id, actor_type, credential)) => {
+            (Some(actor_id), Some(actor_type), Some(credential))
+        }
+        None => (None, None, None),
     };
-    let actor_id_for_registry = actor_id.clone();
+    let actor_id_for_registry = actor_id.clone().zip(actor_type);
+    let connection_credential = credential.clone();
+    let connection_realm = actor_id.as_ref().map(|actor| actor.realm.clone());
     let stale_clients = {
         let mut clients_guard = server.clients.write().await;
+
+        // Serialize this check with connection replacement. An old handshake
+        // must be rejected before it can remove, reroute, or close a healthy
+        // incumbent that connected using the new binding while it was delayed.
+        if require_client_auth
+            && let Some(actor) = actor_id.as_ref()
+            && client_credential_refused(actor, credential.as_ref()).await
+        {
+            drop(clients_guard);
+            let close_frame = axum::extract::ws::CloseFrame {
+                code: axum::extract::ws::close_code::POLICY,
+                reason: "client revoked or replaced".into(),
+            };
+            let _ = ws_sender.send(WsMessage::Close(Some(close_frame))).await;
+            return Ok(());
+        }
 
         // Remove existing connections for the same actor (to avoid stale mappings), and send a WS Close frame to let the old connection exit cleanly.
         let stale_clients = if let Some(ref aid) = actor_id {
@@ -438,20 +751,20 @@ pub async fn handle_websocket_connection(
 
     close_stale_clients(stale_clients, &server).await;
 
-    // Register actor in service registry for discovery/routing (only when URL identity is provided)
-    if let Some(actor_id_for_registry) = actor_id_for_registry {
+    // Register actor in actor registry for discovery/routing (only when URL identity is provided)
+    if let Some((actor_id_for_registry, actor_type)) = actor_id_for_registry {
         {
-            // Load pending service_spec and ws_address from DB (written by AIS during registration)
+            // Load pending service_spec and ws_address from DB (written by Issuer during registration)
             let (service_spec, ws_address) = {
                 let db = platform::storage::db::get_database();
                 let pool = db.get_pool();
                 let row: Option<(Option<Vec<u8>>, Option<String>)> = sqlx::query_as(
                     "SELECT service_spec_blob, ws_address FROM pending_registration \
-                     WHERE serial_number = ?1 AND realm_id = ?2 \
+                     WHERE serial_number = ?1 AND realm = ?2 \
                        AND (expires_at IS NULL OR expires_at > unixepoch())",
                 )
                 .bind(actor_id_for_registry.serial_number as i64)
-                .bind(actor_id_for_registry.realm.realm_id as i64)
+                .bind(&actor_id_for_registry.realm)
                 .fetch_optional(pool)
                 .await
                 .ok()
@@ -465,13 +778,20 @@ pub async fn handle_websocket_connection(
                 }
             };
 
-            let service_name = format!(
-                "{}:{}",
-                actor_id_for_registry.r#type.manufacturer, actor_id_for_registry.r#type.name
-            );
-            let mut registry = server.service_registry.write().await;
+            let service_name = format!("{}:{}", actor_type.publisher, actor_type.name);
+            // A delayed registration must not overwrite a replacement. Use the
+            // same lock order as installation and durable unregister: clients -> registry.
+            let clients = server.clients.read().await;
+            if !clients
+                .get(&client_id)
+                .is_some_and(|client| client.actor_id.as_ref() == Some(&actor_id_for_registry))
+            {
+                return Ok(());
+            }
+            let mut registry = server.actor_registry.write().await;
             if let Err(e) = registry.register_service_full(
                 actor_id_for_registry.clone(),
+                actor_type.clone(),
                 service_name,
                 vec![],
                 None,
@@ -479,7 +799,46 @@ pub async fn handle_websocket_connection(
                 None,
                 ws_address,
             ) {
-                platform::recording::warn!("Failed to register actor in service registry: {}", e);
+                platform::recording::warn!("Failed to register actor in actor registry: {}", e);
+            }
+        }
+        // Authentication and the HTTP upgrade precede registration. A revoke
+        // or reissue can commit and its subscriber can finish in that gap.
+        // Once listed, subsequent revocations can find this connection; now
+        // recheck durable state before announcing it or accepting messages.
+        if require_client_auth {
+            let refused =
+                client_credential_refused(&actor_id_for_registry, connection_credential.as_ref())
+                    .await;
+            if refused {
+                cleanup_client(&client_id, &server, CleanupMode::ExplicitUnregister).await;
+                // The subscriber may have removed the connection before the
+                // registry write above. Remove that late row too, while
+                // preserving any replacement connection's registration.
+                let clients = server.clients.read().await;
+                if !clients
+                    .values()
+                    .any(|client| client.actor_id.as_ref() == Some(&actor_id_for_registry))
+                {
+                    server
+                        .actor_registry
+                        .write()
+                        .await
+                        .unregister_actor_durable(&actor_id_for_registry)
+                        .await?;
+                    server
+                        .presence_manager
+                        .write()
+                        .await
+                        .unsubscribe_all(&actor_id_for_registry);
+                }
+                drop(clients);
+                let close_frame = axum::extract::ws::CloseFrame {
+                    code: axum::extract::ws::close_code::POLICY,
+                    reason: "client revoked or replaced".into(),
+                };
+                let _ = ws_sender.send(WsMessage::Close(Some(close_frame))).await;
+                return Ok(());
             }
         }
         // Notify presence subscribers about the new actor
@@ -487,7 +846,7 @@ pub async fn handle_websocket_connection(
             let actor_id_for_presence = actor_id_for_registry.clone();
             let presence = server.presence_manager.read().await;
             let subscribers = presence
-                .get_subscribers_with_acl(&actor_id_for_presence)
+                .get_subscribers_with_acl(&actor_id_for_presence, &actor_type)
                 .await;
             drop(presence);
 
@@ -519,6 +878,21 @@ pub async fn handle_websocket_connection(
                 }
             }
         }
+    }
+
+    // The Realm retired while this connection was set up: either its state
+    // was dropped before this connection was listed, or the registry refused
+    // the registration above. Either way the connection must not stay.
+    if let Some(realm) = connection_realm
+        && server.actor_registry.read().await.is_retired(&realm)
+    {
+        cleanup_client(&client_id, &server, CleanupMode::ExplicitUnregister).await;
+        let close_frame = axum::extract::ws::CloseFrame {
+            code: axum::extract::ws::close_code::POLICY,
+            reason: "realm retired".into(),
+        };
+        let _ = ws_sender.send(WsMessage::Close(Some(close_frame))).await;
+        return Ok(());
     }
 
     // Task for handling client messages
@@ -578,76 +952,13 @@ pub async fn handle_websocket_connection(
     });
 
     // Task for sending messages
-    //
-    // Drain the control queue first (biased select) so Close/Ping/Pong are not starved by data messages;
-    // every write has a write deadline, so slow/non-reading clients are torn down on timeout (issue #351).
-    let mut send_task = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                // Control messages first
-                ctrl = control_rx.recv() => {
-                    match ctrl {
-                        Some(message) => {
-                            let should_close = matches!(message, WsMessage::Close(_));
-                            match timeout(write_timeout, ws_sender.send(message)).await {
-                                Ok(Ok(())) => {}
-                                Ok(Err(e)) => {
-                                    platform::recording::warn!(
-                                        "WebSocket control frame write failed: {}",
-                                        e
-                                    );
-                                    break;
-                                }
-                                Err(_) => {
-                                    platform::recording::warn!(
-                                        "WebSocket control frame write timed out ({}ms); closing slow-consumer connection",
-                                        write_timeout.as_millis()
-                                    );
-                                    break;
-                                }
-                            }
-                            if should_close {
-                                break;
-                            }
-                        }
-                        None => break,
-                    }
-                }
-                // Data messages
-                data = data_rx.recv() => {
-                    match data {
-                        Some(queued) => {
-                            let QueuedFrame { msg, byte_len, _permit } = queued;
-                            // Hold the byte permit during the write and release it after (applies accurate backpressure to slow consumers)
-                            let send_result = timeout(write_timeout, ws_sender.send(msg)).await;
-                            drop(_permit);
-                            match send_result {
-                                Ok(Ok(())) => {}
-                                Ok(Err(e)) => {
-                                    platform::recording::warn!(
-                                        "WebSocket data frame write failed ({} bytes): {}",
-                                        byte_len,
-                                        e
-                                    );
-                                    break;
-                                }
-                                Err(_) => {
-                                    platform::recording::warn!(
-                                        "WebSocket data frame write timed out ({}ms, {} bytes); closing slow-consumer connection",
-                                        write_timeout.as_millis(),
-                                        byte_len
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                        None => break,
-                    }
-                }
-            }
-        }
-    });
+    let mut send_task = tokio::spawn(write_egress(
+        ws_sender,
+        data_rx,
+        control_rx,
+        closed,
+        write_timeout,
+    ));
     let mut receive_task = receive_task;
 
     // Wait for either task to complete
@@ -683,6 +994,92 @@ pub async fn handle_websocket_connection(
     Ok(())
 }
 
+/// Write a connection's queued frames until the connection ends.
+///
+/// Drains the control queue first (biased select) so Close/Ping/Pong are not
+/// starved by data messages; every write has a write deadline, so slow or
+/// non-reading clients are torn down on timeout (issue #351). Returns, ending
+/// the connection, after writing a Close frame, on a write failure, when the
+/// queues close, or when `closed` is cancelled.
+async fn write_egress<S>(
+    mut ws_sender: S,
+    mut data_rx: tokio::sync::mpsc::Receiver<QueuedFrame>,
+    mut control_rx: tokio::sync::mpsc::Receiver<WsMessage>,
+    closed: tokio_util::sync::CancellationToken,
+    write_timeout: Duration,
+) where
+    S: futures_util::Sink<WsMessage> + Unpin,
+    S::Error: std::fmt::Display,
+{
+    loop {
+        tokio::select! {
+            biased;
+            // The server closed the connection but could not queue a Close frame
+            _ = closed.cancelled() => break,
+            // Control messages first
+            ctrl = control_rx.recv() => {
+                match ctrl {
+                    Some(message) => {
+                        let should_close = matches!(message, WsMessage::Close(_));
+                        match timeout(write_timeout, ws_sender.send(message)).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                platform::recording::warn!(
+                                    "WebSocket control frame write failed: {}",
+                                    e
+                                );
+                                break;
+                            }
+                            Err(_) => {
+                                platform::recording::warn!(
+                                    "WebSocket control frame write timed out ({}ms); closing slow-consumer connection",
+                                    write_timeout.as_millis()
+                                );
+                                break;
+                            }
+                        }
+                        if should_close {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            // Data messages
+            data = data_rx.recv() => {
+                match data {
+                    Some(queued) => {
+                        let QueuedFrame { msg, byte_len, _permit } = queued;
+                        // Hold the byte permit during the write and release it after (applies accurate backpressure to slow consumers)
+                        let send_result = timeout(write_timeout, ws_sender.send(msg)).await;
+                        drop(_permit);
+                        match send_result {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                platform::recording::warn!(
+                                    "WebSocket data frame write failed ({} bytes): {}",
+                                    byte_len,
+                                    e
+                                );
+                                break;
+                            }
+                            Err(_) => {
+                                platform::recording::warn!(
+                                    "WebSocket data frame write timed out ({}ms, {} bytes); closing slow-consumer connection",
+                                    write_timeout.as_millis(),
+                                    byte_len
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+}
+
 fn remove_stale_actor_clients(
     clients: &mut HashMap<String, ClientConnection>,
     actor_id: &ActrId,
@@ -710,13 +1107,9 @@ async fn close_stale_clients(stale_clients: Vec<StaleClient>, server: &Signaling
             reason: "displaced by new connection".into(),
         };
 
-        if stale_client
-            .egress
-            .try_send_control(WsMessage::Close(Some(close_frame)))
-            .is_err()
-        {
+        if !stale_client.egress.close(close_frame) {
             platform::recording::debug!(
-                "Stale WebSocket client {} control queue full or closed",
+                "Stale WebSocket client {} control queue full or closed; closing without a Close frame",
                 stale_client.id
             );
         }
@@ -792,6 +1185,13 @@ async fn handle_client_envelope(
     client_id: &str,
     server: &SignalingServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let identity = {
+        let clients = server.clients.read().await;
+        let Some(client) = clients.get(client_id) else {
+            return Ok(());
+        };
+        client.actor_id.clone().zip(client.credential.clone())
+    };
     // Check message rate limit
     if let Some(ref limiter) = server.message_rate_limiter
         && let Err(e) = limiter.check_message(client_id).await
@@ -809,6 +1209,15 @@ async fn handle_client_envelope(
         let error_envelope =
             server.create_new_envelope(signaling_envelope::Flow::EnvelopeError(error_response));
         send_envelope_to_client(client_id, error_envelope, server).await?;
+        return Ok(());
+    }
+
+    // Admission must precede database authorization work, including for malformed
+    // binary frames. Admitted messages still recheck the live durable binding.
+    if let Some((actor, credential)) = identity
+        && client_credential_refused(&actor, Some(&credential)).await
+    {
+        close_refused_connection(server, client_id).await;
         return Ok(());
     }
 
@@ -842,10 +1251,35 @@ async fn handle_client_envelope(
                     .await
             }
             Some(signaling_envelope::Flow::ActrToServer(actr_to_server)) => {
+                if !is_connection_actor(client_id, server, &actr_to_server.source).await {
+                    platform::recording::warn!(
+                        "Rejecting envelope whose source is not the connection's Actor: client_id={}, source={}",
+                        client_id,
+                        actr_to_server.source.to_string_repr()
+                    );
+                    return send_error_response(
+                        client_id,
+                        &actr_to_server.source,
+                        403,
+                        "Envelope source is not this connection's Actor",
+                        server,
+                        Some(&envelope.envelope_id),
+                    )
+                    .await;
+                }
                 handle_actr_to_server(actr_to_server, client_id, server, &envelope.envelope_id)
                     .await
             }
             Some(signaling_envelope::Flow::ActrRelay(ref relay)) => {
+                if !in_connection_realm(client_id, server, &[&relay.source, &relay.target]).await {
+                    return reject_outside_connection_realm(
+                        client_id,
+                        &relay.source,
+                        server,
+                        &envelope.envelope_id,
+                    )
+                    .await;
+                }
                 #[cfg(feature = "opentelemetry")]
                 {
                     handle_actr_relay(
@@ -880,6 +1314,80 @@ async fn handle_client_envelope(
     .await
 }
 
+/// A signed message must still belong to the actor's current client key,
+/// including when it arrives over an otherwise valid replacement connection.
+async fn check_message_binding(
+    client_id: &str,
+    actor: &ActrId,
+    client_key: &str,
+    server: &SignalingServerHandle,
+    request_envelope_id: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if platform::realm::membership::credential_refused(actor, client_key).await? {
+        send_error_response(
+            client_id,
+            actor,
+            401,
+            "Credential client key was revoked or replaced",
+            server,
+            Some(request_envelope_id),
+        )
+        .await?;
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// Whether `source` is the Actor the connection authenticated as.
+async fn is_connection_actor(
+    client_id: &str,
+    server: &SignalingServerHandle,
+    source: &ActrId,
+) -> bool {
+    let clients = server.clients.read().await;
+    clients
+        .get(client_id)
+        .is_some_and(|c| c.actor_id.as_ref() == Some(source))
+}
+
+/// Whether every Actor an envelope names belongs to the connection's Realm.
+///
+/// A connection is bound to the Realm of the identity it authenticated with;
+/// one without an identity belongs to no Realm.
+async fn in_connection_realm(
+    client_id: &str,
+    server: &SignalingServerHandle,
+    actors: &[&ActrId],
+) -> bool {
+    let clients = server.clients.read().await;
+    let Some(connection) = clients.get(client_id).and_then(|c| c.actor_id.as_ref()) else {
+        return false;
+    };
+    actors.iter().all(|actor| actor.realm == connection.realm)
+}
+
+async fn reject_outside_connection_realm(
+    client_id: &str,
+    source: &ActrId,
+    server: &SignalingServerHandle,
+    request_envelope_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    platform::recording::warn!(
+        "Rejecting envelope outside the connection's Realm: client_id={}, source={}",
+        client_id,
+        source.to_string_repr()
+    );
+    send_error_response(
+        client_id,
+        source,
+        403,
+        "Envelope names an Actor outside this connection's Realm",
+        server,
+        Some(request_envelope_id),
+    )
+    .await
+}
+
 /// Handle PeerToSignaling flow (pre-registration)
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_peer_to_server(
@@ -890,14 +1398,14 @@ async fn handle_peer_to_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match peer_to_server.payload {
         Some(peer_to_signaling::Payload::RegisterRequest(_)) => {
-            // Registration has been migrated to AIS HTTP; signaling no longer relays registration requests
+            // Registration has been migrated to Issuer HTTP; signaling no longer relays registration requests
             platform::recording::warn!(
-                "⚠️  RegisterRequest rejected: use /ais/register HTTP endpoint instead"
+                "⚠️  RegisterRequest rejected: use /issuer/register HTTP endpoint instead"
             );
             send_register_error(
                 client_id,
                 410,
-                "Registration via signaling is no longer supported; use /ais/register HTTP endpoint",
+                "Registration via signaling is no longer supported; use /issuer/register HTTP endpoint",
                 server,
                 request_envelope_id,
             )
@@ -930,13 +1438,8 @@ async fn send_register_error(
 
     // Create temporary ActrId (for response)
     let temp_actor_id = ActrId {
-        realm: Realm { realm_id: 0 },
+        realm: String::new(),
         serial_number: 0,
-        r#type: ActrType {
-            manufacturer: "temp".to_string(),
-            name: "temp".to_string(),
-            version: "1.0.0".to_string(),
-        },
     };
 
     let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
@@ -967,8 +1470,7 @@ async fn handle_actr_to_server(
     );
 
     // Validate that Realm exists, is not expired, and is in normal state
-    let realm_id = source.realm.realm_id;
-    if let Err(e) = RealmEntity::validate_realm(realm_id).await {
+    if let Err(e) = RealmEntity::validate_realm(&source.realm).await {
         let (code, msg) = RealmEntity::map_validation_error(e);
         platform::recording::warn!(
             "⚠️  Actor {} realm validation failed: {}",
@@ -988,13 +1490,15 @@ async fn handle_actr_to_server(
     }
 
     // Validate credential and get tolerance period status
-    let in_tolerance_period = match AIdCredentialValidator::check(
+    let (claims, in_tolerance_period) = match AIdCredentialValidator::check(
         &actr_to_server.credential,
-        source.realm.realm_id,
+        &source.realm,
+        &server.provider_id,
+        "actr.signaling",
     )
     .await
     {
-        Ok((_claims, in_tolerance)) => in_tolerance,
+        Ok(checked) => checked,
         Err(e) => {
             platform::recording::warn!(
                 "⚠️  Actor {} credential validation failed: {}",
@@ -1015,6 +1519,38 @@ async fn handle_actr_to_server(
         }
     };
 
+    // The credential must belong to the source; its claims carry the source's Actor type.
+    if claims.actor_id != source.to_string_repr() {
+        platform::recording::warn!(
+            "source does not match credential actor_id: source={}, credential={}",
+            source.to_string_repr(),
+            claims.actor_id
+        );
+        send_error_response(
+            client_id,
+            &source,
+            403,
+            "Source identity mismatch: source does not match credential",
+            server,
+            Some(request_envelope_id),
+        )
+        .await?;
+        return Ok(());
+    }
+    let source_type = claims.actor_type;
+
+    if !check_message_binding(
+        client_id,
+        &source,
+        &claims.client_key,
+        server,
+        request_envelope_id,
+    )
+    .await?
+    {
+        return Ok(());
+    }
+
     match actr_to_server.payload {
         Some(actr_to_signaling::Payload::Ping(ping)) => {
             handle_ping(
@@ -1031,18 +1567,41 @@ async fn handle_actr_to_server(
             handle_unregister(source, req, client_id, server, request_envelope_id).await?;
         }
         Some(actr_to_signaling::Payload::DiscoveryRequest(req)) => {
-            handle_discovery_request(source, req, client_id, server, request_envelope_id).await?;
+            handle_discovery_request(
+                source,
+                &source_type,
+                req,
+                client_id,
+                server,
+                request_envelope_id,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::RouteCandidatesRequest(req)) => {
-            handle_route_candidates_request(source, req, client_id, server, request_envelope_id)
-                .await?;
+            handle_route_candidates_request(
+                source,
+                &source_type,
+                req,
+                client_id,
+                server,
+                request_envelope_id,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::GetServiceSpecRequest(req)) => {
             handle_get_service_spec_request(source, req, client_id, server, request_envelope_id)
                 .await?;
         }
         Some(actr_to_signaling::Payload::SubscribeActrUpRequest(req)) => {
-            handle_subscribe_actr_up(source, req, client_id, server, request_envelope_id).await?;
+            handle_subscribe_actr_up(
+                source,
+                source_type,
+                req,
+                client_id,
+                server,
+                request_envelope_id,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::UnsubscribeActrUpRequest(req)) => {
             handle_unsubscribe_actr_up(source, req, client_id, server, request_envelope_id).await?;
@@ -1090,8 +1649,8 @@ async fn handle_ping(
         }
     );
 
-    // Store load metrics in ServiceRegistry
-    let mut registry = server.service_registry.write().await;
+    // Store load metrics in ActorRegistry
+    let mut registry = server.actor_registry.write().await;
     if let Err(e) = registry.update_load_metrics(
         &source,
         ping.availability,
@@ -1200,11 +1759,45 @@ async fn handle_unregister(
         req.reason.as_deref().unwrap_or("not provided")
     );
 
-    // Send UnregisterResponse
-    let response = actr_protocol::UnregisterResponse {
-        result: Some(actr_protocol::unregister_response::Result::Success(
-            actr_protocol::unregister_response::UnregisterOk {},
-        )),
+    // Serialize ownership and deletion with replacement installation. An old
+    // handler may have passed authentication before the new connection arrived.
+    let clients = server.clients.read().await;
+    if !clients
+        .get(client_id)
+        .is_some_and(|client| client.actor_id.as_ref() == Some(&source))
+    {
+        return Ok(());
+    }
+    // The storage DELETE must complete before Success is acknowledged: the
+    // peer treats UnregisterOk as "the removal survives a server restart".
+    let durable = server
+        .actor_registry
+        .write()
+        .await
+        .unregister_actor_durable(&source)
+        .await;
+    drop(clients);
+
+    let response = match durable {
+        Ok(()) => actr_protocol::UnregisterResponse {
+            result: Some(actr_protocol::unregister_response::Result::Success(
+                actr_protocol::unregister_response::UnregisterOk {},
+            )),
+        },
+        Err(error) => {
+            platform::recording::error!(
+                "durable unregister failed for Actor {}: {error}",
+                source.to_string_repr()
+            );
+            actr_protocol::UnregisterResponse {
+                result: Some(actr_protocol::unregister_response::Result::Error(
+                    actr_protocol::ErrorResponse {
+                        code: 500,
+                        message: error,
+                    },
+                )),
+            }
+        }
     };
 
     let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
@@ -1327,8 +1920,7 @@ async fn handle_actr_relay(
     let target = relay.target.clone();
     let delivery_context = relay.delivery_context;
     // Validate source Actor realm (exists, not expired, and in normal state)
-    let realm_id = source.realm.realm_id;
-    if let Err(e) = RealmEntity::validate_realm(realm_id).await {
+    if let Err(e) = RealmEntity::validate_realm(&source.realm).await {
         let (code, msg) = RealmEntity::map_validation_error(e);
         platform::recording::warn!(
             "⚠️  Actor {} realm validation failed: {}",
@@ -1355,39 +1947,15 @@ async fn handle_actr_relay(
 
     platform::recording::debug!("handle_actr_relay: relay={:?}", relay);
 
-    // ACL check: can source relay to target?
-    use platform::realm::acl::ActorAcl;
-    let source_realm = source.realm.realm_id;
-    let target_realm = target.realm.realm_id;
-
-    // Unified ACL check: same-realm / cross-realm both go through the same rule query
-    let source_type = type_key(&source.r#type);
-    let target_type = type_key(&target.r#type);
-
-    let can_relay = ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type)
-        .await
-        .unwrap_or(false);
-
-    if !can_relay {
-        platform::recording::warn!(
-            "⚠️  ACL denied relay: {} -> {}",
-            source.to_string_repr(),
-            target.to_string_repr()
-        );
-        send_error_response(
-            client_id,
-            &source,
-            403,
-            "ACL policy denies relay to target actor",
-            server,
-            Some(request_envelope_id),
-        )
-        .await?;
-        return Ok(());
-    }
-
-    // Validate credential and retain claims for identity verification below.
-    let claims = match AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await
+    // Validate credential before the ACL check: the source type used by the ACL
+    // comes from the verified claims.
+    let claims = match AIdCredentialValidator::check(
+        &relay.credential,
+        &source.realm,
+        &server.provider_id,
+        "actr.signaling",
+    )
+    .await
     {
         Ok((claims, _)) => claims,
         Err(e) => {
@@ -1429,6 +1997,73 @@ async fn handle_actr_relay(
         .await?;
         return Ok(());
     }
+    let source_type = claims.actor_type;
+    if !check_message_binding(
+        client_id,
+        &source,
+        &claims.client_key,
+        server,
+        request_envelope_id,
+    )
+    .await?
+    {
+        return Ok(());
+    }
+
+    // ACL check: can source relay to target? Same-realm / cross-realm both go
+    // through the same rule query. The target type comes from the registry
+    // record of the target, never from the sender (SIG-02).
+    use platform::realm::acl::ActorAcl;
+    let target_type = server
+        .actor_registry
+        .read()
+        .await
+        .get_actor_type(&target)
+        .cloned();
+    let Some(target_type) = target_type else {
+        platform::recording::warn!(
+            "⚠️ Relay target Actor {} is not registered",
+            target.to_string_repr()
+        );
+        send_relay_delivery_result_if_requested(
+            client_id,
+            &source,
+            &target,
+            delivery_context.as_ref(),
+            RelayEgressDisposition::TargetUnavailable,
+            request_envelope_id,
+            server,
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let can_relay = ActorAcl::can_discover(
+        &source.realm,
+        &target.realm,
+        &type_key(&source_type),
+        &type_key(&target_type),
+    )
+    .await
+    .unwrap_or(false);
+
+    if !can_relay {
+        platform::recording::warn!(
+            "⚠️  ACL denied relay: {} -> {}",
+            source.to_string_repr(),
+            target.to_string_repr()
+        );
+        send_error_response(
+            client_id,
+            &source,
+            403,
+            "ACL policy denies relay to target actor",
+            server,
+            Some(request_envelope_id),
+        )
+        .await?;
+        return Ok(());
+    }
 
     let connection_status = relay_source_connection_status(client_id, &source, server).await;
     if connection_status != RelaySourceConnectionStatus::Current {
@@ -1445,6 +2080,27 @@ async fn handle_actr_relay(
     if let Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation { from, to, .. })) =
         relay.payload.clone()
     {
+        // The ACL above covers only source -> target, so the negotiation must
+        // name exactly that pair.
+        if from != source || to != target {
+            platform::recording::warn!(
+                "RoleNegotiation does not match relay endpoints: source={}, target={}, from={}, to={}",
+                source.to_string_repr(),
+                target.to_string_repr(),
+                from.to_string_repr(),
+                to.to_string_repr()
+            );
+            send_error_response(
+                client_id,
+                &source,
+                403,
+                "RoleNegotiation must be from the relay source to the relay target",
+                server,
+                Some(request_envelope_id),
+            )
+            .await?;
+            return Ok(());
+        }
         if resolve_client_id_by_actor_id(&to, server).await.is_err() {
             platform::recording::warn!(
                 "⚠️ Role negotiation target Actor {} is unavailable",
@@ -1469,13 +2125,22 @@ async fn handle_actr_relay(
 
         drop(clients_guard);
 
-        // Send RoleAssignment to from
+        // Both assignments are server-to-client notifications: the receiver only
+        // consumes `is_offerer`, so the sender's bearer credential must not ride
+        // along -- `to` is a peer and must never receive the initiator's live
+        // credential.
+        let empty_credential = AIdCredential::default();
+
+        // Send RoleAssignment to from; `from` is the verified source.
+        let from_type = Some(source_type.clone());
+
         let new_relay = ActrRelay {
             // source: peer actor, target: receiver of this assignment
             source: from.clone(),
-            credential: relay.credential.clone(),
+            credential: empty_credential.clone(),
             target: to.clone(),
             delivery_context: None,
+            source_type: from_type.clone(),
             payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
                 is_offerer,
                 remote_fixed: None,
@@ -1494,9 +2159,10 @@ async fn handle_actr_relay(
         let new_relay = ActrRelay {
             // source: peer actor, target: receiver of this assignment
             source: from.clone(),
-            credential: relay.credential.clone(),
+            credential: empty_credential,
             target: to.clone(),
             delivery_context: None,
+            source_type: from_type,
             payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
                 is_offerer: !is_offerer,
                 remote_fixed: None,
@@ -1531,19 +2197,21 @@ async fn handle_actr_relay(
     let target_client_id = {
         let clients_guard = server.clients.read().await;
         clients_guard.iter().find_map(|(id, client)| {
-            client.actor_id.as_ref().and_then(|actor_id| {
-                if actor_id.realm.realm_id == target.realm.realm_id
-                    && actor_id.serial_number == target.serial_number
-                {
-                    Some(id.clone())
-                } else {
-                    None
-                }
-            })
+            (client.actor_id.as_ref() == Some(&target)).then(|| id.clone())
         })
     };
 
     if let Some(target_client_id) = target_client_id {
+        // Strip the sender's credential before forwarding to the peer: the credential is
+        // a bearer token, and forwarding it would let the peer impersonate the sender.
+        // The peer discards this field on receipt, so clearing it has no observable
+        // effect on behavior beyond closing the credential-leak vector.
+        // The source type is overwritten with the verified claims value; whatever
+        // the sender put there is discarded.
+        let mut relay = relay;
+        relay.credential = Default::default();
+        relay.source_type = Some(source_type);
+
         // Reconstruct envelope and forward
         let flow = signaling_envelope::Flow::ActrRelay(relay);
         #[allow(unused_mut)]
@@ -1586,13 +2254,8 @@ async fn handle_actr_relay(
 }
 
 // Compute ActorId key for sorting, ensuring role assignment is deterministic
-fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
-    (
-        id.realm.realm_id,
-        id.serial_number,
-        id.r#type.manufacturer.clone(),
-        id.r#type.name.clone(),
-    )
+fn actor_order_key(id: &ActrId) -> (&str, u64) {
+    (&id.realm, id.serial_number)
 }
 
 /// Determine whether the initiator is the offerer based on both parties role preferences and ActorId
@@ -1667,11 +2330,7 @@ async fn send_role_assignment(
     let target_client_id = {
         let clients_guard = server.clients.read().await;
         clients_guard.iter().find_map(|(id, client)| {
-            (client.actor_id.as_ref().is_some_and(|aid| {
-                aid.realm.realm_id == target_actor.realm.realm_id
-                    && aid.serial_number == target_actor.serial_number
-            }))
-            .then(|| id.clone())
+            (client.actor_id.as_ref() == Some(target_actor)).then(|| id.clone())
         })
     };
 
@@ -1844,7 +2503,7 @@ async fn close_slow_client(client_id: &str, server: &SignalingServerHandle, egre
         code: axum::extract::ws::close_code::ERROR,
         reason: "slow consumer: egress queue saturated".into(),
     };
-    let _ = egress.try_send_control(WsMessage::Close(Some(close_frame)));
+    egress.close(close_frame);
 
     cleanup_client(client_id, server, CleanupMode::ConnectionClosed).await;
 }
@@ -1926,13 +2585,24 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
                     replacement_client_id
                 );
             } else {
-                let mut registry = server.service_registry.write().await;
-                match mode {
-                    CleanupMode::ConnectionClosed => {
-                        registry.unregister_actor_memory_only(&actor_id);
-                    }
-                    CleanupMode::ExplicitUnregister => {
-                        registry.unregister_actor(&actor_id);
+                // A replacement may have connected after the snapshot above.
+                let clients = server.clients.read().await;
+                if !clients
+                    .values()
+                    .any(|client| client.actor_id.as_ref() == Some(&actor_id))
+                {
+                    let mut registry = server.actor_registry.write().await;
+                    match mode {
+                        CleanupMode::ConnectionClosed => {
+                            registry.unregister_actor_memory_only(&actor_id);
+                        }
+                        CleanupMode::ExplicitUnregister => {
+                            if let Err(error) = registry.unregister_actor_durable(&actor_id).await {
+                                platform::recording::warn!(
+                                    "Failed to unregister Actor during connection cleanup: {error}"
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -1952,34 +2622,35 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_discovery_request(
     source: ActrId,
+    source_type: &ActrType,
     req: actr_protocol::DiscoveryRequest,
     client_id: &str,
     server: &SignalingServerHandle,
     request_envelope_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
-        "🔍 Processing Discovery request from Actor {}: manufacturer={:?}, limit={}",
+        "🔍 Processing Discovery request from Actor {}: publisher={:?}, limit={}",
         source.to_string_repr(),
-        req.manufacturer.as_deref().unwrap_or("*"),
+        req.publisher.as_deref().unwrap_or("*"),
         req.limit.unwrap_or(64)
     );
 
-    // Query all services from ServiceRegistry
-    let registry = server.service_registry.read().await;
-    let services = registry.discover_all(req.manufacturer.as_deref());
+    // Query all services of the requester's Realm from ActorRegistry
+    let registry = server.actor_registry.read().await;
+    let services = registry.discover_all(&source.realm, req.publisher.as_deref());
     let total_count = services.len(); // Save count before moving
 
     // Apply ACL filtering (if ACL is enabled)
     use platform::realm::acl::ActorAcl;
-    let source_realm = source.realm.realm_id;
-    let source_type = type_key(&source.r#type);
+    let source_realm = &source.realm;
+    let source_type = type_key(source_type);
 
     let mut acl_filtered_services = Vec::new();
 
     // ACL always enabled: filter services based on ACL rules
     for service in services {
-        let target_realm = service.actor_id.realm.realm_id;
-        let target_type = type_key(&service.actor_id.r#type);
+        let target_realm = &service.actor_id.realm;
+        let target_type = type_key(&service.actor_type);
 
         match ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type).await {
             Ok(true) => acl_filtered_services.push(service),
@@ -2016,7 +2687,7 @@ async fn handle_discovery_request(
         HashMap::new();
 
     for service in acl_filtered_services {
-        let type_key = type_key(&service.actor_id.r#type);
+        let type_key = type_key(&service.actor_type);
 
         // If this type has not been added yet, create a new entry
         type_map.entry(type_key).or_insert_with(|| {
@@ -2034,7 +2705,7 @@ async fn handle_discovery_request(
                 .unwrap_or_else(|| ("unknown".to_string(), None, None, Vec::new()));
 
             actr_protocol::discovery_response::TypeEntry {
-                actr_type: service.actor_id.r#type.clone(),
+                actr_type: service.actor_type.clone(),
                 name: service.service_name.clone(),
                 description,
                 service_fingerprint: fingerprint,
@@ -2078,6 +2749,7 @@ async fn handle_discovery_request(
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_route_candidates_request(
     source: ActrId,
+    source_type: &ActrType,
     req: actr_protocol::RouteCandidatesRequest,
     client_id: &str,
     server: &SignalingServerHandle,
@@ -2086,17 +2758,17 @@ async fn handle_route_candidates_request(
     platform::recording::info!(
         "🎯 Processing RouteCandidates request from Actor {}: target_type={}/{}",
         source.to_string_repr(),
-        req.target_type.manufacturer,
+        req.target_type.publisher,
         req.target_type.name,
     );
 
-    // Query all instances matching target_type from ServiceRegistry
-    let registry = server.service_registry.read().await;
-    let candidates_raw = registry.find_by_actr_type(&req.target_type);
+    // Query all instances of the requester's Realm matching target_type from ActorRegistry
+    let registry = server.actor_registry.read().await;
+    let candidates_raw = registry.find_by_actr_type(&source.realm, &req.target_type);
     drop(registry);
 
     // Filter out ghost candidates with no active WebSocket connection.
-    // ServiceRegistry may briefly retain offline entries due to network disruptions,
+    // ActorRegistry may briefly retain offline entries due to network disruptions,
     // Cross-checking against the clients map eliminates them.
     let connected_actor_ids: std::collections::HashSet<ActrId> = {
         let clients = server.clients.read().await;
@@ -2124,27 +2796,27 @@ async fn handle_route_candidates_request(
     if candidates.is_empty() {
         platform::recording::info!(
             "⚠️  No service instances found for type {}/{}",
-            req.target_type.manufacturer,
+            req.target_type.publisher,
             req.target_type.name
         );
     } else {
         platform::recording::info!(
             "📋 Found {} candidate instances for type {}/{}",
             total_candidates,
-            req.target_type.manufacturer,
+            req.target_type.publisher,
             req.target_type.name
         );
     }
 
     // Apply ACL filtering
     use platform::realm::acl::ActorAcl;
-    let source_realm = source.realm.realm_id;
-    let source_type = type_key(&source.r#type);
+    let source_realm = &source.realm;
+    let source_type = type_key(source_type);
 
     let mut acl_filtered_candidates = Vec::new();
     for candidate in candidates {
-        let target_realm = candidate.actor_id.realm.realm_id;
-        let target_type = type_key(&candidate.actor_id.r#type);
+        let target_realm = &candidate.actor_id.realm;
+        let target_type = type_key(&candidate.actor_type);
 
         match ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type).await {
             Ok(true) => acl_filtered_candidates.push(candidate),
@@ -2185,16 +2857,24 @@ async fn handle_route_candidates_request(
     });
 
     // Extract ws_address (rank_candidates moves candidates, collect beforehand)
-    let ws_address_map: Vec<(ActrId, Option<String>)> = acl_filtered_candidates
+    let ws_address_map: std::collections::HashMap<ActrId, Option<String>> = acl_filtered_candidates
         .iter()
         .map(|c| (c.actor_id.clone(), c.ws_address.clone()))
         .collect();
 
     // Ranking: ACL filtered, same ActrType means protocol compatible, apply ranking_factors in order
     // is_exact_match flag handled internally by LB via client_fingerprint
+    // Cap arbitrary wire requests before ranking/encoding response candidates.
+    let mut criteria = req.criteria.clone().unwrap_or_else(|| {
+        actr_protocol::route_candidates_request::NodeSelectionCriteria {
+            candidate_count: MAX_ROUTE_CANDIDATES,
+            ..Default::default()
+        }
+    });
+    criteria.candidate_count = criteria.candidate_count.min(MAX_ROUTE_CANDIDATES);
     let ranked_actor_ids = LoadBalancer::rank_candidates(
         &acl_filtered_candidates,
-        req.criteria.as_ref(),
+        Some(&criteria),
         req.client_fingerprint.trim(),
         Some(client_id),
         client_location,
@@ -2209,12 +2889,12 @@ async fn handle_route_candidates_request(
     let ws_address_map: Vec<actr_protocol::WsAddressEntry> = ranked_actor_ids
         .iter()
         .filter_map(|id| {
-            ws_address_map.iter().find(|(a, _)| a == id).map(|(_, ws)| {
-                actr_protocol::WsAddressEntry {
+            ws_address_map
+                .get(id)
+                .map(|ws| actr_protocol::WsAddressEntry {
                     candidate_id: id.clone(),
                     ws_address: ws.clone(),
-                }
-            })
+                })
         })
         .collect();
 
@@ -2256,12 +2936,13 @@ async fn handle_get_service_spec_request(
         service_name
     );
 
-    // Find matching ServiceSpec in ServiceRegistry by spec name
+    // Find matching ServiceSpec in ActorRegistry by spec name, only among
+    // services of the requester's own Realm.
     let result = server
-        .service_registry
+        .actor_registry
         .read()
         .await
-        .discover_by_spec_name(service_name)
+        .discover_by_spec_name(&source.realm, service_name)
         .into_iter()
         .find_map(|service| service.service_spec.clone())
         .map(actr_protocol::get_service_spec_response::Result::Success)
@@ -2287,7 +2968,8 @@ async fn handle_get_service_spec_request(
     Ok(())
 }
 
-/// Handle GetSigningKey request — proxies key lookup via local KeyCache
+/// Handle GetSigningKey request — proxies key lookup via local KeyCache, within the
+/// requester's Realm
 async fn handle_get_signing_key_request(
     source: ActrId,
     req: actr_protocol::GetSigningKeyRequest,
@@ -2302,7 +2984,8 @@ async fn handle_get_signing_key_request(
         key_id
     );
 
-    let response = match AIdCredentialValidator::get_key_bytes(key_id).await {
+    // Only the requester's own Realm's issuer keys are served.
+    let response = match AIdCredentialValidator::get_key_bytes(&source.realm, key_id).await {
         Ok(Some(pubkey_bytes)) => actr_protocol::GetSigningKeyResponse {
             key_id,
             pubkey: pubkey_bytes.into(),
@@ -2356,6 +3039,7 @@ async fn handle_get_signing_key_request(
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_subscribe_actr_up(
     source: ActrId,
+    source_type: ActrType,
     req: actr_protocol::SubscribeActrUpRequest,
     client_id: &str,
     server: &SignalingServerHandle,
@@ -2364,13 +3048,13 @@ async fn handle_subscribe_actr_up(
     platform::recording::info!(
         "📢 Actor {} subscribed to service up events: target_type={}/{}",
         source.to_string_repr(),
-        req.target_type.manufacturer,
+        req.target_type.publisher,
         req.target_type.name
     );
 
     // Add subscription to PresenceManager
     let mut presence = server.presence_manager.write().await;
-    presence.subscribe(source.clone(), req.target_type);
+    presence.subscribe(source.clone(), source_type, req.target_type);
     drop(presence);
 
     let response = actr_protocol::SubscribeActrUpResponse {
@@ -2404,7 +3088,7 @@ async fn handle_unsubscribe_actr_up(
     platform::recording::info!(
         "🔕 Actor {} unsubscribed from service up events: target_type={}/{}",
         source.to_string_repr(),
-        req.target_type.manufacturer,
+        req.target_type.publisher,
         req.target_type.name
     );
 
@@ -2417,7 +3101,7 @@ async fn handle_unsubscribe_actr_up(
         platform::recording::warn!(
             "Actor {} was not subscribed to {}/{}",
             source.to_string_repr(),
-            req.target_type.manufacturer,
+            req.target_type.publisher,
             req.target_type.name
         );
     }
@@ -2474,19 +3158,21 @@ async fn send_error_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{ActrType, Realm};
     use std::collections::HashMap;
 
     /// Create test ActrId
     fn create_test_actr_id(serial: u64) -> ActrId {
         ActrId {
             serial_number: serial,
-            realm: Realm { realm_id: 1001 },
-            r#type: ActrType {
-                manufacturer: "test".to_string(),
-                name: "device".to_string(),
-                version: "1.0.0".to_string(),
-            },
+            realm: "test@example.com".to_string(),
+        }
+    }
+
+    fn create_test_actr_type() -> ActrType {
+        ActrType {
+            publisher: "test".to_string(),
+            name: "device".to_string(),
+            version: "1.0.0".to_string(),
         }
     }
 
@@ -2537,32 +3223,180 @@ mod tests {
     fn create_test_server_handle_with_config(
         egress_config: EgressQueueConfig,
     ) -> SignalingServerHandle {
-        let server = SignalingServer::with_egress_config(egress_config);
-        SignalingServerHandle {
-            clients: server.clients.clone(),
-            actor_id_index: server.actor_id_index.clone(),
-            service_registry: server.service_registry.clone(),
-            presence_manager: server.presence_manager.clone(),
-            connection_rate_limiter: server.connection_rate_limiter.clone(),
-            message_rate_limiter: server.message_rate_limiter.clone(),
-            egress_config: server.egress_config.clone(),
-            target_rate_limiter: server.target_rate_limiter.clone(),
-            queue_metrics: server.queue_metrics.clone(),
-        }
+        let mut server = SignalingServer::with_egress_config(egress_config);
+        server.provider_id = "provider.example".to_string();
+        server.handle()
     }
 
     async fn register_test_service(server: &SignalingServerHandle, actor_id: &ActrId) {
         server
-            .service_registry
+            .actor_registry
             .write()
             .await
             .register_service(
                 actor_id.clone(),
+                create_test_actr_type(),
                 "test_service".to_string(),
                 vec!["TestMessage".to_string()],
                 None,
             )
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn displaced_unregister_preserves_replacement_and_durable_discovery() {
+        use crate::actor_registry_storage::ActorRegistryStorage;
+        let server = create_test_server_handle();
+        let actor = create_test_actr_id(812);
+        server.clients.write().await.insert(
+            "old".into(),
+            create_test_client_with_id("old", actor.clone(), None),
+        );
+        register_test_service(&server, &actor).await;
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(
+            ActorRegistryStorage::new(dir.path().join("actors.db"), None)
+                .await
+                .unwrap(),
+        );
+
+        // Pause the actual old handler at its ownership lock, then install a
+        // replacement before releasing it. No timing sleeps or scheduler races.
+        let mut clients = server.clients.write().await;
+        let mut old_request = Box::pin(handle_unregister(
+            actor.clone(),
+            Default::default(),
+            "old",
+            &server,
+            "old-request",
+        ));
+        assert!(futures_util::poll!(&mut old_request).is_pending());
+        clients.remove("old");
+        clients.insert(
+            "new".into(),
+            create_test_client_with_id("new", actor.clone(), None),
+        );
+        server
+            .actor_id_index
+            .write()
+            .await
+            .insert(actor.clone(), "new".into());
+        register_test_service(&server, &actor).await;
+        let service = server
+            .actor_registry
+            .read()
+            .await
+            .find_by_actr_type(&actor.realm, &create_test_actr_type())[0]
+            .clone();
+        storage.save_service(&service).await.unwrap();
+        server
+            .actor_registry
+            .write()
+            .await
+            .set_storage(storage.clone());
+        drop(clients);
+        old_request.await.unwrap();
+        assert!(server.clients.read().await.contains_key("new"));
+        assert_eq!(
+            server
+                .actor_id_index
+                .read()
+                .await
+                .get(&actor)
+                .map(String::as_str),
+            Some("new")
+        );
+        assert_eq!(
+            server.actor_registry.read().await.get_actor_type(&actor),
+            Some(&create_test_actr_type())
+        );
+        assert_eq!(
+            storage
+                .load_services_by_actor_id(&actor)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        handle_unregister(
+            actor.clone(),
+            Default::default(),
+            "new",
+            &server,
+            "current-request",
+        )
+        .await
+        .unwrap();
+        assert!(
+            server
+                .actor_registry
+                .read()
+                .await
+                .get_actor_type(&actor)
+                .is_none()
+        );
+        assert!(
+            storage
+                .load_services_by_actor_id(&actor)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn over_limit_messages_do_not_run_connection_authorization() {
+        let mut server = create_test_server_handle();
+        let limiter = Arc::new(crate::ratelimit::MessageRateLimiter::new(
+            platform::config::signaling::MessageRateLimit {
+                enabled: true,
+                per_second: 1,
+                burst_size: 1,
+            },
+        ));
+        limiter.check_message("limited").await.unwrap();
+        server.message_rate_limiter = Some(limiter);
+        let (egress, mut data_rx, mut control_rx) =
+            create_blocked_egress(EgressQueueConfig::default(), server.queue_metrics.clone());
+        server.clients.write().await.insert(
+            "limited".into(),
+            ClientConnection {
+                id: "limited".into(),
+                actor_id: Some(create_test_actr_id(813)),
+                credential: Some(AIdCredential {
+                    claims: vec![0xff].into(),
+                    ..Default::default()
+                }),
+                egress,
+                client_ip: None,
+                webrtc_role: None,
+            },
+        );
+        handle_client_envelope(&[], "limited", &server)
+            .await
+            .unwrap();
+        let queued = data_rx.recv().await.unwrap();
+        let WsMessage::Binary(bytes) = queued.msg else {
+            panic!("expected binary error")
+        };
+        let envelope = SignalingEnvelope::decode(bytes.as_ref()).unwrap();
+        assert!(matches!(
+            envelope.flow,
+            Some(signaling_envelope::Flow::EnvelopeError(ErrorResponse {
+                code: 429,
+                ..
+            }))
+        ));
+        assert!(server.clients.read().await.contains_key("limited"));
+        assert!(control_rx.try_recv().is_err());
+        // Once admitted, the same invalid connection must still be refused.
+        server.message_rate_limiter = None;
+        handle_client_envelope(&[], "limited", &server)
+            .await
+            .unwrap();
+        assert!(!server.clients.read().await.contains_key("limited"));
+        assert!(matches!(control_rx.recv().await, Some(WsMessage::Close(_))));
     }
 
     #[test]
@@ -2655,13 +3489,140 @@ mod tests {
         );
         assert_eq!(
             server
-                .service_registry
+                .actor_registry
                 .read()
                 .await
-                .discover_by_service_name("test_service")
+                .discover_by_service_name(&actor_id.realm, "test_service")
                 .len(),
             1,
             "stale connection cleanup must not unregister a live replacement"
+        );
+    }
+
+    #[tokio::test]
+    async fn disabling_an_actor_drops_only_its_state() {
+        let server = create_test_server_handle();
+        let disabled = create_test_actr_id(1);
+        let other = create_test_actr_id(2);
+        for (client_id, actor) in [("disabled", &disabled), ("other", &other)] {
+            register_test_service(&server, actor).await;
+            server.clients.write().await.insert(
+                client_id.to_string(),
+                create_test_client_with_id(client_id, actor.clone(), None),
+            );
+            server
+                .actor_id_index
+                .write()
+                .await
+                .insert(actor.clone(), client_id.to_string());
+            server.presence_manager.write().await.subscribe(
+                actor.clone(),
+                create_test_actr_type(),
+                create_test_actr_type(),
+            );
+        }
+
+        disable_actor(&server, &disabled).await;
+
+        assert!(!server.clients.read().await.contains_key("disabled"));
+        assert!(server.clients.read().await.contains_key("other"));
+        let registry = server.actor_registry.read().await;
+        let services = registry.discover_by_service_name(&disabled.realm, "test_service");
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].actor_id, other);
+        drop(registry);
+        let presence = server.presence_manager.read().await;
+        let subscribers = presence.get_subscribers(&disabled.realm, &create_test_actr_type());
+        assert_eq!(subscribers, vec![&other]);
+    }
+
+    #[tokio::test]
+    async fn retiring_a_realm_drops_its_state_and_refuses_it_afterwards() {
+        let server = create_test_server_handle();
+        let retired = create_test_actr_id(1);
+        let other = ActrId {
+            serial_number: 1,
+            realm: "other@example.com".to_string(),
+        };
+        for (client_id, actor) in [("retired", &retired), ("other", &other)] {
+            register_test_service(&server, actor).await;
+            server.clients.write().await.insert(
+                client_id.to_string(),
+                create_test_client_with_id(client_id, actor.clone(), None),
+            );
+            server
+                .actor_id_index
+                .write()
+                .await
+                .insert(actor.clone(), client_id.to_string());
+            server.presence_manager.write().await.subscribe(
+                actor.clone(),
+                create_test_actr_type(),
+                create_test_actr_type(),
+            );
+        }
+
+        retire_realm(&server, &retired.realm).await;
+        // Idempotent.
+        retire_realm(&server, &retired.realm).await;
+
+        assert!(!server.clients.read().await.contains_key("retired"));
+        assert!(server.clients.read().await.contains_key("other"));
+        let registry = server.actor_registry.read().await;
+        assert!(
+            registry
+                .discover_by_service_name(&retired.realm, "test_service")
+                .is_empty()
+        );
+        assert_eq!(
+            registry
+                .discover_by_service_name(&other.realm, "test_service")
+                .len(),
+            1
+        );
+        drop(registry);
+        let presence = server.presence_manager.read().await;
+        assert!(
+            presence
+                .get_subscribers(&retired.realm, &create_test_actr_type())
+                .is_empty()
+        );
+        assert_eq!(
+            presence
+                .get_subscribers(&other.realm, &create_test_actr_type())
+                .len(),
+            1
+        );
+        drop(presence);
+
+        // A registration or subscription racing the retirement is refused.
+        let late = create_test_actr_id(2);
+        assert!(
+            server
+                .actor_registry
+                .write()
+                .await
+                .register_service(
+                    late.clone(),
+                    create_test_actr_type(),
+                    "test_service".to_string(),
+                    vec![],
+                    None,
+                )
+                .is_err()
+        );
+        server.presence_manager.write().await.subscribe(
+            late,
+            create_test_actr_type(),
+            create_test_actr_type(),
+        );
+        assert!(
+            server
+                .presence_manager
+                .read()
+                .await
+                .get_subscribers(&retired.realm, &create_test_actr_type())
+                .is_empty()
         );
     }
 
@@ -2685,10 +3646,10 @@ mod tests {
 
         assert_eq!(
             server
-                .service_registry
+                .actor_registry
                 .read()
                 .await
-                .discover_by_service_name("test_service")
+                .discover_by_service_name(&actor_id.realm, "test_service")
                 .len(),
             0,
             "connection cleanup should remove offline services from memory"
@@ -2986,6 +3947,77 @@ mod tests {
         }
     }
 
+    /// A replaced or retired connection whose control queue is full still
+    /// ends: no Close frame fits, so the write task stops at once instead of
+    /// leaving the socket open until the client speaks.
+    #[tokio::test]
+    async fn a_close_that_cannot_be_queued_still_ends_the_connection() {
+        let server = create_test_server_handle();
+        let config = EgressQueueConfig {
+            max_control_messages: 1,
+            ..EgressQueueConfig::default()
+        };
+        let full_control_queue = || {
+            let (egress, data_rx, control_rx) =
+                ClientEgress::new(config.clone(), Arc::new(SignalingQueueMetrics::default()));
+            egress
+                .try_send_control(WsMessage::Pong(Vec::from("queued").into()))
+                .unwrap();
+            (egress, data_rx, control_rx)
+        };
+
+        // Replaced by a new connection of the same actor.
+        let (replaced, data_rx, control_rx) = full_control_queue();
+        close_stale_clients(
+            vec![StaleClient {
+                id: "replaced".to_string(),
+                egress: replaced.clone(),
+            }],
+            &server,
+        )
+        .await;
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            write_egress(
+                futures_util::sink::drain(),
+                data_rx,
+                control_rx,
+                replaced.closed.clone(),
+                Duration::from_secs(1),
+            ),
+        )
+        .await
+        .expect("the write task ends although the replaced client never reads or speaks");
+
+        // Its Realm retired.
+        let actor = create_test_actr_id(1);
+        let (retired, _data_rx, _control_rx) = full_control_queue();
+        server.clients.write().await.insert(
+            "retired".to_string(),
+            ClientConnection {
+                id: "retired".to_string(),
+                actor_id: Some(actor.clone()),
+                credential: None,
+                egress: retired.clone(),
+                client_ip: None,
+                webrtc_role: None,
+            },
+        );
+        retire_realm(&server, &actor.realm).await;
+        assert!(retired.closed.is_cancelled());
+
+        // A Close frame that fits is sent instead, and ends the connection.
+        let (egress, data_rx, mut control_rx) =
+            ClientEgress::new(config.clone(), Arc::new(SignalingQueueMetrics::default()));
+        assert!(egress.close(axum::extract::ws::CloseFrame {
+            code: axum::extract::ws::close_code::POLICY,
+            reason: "test".into(),
+        }));
+        assert!(!egress.closed.is_cancelled());
+        assert!(matches!(control_rx.try_recv(), Ok(WsMessage::Close(_))));
+        drop(data_rx);
+    }
+
     /// Blocked socket: a slow-consumer client is closed after the enqueue timeout and removed from the routing table (acceptance criteria 3+4).
     #[tokio::test]
     async fn test_slow_consumer_disconnected_and_removed() {
@@ -3111,5 +4143,387 @@ mod tests {
             .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
             .await
             .unwrap();
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Relay: credential before ACL, source type from claims
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    mod relay {
+        use super::*;
+        use actr_protocol::IdentityClaims;
+        use ed25519_dalek::{Signer, SigningKey};
+        use platform::realm::acl::ActorAcl;
+        use serial_test::serial;
+        use tokio::sync::OnceCell;
+
+        const REALM: &str = "test@example.com";
+        const KEY_ID: u32 = 41;
+
+        fn edge() -> ActrType {
+            ActrType {
+                publisher: "acme".to_string(),
+                name: "edge".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        }
+
+        fn worker() -> ActrType {
+            ActrType {
+                publisher: "acme".to_string(),
+                name: "worker".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        }
+
+        fn signing_key() -> SigningKey {
+            SigningKey::from_bytes(&[41u8; 32])
+        }
+
+        fn now() -> u64 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        }
+
+        async fn setup() {
+            static INIT: OnceCell<tempfile::TempDir> = OnceCell::const_new();
+            INIT.get_or_init(|| async {
+                let dir = tempfile::tempdir().unwrap();
+                if let Err(e) = platform::storage::db::set_db_path(dir.path()).await {
+                    assert!(e.to_string().contains("already"), "{e}");
+                }
+                AIdCredentialValidator::init(dir.path()).await.unwrap();
+                AIdCredentialValidator::populate_key(
+                    REALM,
+                    KEY_ID,
+                    &signing_key().verifying_key(),
+                    now() + 3600,
+                )
+                .await
+                .unwrap();
+                if RealmEntity::get(REALM).await.unwrap().is_none() {
+                    RealmEntity::create(REALM.to_string()).await.unwrap();
+                }
+                let rule = ActorAcl::new(
+                    REALM.to_string(),
+                    edge().to_string_repr(),
+                    worker().to_string_repr(),
+                    true,
+                );
+                ActorAcl::replace_for_target(REALM, &worker().to_string_repr(), &[rule])
+                    .await
+                    .unwrap();
+                dir
+            })
+            .await;
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn route_candidate_responses_are_bounded_before_encoding() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 900, "lookup-source").await;
+            for n in 0..80 {
+                let peer = connect(&server, 1000 + n, &format!("candidate-{n}")).await;
+                register(&server, &peer.id, worker()).await;
+            }
+            for count in [2, u32::MAX] {
+                handle_route_candidates_request(
+                    source.id.clone(),
+                    &edge(),
+                    actr_protocol::RouteCandidatesRequest {
+                        target_type: worker(),
+                        criteria: Some(
+                            actr_protocol::route_candidates_request::NodeSelectionCriteria {
+                                candidate_count: count,
+                                ..Default::default()
+                            },
+                        ),
+                        ..Default::default()
+                    },
+                    "lookup-source",
+                    &server,
+                    "lookup-request",
+                )
+                .await
+                .unwrap();
+                let Some(signaling_envelope::Flow::ServerToActr(SignalingToActr {
+                    payload: Some(signaling_to_actr::Payload::RouteCandidatesResponse(response)),
+                    ..
+                })) = next_flow(&mut source)
+                else {
+                    panic!("missing response")
+                };
+                let Some(actr_protocol::route_candidates_response::Result::Success(ok)) =
+                    response.result
+                else {
+                    panic!("lookup failed")
+                };
+                assert_eq!(
+                    ok.candidates.len(),
+                    count.min(MAX_ROUTE_CANDIDATES) as usize
+                );
+                assert_eq!(ok.ws_address_map.len(), ok.candidates.len());
+            }
+        }
+
+        fn credential(actor: &ActrId, actor_type: ActrType) -> AIdCredential {
+            let claims = IdentityClaims {
+                realm: REALM.to_string(),
+                actor_id: actor.to_string_repr(),
+                expires_at: now() + 3600,
+                protocol_version: 1,
+                issuer: REALM.to_string(),
+                provider: "provider.example".to_string(),
+                audience: "actr.signaling".to_string(),
+                actor_type,
+                member: "member-1".to_string(),
+                client_key: "0000000000000000".to_string(),
+                role: actr_protocol::MemberRole::Owner as i32,
+                development: None,
+            };
+            let bytes = claims.encode_to_vec();
+            AIdCredential {
+                key_id: KEY_ID,
+                signature: signing_key().sign(&bytes).to_bytes().to_vec().into(),
+                claims: bytes.into(),
+            }
+        }
+
+        struct Peer {
+            id: ActrId,
+            data_rx: tokio::sync::mpsc::Receiver<QueuedFrame>,
+            _control_rx: tokio::sync::mpsc::Receiver<WsMessage>,
+        }
+
+        async fn connect(server: &SignalingServerHandle, serial: u64, client_id: &str) -> Peer {
+            let id = create_test_actr_id(serial);
+            let (egress, data_rx, control_rx) =
+                create_blocked_egress(EgressQueueConfig::default(), server.queue_metrics.clone());
+            server.clients.write().await.insert(
+                client_id.to_string(),
+                ClientConnection {
+                    id: client_id.to_string(),
+                    actor_id: Some(id.clone()),
+                    credential: None,
+                    egress,
+                    client_ip: None,
+                    webrtc_role: None,
+                },
+            );
+            server
+                .actor_id_index
+                .write()
+                .await
+                .insert(id.clone(), client_id.to_string());
+            Peer {
+                id,
+                data_rx,
+                _control_rx: control_rx,
+            }
+        }
+
+        async fn register(server: &SignalingServerHandle, id: &ActrId, actor_type: ActrType) {
+            server
+                .actor_registry
+                .write()
+                .await
+                .register_service(id.clone(), actor_type, "svc".to_string(), vec![], None)
+                .unwrap();
+        }
+
+        fn next_flow(peer: &mut Peer) -> Option<signaling_envelope::Flow> {
+            let frame = peer.data_rx.try_recv().ok()?;
+            let WsMessage::Binary(bytes) = frame.msg else {
+                panic!("expected a binary frame");
+            };
+            SignalingEnvelope::decode(bytes.as_ref()).unwrap().flow
+        }
+
+        fn error_code(flow: Option<signaling_envelope::Flow>) -> u32 {
+            match flow {
+                Some(signaling_envelope::Flow::ServerToActr(SignalingToActr {
+                    payload: Some(signaling_to_actr::Payload::Error(error)),
+                    ..
+                })) => error.code,
+                other => panic!("expected an error response, got {other:?}"),
+            }
+        }
+
+        fn relay(source: &ActrId, target: &ActrId, credential: AIdCredential) -> ActrRelay {
+            ActrRelay {
+                source: source.clone(),
+                credential,
+                target: target.clone(),
+                delivery_context: None,
+                source_type: Some(worker()),
+                payload: Some(actr_relay::Payload::IceCandidate(
+                    actr_protocol::IceCandidate {
+                        candidate: "candidate".to_string(),
+                        ..Default::default()
+                    },
+                )),
+            }
+        }
+
+        async fn send(server: &SignalingServerHandle, client_id: &str, relay: ActrRelay) {
+            handle_actr_relay(
+                relay,
+                client_id,
+                server,
+                "req",
+                #[cfg(feature = "opentelemetry")]
+                opentelemetry::Context::new(),
+            )
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn invalid_credential_is_rejected_before_acl() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 1, "source").await;
+            let target = connect(&server, 2, "target").await;
+            // No ACL rule allows edge -> this type, so an ACL-first path would answer 403.
+            register(&server, &target.id, edge()).await;
+
+            let mut forged = credential(&source.id, edge());
+            forged.signature = vec![0u8; 64].into();
+            send(&server, "source", relay(&source.id, &target.id, forged)).await;
+
+            assert_eq!(error_code(next_flow(&mut source)), 401);
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn acl_uses_claims_type_and_registry_target_type() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 1, "source").await;
+            let mut target = connect(&server, 2, "target").await;
+            register(&server, &target.id, edge()).await;
+
+            // The claims say worker; there is no worker -> edge rule.
+            let cred = credential(&source.id, worker());
+            send(&server, "source", relay(&source.id, &target.id, cred)).await;
+
+            assert_eq!(error_code(next_flow(&mut source)), 403);
+            assert!(next_flow(&mut target).is_none());
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn forwarded_relay_carries_claims_source_type() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 1, "source").await;
+            let mut target = connect(&server, 2, "target").await;
+            register(&server, &target.id, worker()).await;
+
+            let cred = credential(&source.id, edge());
+            send(&server, "source", relay(&source.id, &target.id, cred)).await;
+
+            assert!(next_flow(&mut source).is_none());
+            let Some(signaling_envelope::Flow::ActrRelay(forwarded)) = next_flow(&mut target)
+            else {
+                panic!("expected the relay to be forwarded");
+            };
+            assert_eq!(forwarded.source, source.id);
+            assert_eq!(forwarded.source_type, Some(edge()));
+            assert_eq!(forwarded.credential, AIdCredential::default());
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn envelopes_naming_another_actor_or_realm_are_rejected() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 1, "source").await;
+            let mut target = connect(&server, 2, "target").await;
+            register(&server, &target.id, worker()).await;
+            // Same serial as the source, another Realm.
+            let elsewhere = ActrId {
+                realm: "other@example.com".to_string(),
+                serial_number: 1,
+            };
+
+            let envelopes = [
+                signaling_envelope::Flow::ActrRelay(relay(
+                    &source.id,
+                    &elsewhere,
+                    credential(&source.id, edge()),
+                )),
+                signaling_envelope::Flow::ActrRelay(relay(
+                    &elsewhere,
+                    &target.id,
+                    credential(&source.id, edge()),
+                )),
+                signaling_envelope::Flow::ActrToServer(ActrToSignaling {
+                    source: elsewhere.clone(),
+                    credential: credential(&source.id, edge()),
+                    payload: Some(actr_to_signaling::Payload::DiscoveryRequest(
+                        actr_protocol::DiscoveryRequest::default(),
+                    )),
+                }),
+                // Another Actor of the same Realm, with its own valid credential.
+                signaling_envelope::Flow::ActrToServer(ActrToSignaling {
+                    source: target.id.clone(),
+                    credential: credential(&target.id, worker()),
+                    payload: Some(actr_to_signaling::Payload::DiscoveryRequest(
+                        actr_protocol::DiscoveryRequest::default(),
+                    )),
+                }),
+            ];
+            for flow in envelopes {
+                let bytes = server.create_new_envelope(flow).encode_to_vec();
+                handle_client_envelope(&bytes, "source", &server)
+                    .await
+                    .unwrap();
+                assert_eq!(error_code(next_flow(&mut source)), 403);
+            }
+            assert!(next_flow(&mut target).is_none());
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn a_replaced_server_still_closes_connections_of_retired_realms() {
+            setup().await;
+            let realm = "replaced@example.com";
+            RealmEntity::create(realm.to_string()).await.unwrap();
+            let server = create_test_server_handle();
+            let actor = ActrId {
+                serial_number: 1,
+                realm: realm.to_string(),
+            };
+            server.clients.write().await.insert(
+                "old".to_string(),
+                create_test_client_with_id("old", actor, None),
+            );
+
+            // A configuration reload cancels this server; its connection stays.
+            let cancel = tokio_util::sync::CancellationToken::new();
+            let follower = tokio::spawn(follow_realm_retirements(server.clone(), cancel.clone()));
+            cancel.cancel();
+            tokio::task::yield_now().await;
+
+            RealmEntity::retire(realm).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while server.clients.read().await.contains_key("old") {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("the retired Realm's connection is dropped");
+            // With no connections left, the follower ends.
+            tokio::time::timeout(Duration::from_secs(5), follower)
+                .await
+                .expect("the follower ends")
+                .unwrap();
+        }
     }
 }

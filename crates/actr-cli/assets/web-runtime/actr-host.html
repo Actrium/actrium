@@ -245,7 +245,17 @@
     <div class="container">
         <h1>🎭 Actor Host</h1>
         <p class="subtitle">actr run --web</p>
-        <div id="status" class="status">⏳ Initializing…</div>
+        <div id="status" class="status">⏳ Loading configuration…</div>
+
+        <div id="realmKeyForm">
+            <label for="realmKeyFile">Realm client key</label>
+            <div class="send-area">
+                <input id="realmKeyFile" type="file" accept=".json,application/json" />
+                <button id="startBtn" disabled>Start Actor</button>
+            </div>
+            <p class="subtitle">Choose the authorized key file created by <code>actr realm join</code>.
+                The key is imported locally into this browser.</p>
+        </div>
 
         <!-- Info grid (always shown) -->
         <dl class="info-grid">
@@ -256,7 +266,7 @@
             <dt>Signaling</dt>
             <dd id="sigUrl">—</dd>
             <dt>Realm</dt>
-            <dd id="realmId">—</dd>
+            <dd id="realm">—</dd>
             <dt>Service</dt>
             <dd id="serviceName">—</dd>
         </dl>
@@ -310,9 +320,6 @@
                 this.swPort = null;
                 this.swTarget = null;
                 this.handlers = new Set();
-                this._ready = null;
-                this._resolveReady = null;
-                this._ready = new Promise(r => { this._resolveReady = r; });
                 this.clientId = 'client_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             }
             async initialize(swUrl, runtimeConfig) {
@@ -331,10 +338,22 @@
                 this.swTarget = target;
                 const ch = new MessageChannel();
                 this.swPort = ch.port1;
-                this.swPort.onmessage = e => this._dispatch(e.data);
-                target.postMessage({ type: 'DOM_PORT_INIT', port: ch.port2, clientId: this.clientId, runtimeConfig }, [ch.port2]);
-                target.postMessage({ type: 'PING' });
-                this._resolveReady();
+                let readyTimeout;
+                const ready = new Promise((resolve, reject) => {
+                    readyTimeout = setTimeout(() => reject(new Error('Actor initialization timed out')), 40000);
+                    this.swPort.onmessage = e => {
+                        if (e.data?.type === 'runtime_ready') resolve();
+                        else if (e.data?.type === 'runtime_error') reject(new Error(e.data.error || 'Actor initialization failed'));
+                        this._dispatch(e.data);
+                    };
+                });
+                try {
+                    target.postMessage({ type: 'DOM_PORT_INIT', port: ch.port2, clientId: this.clientId, runtimeConfig }, [ch.port2]);
+                    target.postMessage({ type: 'PING' });
+                    await ready;
+                } finally {
+                    clearTimeout(readyTimeout);
+                }
             }
             sendToSW(msg, transferables) {
                 if (!this.swPort) return;
@@ -771,6 +790,9 @@
         const resultEl = document.getElementById('result');
         const sendBtn = document.getElementById('sendBtn');
         const msgInput = document.getElementById('msgInput');
+        const realmKeyForm = document.getElementById('realmKeyForm');
+        const realmKeyFile = document.getElementById('realmKeyFile');
+        const startBtn = document.getElementById('startBtn');
 
         // Inbound-request stats (incremented whenever this actor handles a peer call)
         let requestCount = 0, successCount = 0, errorCount = 0;
@@ -907,118 +929,163 @@
                 document.getElementById('actrType').textContent = cfg.package.full_type || '—';
                 document.getElementById('role').textContent = 'Actor (symmetric)';
                 document.getElementById('sigUrl').textContent = cfg.signaling_url || '—';
-                document.getElementById('realmId').textContent = cfg.realm_id || '—';
+                document.getElementById('realm').textContent = cfg.realm || '—';
                 document.getElementById('serviceName').textContent = cfg.package.full_type ? ('echo.' + cfg.package.actr_name || cfg.package.name || cfg.package.full_type) : '—';
 
-                const swRuntimeConfig = {
-                    ais_endpoint: cfg.ais_endpoint,
-                    signaling_url: cfg.signaling_url,
-                    realm_id: cfg.realm_id,
-                    client_actr_type: cfg.package.full_type,
-                    service_fingerprint: '',
-                    acl_allow_types: cfg.acl_allow_types || [],
-                    package_url: cfg.package_url,
-                    runtime_wasm_url: cfg.runtime_wasm_url,
-                    trust: cfg.trust || [],
-                };
-
-                const iceServers = [
-                    ...(cfg.stun_urls || []).map(u => ({ urls: u })),
-                    ...(cfg.turn_urls || []).map(u => ({ urls: u })),
-                ];
-
-                runtimeLog('info', 'Registering Service Worker…');
-                const bridge = new ServiceWorkerBridge();
-                _bridge = bridge;
-                await bridge.initialize('/actor.sw.js', swRuntimeConfig);
-                runtimeLog('success', 'Service Worker ready');
-
-                const forwarder = new FastPathForwarder(bridge);
-                const coordinator = new WebRtcCoordinator(bridge, forwarder, { iceServers, iceTransportPolicy: cfg.force_relay ? 'relay' : undefined });
-                _coordinator = coordinator;
-
-                // Handle RPC responses for callRaw (client mode)
-                bridge.onMessage(m => {
-                    if (m.type === 'control_response' && m.payload) {
-                        const { request_id, data, error } = m.payload;
-                        console.log('[HostPage] control_response request_id=' + request_id + ' clientId=' + bridge.getClientId() + ' error=' + (error ? (error.code || '?') + ':' + (error.message || '') : 'none'));
-                        const pending = _pendingRpc.get(request_id);
-                        if (pending) {
-                            clearTimeout(pending.timer);
-                            _pendingRpc.delete(request_id);
-                            if (error) pending.reject(new Error('RPC error [' + (error.code || '?') + ']: ' + (error.message || '')));
-                            else pending.resolve(data || new Uint8Array());
-                        }
+                statusEl.textContent = 'Choose a Realm client key, then start the Actor.';
+                realmKeyFile.addEventListener('change', () => { startBtn.disabled = !realmKeyFile.files.length; });
+                startBtn.addEventListener('click', async () => {
+                    startBtn.disabled = true;
+                    realmKeyFile.disabled = true;
+                    try {
+                        await startActor(cfg);
+                        realmKeyForm.hidden = true;
+                    } catch (error) {
+                        if (_bridge) _bridge.close();
+                        _bridge = null;
+                        statusEl.textContent = '❌ ' + error.message;
+                        statusEl.className = 'status error';
+                        runtimeLog('error', error.message);
+                    } finally {
+                        realmKeyFile.value = '';
+                        realmKeyFile.disabled = false;
                     }
                 });
-
-                // Listen for SW bridge messages (WebRTC events, sw_log)
-                bridge.onMessage(m => {
-                    if (m.type === 'webrtc_event' && m.payload && m.payload.eventType === 'sw_log') {
-                        const d = m.payload.data; runtimeLog(d.level || 'info', d.message || JSON.stringify(d));
-                    } else if (m.type === 'webrtc_event' && m.payload) {
-                        runtimeLog('info', '[WebRTC] ' + m.payload.eventType + ': ' + JSON.stringify(m.payload.data));
-                    }
-                });
-
-                // Listen for broadcast events from SW (echo_event, sw_log).
-                // echo_event is fired whenever this actor handles an inbound
-                // request, independent of whether it also initiates calls.
-                navigator.serviceWorker.addEventListener('message', e => {
-                    if (!e.data || !e.data.type) return;
-                    if (e.data.type === 'sw_log') {
-                        let msg = e.data.message || '';
-                        msg = msg.replace(/^\s*INFO\s+/, '');
-                        msg = msg.replace(/^\s*WARN\s+/, '⚠️ ');
-                        msg = msg.replace(/^\s*ERROR\s+/, '❌ ');
-                        applyInboundStatsFromRuntimeLog(msg);
-                        runtimeLog(e.data.level || 'info', msg);
-                    } else if (e.data.type === 'echo_event') {
-                        switch (e.data.event) {
-                            case 'request':
-                                requestCount++;
-                                inboundLog('info', '📨 Received Echo request: "' + (e.data.detail || '') + '"');
-                                break;
-                            case 'response':
-                                successCount++;
-                                inboundLog('success', '✅ Sent Echo response: "' + (e.data.detail || '') + '"');
-                                break;
-                            case 'error':
-                                errorCount++;
-                                inboundLog('error', '❌ Handling error: ' + (e.data.detail || ''));
-                                break;
-                        }
-                        updateInboundStats();
-                    }
-                });
-
-                // Unified actor status: every actor is ready both to accept
-                // inbound calls and to initiate outbound ones.
-                statusEl.innerHTML = '<span>✅</span><span>Actor ready</span>';
-                statusEl.className = 'status ready';
-                sendBtn.disabled = false;
-                inboundLog('success', '✅ Actor started — inbound handlers registered');
-                outboundLog('ok', '✅ Actor initialized — outbound send available');
-
-                runtimeLog('success', 'Actor initialized (' + (cfg.package.full_type || 'unknown') + ')');
-
-                // Wire up the outbound send button (always available).
-                sendBtn.addEventListener('click', doSendEcho);
-                msgInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !sendBtn.disabled) doSendEcho(); });
-
-                // Keep-alive
-                setInterval(() => { if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'PING' }); }, 20000);
-
-                // Cleanup on page unload
-                window.addEventListener('beforeunload', () => { bridge.close(); });
-
             } catch (e) {
                 statusEl.textContent = '❌ ' + e.message;
                 statusEl.className = 'status error';
                 runtimeLog('error', String(e));
-                console.error(e);
             }
         })();
+
+        async function startActor(cfg) {
+            const file = realmKeyFile.files[0];
+            if (!file) throw new Error('Choose an authorized Realm client key file');
+            let realmKey;
+            try { realmKey = JSON.parse(await file.text()); }
+            catch (_) { throw new Error('The selected file is not a valid Realm client key JSON file'); }
+            const fields = ['realm', 'provider_id', 'issuer', 'key_id', 'private_key', 'public_key'];
+            if (!realmKey || fields.some(field => typeof realmKey[field] !== 'string' || !realmKey[field])) {
+                throw new Error('The selected file is not a Realm client key');
+            }
+            if (realmKey.realm !== cfg.realm || realmKey.issuer.replace(/\/+$/, '') !== cfg.issuer_endpoint.replace(/\/+$/, '')) {
+                throw new Error('The selected key belongs to a different Realm or Issuer');
+            }
+            statusEl.textContent = '⏳ Starting Actor…';
+            statusEl.className = 'status connecting';
+            const swRuntimeConfig = {
+                issuer_endpoint: cfg.issuer_endpoint,
+                signaling_url: cfg.signaling_url,
+                realm: cfg.realm,
+                client_actr_type: cfg.package.full_type,
+                service_fingerprint: '',
+                acl_allow_types: cfg.acl_allow_types || [],
+                package_url: cfg.package_url,
+                runtime_wasm_url: cfg.runtime_wasm_url,
+                trust: cfg.trust || [],
+                realm_client_key: realmKey,
+            };
+
+            const iceServers = [
+                ...(cfg.stun_urls || []).map(u => ({ urls: u })),
+                ...(cfg.turn_urls || []).map(u => ({ urls: u })),
+            ];
+
+            runtimeLog('info', 'Registering Service Worker…');
+            const bridge = new ServiceWorkerBridge();
+            _bridge = bridge;
+            const forwarder = new FastPathForwarder(bridge);
+            const coordinator = new WebRtcCoordinator(bridge, forwarder, { iceServers, iceTransportPolicy: cfg.force_relay ? 'relay' : undefined });
+            _coordinator = coordinator;
+
+            // Handle RPC responses for callRaw (client mode)
+            bridge.onMessage(m => {
+                if (m.type === 'control_response' && m.payload) {
+                    const { request_id, data, error } = m.payload;
+                    console.log('[HostPage] control_response request_id=' + request_id + ' clientId=' + bridge.getClientId() + ' error=' + (error ? (error.code || '?') + ':' + (error.message || '') : 'none'));
+                    const pending = _pendingRpc.get(request_id);
+                    if (pending) {
+                        clearTimeout(pending.timer);
+                        _pendingRpc.delete(request_id);
+                        if (error) pending.reject(new Error('RPC error [' + (error.code || '?') + ']: ' + (error.message || '')));
+                        else pending.resolve(data || new Uint8Array());
+                    }
+                }
+            });
+
+            // Listen for SW bridge messages (WebRTC events, sw_log)
+            bridge.onMessage(m => {
+                if (m.type === 'webrtc_event' && m.payload && m.payload.eventType === 'sw_log') {
+                    const d = m.payload.data; runtimeLog(d.level || 'info', d.message || JSON.stringify(d));
+                } else if (m.type === 'webrtc_event' && m.payload) {
+                    runtimeLog('info', '[WebRTC] ' + m.payload.eventType + ': ' + JSON.stringify(m.payload.data));
+                }
+            });
+
+            // Listen for broadcast events from SW (echo_event, sw_log).
+            // echo_event is fired whenever this actor handles an inbound
+            // request, independent of whether it also initiates calls.
+            navigator.serviceWorker.addEventListener('message', e => {
+                if (!e.data || !e.data.type) return;
+                if (e.data.type === 'sw_log') {
+                    let msg = e.data.message || '';
+                    msg = msg.replace(/^\s*INFO\s+/, '');
+                    msg = msg.replace(/^\s*WARN\s+/, '⚠️ ');
+                    msg = msg.replace(/^\s*ERROR\s+/, '❌ ');
+                    applyInboundStatsFromRuntimeLog(msg);
+                    runtimeLog(e.data.level || 'info', msg);
+                } else if (e.data.type === 'echo_event') {
+                    switch (e.data.event) {
+                        case 'request':
+                            requestCount++;
+                            inboundLog('info', '📨 Received Echo request: "' + (e.data.detail || '') + '"');
+                            break;
+                        case 'response':
+                            successCount++;
+                            inboundLog('success', '✅ Sent Echo response: "' + (e.data.detail || '') + '"');
+                            break;
+                        case 'error':
+                            errorCount++;
+                            inboundLog('error', '❌ Handling error: ' + (e.data.detail || ''));
+                            break;
+                    }
+                    updateInboundStats();
+                }
+            });
+
+            // Install listeners before registration can emit TURN credentials
+            // or WebRTC commands, then wait for the runtime acknowledgement.
+            try {
+                await bridge.initialize('/actor.sw.js', swRuntimeConfig);
+            } finally {
+                // The worker persists the key in its private store. Do not
+                // retain import material in the page's runtime config.
+                delete swRuntimeConfig.realm_client_key;
+                realmKey = null;
+            }
+            runtimeLog('success', 'Service Worker ready');
+
+            // Unified actor status: every actor is ready both to accept
+            // inbound calls and to initiate outbound ones.
+            statusEl.innerHTML = '<span>✅</span><span>Actor ready</span>';
+            statusEl.className = 'status ready';
+            sendBtn.disabled = false;
+            inboundLog('success', '✅ Actor started — inbound handlers registered');
+            outboundLog('ok', '✅ Actor initialized — outbound send available');
+
+            runtimeLog('success', 'Actor initialized (' + (cfg.package.full_type || 'unknown') + ')');
+
+            // Wire up the outbound send button (always available).
+            sendBtn.addEventListener('click', doSendEcho);
+            msgInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !sendBtn.disabled) doSendEcho(); });
+
+            // Keep-alive
+            setInterval(() => { if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'PING' }); }, 20000);
+
+            // Cleanup on page unload
+            window.addEventListener('beforeunload', () => { bridge.close(); });
+
+        }
     </script>
 </body>
 

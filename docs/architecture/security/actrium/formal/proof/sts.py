@@ -14,7 +14,7 @@ Structural rules prevent a vacuous "the guard is the model" check:
   must therefore trigger the corresponding invariant.
 
 The main model is deliberately conservative, as documented alongside it:
-- ActorStateId is represented as (revision, cfg, transfers). Revision is
+- ActorStateDigest is represented as (revision, cfg, transfers). Revision is
   monotonic, and capability declarations are part of state identity (h_cap),
   so rolling content back still produces a new sid;
 - Change does not globally erase published snapshots because no such atomic
@@ -71,7 +71,7 @@ class Actor:
 
 
 def sid_of(actor: Actor) -> tuple:
-    """Bounded ActorStateId stand-in with monotonic revision and h_cap."""
+    """Bounded ActorStateDigest stand-in with monotonic revision and h_cap."""
     return (actor.revision, actor.cfg, actor.transfers)
 
 
@@ -168,7 +168,7 @@ def depends_on_suspended(state: State, i: int) -> bool:
 def exec_guard(state: State, i: int) -> bool:
     """Implementation guard for protected operations, replaceable by mutants.
 
-    The capability is minted for the current state, so sid_match is true.
+    The Actor Grant is issued for the current state, so sid_match is true.
     explore_rollback models an attacker holding an old credential. Time
     semantics live in explore_clocks and the shared guard.
     """
@@ -532,7 +532,7 @@ def explore_clocks(
     )
 
 
-# --- Rollback-resurrection model with a stale-capability attacker ---
+# --- Rollback-resurrection model with a stale-Actor-Grant attacker ---
 
 
 @dataclass(frozen=True)
@@ -545,7 +545,7 @@ class RollState:
     resurrected: bool
 
 
-HELD_CAP_SID = (0, 0)  # Capability issued for initial (revision=0, cfg=0).
+HELD_CAP_SID = (0, 0)  # Actor Grant issued for initial (revision=0, cfg=0).
 
 
 def roll_sid(state: RollState) -> tuple[int, int]:
@@ -568,7 +568,7 @@ def _roll_successors(
         yield "attest", replace(state, aa_current=True)
     if state.gate is Gate.SUSPENDED and state.aa_current:
         yield "resume", replace(state, gate=Gate.ACTIVE, keys_current=True)
-    # Attempt execution with the capability issued for the initial state.
+    # Attempt execution with the Actor Grant issued for the initial state.
     usable = semantics.exec_gate_ok(
         gate_active=state.gate is Gate.ACTIVE,
         keys_current=state.keys_current,
@@ -581,7 +581,7 @@ def _roll_successors(
 
 def _roll_invariants(state: RollState) -> list[str]:
     if state.resurrected:
-        return ["old-capability-resurrected-after-rollback"]
+        return ["old-actor-grant-resurrected-after-rollback"]
     return []
 
 

@@ -2,10 +2,10 @@ use crate::core::{
     AvailabilityStatus, HealthStatus, ProtoFile, ServiceDetails, ServiceDiscovery, ServiceFilter,
     ServiceInfo,
 };
-use actr_hyper::AisClient;
+use actr_hyper::IssuerClient;
 use actr_protocol::{
     AIdCredential, ActrId, ActrToSignaling, ActrType, DiscoveryRequest, ErrorResponse,
-    GetServiceSpecRequest, Realm, RegisterAuthMode, RegisterRequest, SIGNALING_ENVELOPE_VERSION,
+    GetServiceSpecRequest, RegisterAuthMode, RegisterRequest, SIGNALING_ENVELOPE_VERSION,
     SignalingEnvelope, actr_to_signaling, discovery_response, get_service_spec_response,
     register_response, signaling_envelope, signaling_to_actr,
 };
@@ -20,7 +20,10 @@ use tokio::{
     sync::Mutex,
     time::{Duration, sleep},
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{Message as WsMessage, client::IntoClientRequest},
+};
 use url::Url;
 
 type SignalingSocket =
@@ -44,14 +47,15 @@ pub struct DiscoveryContext {
     /// Signaling server URL
     pub signaling_url: Url,
 
-    /// AIS endpoint URL
-    pub ais_endpoint: String,
+    /// Issuer endpoint URL
+    pub issuer_endpoint: String,
 
-    /// Realm for temporary actor registration
-    pub realm: Realm,
+    /// Realm name for temporary actor registration
+    pub realm: Option<String>,
 
-    /// Optional realm secret for authentication
-    pub realm_secret: Option<String>,
+    /// Realm client key file (`actr realm join`) that signs the temporary
+    /// actor's registration
+    pub realm_client_key: Option<std::path::PathBuf>,
 }
 
 pub struct NetworkServiceDiscovery {
@@ -98,7 +102,7 @@ impl NetworkServiceDiscovery {
 
         // TODO: add filter support
         let request = DiscoveryRequest {
-            manufacturer: None,
+            publisher: None,
             limit: None,
         };
         let payload = actr_to_signaling::Payload::DiscoveryRequest(request);
@@ -149,34 +153,39 @@ impl NetworkServiceDiscovery {
     }
 
     async fn connect_and_register(&self) -> Result<SignalingState> {
-        let realm_secret = self.required_realm_secret()?.to_string();
-        let register_request = self.build_linked_register_request();
+        let realm = self.required_realm()?;
+        let client_key = self.required_client_key(realm)?;
+        let register_request = self.build_linked_register_request(realm);
 
-        let ais_client = AisClient::new(&self.context.ais_endpoint).with_realm_secret(realm_secret);
+        let issuer_client =
+            IssuerClient::new(&self.context.issuer_endpoint).with_client_key(client_key);
 
-        let register_response = ais_client
+        let register_response = issuer_client
             .register_linked(register_request)
             .await
-            .map_err(|err| anyhow!("AIS HTTP registration failed: {err}"))?;
+            .map_err(|err| anyhow!("Issuer HTTP registration failed: {err}"))?;
 
         let (actr_id, credential) = match register_response.result {
             Some(register_response::Result::Success(success)) => {
                 (success.actr_id, success.credential)
             }
             Some(register_response::Result::Error(error)) => {
-                return Err(Self::as_error("AIS registration failed", &error));
+                return Err(Self::as_error("Issuer registration failed", &error));
             }
-            None => return Err(anyhow!("AIS registration response is missing result")),
+            None => return Err(anyhow!("Issuer registration response is missing result")),
         };
 
-        let signaling_url = Self::build_signaling_url_with_identity(
+        let signaling_request = Self::build_signaling_request_with_identity(
             &self.context.signaling_url,
             &actr_id,
             &credential,
-        );
-        let (socket, _) = connect_async(signaling_url.as_str())
-            .await
-            .with_context(|| format!("Failed to connect to signaling: {signaling_url}"))?;
+        )?;
+        let (socket, _) = connect_async(signaling_request).await.with_context(|| {
+            format!(
+                "Failed to connect to signaling: {}",
+                self.context.signaling_url
+            )
+        })?;
 
         Ok(SignalingState {
             socket,
@@ -185,22 +194,31 @@ impl NetworkServiceDiscovery {
         })
     }
 
-    fn build_signaling_url_with_identity(
+    fn build_signaling_request_with_identity(
         signaling_url: &Url,
         actr_id: &ActrId,
         credential: &AIdCredential,
-    ) -> Url {
+    ) -> Result<tokio_tungstenite::tungstenite::http::Request<()>> {
+        // The signaling server validates identity from URL query params before
+        // the WebSocket upgrade (loran-signaling `parse_url_identity`); the
+        // scheme matches actr-hyper's `build_url_with_identity`.
         let mut url = signaling_url.clone();
-        let claims_b64 = base64::engine::general_purpose::STANDARD.encode(&credential.claims);
-        let signature_b64 = base64::engine::general_purpose::STANDARD.encode(&credential.signature);
-
-        url.query_pairs_mut()
-            .append_pair("actor_id", &actr_id.to_string_repr())
-            .append_pair("key_id", &credential.key_id.to_string())
-            .append_pair("claims", &claims_b64)
-            .append_pair("signature", &signature_b64);
-
-        url
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("actor_id", &actr_id.to_string_repr());
+            pairs.append_pair("key_id", &credential.key_id.to_string());
+            pairs.append_pair(
+                "claims",
+                &base64::engine::general_purpose::STANDARD.encode(&credential.claims),
+            );
+            pairs.append_pair(
+                "signature",
+                &base64::engine::general_purpose::STANDARD.encode(&credential.signature),
+            );
+        }
+        url.as_str()
+            .into_client_request()
+            .context("invalid signaling WebSocket URL")
     }
 
     fn as_error(context: &str, error: &ErrorResponse) -> anyhow::Error {
@@ -382,32 +400,38 @@ impl NetworkServiceDiscovery {
         entry.actr_type == lookup_type
     }
 
-    fn required_realm_secret(&self) -> Result<&str> {
+    fn required_client_key(&self, realm: &str) -> Result<actr_hyper::RealmClientKey> {
+        let path = self.context.realm_client_key.as_deref().ok_or_else(|| {
+            anyhow!("network.realm_client_key is required for CLI service discovery registration")
+        })?;
+        actr_hyper::RealmClientKey::load_for(Some(path), realm)?
+            .ok_or_else(|| anyhow!("network.realm_client_key is not set"))
+    }
+
+    fn required_realm(&self) -> Result<&str> {
         self.context
-            .realm_secret
+            .realm
             .as_deref()
             .map(str::trim)
-            .filter(|secret| !secret.is_empty())
+            .filter(|realm| !realm.is_empty())
             .ok_or_else(|| {
-                anyhow!("network.realm_secret is required for CLI service discovery registration")
+                anyhow!("network.realm is required for CLI service discovery registration")
             })
     }
 
-    fn build_linked_register_request(&self) -> RegisterRequest {
+    fn build_linked_register_request(&self, realm: &str) -> RegisterRequest {
         RegisterRequest {
             actr_type: self.context.package_actr_type.clone(),
-            realm: self.context.realm,
+            realm: realm.to_string(),
             service_spec: None,
             service: None,
             acl: None,
             ws_address: None,
             manifest_raw: None,
-            mfr_signature: None,
+            publisher_signature: None,
             target: None,
             auth_mode: Some(RegisterAuthMode::Linked as i32),
-            manufacturer_auth_signature: None,
-            manufacturer_auth_signed_at: None,
-            manufacturer_auth_nonce: None,
+            signing_public_key: None,
         }
     }
 }

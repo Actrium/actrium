@@ -9,7 +9,9 @@ pub struct InitContext {
     pub project_dir: PathBuf,
     pub project_name: String,
     pub signaling_url: String,
-    pub manufacturer: String,
+    pub publisher: String,
+    /// Realm name (`<realm_id>@<domain>`) written to the generated config.
+    pub realm: String,
     pub template: ProjectTemplateName,
     pub is_current_dir: bool,
     /// Role for echo template: service or app. Ignored for other templates.

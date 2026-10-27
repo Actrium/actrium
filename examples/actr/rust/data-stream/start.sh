@@ -279,39 +279,31 @@ echo ""
 echo "🔑 Setting up realms in actrix (sqlite3)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Parse realm_id and realm_secret from receiver's actr.toml
+# Parse realm from receiver's actr.toml
 # Note: these keys live under [system.deployment] section, grep may find 0 matches
-REALM_ID=$(grep -E '^\s*realm_id\s*=' "$RECEIVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
-REALM_SECRET=$(grep -E '^\s*realm_secret\s*=' "$RECEIVER_DIR/actr.toml" | sed 's/.*=\s*"\{0,1\}//' | sed 's/"\s*$//' | head -1 || true)
+REALM=$(grep -E '^\s*realm\s*=' "$RECEIVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
 
-if [ -z "$REALM_ID" ]; then
-    REALM_ID=33554432
-fi
-if [ -z "$REALM_SECRET" ]; then
-    echo -e "${RED}❌ Could not parse realm_secret from $RECEIVER_DIR/actr.toml${NC}"
-    exit 1
+if [ -z "$REALM" ]; then
+    REALM=data-stream@example.com
 fi
 
-echo "   realm_id     = $REALM_ID"
-echo "   realm_secret = ${REALM_SECRET:0:10}..."
+echo "   realm        = $REALM"
 
-SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
-echo "   secret_hash  = ${SECRET_HASH:0:16}..."
 
 # Insert realm and ACL rules (with clean slate for ACL)
 sqlite3 "$ACTRIX_DB" <<EOF
-INSERT OR REPLACE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES ($REALM_ID, 'DataChunk Realm', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');
-DELETE FROM actoracl WHERE realm_id = $REALM_ID;
-INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, $REALM_ID, 'acme:GenericClient:1.0.0', 'acme:FileTransferService:1.0.0', 1);
-INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, $REALM_ID, 'acme:FileTransferService:1.0.0', 'acme:GenericClient:1.0.0', 1);
+INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));
+DELETE FROM actoracl WHERE realm = '$REALM';
+INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+VALUES ('$REALM', '$REALM', 'acme/GenericClient@1.0.0', 'acme/FileTransferService@1.0.0', 1);
+INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+VALUES ('$REALM', '$REALM', 'acme/FileTransferService@1.0.0', 'acme/GenericClient@1.0.0', 1);
 EOF
 
 echo -e "${GREEN}✅ Realm and ACL setup completed${NC}"
 
 # Verify ACL entries
-sqlite3 "$ACTRIX_DB" "SELECT from_type, to_type, access FROM actoracl WHERE realm_id = $REALM_ID;" | while read line; do
+sqlite3 "$ACTRIX_DB" "SELECT from_type, to_type, access FROM actoracl WHERE realm = '$REALM';" | while read line; do
     echo "   ACL: $line"
 done
 
@@ -355,6 +347,12 @@ if [ $COUNTER -eq $MAX_WAIT ]; then
     cat "$LOG_DIR/actrix.log"
     exit 1
 fi
+
+# Join the Realm: each actr.toml names its key file (`realm_client_key`).
+ACTR_CMD="${ACTR_GEN_CMD:-actr}" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
+    "$ACTRIX_DB" "$REALM" "http://localhost:8081/issuer" \
+    "$RECEIVER_DIR/realm-client.json" "$SENDER_DIR/realm-client.json"
+echo -e "${GREEN}✅ Joined Realm $REALM${NC}"
 
 # Step 3.7: Build and start receiver first (so it registers with actrix)
 echo ""

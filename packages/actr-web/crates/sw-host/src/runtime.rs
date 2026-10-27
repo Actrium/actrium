@@ -36,7 +36,9 @@ use actr_protocol::{
     route_candidates_request, session_description, signaling_envelope, signaling_to_actr,
 };
 use actr_protocol::{IceCandidate, IceRestartRejected, SessionDescription, ice_restart_rejected};
-use actr_web_common::{ExponentialBackoff, MessageFormat, PayloadType, RenewError, WebAisClient};
+use actr_web_common::{
+    ExponentialBackoff, MessageFormat, PayloadType, RenewError, WebIssuerClient,
+};
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::channel::{mpsc, oneshot};
@@ -385,9 +387,13 @@ impl Default for ReconnectConfig {
 
 #[derive(Deserialize)]
 struct SwConfig {
-    ais_endpoint: String,
+    issuer_endpoint: String,
     signaling_url: String,
-    realm_id: u32,
+    /// Realm name `<realm_id>@<domain>`.
+    realm: String,
+    /// Import an already authorized device key once; subsequent starts restore it.
+    #[serde(default)]
+    realm_client_key: Option<actr_protocol::realm_membership::RealmClientKeyFile>,
     client_actr_type: String,
     #[serde(default)]
     target_actr_type: Option<String>,
@@ -554,10 +560,10 @@ const P2P_RETRY_MAX_DELAY_MS: u64 = 15000;
 struct SwRuntime {
     /// Unique client identifier (one per browser tab)
     client_id: String,
-    ais_endpoint: String,
+    issuer: WebIssuerClient,
     signaling_url: String,
     reconnect_config: ReconnectConfig,
-    realm_id: u32,
+    realm: String,
     client_actr_type: ActrType,
     target_actr_type: Option<ActrType>,
     service_fingerprint: String,
@@ -565,12 +571,12 @@ struct SwRuntime {
     signaling: SignalingClient,
     actor_id: Option<ActrId>,
     credential: Option<AIdCredential>,
-    /// TURN credential from AIS registration (time-limited HMAC)
+    /// TURN credential from Issuer registration (time-limited HMAC)
     turn_credential: Option<actr_protocol::TurnCredential>,
     /// Platform provider for crypto and KV storage
     platform: WebPlatformProvider,
     /// Per-target-type cache of the most recently discovered `ActrId`.
-    /// Avoids running AIS discovery on every legacy raw RPC call.
+    /// Avoids running Issuer discovery on every legacy raw RPC call.
     /// Entries are invalidated when the corresponding peer connection fails or closes.
     discovered_targets: HashMap<String, ActrId>,
     dom_port: Option<MessagePort>,
@@ -607,9 +613,9 @@ impl SwRuntime {
                         permission: acl_rule::Permission::Allow as i32,
                         from_type: actr_type,
                         // Actrix's DB-backed ACL lookup currently matches on an explicit
-                        // `source_realm_id` equality. Using `any_realm` would not match and
+                        // `source_realm` equality. Using `any_realm` would not match and
                         // would default-deny discovery.
-                        source_realm: Some(acl_rule::SourceRealm::RealmId(config.realm_id)),
+                        source_realm: Some(acl_rule::SourceRealm::Realm(config.realm.clone())),
                     })
                 })
                 .collect::<Result<Vec<_>, JsValue>>()?;
@@ -620,17 +626,18 @@ impl SwRuntime {
             .map_err(|e| JsValue::from_str(&format!("Invalid client actr_type: {e}")))?;
         let platform = WebPlatformProvider::new(client_actr_type.to_string_repr());
 
-        // Step 1: Obtain credential via AIS HTTP registration
+        // Step 1: Obtain credential via Issuer HTTP registration
         //   Try to restore persisted credentials first; if expired or missing,
-        //   perform a fresh AIS HTTP registration.
+        //   perform a fresh Issuer HTTP registration.
         //
         // TD-004: partition the namespace by `client_id` so each tab performs
-        // an independent AIS registration and receives its own `actor_id`.
+        // an independent Issuer registration and receives its own `actor_id`.
         let cred_kv_ns = Self::build_cred_kv_namespace(&client_actr_type, &client_id);
-        let (actor_id, credential, turn_credential) = Self::obtain_credential_from_ais(
-            &config.ais_endpoint,
+        let issuer = Self::load_issuer_client(&config, &platform).await?;
+        let (actor_id, credential, turn_credential) = Self::obtain_credential_from_issuer(
+            &issuer,
             &client_actr_type,
-            config.realm_id,
+            &config.realm,
             &acl,
             &platform,
             &cred_kv_ns,
@@ -653,10 +660,10 @@ impl SwRuntime {
 
         Ok(Self {
             client_id,
-            ais_endpoint: config.ais_endpoint,
+            issuer,
             signaling_url: config.signaling_url,
             reconnect_config: config.reconnect_config,
-            realm_id: config.realm_id,
+            realm: config.realm,
             client_actr_type,
             target_actr_type: config
                 .target_actr_type
@@ -688,15 +695,55 @@ impl SwRuntime {
         })
     }
 
-    /// Register with AIS via HTTP and obtain credential.
+    async fn load_issuer_client(
+        config: &SwConfig,
+        platform: &WebPlatformProvider,
+    ) -> Result<WebIssuerClient, JsValue> {
+        use actr_web_common::issuer_client::WebRealmClientKey;
+        let scope = serde_json::to_vec(&(
+            "actr-web-realm-client-key/v1",
+            &config.realm,
+            config.issuer_endpoint.trim_end_matches('/'),
+        ))
+        .map_err(|_| JsValue::from_str("Cannot encode Realm key scope"))?;
+        let namespace = StorageNamespace::actr_v1(Sha256::digest(scope).into());
+        let store = platform
+            .secret_store(&namespace)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Cannot open Realm key store: {e}")))?;
+        let text = match &config.realm_client_key {
+            Some(file) => serde_json::to_string(file)
+                .map_err(|_| JsValue::from_str("Cannot encode Realm client key"))?,
+            None => {
+                let bytes = store.get("realm_client_key").await
+                    .map_err(|e| JsValue::from_str(&format!("Cannot load Realm client key: {e}")))?
+                    .ok_or_else(|| JsValue::from_str(
+                        "Import an authorized Realm client key with runtimeConfig.realm_client_key before starting this browser Host"
+                    ))?;
+                String::from_utf8(bytes)
+                    .map_err(|_| JsValue::from_str("Stored Realm client key is invalid"))?
+            }
+        };
+        let key = WebRealmClientKey::from_key_file(&config.issuer_endpoint, &config.realm, &text)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        if config.realm_client_key.is_some() {
+            store
+                .set("realm_client_key", text.as_bytes())
+                .await
+                .map_err(|e| JsValue::from_str(&format!("Cannot persist Realm client key: {e}")))?;
+        }
+        Ok(WebIssuerClient::new(&config.issuer_endpoint, key))
+    }
+
+    /// Register with Issuer via HTTP and obtain credential.
     ///
     /// Web always uses Linked registration (realm authorization). Credential
-    /// renewal is handled by the Web Credential Manager via POST /ais/renew.
-    async fn register_via_ais(&mut self) -> Result<(), JsValue> {
-        let (actor_id, credential, turn_credential) = Self::obtain_credential_from_ais(
-            &self.ais_endpoint,
+    /// renewal is handled by the Web Credential Manager via POST /issuer/renew.
+    async fn register_via_issuer(&mut self) -> Result<(), JsValue> {
+        let (actor_id, credential, turn_credential) = Self::obtain_credential_from_issuer(
+            &self.issuer,
             &self.client_actr_type,
-            self.realm_id,
+            &self.realm,
             &self.acl,
             &self.platform,
             &self.cred_kv_namespace(),
@@ -708,15 +755,15 @@ impl SwRuntime {
         Ok(())
     }
 
-    /// Obtain a credential from AIS via HTTP.
+    /// Obtain a credential from Issuer via HTTP.
     ///
     /// 1. Perform Linked registration (no manifest for web clients)
     /// 2. Persist credential and actor_id to IndexedDB
     /// 3. Return (actor_id, credential, turn_credential)
-    async fn obtain_credential_from_ais(
-        ais_endpoint: &str,
+    async fn obtain_credential_from_issuer(
+        issuer: &WebIssuerClient,
         client_actr_type: &ActrType,
-        realm_id: u32,
+        realm: &str,
         acl: &Option<Acl>,
         platform: &WebPlatformProvider,
         cred_kv_ns: &StorageNamespace,
@@ -729,16 +776,16 @@ impl SwRuntime {
                 "[SW] credentials restored from IndexedDB (actor_id={})",
                 actor_id
             );
-            // Also try to restore persisted TurnCredential
-            let turn_credential =
-                Self::try_restore_turn_credential_static(platform, cred_kv_ns).await?;
-            return Ok((actor_id, credential, turn_credential));
+            if issuer.accepts_credential(&credential) && actor_id.realm == realm {
+                let turn_credential =
+                    Self::try_restore_turn_credential_static(platform, cred_kv_ns).await?;
+                return Ok((actor_id, credential, turn_credential));
+            }
+            Self::clear_persisted_identity_static(platform, cred_kv_ns).await?;
         }
 
-        let ais = WebAisClient::new(ais_endpoint);
-
         if let Some((actor_id, credential, turn_credential)) =
-            Self::try_renew_persisted_credential_static(&ais, platform, cred_kv_ns).await?
+            Self::try_renew_persisted_credential_static(issuer, platform, cred_kv_ns).await?
         {
             log::info!(
                 "[SW] credentials renewed from persisted identity lease (actor_id={})",
@@ -749,32 +796,30 @@ impl SwRuntime {
 
         // Web registration always uses Linked auth (realm authorization).
         // Legacy PSK renewal path removed — credential renewal now goes
-        // through the Web Credential Manager via POST /ais/renew.
+        // through the Web Credential Manager via POST /issuer/renew.
         let request = RegisterRequest {
             actr_type: client_actr_type.clone(),
-            realm: actr_protocol::Realm { realm_id },
+            realm: realm.to_string(),
             service_spec: None,
             acl: acl.clone(),
             service: None,
             ws_address: None,
             manifest_raw: None,
-            mfr_signature: None,
+            publisher_signature: None,
             target: None,
-            manufacturer_auth_signature: None,
-            manufacturer_auth_signed_at: None,
-            manufacturer_auth_nonce: None,
+            signing_public_key: None,
             auth_mode: Some(RegisterAuthMode::Linked as i32),
         };
 
         log::info!(
-            "[SW] register via AIS HTTP (linked): actr_type={}",
+            "[SW] register via Issuer HTTP (linked): actr_type={}",
             client_actr_type
         );
 
-        let response = ais
+        let response = issuer
             .register_linked(request)
             .await
-            .map_err(|e| JsValue::from_str(&format!("AIS registration failed: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("Issuer registration failed: {e}")))?;
 
         match response.result {
             Some(actr_protocol::register_response::Result::Success(ok)) => {
@@ -782,7 +827,7 @@ impl SwRuntime {
                 let credential = ok.credential.clone();
                 let turn_credential = Some(ok.turn_credential.clone());
 
-                log::info!("[SW] AIS registration success: actr_id={}", actor_id);
+                log::info!("[SW] Issuer registration success: actr_id={}", actor_id);
 
                 // Persist credential and actor_id
                 Self::persist_credentials_static(platform, cred_kv_ns, &actor_id, &credential)
@@ -809,13 +854,13 @@ impl SwRuntime {
                 Ok((actor_id, credential, turn_credential))
             }
             Some(actr_protocol::register_response::Result::Error(err)) => {
-                log::warn!("[SW] AIS register error: {}", err.message);
+                log::warn!("[SW] Issuer register error: {}", err.message);
                 Err(JsValue::from_str(&format!(
-                    "AIS register failed: {}",
+                    "Issuer register failed: {}",
                     err.message
                 )))
             }
-            None => Err(JsValue::from_str("AIS register response missing result")),
+            None => Err(JsValue::from_str("Issuer register response missing result")),
         }
     }
 
@@ -941,7 +986,7 @@ impl SwRuntime {
     }
 
     async fn try_renew_persisted_credential_static(
-        ais: &WebAisClient,
+        issuer: &WebIssuerClient,
         platform: &WebPlatformProvider,
         cred_kv_ns: &StorageNamespace,
     ) -> Result<Option<(ActrId, AIdCredential, Option<actr_protocol::TurnCredential>)>, JsValue>
@@ -950,6 +995,18 @@ impl SwRuntime {
             .secret_store(cred_kv_ns)
             .await
             .map_err(|e| JsValue::from_str(&format!("Failed to open KV store: {e}")))?;
+
+        let credential = kv
+            .get("credential")
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to read credential: {e}")))?;
+        if !credential.as_ref().is_some_and(|bytes| {
+            AIdCredential::decode(bytes.as_slice())
+                .is_ok_and(|credential| issuer.accepts_credential(&credential))
+        }) {
+            Self::clear_persisted_identity_static(platform, cred_kv_ns).await?;
+            return Ok(None);
+        }
 
         let Some(id_bytes) = kv
             .get("actor_id")
@@ -993,7 +1050,7 @@ impl SwRuntime {
 
         // Persist the exact attempt identity across outer Service Worker
         // recovery rounds (and worker restarts). It is replaced only when the
-        // actor/token binding changes or AIS returns a definitive result.
+        // actor/token binding changes or Issuer returns a definitive result.
         let token_hash = Sha256::digest(&token).to_vec();
         let stored_attempt_id = kv
             .get("renewal_attempt_id")
@@ -1037,7 +1094,7 @@ impl SwRuntime {
             }
         };
 
-        let response = match ais
+        let response = match issuer
             .renew_credential(RenewCredentialRequest {
                 actr_id: actor_id.clone(),
                 renewal_token: token.into(),
@@ -1047,7 +1104,9 @@ impl SwRuntime {
         {
             Ok(response) => response,
             Err(RenewError::TokenRejected | RenewError::InvalidRequest(_)) => {
-                log::warn!("[SW] AIS renew rejected persisted identity; clearing local identity");
+                log::warn!(
+                    "[SW] Issuer renew rejected persisted identity; clearing local identity"
+                );
                 Self::clear_persisted_identity_static(platform, cred_kv_ns).await?;
                 return Ok(None);
             }
@@ -1062,16 +1121,16 @@ impl SwRuntime {
                     let _ = kv.delete(key).await;
                 }
                 return Err(JsValue::from_str(
-                    "AIS renewal attempt must be restarted with a new attempt ID",
+                    "Issuer renewal attempt must be restarted with a new attempt ID",
                 ));
             }
-            Err(e) => return Err(JsValue::from_str(&format!("AIS renewal failed: {e}"))),
+            Err(e) => return Err(JsValue::from_str(&format!("Issuer renewal failed: {e}"))),
         };
 
         let ok = match response.result {
             Some(renew_credential_response::Result::Success(ok)) => ok,
             Some(renew_credential_response::Result::Error(err)) => {
-                log::warn!("[SW] AIS renew error: {}", err.message);
+                log::warn!("[SW] Issuer renew error: {}", err.message);
                 if matches!(err.code, 400 | 401) {
                     Self::clear_persisted_identity_static(platform, cred_kv_ns).await?;
                 }
@@ -1084,7 +1143,9 @@ impl SwRuntime {
         };
 
         if ok.actr_id != actor_id {
-            return Err(JsValue::from_str("AIS renew returned a different ActrId"));
+            return Err(JsValue::from_str(
+                "Issuer renew returned a different ActrId",
+            ));
         }
 
         let credential = ok.credential.clone();
@@ -1230,7 +1291,7 @@ impl SwRuntime {
                 claims.expires_at,
                 now_secs
             );
-            let _ = kv.delete("credential").await;
+            // Keep the expired credential as the binding of the renewal lease.
             return Ok(None);
         }
 
@@ -1251,7 +1312,7 @@ impl SwRuntime {
     /// IndexedDB, both WS sessions would land on the same `actor_id`, and the
     /// mock-actrix registry rebind would steal the relay binding from the
     /// original client. Partitioning by `client_id` guarantees every client
-    /// page performs its own AIS registration and persists its own credential.
+    /// page performs its own Issuer registration and persists its own credential.
     fn cred_kv_namespace(&self) -> StorageNamespace {
         Self::build_cred_kv_namespace(&self.client_actr_type, &self.client_id)
     }
@@ -1264,7 +1325,7 @@ impl SwRuntime {
     /// The identity fields and `client_id` are hashed into the opaque namespace
     /// using a domain-separated, tagged, length-prefixed encoding, so distinct
     /// field splits never collide — e.g. `("acme:Echo:1_a", "b")` vs
-    /// `("acme:Echo:1", "a_b")` would map to the same string under a
+    /// `("acme/Echo@1", "a_b")` would map to the same string under a
     /// delimiter-joined encoding. Per-tab partitioning is preserved while the raw
     /// identity stays out of any storage-location string.
     fn build_cred_kv_namespace(client_actr_type: &ActrType, client_id: &str) -> StorageNamespace {
@@ -1276,7 +1337,7 @@ impl SwRuntime {
         }
         let mut h = Sha256::new();
         h.update(DOMAIN);
-        field(&mut h, 1, client_actr_type.manufacturer.as_bytes());
+        field(&mut h, 1, client_actr_type.publisher.as_bytes());
         field(&mut h, 2, client_actr_type.name.as_bytes());
         field(&mut h, 3, client_actr_type.version.as_bytes());
         field(&mut h, 4, client_id.as_bytes());
@@ -1286,7 +1347,7 @@ impl SwRuntime {
 
     /// Reconnect the signaling WebSocket after detecting a dead connection.
     ///
-    /// New flow: obtain credential via AIS HTTP first, then connect signaling
+    /// New flow: obtain credential via Issuer HTTP first, then connect signaling
     /// with credential in URL.
     async fn reconnect_signaling(&mut self) -> Result<(), JsValue> {
         log::info!(
@@ -1301,11 +1362,11 @@ impl SwRuntime {
         //    a fresh discovery & WebRTC handshake.
         self.clear_peer_state_for_signaling_reconnect();
 
-        // 3. Obtain credential: try restore from IndexedDB, else re-register via AIS HTTP.
+        // 3. Obtain credential: try restore from IndexedDB, else re-register via Issuer HTTP.
         let cred_kv_ns = self.cred_kv_namespace();
         match Self::try_restore_credential_static(&self.platform, &cred_kv_ns).await {
             Ok(Some((actor_id, credential))) => {
-                log::info!("[SW] restored credentials from IndexedDB, skipping AIS re-register");
+                log::info!("[SW] restored credentials from IndexedDB, skipping Issuer re-register");
                 self.actor_id = Some(actor_id);
                 self.credential = Some(credential);
                 // Also try to restore TurnCredential
@@ -1316,7 +1377,7 @@ impl SwRuntime {
                 }
             }
             _ => {
-                self.register_via_ais().await?;
+                self.register_via_issuer().await?;
             }
         }
 
@@ -1334,7 +1395,7 @@ impl SwRuntime {
         self.connect_signaling_with_current_identity().await?;
 
         log::info!(
-            "[SW] [{}] Signaling reconnected (AIS HTTP credential)",
+            "[SW] [{}] Signaling reconnected (Issuer HTTP credential)",
             self.client_id
         );
         Ok(())
@@ -1363,13 +1424,13 @@ impl SwRuntime {
 
     async fn renew_current_credential(&mut self) -> Result<(), JsValue> {
         let cred_kv_ns = self.cred_kv_namespace();
-        let ais = WebAisClient::new(self.ais_endpoint.clone());
 
         let Some((actor_id, credential, turn_credential)) =
-            Self::try_renew_persisted_credential_static(&ais, &self.platform, &cred_kv_ns).await?
+            Self::try_renew_persisted_credential_static(&self.issuer, &self.platform, &cred_kv_ns)
+                .await?
         else {
-            log::warn!("[SW] renewal token unavailable; falling back to AIS registration");
-            self.register_via_ais().await?;
+            log::warn!("[SW] renewal token unavailable; falling back to Issuer registration");
+            self.register_via_issuer().await?;
             if let Some(ref tc) = self.turn_credential {
                 self.send_turn_credential_to_dom(tc)?;
             }
@@ -1377,7 +1438,7 @@ impl SwRuntime {
             self.clear_peer_state_for_signaling_reconnect();
             self.connect_signaling_with_current_identity().await?;
             log::info!(
-                "[SW] [{}] signaling reconnected after AIS re-registration",
+                "[SW] [{}] signaling reconnected after Issuer re-registration",
                 self.client_id
             );
             return Ok(());
@@ -1452,7 +1513,7 @@ impl SwRuntime {
         Ok(())
     }
 
-    /// Discover a peer of `self.target_actr_type` via the AIS route-candidates API.
+    /// Discover a peer of `self.target_actr_type` via the Issuer route-candidates API.
     ///
     /// Returns a cached `ActrId` if a previous discovery for the same target type
     /// succeeded and the associated peer has not been torn down. Otherwise issues
@@ -1554,7 +1615,7 @@ impl SwRuntime {
 
     /// Drop any `discovered_targets` entry whose resolved `ActrId` matches
     /// the given peer identifier. Used when a peer connection fails/closes,
-    /// so the next outbound RPC issues a fresh AIS discovery rather than
+    /// so the next outbound RPC issues a fresh Issuer discovery rather than
     /// re-using the dead `ActrId`.
     fn invalidate_discovered_target(&mut self, peer_id: &str) {
         let before = self.discovered_targets.len();
@@ -1708,6 +1769,7 @@ impl SwRuntime {
             credential,
             target: target.clone(),
             delivery_context: None,
+            source_type: None,
             payload: Some(actr_relay::Payload::IceRestartRejected(
                 IceRestartRejected {
                     sdp_exchange_id: sdp_exchange_id.to_string(),
@@ -1739,13 +1801,13 @@ impl SwRuntime {
         let payload = actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: actor_id.clone(),
             to: target.clone(),
-            realm_id: actor_id.realm.realm_id,
         });
         let relay = actr_protocol::ActrRelay {
             source: actor_id,
             credential,
             target: target.clone(),
             delivery_context: None,
+            source_type: None,
             payload: Some(payload),
         };
         let envelope = SignalingEnvelope {
@@ -2352,6 +2414,7 @@ impl SwRuntime {
                     credential,
                     target,
                     delivery_context: None,
+                    source_type: None,
                     payload: Some(actr_relay::Payload::SessionDescription(sd)),
                 };
                 let envelope = SignalingEnvelope {
@@ -2381,6 +2444,7 @@ impl SwRuntime {
                     credential,
                     target,
                     delivery_context: None,
+                    source_type: None,
                     payload: Some(actr_relay::Payload::IceCandidate(ice)),
                 };
                 let envelope = SignalingEnvelope {
@@ -2518,7 +2582,7 @@ impl SwRuntime {
                         self.pending_remote_sdp_exchanges.remove(&data.peer_id);
                         self.peer_connection_states.remove(&data.peer_id);
                         // Invalidate any discovered-target cache entry that resolved
-                        // to this peer, so the next outbound RPC runs a fresh AIS
+                        // to this peer, so the next outbound RPC runs a fresh Issuer
                         // discovery instead of re-using a broken ActrId.
                         self.invalidate_discovered_target(&data.peer_id);
                         // Notify DOM about connection failure so pending RPCs can fail fast
@@ -2590,6 +2654,7 @@ impl SwRuntime {
                     credential,
                     target,
                     delivery_context: None,
+                    source_type: None,
                     payload: Some(actr_relay::Payload::SessionDescription(sd)),
                 };
                 let envelope = SignalingEnvelope {
@@ -3288,12 +3353,13 @@ pub fn init_global() -> Result<(), JsValue> {
 /// Each call creates an independent runtime with its own signaling connection,
 /// actor registration, and WebRTC state. This enables multiple browser tabs
 /// to work simultaneously without interfering with each other.
+/// Returns the actual imported or restored Realm client key ID after success.
 #[wasm_bindgen]
 pub async fn register_client(
     client_id: String,
     config: JsValue,
     port: MessagePort,
-) -> Result<(), JsValue> {
+) -> Result<String, JsValue> {
     // Ensure global init
     init_global()?;
 
@@ -3306,6 +3372,7 @@ pub async fn register_client(
         config.acl_allow_types,
     );
     let mut runtime = SwRuntime::new(client_id.clone(), config).await?;
+    let client_key_id = runtime.issuer.client_key_id().to_owned();
 
     // Set DOM port
     runtime.dom_port = Some(port);
@@ -3742,7 +3809,7 @@ pub async fn register_client(
         "[SW] [{}] Client registration complete (State Path enabled)",
         client_id
     );
-    Ok(())
+    Ok(client_key_id)
 }
 
 /// Unregister a client (browser tab) from the SW runtime.
@@ -3924,7 +3991,7 @@ pub async fn handle_dom_control(client_id: String, payload: JsValue) -> Result<(
         );
 
         // Discover the target for this RPC. `discover_target_with_retry`
-        // consults the per-type cache first and only hits AIS on miss, so
+        // consults the per-type cache first and only hits Issuer on miss, so
         // steady-state calls remain cheap while transparently re-discovering
         // after a peer tear-down invalidates the cache.
         let target_id = {
@@ -4107,9 +4174,83 @@ fn js_encode_uri_component(s: &str) -> String {
 mod cred_ns_tests {
     use super::*;
 
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn authorized_realm_key_survives_host_restart_and_is_scoped() {
+        use actr_protocol::IdentityClaims;
+        use actr_protocol::realm_membership::RealmClientKeyFile;
+        let root = format!("realm-key-test-{}", uuid::Uuid::new_v4());
+        let file = RealmClientKeyFile::new(
+            "browser@example.com",
+            "provider.example",
+            "https://provider.example/issuer",
+            &ed25519_dalek::SigningKey::from_bytes(&[57; 32]),
+        );
+        let mut config: SwConfig = serde_json::from_value(serde_json::json!({
+            "issuer_endpoint": file.issuer,
+            "signaling_url": "wss://provider.example/signaling/ws",
+            "realm": file.realm,
+            "client_actr_type": "example.com/browser@1.0.0",
+            "service_fingerprint": "test",
+            "realm_client_key": file,
+        }))
+        .unwrap();
+        let credential = AIdCredential {
+            claims: IdentityClaims {
+                realm: file.realm.clone(),
+                provider: file.provider_id.clone(),
+                client_key: file.key_id.clone(),
+                ..Default::default()
+            }
+            .encode_to_vec()
+            .into(),
+            ..Default::default()
+        };
+        let imported = SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+            .await
+            .unwrap();
+        assert_eq!(imported.client_key_id(), file.key_id);
+        assert!(imported.accepts_credential(&credential));
+        drop(imported);
+        config.realm_client_key = None;
+        // Recreate the provider: restoration must come from IndexedDB, not memory.
+        let restored = SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+            .await
+            .unwrap();
+        assert_eq!(restored.client_key_id(), file.key_id);
+        assert!(restored.accepts_credential(&credential));
+        assert!(
+            SwRuntime::load_issuer_client(
+                &config,
+                &WebPlatformProvider::new(format!("{root}-other"))
+            )
+            .await
+            .is_err()
+        );
+        config.realm = "other@example.com".into();
+        assert!(
+            SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+                .await
+                .is_err()
+        );
+        config.realm = file.realm.clone();
+        config.issuer_endpoint = "https://other.example/issuer".into();
+        assert!(
+            SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+                .await
+                .is_err()
+        );
+        config.realm_client_key = Some(file);
+        assert!(
+            SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
+                .await
+                .is_err()
+        );
+    }
+
     fn ty(m: &str, n: &str, v: &str) -> ActrType {
         ActrType {
-            manufacturer: m.to_string(),
+            publisher: m.to_string(),
             name: n.to_string(),
             version: v.to_string(),
         }
@@ -4117,7 +4258,7 @@ mod cred_ns_tests {
 
     #[test]
     fn cred_kv_namespace_avoids_delimiter_ambiguity() {
-        // ("acme:Echo:1_a", "b") vs ("acme:Echo:1", "a_b") produce the SAME string
+        // ("acme:Echo:1_a", "b") vs ("acme/Echo@1", "a_b") produce the SAME string
         // under a delimiter-joined encoding; the length-prefixed encoding must
         // keep them distinct.
         let a = SwRuntime::build_cred_kv_namespace(&ty("acme", "Echo", "1_a"), "b");

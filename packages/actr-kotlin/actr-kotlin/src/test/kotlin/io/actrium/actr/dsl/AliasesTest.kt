@@ -1,14 +1,12 @@
 package io.actrium.actr.dsl
 
 import io.actrium.actr.ActrId
-import io.actrium.actr.ActrType
-import io.actrium.actr.Realm
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class AliasesTest {
-    private val peer = ActrId(Realm(7u), 1uL, ActrType("acme", "Echo", "1.0.0"))
+    private val peer = ActrId("test@example.com", 1uL)
 
     @Test
     fun `PeerEvent aliases the generated PeerEventBridge`() {

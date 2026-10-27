@@ -69,7 +69,7 @@ Console.WriteLine(info);
 
 var node = new ActrCabiNode();
 await node.FromConfig("actr.toml");
-node.WithActorType("example:MyWorkload:1.0.0");
+node.WithActorType("example/MyWorkload@1.0.0");
 await node.LinkWorkload("cabi.MyWorkload");
 await node.Register();
 await node.Start();

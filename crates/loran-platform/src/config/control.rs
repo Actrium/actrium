@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 /// Control head type.
 ///
-/// - `admin_ui`: Provides a local admin UI (HTTP).
-/// - `grpc_api`: Provides a gRPC API for the cluster supervisor (reuses the main HTTP port).
+/// - `admin_ui`: provides a local admin UI (HTTP).
+/// - `grpc_api`: provides a gRPC API for the cluster supervisor (reuses the main HTTP port).
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlHead {
@@ -14,12 +14,13 @@ pub enum ControlHead {
 
 /// gRPC control plane configuration.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct ControlGrpcApiConfig {
     /// Whether to enable the NodeAdminService gRPC API.
     #[serde(default)]
     pub enabled: bool,
 
-    /// Node ID (used for authentication payloads)
+    /// Node ID (used in authentication payloads)
     #[serde(default = "default_grpc_node_id")]
     pub node_id: String,
 
@@ -31,29 +32,74 @@ pub struct ControlGrpcApiConfig {
     #[serde(default)]
     pub shared_secret: String,
 
-    /// Allowed maximum clock skew (seconds)
+    /// Maximum allowed clock skew (seconds)
     #[serde(default = "default_max_clock_skew_secs")]
     pub max_clock_skew_secs: u64,
 }
 
 /// Admin UI configuration.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct AdminUiConfig {
     /// Whether to enable the local Admin UI.
     #[serde(default = "default_admin_ui_enabled")]
     pub enabled: bool,
 
-    /// Login password (required in admin_ui mode, >= 8 characters)
+    /// Argon2id PHC password hash. Plaintext passwords are never accepted in
+    /// production configuration.
     #[serde(default)]
-    pub password: String,
+    pub password_hash: String,
 
-    /// JWT session expiration time (seconds), default 86400 (24 hours)
+    /// JWT session expiry in seconds. Default: 3600 (1 hour).
     #[serde(default = "default_session_expiry_secs")]
     pub session_expiry_secs: u64,
+
+    /// Login admission limits, applied before expensive password verification.
+    #[serde(default)]
+    pub login_limits: AdminLoginLimits,
 }
 
-/// Control resident configuration.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct AdminLoginLimits {
+    pub per_ip_per_minute: u32,
+    pub per_ip_burst: u32,
+    pub global_per_minute: u32,
+    pub global_burst: u32,
+    pub max_concurrent: usize,
+}
+
+impl Default for AdminLoginLimits {
+    fn default() -> Self {
+        Self {
+            per_ip_per_minute: 30,
+            per_ip_burst: 10,
+            global_per_minute: 120,
+            global_burst: 20,
+            max_concurrent: 2,
+        }
+    }
+}
+
+impl AdminUiConfig {
+    /// ADM-07: Short, stable fingerprint of the current password hash.
+    ///
+    /// Embedded into admin session tokens as the `pwd_ver` claim so that
+    /// rotating `password_hash` (followed by a reload) invalidates every
+    /// previously issued token, effectively logging out all sessions. Returns
+    /// the first 16 hex characters of the SHA-256 digest of the PHC hash
+    /// string. This never exposes the password or the raw hash — only a stable
+    /// derived fingerprint of it.
+    pub fn password_version(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(self.password_hash.as_bytes());
+        hex::encode(&digest[..8])
+    }
+}
+
+/// Control persistent configuration.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ControlConfig {
     /// Legacy either-or head mode. New configurations should prefer admin_ui.enabled/grpc_api.enabled.
     #[serde(default)]
@@ -81,7 +127,10 @@ fn default_max_clock_skew_secs() -> u64 {
 }
 
 fn default_session_expiry_secs() -> u64 {
-    86400
+    // ADM-07: Lowered from 86400 (24h) to reduce the window a leaked admin
+    // token remains valid. Combined with the pwd_ver claim, password rotation
+    // still invalidates tokens immediately regardless of this TTL.
+    3600
 }
 
 fn default_admin_ui_enabled() -> bool {
@@ -92,8 +141,9 @@ impl Default for AdminUiConfig {
     fn default() -> Self {
         Self {
             enabled: default_admin_ui_enabled(),
-            password: String::new(),
+            password_hash: String::new(),
             session_expiry_secs: default_session_expiry_secs(),
+            login_limits: AdminLoginLimits::default(),
         }
     }
 }
@@ -161,14 +211,28 @@ impl ControlConfig {
     fn validate_admin_ui(&self) -> Result<(), String> {
         let cfg = &self.admin_ui;
 
-        if cfg.password.is_empty() {
-            return Err(
-                "control.admin_ui.password is required when admin_ui is enabled".to_string(),
-            );
+        let limits = &cfg.login_limits;
+        if limits.per_ip_per_minute == 0
+            || limits.per_ip_burst == 0
+            || limits.global_per_minute == 0
+            || limits.global_burst == 0
+            || limits.max_concurrent == 0
+        {
+            return Err("control.admin_ui.login_limits values must be greater than 0".into());
         }
 
-        if cfg.password.len() < 8 {
-            return Err("control.admin_ui.password must be at least 8 characters".to_string());
+        if cfg.password_hash.is_empty() {
+            return Err(
+                "control.admin_ui.password_hash is required when admin_ui is enabled".to_string(),
+            );
+        }
+        let parsed = argon2::PasswordHash::new(&cfg.password_hash).map_err(|error| {
+            format!("control.admin_ui.password_hash is not a valid PHC string: {error}")
+        })?;
+        if parsed.algorithm.as_str() != "argon2id" {
+            return Err(
+                "control.admin_ui.password_hash must use the Argon2id algorithm".to_string(),
+            );
         }
 
         if cfg.session_expiry_secs == 0 {
@@ -226,7 +290,7 @@ mod tests {
         let cfg = ControlConfig {
             head: Some(ControlHead::AdminUi),
             admin_ui: AdminUiConfig {
-                password: String::new(),
+                password_hash: String::new(),
                 ..Default::default()
             },
             ..Default::default()
@@ -236,11 +300,11 @@ mod tests {
     }
 
     #[test]
-    fn admin_ui_rejects_short_password() {
+    fn admin_ui_rejects_plaintext_password() {
         let cfg = ControlConfig {
             head: Some(ControlHead::AdminUi),
             admin_ui: AdminUiConfig {
-                password: "short".to_string(),
+                password_hash: "short".to_string(),
                 ..Default::default()
             },
             ..Default::default()
@@ -250,17 +314,45 @@ mod tests {
     }
 
     #[test]
-    fn admin_ui_accepts_valid_password() {
+    fn legacy_plaintext_password_field_is_not_silently_ignored() {
+        let error = toml::from_str::<ControlConfig>(
+            r#"
+            [admin_ui]
+            enabled = true
+            password = "plaintext"
+            "#,
+        )
+        .expect_err("unknown plaintext password field must fail deserialization");
+        assert!(error.to_string().contains("unknown field"));
+        assert!(error.to_string().contains("password"));
+    }
+
+    #[test]
+    fn admin_ui_accepts_valid_password_hash() {
         let cfg = ControlConfig {
             head: Some(ControlHead::AdminUi),
             admin_ui: AdminUiConfig {
-                password: "changeme123".to_string(),
+                password_hash: "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string(),
                 ..Default::default()
             },
             ..Default::default()
         };
 
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn admin_ui_rejects_non_argon2id_hash() {
+        let cfg = ControlConfig {
+            head: Some(ControlHead::AdminUi),
+            admin_ui: AdminUiConfig {
+                password_hash: "$argon2i$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(cfg.validate().is_err());
     }
 
     #[test]
@@ -298,7 +390,7 @@ mod tests {
             head: None,
             admin_ui: AdminUiConfig {
                 enabled: true,
-                password: "changeme123".to_string(),
+                password_hash: "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string(),
                 ..Default::default()
             },
             grpc_api: ControlGrpcApiConfig {

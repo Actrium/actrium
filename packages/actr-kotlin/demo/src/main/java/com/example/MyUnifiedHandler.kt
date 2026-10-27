@@ -39,7 +39,7 @@ class MyUnifiedHandler : ActrDispatchHandler {
             val serverType = ctx.resolveDependency("stream")
             Log.i(
                 TAG,
-                "🌐 discovering server type: ${serverType.manufacturer}/${serverType.name}",
+                "🌐 discovering server type: ${serverType.publisher}/${serverType.name}",
             )
             val serverId = ctx.discover(serverType)
             Log.i(TAG, "🎯 discovered server: ${serverId.serialNumber}")
