@@ -1,21 +1,30 @@
-//! Actr package distribution service configuration.
+//! Actr package hosting service configuration.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PackagesConfig {
-    /// Deploy-time mappings from opaque URI targets to root Actor packages.
+    /// Absolute paths of local `.actr` files, each served by its SHA-256 digest.
     #[serde(default)]
-    pub targets: Vec<PackageTargetConfig>,
+    pub artifacts: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct PackageTargetConfig {
-    /// Opaque target reference, without a leading slash.
-    pub target: String,
-    /// Local `.actr` artifact served by this Loran instance.
-    pub artifact: String,
-    /// Optional workload profile hint used for early Host selection.
-    #[serde(default)]
-    pub profile: Option<String>,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_retired_target_mappings() {
+        let config: PackagesConfig =
+            toml::from_str(r#"artifacts = ["/srv/actr/echo.actr"]"#).unwrap();
+        assert_eq!(config.artifacts, ["/srv/actr/echo.actr"]);
+
+        let retired = r#"
+            [[targets]]
+            target = "apps/echo"
+            artifact = "/srv/actr/echo.actr"
+        "#;
+        assert!(toml::from_str::<PackagesConfig>(retired).is_err());
+    }
 }

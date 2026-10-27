@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// Known service names accepted in `/{service}/health` and `/{service}/metrics`.
 const KNOWN_SERVICES: &[&str] = &[
     "signaling",
-    "ais",
+    "issuer",
     "signer",
     "control",
     "admin",
@@ -39,7 +39,7 @@ pub struct ObservabilityState {
 
 /// Services that already have their own `/health` route in their nested router.
 /// We skip registering observability `/health` for these to avoid duplicate routes.
-const SERVICES_WITH_OWN_HEALTH: &[&str] = &["signaling", "ais"];
+const SERVICES_WITH_OWN_HEALTH: &[&str] = &["signaling", "issuer"];
 
 /// Build the observability sub-router with auth middleware.
 ///
@@ -47,7 +47,7 @@ const SERVICES_WITH_OWN_HEALTH: &[&str] = &["signaling", "ais"];
 /// so that concrete routes take priority over nested service routers.
 ///
 /// Services that already define their own `/health` in their nested router
-/// (signaling, ais, signer) keep their own health endpoint; we only register
+/// (signaling, issuer, signer) keep their own health endpoint; we only register
 /// `/{service}/metrics` for those.
 pub fn build_observability_router(state: Arc<ObservabilityState>) -> Router {
     let mut router = Router::new()
@@ -274,6 +274,24 @@ fn extract_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
     Some((user.to_string(), pass.to_string()))
 }
 
+/// Constant-time byte-slice equality.
+///
+/// ADM-05: htpasswd credential matching must not short-circuit on the first
+/// differing byte, otherwise response timing leaks how many leading characters
+/// of a username/password are correct. `subtle` is not a dependency of this
+/// crate, so we implement the constant-time compare directly. The length check
+/// only leaks the credential length, which is not sensitive here.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Check credentials against an htpasswd file (plaintext format: user:password).
 fn check_htpasswd(path: &str, username: &str, password: &str) -> bool {
     let Ok(content) = std::fs::read_to_string(path) else {
@@ -285,8 +303,8 @@ fn check_htpasswd(path: &str, username: &str, password: &str) -> bool {
             continue;
         }
         if let Some((user, pass)) = line.split_once(':')
-            && user == username
-            && pass == password
+            && constant_time_eq(user.as_bytes(), username.as_bytes())
+            && constant_time_eq(pass.as_bytes(), password.as_bytes())
         {
             return true;
         }
@@ -313,7 +331,7 @@ async fn resolve_service_status(service: &str, state: &ObservabilityState) -> St
     // Check if service is enabled
     let enabled = match service {
         "signaling" => cfg.is_signaling_enabled(),
-        "ais" => cfg.is_ais_enabled(),
+        "issuer" => cfg.is_issuer_enabled(),
         "signer" => cfg.is_signer_enabled(),
         "stun" => cfg.is_stun_enabled(),
         "turn" => cfg.is_turn_enabled(),
@@ -329,7 +347,7 @@ async fn resolve_service_status(service: &str, state: &ObservabilityState) -> St
     // Map service name to ServiceCollector key
     let collector_key = match service {
         "signaling" => Some("Signaling Service"),
-        "ais" => Some("AIS Service"),
+        "issuer" => Some("Issuer Service"),
         "signer" => Some("Signer Service"),
         "stun" => Some("STUN Server"),
         "turn" => Some("TURN Server"),

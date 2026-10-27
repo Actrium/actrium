@@ -71,7 +71,7 @@ const SERVICE_ICONS: Record<string, any> = {
   "stun": Shield,
   "turn": ArrowLeftRight,
   "signaling": Radio,
-  "ais": Fingerprint,
+  "issuer": Fingerprint,
   "signer": Key,
 };
 
@@ -219,7 +219,7 @@ export function NetworkPage() {
   // All expected services — ones missing from API are treated as disabled
   const ALL_SERVICES: { name: string; type: number; port: number }[] = [
     { name: "Signer Service", type: 5, port: 80 },
-    { name: "AIS Service", type: 4, port: 80 },
+    { name: "Issuer Service", type: 4, port: 80 },
     { name: "Signaling Service", type: 3, port: 80 },
     { name: "STUN Server", type: 1, port: 3478 },
     { name: "TURN Server", type: 2, port: 3478 },
@@ -282,7 +282,7 @@ export function NetworkPage() {
   const CB = "#2563eb";                        // blue       (testing)
   const CN = "#94a3b8";                        // neutral gray (idle/untested)
 
-  const NAME_ORDER: Record<string, number> = { "Signer": 0, "Signer Service": 0, "AIS": 1, "AIS Service": 1, "Signaling": 2, "Signaling Service": 2, "STUN": 3, "STUN Server": 3, "TURN": 4, "TURN Server": 4 };
+  const NAME_ORDER: Record<string, number> = { "Signer": 0, "Signer Service": 0, "Issuer": 1, "Issuer Service": 1, "Signaling": 2, "Signaling Service": 2, "STUN": 3, "STUN Server": 3, "TURN": 4, "TURN Server": 4 };
   const sortedServices = [...allServices].sort((a, b) => (NAME_ORDER[a.name] ?? 99) - (NAME_ORDER[b.name] ?? 99));
 
   // Pill: service health — disabled → gray, healthy → green, unhealthy → red
@@ -330,12 +330,6 @@ export function NetworkPage() {
 
       <div className="flex flex-col items-center overflow-x-auto">
         <svg viewBox={`0 -40 ${SVG_W} ${SVG_H + 40}`} className="max-w-3xl mx-auto select-none">
-          <defs>
-            <style>{`
-              @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
-              .testing { animation: pulse 1.2s ease-in-out infinite; }
-            `}</style>
-          </defs>
           {/* ── Network boundary zone ── */}
           {(() => {
             const zoneW = 70;

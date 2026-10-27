@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   ActrId,
+  ActrType,
   DataChunk,
   InvocationCtx,
   StreamCallback,
@@ -18,13 +19,8 @@ async function loadRuntime() {
 
 function testActorId(serialNumber: number | bigint = 7n): ActrId {
   return {
-    realm: { realmId: 42 },
+    realm: 'test@example.com',
     serialNumber,
-    type: {
-      manufacturer: 'acme',
-      name: 'EchoService',
-      version: '1.0.0',
-    },
   };
 }
 
@@ -101,7 +97,11 @@ describe('@actrium/actr-workload', () => {
     const { host, runtime } = await loadRuntime();
     const ctx = testInvocationCtx(91n);
     const payload = new Uint8Array([4, 2]);
-    const targetType = testActorId().type;
+    const targetType: ActrType = {
+      publisher: 'acme',
+      name: 'EchoService',
+      version: '1.0.0',
+    };
 
     await runtime.withInvocationCtx(ctx, async () => {
       expect(runtime.getCurrentInvocationCtx()).toBe(ctx);

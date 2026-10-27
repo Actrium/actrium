@@ -12,15 +12,52 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+
+/// Maximum number of per-IP connection rate limiters kept in memory. Without a cap, an
+/// attacker rotating source IPs can grow the map without bound (memory exhaustion). When
+/// the cap is reached, the least-recently-seen entry is evicted.
+const MAX_CONNECTION_LIMITERS: usize = 65_536;
+
+/// Idle TTL for a per-IP connection rate limiter. Entries not seen for this duration are
+/// reclaimed, which bounds memory and discards stale buckets so a returning IP gets a fresh
+/// quota (rather than inheriting a depleted bucket from a long-past burst).
+const CONNECTION_LIMITER_IDLE_TTL: Duration = Duration::from_secs(600);
+
+/// A per-IP rate limiter paired with the last time it was touched, for TTL/LRU reclamation.
+#[derive(Debug)]
+struct LimiterEntry {
+    limiter: DefaultDirectRateLimiter,
+    last_seen: Instant,
+}
+
+/// Reclaim space in the per-IP limiter map: first drop entries idle longer than the TTL,
+/// then if the map is still at capacity evict the least-recently-seen entry. Called only
+/// when a new IP is about to be inserted, so the amortized cost is low.
+fn reclaim_limiters(map: &mut HashMap<IpAddr, LimiterEntry>, now: Instant) {
+    let ttl = CONNECTION_LIMITER_IDLE_TTL;
+    map.retain(|_, entry| now.duration_since(entry.last_seen) < ttl);
+
+    while map.len() >= MAX_CONNECTION_LIMITERS {
+        let Some(evict_ip) = map
+            .iter()
+            .min_by_key(|(_, entry)| entry.last_seen)
+            .map(|(ip, _)| *ip)
+        else {
+            break;
+        };
+        map.remove(&evict_ip);
+    }
+}
 
 /// Connection rate limiter (per IP)
 #[derive(Debug)]
 pub struct ConnectionRateLimiter {
     /// Configuration
     config: ConnectionRateLimit,
-    /// Per-IP rate limiter
-    limiters: Arc<RwLock<HashMap<IpAddr, DefaultDirectRateLimiter>>>,
+    /// Per-IP rate limiter (bounded by TTL + LRU, see `reclaim_limiters`)
+    limiters: Arc<RwLock<HashMap<IpAddr, LimiterEntry>>>,
     /// Current connection count per IP
     connections: Arc<RwLock<HashMap<IpAddr, u32>>>,
 }
@@ -62,8 +99,13 @@ impl ConnectionRateLimiter {
         drop(connections);
 
         // Check connection rate
+        let now = Instant::now();
         let mut limiters = self.limiters.write().await;
-        let limiter = limiters.entry(ip).or_insert_with(|| {
+        // Bound the map before inserting a new IP: drop idle entries, then evict LRU if at cap.
+        if !limiters.contains_key(&ip) {
+            reclaim_limiters(&mut limiters, now);
+        }
+        let entry = limiters.entry(ip).or_insert_with(|| {
             // per_minute connections per minute, convert to per second
             let per_second =
                 NonZeroU32::new((self.config.per_minute as f64 / 60.0).ceil().max(1.0) as u32)
@@ -72,8 +114,14 @@ impl ConnectionRateLimiter {
             let quota = Quota::per_second(per_second)
                 .allow_burst(NonZeroU32::new(self.config.burst_size).unwrap());
 
-            RateLimiter::direct(quota)
+            LimiterEntry {
+                limiter: RateLimiter::direct(quota),
+                last_seen: now,
+            }
         });
+        // Refresh LRU timestamp on every access so an active IP is never evicted.
+        entry.last_seen = now;
+        let limiter = &entry.limiter;
 
         match limiter.check() {
             Ok(_) => {

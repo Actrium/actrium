@@ -135,7 +135,7 @@ final class BookmarkRepository {
             appId: bookmark.appId,
             createdAtSeconds: Int64(bookmark.createdAt.timeIntervalSince1970),
             lastUsedAtSeconds: bookmark.lastUsedAt.map { Int64($0.timeIntervalSince1970) },
-            manufacturer: bookmark.manufacturer,
+            publisher: bookmark.publisher,
             notes: bookmark.notes,
             favicon: bookmark.favicon
         )
@@ -149,7 +149,7 @@ final class BookmarkRepository {
             appId: row["app_id"] as? String,
             createdAtSeconds: row["created_at"] as? Int64 ?? 0,
             lastUsedAtSeconds: row["last_used_at"] as? Int64,
-            manufacturer: row["manufacturer"] as? String,
+            publisher: row["publisher"] as? String,
             notes: row["notes"] as? String,
             favicon: row["favicon"] as? String
         ))
@@ -161,7 +161,7 @@ final class BookmarkRepository {
             appId: bookmark.appId,
             createdAt: Date(timeIntervalSince1970: TimeInterval(bookmark.createdAtSeconds)),
             lastUsedAt: bookmark.lastUsedAtSeconds.map { Date(timeIntervalSince1970: TimeInterval($0)) },
-            manufacturer: bookmark.manufacturer,
+            publisher: bookmark.publisher,
             notes: bookmark.notes,
             favicon: bookmark.favicon,
             tags: tags

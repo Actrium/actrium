@@ -1,17 +1,4 @@
 {
-  "dispatch_spec_hash" : "4b97d882bf8d29f5b91208d9a28399b756356590de53fa2d7979190300126384",
-  "generated_files" : [
-    "echo.client.swift",
-    "local_echo.actor.swift",
-    "actr_dispatch.swift",
-    "actr-gen-meta.json"
-  ],
-  "generated_local_routes" : [
-    "echoapp.LocalEchoService.Send"
-  ],
-  "generated_remote_routes" : [
-    "echo.EchoService.Echo"
-  ],
   "language" : "swift",
   "local_services" : [
     {
@@ -41,11 +28,11 @@
       "proto_file" : "local/local_echo.proto"
     }
   ],
-  "plugin_version" : "0.6.1",
+  "plugin_version" : "0.4.16",
   "remote_services" : [
     {
+      "actr_type" : "e2e.actrium.test/EchoService@1.0.0",
       "client_type" : "EchoServiceClient",
-      "dependency_alias" : "echo",
       "methods" : [
         {
           "input_ref" : {
@@ -69,6 +56,5 @@
       "package" : "echo",
       "proto_file" : "remote/echo/echo.proto"
     }
-  ],
-  "schema_version" : "v1"
+  ]
 }

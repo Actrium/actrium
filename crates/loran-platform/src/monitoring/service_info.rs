@@ -86,7 +86,7 @@ impl ServiceInfo {
                 config.bind.ice.port.to_string(),
                 format!("stun:{}", config.bind.ice.advertised_ip),
             ),
-            ServiceType::Ais | ServiceType::Ks | ServiceType::Mfr => {
+            ServiceType::Issuer | ServiceType::Signer | ServiceType::PublisherRegistry => {
                 if let Some(ref h) = config.bind.http {
                     (
                         h.port.to_string(),

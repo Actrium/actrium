@@ -24,11 +24,12 @@ impl ProjectInitializer for PythonInitializer {
         let mut template_context = TemplateContext::new(
             &context.project_name,
             &context.signaling_url,
-            &context.manufacturer,
+            &context.publisher,
             service_name,
             true,
         );
         template_context.is_both = context.is_both;
+        template_context.realm = context.realm.clone();
         template.generate(&context.project_dir, &template_context)?;
         make_build_script_executable(&context.project_dir)?;
         init_git_repo(&context.project_dir)?;

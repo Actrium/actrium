@@ -5,18 +5,18 @@
 # package, binary, and build sections are intentionally omitted.
 #
 # The actor type is defined in Swift code:
-#     ActrType(manufacturer: "__MANUFACTURER__", name: "SwiftTsWorkloadApp", version: "0.1.0")
+#     ActrType(publisher: "__PUBLISHER__", name: "SwiftTsWorkloadApp", version: "0.1.0")
 
 [signaling]
 url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
 
-[ais_endpoint]
-url = "http://__HOST__:__HTTP_PORT__/ais"
+[issuer_endpoint]
+url = "http://__HOST__:__HTTP_PORT__/issuer"
 
 [deployment]
-# Replace this with the REALM_ID returned by actrix CreateRealm/Admin UI.
-realm_id = __REALM_ID__
-realm_secret = "__REALM_SECRET__"
+# Replace this with the Realm name created via the actrix Admin UI.
+realm = "__REALM__"
+realm_client_key = "__REALM_CLIENT_KEY__"
 
 [discovery]
 visible = true
@@ -36,8 +36,8 @@ turn_urls = ["turn:__HOST__:__ICE_PORT__"]
 
 [[acl.rules]]
 permission = "allow"
-type = "__MANUFACTURER__:DuplexEchoService:1.0.0"
+type = "__PUBLISHER__/DuplexEchoService@1.0.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "__MANUFACTURER__:SwiftTsWorkloadApp:0.1.0"
+type = "__PUBLISHER__/SwiftTsWorkloadApp@0.1.0"

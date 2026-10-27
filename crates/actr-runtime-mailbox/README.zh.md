@@ -1,8 +1,8 @@
-# actr-mailbox
+# actr-runtime-mailbox
 
 🗄️ **Actor-RTC 持久化邮箱层**
 
-`actr-mailbox` 提供 Actor-RTC 框架的消息持久化功能，基于 SQLite 实现，确保消息的可靠存储和检索。
+`actr-runtime-mailbox` 提供 Actor-RTC 框架的消息持久化功能，基于 SQLite 实现，确保消息的可靠存储和检索。
 
 ## 📦 功能特性
 
@@ -22,8 +22,11 @@
 （如 `cache=shared`、`nolock=1` 或自定义 `vfs`）绕过独占锁。实际文件名若以 `file:` 开头，
 请使用 `./file:...` 或绝对路径。
 
+当前数据库 schema 版本为 1，包含发送方类型 `from_actr_type`。仅支持当前版本的重启恢复；
+旧版本或更新版本的数据库会返回 `StorageError::ConfigError`，不会自动迁移或清空。
+
 打开数据库时，实例先取得独占权，再在事务内将遗留的 `Inflight` 消息恢复为 `Queued`。
-事务提交后实例才可用；恢复失败会回滚并返回错误。消息 ID、内容、优先级和创建时间不变，
+事务提交后实例才可用；恢复失败会回滚并返回错误。消息 ID、发送方类型、内容、优先级和创建时间不变，
 已 ACK 删除的消息不会恢复。此行为适用于 WAL 和非 WAL 文件数据库；`:memory:` 实例相互独立，
 关闭后不保留消息。
 
@@ -37,13 +40,13 @@
 
 ```toml
 [dependencies]
-actr-mailbox = { path = "path/to/actr-mailbox" }
+actr-runtime-mailbox = { path = "path/to/actr-runtime-mailbox" }
 ```
 
 ### 基本使用
 
 ```rust,no_run
-use actr_mailbox::prelude::*;
+use actr_runtime_mailbox::prelude::*;
 use std::time::Duration;
 
 async fn message_processor(mailbox: impl Mailbox) {
@@ -81,16 +84,14 @@ async fn message_processor(mailbox: impl Mailbox) {
 
 ```text
 ┌─────────────────────────────────────────┐
-│              actr-core                  │
+│      actr-hyper    │    loran-server    │
 ├─────────────────────────────────────────┤
-│  actr-sdk  │  actr-mailbox │ actr-runtime│ (此层)
+│        actr-runtime-mailbox (此层)      │
 ├─────────────────────────────────────────┤
-│  actr-protocol │    actr-version         │
-├─────────────────────────────────────────┤
-│  actr-types    │     actr-uri           │
+│              actr-protocol              │
 └─────────────────────────────────────────┘
 ```
 
 ## 📄 许可证
 
-MIT License
+Apache-2.0

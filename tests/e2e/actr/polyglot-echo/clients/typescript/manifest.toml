@@ -11,6 +11,6 @@ exports = []
 
 [package]
 name = "TsDriver"
-manufacturer = "polyglot"
+publisher = "polyglot"
 version = "0.1.0"
 description = "polyglot-echo TypeScript driver"

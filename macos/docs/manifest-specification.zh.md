@@ -1,16 +1,16 @@
 # Actrium Actor Package Manifest
 
-Actrium 不再定义另一层应用归档格式。它直接读取通用的 `actr-package/1` `.actr`
+Actrium 不再定义另一层应用归档格式。它直接读取通用的 `actr-package/2` `.actr`
 包，并要求主 Workload 使用 `keel.guest/1` Profile。
 
 每个包的根目录包含 `manifest.toml`、Ed25519 原始签名 `manifest.sig`，以及所有在
 `[[files]]` 中声明的 payload。最小 Actrium Guest Manifest 如下：
 
 ```toml
-format = "actr-package/1"
+format = "actr-package/2"
 
 [actor]
-manufacturer = "acme"
+publisher = "acme"
 name = "notes"
 version = "1.0.0"
 

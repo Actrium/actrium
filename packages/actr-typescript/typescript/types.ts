@@ -2,7 +2,6 @@
 import {
   ActrId,
   ActrType,
-  Realm,
   PayloadType,
   DataChunk,
   StreamSignal,
@@ -12,7 +11,6 @@ import {
 export {
   ActrId,
   ActrType,
-  Realm,
   PayloadType,
   DataChunk,
   StreamSignal,

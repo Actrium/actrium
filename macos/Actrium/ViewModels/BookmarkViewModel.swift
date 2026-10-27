@@ -50,8 +50,8 @@ final class BookmarkViewModel: ObservableObject {
     }
 
     /// Add a new bookmark from a Tab
-    func addBookmark(from tab: Tab, tags: [Tag] = [], notes: String? = nil, manufacturer: String? = nil) {
-        var bookmark = Bookmark.from(tab: tab, manufacturer: manufacturer)
+    func addBookmark(from tab: Tab, tags: [Tag] = [], notes: String? = nil, publisher: String? = nil) {
+        var bookmark = Bookmark.from(tab: tab, publisher: publisher)
         bookmark.notes = notes
         bookmark.tags = tags
 
@@ -172,7 +172,7 @@ final class BookmarkViewModel: ObservableObject {
             result = result.filter { bookmark in
                 bookmark.title.localizedCaseInsensitiveContains(query) ||
                 (bookmark.notes?.localizedCaseInsensitiveContains(query) ?? false) ||
-                (bookmark.manufacturer?.localizedCaseInsensitiveContains(query) ?? false)
+                (bookmark.publisher?.localizedCaseInsensitiveContains(query) ?? false)
             }
         }
 

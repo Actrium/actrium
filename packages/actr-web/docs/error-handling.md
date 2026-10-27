@@ -8,7 +8,7 @@ Actor-RTC Web treats errors as structured runtime signals rather than ad hoc con
 
 Examples:
 
-- invalid signaling or AIS URL
+- invalid signaling or Issuer URL
 - missing realm, package, or actor identifiers
 - incorrect Service Worker path
 - missing `.actr` package, package binary, or signed `resources/glue.js`
@@ -32,7 +32,7 @@ These are build or packaging errors. They should include the package URL, affect
 Examples:
 
 - WebSocket signaling failures
-- AIS registration or discovery failures
+- Issuer registration or discovery failures
 - ICE negotiation failures
 - WebRTC channel closure or setup timeouts
 

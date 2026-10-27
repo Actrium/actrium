@@ -57,7 +57,7 @@ let base_service = ServiceSpec {
     fingerprint: base_fingerprint,
     protobufs: proto_files.into_iter().map(|pf| {
         actr_protocol::service_spec::Protobuf {
-            uri: format!("actr://user-service/{}", pf.name),
+            package: pf.name.trim_end_matches(".proto").to_string(),
             content: pf.content,
             fingerprint: "file_fp".to_string(),
         }
@@ -86,7 +86,7 @@ let candidate_service = ServiceSpec {
     fingerprint: candidate_fingerprint,
     protobufs: candidate_proto.into_iter().map(|pf| {
         actr_protocol::service_spec::Protobuf {
-            uri: format!("actr://user-service/{}", pf.name),
+            package: pf.name.trim_end_matches(".proto").to_string(),
             content: pf.content,
             fingerprint: "file_fp".to_string(),
         }

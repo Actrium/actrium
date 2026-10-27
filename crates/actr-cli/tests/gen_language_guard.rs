@@ -21,7 +21,7 @@ exports = []
 
 [package]
 name = "demo-service"
-manufacturer = "acme"
+publisher = "acme"
 description = "Test project"
 
 [dependencies]
@@ -29,11 +29,11 @@ description = "Test project"
 [system.signaling]
 url = "ws://localhost:8080"
 
-[system.ais_endpoint]
-url = "http://localhost:8080/ais"
+[system.issuer_endpoint]
+url = "http://localhost:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 
 [system.discovery]
 visible = true

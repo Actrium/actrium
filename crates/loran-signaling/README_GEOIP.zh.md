@@ -109,7 +109,7 @@ let request = RouteCandidatesRequest {
                       SignalingServer 记录坐标
 
 2. 路由查询阶段
-   客户端请求 → ServiceRegistry 过滤候选（50-200 个）
+   客户端请求 → ActorRegistry 过滤候选（50-200 个）
                               ↓
                    LoadBalancer 使用 Haversine 计算距离
                               ↓
@@ -120,7 +120,7 @@ let request = RouteCandidatesRequest {
 
 ### 两阶段查询策略
 
-1. **过滤阶段** - ServiceRegistry 根据 ActrType 过滤候选（50-200 个）
+1. **过滤阶段** - ActorRegistry 根据 ActrType 过滤候选（50-200 个）
 2. **排序阶段** - LoadBalancer 使用 Haversine 计算距离并排序
 
 ### LoadBalancer API
@@ -204,10 +204,11 @@ let config: ActorConfig = toml::from_str(r#"
 
 // 注册到信令服务
 let request = RegisterRequest {
-    realm: Realm { realm_id: 1 },
+    realm: "k7m2q9xh@example.com".to_string(),
     actr_type: ActrType {
-        manufacturer: "my-company".to_string(),
+        publisher: "example.com".to_string(),
         name: "my-service".to_string(),
+        version: "1.0.0".to_string(),
     },
     geo_location: Some(config.geo_location),
     // ... 其他字段

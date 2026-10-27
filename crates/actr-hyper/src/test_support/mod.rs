@@ -112,20 +112,27 @@ pub fn create_credential_state_for_test(
 pub mod utils {
     pub use super::{
         create_credential_state_for_test, dummy_credential, install_test_crypto_provider,
-        make_actor_id,
+        make_actor_id, make_actor_type,
     };
 }
+
+/// Realm name used by [`make_actor_id`].
+pub const TEST_REALM: &str = "test@example.com";
 
 /// Create a test ActrId with the given serial number.
 pub fn make_actor_id(serial_number: u64) -> ActrId {
     ActrId {
-        realm: actr_protocol::Realm { realm_id: 1 },
+        realm: TEST_REALM.to_string(),
         serial_number,
-        r#type: actr_protocol::ActrType {
-            manufacturer: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
+    }
+}
+
+/// Actor type of every [`make_actor_id`] Actor.
+pub fn make_actor_type() -> actr_protocol::ActrType {
+    actr_protocol::ActrType {
+        publisher: "acme".to_string(),
+        name: "node".to_string(),
+        version: "1.0.0".to_string(),
     }
 }
 

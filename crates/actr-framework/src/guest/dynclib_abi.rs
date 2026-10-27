@@ -131,8 +131,9 @@ pub struct InitPayloadV1 {
     pub credential: Vec<u8>,
     #[prost(bytes = "vec", tag = "4")]
     pub actor_id: Vec<u8>,
-    #[prost(uint32, tag = "5")]
-    pub realm_id: u32,
+    /// Realm name `<realm_id>@<domain>`.
+    #[prost(string, tag = "5")]
+    pub realm: String,
 }
 
 /// Runtime frame used by both host->guest and guest->host invocation.

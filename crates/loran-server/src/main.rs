@@ -1,10 +1,10 @@
-//! Actrix auxiliary server main program
+//! Actrix auxiliary server main entry point
 //!
-//! Starts and manages WebRTC-related auxiliary services, including Signaling, STUN, TURN, etc.
+//! Starts and manages WebRTC-related auxiliary services, including signaling, STUN, TURN, etc.
 #![deny(clippy::disallowed_macros)]
 
 mod cli;
-// mod config; // migrated to standalone config crate
+// mod config; // migrated to a standalone config crate
 mod error;
 mod process;
 mod recording_pipeline;
@@ -16,7 +16,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use platform::config::ActrixConfig;
 use recording_pipeline::init_recording_pipeline;
 use service::{
-    AisService, ServiceContainer, ServiceManager, SignalingService, StunService, TurnService,
+    IssuerService, ServiceContainer, ServiceManager, SignalingService, StunService, TurnService,
 };
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
@@ -39,6 +39,22 @@ use error::{Error, Result};
 
 /// Application launcher utilities
 struct ApplicationLauncher;
+
+/// Full server composition with an in-process publisher document fixture.
+/// This entry point and its fetcher do not exist in production binaries.
+#[cfg(test)]
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "started by package-runtime-echo/run.sh"]
+async fn package_runtime_fixture() {
+    assert_eq!(
+        std::env::var("ACTR_PACKAGE_RUNTIME_FIXTURE").as_deref(),
+        Ok("1")
+    );
+    let config = std::env::var("ACTR_PACKAGE_RUNTIME_CONFIG").expect("fixture config path");
+    ApplicationLauncher::run_application(Path::new(&config))
+        .await
+        .expect("package runtime fixture server");
+}
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -132,12 +148,12 @@ impl ApplicationLauncher {
                         platform::recording::error!("Configuration validation found issues:");
                         for (i, err) in errors.iter().enumerate() {
                             if err.starts_with("Warning:") {
-                                platform::recording::info!("  {}. ⚠️  {}", i + 1, err);
+                                platform::recording::info!("  {}. Warning: {}", i + 1, err);
                             } else {
-                                platform::recording::error!("  {}. ❌ {}", i + 1, err);
+                                platform::recording::error!("  {}. Error: {}", i + 1, err);
                             }
                         }
-                        // Check for non-warning errors
+                        // Check whether there are non-warning errors
                         let has_errors = errors.iter().any(|e| !e.starts_with("Warning:"));
                         if has_errors {
                             return Err(Error::service_validation(
@@ -147,14 +163,14 @@ impl ApplicationLauncher {
                     }
                 }
 
-                // No need to reinitialize the recording pipeline since basic logging is already initialized
+                // No need to initialize the recording pipeline again, since basic logging is already initialized
                 platform::recording::info!("Full configuration validation passed");
                 Ok(())
             }
             Err(e) => {
-                platform::recording::error!("Configuration file parse failed: {}", e);
+                platform::recording::error!("Config file parsing failed: {}", e);
                 Err(Error::service_validation(format!(
-                    "Configuration parse failed: {e}"
+                    "Config parsing failed: {e}"
                 )))
             }
         }
@@ -164,7 +180,7 @@ impl ApplicationLauncher {
     async fn run_application(config_path: &Path) -> Result<()> {
         bootstrap_info!("Loading config file: {:?}", config_path);
 
-        // Load configuration file
+        // Load the configuration file
         let config = match ActrixConfig::from_file(config_path) {
             Ok(config) => {
                 bootstrap_info!("Config loaded successfully");
@@ -175,15 +191,15 @@ impl ApplicationLauncher {
                     let mut has_critical_errors = false;
                     for (i, err) in errors.iter().enumerate() {
                         if err.starts_with("Warning:") {
-                            bootstrap_info!("  {}. ⚠️  {}", i + 1, err);
+                            bootstrap_info!("  {}. Warning: {}", i + 1, err);
                         } else {
-                            bootstrap_error!("  {}. ❌ {}", i + 1, err);
+                            bootstrap_error!("  {}. Error: {}", i + 1, err);
                             has_critical_errors = true;
                         }
                     }
                     if has_critical_errors {
                         return Err(Error::custom(
-                            "Configuration validation failed, please fix the above errors"
+                            "Configuration validation failed, please fix the errors above"
                                 .to_string(),
                         ));
                     }
@@ -192,10 +208,15 @@ impl ApplicationLauncher {
                 config
             }
             Err(e) => {
-                bootstrap_error!("Config load failed: {}", e);
-                return Err(Error::custom(format!("Configuration load failed: {e}")));
+                bootstrap_error!("Config loading failed: {}", e);
+                return Err(Error::custom(format!("Config loading failed: {e}")));
             }
         };
+
+        // Tighten umask before creating any file so databases (incl. the Signer
+        // private-key store), WAL/SHM sidecars, backups and the PID file are
+        // created owner-only and never world-readable.
+        process::ProcessManager::tighten_umask();
 
         // ensure sqlite_path directory exists
         if !config.sqlite_path.exists() {
@@ -207,14 +228,14 @@ impl ApplicationLauncher {
             })?;
         }
 
-        // Initialize recording pipeline (logging + tracing)
+        // Initialize the recording pipeline (logging + tracing)
         let _recording_pipeline_guard = init_recording_pipeline(&config)?;
 
-        // Write PID file (before binding ports, requires privileges)
+        // Write the PID file (before binding ports, requires permissions)
         let pid_path = process::ProcessManager::write_pid_file(config.get_pid_path().as_deref())?;
         let _pid_guard = process::PidFileGuard::new(pid_path);
 
-        // Clone config before creating services, as the service may need root privileges to bind ports
+        // Clone the configuration before creating services, because services may need root privileges to bind ports
         let user = config.user.clone();
         let group = config.group.clone();
 
@@ -222,7 +243,7 @@ impl ApplicationLauncher {
         Self::run_services_with_privilege_drop(config, user, group, config_path.to_path_buf()).await
     }
 
-    /// Run services and switch user privileges at the appropriate time
+    /// Run services and drop privileges at the appropriate time
     async fn run_services_with_privilege_drop(
         config: ActrixConfig,
         user: Option<String>,
@@ -238,13 +259,13 @@ impl ApplicationLauncher {
             .map_err(|e| Error::custom(format!("Database initialization failed: {e}")))?;
         platform::recording::info!("Database initialization complete");
 
-        // Initialize global shutdown channel (shared across all services)
+        // Initialize the global shutdown channel (shared by all services)
         let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(10);
 
-        // Install Ctrl-C handler to ensure shutdown can be broadcast at any stage
+        // Install the Ctrl-C handler to ensure shutdown can be broadcast at any stage
         setup_ctrl_c_handler(shutdown_tx.clone()).await;
 
-        // If KS is enabled, build gRPC service future
+        // If Signer is enabled, build the gRPC service future
         let mut handle_futs: Vec<JoinHandle<()>> = Vec::new();
 
         let mut service_manager =
@@ -254,15 +275,29 @@ impl ApplicationLauncher {
         handle_futs.extend(handle_futures);
         platform::recording::info!("Starting all services...");
 
-        // After port binding is complete, switch user and group
-        platform::recording::info!(
-            "Service startup complete, preparing to switch user privileges..."
-        );
-        if let Err(e) = process::ProcessManager::drop_privileges(user.as_deref(), group.as_deref())
-        {
-            platform::recording::error!("Failed to drop privileges: {}", e);
-            // Continue running, but log the error
-        }
+        // Hand the data directory to the target user (and tighten modes) BEFORE
+        // dropping privileges: files created as root would otherwise be
+        // unreadable to the dropped-to user, and any left world-readable.
+        process::ProcessManager::secure_data_dir(
+            &config.sqlite_path,
+            user.as_deref(),
+            group.as_deref(),
+        )
+        .map_err(|error| {
+            platform::recording::error!("Failed to secure data directory: {}", error);
+            anyhow::anyhow!("refusing to continue after data-dir hardening failed: {error}")
+        })?;
+
+        // Switch user/group after ports are bound.
+        platform::recording::info!("Services started; preparing to drop privileges...");
+        process::ProcessManager::drop_privileges(user.as_deref(), group.as_deref()).map_err(
+            |error| {
+                platform::recording::error!("Failed to drop privileges: {}", error);
+                anyhow::anyhow!(
+                    "refusing to continue after configured privilege drop failed: {error}"
+                )
+            },
+        )?;
 
         // Display service info
         Self::display_service_info(&config);
@@ -307,17 +342,17 @@ impl ApplicationLauncher {
         Ok(())
     }
 
-    /// Create service manager
+    /// Create the service manager
     async fn create_service_manager(
         config: ActrixConfig,
         shutdown_tx: tokio::sync::broadcast::Sender<()>,
         config_path: PathBuf,
     ) -> Result<ServiceManager> {
         platform::recording::info!("Planned services:");
-        // Database is initialized early in run_services_with_privilege_drop
+        // The database has already been initialized earlier in run_services_with_privilege_drop,
         // to ensure the control gRPC header can safely handle RPC callbacks
 
-        // Initialize Prometheus metrics registry
+        // Initialize the Prometheus metrics registry
         let registry = &platform::metrics::REGISTRY;
         if let Err(e) = platform::metrics::register_metrics() {
             platform::recording::warn!(
@@ -331,7 +366,7 @@ impl ApplicationLauncher {
             && let Err(e) = signer::register_signer_metrics(registry)
         {
             platform::recording::warn!(
-                "KS metrics registration warning (may already be registered): {}",
+                "Signer metrics registration warning (may already be registered): {}",
                 e
             );
         }
@@ -352,10 +387,10 @@ impl ApplicationLauncher {
                 service_manager.add_service(ServiceContainer::stun(stun_service));
             }
         } else {
-            platform::recording::info!("ICE service (STUN/TURN) is disabled");
+            platform::recording::info!("ICE services (STUN/TURN) disabled");
         }
 
-        // Add HTTP route services - each service controlled independently
+        // Add HTTP routing services - each service controlled independently
         if config.is_signaling_enabled() {
             platform::recording::info!("  - Signaling WebSocket Service (/signaling)");
             let signaling_service =
@@ -363,10 +398,10 @@ impl ApplicationLauncher {
             service_manager.add_service(ServiceContainer::signaling(signaling_service));
         }
 
-        if config.is_ais_enabled() {
-            platform::recording::info!("  - AIS Service (/ais)");
-            let ais_service = AisService::new(&config);
-            service_manager.add_service(ServiceContainer::ais(ais_service));
+        if config.is_issuer_enabled() {
+            platform::recording::info!("  - Issuer Service (/issuer)");
+            let issuer_service = IssuerService::new(&config);
+            service_manager.add_service(ServiceContainer::issuer(issuer_service));
         }
 
         if config.is_signer_enabled() {
@@ -412,9 +447,9 @@ impl ApplicationLauncher {
                 if config.is_signer_enabled() {
                     platform::recording::info!("  - {}/signer.v1.Signer/<Method>", http_url);
                 }
-                if config.is_ais_enabled() {
-                    platform::recording::info!("  - {}/ais/health", http_url);
-                    platform::recording::info!("  - {}/ais/register (POST protobuf)", http_url);
+                if config.is_issuer_enabled() {
+                    platform::recording::info!("  - {}/issuer/health", http_url);
+                    platform::recording::info!("  - {}/issuer/register (POST protobuf)", http_url);
                 }
                 if config.admin_ui_enabled() {
                     platform::recording::info!("  - {}/admin", http_url);
@@ -431,18 +466,18 @@ impl ApplicationLauncher {
             platform::recording::info!("No HTTP/HTTPS server configured");
         }
 
-        // KS gRPC reuses the main HTTP listener port, no standalone gRPC port.
+        // Signer gRPC reuses the main HTTP listening port; there is no standalone gRPC port.
     }
 }
 
-/// Set up Ctrl-C signal handler
+/// Set up the Ctrl-C signal handler
 async fn setup_ctrl_c_handler(shutdown_tx: tokio::sync::broadcast::Sender<()>) {
     tokio::spawn(async move {
         if let Err(e) = tokio::signal::ctrl_c().await {
             platform::recording::error!("Failed to listen for Ctrl-C signal: {}", e);
             return;
         }
-        platform::recording::info!("Ctrl-C signal received, starting graceful shutdown...");
+        platform::recording::info!("Received Ctrl-C signal, starting graceful shutdown...");
         let _ = shutdown_tx.send(());
     });
 }

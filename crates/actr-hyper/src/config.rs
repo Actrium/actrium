@@ -380,7 +380,7 @@ pub(crate) enum HyperTrustAnchor {
         #[serde(default)]
         pubkey_b64: Option<String>,
     },
-    /// AIS HTTP registry endpoint. See
+    /// Issuer HTTP registry endpoint. See
     /// [`actr_config::TrustAnchor::Registry`].
     Registry { endpoint: String },
 }
@@ -442,12 +442,12 @@ pub(crate) async fn node_from_config_file_with_package(
     // `RuntimeConfig` requires a PackageInfo. When the caller has one
     // already (bindings come in here with the manifest's `[package]`),
     // honour it so the node registers under the real actr_type. Without
-    // an explicit one, fall back to the historical `local:Client:0.0.0`
+    // an explicit one, fall back to the historical `local/Client@0.0.0`
     // placeholder so callers without a sibling manifest still work.
     let package_info = package_info.unwrap_or_else(|| actr_config::PackageInfo {
         name: "client".to_string(),
         actr_type: actr_protocol::ActrType {
-            manufacturer: "local".to_string(),
+            publisher: "local".to_string(),
             name: "Client".to_string(),
             version: "0.0.0".to_string(),
         },
@@ -515,7 +515,7 @@ pub(crate) async fn node_from_config_file_with_package(
                 Arc::new(StaticTrust::new(key_bytes)?)
             }
             HyperTrustAnchor::Registry { endpoint } => {
-                let base = endpoint.trim_end_matches("/ais").to_string();
+                let base = endpoint.trim_end_matches("/issuer").to_string();
                 Arc::new(RegistryTrust::new(base))
             }
         }
@@ -534,7 +534,7 @@ pub(crate) async fn node_from_config_file_with_package(
                     Arc::new(StaticTrust::new(key_bytes)?)
                 }
                 actr_config::TrustAnchor::Registry { endpoint } => {
-                    let base = endpoint.trim_end_matches("/ais").to_string();
+                    let base = endpoint.trim_end_matches("/issuer").to_string();
                     Arc::new(RegistryTrust::new(base))
                 }
             };
@@ -551,7 +551,7 @@ pub(crate) async fn node_from_config_file_with_package(
              Every runtime must declare a package-signature trust policy. \
              For dev / tests set `[hyper.trust] kind = \"dev_only\"`; \
              for production use `kind = \"static\"` with a `pubkey_file` \
-             or `kind = \"registry\"` with an AIS endpoint."
+             or `kind = \"registry\"` with an Issuer endpoint."
                 .to_string(),
         ));
     };

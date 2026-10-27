@@ -3,11 +3,11 @@ edition = 1
 [signaling]
 url = "ws://127.0.0.1:__HTTP_PORT__/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:__HTTP_PORT__/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:__HTTP_PORT__/issuer"
 
 [deployment]
-realm_id = __REALM_ID__
+realm = "__REALM__"
 
 [discovery]
 visible = true
@@ -29,12 +29,12 @@ turn_urls = ["turn:127.0.0.1:__ICE_PORT__"]
 # means appending another rule here, not loosening to a wildcard.
 [[acl.rules]]
 permission = "allow"
-type = "polyglot:RustDriver:0.1.0"
+type = "polyglot/RustDriver@0.1.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "polyglot:TsDriver:0.1.0"
+type = "polyglot/TsDriver@0.1.0"
 
 [[trust]]
 kind = "static"
-pubkey_b64 = "__MFR_PUBKEY__"
+pubkey_b64 = "__PUBLISHER_PUBKEY__"

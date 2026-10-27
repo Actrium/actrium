@@ -9,7 +9,7 @@ use crate::transport::{NetworkError, NetworkResult};
 use crate::wire::webrtc::{DisconnectReason, SignalingEvent, SignalingStats};
 use actr_protocol::prost::Message as _;
 use actr_protocol::{
-    AIdCredential, ActrType, CredentialWarning, IdentityClaims, Pong, Realm, RegisterResponse,
+    AIdCredential, ActrType, CredentialWarning, IdentityClaims, Pong, RegisterResponse,
     RenewCredentialResponse, RouteCandidatesRequest, RouteCandidatesResponse, SignalingEnvelope,
     TurnCredential, UnregisterResponse, credential_warning, register_response,
     renew_credential_response,
@@ -22,13 +22,16 @@ use uuid::Uuid;
 
 fn test_actor_id(serial_number: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number,
-        r#type: ActrType {
-            manufacturer: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
+    }
+}
+
+fn test_actr_type() -> ActrType {
+    ActrType {
+        publisher: "acme".to_string(),
+        name: "node".to_string(),
+        version: "1.0.0".to_string(),
     }
 }
 
@@ -42,9 +45,18 @@ fn test_credential() -> AIdCredential {
 
 fn test_credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdCredential {
     let claims = IdentityClaims {
-        realm_id: actor_id.realm.realm_id,
+        realm: actor_id.realm.clone(),
         actor_id: actor_id.to_string_repr(),
         expires_at,
+        protocol_version: 1,
+        issuer: actor_id.realm.clone(),
+        provider: "provider.example".to_string(),
+        audience: "actr.signaling".to_string(),
+        actor_type: test_actr_type(),
+        member: "member-1".to_string(),
+        client_key: "0000000000000000".to_string(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     AIdCredential {
         key_id,
@@ -60,6 +72,7 @@ impl Mailbox for EmptyMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
+        _from_type: Option<Vec<u8>>,
         _payload: Vec<u8>,
         _priority: MessagePriority,
     ) -> actr_runtime_mailbox::StorageResult<Uuid> {
@@ -414,8 +427,8 @@ async fn heartbeat_tick_requests_recovery_without_driving_disconnected_socket() 
         Arc::new(EmptyMailbox) as Arc<dyn Mailbox>,
         Duration::from_millis(20),
         RegisterRequest {
-            actr_type: actor_id.r#type.clone(),
-            realm: actor_id.realm,
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
             ..Default::default()
         },
         "http://127.0.0.1:1".to_string(),
@@ -464,11 +477,10 @@ async fn membership_heartbeat_never_drives_disconnected_socket() {
         session,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor_id.r#type.clone(),
-                realm: actor_id.realm,
+                actr_type: test_actr_type(),
+                realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         "http://127.0.0.1:1",
         None,
@@ -495,8 +507,8 @@ async fn membership_heartbeat_never_drives_disconnected_socket() {
         Arc::new(EmptyMailbox) as Arc<dyn Mailbox>,
         Duration::from_millis(20),
         RegisterRequest {
-            actr_type: actor_id.r#type.clone(),
-            realm: actor_id.realm,
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
             ..Default::default()
         },
         "http://127.0.0.1:1".to_string(),
@@ -526,11 +538,10 @@ async fn run_membership_heartbeat_ticks(
         session,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor_id.r#type.clone(),
-                realm: actor_id.realm,
+                actr_type: test_actr_type(),
+                realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         "http://127.0.0.1:1",
         None,
@@ -557,8 +568,8 @@ async fn run_membership_heartbeat_ticks(
         Arc::new(EmptyMailbox) as Arc<dyn Mailbox>,
         Duration::from_millis(20),
         RegisterRequest {
-            actr_type: actor_id.r#type.clone(),
-            realm: actor_id.realm,
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
             ..Default::default()
         },
         "http://127.0.0.1:1".to_string(),
@@ -636,6 +647,10 @@ async fn credential_expiry_does_not_re_register_or_update_webrtc_local_id() {
                 actr_id: renewed_id.clone(),
                 credential: test_credential(),
                 turn_credential: TurnCredential {
+                    protocol_version: 1,
+                    realm: "test@example.com".to_string(),
+                    provider: "provider.example".to_string(),
+                    audience: "actr.turn".to_string(),
                     username: "1000:actor".to_string(),
                     password: "password".to_string(),
                     expires_at: 1000,
@@ -670,8 +685,8 @@ async fn credential_expiry_does_not_re_register_or_update_webrtc_local_id() {
         &(Arc::new(EmptyMailbox) as Arc<dyn Mailbox>),
         Duration::from_secs(30),
         &RegisterRequest {
-            actr_type: renewed_id.r#type.clone(),
-            realm: renewed_id.realm,
+            actr_type: test_actr_type(),
+            realm: renewed_id.realm.clone(),
             ..Default::default()
         },
         &mut consecutive_failures,
@@ -699,8 +714,8 @@ async fn invalid_expiry_skips_both_expired_and_warning_hooks() {
     );
     let mailbox = Arc::new(EmptyMailbox) as Arc<dyn Mailbox>;
     let register_request = RegisterRequest {
-        actr_type: actor_id.r#type.clone(),
-        realm: actor_id.realm,
+        actr_type: test_actr_type(),
+        realm: actor_id.realm.clone(),
         ..Default::default()
     };
     let hook_calls = Arc::new(AtomicUsize::new(0));
@@ -752,6 +767,10 @@ async fn credential_warning_triggers_credential_manager_renewal() {
                 actr_id: actor_id.clone(),
                 credential: test_credential_for_actor(&actor_id, 9, NEW_EXPIRY as u64),
                 turn_credential: TurnCredential {
+                    protocol_version: 1,
+                    realm: "test@example.com".to_string(),
+                    provider: "provider.example".to_string(),
+                    audience: "actr.turn".to_string(),
                     username: "4000001000:actor".to_string(),
                     password: "new-password".to_string(),
                     expires_at: NEW_EXPIRY as u64,
@@ -788,6 +807,10 @@ async fn credential_warning_triggers_credential_manager_renewal() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "4000000000:actor".to_string(),
             password: "old-password".to_string(),
             expires_at: OLD_EXPIRY as u64,
@@ -803,11 +826,10 @@ async fn credential_warning_triggers_credential_manager_renewal() {
         session.clone(),
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor_id.r#type.clone(),
-                realm: actor_id.realm,
+                actr_type: test_actr_type(),
+                realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         server.url(),
         None,
@@ -825,8 +847,8 @@ async fn credential_warning_triggers_credential_manager_renewal() {
         &(Arc::new(EmptyMailbox) as Arc<dyn Mailbox>),
         Duration::from_secs(30),
         &RegisterRequest {
-            actr_type: actor_id.r#type.clone(),
-            realm: actor_id.realm,
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
             ..Default::default()
         },
         &mut consecutive_failures,
@@ -855,19 +877,14 @@ async fn credential_warning_triggers_credential_manager_renewal() {
 use actr_protocol::RegisterAuthMode;
 use std::sync::Mutex;
 
-fn test_realm_secret_actor_id(serial_number: u64) -> ActrId {
+fn test_re_register_actor_id(serial_number: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         serial_number,
-        r#type: ActrType {
-            manufacturer: "demo2".to_string(),
-            name: "DuplexStreamService".to_string(),
-            version: "1.0.0".to_string(),
-        },
     }
 }
 
-fn test_realm_secret_credential(key_id: u32) -> AIdCredential {
+fn test_re_register_credential(key_id: u32) -> AIdCredential {
     AIdCredential {
         key_id,
         claims: bytes::Bytes::from_static(b"claims"),
@@ -966,15 +983,19 @@ impl SignalingClient for FakeSignalingClient {
 }
 
 #[tokio::test]
-async fn re_registration_sends_realm_secret_to_ais() {
+async fn re_registration_signs_a_client_proof() {
     let mut server = mockito::Server::new_async().await;
-    let new_actor_id = test_realm_secret_actor_id(42);
+    let new_actor_id = test_re_register_actor_id(42);
     let register_response = RegisterResponse {
         result: Some(register_response::Result::Success(
             register_response::RegisterOk {
                 actr_id: new_actor_id.clone(),
-                credential: test_realm_secret_credential(2),
+                credential: test_re_register_credential(2),
                 turn_credential: TurnCredential {
+                    protocol_version: 1,
+                    realm: "test@example.com".to_string(),
+                    provider: "provider.example".to_string(),
+                    audience: "actr.turn".to_string(),
                     username: "turn-user".to_string(),
                     password: "turn-password".to_string(),
                     expires_at: 123,
@@ -993,15 +1014,15 @@ async fn re_registration_sends_realm_secret_to_ais() {
     };
     let _mock = server
         .mock("POST", "/register")
-        .match_header("x-actrix-realm-secret", "rs_test_secret")
+        .match_header("x-actr-client-proof", mockito::Matcher::Any)
         .with_status(200)
         .with_body(register_response.encode_to_vec())
         .create_async()
         .await;
 
-    let old_actor_id = test_realm_secret_actor_id(1);
+    let old_actor_id = test_re_register_actor_id(1);
     let credential_state = CredentialState::new(
-        test_realm_secret_credential(1),
+        test_re_register_credential(1),
         Some(prost_types::Timestamp {
             seconds: 123,
             nanos: 0,
@@ -1009,8 +1030,8 @@ async fn re_registration_sends_realm_secret_to_ais() {
         None,
     );
     let register_request = RegisterRequest {
-        actr_type: old_actor_id.r#type.clone(),
-        realm: old_actor_id.realm,
+        actr_type: test_actr_type(),
+        realm: old_actor_id.realm.clone(),
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         ..Default::default()
     };
@@ -1022,7 +1043,11 @@ async fn re_registration_sends_realm_secret_to_ais() {
         register_request,
         credential_state,
         server.url(),
-        Some("rs_test_secret".to_string()),
+        Some(crate::issuer_client::RealmClientKey::new(
+            "test7@example.com",
+            "provider.example",
+            ed25519_dalek::SigningKey::from_bytes(&[4; 32]),
+        )),
         None,
     )
     .await;
@@ -1120,6 +1145,10 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "u".to_string(),
             password: "p".to_string(),
             expires_at: 4_000_000_000,
@@ -1135,11 +1164,10 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
         session,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor_id.r#type.clone(),
-                realm: actor_id.realm,
+                actr_type: test_actr_type(),
+                realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         "http://127.0.0.1:1".to_string(),
         None,
@@ -1173,8 +1201,8 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
         Arc::new(EmptyMailbox) as Arc<dyn Mailbox>,
         Duration::from_millis(20),
         RegisterRequest {
-            actr_type: actor_id.r#type.clone(),
-            realm: actor_id.realm,
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
             ..Default::default()
         },
         "http://127.0.0.1:1".to_string(),
@@ -1334,8 +1362,8 @@ async fn wait_for_with_bounded_advance(label: &str, mut condition: impl FnMut() 
 
 fn heartbeat_register_request(actor_id: &ActrId) -> RegisterRequest {
     RegisterRequest {
-        actr_type: actor_id.r#type.clone(),
-        realm: actor_id.realm,
+        actr_type: test_actr_type(),
+        realm: actor_id.realm.clone(),
         ..Default::default()
     }
 }

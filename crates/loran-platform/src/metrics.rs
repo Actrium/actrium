@@ -1,6 +1,6 @@
 //! Prometheus metrics module
 //!
-//! Provides global metric collection and export functionality
+//! Provides global metrics collection and export
 
 use lazy_static::lazy_static;
 use prometheus::{
@@ -22,7 +22,7 @@ lazy_static! {
     pub static ref ACTORS_TOTAL: IntGaugeVec = IntGaugeVec::new(
         Opts::new("actrix_actors_total", "Total number of registered actors")
             .namespace("actrix"),
-        &["realm_id", "service"]
+        &["realm", "service"]
     ).unwrap();
 
     /// Total number of registered services
@@ -38,11 +38,11 @@ lazy_static! {
         "Number of active WebSocket connections"
     ).unwrap();
 
-    /// Token issuance count (AIS)
+    /// Token issuance count (Issuer)
     pub static ref TOKENS_ISSUED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_tokens_issued_total", "Total number of tokens issued")
             .namespace("actrix"),
-        &["realm_id", "status"]
+        &["realm", "status"]
     ).unwrap();
 
     /// Token validation count (Signaling/TURN)
@@ -54,7 +54,7 @@ lazy_static! {
 
     // ========== Performance metrics ==========
 
-    /// HTTP request latency (seconds)
+    /// HTTP request duration (seconds)
     pub static ref REQUEST_DURATION: HistogramVec = HistogramVec::new(
         HistogramOpts::new("actrix_request_duration_seconds", "HTTP request duration in seconds")
             .namespace("actrix")
@@ -62,7 +62,7 @@ lazy_static! {
         &["service", "method", "path", "status"]
     ).unwrap();
 
-    /// Total HTTP request count
+    /// Total number of HTTP requests
     pub static ref REQUESTS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_requests_total", "Total number of HTTP requests")
             .namespace("actrix"),
@@ -122,7 +122,7 @@ lazy_static! {
         &["service", "reason"]
     ).unwrap();
 
-    // ========== KS-specific metrics ==========
+    // ========== Signer-specific metrics ==========
 
     /// Key generation count
     pub static ref KEYS_GENERATED: IntCounterVec = IntCounterVec::new(
@@ -232,7 +232,7 @@ lazy_static! {
     pub static ref SERVICE_REGISTRIES: ServiceMetricsRegistry = ServiceMetricsRegistry::new();
 }
 
-/// Register all metrics into the global Registry
+/// Register all metrics to the global Registry
 ///
 /// This function is idempotent - calling it multiple times is safe.
 /// Only the first call will actually register the metrics.
@@ -263,7 +263,7 @@ pub fn register_metrics() -> Result<(), prometheus::Error> {
             REGISTRY.register(Box::new(AUTH_FAILURES.clone()))?;
             REGISTRY.register(Box::new(INVALID_REQUESTS.clone()))?;
 
-            // KS-specific metrics
+            // Signer-specific metrics
             REGISTRY.register(Box::new(KEYS_GENERATED.clone()))?;
             REGISTRY.register(Box::new(KEY_ROTATIONS.clone()))?;
 
@@ -292,7 +292,7 @@ pub struct RequestTimer {
 }
 
 impl RequestTimer {
-    /// Create a timer
+    /// Create the timer
     pub fn new(service: &str, method: &str, path: &str) -> Self {
         Self {
             start: Instant::now(),
@@ -335,9 +335,9 @@ mod tests {
 
     #[test]
     fn test_register_metrics() {
-        // Registration should succeed (or already be registered)
+        // Registration should succeed (or metrics are already registered)
         let result = register_metrics();
-        // If already registered, it returns an error but does not affect functionality
+        // If already registered, returns an error, but functionality is unaffected
         assert!(result.is_ok() || result.is_err());
     }
 

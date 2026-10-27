@@ -18,7 +18,7 @@ use webrtc::peer_connection::{
 };
 
 const TURN_REALM: &str = "actr.test";
-const TURN_SHARED_TEST_KEY: &str = "turn-rotation-integration-key";
+const TURN_SHARED_TEST_KEY: &str = "actrix-turn-rotation-integration-test-key";
 const WAIT: Duration = Duration::from_secs(60);
 
 #[path = "turn_credential_rotation/issue_248.rs"]
@@ -35,7 +35,12 @@ impl CountingAuthenticator {
     fn new() -> (Self, Arc<AtomicUsize>) {
         let auth_calls = Arc::new(AtomicUsize::new(0));
         let inner = Arc::new(
-            turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned()).expect("TURN authenticator"),
+            turn::Authenticator::new(
+                TURN_SHARED_TEST_KEY.to_owned(),
+                "provider.example".to_owned(),
+            )
+            .expect("TURN authenticator")
+            .with_inactive_realms(turn_bindings().clone()),
         );
         (
             Self {
@@ -59,14 +64,33 @@ impl AuthHandler for CountingAuthenticator {
     }
 }
 
+fn turn_bindings() -> &'static turn::InactiveRealms {
+    static BINDINGS: std::sync::LazyLock<turn::InactiveRealms> =
+        std::sync::LazyLock::new(turn::InactiveRealms::default);
+    &BINDINGS
+}
+
 fn turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
-    let username = format!("{expires_at}:{id}");
-    let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes()).unwrap();
+    turn_bindings().bind_actor(&id.to_string_repr(), "aaaaaaaaaaaaaaaa");
+    let username = format!(
+        "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:client_key=aaaaaaaaaaaaaaaa:actor={id}",
+        id.realm
+    );
+    let secret = platform::realm::realm_turn_secret(
+        TURN_SHARED_TEST_KEY.as_bytes(),
+        &id.realm,
+        "provider.example",
+    );
+    let mut mac = HmacSha1::new_from_slice(&secret).expect("HMAC-SHA1 accepts any key length");
     mac.update(username.as_bytes());
     TurnCredential {
         username,
         password: BASE64_STANDARD.encode(mac.finalize().into_bytes()),
         expires_at,
+        protocol_version: 1,
+        realm: id.realm.clone(),
+        provider: "provider.example".to_string(),
+        audience: "actr.turn".to_string(),
     }
 }
 
@@ -115,9 +139,16 @@ async fn start_turn(
 ) -> (SocketAddr, turn_crate::server::Server) {
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     let address = socket.local_addr().unwrap();
-    let server = turn::create_turn_server(socket, "127.0.0.1", TURN_REALM, auth)
-        .await
-        .expect("TURN server");
+    let server = turn::create_turn_server(
+        socket,
+        "127.0.0.1",
+        TURN_REALM,
+        (49_152, 65_535),
+        auth,
+        true,
+    )
+    .await
+    .expect("TURN server");
     (address, server)
 }
 
@@ -125,7 +156,12 @@ async fn start_turn(
 async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_turn() {
     install_test_crypto_provider();
     let authenticator = Arc::new(
-        turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned()).expect("TURN authenticator"),
+        turn::Authenticator::new(
+            TURN_SHARED_TEST_KEY.to_owned(),
+            "provider.example".to_owned(),
+        )
+        .expect("TURN authenticator")
+        .with_inactive_realms(turn_bindings().clone()),
     );
     let (turn_address, turn_server) = start_turn(authenticator.clone()).await;
     let now = SystemTime::now()

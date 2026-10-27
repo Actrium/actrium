@@ -101,7 +101,7 @@ export class ActrPackageLoader {
       // 4. Parse manifest.toml.
       const manifest = await this.parseManifest(workDir);
       console.log(
-        `[ActrPackageLoader] Parsed manifest: ${manifest.actor.manufacturer}:${manifest.actor.name}:${manifest.actor.version}`,
+        `[ActrPackageLoader] Parsed manifest: ${manifest.actor.publisher}/${manifest.actor.name}@${manifest.actor.version}`,
       );
 
       // 5. Every declared payload is authenticated before any workload bytes

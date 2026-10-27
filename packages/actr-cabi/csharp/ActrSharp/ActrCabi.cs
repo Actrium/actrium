@@ -554,19 +554,19 @@ static unsafe partial class Native
     [LibraryImport("actr_cabi", EntryPoint = "actr_node_register")]
     private static partial int NodeRegisterImport(
         nint attachedHandle,
-        byte* ais,
-        nuint aisLen,
+        byte* issuer,
+        nuint issuerLen,
         [MarshalAs(UnmanagedType.FunctionPtr)] ActrHandleCallback callback,
         nint userData);
 
     internal static int NodeRegister(
         nint attachedHandle,
-        byte[]? ais,
+        byte[]? issuer,
         ActrHandleCallback callback,
         nint userData)
     {
-        fixed (byte* aisPtr = ais)
-            return NodeRegisterImport(attachedHandle, aisPtr, (nuint)(ais?.Length ?? 0), callback, userData);
+        fixed (byte* issuerPtr = issuer)
+            return NodeRegisterImport(attachedHandle, issuerPtr, (nuint)(issuer?.Length ?? 0), callback, userData);
     }
 
     [LibraryImport("actr_cabi")]
@@ -1116,9 +1116,9 @@ public sealed class ActrCabiNode : IDisposable
 
     /// <summary>
     /// Set the concrete identity used when a linked workload registers with
-    /// AIS. Call after <see cref="FromConfig"/> and before
+    /// Issuer. Call after <see cref="FromConfig"/> and before
     /// <see cref="LinkWorkload"/> using
-    /// <c>manufacturer:name:version</c>.
+    /// <c>publisher/program@version</c>.
     /// </summary>
     public void WithActorType(string actorType)
     {
@@ -1180,19 +1180,19 @@ public sealed class ActrCabiNode : IDisposable
         }
     }
 
-    public async Task Register(string? aisEndpoint = null)
+    public async Task Register(string? issuerEndpoint = null)
     {
         ActrCabiHandle attachedHandle = BeginWithHandle(NodeState.Attached, NodeState.Registering);
         using (attachedHandle)
         {
             try
             {
-                byte[]? ais = aisEndpoint is null ? null : Encoding.UTF8.GetBytes(aisEndpoint);
+                byte[]? issuer = issuerEndpoint is null ? null : Encoding.UTF8.GetBytes(issuerEndpoint);
                 nint result = await WithCallback<nint>(userData =>
                 {
                     _ = Native.NodeRegister(
                         attachedHandle.Ptr,
-                        ais,
+                        issuer,
                         Trampolines.Handle,
                         userData);
                 });

@@ -17,11 +17,12 @@ impl ProjectInitializer for TypeScriptInitializer {
         let mut template_context = TemplateContext::new(
             &context.project_name,
             &context.signaling_url,
-            &context.manufacturer,
+            &context.publisher,
             context.template.to_service_name(),
             is_service,
         );
         template_context.is_both = context.is_both;
+        template_context.realm = context.realm.clone();
 
         template.generate(&context.project_dir, &template_context)?;
 

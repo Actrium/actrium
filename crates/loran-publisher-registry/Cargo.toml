@@ -1,0 +1,40 @@
+[package]
+name = "actrix-publisher-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Actrix Publisher Registry - domain identity and signed Actor packages"
+
+[dependencies]
+# Workspace dependencies
+actr-protocol = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+axum = { workspace = true }
+ed25519-dalek = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+toml = { version = "0.8" }
+sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
+
+# Not in workspace
+rand = "0.8"
+hex = "0.4"
+url = "2"
+
+# Internal dependencies
+platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.7" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = { workspace = true }
+serial_test = { workspace = true }
+
+[lints]
+workspace = true

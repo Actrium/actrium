@@ -12,9 +12,10 @@ use std::sync::Arc;
 
 use actr_framework::Bytes;
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrId, DataChunk, Direction, PayloadType, RpcEnvelope};
+use actr_protocol::{ActrId, ActrType, DataChunk, Direction, PayloadType, RpcEnvelope};
 use actr_runtime_mailbox::{Mailbox, MessagePriority};
 
+use crate::lifecycle::node::PeerTypes;
 use crate::transport::correlation::PendingRequestsMap;
 use crate::wire::{DirectionError, direction_for_routing};
 
@@ -26,16 +27,21 @@ use super::DataChunkRegistry;
 pub(crate) struct InboundDispatcher {
     pending_requests: PendingRequestsMap,
     data_chunk_registry: Arc<DataChunkRegistry>,
+    /// Sender types learned from Signaling; recorded with each enqueued
+    /// request for the inbound ACL.
+    peer_types: PeerTypes,
 }
 
 impl InboundDispatcher {
     pub(crate) fn new(
         pending_requests: PendingRequestsMap,
         data_chunk_registry: Arc<DataChunkRegistry>,
+        peer_types: PeerTypes,
     ) -> Self {
         Self {
             pending_requests,
             data_chunk_registry,
+            peer_types,
         }
     }
 
@@ -55,9 +61,13 @@ impl InboundDispatcher {
             PayloadType::RpcReliable | PayloadType::RpcSignal => {
                 match RpcEnvelope::decode(&data[..]) {
                     Ok(envelope) => {
+                        let from_type = ActrId::decode(&from_bytes[..])
+                            .ok()
+                            .and_then(|from| self.peer_types.get(&from));
                         Self::handle_envelope(
                             envelope,
                             from_bytes,
+                            from_type,
                             data,
                             payload_type,
                             self.pending_requests.clone(),
@@ -100,6 +110,7 @@ impl InboundDispatcher {
     pub(crate) async fn handle_envelope(
         envelope: RpcEnvelope,
         from_bytes: Vec<u8>,
+        from_type: Option<ActrType>,
         data: Bytes,
         payload_type: PayloadType,
         pending_requests: PendingRequestsMap,
@@ -129,7 +140,15 @@ impl InboundDispatcher {
         };
 
         if matches!(direction, Direction::Request | Direction::Tell) {
-            Self::enqueue_request(from_bytes, data, payload_type, mailbox, &request_id).await;
+            Self::enqueue_request(
+                from_bytes,
+                from_type,
+                data,
+                payload_type,
+                mailbox,
+                &request_id,
+            )
+            .await;
             return;
         }
 
@@ -142,6 +161,7 @@ impl InboundDispatcher {
     /// priority derived from the inbound `PayloadType`.
     async fn enqueue_request(
         from_bytes: Vec<u8>,
+        from_type: Option<ActrType>,
         data: Bytes,
         payload_type: PayloadType,
         mailbox: Arc<dyn Mailbox>,
@@ -155,7 +175,11 @@ impl InboundDispatcher {
         };
 
         tracing::info!(request_id = %request_id, "rpc.mailbox.enqueue");
-        match mailbox.enqueue(from_bytes, data.to_vec(), priority).await {
+        let from_type = from_type.map(|actor_type| actor_type.encode_to_vec());
+        match mailbox
+            .enqueue(from_bytes, from_type, data.to_vec(), priority)
+            .await
+        {
             Ok(msg_id) => {
                 tracing::debug!(
                     "RPC message enqueued to Mailbox: msg_id={}, priority={:?}",

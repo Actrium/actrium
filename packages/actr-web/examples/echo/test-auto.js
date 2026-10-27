@@ -2863,7 +2863,7 @@ async function suiteCrossplatformEnv(browser) {
 
     if (!RUN_C_TESTS) {
         skipTest('14-0-1', 'Actrix Availability Check', 'Requires RUN_C=1');
-        skipTest('14-0-2', 'realm_id Alignment Check', 'Requires RUN_C=1');
+        skipTest('14-0-2', 'realm Alignment Check', 'Requires RUN_C=1');
         skipTest('14-0-3', 'signaling URL Alignment Check', 'Requires RUN_C=1');
         skipTest('14-0-6', 'Start Web Client', 'Requires RUN_C=1');
         return;
@@ -2912,8 +2912,8 @@ async function suiteCrossplatformEnv(browser) {
         }
     });
 
-    // 14-0-2 realm_id Alignment Check
-    await runTest('14-0-2', 'realm_id Alignment Check', async () => {
+    // 14-0-2 realm Alignment Check
+    await runTest('14-0-2', 'realm Alignment Check', async () => {
         // Read the Rust server config (actr.toml) and Web client SW config
         const rustTomlPath = path.join(ACTR_EXAMPLES_DIR, 'shell-actr-echo', 'server', 'actr.toml');
         const clientSwPath = path.join(SCRIPT_DIR, 'client', 'public', 'actor.sw.js');
@@ -2923,18 +2923,18 @@ async function suiteCrossplatformEnv(browser) {
 
         if (fs.existsSync(rustTomlPath)) {
             const toml = fs.readFileSync(rustTomlPath, 'utf8');
-            const match = toml.match(/realm_id\s*=\s*(\d+)/);
+            const match = toml.match(/^\s*realm\s*=\s*"([^"]+)"/m);
             if (match) rustRealm = match[1];
         }
         if (fs.existsSync(clientSwPath)) {
             const sw = fs.readFileSync(clientSwPath, 'utf8');
-            const match = sw.match(/realm_id\s*[:=]\s*(\d+)/);
+            const match = sw.match(/realm\s*[:=]\s*['"]([^'"]+@[^'"]+)['"]/);
             if (match) webRealm = match[1];
         }
 
         if (rustRealm && webRealm) {
             if (rustRealm !== webRealm) {
-                throw new Error(`realm_id mismatch: Rust=${rustRealm}, Web=${webRealm}. Tests 14-1-* will fail`);
+                throw new Error(`realm mismatch: Rust=${rustRealm}, Web=${webRealm}. Tests 14-1-* will fail`);
             }
         }
         // If we can't read one, just note it

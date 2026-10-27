@@ -6,7 +6,7 @@ const VALID_MANIFEST: &str = r#"edition = 1
 
 [package]
 name = "echo-service"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 description = "Echo service"
 
@@ -81,14 +81,14 @@ async fn update_dependency_adds_new_entry_with_actr_type() {
     let spec = DependencySpec {
         alias: "echo".into(),
         name: "echo-service".into(),
-        actr_type: Some(actr_protocol::ActrType::from_string_repr("acme:Echo:1.0.0").unwrap()),
+        actr_type: Some(actr_protocol::ActrType::from_string_repr("acme/Echo@1.0.0").unwrap()),
         fingerprint: Some("fp1".into()),
     };
     mgr.update_dependency(&spec).await.unwrap();
     let content = std::fs::read_to_string(dir.path().join("manifest.toml")).unwrap();
     assert!(content.contains("echo"), "added dep key: {content}");
     assert!(
-        content.contains("acme:Echo:1.0.0"),
+        content.contains("acme/Echo@1.0.0"),
         "actr_type written: {content}"
     );
     assert!(content.contains("fp1"), "fingerprint written: {content}");
@@ -105,11 +105,11 @@ async fn update_dependency_preserves_actr_type_and_migrates_legacy_service_field
     let body = r#"edition = 1
 [package]
 name = "svc"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
-echo = { actr_type = "acme:Echo:1.0.0", fingerprint = "keep-fp" }
+echo = { actr_type = "acme/Echo@1.0.0", fingerprint = "keep-fp" }
 "#;
     let (mgr, _) = manager_with(dir.path(), body);
     // New spec omits actr_type/fingerprint → existing must be preserved.
@@ -122,7 +122,7 @@ echo = { actr_type = "acme:Echo:1.0.0", fingerprint = "keep-fp" }
     mgr.update_dependency(&spec).await.unwrap();
     let content = std::fs::read_to_string(dir.path().join("manifest.toml")).unwrap();
     assert!(
-        content.contains("acme:Echo:1.0.0"),
+        content.contains("acme/Echo@1.0.0"),
         "actr_type preserved: {content}"
     );
     assert!(
@@ -141,11 +141,11 @@ async fn update_dependency_prefers_existing_canonical_service_over_legacy_fields
     let body = r#"edition = 1
 [package]
 name = "svc"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
-echo = { actr_type = "acme:Echo:1.0.0", service = "EchoService:canonical", name = "legacy", fingerprint = "legacy-fp" }
+echo = { actr_type = "acme/Echo@1.0.0", service = "EchoService:canonical", name = "legacy", fingerprint = "legacy-fp" }
 "#;
     let (mgr, _) = manager_with(dir.path(), body);
     let spec = DependencySpec {

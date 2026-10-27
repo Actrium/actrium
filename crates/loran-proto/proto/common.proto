@@ -26,9 +26,9 @@ enum ResourceType {
   STUN = 1;
   TURN = 2;
   SIGNALING = 3;
-  AIS = 4;
-  KS = 5;
-  MFR = 6;
+  ISSUER = 4;
+  SIGNER = 5;
+  PUBLISHER_REGISTRY = 6;
 }
 
 // ============================================================================
@@ -93,31 +93,14 @@ message ServiceStatus {
 // ============================================================================
 
 message RealmInfo {
-  required uint32 realm_id = 1;            // Realm identifier (DB auto-increment, starts at 2^25)
-  required string name = 2;                 // Realm name
-  required bool enabled = 3;                // Enabled status
+  reserved 1; reserved "realm_id", "name";
+  required string realm = 2;                // Realm name <realm_id>@<domain>
+  required bool enabled = 3;                // Enabled (false = suspended)
   required int64 created_at = 4;            // Creation timestamp
   optional int64 updated_at = 5;            // Update timestamp
   // Field 6 removed (was use_servers)
   // Field 7 removed (was version, replaced by updated_at)
   required uint64 expires_at = 8;           // Expiration timestamp (Unix timestamp)
-  required string status = 9;               // Realm status (Active, Inactive, Suspended)
-  optional SecretRotationState secret_rotation_state = 10; // Secret rotation state
-}
-
-message ManagedRealmState {
-  required uint32 realm_id = 1;             // Superv-assigned realm identifier
-  required string name = 2;                 // Realm name
-  required bool enabled = 3;                // Enabled status
-  required string status = 4;               // Active / Inactive / Suspended
-  optional uint64 expires_at = 5;           // Expiration timestamp (Unix timestamp)
-  required string secret_current_hash = 6;  // Current realm secret hash
-  optional string secret_previous_hash = 7; // Previous realm secret hash during rotation
-  optional uint64 secret_previous_valid_until = 8; // Previous secret grace-window deadline
-}
-
-message SecretRotationState {
-  required string current_hash_preview = 1;
-  optional string previous_hash_preview = 2;
-  optional int64 previous_valid_until = 3;
+  required string status = 9;               // pending | active | retired
+  reserved 10; reserved "secret_rotation_state"; // Realm secrets were replaced by invites
 }

@@ -6,10 +6,12 @@ import {
   SUPPORTED_INTEGRITY_ALGORITHM,
 } from '../coreContract';
 
-export const ACTR_PACKAGE_FORMAT = 'actr-package/1' as const;
+export const ACTR_PACKAGE_FORMAT = 'actr-package/2' as const;
+const LEGACY_ACTR_PACKAGE_FORMAT = 'actr-package/1';
+const LEGACY_PUBLISHER_KEY = 'manufacturer';
 
 export interface ActorDescriptor {
-  manufacturer: string;
+  publisher: string;
   name: string;
   version: string;
 }
@@ -84,6 +86,15 @@ export function parseActrPackageManifest(source: string): ActrPackageManifest {
   }
 
   const format = requiredString(root, 'format');
+  const legacyActor = root.actor;
+  if (
+    format === LEGACY_ACTR_PACKAGE_FORMAT ||
+    (typeof legacyActor === 'object' && legacyActor !== null && LEGACY_PUBLISHER_KEY in legacyActor)
+  ) {
+    throw new Error(
+      `${LEGACY_ACTR_PACKAGE_FORMAT} manifests are no longer supported: set \`format = "${ACTR_PACKAGE_FORMAT}"\` and rename \`actor.${LEGACY_PUBLISHER_KEY}\` to \`actor.publisher\``,
+    );
+  }
   if (format !== ACTR_PACKAGE_FORMAT) {
     throw new Error(
       `unsupported package format \`${format}\`, expected \`${ACTR_PACKAGE_FORMAT}\``,
@@ -148,7 +159,7 @@ export function parseActrPackageManifest(source: string): ActrPackageManifest {
   return {
     format: ACTR_PACKAGE_FORMAT,
     actor: {
-      manufacturer: requiredString(actorRaw, 'manufacturer'),
+      publisher: requiredString(actorRaw, 'publisher'),
       name: requiredString(actorRaw, 'name'),
       version: requiredString(actorRaw, 'version'),
     },

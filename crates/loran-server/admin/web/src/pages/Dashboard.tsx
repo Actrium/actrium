@@ -62,7 +62,7 @@ const SERVICES = [
   { name: "Signaling", bit: 1, type: 3, route: "/admin/services/signaling" },
   { name: "STUN", bit: 2, type: 1, route: "/admin/services/stun" },
   { name: "TURN", bit: 4, type: 2, route: "/admin/services/turn" },
-  { name: "AIS", bit: 8, type: 4, route: "/admin/services/ais" },
+  { name: "Issuer", bit: 8, type: 4, route: "/admin/services/issuer" },
   { name: "Signer", bit: 16, type: 5, route: "/admin/services/signer" },
 ] as const;
 

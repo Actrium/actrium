@@ -33,9 +33,11 @@ pub use generated::webrtc::*;
 pub mod actr_ext;
 pub mod authority;
 pub mod error;
-pub mod manufacturer_auth;
 pub mod message;
 pub mod name;
+pub mod realm_management;
+pub mod realm_membership;
+pub mod realm_profile;
 pub mod turn;
 pub mod uri;
 
@@ -43,7 +45,6 @@ pub mod uri;
 pub use actr_ext::*;
 pub use authority::*;
 pub use error::*;
-pub use manufacturer_auth::*;
 pub use message::RpcRequest;
 pub use name::*;
 

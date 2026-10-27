@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# register.sh — Seed realm + MFR manufacturer and publish web echo .actr packages
+# register.sh — Seed realm + publisher and publish web echo .actr packages
 #               to a running actrix instance.
 # Usage: ./register.sh [--db <path>] [--endpoint <url>]
 #
 # Prerequisites:
-#   1. actrix running (signaling + AIS + MFR) on port 8081
+#   1. actrix running (signaling + Issuer + publisher) on port 8081
 #   2. .actr packages already built in release/ (via start.sh Steps 1–2)
-#   3. MFR signing key at release/dev-key.json (generated during build)
+#   3. publisher signing key at release/dev-key.json (generated during build)
 
 set -euo pipefail
 
@@ -37,7 +37,7 @@ _detect_actrix_db() {
     )
     local best="" best_mtime=0
     for db in "${candidates[@]}"; do
-        if [ -f "$db" ] && sqlite3 "$db" ".tables" 2>/dev/null | grep -q "mfr"; then
+        if [ -f "$db" ] && sqlite3 "$db" ".tables" 2>/dev/null | grep -q "publisher"; then
             local mtime
             mtime=$(stat -f "%m" "$db" 2>/dev/null || stat -c "%Y" "$db" 2>/dev/null || echo 0)
             if [ "$mtime" -gt "$best_mtime" ]; then
@@ -52,8 +52,8 @@ _detect_actrix_db() {
 ACTRIX_DB="${ACTRIX_DB:-$(_detect_actrix_db)}"
 ENDPOINT="${ENDPOINT:-http://localhost:8081}"
 RELEASE_DIR="$SCRIPT_DIR/release"
-MFR_KEY_FILE="$RELEASE_DIR/dev-key.json"
-MFR_NAME="acme"
+PUBLISHER_KEY_FILE="$RELEASE_DIR/dev-key.json"
+PUBLISHER_NAME="acme"
 
 # Browser packages contain the authenticated wasm-bindgen binary and glue.
 SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.2.0-wasm32-unknown-unknown.actr"
@@ -87,7 +87,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  actr register — Web Echo MFR setup"
+echo "  actr register — Web Echo publisher setup"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  DB:       $ACTRIX_DB"
 echo "  Endpoint: $ENDPOINT"
@@ -102,8 +102,8 @@ if [ ! -f "$ACTRIX_DB" ]; then
     exit 1
 fi
 
-if [ ! -f "$MFR_KEY_FILE" ]; then
-    echo -e "${RED}❌ MFR key not found: $MFR_KEY_FILE${NC}"
+if [ ! -f "$PUBLISHER_KEY_FILE" ]; then
+    echo -e "${RED}❌ publisher key not found: $PUBLISHER_KEY_FILE${NC}"
     echo "   Build packages first (./start.sh builds them)."
     exit 1
 fi
@@ -123,15 +123,15 @@ if ! command -v jq >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-# Extract MFR public key
+# Extract publisher public key
 if command -v jq >/dev/null 2>&1; then
-    MFR_PUBKEY=$(jq -r '.public_key' "$MFR_KEY_FILE")
+    PUBLISHER_PUBKEY=$(jq -r '.public_key' "$PUBLISHER_KEY_FILE")
 else
-    MFR_PUBKEY=$(python3 -c "import json; print(json.load(open('$MFR_KEY_FILE'))['public_key'])")
+    PUBLISHER_PUBKEY=$(python3 -c "import json; print(json.load(open('$PUBLISHER_KEY_FILE'))['public_key'])")
 fi
 
-if [ -z "$MFR_PUBKEY" ]; then
-    echo -e "${RED}❌ Failed to extract public_key from $MFR_KEY_FILE${NC}"
+if [ -z "$PUBLISHER_PUBKEY" ]; then
+    echo -e "${RED}❌ Failed to extract public_key from $PUBLISHER_KEY_FILE${NC}"
     exit 1
 fi
 
@@ -140,48 +140,48 @@ fi
 echo ""
 echo "🔑 Step 1: Creating realms..."
 
-SERVER_REALM=$(grep -E 'realm_id\s*=' "$SERVER_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
-CLIENT_REALM=$(grep -E 'realm_id\s*=' "$CLIENT_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+SERVER_REALM=$(grep -E '^\s*realm\s*=' "$SERVER_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' "')
+CLIENT_REALM=$(grep -E '^\s*realm\s*=' "$CLIENT_ACTR_TOML" | head -1 | sed 's/.*=\s*//' | tr -d ' "')
 
 NOW=$(date +%s)
 
-for REALM_ID in $SERVER_REALM $CLIENT_REALM; do
+for REALM in $SERVER_REALM $CLIENT_REALM; do
     sqlite3 "$ACTRIX_DB" \
-        "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) \
-         VALUES ($REALM_ID, 'web-echo-realm', 'Active', 1, $NOW, '');"
+        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) \
+         VALUES ('$REALM', 'active', 1, $NOW);"
 done
 
 echo -e "${GREEN}✅ Realms ready: $SERVER_REALM, $CLIENT_REALM${NC}"
 
-# ── Step 2: Register MFR manufacturer ────────────────────────────────────────
+# ── Step 2: Register publisher ────────────────────────────────────────
 
 echo ""
-echo "🏷️  Step 2: Registering MFR manufacturer '$MFR_NAME'..."
+echo "🏷️  Step 2: Registering publisher '$PUBLISHER_NAME'..."
 
 EXPIRES_AT=$((NOW + 86400 * 365))
 
 sqlite3 "$ACTRIX_DB" << SQL
-INSERT OR IGNORE INTO mfr
+INSERT OR IGNORE INTO publisher
     (name, public_key, contact, status, created_at, verified_at, key_expires_at)
-VALUES ('$MFR_NAME', '$MFR_PUBKEY', 'dev@example.com', 'active',
+VALUES ('$PUBLISHER_NAME', '$PUBLISHER_PUBKEY', 'dev@example.com', 'active',
         $NOW, $NOW, $EXPIRES_AT);
-UPDATE mfr
-   SET public_key     = '$MFR_PUBKEY',
+UPDATE publisher
+   SET public_key     = '$PUBLISHER_PUBKEY',
        status         = 'active',
        updated_at     = $NOW,
        verified_at    = $NOW,
        key_expires_at = $EXPIRES_AT,
        suspended_at   = NULL,
        revoked_at     = NULL
- WHERE name = '$MFR_NAME';
+ WHERE name = '$PUBLISHER_NAME';
 SQL
 
-echo -e "${GREEN}✅ MFR '$MFR_NAME' registered${NC}"
+echo -e "${GREEN}✅ publisher '$PUBLISHER_NAME' registered${NC}"
 
 # ── Step 3: Publish packages via actr pkg publish ─────────────────────────────
 
 echo ""
-echo "📡 Step 3: Publishing packages to MFR..."
+echo "📡 Step 3: Publishing packages to publisher..."
 
 PUBLISH_MAX_RETRIES=5
 
@@ -197,7 +197,7 @@ for PKG_LABEL in server client; do
     while [ $PUBLISH_RETRY -lt $PUBLISH_MAX_RETRIES ]; do
         if $ACTR_CMD pkg publish \
             --package "$PKG_FILE" \
-            --keychain "$MFR_KEY_FILE" \
+            --keychain "$PUBLISHER_KEY_FILE" \
             --endpoint "$ENDPOINT"; then
             PUBLISH_OK=1
             break
@@ -213,15 +213,15 @@ for PKG_LABEL in server client; do
     echo -e "${GREEN}✅ ${PKG_LABEL^} package published${NC}"
 done
 
-# ── Step 4: Inject MFR pubkey into config files ──────────────────────────────
+# ── Step 4: Inject publisher pubkey into config files ──────────────────────────────
 
 echo ""
-echo "🔐 Step 4: Injecting MFR pubkey into config files..."
+echo "🔐 Step 4: Injecting publisher pubkey into config files..."
 
-sed -i '' "s|__MFR_PUBKEY_PLACEHOLDER__|${MFR_PUBKEY}|g" "$SERVER_ACTR_TOML"
-sed -i '' "s|__MFR_PUBKEY_PLACEHOLDER__|${MFR_PUBKEY}|g" "$CLIENT_ACTR_TOML"
+sed -i '' "s|__PUBLISHER_PUBKEY_PLACEHOLDER__|${PUBLISHER_PUBKEY}|g" "$SERVER_ACTR_TOML"
+sed -i '' "s|__PUBLISHER_PUBKEY_PLACEHOLDER__|${PUBLISHER_PUBKEY}|g" "$CLIENT_ACTR_TOML"
 
-echo -e "${GREEN}✅ MFR pubkey injected${NC}"
+echo -e "${GREEN}✅ publisher pubkey injected${NC}"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

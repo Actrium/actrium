@@ -6,32 +6,10 @@
 
 use actr_hyper::lifecycle as runtime_lifecycle;
 
-/// Security realm identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
-pub struct Realm {
-    pub realm_id: u32,
-}
-
-impl From<actr_protocol::Realm> for Realm {
-    fn from(r: actr_protocol::Realm) -> Self {
-        Self {
-            realm_id: r.realm_id,
-        }
-    }
-}
-
-impl From<Realm> for actr_protocol::Realm {
-    fn from(r: Realm) -> Self {
-        Self {
-            realm_id: r.realm_id,
-        }
-    }
-}
-
-/// Actor type (manufacturer + name + version)
+/// Actor type (publisher + name + version)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
 pub struct ActrType {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
 }
@@ -39,7 +17,7 @@ pub struct ActrType {
 impl From<actr_protocol::ActrType> for ActrType {
     fn from(t: actr_protocol::ActrType) -> Self {
         Self {
-            manufacturer: t.manufacturer,
+            publisher: t.publisher,
             name: t.name,
             version: t.version,
         }
@@ -49,27 +27,26 @@ impl From<actr_protocol::ActrType> for ActrType {
 impl From<ActrType> for actr_protocol::ActrType {
     fn from(t: ActrType) -> Self {
         Self {
-            manufacturer: t.manufacturer,
+            publisher: t.publisher,
             name: t.name,
             version: t.version,
         }
     }
 }
 
-/// Actor identifier (realm + serial_number + type)
+/// Actor identifier (Realm name + Actor serial)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
 pub struct ActrId {
-    pub realm: Realm,
+    /// Realm name, `<realm_id>@<domain>`
+    pub realm: String,
     pub serial_number: u64,
-    pub r#type: ActrType,
 }
 
 impl From<actr_protocol::ActrId> for ActrId {
     fn from(id: actr_protocol::ActrId) -> Self {
         Self {
-            realm: id.realm.into(),
+            realm: id.realm,
             serial_number: id.serial_number,
-            r#type: id.r#type.into(),
         }
     }
 }
@@ -77,9 +54,8 @@ impl From<actr_protocol::ActrId> for ActrId {
 impl From<ActrId> for actr_protocol::ActrId {
     fn from(id: ActrId) -> Self {
         Self {
-            realm: id.realm.into(),
+            realm: id.realm,
             serial_number: id.serial_number,
-            r#type: id.r#type.into(),
         }
     }
 }

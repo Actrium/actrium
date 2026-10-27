@@ -13,7 +13,7 @@ async function main(): Promise<void> {
 
   const [target] = await actorRef.discover(
     {
-      manufacturer: 'actrium',
+      publisher: 'actrium',
       name: 'EchoService',
       version: process.env.ECHO_ACTR_VERSION ?? '0.2.1-beta',
     },

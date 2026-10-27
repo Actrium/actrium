@@ -3,15 +3,16 @@
 //! Manages HTTP-related services
 
 pub mod admin_api;
-mod ais;
 mod authority;
 mod control;
-mod mfr;
+mod issuer;
 pub mod observability;
+mod publisher_registry;
+mod realm_management;
 mod signaling;
 
-pub use ais::AisService;
-pub use authority::build_authority_router;
+pub use authority::{build_authority_router, build_realm_profiles};
 pub use control::build_control_router;
-pub use mfr::MfrService;
+pub use issuer::IssuerService;
+pub use publisher_registry::PublisherRegistryService;
 pub use signaling::SignalingService;

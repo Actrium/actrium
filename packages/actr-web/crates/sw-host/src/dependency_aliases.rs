@@ -165,7 +165,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "echo-service"
 alias = "echo"
-actr_type = "acme:EchoService:1.2.3"
+actr_type = "acme/EchoService@1.2.3"
 fingerprint = "service_semantic:first"
 cached_at = "2026-08-06T00:00:00Z"
 
@@ -182,7 +182,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "profile-service"
 alias = "profile"
-actr_type = "acme:ProfileService:2.0.0"
+actr_type = "acme/ProfileService@2.0.0"
 fingerprint = "service_semantic:second"
 cached_at = "2026-08-06T00:00:00Z"
 
@@ -198,7 +198,7 @@ fingerprint = "semantic:second"
             resolve("echo")
                 .expect("resolve first alias")
                 .to_string_repr(),
-            "acme:EchoService:1.2.3"
+            "acme/EchoService@1.2.3"
         );
         assert_eq!(
             fingerprint_for(&resolve("echo").unwrap()).as_deref(),
@@ -211,14 +211,14 @@ fingerprint = "semantic:second"
             Err(ActrError::DependencyNotFound { .. })
         ));
         assert!(
-            fingerprint_for(&ActrType::from_string_repr("acme:EchoService:1.2.3").unwrap())
+            fingerprint_for(&ActrType::from_string_repr("acme/EchoService@1.2.3").unwrap())
                 .is_none()
         );
         assert_eq!(
             resolve("profile")
                 .expect("resolve replacement alias")
                 .to_string_repr(),
-            "acme:ProfileService:2.0.0"
+            "acme/ProfileService@2.0.0"
         );
 
         install(None).expect("clear lock");

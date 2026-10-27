@@ -69,7 +69,7 @@ actr gen --output src/generated{{/if}}</code></pre>
                 </tr>
                 <tr>
                     <td><code>[package]</code></td>
-                    <td>Package metadata (name, manufacturer, version, description, authors, license, tags)</td>
+                    <td>Package metadata (name, publisher, version, description, authors, license, tags)</td>
                     <td>Required</td>
                 </tr>
                 <tr>
@@ -83,8 +83,8 @@ actr gen --output src/generated{{/if}}</code></pre>
                     <td>Optional</td>
                 </tr>
                 <tr>
-                    <td><code>[system.ais_endpoint]</code></td>
-                    <td>AIS HTTP endpoint configuration</td>
+                    <td><code>[system.issuer_endpoint]</code></td>
+                    <td>Issuer HTTP endpoint configuration</td>
                     <td>Optional</td>
                 </tr>
                 <tr>
@@ -134,11 +134,11 @@ actr gen --output src/generated{{/if}}</code></pre>
             <pre><code class="language-toml"># Actor registry (alias = { name, actr_type, ... })
 [dependencies.payment]
 name = "payment-service"
-actr_type = "my-company:PaymentService:1.0.0"
+actr_type = "my-company/PaymentService@1.0.0"
 fingerprint = "sha256:a1b2c3d4..."
 
 # Simplified format (alias = { actr_type })
-my-service = { actr_type = "my-company:MyService:1.0.0" }</code></pre>
+my-service = { actr_type = "my-company/MyService@1.0.0" }</code></pre>
         </div>
     </div>
 </body>

@@ -3,18 +3,18 @@ exports = []
 
 [package]
 name = "StreamEchoClient"
-manufacturer = "{{MANUFACTURER}}"
+publisher = "{{PUBLISHER}}"
 description = "An Actrium Android DataStream client"
 authors = []
 
 [dependencies]
-StreamEchoServer = { actr_type = "{{MANUFACTURER}}:StreamEchoServer:1.0.0" }
+StreamEchoServer = { actr_type = "{{PUBLISHER}}/StreamEchoServer@1.0.0" }
 
 [system.signaling]
 url = "{{SIGNALING_URL}}"
 
-[system.ais_endpoint]
-url = "{{AIS_ENDPOINT_URL}}"
+[system.issuer_endpoint]
+url = "{{ISSUER_ENDPOINT_URL}}"
 
 [system.webrtc]
 stun_urls = ["stun:{{SIGNALING_HOST}}:3478"]
@@ -22,7 +22,7 @@ turn_urls = ["turn:{{SIGNALING_HOST}}:3478"]
 force_relay = true
 
 [system.deployment]
-realm_id = 2368266035
+realm = "{{REALM}}"
 
 [system.discovery]
 visible = false
@@ -33,7 +33,7 @@ visible = false
 [[acl.rules]]
 permission = "allow"
 principals = [
-    { actr_type = { manufacturer = "{{MANUFACTURER}}", name = "StreamEchoServer" } },
+    { actr_type = { publisher = "{{PUBLISHER}}", name = "StreamEchoServer" } },
 ]
 
 [scripts]

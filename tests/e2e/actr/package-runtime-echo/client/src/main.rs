@@ -1,6 +1,6 @@
 //! Package Runtime Echo Client Host.
 //!
-//! Loads a local client guest package, registers with AIS, then dispatches
+//! Loads a local client guest package, registers with Issuer, then dispatches
 //! stdin lines to the guest which proxies requests to the remote EchoService.
 
 pub mod echo {
@@ -97,7 +97,7 @@ async fn main() -> Result<()> {
     let package_info = actr_config::PackageInfo {
         name: manifest.name.clone(),
         actr_type: actr_protocol::ActrType {
-            manufacturer: manifest.manufacturer.clone(),
+            publisher: manifest.publisher.clone(),
             name: manifest.name,
             version: manifest.version,
         },
@@ -118,9 +118,9 @@ async fn main() -> Result<()> {
         .map(|v| v == "production")
         .unwrap_or(false)
     {
-        let ais_endpoint =
-            env::var("AIS_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/ais".to_string());
-        let base_endpoint = ais_endpoint.trim_end_matches("/ais").to_string();
+        let issuer_endpoint = env::var("ISSUER_ENDPOINT")
+            .unwrap_or_else(|_| "http://127.0.0.1:8081/issuer".to_string());
+        let base_endpoint = issuer_endpoint.trim_end_matches("/issuer").to_string();
         Arc::new(RegistryTrust::new(base_endpoint))
     } else {
         Arc::new(StaticTrust::new(load_package_public_key()?).context("invalid pubkey")?)
@@ -128,13 +128,13 @@ async fn main() -> Result<()> {
 
     let hyper = Hyper::new(HyperConfig::new(&hyper_data_dir, trust)).await?;
 
-    let ais_endpoint =
-        env::var("AIS_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/ais".to_string());
+    let issuer_endpoint =
+        env::var("ISSUER_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/issuer".to_string());
 
     let actr_ref = actr_hyper::Node::from_hyper(hyper, config)
         .attach(&package)
         .await?
-        .register(&ais_endpoint)
+        .register(&issuer_endpoint)
         .await?
         .start()
         .await?;

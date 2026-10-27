@@ -6,9 +6,9 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 RUN_ID="${ACTR_E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 RUN_ROOT="${ACTR_E2E_RUN_ROOT:-$REPO_ROOT/target/e2e-cache/typescript-stream/$RUN_ID}"
 LOG_DIR="$RUN_ROOT/logs"
-REALM_ID="${ACTR_E2E_REALM_ID:-2368266035}"
-REALM_SECRET="${ACTR_E2E_REALM_SECRET:-typescript-stream-e2e-secret}"
-MANUFACTURER="demo1"
+REALM="${ACTR_E2E_REALM:-typescript-stream-${RUN_ID}@e2e.test}"
+REALM_CLIENT_KEY=""
+PUBLISHER="demo1"
 
 ACTR_BIN="${ACTR_BIN:-$REPO_ROOT/target/release/actr}"
 MOCK_ACTRIX_BIN="${MOCK_ACTRIX_BIN:-$REPO_ROOT/target/release/mock-actrix}"
@@ -26,16 +26,7 @@ dump_log_tail() {
   fi
 
   printf '\n--- %s (last %s lines) ---\n' "$file" "$lines" >&2
-  tail -n "$lines" "$file" | REALM_SECRET="$REALM_SECRET" python3 -c '
-import os
-import sys
-
-secret = os.environ.get("REALM_SECRET", "")
-data = sys.stdin.read()
-if secret:
-    data = data.replace(secret, "[redacted]")
-sys.stderr.write(data)
-' || true
+  tail -n "$lines" "$file" >&2 || true
 }
 
 dump_failure_logs() {
@@ -108,19 +99,35 @@ wait_actor_registered() {
   wait_log "$LOG_DIR/mock-actrix.log" "name=\"$name\""
 }
 
+# A Realm client key file for $REALM. mock-actrix has no membership endpoint
+# and accepts any client proof, so the key is made locally instead of with
+# `actr realm join`.
+write_realm_client_key() {
+  local signing_key="$RUN_ROOT/realm-signing-key.json"
+  REALM_CLIENT_KEY="$RUN_ROOT/realm-client.json"
+  "$ACTR_BIN" realm keygen --key-id local --output "$signing_key" --force >/dev/null
+  local key_id
+  key_id="$(jq -r '.public_key' "$signing_key" | base64 -d | sha256sum | cut -c1-16)"
+  jq --arg realm "$REALM" --arg issuer "$ISSUER_ENDPOINT" --arg key_id "$key_id" \
+    '{realm: $realm, provider_id: ($issuer | sub("^[a-z]+://"; "") | sub("/.*$"; "")),
+      issuer: $issuer, key_id: $key_id, private_key, public_key}' \
+    "$signing_key" >"$REALM_CLIENT_KEY"
+  chmod 600 "$REALM_CLIENT_KEY"
+}
+
 write_cli_config() {
   local project="$1"
   mkdir -p "$project/.actr"
   cat >"$project/.actr/config.toml" <<EOF_CFG
-[mfr]
-manufacturer = "$MANUFACTURER"
+[publisher]
+name = "$PUBLISHER"
 keychain = "$RUN_ROOT/dev-key.json"
 
 [network]
 signaling_url = "$SIGNALING_WS"
-ais_endpoint = "$AIS_ENDPOINT"
-realm_id = $REALM_ID
-realm_secret = "$REALM_SECRET"
+issuer_endpoint = "$ISSUER_ENDPOINT"
+realm = "$REALM"
+realm_client_key = "$REALM_CLIENT_KEY"
 
 [storage]
 hyper_data_dir = "$RUN_ROOT/hyper"
@@ -138,12 +145,12 @@ edition = 1
 [signaling]
 url = "$SIGNALING_WS"
 
-[ais_endpoint]
-url = "$AIS_ENDPOINT"
+[issuer_endpoint]
+url = "$ISSUER_ENDPOINT"
 
 [deployment]
-realm_id = $REALM_ID
-realm_secret = "$REALM_SECRET"
+realm = "$REALM"
+realm_client_key = "$REALM_CLIENT_KEY"
 
 [[trust]]
 kind = "static"
@@ -345,7 +352,7 @@ exports = ["protos/local/echo.proto"]
 
 [package]
 name = "EchoService"
-manufacturer = "demo1"
+publisher = "demo1"
 version = "1.0.0"
 description = "Actor-RTC TypeScript EchoService provider"
 authors = []
@@ -456,7 +463,7 @@ exports = ["protos/local/relay.proto"]
 
 [package]
 name = "RelayService"
-manufacturer = "demo1"
+publisher = "demo1"
 version = "1.0.0"
 description = "Actor-RTC RelayService workload package"
 authors = []
@@ -464,7 +471,7 @@ license = "Apache-2.0"
 tags = ["dev", "service"]
 
 [dependencies]
-EchoService = { actr_type = "demo1:EchoService:1.0.0" }
+EchoService = { actr_type = "demo1/EchoService@1.0.0" }
 
 [binary]
 path = "dist/relay_service.cdylib"
@@ -602,7 +609,7 @@ static STREAM_RESULTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new(
 
 fn echo_type() -> ActrType {
     ActrType {
-        manufacturer: "demo1".to_string(),
+        publisher: "demo1".to_string(),
         name: "EchoService".to_string(),
         version: "1.0.0".to_string(),
     }
@@ -802,7 +809,7 @@ exports = []
 
 [package]
 name = "ClientApp"
-manufacturer = "demo1"
+publisher = "demo1"
 version = "1.0.0"
 description = "Package-backed Rust relay client app"
 authors = []
@@ -810,7 +817,7 @@ license = "Apache-2.0"
 tags = ["dev", "app"]
 
 [dependencies]
-RelayService = { actr_type = "demo1:RelayService:1.0.0" }
+RelayService = { actr_type = "demo1/RelayService@1.0.0" }
 
 [binary]
 path = "dist/app.cdylib"
@@ -908,16 +915,16 @@ async fn main() -> Result<()> {
     let package = WorkloadPackage::from_path(&package_path)
         .with_context(|| format!("failed to read {}", package_path.display()))?;
 
-    let ais_endpoint = runtime.ais_endpoint.clone();
+    let issuer_endpoint = runtime.issuer_endpoint.clone();
     eprintln!("client phase: attach/register/start");
     let actr_ref = tokio::time::timeout(OP_TIMEOUT, async {
         Node::from_hyper(hyper, runtime.clone())
             .attach(&package)
             .await
             .context("failed to attach local guest package")?
-            .register(&ais_endpoint)
+            .register(&issuer_endpoint)
             .await
-            .context("failed to register with AIS")?
+            .context("failed to register with Issuer")?
             .start()
             .await
             .context("failed to start app node")
@@ -926,11 +933,11 @@ async fn main() -> Result<()> {
     .context("timed out during attach/register/start")??;
 
     let relay_type = ActrType {
-        manufacturer: "demo1".to_string(),
+        publisher: "demo1".to_string(),
         name: "RelayService".to_string(),
         version: "1.0.0".to_string(),
     };
-    info!("Discovering demo1:RelayService:1.0.0");
+    info!("Discovering demo1/RelayService@1.0.0");
     eprintln!("client phase: discover RelayService");
     let relay_actor = tokio::time::timeout(OP_TIMEOUT, async {
         actr_ref
@@ -1106,7 +1113,7 @@ PY
 )}"
 MOCK_HTTP="http://127.0.0.1:$MOCK_PORT"
 SIGNALING_WS="ws://127.0.0.1:$MOCK_PORT/signaling/ws"
-AIS_ENDPOINT="$MOCK_HTTP/ais"
+ISSUER_ENDPOINT="$MOCK_HTTP/issuer"
 
 log "Start mock-actrix on $MOCK_PORT"
 NO_COLOR=1 "$MOCK_ACTRIX_BIN" --port "$MOCK_PORT" >"$LOG_DIR/mock-actrix.log" 2>&1 &
@@ -1122,16 +1129,17 @@ mkdir -p "$RUN_ROOT"
 mkdir -p "$RUN_ROOT/home"
 run_logged "keygen" env HOME="$RUN_ROOT/home" "$ACTR_BIN" pkg keygen --output "$RUN_ROOT/dev-key.json" --force
 PUBLIC_KEY="$(jq -r '.public_key' "$RUN_ROOT/dev-key.json")"
+write_realm_client_key
 
 curl -fsS -X POST "$MOCK_HTTP/admin/realms" \
   -H 'content-type: application/json' \
-  -d "{\"id\":$REALM_ID,\"name\":\"typescript-stream-e2e\"}" >/dev/null
-curl -fsS -X POST "$MOCK_HTTP/admin/mfr" \
+  -d "{\"realm\":\"$REALM\"}" >/dev/null
+curl -fsS -X POST "$MOCK_HTTP/admin/publisher" \
   -H 'content-type: application/json' \
-  -d "{\"name\":\"$MANUFACTURER\",\"pubkey_b64\":\"$PUBLIC_KEY\",\"contact\":\"e2e@local.actr\"}" >/dev/null
+  -d "{\"name\":\"$PUBLISHER\",\"pubkey_b64\":\"$PUBLIC_KEY\",\"contact\":\"e2e@local.actr\"}" >/dev/null
 
 log "Generate TypeScript EchoService template"
-(cd "$RUN_ROOT" && "$ACTR_BIN" init echo-service-ts -l typescript --role service --manufacturer "$MANUFACTURER" --signaling "$MOCK_HTTP")
+(cd "$RUN_ROOT" && "$ACTR_BIN" init echo-service-ts -l typescript --role service --publisher "$PUBLISHER" --realm "$REALM" --signaling "$MOCK_HTTP")
 write_cli_config "$TS_ECHO"
 write_ts_echo_project_overrides
 (cd "$TS_ECHO" && run_logged "ts echo deps install" "$ACTR_BIN" deps install)

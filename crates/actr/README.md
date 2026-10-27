@@ -29,7 +29,7 @@ Application code resolves remote dependencies through the same
 read the alias mapping from the authenticated v2 `manifest.lock.toml`, while
 linked iOS and Android workloads read it from their dynamic `manifest.toml`.
 The lock stores each dependency's alias and canonical
-`manufacturer:name:version` ActrType; v1 locks must be migrated by the CLI and
+`publisher/program@version` ActrType; v1 locks must be migrated by the CLI and
 are not accepted by the runtime.
 
 ---
@@ -65,7 +65,7 @@ The repository includes a complete set of design and development documents. A pr
 
 #### **Appendix**
 
-*   **[Glossary](./docs/appendix-a-glossary.zh.md)**
+*   **[Glossary](../../docs/GLOSSARY.zh.md)**
 
 ---
 

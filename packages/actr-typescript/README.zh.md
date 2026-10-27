@@ -37,7 +37,7 @@ async function main() {
   const actorRef = await node.start();
 
   const [serverId] = await actorRef.discover(
-    { manufacturer: 'actrium', name: 'EchoService', version: '0.2.1-beta' },
+    { publisher: 'actrium', name: 'EchoService', version: '0.2.1-beta' },
     1,
   );
 
@@ -96,7 +96,7 @@ name = "my-actor"
 description = "My Actor"
 
 [package.actor]
-manufacturer = "actr"
+publisher = "actr"
 name = "my-actor"
 
 [network]

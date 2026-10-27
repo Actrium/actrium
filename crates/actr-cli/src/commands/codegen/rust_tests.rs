@@ -4,9 +4,7 @@ use crate::commands::codegen::{
     ActrGenMetadata, DispatchSpec, GenContext, LanguageGenerator, ProtoModel, SupportedLanguage,
     TypeRef, write_metadata,
 };
-use crate::templates::{
-    DEFAULT_MANUFACTURER, ProjectTemplate, ProjectTemplateName, TemplateContext,
-};
+use crate::templates::{DEFAULT_PUBLISHER, ProjectTemplate, ProjectTemplateName, TemplateContext};
 use actr_config::ConfigParser;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -70,7 +68,7 @@ fn generated_entry_placeholder_is_overwritten_and_regeneration_is_idempotent() {
     let context = TemplateContext::new(
         "empty-shell",
         "ws://localhost:8080",
-        DEFAULT_MANUFACTURER,
+        DEFAULT_PUBLISHER,
         "empty-service",
         true,
     );
@@ -104,7 +102,7 @@ fn legacy_generated_entry_placeholder_is_overwritten_with_full_scaffold() {
     let context = TemplateContext::new(
         "legacy-empty-shell",
         "ws://localhost:8080",
-        DEFAULT_MANUFACTURER,
+        DEFAULT_PUBLISHER,
         "empty-service",
         true,
     );
@@ -135,7 +133,7 @@ fn user_modified_entry_placeholder_is_preserved() {
     let context = TemplateContext::new(
         "custom-empty-shell",
         "ws://localhost:8080",
-        DEFAULT_MANUFACTURER,
+        DEFAULT_PUBLISHER,
         "empty-service",
         true,
     );
@@ -211,17 +209,17 @@ exports = []
 
 [package]
 name = "Demo"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [system.signaling]
 url = "ws://127.0.0.1:8080"
 
-[system.ais_endpoint]
-url = "http://127.0.0.1:8080/ais"
+[system.issuer_endpoint]
+url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 "#,
     )
     .unwrap();
@@ -476,20 +474,20 @@ exports = []
 
 [package]
 name = "Demo"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
-echo = { actr_type = "remote:EchoService:0.1.0" }
+echo = { actr_type = "remote/EchoService@0.1.0" }
 
 [system.signaling]
 url = "ws://127.0.0.1:8080"
 
-[system.ais_endpoint]
-url = "http://127.0.0.1:8080/ais"
+[system.issuer_endpoint]
+url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 "#,
     )
     .unwrap();

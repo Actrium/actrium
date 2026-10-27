@@ -21,7 +21,7 @@
  * Parsed manifest.toml manifest
  */
 export interface UnverifiedActrManifest {
-  manufacturer: string;
+  publisher: string;
   name: string;
   version: string;
   signature_algorithm: string;
@@ -109,7 +109,7 @@ function parseStoreZip(buffer: ArrayBuffer): Map<string, Uint8Array> {
  */
 function parseActrToml(text: string): UnverifiedActrManifest {
   const manifest: UnverifiedActrManifest = {
-    manufacturer: '',
+    publisher: '',
     name: '',
     version: '',
     signature_algorithm: '',
@@ -156,7 +156,7 @@ function parseActrToml(text: string): UnverifiedActrManifest {
     }
 
     if (currentSection === '' || currentSection === 'package') {
-      if (key === 'manufacturer') manifest.manufacturer = val;
+      if (key === 'publisher') manifest.publisher = val;
       else if (key === 'name') manifest.name = val;
       else if (key === 'version') manifest.version = val;
       else if (key === 'signature_algorithm') manifest.signature_algorithm = val;

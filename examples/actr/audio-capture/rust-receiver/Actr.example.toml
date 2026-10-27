@@ -1,6 +1,6 @@
 [package]
 name = "AudioRecorder"
-manufacturer = "acme"
+publisher = "acme"
 description = "Audio capture receiver - saves incoming MediaTrack audio to WAV"
 authors = ["Actr Dev Team"]
 license = "Apache-2.0"

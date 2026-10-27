@@ -23,7 +23,7 @@ use std::str::FromStr;
 /// [[dependency]]
 /// name = "user-service"
 /// alias = "user-service"
-/// actr_type = "acme:user-service:1.0.0"
+/// actr_type = "acme/user-service@1.0.0"
 /// description = "User management service"
 /// fingerprint = "service_semantic:a1b2c3d4e5f6..."
 /// published_at = 1705315800
@@ -75,7 +75,7 @@ pub struct LockedDependency {
     #[serde(default)]
     pub alias: String,
 
-    /// Actor type (e.g., "acme:user-service:1.0.0")
+    /// Actor type (e.g., "acme/user-service@1.0.0")
     pub actr_type: String,
 
     /// Service description
@@ -492,7 +492,7 @@ mod tests {
 
         let dep = LockedDependency::new(
             "test-service".to_string(),
-            "acme:test-service:1.0.0".to_string(),
+            "acme/test-service@1.0.0".to_string(),
             spec_meta,
         );
 
@@ -501,7 +501,7 @@ mod tests {
 
         let found = lock_file.get_dependency_by_alias("test-service");
         assert!(found.is_some());
-        assert_eq!(found.unwrap().actr_type, "acme:test-service:1.0.0");
+        assert_eq!(found.unwrap().actr_type, "acme/test-service@1.0.0");
 
         let removed = lock_file.remove_dependency_by_alias("test-service");
         assert!(removed);
@@ -526,7 +526,7 @@ mod tests {
 
         let dep = LockedDependency::new(
             "user-service".to_string(),
-            "acme:user-service:1.0.0".to_string(),
+            "acme/user-service@1.0.0".to_string(),
             spec_meta,
         );
 
@@ -606,7 +606,7 @@ mod tests {
             dependencies: vec![locked_dependency(
                 "echo-service",
                 "",
-                "acme:echo-service:1.0.0",
+                "acme/echo-service@1.0.0",
             )],
         };
 
@@ -628,7 +628,7 @@ mod tests {
                 dependencies: vec![locked_dependency(
                     "echo-service",
                     alias,
-                    "acme:echo-service:1.0.0",
+                    "acme/echo-service@1.0.0",
                 )],
             };
 
@@ -644,7 +644,7 @@ mod tests {
         lock.dependencies.push(locked_dependency(
             "echo-service",
             " echo ",
-            "acme:echo-service:1.0.0",
+            "acme/echo-service@1.0.0",
         ));
 
         let error = lock.validate_aliases().unwrap_err().to_string();
@@ -655,17 +655,17 @@ mod tests {
     fn validation_rejects_duplicate_aliases_and_actor_types() {
         let mut lock = LockFile::new();
         lock.dependencies = vec![
-            locked_dependency("echo-service", "shared", "acme:echo-service:1.0.0"),
-            locked_dependency("other-service", "shared", "acme:other-service:1.0.0"),
+            locked_dependency("echo-service", "shared", "acme/echo-service@1.0.0"),
+            locked_dependency("other-service", "shared", "acme/other-service@1.0.0"),
         ];
         let alias_error = lock.validate_aliases().unwrap_err().to_string();
         assert!(alias_error.contains("alias `shared` is declared more than once"));
 
         lock.dependencies[1].alias = "other".to_string();
-        lock.dependencies[1].actr_type = "acme:echo-service:1.0.0".to_string();
+        lock.dependencies[1].actr_type = "acme/echo-service@1.0.0".to_string();
         let type_error = lock.validate_aliases().unwrap_err().to_string();
         assert!(
-            type_error.contains("actr_type `acme:echo-service:1.0.0` is declared more than once")
+            type_error.contains("actr_type `acme/echo-service@1.0.0` is declared more than once")
         );
     }
 
@@ -688,7 +688,7 @@ mod tests {
         lock.add_dependency(locked_dependency(
             "EchoService",
             "echo",
-            "acme:EchoActor:1.0.0",
+            "acme/EchoActor@1.0.0",
         ));
 
         assert!(lock.get_dependency_by_alias("echo").is_some());
@@ -697,7 +697,7 @@ mod tests {
         assert!(lock.get_dependency_by_alias("acme:EchoActor").is_none());
         assert!(
             lock.get_dependency_by_actr_type(
-                &ActrType::from_string_repr("acme:EchoActor:1.0.0").unwrap()
+                &ActrType::from_string_repr("acme/EchoActor@1.0.0").unwrap()
             )
             .is_some()
         );
@@ -710,12 +710,12 @@ mod tests {
         lock.add_dependency(locked_dependency(
             "EchoService",
             "echo",
-            "acme:EchoActor:1.0.0",
+            "acme/EchoActor@1.0.0",
         ));
         lock.add_dependency(locked_dependency(
             "DifferentServiceRef",
             "echo",
-            "acme:NewEchoActor:2.0.0",
+            "acme/NewEchoActor@2.0.0",
         ));
         assert_eq!(lock.dependencies.len(), 1);
         assert_eq!(lock.dependencies[0].name, "DifferentServiceRef");
@@ -723,10 +723,10 @@ mod tests {
         lock.add_dependency(locked_dependency(
             "AnotherServiceRef",
             "renamed-alias",
-            "acme:NewEchoActor:2.0.0",
+            "acme/NewEchoActor@2.0.0",
         ));
         assert_eq!(lock.dependencies.len(), 2);
         let error = lock.validate_aliases().unwrap_err().to_string();
-        assert!(error.contains("actr_type `acme:NewEchoActor:2.0.0`"));
+        assert!(error.contains("actr_type `acme/NewEchoActor@2.0.0`"));
     }
 }

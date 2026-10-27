@@ -98,17 +98,17 @@ async fn verify_package_rejects_invalid_identity_from_custom_provider() {
     );
 }
 
-// ─── AIS integration tests (mockito mock server) ────────────────────────
+// ─── Issuer integration tests (mockito mock server) ────────────────────────
 
 /// Helper: build a [`VerifiedPackage`] for tests.
 ///
 /// Uses the canonical `actr_pack::PackageManifest` shape wrapped with empty
-/// manifest_raw / sig_raw placeholders — bootstrap tests don't touch AIS's
+/// manifest_raw / sig_raw placeholders — bootstrap tests don't touch Issuer's
 /// re-verification path, so those bytes are not inspected.
 fn fake_manifest() -> VerifiedPackage {
     VerifiedPackage {
         manifest: actr_pack::PackageManifest {
-            manufacturer: "test-mfr".to_string(),
+            publisher: "test-publisher".to_string(),
             name: "TestActor".to_string(),
             version: "0.1.0".to_string(),
             binary: actr_pack::BinaryEntry {
@@ -127,20 +127,30 @@ fn fake_manifest() -> VerifiedPackage {
         },
         manifest_raw: vec![],
         sig_raw: vec![0u8; 64],
+        signing_public_key: [0u8; 32],
     }
 }
 
 /// Helper: build valid RegisterResponse protobuf bytes with credential data.
 fn fake_register_response_bytes() -> Vec<u8> {
     use actr_protocol::{
-        AIdCredential, ActrId, ActrType, IdentityClaims, Realm, RegisterResponse, TurnCredential,
+        AIdCredential, ActrId, ActrType, IdentityClaims, RegisterResponse, TurnCredential,
         register_response,
     };
 
     let claims = IdentityClaims {
-        realm_id: 1,
+        realm: "test@example.com".to_string(),
         actor_id: "test-actor-id".to_string(),
         expires_at: u64::MAX,
+        protocol_version: 1,
+        issuer: "test@example.com".to_string(),
+        provider: "provider.example".to_string(),
+        audience: "actr.signaling".to_string(),
+        actor_type: ActrType::default(),
+        member: "member-1".to_string(),
+        client_key: "0000000000000000".to_string(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     let claims_bytes = claims.encode_to_vec();
 
@@ -151,16 +161,15 @@ fn fake_register_response_bytes() -> Vec<u8> {
     };
 
     let actr_id = ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 42,
-        r#type: ActrType {
-            manufacturer: "test-mfr".to_string(),
-            name: "TestActor".to_string(),
-            version: "0.1.0".to_string(),
-        },
     };
 
     let turn = TurnCredential {
+        protocol_version: 1,
+        realm: "test@example.com".to_string(),
+        provider: "provider.example".to_string(),
+        audience: "actr.turn".to_string(),
         username: "user".to_string(),
         password: "pass".to_string(),
         expires_at: u64::MAX,
@@ -204,7 +213,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         package: actr_config::PackageInfo {
             name: "LinkedActor".to_string(),
             actr_type: actr_protocol::ActrType {
-                manufacturer: "test-mfr".to_string(),
+                publisher: "test-publisher".to_string(),
                 name: "LinkedActor".to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -213,9 +222,9 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
             license: None,
         },
         signaling_url: url::Url::parse("ws://localhost:8081/signaling/ws").unwrap(),
-        realm: Realm { realm_id: 7 },
-        ais_endpoint: "http://localhost:8081/ais".to_string(),
-        realm_secret: Some("test-realm-secret".to_string()),
+        realm: "test7@example.com".to_string(),
+        issuer_endpoint: "http://localhost:8081/issuer".to_string(),
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: test_acl(),
         mailbox_path: None,
@@ -251,8 +260,134 @@ fn linked_register_request_uses_linked_auth_mode() {
 
     assert_eq!(req.auth_mode, Some(RegisterAuthMode::Linked as i32));
     assert_eq!(req.manifest_raw, None);
-    assert_eq!(req.mfr_signature, None);
+    assert_eq!(req.publisher_signature, None);
     assert_eq!(req.ws_address.as_deref(), Some("ws://127.0.0.1:9100"));
+}
+
+struct RegistrationTestWorkload;
+
+#[async_trait::async_trait]
+impl crate::workload::LinkedWorkloadHandle for RegistrationTestWorkload {}
+
+async fn registration_test_node(dir: &TempDir, package: bool) -> Node<Attached> {
+    let hyper = Hyper::new(dev_config(dir)).await.unwrap();
+    let mut node = Node::from_hyper(hyper, linked_runtime_config(dir))
+        .link_handle(Arc::new(RegistrationTestWorkload))
+        .await
+        .unwrap();
+    if package {
+        node.attachment.as_mut().unwrap().verified = Some(fake_manifest());
+    }
+    node
+}
+
+#[tokio::test]
+async fn registration_preserves_the_sent_request_for_credential_recovery() {
+    use crate::lifecycle::credential_manager::RegistrationContext;
+
+    for package in [false, true] {
+        let mut server = mockito::Server::new_async().await;
+        let received = Arc::new(std::sync::Mutex::new(None));
+        let captured = received.clone();
+        let mock = server
+            .mock("POST", "/register")
+            .match_request(move |request| {
+                let request = RegisterRequest::decode(request.body().unwrap().as_slice()).unwrap();
+                *captured.lock().unwrap() = Some(request);
+                true
+            })
+            .with_status(200)
+            .with_header("content-type", "application/x-protobuf")
+            .with_body(fake_register_response_bytes())
+            .expect(1)
+            .create_async()
+            .await;
+        let dir = TempDir::new().unwrap();
+        let registered = registration_test_node(&dir, package)
+            .await
+            .register_with(&server.url(), test_service_spec())
+            .await
+            .unwrap();
+        mock.assert_async().await;
+
+        let node = registered.attachment.unwrap().node;
+        assert!(node.preregistered_credential.is_some());
+        let context = node.preregistered_registration_context.unwrap();
+        let saved = match (package, context) {
+            (true, RegistrationContext::Package { request })
+            | (false, RegistrationContext::Linked { request }) => request,
+            _ => panic!("credential recovery changed the workload's registration mode"),
+        };
+        assert_eq!(saved, received.lock().unwrap().take().unwrap());
+        assert_eq!(saved.realm, "test7@example.com");
+        assert_eq!(saved.service_spec, test_service_spec());
+        assert_eq!(saved.acl, test_acl());
+        if package {
+            assert_eq!(saved.publisher_signature, Some(vec![0; 64].into()));
+            assert_eq!(saved.signing_public_key, Some(vec![0; 32].into()));
+        } else {
+            assert_eq!(saved.ws_address.as_deref(), Some("ws://127.0.0.1:9100"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn registration_rejects_invalid_direct_security_before_issuer_call() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/register")
+        .expect(0)
+        .create_async()
+        .await;
+    let dir = TempDir::new().unwrap();
+    let mut node = registration_test_node(&dir, false).await;
+    node.attachment
+        .as_mut()
+        .unwrap()
+        .node
+        .config
+        .websocket_security
+        .allow_insecure = false;
+    let result = node.register_with(&server.url(), test_service_spec()).await;
+    assert!(
+        result.is_err(),
+        "invalid TLS configuration must reject registration"
+    );
+    mock.assert_async().await;
+}
+
+#[cfg(feature = "test-utils")]
+#[tokio::test]
+async fn preregistered_credentials_keep_the_workload_recovery_context() {
+    use crate::lifecycle::credential_manager::RegistrationContext;
+    use actr_protocol::{RegisterResponse, register_response};
+
+    for package in [false, true] {
+        let dir = TempDir::new().unwrap();
+        let response = RegisterResponse::decode(fake_register_response_bytes().as_slice()).unwrap();
+        let Some(register_response::Result::Success(ok)) = response.result else {
+            panic!("fixture must contain a successful registration");
+        };
+        let registered = registration_test_node(&dir, package)
+            .await
+            .try_with_preregistered_credential(ok.clone())
+            .unwrap();
+        let node = registered.attachment.unwrap().node;
+        assert_eq!(node.preregistered_credential, Some(ok));
+        match (package, node.preregistered_registration_context.unwrap()) {
+            (true, RegistrationContext::Package { request }) => {
+                assert_eq!(request.realm, "test7@example.com");
+                assert_eq!(request.auth_mode, Some(RegisterAuthMode::Package as i32));
+                assert_eq!(request.publisher_signature, Some(vec![0; 64].into()));
+                assert_eq!(request.signing_public_key, Some(vec![0; 32].into()));
+            }
+            (false, RegistrationContext::Linked { request }) => {
+                assert_eq!(request.auth_mode, Some(RegisterAuthMode::Linked as i32));
+                assert_eq!(request.acl, test_acl());
+            }
+            _ => panic!("pre-registration must preserve the workload's auth mode"),
+        }
+    }
 }
 
 #[tokio::test]
@@ -261,14 +396,14 @@ async fn with_actor_type_overrides_pending_runtime_metadata() {
     let hyper = Hyper::new(dev_config(&dir)).await.unwrap();
     let node = Node::from_hyper(hyper, linked_runtime_config(&dir)).with_actor_type(
         actr_protocol::ActrType {
-            manufacturer: "acme".into(),
+            publisher: "acme".into(),
             name: "UnifiedActor".into(),
             version: "1.0.0".into(),
         },
     );
 
     let actr_type = node.runtime_config().actr_type();
-    assert_eq!(actr_type.manufacturer, "acme");
+    assert_eq!(actr_type.publisher, "acme");
     assert_eq!(actr_type.name, "UnifiedActor");
     assert_eq!(actr_type.version, "1.0.0");
 }
@@ -278,7 +413,7 @@ async fn linked_manifest_identity_rejects_actor_type_override() {
     let dir = TempDir::new().unwrap();
     let hyper = Hyper::new(dev_config(&dir)).await.unwrap();
     let manifest_type = actr_protocol::ActrType {
-        manufacturer: "acme".into(),
+        publisher: "acme".into(),
         name: "ManifestActor".into(),
         version: "1.0.0".into(),
     };
@@ -300,7 +435,7 @@ async fn linked_manifest_identity_rejects_actor_type_override() {
         config_dir: dir.path().to_path_buf(),
     };
     let requested_type = actr_protocol::ActrType {
-        manufacturer: "other".into(),
+        publisher: "other".into(),
         name: "Override".into(),
         version: "9.9.9".into(),
     };
@@ -356,7 +491,7 @@ fn fake_dynclib_manifest() -> PackageManifest {
         }
     );
     PackageManifest {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "DynActor".to_string(),
         version: "1.0.0".to_string(),
         binary: actr_pack::BinaryEntry {
@@ -464,7 +599,7 @@ fn ensure_dynclib_cache_path_handles_concurrent_creation() {
     );
 }
 
-/// Package bootstrap always authenticates with the MFR manifest and does
+/// Package bootstrap always authenticates with the publisher manifest and does
 /// not read or write legacy PSK keys.
 #[tokio::test]
 async fn bootstrap_package_uses_manifest_auth() {
@@ -486,7 +621,14 @@ async fn bootstrap_package_uses_manifest_auth() {
 
     let manifest = fake_manifest();
     let result = hyper
-        .bootstrap_credential(&manifest, &server.url(), 1, test_service_spec(), test_acl())
+        .bootstrap_credential(
+            &manifest,
+            &server.url(),
+            "test@example.com",
+            test_service_spec(),
+            test_acl(),
+            None,
+        )
         .await;
 
     mock.assert_async().await;
@@ -508,15 +650,15 @@ async fn bootstrap_package_uses_manifest_auth() {
     );
 }
 
-/// AIS errors should propagate as HyperError::AisBootstrapFailed.
+/// Issuer errors should propagate as HyperError::IssuerBootstrapFailed.
 #[tokio::test]
-async fn bootstrap_ais_error_propagates() {
+async fn bootstrap_issuer_error_propagates() {
     use actr_protocol::{ErrorResponse, RegisterResponse, register_response};
 
     let error_resp = RegisterResponse {
         result: Some(register_response::Result::Error(ErrorResponse {
             code: 403,
-            message: "manufacturer not trusted".to_string(),
+            message: "publisher not trusted".to_string(),
         })),
     }
     .encode_to_vec();
@@ -536,27 +678,34 @@ async fn bootstrap_ais_error_propagates() {
 
     let manifest = fake_manifest();
     let result = hyper
-        .bootstrap_credential(&manifest, &server.url(), 1, test_service_spec(), test_acl())
+        .bootstrap_credential(
+            &manifest,
+            &server.url(),
+            "test@example.com",
+            test_service_spec(),
+            test_acl(),
+            None,
+        )
         .await;
 
     assert!(
-        matches!(result, Err(HyperError::AisBootstrapFailed(_))),
-        "AIS errors should propagate as AisBootstrapFailed, got: {:?}",
+        matches!(result, Err(HyperError::IssuerBootstrapFailed(_))),
+        "Issuer errors should propagate as IssuerBootstrapFailed, got: {:?}",
         result
     );
 }
 
-/// A rejected AIS registration must not create the per-actor database
+/// A rejected Issuer registration must not create the per-actor database
 /// (issue #350 acceptance; repeated rejected identities must not accumulate
 /// empty databases). The store is opened only after a successful response.
 #[tokio::test]
-async fn bootstrap_ais_rejection_creates_no_database() {
+async fn bootstrap_issuer_rejection_creates_no_database() {
     use actr_protocol::{ErrorResponse, RegisterResponse, register_response};
 
     let error_resp = RegisterResponse {
         result: Some(register_response::Result::Error(ErrorResponse {
             code: 403,
-            message: "manufacturer not trusted".to_string(),
+            message: "publisher not trusted".to_string(),
         })),
     }
     .encode_to_vec();
@@ -576,9 +725,16 @@ async fn bootstrap_ais_rejection_creates_no_database() {
 
     let manifest = fake_manifest();
     let result = hyper
-        .bootstrap_credential(&manifest, &server.url(), 1, test_service_spec(), test_acl())
+        .bootstrap_credential(
+            &manifest,
+            &server.url(),
+            "test@example.com",
+            test_service_spec(),
+            test_acl(),
+            None,
+        )
         .await;
-    assert!(matches!(result, Err(HyperError::AisBootstrapFailed(_))));
+    assert!(matches!(result, Err(HyperError::IssuerBootstrapFailed(_))));
 
     // The would-be database path must not exist after a rejected registration.
     let namespace = storage_namespace_for(&manifest.manifest).unwrap();
@@ -595,14 +751,14 @@ async fn bootstrap_ais_rejection_creates_no_database() {
 
 // ── pure helper functions ───────────────────────────────────────────────
 
-use actr_protocol::{ActrType, Realm, RegisterAuthMode};
+use actr_protocol::{ActrType, RegisterAuthMode};
 
 fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config::RuntimeConfig {
     actr_config::RuntimeConfig {
         package: actr_config::PackageInfo {
             name: "linked".into(),
             actr_type: ActrType {
-                manufacturer: "mfr".into(),
+                publisher: "publisher".into(),
                 name: "Linked".into(),
                 version: "1.0.0".into(),
             },
@@ -611,9 +767,9 @@ fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config:
             license: None,
         },
         signaling_url: url::Url::parse("ws://127.0.0.1:9/signaling/ws").unwrap(),
-        realm: Realm { realm_id: 1 },
-        ais_endpoint: "http://127.0.0.1:9/ais".into(),
-        realm_secret: None,
+        realm: "test@example.com".to_string(),
+        issuer_endpoint: "http://127.0.0.1:9/issuer".into(),
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,
@@ -720,7 +876,7 @@ fn is_compatible_native_target_validates_host_triple() {
 #[test]
 fn detect_binary_kind_rejects_unsupported_target() {
     let manifest = actr_pack::PackageManifest {
-        manufacturer: "m".into(),
+        publisher: "m".into(),
         name: "n".into(),
         version: "1.0.0".into(),
         binary: actr_pack::BinaryEntry {
@@ -748,11 +904,11 @@ fn linked_dependency_metadata_loads_from_explicit_manifest_and_ignores_lock() {
         dir.path().join("manifest.toml"),
         r#"[package]
 name = "LinkedClient"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
-echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_semantic:echo" }
+echo = { actr_type = "acme/EchoActor@1.0.0", service = "EchoService:service_semantic:echo" }
 "#,
     )
     .unwrap();
@@ -771,7 +927,7 @@ echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_sema
             .get("echo")
             .map(ActrType::to_string_repr)
             .as_deref(),
-        Some("acme:EchoActor:1.0.0")
+        Some("acme/EchoActor@1.0.0")
     );
     assert_eq!(
         metadata.fingerprints.values().next().map(String::as_str),
@@ -781,7 +937,7 @@ echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_sema
     let mut duplicate_alias_manifest = manifest.clone();
     let mut duplicate = duplicate_alias_manifest.dependencies[0].clone();
     duplicate.actr_type = Some(ActrType {
-        manufacturer: "acme".into(),
+        publisher: "acme".into(),
         name: "OtherEchoActor".into(),
         version: "1.0.0".into(),
     });
@@ -798,7 +954,7 @@ echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_sema
         dir.path().join("manifest.toml"),
         r#"[package]
 name = "LinkedClient"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
@@ -820,12 +976,12 @@ echo = {}
         dir.path().join("manifest.toml"),
         r#"[package]
 name = "LinkedClient"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
-echo = { actr_type = "acme:EchoActor:1.0.0" }
-echo_copy = { actr_type = "acme:EchoActor:1.0.0" }
+echo = { actr_type = "acme/EchoActor@1.0.0" }
+echo_copy = { actr_type = "acme/EchoActor@1.0.0" }
 "#,
     )
     .unwrap();

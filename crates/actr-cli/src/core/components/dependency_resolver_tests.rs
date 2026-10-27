@@ -39,12 +39,12 @@ async fn resolve_dependencies_matches_by_name_actr_type_or_falls_back() {
     let resolver = DefaultDependencyResolver::new();
     let specs = vec![
         spec("echo", "echo", None, None),
-        spec("other", "different", Some("acme:Other:1.0.0"), None),
+        spec("other", "different", Some("acme/Other@1.0.0"), None),
         spec("orphan", "orphan", None, Some("manual-fp")),
     ];
     let details = vec![
         ServiceDetails {
-            info: service_info("echo", "echo-fp", "acme:Echo:1.0.0"),
+            info: service_info("echo", "echo-fp", "acme/Echo@1.0.0"),
             proto_files: vec![ProtoFile {
                 name: "echo.proto".into(),
                 path: "echo.proto".into(),
@@ -54,7 +54,7 @@ async fn resolve_dependencies_matches_by_name_actr_type_or_falls_back() {
             dependencies: vec![],
         },
         ServiceDetails {
-            info: service_info("other-service", "other-fp", "acme:Other:1.0.0"),
+            info: service_info("other-service", "other-fp", "acme/Other@1.0.0"),
             proto_files: vec![],
             dependencies: vec![],
         },
@@ -83,7 +83,7 @@ async fn resolve_dependencies_matches_canonical_service_name_not_registry_key() 
         info: service_info(
             "acme:EchoService",
             "service_semantic:echo",
-            "acme:EchoService:1.0.0",
+            "acme/EchoService@1.0.0",
         ),
         proto_files: vec![],
         dependencies: vec![],

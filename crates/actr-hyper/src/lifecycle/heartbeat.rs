@@ -3,7 +3,7 @@
 //! This module contains functions for sending periodic heartbeat messages
 //! to the signaling server and handling responses.
 
-use crate::ais_client::AisClient;
+use crate::issuer_client::{IssuerClient, RealmClientKey};
 use crate::lifecycle::credential_manager::{CredentialManager, credential_expiry_to_system_time};
 use crate::lifecycle::membership::MembershipHandle;
 use crate::lifecycle::session_state::SessionPhase;
@@ -144,8 +144,8 @@ async fn send_heartbeat_and_handle_response(
     heartbeat_interval: Duration,
     _register_request: &RegisterRequest,
     consecutive_failures: &mut u64,
-    _ais_endpoint: &str,
-    _realm_secret: Option<&str>,
+    _issuer_endpoint: &str,
+    _client_key: Option<&RealmClientKey>,
     credential_manager: Option<&CredentialManager>,
     hook_callback: Option<&HookCallback>,
     membership: Option<&MembershipHandle>,
@@ -321,7 +321,7 @@ async fn send_heartbeat_and_handle_response(
         // workload can preload its credential-renewed handlers (e.g. to
         // rotate derived secrets) before the refresh round-trip lands.
         // The signaling warning is an idempotent trigger source for the
-        // Credential Manager; actual renewal goes through POST /ais/renew.
+        // Credential Manager; actual renewal goes through POST /issuer/renew.
         if let Some(expires_at) = credential_state.expires_at().await {
             if let Some(new_expiry) = credential_expiry_to_system_time(&expires_at) {
                 fire_hook(hook_callback, HookEvent::CredentialExpiring { new_expiry }).await;
@@ -351,7 +351,7 @@ async fn send_heartbeat_and_handle_response(
 /// * `mailbox` - Mailbox instance for backlog statistics
 /// * `heartbeat_interval` - Interval between heartbeats
 /// * `register_request` - RegisterRequest for re-registration on credential expiry
-/// * `ais_endpoint` - AIS HTTP endpoint for re-registration
+/// * `issuer_endpoint` - Issuer HTTP endpoint for re-registration
 #[allow(clippy::too_many_arguments)]
 pub async fn heartbeat_task(
     shutdown: CancellationToken,
@@ -361,8 +361,8 @@ pub async fn heartbeat_task(
     mailbox: Arc<dyn Mailbox>,
     heartbeat_interval: Duration,
     register_request: RegisterRequest,
-    ais_endpoint: String,
-    realm_secret: Option<String>,
+    issuer_endpoint: String,
+    client_key: Option<RealmClientKey>,
     credential_manager: Option<CredentialManager>,
     hook_callback: Option<HookCallback>,
     membership: Option<MembershipHandle>,
@@ -414,8 +414,8 @@ pub async fn heartbeat_task(
                     heartbeat_interval,
                     &register_request,
                     &mut consecutive_failures,
-                    &ais_endpoint,
-                    realm_secret.as_deref(),
+                    &issuer_endpoint,
+                    client_key.as_ref(),
                     credential_manager.as_ref(),
                     hook_callback.as_ref(),
                     membership.as_ref(),
@@ -436,7 +436,7 @@ pub async fn heartbeat_task(
 
 /// Re-register actor after credential expiry
 ///
-/// When the credential has completely expired, re-register via AIS HTTP,
+/// When the credential has completely expired, re-register via Issuer HTTP,
 /// then disconnect/reconnect the signaling WebSocket with the new credential.
 ///
 /// # Arguments
@@ -444,33 +444,36 @@ pub async fn heartbeat_task(
 /// * `actor_id` - Current actor ID (used for logging)
 /// * `register_request` - RegisterRequest containing actor type, realm, and service spec
 /// * `credential_state` - Shared credential state to update
-/// * `ais_endpoint` - AIS HTTP endpoint for registration
+/// * `issuer_endpoint` - Issuer HTTP endpoint for registration
 #[allow(dead_code)]
 async fn re_register_task(
     client: Arc<dyn SignalingClient>,
     actor_id: ActrId,
     register_request: RegisterRequest,
     credential_state: CredentialState,
-    ais_endpoint: String,
-    realm_secret: Option<String>,
+    issuer_endpoint: String,
+    client_key: Option<RealmClientKey>,
     hook_callback: Option<HookCallback>,
 ) -> ActrId {
     tracing::info!(
-        "🔄 Re-registering actor {} after credential expiry via AIS HTTP (type: {}/{})",
+        "🔄 Re-registering actor {} after credential expiry via Issuer HTTP (type: {}/{})",
         actor_id,
-        register_request.actr_type.manufacturer,
+        register_request.actr_type.publisher,
         register_request.actr_type.name
     );
 
-    // Step 1: Register via AIS HTTP to get new credential
-    let mut ais = AisClient::new(&ais_endpoint);
-    if let Some(secret) = realm_secret {
-        ais = ais.with_realm_secret(secret);
+    // Step 1: Register via Issuer HTTP to get new credential
+    let mut issuer = IssuerClient::new(&issuer_endpoint);
+    if let Some(key) = client_key {
+        issuer = issuer.with_client_key(key);
     }
-    let resp = match ais.register_with_manifest(register_request.clone()).await {
+    let resp = match issuer
+        .register_with_manifest(register_request.clone())
+        .await
+    {
         Ok(resp) => resp,
         Err(e) => {
-            tracing::error!("❌ AIS re-registration HTTP request failed: {}", e);
+            tracing::error!("❌ Issuer re-registration HTTP request failed: {}", e);
             return actor_id;
         }
     };
@@ -529,14 +532,14 @@ async fn re_register_task(
         }
         Some(actr_protocol::register_response::Result::Error(err)) => {
             tracing::error!(
-                "❌ AIS re-registration failed: code={}, message={}",
+                "❌ Issuer re-registration failed: code={}, message={}",
                 err.code,
                 err.message
             );
             actor_id
         }
         None => {
-            tracing::error!("❌ AIS re-registration response missing result");
+            tracing::error!("❌ Issuer re-registration response missing result");
             actor_id
         }
     }

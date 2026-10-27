@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use actr_hyper::test_support::TestHarness;
-use actr_protocol::{Direction, RpcEnvelope};
+use actr_protocol::{ActrError, Direction, RpcEnvelope};
 
 const OFFERER_SERIAL: u64 = 100;
 const ANSWERER_SERIAL: u64 = 200;
@@ -48,20 +48,34 @@ async fn answerer_failed_peer_does_not_keep_sending_on_stale_webrtc() {
         .await
         .expect("answerer must publish sendable=false during failure");
 
-    let started = std::time::Instant::now();
-    let result = tokio::time::timeout(
-        Duration::from_secs(2),
-        harness
+    {
+        let mut outage_request = request("answerer-send-during-failure");
+        outage_request.timeout_ms = 300;
+        let waiting = harness
             .peer(ANSWERER_SERIAL)
             .gate
-            .send_request(&offerer, request("answerer-send-during-failure")),
-    )
-    .await
-    .expect("send must fail promptly instead of using a stale DataChannel");
-    assert!(result.is_err());
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert_eq!(harness.peer(ANSWERER_SERIAL).pending_count().await, 0);
-
+            .send_request(&offerer, outage_request);
+        tokio::pin!(waiting);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut waiting)
+                .await
+                .is_err(),
+            "reliable sends must wait for recovery before their deadline"
+        );
+        assert_eq!(harness.peer(ANSWERER_SERIAL).pending_count().await, 0);
+        let result = tokio::time::timeout(Duration::from_secs(2), &mut waiting)
+            .await
+            .expect("the caller's deadline must bound readiness waiting");
+        assert!(matches!(result, Err(ActrError::TimedOut)), "{result:?}");
+        assert_eq!(harness.peer(ANSWERER_SERIAL).pending_count().await, 0);
+        assert_eq!(
+            harness
+                .peer(OFFERER_SERIAL)
+                .request_count("answerer-send-during-failure"),
+            0,
+            "the unavailable answerer must not submit through a stale DataChannel"
+        );
+    }
     harness.simulate_reconnect();
     harness
         .peer(ANSWERER_SERIAL)

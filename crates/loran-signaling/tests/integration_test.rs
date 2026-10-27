@@ -4,8 +4,8 @@
 //! heartbeat, and signaling relay functionality work correctly
 
 use actr_protocol::{
-    AIdCredential, ActrToSignaling, ActrType, Ping, Realm, SIGNALING_ENVELOPE_VERSION,
-    SignalingEnvelope, actr_to_signaling, signaling_envelope, signaling_to_actr,
+    AIdCredential, ActrToSignaling, Ping, SIGNALING_ENVELOPE_VERSION, SignalingEnvelope,
+    actr_to_signaling, signaling_envelope, signaling_to_actr,
 };
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
@@ -21,6 +21,8 @@ use tokio::sync::OnceCell;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 use uuid::Uuid;
+
+const TEST_REALM: &str = "test@example.com";
 
 /// Test helper: create minimal config
 #[allow(dead_code)]
@@ -78,12 +80,8 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
     .await;
 
     // Ensure the test-required realm exists — avoids 403 errors due to missing realm
-    if RealmEntity::get_by_name("test_realm")
-        .await
-        .unwrap_or(None)
-        .is_none()
-    {
-        let _ = RealmEntity::create("test_realm".to_string(), String::new()).await;
+    if RealmEntity::get(TEST_REALM).await.unwrap_or(None).is_none() {
+        let _ = RealmEntity::create(TEST_REALM.to_string()).await;
     }
 
     // Create router using create_signaling_router
@@ -136,12 +134,7 @@ fn create_test_credential() -> AIdCredential {
 fn create_test_actr_id(serial: u64) -> actr_protocol::ActrId {
     actr_protocol::ActrId {
         serial_number: serial,
-        realm: Realm { realm_id: 1001 },
-        r#type: ActrType {
-            manufacturer: "test".to_string(),
-            name: "device".to_string(),
-            version: "1.0.0".to_string(),
-        },
+        realm: TEST_REALM.to_string(),
     }
 }
 

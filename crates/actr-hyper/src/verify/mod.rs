@@ -8,6 +8,6 @@ mod cert_cache;
 mod trust;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use cert_cache::MfrCertCache;
+pub use cert_cache::PublisherCertCache;
 #[cfg(not(target_arch = "wasm32"))]
 pub use trust::{ChainTrust, RegistryTrust, StaticTrust, TrustProvider};

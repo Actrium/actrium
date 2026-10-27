@@ -131,3 +131,7 @@ keel/docs/.vitepress/cache/
 keel/docs/.vitepress/dist/
 benchmark-*.txt
 packages/*/benchmark-*.txt
+
+# Realm client keys written by `actr realm join` (private keys)
+realm-client.json
+*-realm-client.json

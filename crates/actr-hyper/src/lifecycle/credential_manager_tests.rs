@@ -1,6 +1,6 @@
 use super::*;
 use actr_protocol::{
-    AIdCredential, ActrId, ActrType, IdentityClaims, Realm, RegisterRequest, RegisterResponse,
+    AIdCredential, ActrId, ActrType, IdentityClaims, RegisterRequest, RegisterResponse,
     ReissueCredentialRequest, RenewCredentialResponse, TurnCredential, register_response,
     renew_credential_response,
 };
@@ -9,13 +9,16 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 
 fn actor(serial: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         serial_number: serial,
-        r#type: ActrType {
-            manufacturer: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
+    }
+}
+
+fn test_actr_type() -> ActrType {
+    ActrType {
+        publisher: "acme".to_string(),
+        name: "node".to_string(),
+        version: "1.0.0".to_string(),
     }
 }
 
@@ -33,9 +36,18 @@ fn pending_control_attempts() -> Arc<Mutex<PendingControlAttempts>> {
 
 fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdCredential {
     let claims = IdentityClaims {
-        realm_id: actor_id.realm.realm_id,
+        realm: actor_id.realm.clone(),
         actor_id: actor_id.to_string_repr(),
         expires_at,
+        protocol_version: 1,
+        issuer: actor_id.realm.clone(),
+        provider: "provider.example".to_string(),
+        audience: "actr.signaling".to_string(),
+        actor_type: test_actr_type(),
+        member: "member-1".to_string(),
+        client_key: "0000000000000000".to_string(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     AIdCredential {
         key_id,
@@ -49,6 +61,10 @@ fn register_ok(serial: u64, key_id: u32) -> register_response::RegisterOk {
         actr_id: actor(serial),
         credential: credential(key_id),
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: format!("1000:actor-{serial}"),
             password: "turn-password".to_string(),
             expires_at: 1000,
@@ -69,7 +85,7 @@ fn register_ok(serial: u64, key_id: u32) -> register_response::RegisterOk {
 }
 
 /// A `RegisterOk` whose `renewal_token` / `renewal_token_expires_at` are
-/// `None` — what an AIS built before the renewal-token feature returns. Used
+/// `None` — what an Issuer built before the renewal-token feature returns. Used
 /// to prove a version-skewed hard rebind still commits the access credential
 /// instead of discarding it (issue #397).
 fn register_ok_without_token(serial: u64, key_id: u32) -> register_response::RegisterOk {
@@ -82,7 +98,7 @@ fn register_ok_without_token(serial: u64, key_id: u32) -> register_response::Reg
 /// P1 (finding 1): with the membership controller flag OFF (default), an expired
 /// renewal token drives the legacy hard rebind, which must recover via a FRESH
 /// `/register` (new serial) and must NOT call `/reissue`. A `/reissue`-only
-/// legacy path breaks recovery against older AIS servers (404) and after the
+/// legacy path breaks recovery against older Issuer servers (404) and after the
 /// reissue binding grace lapses (403 possession failure).
 #[tokio::test]
 async fn expired_renewal_token_re_registers_fresh_identity() {
@@ -114,6 +130,10 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: 10,
@@ -127,8 +147,8 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
     });
 
     let request = RegisterRequest {
-        actr_type: actor(1).r#type,
-        realm: Realm { realm_id: 7 },
+        actr_type: test_actr_type(),
+        realm: "test7@example.com".to_string(),
         ..Default::default()
     };
 
@@ -136,10 +156,7 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
         session.clone(),
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request,
-            realm_secret: None,
-        },
+        RegistrationContext::Linked { request },
         None,
         None,
         pending_control_attempts(),
@@ -150,7 +167,7 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
     register_mock.assert_async().await;
     reissue_mock.assert_async().await;
     let snapshot = session.snapshot().await;
-    // Fresh register: the new serial issued by AIS is adopted.
+    // Fresh register: the new serial issued by Issuer is adopted.
     assert_eq!(snapshot.actor_id, actor(2));
     assert_eq!(snapshot.credential.key_id, 9);
     assert_eq!(snapshot.generation, 2);
@@ -172,6 +189,10 @@ async fn soft_renewal_fires_credential_renewed_hook() {
                 actr_id: actor_id.clone(),
                 credential: credential_for_actor(&actor_id, 9, NEW_EXPIRY as u64),
                 turn_credential: TurnCredential {
+                    protocol_version: 1,
+                    realm: "test@example.com".to_string(),
+                    provider: "provider.example".to_string(),
+                    audience: "actr.turn".to_string(),
                     username: "4000001000:actor-1".to_string(),
                     password: "turn-password".to_string(),
                     expires_at: NEW_EXPIRY as u64,
@@ -208,6 +229,10 @@ async fn soft_renewal_fires_credential_renewed_hook() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "4000000000:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: OLD_EXPIRY as u64,
@@ -241,11 +266,10 @@ async fn soft_renewal_fires_credential_renewed_hook() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor_id.r#type.clone(),
-                realm: actor_id.realm,
+                actr_type: test_actr_type(),
+                realm: actor_id.realm.clone(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         Some(hook_callback),
@@ -285,6 +309,10 @@ async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: 10,
@@ -318,11 +346,10 @@ async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         Some(hook_callback),
@@ -376,6 +403,10 @@ async fn reissue_possession_failure_defers_instead_of_denying() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: 10,
@@ -395,11 +426,10 @@ async fn reissue_possession_failure_defers_instead_of_denying() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         None,
@@ -428,7 +458,7 @@ async fn reissue_realm_denied_is_terminal() {
         result: Some(register_response::Result::Error(
             actr_protocol::ErrorResponse {
                 code: 403,
-                message: "Invalid realm secret".to_string(),
+                message: "client_revoked: the Realm client key is revoked".to_string(),
             },
         )),
     };
@@ -449,6 +479,10 @@ async fn reissue_realm_denied_is_terminal() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: 10,
@@ -468,11 +502,10 @@ async fn reissue_realm_denied_is_terminal() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         None,
@@ -520,6 +553,10 @@ async fn legacy_hard_rebind_fires_credential_renewed_hook() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: 10,
@@ -553,11 +590,10 @@ async fn legacy_hard_rebind_fires_credential_renewed_hook() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         Some(hook_callback),
@@ -590,43 +626,23 @@ fn backoff_sequence() {
     assert!(d4 <= Duration::from_secs(75)); // 60 + 25% jitter
 }
 
-/// Hard rebind of a Package registration must re-invoke the manufacturer auth
-/// provider to mint a fresh proof. The initial manufacturer nonce was consumed
-/// by AIS on the first successful registration; replaying it would be
-/// rejected. This locks in the re-sign behaviour added to fix replay on
-/// hard rebind.
+/// Hard rebind of a Package registration re-sends the saved package
+/// registration as is: the signed manifest and its signing key are all Issuer
+/// needs, and no Publisher private key is involved.
 #[tokio::test]
-async fn package_hard_rebind_re_signs_manufacturer_proof() {
+async fn package_hard_rebind_resends_package_registration() {
     use actr_protocol::RegisterAuthMode;
-    use std::sync::atomic::AtomicU64;
 
-    struct CountingManufacturerProvider {
-        calls: Arc<AtomicU64>,
-    }
-    impl crate::ManufacturerAuthProvider for CountingManufacturerProvider {
-        fn sign(
-            &self,
-            _realm_id: u32,
-            _actr_type: &actr_protocol::ActrType,
-            _target: &str,
-            _manifest_raw: &[u8],
-        ) -> std::result::Result<crate::ManufacturerRegistrationAuth, crate::HyperError> {
-            let n = self.calls.fetch_add(1, AtomicOrdering::SeqCst) + 1;
-            // Deterministic fresh proof keyed by call count. The mock AIS
-            // server does not validate crypto, so the values only need to
-            // differ from the stale proof saved on the original request.
-            Ok(crate::ManufacturerRegistrationAuth {
-                signature: vec![n as u8; 64],
-                signed_at: 9_999_999_999,
-                nonce: vec![n as u8; 32],
-            })
-        }
-    }
-
-    let calls = Arc::new(AtomicU64::new(0));
-    let provider: Arc<CountingManufacturerProvider> = Arc::new(CountingManufacturerProvider {
-        calls: calls.clone(),
-    });
+    let request = RegisterRequest {
+        actr_type: test_actr_type(),
+        realm: "test7@example.com".to_string(),
+        manifest_raw: Some(Bytes::from_static(b"manifest-bytes")),
+        publisher_signature: Some(Bytes::from_static(b"publisher-sig")),
+        target: Some("wasm32-wasip1".to_string()),
+        auth_mode: Some(RegisterAuthMode::Package as i32),
+        signing_public_key: Some(Bytes::from_static(&[7; 32])),
+        ..Default::default()
+    };
 
     let mut server = mockito::Server::new_async().await;
     let response = RegisterResponse {
@@ -635,27 +651,13 @@ async fn package_hard_rebind_re_signs_manufacturer_proof() {
     // Flag-OFF legacy hard rebind re-registers via fresh `/register`.
     let mock = server
         .mock("POST", "/register")
+        .match_body(request.encode_to_vec())
         .with_status(200)
         .with_header("content-type", "application/x-protobuf")
         .with_body(response.encode_to_vec())
         .expect(1)
         .create_async()
         .await;
-
-    // Stale manufacturer proof (nonce 0xAA) saved on the original request — this
-    // is exactly what must not be replayed to AIS.
-    let request = RegisterRequest {
-        actr_type: actor(1).r#type,
-        realm: Realm { realm_id: 7 },
-        manifest_raw: Some(Bytes::from_static(b"manifest-bytes")),
-        mfr_signature: Some(Bytes::from_static(b"mfr-sig")),
-        target: Some("wasm32-wasip1".to_string()),
-        auth_mode: Some(RegisterAuthMode::Package as i32),
-        manufacturer_auth_signature: Some(Bytes::from_static(b"stale-manufacturer-auth-sig")),
-        manufacturer_auth_signed_at: Some(1),
-        manufacturer_auth_nonce: Some(Bytes::from_static(&[0xAA; 32])),
-        ..Default::default()
-    };
 
     // Expired renewal token -> run_renewal_once takes the hard rebind branch.
     let session = SessionState::new(SessionSnapshot {
@@ -666,6 +668,10 @@ async fn package_hard_rebind_re_signs_manufacturer_proof() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: 10,
@@ -683,8 +689,7 @@ async fn package_hard_rebind_re_signs_manufacturer_proof() {
         server.url(),
         None,
         RegistrationContext::Package {
-            request,
-            resign: Some(provider),
+            request: request.clone(),
         },
         None,
         None,
@@ -694,11 +699,6 @@ async fn package_hard_rebind_re_signs_manufacturer_proof() {
     .expect("hard rebind should commit new snapshot");
 
     mock.assert_async().await;
-    assert_eq!(
-        calls.load(AtomicOrdering::SeqCst),
-        1,
-        "hard rebind must re-invoke the manufacturer auth provider exactly once"
-    );
 }
 
 #[test]
@@ -832,7 +832,7 @@ async fn credential_expiry_overflow_skips_callback_instead_of_panicking() {
     );
 }
 
-/// Issue #397: an AIS that predates the renewal-token feature returns a
+/// Issue #397: an Issuer that predates the renewal-token feature returns a
 /// successful `/register` whose `renewal_token` / `renewal_token_expires_at`
 /// are `None`. The legacy hard rebind must still commit the access credential
 /// (the field that actually keeps the node reachable) instead of discarding
@@ -840,7 +840,7 @@ async fn credential_expiry_overflow_skips_callback_instead_of_panicking() {
 /// keeps its expiring old credential and silently drops off once its TTL
 /// lapses.
 #[tokio::test]
-async fn legacy_hard_rebind_commits_when_ais_omits_renewal_token() {
+async fn legacy_hard_rebind_commits_when_issuer_omits_renewal_token() {
     let mut server = mockito::Server::new_async().await;
     let response = RegisterResponse {
         result: Some(register_response::Result::Success(
@@ -867,6 +867,10 @@ async fn legacy_hard_rebind_commits_when_ais_omits_renewal_token() {
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: 10,
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
         },
         renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
         renewal_token_expires_at: prost_types::Timestamp {
@@ -882,18 +886,17 @@ async fn legacy_hard_rebind_commits_when_ais_omits_renewal_token() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         None,
         pending_control_attempts(),
     )
     .await
-    .expect("hard rebind should commit even when AIS omits renewal_token");
+    .expect("hard rebind should commit even when Issuer omits renewal_token");
 
     mock.assert_async().await;
     let snapshot = session.snapshot().await;
@@ -917,7 +920,7 @@ async fn legacy_hard_rebind_commits_when_ais_omits_renewal_token() {
 /// also commit a token-less success instead of returning `Deferred` and
 /// discarding the reissued credential.
 #[tokio::test]
-async fn credential_only_hard_reissue_commits_when_ais_omits_renewal_token() {
+async fn credential_only_hard_reissue_commits_when_issuer_omits_renewal_token() {
     let mut server = mockito::Server::new_async().await;
     let response = RegisterResponse {
         result: Some(register_response::Result::Success(
@@ -945,6 +948,10 @@ async fn credential_only_hard_reissue_commits_when_ais_omits_renewal_token() {
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
             expires_at: 10,
+            protocol_version: 1,
+            realm: "test@example.com".to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.turn".to_string(),
         },
         renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
         renewal_token_expires_at: prost_types::Timestamp {
@@ -961,11 +968,10 @@ async fn credential_only_hard_reissue_commits_when_ais_omits_renewal_token() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
-            realm_secret: None,
         },
         None,
         None,
@@ -995,7 +1001,7 @@ async fn credential_only_hard_reissue_commits_when_ais_omits_renewal_token() {
 #[test]
 fn classify_renewal_error_categorizes_missing_field_as_non_transient() {
     // Missing optional field / contract violations are non-transient: no retry
-    // can make an old AIS start returning renewal_token.
+    // can make an old Issuer start returning renewal_token.
     assert_eq!(
         classify_renewal_error("hard rebind response missing renewal token"),
         FailureClass::NonTransient

@@ -26,8 +26,8 @@ impl LanguageGenerator for RustGenerator {
         let prost_plugin_path = self.ensure_prost_plugin(&context.config_path)?;
         let plugin_path = self.ensure_protoc_plugin()?;
 
-        let manufacturer = context.config.package.actr_type.manufacturer.clone();
-        debug!("Using manufacturer from manifest.toml: {}", manufacturer);
+        let publisher = context.config.package.actr_type.publisher.clone();
+        debug!("Using publisher from manifest.toml: {}", publisher);
 
         let output = &context.output;
 
@@ -47,7 +47,7 @@ impl LanguageGenerator for RustGenerator {
             output,
             &prost_plugin_path,
             &plugin_path,
-            &manufacturer,
+            &publisher,
         )?;
 
         // Without `--clean` the output directory keeps files from previous
@@ -194,14 +194,14 @@ impl RustGenerator {
         output: &Path,
         prost_plugin_path: &Path,
         plugin_path: &Path,
-        manufacturer: &str,
+        publisher: &str,
     ) -> Result<()> {
         // The Rust plugin now reads the DispatchSpec for local/remote
         // classification and dependency aliases — the legacy
         // `LocalFiles`/`RemoteFiles`/`RemoteFileActrTypes` params are no
-        // longer passed via --actrframework_opt. The `manufacturer` param
+        // longer passed via --actrframework_opt. The `publisher` param
         // is retained for backward compat with older plugin versions.
-        let mut opt_str = format!("manufacturer={}", manufacturer);
+        let mut opt_str = format!("publisher={}", publisher);
 
         // Pass dispatch spec path and hash to the protoc plugin.
         opt_str.push_str(&format!(

@@ -7,6 +7,7 @@ pub mod aid;
 pub mod error;
 pub mod metrics;
 pub mod monitoring;
+pub mod net;
 pub mod realm;
 pub mod recording;
 pub mod storage;
@@ -27,7 +28,7 @@ pub use monitoring::{
 };
 pub use realm::{ActorAcl, Realm, RealmError};
 pub use storage::SqliteNonceStorage;
-pub use types::{ActrId, PeerId, RealmId};
+pub use types::{ActrId, PeerId};
 pub use util::TlsConfigurer;
 
 // Simplified credential module for backward compatibility

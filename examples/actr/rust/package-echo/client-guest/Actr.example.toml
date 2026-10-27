@@ -3,11 +3,13 @@ edition = 1
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 1001
+realm = "package-echo@example.com"
+# Written by `actr realm join` (the start script runs it).
+realm_client_key = "realm-client.json"
 
 [discovery]
 visible = true
@@ -27,4 +29,4 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:EchoService:0.2.1"
+type = "actrium/EchoService@0.2.1"

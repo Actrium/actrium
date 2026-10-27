@@ -3,12 +3,13 @@ edition = 1
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 33554432
-realm_secret = "rs_AeEwCl5kEEd4foT3KSH-ZSgIFfrBzvnO"
+realm = "data-stream@example.com"
+# Written by `actr realm join` (the start script runs it).
+realm_client_key = "realm-client.json"
 
 [discovery]
 visible = true
@@ -24,8 +25,8 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-# Allow server with actr_type = "acme:FileTransferService:1.0.0"
-type = "acme:FileTransferService:1.0.0"
+# Allow server with actr_type = "acme/FileTransferService@1.0.0"
+type = "acme/FileTransferService@1.0.0"
 
 [scripts]
 dev = "cargo run"

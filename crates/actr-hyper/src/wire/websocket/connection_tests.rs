@@ -315,13 +315,8 @@ async fn retired_websocket_destination_is_rebuilt_for_later_work() {
         }
     }
     let local = actr_protocol::ActrId {
-        realm: actr_protocol::Realm { realm_id: 1 },
+        realm: "test@example.com".into(),
         serial_number: 1,
-        r#type: actr_protocol::ActrType {
-            manufacturer: "test".into(),
-            name: "ws-recovery".into(),
-            version: "1".into(),
-        },
     };
     let mut target = local.clone();
     target.serial_number = 2;

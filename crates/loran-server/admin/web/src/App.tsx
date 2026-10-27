@@ -9,9 +9,9 @@ import { ConfigEditor } from "./pages/ConfigEditor";
 import { StunService } from "./pages/services/StunService";
 import { TurnService } from "./pages/services/TurnService";
 import { SignalingService } from "./pages/services/SignalingService";
-import { AisService } from "./pages/services/AisService";
+import { IssuerService } from "./pages/services/IssuerService";
 import { SignerService } from "./pages/services/SignerService";
-import { MfrService } from "./pages/services/MfrService";
+import { PublisherRegistryPage } from "./pages/services/PublisherRegistryPage";
 import { Overview2Page } from "./pages/general/Overview2Page";
 import { RecordingSection } from "./pages/platform/RecordingSection";
 import { NetworkPage } from "./pages/host/NetworkPage";
@@ -52,9 +52,9 @@ export function App() {
             <Route path="services/stun" element={<StunService />} />
             <Route path="services/turn" element={<TurnService />} />
             <Route path="services/signaling" element={<SignalingService />} />
-            <Route path="services/ais" element={<AisService />} />
+            <Route path="services/issuer" element={<IssuerService />} />
             <Route path="services/signer" element={<SignerService />} />
-            <Route path="mfr" element={<MfrService />} />
+            <Route path="publishers" element={<PublisherRegistryPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/admin" replace />} />
         </Routes>

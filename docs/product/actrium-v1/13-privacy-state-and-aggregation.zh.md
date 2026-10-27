@@ -1,6 +1,6 @@
 # 13. Actrium 隐私标记与图汇聚
 
-> 安全语义以 [docs/security](../../security/README.zh.md) 为准。本章只写 Actrium 如何把该模型落到 Tab、Front、Host 和数据面。两者冲突时改本章，不改现行安全模型。
+> 安全语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章只写 Actrium 如何把该模型落到 Tab、Front、Actr Host 和数据面。两者冲突时改本章，不改现行安全模型。
 
 成熟度：`Specified`。
 
@@ -15,18 +15,18 @@ Tab ──定位──▶ Front Actor ──发现──▶ 无根应用图 CC(U
                          ActorAssurance（每节点，禁止自签）
                                       │
                                       ▼
-                    ApplicationStateId + ApplicationAssurance
+                    ApplicationStateDigest + ApplicationAssurance
                                       │
                                       ▼
                          Ready？ → 展示绿 / 黄 / 红
                          否则    → 无法建立 / 正在重新验证
 ```
 
-Front Actor 只做产品入口，不是图根。Primary Service 是 Guest 的业务 façade，不是安全根。
+Front Actor 只做产品入口，不是图根。Service 是 Guest 的业务 façade，不是安全根。
 
 内部证据维度（身份、制品、约束、计算、通道、存储、出口、输出）是评定输入。用户只看到三色；切面未就绪时不把任何颜色当成当前应用保障。
 
-通道、原语和远程证明见 [14](14-privacy-primitives-and-attestation.md)。完整判断与证明见 [形式模型](../../security/formal/model.zh.md)。
+通道、原语和远程证明见 [14](14-privacy-primitives-and-attestation.md)。完整判断与证明见 [形式模型](../../architecture/security/actrium/formal/model.zh.md)。
 
 ## 2. 颜色与事实
 
@@ -46,13 +46,13 @@ Front Actor 只做产品入口，不是图根。Primary Service 是 Guest 的业
 图由有效 `Transfer(ActorId)` 形成：目标可解析、双方同一 Principal、声明与状态当前有效。丢掉无效边后忽略方向，取连通分量。循环合法，必须发现入边。
 
 ```text
-structureId = H("actrium/structure/v1", EncGraph)
+structureDigest = H("actrium/structure/v1", EncGraph)
 EncGraph    = actrium/graph/v1 规范 JSON（排序后的 ActorId 与有向边）
 ```
 
 不进入图：仅安装未执行的 Program、无有效依赖的同 Realm Actor、跨 Principal Actor。跨 Principal 或无效 Actor 出口仍在发起方计分，不得判 `CONTROLLED`。
 
-非 Actor 目标（屏幕、文件、Workspace、HTTPS API）是 Host 可强制的汇。TLS 主机名只证明送到该域名，不证明域内不继续外泄。目标分类不由声明方自选：可出示 Actr 身份的端点必须按 Actor 目标评定并接受跨 Principal 规则，不得改写成 HTTPS 汇绕过评分；类别无法判定时该出口保持 `UNKNOWN`。用户信任一个汇的语义是「认可数据离开保障范围」。只转发端到端密文的 TURN 不入图。
+非 Actor 目标（屏幕、文件、Workspace、HTTPS API）是 Actr Host 可强制的汇。TLS 主机名只证明送到该域名，不证明域内不继续外泄。目标分类不由声明方自选：可出示 Actr 身份的端点必须按 Actor 目标评定并接受跨 Principal 规则，不得改写成 HTTPS 汇绕过评分；类别无法判定时该出口保持 `UNKNOWN`。用户信任一个汇的语义是「认可数据离开保障范围」。只转发端到端密文的 TURN 不入图。
 
 Front 的最终节点结论是：
 
@@ -60,11 +60,11 @@ Front 的最终节点结论是：
 R_A(Front) = join(Actrium Host 平台事实, Keel Guest 出口事实)
 ```
 
-Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。不能只评 Guest。
+Actr Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。不能只评 Guest。
 
 ## 4. 状态变化
 
-不做全图分布式提交。顺序：本地提交新 `ActorStateId` → 废除旧权力 → 保障挂起 → 异步重建切面。`ActorState` 含状态权威维护的单调修订号：配置回滚也得到新状态根，被废除的旧 Capability、通道与结论不会因回滚复活。
+不做全图分布式提交。顺序：本地提交新 `ActorStateDigest` → 废除旧权力 → 保障挂起 → 异步重建切面。`ActorState` 含状态权威维护的单调修订号：配置回滚也得到新状态根，被废除的旧 Actor Grant、通道与结论不会因回滚复活。
 
 ```text
 Depends(b, a)           := 无向有效依赖边
@@ -79,7 +79,7 @@ LocalContinue(b | C)    := ACTIVE ∧ 当前 AA 仍适用 ∧ 不依赖 C ∧ �
 
 ### 5.1 WASM
 
-判 `CONTROLLED` 至少同时满足：制品与已验证包一致；import 可枚举；无 ambient 文件系统 / socket / 进程 API；能力全部经 Host；有效声明是 Manifest ∪ Host ∪ 环境不可排除项；每个 Actor 目标入图另评；每个非 Actor 汇被策略认可；证据未过期。
+判 `CONTROLLED` 至少同时满足：制品与已验证包一致；import 可枚举；无 ambient 文件系统 / socket / 进程 API；能力全部经 Actr Host；有效声明是 Manifest ∪ Actr Host ∪ 环境不可排除项；每个 Actor 目标入图另评；每个非 Actor 汇被策略认可；证据未过期。
 
 可度量的是：
 
@@ -102,9 +102,9 @@ observed ⊆ 有效声明且被强制
 
 ### 5.4 Actrium Native Front Host
 
-不能把平台 Host 一律判未知，否则所有 Tab 永远非绿。Host 结论来自官方签名、安装完整性、版本策略和设备证明；安装无法验证或版本已撤销时，同样是黄或红。被评估的是 Front 进程整体。
+不能把平台 Actr Host 一律判未知，否则所有 Tab 永远非绿。Actr Host 结论来自官方签名、安装完整性、版本策略和设备证明；安装无法验证或版本已撤销时，同样是黄或红。被评估的是 Front 进程整体。
 
-Host 可以为 Guest 提供证据或作为验证者签发 `ActorAssurance`，但 **issuer ≠ subject**：Host 不得自签自己的最终结论。
+Actr Host 可以为 Guest 提供证据或作为验证者签发 `ActorAssurance`，但 **issuer ≠ subject**：Actr Host 不得自签自己的最终结论。
 
 ### 5.5 外部 HTTPS
 
@@ -112,7 +112,7 @@ Host 可以为 Guest 提供证据或作为验证者签发 `ActorAssurance`，但
 
 ## 6. 声明是输入
 
-`.actr` Manifest 的 `[actrium.privacy]` 与 Native Capsule profile 仍是待验证输入，不是结论。Host 必须对照 imports、实际能力、实际边。发现未声明且可能行使的出口：确认则可红，无法确认则黄。
+`.actr` Manifest 的 `[actrium.privacy]` 与 Native Capsule profile 仍是待验证输入，不是结论。Actr Host 必须对照 imports、实际能力、实际边。发现未声明且可能行使的出口：确认则可红，无法确认则黄。
 
 ## 7. 谁签发结论
 
@@ -122,7 +122,7 @@ Evidence   用来核实该主张的材料
 Assurance  验证者结合状态、证据、规则和用户策略给出的结论
 ```
 
-Actrium 内的 Privacy Agent 负责观测、取证、组图和向验证者提交材料。跨进程成为安全依据时，必须由验证者签名 `ActorAssurance`，精确绑定 `ActorId + ActorStateId`、证据指纹、策略、规则和有效期。依赖方使用前自行核验。
+Actrium 内的 Privacy Agent 负责观测、取证、组图和向验证者提交材料。跨进程成为安全依据时，必须由验证者签名 `ActorAssurance`，精确绑定 `ActorId + ActorStateDigest`、证据指纹、策略、规则和有效期。依赖方使用前自行核验。
 
 发布 `ApplicationAssurance` 前：完整发现、核对每个当前状态、每个 AA 不得强于该上下文最弱项、无挂起成员、重读当前指针。成功只说明读一致切面。
 
@@ -134,9 +134,9 @@ Actrium 内的 Privacy Agent 负责观测、取证、组图和向验证者提交
 | --- | --- |
 | Actor Privacy Mark | `ActorAssurance` 的节点结论 |
 | 应用 Privacy Mark | `ApplicationAssurance` 的颜色；展示还须 `Ready` |
-| privacyGraphId + epoch | `structureId` + `ApplicationStateId` |
+| privacyGraphId + epoch | `structureDigest` + `ApplicationStateDigest` |
 | GraphRoot | 无。Front 只定位 |
-| Host 自签 Mark | 禁止作为被评估者的最终结论 |
+| Actr Host 自签 Mark | 禁止作为被评估者的最终结论 |
 
 示意（字段名可在 schema 仓库版本化，语义不得弱于下表）：
 
@@ -144,7 +144,7 @@ Actrium 内的 Privacy Agent 负责观测、取证、组图和向验证者提交
 {
   "object": "actrium/actor-assurance/v1",
   "issuer": "verifier:…",
-  "subject": { "actorId": "…", "actorStateId": "…" },
+  "subject": { "actorId": "…", "actorStateDigest": "…" },
   "qid": "actrium.consumer.default",
   "ruleset": "…",
   "result": "CONTROLLED",
@@ -154,9 +154,9 @@ Actrium 内的 Privacy Agent 负责观测、取证、组图和向验证者提交
 }
 ```
 
-`ApplicationAssurance` 承诺 `structureId`、Principal、Merkle 根（叶子绑定 `ActorId + ActorStateId + H(AA)`）。成员证明对数路径。
+`ApplicationAssurance` 承诺 `structureDigest`、Principal、Merkle 根（叶子绑定 `ActorId + ActorStateDigest + H(AA)`）。成员证明对数路径。
 
-边握手仍须在发送应用数据前核验对端 `gate=ACTIVE`、当前 AA、通道绑定双方当前 `ActorId + ActorStateId`。`minimumTarget` 用节点结论，不用旧 Mark 名。
+边握手仍须在发送应用数据前核验对端 `gate=ACTIVE`、当前 AA、通道绑定双方当前 `ActorId + ActorStateDigest`。`minimumTarget` 用节点结论，不用旧 Mark 名。
 
 ## 9. 系统协议
 

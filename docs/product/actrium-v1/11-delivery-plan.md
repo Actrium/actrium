@@ -2,39 +2,39 @@
 
 ## 1. Feasibility conclusions
 
-Overall **It's possible, but not just change. Actrium UI**.
+Overall this is **feasible, but it is not just a change to the Actrium UI**.
 
-The existing technology accumulation already covers most of the“Mechanisms”:
+The existing technology base already covers most of the "mechanisms":
 
-- Actr It's accurate. `ActorId` (a) Address;
-- Actr Yes, it's pressed. `ActrType` (a) Discovery;
-- Actr Yes. Realm, ACL, signaling, WebRTC, TURN;
-- Actr Yes. Linked, NativeCdylib and WASM workload;
-- Actr `.actr` Signed, signed,hash, resources and dependencies;
-- Keel Existing Host/Guest, Bridge, contracts,JS sandbox and native component trees;
-- Actrium Existing cross-platform Shell, Tab, share the running time and local sustainability base.
+- Actr has precise `ActorId` addressing;
+- Actr has discovery by `ActrType`;
+- Actr has Realm, connection ACL, signaling, WebRTC, and TURN;
+- Actr has Linked, NativeCdylib, and WASM workloads;
+- Actr's `.actr` already has signing, hashes, resources, and a dependency lock;
+- Keel already has Host/Guest, Bridge, contracts, a JS sandbox, and a native component tree;
+- Actrium already has a cross-platform Shell, Tab, a shared runtime, and a local persistence foundation.
 
-What is really missing is product-level invariacies and some key syntaxes:
+What is really missing are product-level invariants and several key semantics:
 
-1. Service ActorId (b) Permanent identity;
-2. Publisher domain with package key (a) The formal chain of trust;
-3. Realm Profile with Provider (a) Assignment;
-4. Program/Service/Workspace Separation;
-5. Fixed Front Native Host And controlled. Keel Guest;
-6. `actr://` Create/Connectivity services;
-7. Front–Service Attach/session Agreements;
-8. Security component and capability broker;
+1. Service ActorId's durable identity;
+2. the formal trust chain between the Publisher domain and the package key;
+3. Realm domains and signing keys, per-instance Realm Profiles, and Realm Infra Provider delegation;
+4. separation of Program/Service/Workspace;
+5. a fixed Front Native Host and a controlled Keel Guest;
+6. the create-instance transaction and the Realm-link open flow;
+7. the Front–Service Attach/session protocol;
+8. the security components and the capability broker;
 9. per-instance storage;
-10. Move the end honest life cycle.
+10. an honest lifecycle on mobile.
 
-## 2. Key Dependency Chart
+## 2. Key dependency graph
 
 ```mermaid
 flowchart LR
-    A["P0 Regulates freezing"]
-    B["P1 Actr Persistence/Realm"]
+    A["P0 Spec freeze"]
+    B["P1 Actr durable identity/Realm"]
     C["P1 Package/Publisher"]
-    D["P2 Front Runtime/Keel Secure borders"]
+    D["P2 Front Runtime/Keel security boundary"]
     E["P2 Service Manager/Workspace"]
     F["P3 URI/Shell/Catalog/Inventory"]
     G["P3 Network/Remote Attach"]
@@ -52,154 +52,153 @@ flowchart LR
     G --> H
 ```
 
-Persistence ActorId It's the longest critical path. When it doesn't work,Attach URI, history, collection, re-launch and Service Inventory None of them can be delivered.
+The durable ActorId is the longest critical path. Without it, opening an instance, history, favorites, restart recovery, and Service Inventory all fail to hold.
 
-## 3. P0: Regulate freezing
+## 3. P0: Spec freeze
 
-### Objective
+### Goal
 
-Turn the syntax of the product in this document into a cross-storey testable contract.
+Turn this document's product semantics into a cross-repository, testable contract.
 
-### Delivery
+### Deliverables
 
-- `actr://` URI schema (a) with the test vector;
-- Publisher Profile/Release schema;
+- test vectors for the Realm link (`actr://` URI) and the `links` conversion;
+- Publisher Profile schema;
 - Actrium manifest extension schema;
-- Realm Profile schema;
+- the Realm signing key (the authority descriptor's `realm_signing_keys` member and the core `realms` relation, already defined in Actr Authority Discovery §4.3–4.4) and the Realm Profile schema;
 - persistent Actor identity lifecycle ADR;
 - Front–Service session proto;
 - ActorAssurance / ApplicationAssurance / EncGraph schema;
-- privacy data-class, policy (a) The rules of convergence with the weakest;
+- privacy data-class, policy, and the weakest-item aggregation rule;
 - capability/permission taxonomy;
 - Service/Workspace state machine;
-- Steady error code registry;
+- a stable error code registry;
 - threat model.
 
-### Exit Conditions
+### Exit criteria
 
-- Actrium, Actr, Keel Maintainer signatures for core nonvariable;
-- schema (a) Version fields;
-- create/attach/identity mismatch It's... golden tests Freezing;
-- None“It's a decision. ActorId Stable”The problem of the suspense.
+- Actrium, Actr, and Keel maintainers sign off on the core invariants;
+- schemas have a version field;
+- golden tests for create/attach/identity mismatch are frozen;
+- there is no open question of "implement first, decide whether the ActorId is stable later".
 
-## 4. P1-A: Actr Durable identity and Realm
+## 4. P1-A: Actr durable identity and Realm
 
-### Actr I'll change it.
+### Actr must change
 
-1. ActorLong term key Models;
-2. ActorId Text and wire model Include as Verifiable Realm authority;
-3. New & & & & & & New reclaim ActorId Two paths to registration;
-4. ActorId, renewal/identity state (a) Sustainability;
-5. hard re-auth Keep Same ActorId;
-6. Realm Internal serial Never again;
-7. current endpoint/presence with logical ActorId Separation;
-8. Realm Profile and issuer key discovery;
-9. Actor credential Tie public keyand transcript/SDP challenge (a) Proof of private key holding;
-10. signaling One-time ticket/header;
-11. Provider Accreditation and failover;
-12. per-Realm/TURN-pool key id (a) With rotation;
-13. Publisher/manufacturer DNS Length and standardization;
-14. Actor store namespace Accept instance identity;
-15. Authenticator identification and signature `ActorAssurance`;
-16. Actor spawn/call/stream/egress edge Observation;
-17. `ActorStateId` / `ApplicationStateId` Subscriptions and withdrawals of dissemination system protocols.
+1. the Actor long-term key model;
+2. the ActorId text and wire model change to `<serial>.<realm_id>@<domain>`: a verifiable Realm name replaces the numeric realm_id, and the Actor type moves into registration and the credential (done);
+3. two registration paths: create and reclaim ActorId;
+4. persistence of the ActorId and renewal/identity state;
+5. hard re-auth keeps the same ActorId;
+6. the Actor serial is never reused within a Realm;
+7. separating the current endpoint/presence from the logical ActorId;
+8. the Realm signing key, the Realm Profile it signs, and Realm issuer key discovery;
+9. the Actor credential binds a public key, and holding the private key is proven with a transcript/SDP challenge;
+10. a one-time signaling ticket/header;
+11. Realm Infra Provider delegation and failover; one Realm Infra Provider hosts multiple Realms, and Realm creation is authorized by a Realm signing key signature;
+12. per-Realm/TURN-pool key id and rotation;
+13. Publisher DNS length and normalization;
+14. the Actor store namespace accepts instance identity;
+15. the verifier's identity and signed `ActorAssurance`;
+16. observation of Actor spawn/call/stream/egress edges;
+17. a system protocol for `ActorStateDigest` / `ApplicationStateDigest` subscription and revocation propagation.
 
-### Must keep
+### Must be kept
 
-- `Dest::Peer(ActrId)` (a) Accurate location;
-- `ActrType + fingerprint` (a) Discovery;
-- Realm default-deny ACL;
+- `Dest::Peer(ActrId)` exact addressing;
+- `ActrType + fingerprint` discovery;
+- the Realm's default-deny connection ACL;
 - workload lifecycle hooks;
 - `.actr` verification;
 - WebRTC state/fast path.
 
-### Exit Conditions
+### Exit criteria
 
-- Same Service Re-starting,credential Extension,hard re-auth, signaling failover Back ID No change;
-- Realm It's a replacement. signaling endpoint;
-- ActorId reclaim Yes. key proof and conflict protection;
-- legacy ephemeral identity The path will not be taken Actrium Service Use;
-- Host It's practical. workload and Actor edge Generate Authenticable evidenceNo, no, no. Actor Can not hide the controlled side.
+- the same Service's ID stays unchanged across process restart, credential renewal, hard re-auth, and signaling failover;
+- a Realm can replace its signaling endpoint within the same Realm Infra Provider while the Realm name and ActorId stay unchanged;
+- ActorId reclaim has key proof and conflict protection;
+- the legacy ephemeral identity path is never used by an Actrium Service;
+- the Actr Host can generate verifiable evidence for actual workloads and Actor edges; a malicious Actor cannot hide a controlled call edge.
 
-## 5. P1-B: Publisher with package
+## 5. P1-B: Publisher and package
 
-### Delivery
+### Deliverables
 
 - Publisher Profile resolver;
-- well-known release resolver;
 - domain/IDNA normalizer;
 - key history/rotation store;
 - package digest pinning;
 - Actrium manifest extension;
-- Guest/contract/assets Inclusion `.actr` resource hash;
+- Guest/contract/assets folded into the `.actr` resource hash;
 - content-addressed cache;
 - zip safety policy;
 - Marketplace metadata adapter;
 - dev source adapter.
 
-### Actr package Changes
+### Actr package changes
 
-- manufacturer Allow Normative Publisher domain;
-- manifest Add Backwards Compatible `[actrium]` section;
-- verifier Output typed Actrium metadata;
-- binary Only support is allowed kind;
-- resource hash, lock and proto Maintain;
-- package signing key id Intercept Publisher Profile.
+- the publisher field accepts a normalized Publisher domain;
+- the manifest gains a backward-compatible `[actrium]` section;
+- the verifier outputs typed Actrium metadata;
+- the binary only allows a supported kind;
+- the resource hash, lock, and proto are kept;
+- the package signing key id ties into the Publisher Profile.
 
-### Exit Conditions
+### Exit criteria
 
-- coordinate From Publisher Download a valid field name `.actr`;
-- The same version of the variant is stabilized;
-- Offline caches can be re-verifiable;
-- package Can not replace folder: %s: No such folder Front Host.
+- a `.actr` can be downloaded and verified per the Realm Profile's `package`;
+- a mismatched package for the same version is reliably detected;
+- an offline cache can be re-verified;
+- the Front Host cannot be replaced from within a package.
 
-## 6. P2-A: Front Runtime with Keel
+## 6. P2-A: Front Runtime and Keel
 
 ### Actrium
 
-- Every Tab Front Actor manager;
+- a per-Tab Front Actor manager;
 - fixed linked/native workload;
 - verified Guest byte loader;
-- Keel Engine Clear create/pause/resume/destroy;
+- explicit Keel Engine create/pause/resume/destroy;
 - capability broker;
 - session guard;
 - resource accounting;
-- Front Privacy Evaluator with aggregate subscription;
-- crash page And diagnosis.
+- the Front Privacy Evaluator and aggregate subscription;
+- a crash page and diagnostics.
 
 ### Keel
 
-- Support Host From Authenticated bytes Loading;
+- support for the Actr Host loading from verified bytes;
 - fixed QuickJS provider config;
-- Make it real and validate it. Native QuickJS `JS_SetInterruptHandler`/deadline;
-- - Put it on. per-Guest heap limit Import runtimeand achieves credibility heap Diagnosis;
+- implement and verify a real Native QuickJS `JS_SetInterruptHandler`/deadline;
+- pass the per-Guest heap limit into the runtime, and implement trustworthy heap diagnostics;
 - strict bundle analysis;
 - eval/dynamic import violation;
 - capability manifest;
-- callback/timer/destroy Testing;
-- Safe Component schema Extension points;
-- Disables default hidden network components.
+- callback/timer/destroy tests;
+- a Safe Component schema extension point;
+- forbid implicit network components by default.
 
-### ActriumSafeComponents
+### Actrium Safe Components
 
-- View/Text/Scroll/Input/Button/List/Image (a) The minimum set;
+- a minimal set of View/Text/Scroll/Input/Button/List/Image, etc.;
 - props/event schema;
-- asset-only Image Default;
+- asset-only Image by default;
 - type-safe RemoteRef;
 - render op quota;
 - accessibility.
 
-### Exit Conditions
+### Exit criteria
 
-- Malicious. Guest Cannot initialise Evolution's mail component. fetch/fs/arbitrary actor;
-- Real Native QuickJS "Infinite cycle,heap Overstretch.render bomb List Tab(b) Segregation;
-- Close/Reconstruction 10,000 None callback/capability Cross Tab Leakage;
-- Security file is accurately marked as same-process sandbox;
-- Front It is possible to position and draw conclusions in a strategic manner, and no nodes are shown green when they are unknown or cut in the ground.
+- a malicious Guest cannot obtain fetch/fs/arbitrary actor;
+- under real Native QuickJS, an infinite loop, heap overrun, or render bomb is isolated to a single Tab;
+- 10,000 close/rebuild cycles produce no callback/capability leak across Tabs;
+- security copy accurately labels this a same-process sandbox;
+- the Front can locate the rootless graph per policy and aggregate a conclusion; it never shows green while any node is unknown or the cut is not Ready.
 
-## 7. P2-B: Service Manager with Workspace
+## 7. P2-B: Service Manager and Workspace
 
-### Delivery
+### Deliverables
 
 - durable creation intent;
 - Service Inventory store;
@@ -210,191 +209,194 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - exclusive writer lease;
 - stop/start/archive/trash/restore/purge;
 - snapshot/restore;
-- local Realm;
+- the local pseudo-domain `<installation-id>.actr.alt` and one local Realm per instance;
 - platform runtime adapters;
 - Service subtree privacy aggregate;
 - Actor/terminal egress evidence.
 
-### Exit Conditions
+### Exit criteria
 
-- Multiple in Same Type Service (a) Full isolation;
-- Restart same ActorId;
-- The same wastebin is available ActorId Recover it. Clear it completely. Workspace;
-- Create Any Stage crash (a) Not repeat;
-- Mobile Platform suspended (a) The state is extenuating;
-- Required Auxiliary Actor Undo can spread to Front aggregate and stop the data path.
+- multiple Services of the same type are fully isolated;
+- restart keeps the same ActorId;
+- Trash can restore with the same ActorId; purging never deletes the Workspace;
+- a crash at any stage of creation does not duplicate it;
+- the suspended state on mobile platforms is explainable;
+- revoking a required Actor within the Realm propagates to the Front aggregate and blocks the related data path.
 
-## 8. P3-A: Shell, URI and management
+## 8. P3-A: Shell, URI, and management surfaces
 
-### Delivery
+### Deliverables
 
 - address bar parser/formatter;
 - Create/Attach confirmation;
-- After Create replace URI;
+- replace the URI after creation;
 - Program Catalog;
 - Service Inventory;
-- Template Collection/(a) Case collection;
-- History and session restore;
-- (a) Security information panels;
-- Address Bar Green / Yellow / Red and weakest / Details of exports;
-- (a) Competence centres;
-- (a) The error page;
-- External scheme handler;
+- program-template favorites/instance favorites;
+- history and session restore;
+- the security information panel;
+- the address bar's green/yellow/red plus weakest-item/egress detail;
+- the permission center;
+- error pages;
+- the external scheme handler;
 - developer mode.
 
-### Exit Conditions
+### Exit criteria
 
-- Create with Attach (a) There is no hidden branch of the act;
-- All failures have stabilization errors and recovery actions;
-- Repeat this machine. Service Focus;
-- Refresh/Back/Crash (a) Do not duplicate creations;
-- Address Bar Only `Ready` And the conclusion is green to show green and to position the weakest.
+- Create and Attach behavior has no implicit branches;
+- every failure has a stable error and a recovery action;
+- a duplicate local Service focuses the existing one;
+- Refresh/Back/Crash never duplicate creation;
+- the address bar shows green only when `Ready` and the conclusion is green, and it can locate the weakest item.
 
-## 9. P3-B: Networking Realm With Far Attach
+## 9. P3-B: Networked Realms and remote Attach
 
-### Delivery
+### Deliverables
 
-- Realm onboarding;
-- membership;
-- signaling Provider failover;
+- domain trust and creating a networked Realm per instance;
+- joining an instance's Realm via a Realm invitation and obtaining Realm membership;
+- signaling Realm Infra Provider failover;
 - P2P/TURN;
-- From Description ActorId Parsing portable URI Realm;
+- resolving the Realm name from the Realm link and obtaining the Realm Profile;
 - Actor/peer handshake;
 - Attach challenge;
 - exclusive lease/takeover;
-- offline/suspended/denied (a) Status;
-- Metadata privacy UI.
+- offline/suspended/denied states;
+- metadata privacy UI.
 
-### Exit Conditions
+### Exit criteria
 
-- Open the same across devices URI Exactly the same. Service;
-- No authority to know. ActorId (a) Connection;
-- signaling We can't pretend to be Actor;
-- TURN Use short-term credential;
-- Provider failover No, I'm not. ActorId.
+- opening the same URI across devices lands precisely on the same Service;
+- knowing the ActorId alone, without permission, cannot establish a connection;
+- signaling cannot impersonate an Actor;
+- TURN uses a short-lived credential;
+- Realm Infra Provider failover never changes the ActorId.
 
-## 10. P4: Hardening with Public Beta
+## 10. P4: Hardening and public beta
 
-### Clear.
+### Security
 
 - parser/bridge/package fuzz;
-- Third-party penetration tests;
+- third-party penetration testing;
 - SBOM/provenance;
 - emergency revoke;
 - key compromise dkeel;
 - Workspace deletion/recovery dkeel;
 - signaling/TURN metadata review;
-- security graph spoofingELECTRONIC, COMPLETE AND stale evidence review.
+- security graph spoofing, omission, cycle, over-limit, and stale evidence review.
 
 ### Stability
 
-- (a) Fault injection;
-- Power outages./Disk fill;
-- Network switching;
-- Move Side suspend/kill;
+- fault injection;
+- power loss/disk full;
+- network switchover;
+- suspend/kill on mobile;
 - package cache corruption;
-- Realm key rotation;
-- Large Tab/Service;
-- Long time. lease;
-- Migration/Roll back;
-- More Host Untransmitted, mixed snapshot rejections and optional dependency Segregation.
+- Realm signing key and Realm issuer key rotation;
+- large-scale Tab/Service counts;
+- long-lived leases;
+- migration/rollback;
+- revocation propagation across multiple Actr Hosts, rejection of mixed snapshots, and isolation of optional dependencies.
 
-### Products
+### Product
 
-- (a) Accessibility;
-- (a) Internationalization;
-- Support/Diagnostic export;
-- (a) Privacy policy;
-- Marketplace (a) The audit process;
-- Enterprise strategy.
+- accessibility;
+- internationalization;
+- support/diagnostic export;
+- privacy policy;
+- the Marketplace review process;
+- enterprise policy.
 
-## 11. The current relocation boundary of warehouses
+## 11. Migration boundary for the current repository
 
-Ben. PRD No requirement to retain existing Actr/AppSession/URL Behavior, but recommend re-use of mature mechanisms:
+This PRD does not require preserving the existing Actr/AppSession/URL behavior, but recommends reusing mature mechanisms:
 
-| Current Area | Objective |
+| Current area | Target |
 |---|---|
-| `packages/actrium` | Split Tab Runtime Manager, Front Host & With System UI |
-| `packages/keel` | As upstream dependency/Synchronization package, fill strict Guest Security capabilities |
-| `packages/browser-model` | Fall Program/Service/Tab/Realm Shared Model |
-| `packages/runtime-host` | Fall Front Runtime with capability broker |
-| `packages/app-sdk` | Just face it. Keel Guest Public API |
-| `crates/actrium-core` | URIand the role of thepackage/realm modelThe rule of durability |
-| `schemas/` | URI, manifest, session, service, workspace contract |
+| `packages/actrium` | Split out the Tab Runtime Manager, Front Host, and system UI |
+| `packages/keel` | Serve as an upstream dependency/sync package; add strict Guest security capabilities |
+| `packages/actrium-browser-model` | Land the shared Program/Service/Tab/Realm model |
+| `packages/actrium-runtime-host` | Land the Front Runtime and the capability broker |
+| `packages/actrium-app-sdk` | Land the public API aimed only at Keel Guest |
+| `crates/actrium-core` | URI, normalization, the package/realm model, durable-state rules |
+| `contracts/` | URI, manifest, session, service, workspace contracts |
 | platform apps | Shell, OS lifecycle, secure storage, helper process |
 
-History `.actr` URLFar away. app API And many Tab legacy runtime:
+The historical `.actr` URL, remote app API, and multi-Tab legacy runtime:
 
-- Provides one-time import/(b) Migration tools;
-- (b) Not entering new public models;
-- Do not continue to expand the two tracks API;
-- Migration period UI Clear Tag legacy;
-- And finally, Program Release + Service ActorReplace.
+- may get a one-time import/migration tool;
+- do not enter the new public model;
+- the dual-track API is not extended further;
+- the UI clearly marks legacy items during migration;
+- and are ultimately replaced by Program Release + Service.
 
 ## 12. Risk list
 
-| Risk | Severity | Response |
+| Risk | Severity | Mitigation |
 |---|---|---|
-| ActrId It's not stable. | Block | P1 Change of identity; no publication Attach URI |
-| iOS Local backstage is unsustainable | High | Clearing the front-office commitments; remote host;suspended Status |
-| Keel same-process sandbox Run away. | High | fixed QuickJS,Minus TCB, fuzz;planning helper process |
-| Publisher domain Transferred | High | key history, digest pin, a hint of change in identity |
-| Service WASM Inadequate capacity | High | capability broker with ABIMake the smallest ring. |
-| Workspace Overwrite damage | High | v1 exclusive writer |
-| URI Create Abused | Medium | Confirm, tweak, etc., restricted flow, quota |
-| Realm/Provider Overcentre | Medium | profile Delegation of authority, many ProviderSelf-custodial |
-| Packing format extension fork | Medium | Direct Extension `.actr`No, no, no, no, no, no, no. |
-| Multiplatform Host Behavioural drift | Medium |Share schema/golden tests, fixed sandbox |
-| Version/ActorType Upgrade Complex | Medium | v1 Remarkable new Actor Migration |
-| Marketplace Mistaked as trust. | Medium | UI And separate the identity from the agreement./Audit |
-| Actor Self-reported, undiscovered or concealed downstream. | High | Host Closed valid declaration and discovery; self-reporting only declarations; prohibition of self-signature final conclusions |
-| The change in privacy chart dynamics led to brief green misreporting | High | Change is hung up, not Ready No greens, no old data. |
-| Large/Circulation caused DoS | Medium | No-go-connected weight, no-node limit, no-node limit, no-node minimum, no-node minimum, no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no. |
-| Native Capsule Platform Semantic Float | High | Fixed conformance profile;absorption missing fail closed Or keep unknown |
+| ActorId cannot be made stable | Blocking | Fix identity first in P1; do not ship cross-device open |
+| iOS local background is not sustainable | High | Commit explicitly to foreground; use a remote host; suspended state |
+| Keel same-process sandbox escape | High | Fixed QuickJS, minimal TCB, fuzzing; plan a helper process |
+| Publisher domain transfer | High | Key history, digest pin, identity-change prompt |
+| Service WASM capability is insufficient | High | Build the capability broker and ABI as a minimal closed loop first |
+| Workspace corruption from multiple writers | High | v1 exclusive writer |
+| Create instance is abused | Medium | Confirmation, idempotency, rate limiting, quotas |
+| Realm Infra Provider is over-centralized | Medium | Realm Profile delegation, multiple Realm Infra Providers, self-hosting |
+| Package format extension forks | Medium | Extend `.actr` directly; do not nest a second package layer |
+| Host behavior drifts across platforms | Medium | Shared schema/golden tests, fixed sandbox |
+| Version/Actor type upgrades are complex | Medium | v1 uses explicit new-Actor migration |
+| Marketplace is mistaken for a trust root | Medium | UI and protocol separate identity from review |
+| Actor self-reports leak or conceal downstream effects | High | The Actr Host closes the effective declaration and discovers inbound edges; a self-report is only a declaration; self-signed final conclusions are forbidden |
+| Dynamic changes to the privacy graph cause a brief false green | High | Suspend on change, never show green before Ready, generation gating blocks stale data |
+| Large graphs/cycles cause DoS | Medium | Dedupe undirected connected components, cap nodes/edges, incremental weakest-item aggregation; never green over the limit |
+| Native Capsule platform semantics drift | High | Fix a conformance profile; missing constraints fail closed or stay unknown |
 
-## 13. Matters requiring continued decision-making without blocking product models
+## 13. Matters left to implementation decisions that do not block the product model
 
-Here's what I can do. P0/P1 ADR , do not change the core semantic of this text:
+The following can be decided in a P0/P1 ADR without changing this document's core semantics:
 
-- ActorId authority ♪ And in the end ♪ binary/text (a) Encoding;
-- Publisher offline root It's... Marketplace/(b) Compulsory enterprise ranking;
-- Service WASM Host API Use WIT Specific versions;
-- Front–ServiceOperations contract From Proto How to generate Keel TS schema;
-- helper process The order in which the platform is implemented;
-- Local Realm ID (a) The distribution format;
-- snapshot envelope The specific coding and the version are negotiated;
-- Marketplace Transparent log providers;
-- Private enterprise CA The strategy format for the project;
-- `ActorAssurance` Remote certification format and platform attestation provider;
-- privacy evidence root Specific coding and cache strategies;
-- Native Capsule Yes. Windows/Linux/macOS/Android Minimum conformance profile.
+- the final binary/text encoding of ActorId authority;
+- the Marketplace/enterprise enforcement tier of the Publisher offline root;
+- the specific WIT version used by the Service WASM Host API;
+- how the Front–Service business contract generates the Keel TS schema from Proto;
+- the platform implementation order for the helper process;
+- the auto-generation format for a local Realm's RealmId;
+- the specific encoding and version negotiation for the snapshot envelope;
+- the Marketplace transparency-log provider;
+- the policy format for an enterprise private CA;
+- the remote attestation format for `ActorAssurance` and the platform attestation provider;
+- the specific encoding and caching strategy for the privacy evidence root;
+- the minimum conformance profile for Native Capsule on Windows/Linux/macOS/Android.
 
-The following is no longer an open question:
+The following are no longer open questions:
 
-- Use ActorId (a) Accurate connection: Yes;
-- Is it for you? stateful Service Do it. LB: No;
-- Workspace Whether or not the Service Binding: Yes;
-- Publisher Domain names: Yes;
-- Front Publisher Can you write it? Host: No;
-- None service Created or not: Yes;
-- Yes. service Failure to create alternative: No;
-- Marketplace Name authority: No;
-- Is the letter...“Powerlessness”: No;
-- Realm Whether to bind to a physical order: No.
+- whether to connect by exact ActorId: yes;
+- whether to load-balance a stateful Service: no;
+- whether the Workspace is bound by the Service: yes;
+- whether Publisher uses a domain name: yes;
+- whether a Front Publisher can write to the Actr Host: no;
+- whether a link triggers creation: no, creating an instance is a local Actrium operation;
+- whether a failed instance open creates a substitute: no;
+- whether Marketplace is a naming authority: no;
+- whether signaling is "powerless": no;
+- whether a Realm is bound one-to-one to a physical signaling server: no;
+- whether a Realm corresponds to an application instance: yes, creating an instance always creates a new Realm;
+- whether one Realm Infra Provider hosts multiple Realms: yes.
 
-## 14. Min. & Quantification
+## 14. Minimum vertical slice
 
-The first can show that the incision is only done:
+The first demonstrable vertical slice does only:
 
 1. macOS;
-2. local Realm;
-3. An autograph. `.actr` WASM Service;
-4. One in the bag. Keel JS Guest;
+2. a local Realm;
+3. one signed `.actr` WASM Service;
+4. one Keel JS Guest inside the package;
 5. managed Workspace;
-6. None `service` (a) Create;
-7. URI Rewriting;
-8. Close/same after restart ActorIdRehabilitation;
+6. creating an instance from a local package;
+7. the address bar shows the Realm link;
+8. the same ActorId recovers after close/restart;
 9. fixed QuickJS;
-10. Open only PrimaryService RPC.
+10. only the Service RPC is exposed.
 
-Once this is established, the successor platform and network is expanded on the stabilization model rather than continuing to explore the relationship.
+Once this slice holds, later platforms and networking extend a stable model instead of continuing to probe object relationships.
+</content>

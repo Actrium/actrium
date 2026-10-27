@@ -26,7 +26,7 @@
 - ✅ 兼容性缓存单元测试（5 个测试）
 - ✅ 地理距离计算测试（5 个测试）
 - ✅ Presence 管理测试（5 个测试）
-- ✅ AIS 客户端配置测试（2 个测试）
+- ✅ Issuer 客户端配置测试（2 个测试）
 
 #### ⏳ 待实施（P1）
 - 完整的 WebSocket 集成测试
@@ -60,8 +60,8 @@
 // 客户端发送
 SignalingEnvelope {
     flow: PeerToSignaling(RegisterRequest {
-        actr_type: ActrType { manufacturer, name, version },
-        realm: Realm { realm_id },
+        actr_type: ActrType { publisher, name, version },
+        realm,  // Realm 名
         service_spec: Option,
         acl: Option,
     })
@@ -88,7 +88,7 @@ SignalingEnvelope {
 - ⏳ Credential 验证（如果启用）
 - ⏳ 注销清理
 
-**实现复杂度**: 高（需要 AIS 集成或 mock）
+**实现复杂度**: 高（需要 Issuer 集成或 mock）
 
 ---
 
@@ -174,7 +174,7 @@ DiscoveryResponse {
 ```
 
 **测试点**:
-- ⏳ 服务注册到 ServiceRegistry
+- ⏳ 服务注册到 ActorRegistry
 - ⏳ 服务发现查询
 - ⏳ 过期服务清理
 
@@ -236,7 +236,7 @@ cargo fmt --check -p signaling
 
 2. **服务注册表测试** (可独立测试)
    ```rust
-   // crates/signaling/src/service_registry.rs
+   // crates/signaling/src/actor_registry.rs
    #[cfg(test)]
    mod tests {
        #[test]
@@ -291,7 +291,7 @@ tokio-tungstenite = "0.27"  # WebSocket 客户端
    - 创建测试辅助工具
 
 6. ⏳ **添加 Actor 注册流程测试** (4-8 小时)
-   - Mock AIS 客户端
+   - Mock Issuer 客户端
    - 或使用测试 Token
 
 7. ⏳ **添加心跳和信令中继测试** (4-6 小时)
@@ -319,7 +319,7 @@ cargo test -p signaling --lib
 
 # 运行特定模块的测试
 cargo test -p signaling --lib load_balancer::tests
-cargo test -p signaling --lib service_registry::tests
+cargo test -p signaling --lib actor_registry::tests
 cargo test -p signaling --lib compatibility_cache::tests
 
 # 格式和 Clippy
@@ -332,11 +332,11 @@ cargo clippy -p signaling
 | 模块 | 测试数 | 说明 |
 |------|--------|------|
 | load_balancer | 23 | 负载均衡算法（排序、过滤、兼容性评分） |
-| service_registry | 14 | 服务注册、发现、注销、状态管理 |
+| actor_registry | 14 | 服务注册、发现、注销、状态管理 |
 | compatibility_cache | 5 | 兼容性缓存操作和过期清理 |
 | geo | 5 | Haversine 距离计算 |
 | presence | 5 | Presence 订阅和统计 |
-| ais_client | 2 | AIS 客户端配置 |
+| issuer_client | 2 | Issuer 客户端配置 |
 | **总计** | **54** | **全部通过** |
 
 ### 未来的集成测试
@@ -387,14 +387,14 @@ cargo test -p signaling test_websocket_connection
 
 在测试过程中发现以下实现问题（不影响 P0 部署，但建议后续修复）：
 
-1. **ServiceRegistry 消息类型索引重复问题**:
-   - 位置: `service_registry.rs:168-172`
+1. **ActorRegistry 消息类型索引重复问题**:
+   - 位置: `actor_registry.rs:168-172`
    - 问题: 每次注册服务时会重复 push 服务名到 `message_type_index`，即使服务名已存在
    - 影响: `get_message_type_stats()` 返回的数量可能不准确
    - 建议: 添加去重逻辑或使用 HashSet
 
 2. **unregister_service 错误处理不一致**:
-   - 位置: `service_registry.rs:408-452`
+   - 位置: `actor_registry.rs:408-452`
    - 问题: 注销不存在的服务名返回 `Ok(())`，只有服务名存在但 actor_id 不匹配时才返回 `Err`
    - 影响: 错误情况下返回成功，可能导致调用方误判
    - 建议: 统一错误处理逻辑

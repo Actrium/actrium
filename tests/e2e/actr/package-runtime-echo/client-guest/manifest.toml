@@ -1,6 +1,8 @@
 [package]
 name = "pkg-runtime-echo-client-guest"
-manufacturer = "actrium"
+# Non-dotted on purpose: a realm consumer registers linked (Realm client key), and
+# Issuer-01 reserves DNS-style publisher names for verified publishers.
+publisher = "e2e-actrium-local"
 version = "0.1.0"
 description = "Package Runtime Echo Client Guest"
 authors = ["Actr Dev Team"]
@@ -9,4 +11,4 @@ tags = ["dev", "example", "client-guest"]
 exports = []
 
 [dependencies]
-EchoService = { actr_type = "actrium:EchoService:1.0.0" }
+EchoService = { actr_type = "e2e.actrium.test/EchoService@1.0.0" }

@@ -18,7 +18,7 @@
 2. **相对可靠**（Thm 7）。若 A1–A13 成立，且快照当前、图就绪，绿色足以推出：当前不存在可执行的模型内泄漏。绿色只保证这次就绪切面，不保证曾经存在一个全图同时世界，也不否定历史上已经发生的泄漏。
 3. **弱项不可抵消**（Thm 3–6、A13）。未受控必红；无红而有未知必黄。增加节点、风险接受、数据输入授权都不能把弱项洗绿。同一评定上下文的多份结论取最弱项。
 4. **图外 Actor 出口不能靠纳图偷绿**（Thm 8）。跨 Principal 或无效依赖的 `Transfer(Actor(_))` 不入图，且不得判 `CONTROLLED`。
-5. **状态、世代与执行隔离**（Thm 10–14、18）。`ActorStateId` 变化后，旧通道、旧 Capability、旧结论失效；单调修订号保证内容回滚也不复活旧权力；挂起期间不得产生新的应用 `Transfer`／`Retain`；旧数据不能走新出口；信箱按当前声明与取得世代声明的交集执行。
+5. **状态、世代与执行隔离**（Thm 10–14、18）。`ActorStateDigest` 变化后，旧通道、旧 Actor Grant、旧结论失效；单调修订号保证内容回滚也不复活旧权力；挂起期间不得产生新的应用 `Transfer`／`Retain`；旧数据不能走新出口；信箱按当前声明与取得世代声明的交集执行。
 6. **发布抗拼接**（Thm 9、15、19）。混合快照不能成为可接受的 `ApplicationAssurance`；叶子必须同时绑定 Actor、状态和节点结论；`EncGraph` 对带标签图单射。
 7. **不需要全图分布式提交**（Thm 12 推论、Imp 1、Thm 20）。本地原子废除旧权力即可保证安全；未依赖变化节点的成员可以局部继续。
 8. **失联与撤销有可证上界**（Imp 2–3、Thm 16、21）。最高保障必须本地收口；期限相对本地不可回拨时钟。完全离线最迟到 `expiresAt`。授权不可自行扩大见 Thm 17。
@@ -47,7 +47,7 @@ $$
 | 机械化 | 三值格、图划分、Merkle、判断、跨 Principal、颜色独立、绿色相对安全 | [proof/theory.py](proof/theory.py) 有限完全判定；[proof/z3_theory.py](proof/z3_theory.py) SMT 量词证明（守卫取自共享定义；部分条目为定义一致性锁定，非独立证明） |
 | 有界 STS | Change／Attest／Resume／Publish；n≤2 可达状态；另含数据世代、对抗性本地时钟、回滚复活专用穷举 | [proof/sts.py](proof/sts.py)，n=2 时 14,400 态；旧快照不被全局抹除，由 Ready 指针核对拒绝；触及状态上限即失败 |
 | 握手穷举 | 联合 transcript 认证下的身份／状态绑定、重放与两侧一致性（双侧独立视图） | [proof/channel.py](proof/channel.py)，7,056 条迹 |
-| 回归 | 对象绑定、证据、Capability、挂起、回滚、编码字符集 | [check_formal_model.py](check_formal_model.py) |
+| 回归 | 对象绑定、证据、Actor Grant、挂起、回滚、编码字符集 | [check_formal_model.py](check_formal_model.py) |
 | 变异回归 | 把守卫换成已知坏定义，断言对应检查器必须报警（防「守卫即模型」空洞） | [proof/mutants.py](proof/mutants.py)，8 个变异体 |
 | 公理 | 完整中介、计算密码学、证据覆盖现实、可信时间、完整发现 | A1–A13，见缺陷表 |
 | 未做 | Lean／Tamarin 无界归纳与计算密码归约；实现符合性 | §22 |
@@ -91,7 +91,7 @@ sid_a(t)=H(
 )
 $$
 
-四个子指纹分别是软件包、实例配置、有效能力声明和宿主环境。\(rev_a\) 是状态权威维护的单调递增修订号：每次 Change 严格加一，永不回退。因此**内容回滚不复现旧 \(sid\)**——把配置改回旧值得到的是携带新修订号的新状态，绑定旧 \(sid\) 的 Capability、通道与 `ActorAssurance` 不会复活（Thm 10）。证据、策略和评定结果不属于 \(s_a\)。
+四个子指纹分别是软件包、实例配置、有效能力声明和宿主环境。\(rev_a\) 是状态权威维护的单调递增修订号：每次 Change 严格加一，永不回退。因此**内容回滚不复现旧 \(sid\)**——把配置改回旧值得到的是携带新修订号的新状态，绑定旧 \(sid\) 的 Actor Grant、通道与 `ActorAssurance` 不会复活（Thm 10）。证据、策略和评定结果不属于 \(s_a\)。
 
 ### 2.3 隐私效果
 
@@ -341,10 +341,10 @@ EncGraph(G)=\;&\mathsf{JSON}\bigl[
 $$
 
 $$
-structureId(G)=H(\mathsf{actrium/structure/v1},EncGraph(G))
+structureDigest(G)=H(\mathsf{actrium/structure/v1},EncGraph(G))
 $$
 
-节点集、边集或 Principal 任一不同，则编码字节不同（Thm 19）。输入顺序、空白或对象键序不得改变摘要。依赖增删会改变 \(structureId\)，除非发生哈希碰撞（A4）。
+节点集、边集或 Principal 任一不同，则编码字节不同（Thm 19）。输入顺序、空白或对象键序不得改变摘要。依赖增删会改变 \(structureDigest\)，除非发生哈希碰撞（A4）。
 
 进入 \(EncGraph\) 的 `ActorId` 与 `PrincipalId` 必须落在受限 ASCII 字符集 `[a-z0-9._:-]`（推荐：指纹的小写十六进制），超出即拒绝编码。这消除 JSON 字符串转义与 Unicode 归一化在跨语言实现间的歧义空间。
 
@@ -381,7 +381,7 @@ $$
 $$
 appid=H(
   \mathsf{actrium/application\text{-}state/v1},
-  structureId(G),
+  structureDigest(G),
   principal(G),
   MerkleRoot(L)
 )
@@ -424,7 +424,7 @@ $$
 
 ### A3　状态权威唯一且原子
 
-每个 Actor 在一个修订期内只有一个可认证状态权威。它可以原子切换当前 `ActorStateId`，并同步让旧状态的密钥、通道和受保护动作失效。
+每个 Actor 在一个修订期内只有一个可认证状态权威。它可以原子切换当前 `ActorStateDigest`，并同步让旧状态的密钥、通道和受保护动作失效。
 
 ### A4　内容寻址和签名安全
 
@@ -432,7 +432,7 @@ $$
 
 ### A5　有效 Actr 通道
 
-Actor-to-Actor 应用数据仅通过满足端到端机密性、完整性、双方 `ActorId + ActorStateId` 绑定和重放防护的通道传输。
+Actor-to-Actor 应用数据仅通过满足端到端机密性、完整性、双方 `ActorId + ActorStateDigest` 绑定和重放防护的通道传输。
 
 ### A6　证据可靠性
 
@@ -454,7 +454,7 @@ Actor-to-Actor 应用数据仅通过满足端到端机密性、完整性、双�
 
 ### A10　依赖方复验
 
-持有 `ApplicationAssurance` 不等于可以跳过核验。使用方必须检查签名、验证者当前信任、每个相关 `ActorStateId` 是否仍为当前值，以及用**本方**本地时钟核对 `not_after`。
+持有 `ApplicationAssurance` 不等于可以跳过核验。使用方必须检查签名、验证者当前信任、每个相关 `ActorStateDigest` 是否仍为当前值，以及用**本方**本地时钟核对 `not_after`。
 
 ### A11　验证者不是被评估者
 
@@ -518,7 +518,7 @@ $$
 前置：
 
 1. 若 \(op\in Protected\)，则 \(gate_a=ACTIVE\)、\(now_a<T^{max}_a\)、当前密钥属于 \(sid_a\)；
-2. 若 \(op\in Protected\)，则 Capability 通过 §18 的验证（时间窗口用 \(now_a\)）；
+2. 若 \(op\in Protected\)，则 Actor Grant 通过 §18 的验证（时间窗口用 \(now_a\)）；
 3. 若 \(op\) 作用于数据 \(d\)，则效果属于 \(\operatorname{Allowed}(a,d)\)；新产生或新接收的数据 \(\operatorname{gen}(d)=s_a\)，因而退化为当前声明；
 4. 若 \(op=Transfer(Actor(b))\)，则 \(gate_b=ACTIVE\) 且 \(ValidDependency(a,b)\)；
 5. 若存在 \(c\) 使 \(gate_c=SUSPENDED\) 且 \(\operatorname{Depends}(a,c)\)，则禁止 \(Protected\)；
@@ -575,7 +575,7 @@ $$
 Tick_a:\quad now_a:=now_a+\delta\quad(\delta>0)
 $$
 
-禁止减小 \(now_a\)。没有全局 \(now\)。Capability 与 \(T^{max}\) 只和执行方的 \(now_a\) 比较。
+禁止减小 \(now_a\)。没有全局 \(now\)。Actor Grant 与 \(T^{max}\) 只和执行方的 \(now_a\) 比较。
 
 ## 8. 自洽性
 
@@ -704,7 +704,7 @@ A6 把「用户信错主体」保留为相对前提：\(Green=Green(\vec s,\Gamm
 
 ### Lem 4　成员绑定
 
-给定 `ApplicationAssurance + ActorId + ActorStateId + ActorAssurance + MerkleProof`，验证者能确认该叶子被 `appid` 承诺。替换任一项要求伪造签名或找到碰撞。
+给定 `ApplicationAssurance + ActorId + ActorStateDigest + ActorAssurance + MerkleProof`，验证者能确认该叶子被 `appid` 承诺。替换任一项要求伪造签名或找到碰撞。
 
 **证明：** 叶子绑定三项；路径绑定叶子到 `MerkleRoot`；`appid` 再绑定结构、Principal 和该根；`APPA` 签在 `appid` 上。证毕。
 
@@ -716,15 +716,15 @@ A6 把「用户信错主体」保留为相对前提：\(Green=Green(\vec s,\Gamm
 
 ## 13. 状态变化、挂起与信箱
 
-### Thm 10　旧 Capability 自动不匹配
+### Thm 10　旧 Actor Grant 自动不匹配
 
-Capability 绑定 \((ActorId,sid(s))\)。变化后 \(sid(s')\neq sid(s)\)，相等检查失败。
+Actor Grant 绑定 \((ActorId,sid(s))\)。变化后 \(sid(s')\neq sid(s)\)，相等检查失败。
 
-因为修订号 \(rev_a\) 参与 \(sid\) 且单调递增，本定理**不依赖「状态不回访」**：把配置内容改回旧值得到的仍是新 \(sid\)，历史上签发的 Capability 不因内容回滚而复活（回滚穷举见 [proof/sts.py](proof/sts.py) 的 rollback 模型，回归见 `verify_rollback_revision`）。撤销语义因此是持久的：一旦 Change，绑定旧 \(sid\) 的权力在该实例的余下生命周期内永久不匹配，除非签发者对新状态另行签发。
+因为修订号 \(rev_a\) 参与 \(sid\) 且单调递增，本定理**不依赖「状态不回访」**：把配置内容改回旧值得到的仍是新 \(sid\)，历史上签发的 Actor Grant 不因内容回滚而复活（回滚穷举见 [proof/sts.py](proof/sts.py) 的 rollback 模型，回归见 `verify_rollback_revision`）。撤销语义因此是持久的：一旦 Change，绑定旧 \(sid\) 的权力在该实例的余下生命周期内永久不匹配，除非签发者对新状态另行签发。
 
 ### Thm 11　旧通道不能承载新状态应用数据
 
-**Prop**（A3 ∧ A5）。握手绑定双方当前 `ActorStateId`。状态权威废除旧会话密钥后，旧通道不能被当前状态合法使用。
+**Prop**（A3 ∧ A5）。握手绑定双方当前 `ActorStateDigest`。状态权威废除旧会话密钥后，旧通道不能被当前状态合法使用。
 
 只把状态 ID 写进握手、却允许 Workload 继续使用旧私钥，不足以证明本定理。
 
@@ -746,7 +746,7 @@ $$
 \neg Exec(a,Retain)
 $$
 
-即使攻击者持有绑定新 \(sid_a\) 的 Capability，也不得在挂起期间对应用数据产生这两类效果。`attest`／`exit` 可以发生。
+即使攻击者持有绑定新 \(sid_a\) 的 Actor Grant，也不得在挂起期间对应用数据产生这两类效果。`attest`／`exit` 可以发生。
 
 **证明：** 由 Exec 前置 1。证毕。
 
@@ -760,7 +760,7 @@ $$
 \operatorname{Allowed}(a,d)=T(a,s_{\mathrm{now}})\cap T(a,\operatorname{gen}(d))
 $$
 
-新产生或新接收的数据 \(\operatorname{gen}(d)=s_{\mathrm{now}}\)，交集退化为当前声明。\(Exec\) 还检查当前 \(sid_a\)、当前 Capability、当前 \(gate_a\)、本地 \(now_a<T^{max}_a\)，以及依赖方是否挂起。
+新产生或新接收的数据 \(\operatorname{gen}(d)=s_{\mathrm{now}}\)，交集退化为当前声明。\(Exec\) 还检查当前 \(sid_a\)、当前 Actor Grant、当前 \(gate_a\)、本地 \(now_a<T^{max}_a\)，以及依赖方是否挂起。
 
 因此：旧消息不能用已删除的旧出口（当前声明已去掉）；旧数据也不能用状态变化后新出现的出口（Thm 18）；挂起期间仍失败（Thm 13）；重试必须重新走 Exec。
 
@@ -797,7 +797,7 @@ $$
 \neg Exec\bigl(a,\operatorname{Transfer}_e(d)\bigr)
 $$
 
-即使 Resume 之后 \(gate_a=ACTIVE\) 且存在绑定新 \(sid_a\) 的 Capability。
+即使 Resume 之后 \(gate_a=ACTIVE\) 且存在绑定新 \(sid_a\) 的 Actor Grant。
 
 **证明：** Exec 前置 3 要求 \(e\in T\cap T'\)。\(e\notin T\)。证毕。
 
@@ -805,7 +805,7 @@ $$
 
 ### Thm 19　\(EncGraph\) 对带标签图单射
 
-设 \(G,G'\) 的 Principal、节点 `ActorId` 集合或有向有效依赖边集合任一不同。则 \(EncGraph(G)\neq EncGraph(G')\)。因而在 A4 下 \(structureId(G)=structureId(G')\) 只可能来自哈希碰撞。
+设 \(G,G'\) 的 Principal、节点 `ActorId` 集合或有向有效依赖边集合任一不同。则 \(EncGraph(G)\neq EncGraph(G')\)。因而在 A4 下 \(structureDigest(G)=structureDigest(G')\) 只可能来自哈希碰撞。
 
 **证明：** 编码是排序后的节点表与边表的规范 JSON。集合不同则序列不同，UTF-8 字节不同。证毕。
 
@@ -899,7 +899,7 @@ $$
 (id_A,sid_A,ephk_A,id_B,sid_B,ephk_B,session)
 $$
 
-而不是只认证单方 Hello。只签本方字段时，旧 `sid` 问候可被信令重放（缺陷 F-CHAN-01）。双方都接受后，各自看到的对端必须是对方当前 `ActorId + ActorStateId`，且两侧的联合 transcript 必须一致。有界 Dolev-Yao 穷举见 [proof/channel.py](proof/channel.py)：A、B 两侧视图独立枚举，攻击者语料含旧会话真实 MAC 与伪造 MAC，「接受即当前、两侧一致」是被检验的结论而非建模前提；单方 MAC 的坏定义由变异回归证明可被检出。该穷举仍是单会话对、符号模型，不替代 Tamarin／ProVerif。
+而不是只认证单方 Hello。只签本方字段时，旧 `sid` 问候可被信令重放（缺陷 F-CHAN-01）。双方都接受后，各自看到的对端必须是对方当前 `ActorId + ActorStateDigest`，且两侧的联合 transcript 必须一致。有界 Dolev-Yao 穷举见 [proof/channel.py](proof/channel.py)：A、B 两侧视图独立枚举，攻击者语料含旧会话真实 MAC 与伪造 MAC，「接受即当前、两侧一致」是被检验的结论而非建模前提；单方 MAC 的坏定义由变异回归证明可被检出。该穷举仍是单会话对、符号模型，不替代 Tamarin／ProVerif。
 
 ### Prop 3　重放
 
@@ -914,7 +914,7 @@ $$
 ## 18. 授权
 
 $$
-C=Sign_I(ActorId,ActorStateId,Scope,notBefore,expiresAt,credId)
+C=Sign_I(ActorId,ActorStateDigest,Scope,notBefore,expiresAt,credId)
 $$
 
 接受当且仅当：
@@ -933,7 +933,7 @@ $$
 
 ### Thm 17　Actor 不能自行扩大权力
 
-V1 禁止转授权。不持有签发者密钥的 Actor 不能制造更大 Scope、不同 ActorId、不同 ActorStateId 或更晚有效期的可接受 Capability。复制原凭证不产生新权力，因为使用者身份和当前状态必须精确匹配。
+V1 禁止转授权。不持有签发者密钥的 Actor 不能制造更大 Scope、不同 ActorId、不同 ActorStateDigest 或更晚有效期的可接受 Actor Grant。复制原凭证不产生新权力，因为使用者身份和当前状态必须精确匹配。
 
 **证明：** 由 A4 与接受谓词。扩大任一绑定字段都会使签名验证失败，或使相等检查失败。证毕。
 
@@ -966,7 +966,7 @@ A1 且结构最终稳定时，算法终止。持续变化不保证产生新 `APP
 | CE-07 | 无本地期限的远端 LLM | 不满足 A8，不得绿 |
 | CE-08 | 图持续变化 | 不保证活性；旧权力不恢复 |
 | CE-09 | 跨 Principal Actor 出口不入图、也不评分 | Thm 8：不得 \(\mathbf C\)，确认存在则为 \(\mathbf X\) |
-| CE-10 | 挂起后用新 Capability 继续外发旧数据 | Thm 13：挂起禁止 Protected |
+| CE-10 | 挂起后用新 Actor Grant 继续外发旧数据 | Thm 13：挂起禁止 Protected |
 | CE-11 | 信箱保存发送时权限 | Thm 14：Exec 看当前 ∩ 世代 |
 | CE-12 | 用 A 的当前 sid 配 B 的旧 AA 发布 | Thm 15：混合快照失败 |
 | CE-13 | 过期或绑错状态的证据把出口判绿 | E-Acc 拒绝；Lem 0 |
@@ -981,10 +981,10 @@ CE-01…CE-17 的可执行核心已进入回归脚本或证明套件。CE-07 的
 
 | 方法 | 适合的对象 | 本文状态 |
 | --- | --- | --- |
-| 有限模型回归 | 格、图、Merkle、判断、挂起、快照、Capability | 已做 |
+| 有限模型回归 | 格、图、Merkle、判断、挂起、快照、Actor Grant | 已做 |
 | TLA+／PlusCal | 并发 Change／Publish、事件丢失、候选反复作废 | 未做 |
 | Alloy | 更大图上的成员完整性与 Principal 不变量 | 未做 |
-| Tamarin／ProVerif | 握手、重放、TURN、Capability 不可伪造 | 未做 |
+| Tamarin／ProVerif | 握手、重放、TURN、Actor Grant 不可伪造 | 未做 |
 | Lean／Coq | 格、图划分、Merkle、Thm 7 的抽象证明 | 未做 |
 
 先运行 [proof/check_proofs.py](proof/check_proofs.py)，再运行 [check_formal_model.py](check_formal_model.py)。
@@ -1007,7 +1007,7 @@ CE-01…CE-17 的可执行核心已进入回归脚本或证明套件。CE-07 的
 - 跨 Principal 边不入图，且图外 Actor 出口不得为 \(\mathbf C\)；
 - 证据过期、错绑、不受信、真伪冲突时的判断；
 - Merkle 成员证明与换叶攻击；
-- Capability 字段扩大／错绑／撤销／过期；修订号回滚不复活旧凭证；
+- Actor Grant 字段扩大／错绑／撤销／过期；修订号回滚不复活旧凭证；
 - 挂起隔离与期限后拒绝；
 - 混合快照与重复 `ActorId` 叶子拒绝发布；
 - `EncGraph` 单射、排列无关与标识符字符集约束；
@@ -1037,7 +1037,7 @@ PO-01…PO-12 仍是实现要逐项交付的义务。最难的三处不变：Nat
 - 图无根，但 Tab 可以用 Front Actor 定位；
 - 状态本地原子变化，应用结论异步重建；
 - Assurance 可复制，但不产生权限；
-- Capability 可离线验证，撤销感知受有限期约束；
+- Actor Grant 可离线验证，撤销感知受有限期约束；
 - 断网后可以继续有限计算，期限后不依赖远端；
 - \(q\) 影响颜色，\(w\) 不影响颜色；
 - Actor 通道失败直接使 \(color=\bot\)，不参加评分。

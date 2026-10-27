@@ -26,8 +26,7 @@
 use std::time::{Duration, UNIX_EPOCH};
 
 use actr_protocol::{
-    ActrError, ActrId, ConnectionNotReadyInfo, DataChunk, Direction, MetadataEntry, Realm,
-    RpcEnvelope,
+    ActrError, ActrId, ConnectionNotReadyInfo, DataChunk, Direction, MetadataEntry, RpcEnvelope,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -48,39 +47,17 @@ use actr_web_abi::types as wit;
 // with per-call context plumbing, the adapter deals with per-call event
 // translation.
 
-fn actr_type_from_wit(t: &wit::ActrType) -> actr_protocol::ActrType {
-    actr_protocol::ActrType {
-        manufacturer: t.manufacturer.clone(),
-        name: t.name.clone(),
-        version: t.version.clone(),
-    }
-}
-
 fn actr_id_from_wit(id: &wit::ActrId) -> ActrId {
     ActrId {
-        realm: Realm {
-            realm_id: id.realm.realm_id,
-        },
+        realm: id.realm.clone(),
         serial_number: id.serial_number,
-        r#type: actr_type_from_wit(&id.actr_type),
-    }
-}
-
-fn actr_type_to_wit(t: &actr_protocol::ActrType) -> wit::ActrType {
-    wit::ActrType {
-        manufacturer: t.manufacturer.clone(),
-        name: t.name.clone(),
-        version: t.version.clone(),
     }
 }
 
 fn actr_id_to_wit(id: &ActrId) -> wit::ActrId {
     wit::ActrId {
-        realm: wit::Realm {
-            realm_id: id.realm.realm_id,
-        },
+        realm: id.realm.clone(),
         serial_number: id.serial_number,
-        actr_type: actr_type_to_wit(&id.r#type),
     }
 }
 

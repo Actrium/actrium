@@ -1,6 +1,6 @@
 use super::*;
 use crate::transport::secure_channel::SecureChannelState;
-use actr_protocol::{ActrType, IdentityClaims, Realm};
+use actr_protocol::{ActrType, IdentityClaims};
 use actr_runtime_mailbox::{MailboxStats, MessageRecord, StorageResult};
 use async_trait::async_trait;
 use ed25519_dalek::{Signer, SigningKey};
@@ -11,13 +11,16 @@ use uuid::Uuid;
 
 fn test_actor_id(serial: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: serial,
-        r#type: ActrType {
-            manufacturer: "test".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
+    }
+}
+
+fn test_actor_type() -> ActrType {
+    ActrType {
+        publisher: "acme".to_string(),
+        name: "node".to_string(),
+        version: "1.0.0".to_string(),
     }
 }
 
@@ -36,7 +39,16 @@ fn make_valid_credential(
     let claims = IdentityClaims {
         actor_id: actor_id.to_string_repr(),
         expires_at,
-        realm_id: actor_id.realm.realm_id,
+        realm: actor_id.realm.clone(),
+        protocol_version: 1,
+        issuer: actor_id.realm.clone(),
+        provider: "provider.example".to_string(),
+        audience: "actr.signaling".to_string(),
+        actor_type: test_actor_type(),
+        member: "member-1".to_string(),
+        client_key: "0000000000000000".to_string(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: None,
     };
     let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
     let signature = sk.sign(&claims_bytes);
@@ -63,7 +75,7 @@ fn past_ts() -> u64 {
         - 1
 }
 
-// --- mock SignalingClient (same as ais_key_cache tests, inlined to avoid module dependency) ---
+// --- mock SignalingClient (same as issuer_key_cache tests, inlined to avoid module dependency) ---
 
 struct NullSignaling;
 
@@ -147,7 +159,7 @@ impl crate::wire::SignalingClient for NullSignaling {
 /// Construct WsAuthContext with pre-seeded public key (key_id already in cache, no signaling needed)
 async fn make_auth_ctx(sk: &SigningKey, key_id: u32, local_actor: ActrId) -> WsAuthContext {
     let pubkey_bytes = sk.verifying_key().as_bytes().to_vec();
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     cache.seed(key_id, &pubkey_bytes).await.unwrap();
 
     let local_credential = AIdCredential {
@@ -158,10 +170,11 @@ async fn make_auth_ctx(sk: &SigningKey, key_id: u32, local_actor: ActrId) -> WsA
     let cred_state = crate::lifecycle::CredentialState::new(local_credential, None, None);
 
     WsAuthContext {
-        ais_key_cache: cache,
+        issuer_key_cache: cache,
         actor_id: local_actor,
         credential_state: cred_state,
         signaling_client: Arc::new(NullSignaling),
+        peer_types: PeerTypes::default(),
     }
 }
 
@@ -177,7 +190,11 @@ async fn verify_credential_valid_returns_some() {
     let source_bytes = actr_protocol::prost::Message::encode_to_vec(&actor);
 
     let result = WebSocketGate::verify_credential(&credential, &source_bytes, &ctx).await;
-    assert!(result.is_some(), "valid credential should pass");
+    assert_eq!(
+        result,
+        Some(test_actor_type()),
+        "valid credential should pass and yield the verified Actor type"
+    );
 }
 
 /// Signature flipped 1 bit -> verification fails -> None
@@ -255,6 +272,47 @@ async fn verify_credential_actor_id_mismatch_returns_none() {
     );
 }
 
+/// claims.realm or claims.issuer differing from the source Realm -> None
+#[tokio::test]
+async fn verify_credential_realm_or_issuer_mismatch_returns_none() {
+    let sk = signing_key(5);
+    let actor = test_actor_id(200);
+    let ctx = make_auth_ctx(&sk, 1, test_actor_id(999)).await;
+    let source_bytes = actr_protocol::prost::Message::encode_to_vec(&actor);
+
+    for (realm, issuer) in [
+        ("other@example.com", actor.realm.as_str()),
+        (actor.realm.as_str(), "other@example.com"),
+    ] {
+        let claims = IdentityClaims {
+            actor_id: actor.to_string_repr(),
+            expires_at: future_ts(),
+            realm: realm.to_string(),
+            protocol_version: 1,
+            issuer: issuer.to_string(),
+            provider: "provider.example".to_string(),
+            audience: "actr.signaling".to_string(),
+            actor_type: test_actor_type(),
+            member: "member-1".to_string(),
+            client_key: "0000000000000000".to_string(),
+            role: actr_protocol::MemberRole::Owner as i32,
+            development: None,
+        };
+        let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
+        let credential = AIdCredential {
+            key_id: 1,
+            signature: sk.sign(&claims_bytes).to_bytes().to_vec().into(),
+            claims: claims_bytes.into(),
+        };
+        assert!(
+            WebSocketGate::verify_credential(&credential, &source_bytes, &ctx)
+                .await
+                .is_none(),
+            "realm={realm} issuer={issuer} should be rejected"
+        );
+    }
+}
+
 /// Invalid protobuf bytes in `IdentityClaims` should fail decoding and return `None`.
 #[tokio::test]
 async fn verify_credential_invalid_claims_proto_returns_none() {
@@ -302,17 +360,18 @@ async fn verify_credential_unknown_key_id_returns_none() {
     let sk = signing_key(8);
     let actor = test_actor_id(106);
     // `key_id=99` is not in cache, so `NullSignaling` returns an error.
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     let local_credential = AIdCredential {
         key_id: 1,
         claims: bytes::Bytes::new(),
         signature: bytes::Bytes::from(vec![0u8; 64]),
     };
     let ctx = WsAuthContext {
-        ais_key_cache: cache,
+        issuer_key_cache: cache,
         actor_id: test_actor_id(999),
         credential_state: crate::lifecycle::CredentialState::new(local_credential, None, None),
         signaling_client: Arc::new(NullSignaling),
+        peer_types: PeerTypes::default(),
     };
 
     let credential = make_valid_credential(&sk, &actor, future_ts(), 99); // `key_id=99` does not exist.
@@ -330,6 +389,7 @@ async fn verify_credential_unknown_key_id_returns_none() {
 struct CapturingMailbox {
     enqueue_count: AtomicUsize,
     last_priority: std::sync::Mutex<Option<MessagePriority>>,
+    last_from_type: std::sync::Mutex<Option<Vec<u8>>>,
 }
 
 impl CapturingMailbox {
@@ -337,6 +397,7 @@ impl CapturingMailbox {
         Arc::new(Self {
             enqueue_count: AtomicUsize::new(0),
             last_priority: std::sync::Mutex::new(None),
+            last_from_type: std::sync::Mutex::new(None),
         })
     }
 }
@@ -346,11 +407,13 @@ impl Mailbox for CapturingMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
         _payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid> {
         self.enqueue_count.fetch_add(1, Ordering::SeqCst);
         *self.last_priority.lock().unwrap() = Some(priority);
+        *self.last_from_type.lock().unwrap() = from_type;
         Ok(Uuid::new_v4())
     }
     async fn dequeue(&self) -> StorageResult<Vec<MessageRecord>> {
@@ -418,6 +481,7 @@ async fn finish_lane_task_last_lane_removes_sink_and_fires_disconnect() {
         Some(peer.clone()),
         Some(hook),
         inbound_sinks.clone(),
+        PeerTypes::default(),
     )
     .await;
 
@@ -459,6 +523,7 @@ async fn finish_lane_task_non_last_lane_keeps_sink_and_skips_disconnect() {
         Some(peer.clone()),
         Some(hook),
         inbound_sinks.clone(),
+        PeerTypes::default(),
     )
     .await;
 
@@ -472,6 +537,7 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
     let peer = test_actor_id(300);
     let source_id = actr_protocol::prost::Message::encode_to_vec(&peer);
     let inbound_sinks: InboundSinkMap = Arc::new(RwLock::new(HashMap::new()));
+    let peer_types = PeerTypes::default();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let hook: HookCallback = Arc::new(move |event| {
         let tx = tx.clone();
@@ -483,11 +549,13 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
     WebSocketGate::spawn_connection_tasks(
         crate::wire::websocket::connection::WebSocketConnection::new("ws://127.0.0.1:0".into()),
         source_id,
+        test_actor_type(),
         empty_pending(),
         Arc::new(DataChunkRegistry::new()),
         CapturingMailbox::new(),
         Some(hook),
         inbound_sinks.clone(),
+        peer_types.clone(),
     )
     .await;
 
@@ -507,6 +575,11 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
 
     assert_eq!(disconnected_peer, peer);
     assert!(!inbound_sinks.read().await.contains_key(&peer));
+    assert_eq!(
+        peer_types.get(&peer),
+        None,
+        "the closed connection no longer holds the peer's type"
+    );
 }
 
 /// RPC request with no pending entry should go to the mailbox with normal priority.
@@ -520,6 +593,7 @@ async fn handle_envelope_request_goes_to_mailbox_with_normal_priority() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![1u8, 2, 3],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -545,6 +619,7 @@ async fn handle_envelope_rpc_signal_uses_high_priority() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcSignal,
         pending,
@@ -571,6 +646,7 @@ async fn handle_envelope_missing_direction_is_dropped_not_enqueued() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -597,6 +673,7 @@ async fn handle_envelope_unspecified_direction_is_dropped_not_enqueued() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -623,6 +700,7 @@ async fn handle_envelope_unknown_direction_is_dropped_not_enqueued() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -655,6 +733,7 @@ async fn handle_envelope_tell_direction_is_enqueued() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending.clone(),
@@ -693,6 +772,7 @@ async fn handle_envelope_response_resolves_pending_not_mailbox() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending.clone(),
@@ -729,6 +809,7 @@ async fn handle_envelope_response_both_payload_and_error_gives_decode_failure() 
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -763,6 +844,7 @@ async fn handle_envelope_response_error_only_gives_unavailable() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -793,6 +875,7 @@ async fn handle_envelope_response_removes_pending_entry() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending.clone(),
@@ -823,6 +906,7 @@ async fn handle_envelope_explicit_response_with_no_pending_is_dropped_not_enqueu
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,
@@ -856,6 +940,7 @@ async fn handle_envelope_explicit_request_always_enqueues() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending.clone(),
@@ -896,6 +981,7 @@ async fn handle_envelope_explicit_response_with_pending_wakes_caller() {
     WebSocketGate::handle_envelope(
         envelope,
         vec![],
+        None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
         pending,

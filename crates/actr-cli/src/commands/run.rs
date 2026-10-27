@@ -29,47 +29,6 @@ fn resolve_against(base: &Path, path: &Path) -> PathBuf {
     }
 }
 
-/// [`actr_hyper::ManufacturerAuthProvider`] backed by an MFR keychain file.
-///
-/// Holds only the key path — the private key is re-read from disk on every
-/// `sign` call, so it is never kept resident in memory. After MFR key rotation,
-/// an old package can still use published Path 1, but it must be rebuilt and
-/// re-signed before it can use unpublished Path 2 again.
-struct KeychainManufacturerAuthProvider {
-    key_path: PathBuf,
-}
-
-impl actr_hyper::ManufacturerAuthProvider for KeychainManufacturerAuthProvider {
-    fn sign(
-        &self,
-        realm_id: u32,
-        actr_type: &actr_protocol::ActrType,
-        target: &str,
-        manifest_raw: &[u8],
-    ) -> std::result::Result<actr_hyper::ManufacturerRegistrationAuth, actr_hyper::HyperError> {
-        let (signing_key, keychain_manufacturer) =
-            crate::commands::package_build::load_signing_key_with_manufacturer(&self.key_path)
-                .map_err(|e| {
-                    actr_hyper::HyperError::Runtime(format!("reload mfr signing key: {e}"))
-                })?;
-        // Reject cross-manufacturer registration signing (issue #425): a
-        // keychain bound to one manufacturer must not register a package that
-        // belongs to another.
-        crate::commands::package_build::ensure_manufacturer_matches(
-            keychain_manufacturer.as_deref(),
-            &actr_type.manufacturer,
-        )
-        .map_err(|e| actr_hyper::HyperError::Runtime(format!("manufacturer mismatch: {e}")))?;
-        actr_hyper::ManufacturerRegistrationAuth::sign(
-            &signing_key,
-            realm_id,
-            actr_type,
-            target,
-            manifest_raw,
-        )
-    }
-}
-
 #[derive(Args)]
 pub struct RunCommand {
     /// Runtime configuration file (defaults to ./actr.toml if not specified)
@@ -182,19 +141,6 @@ impl RunCommand {
         info!("📡 Signaling server: {}", config.signaling_url.as_str());
         info!("🔐 Trust anchors: {} configured", config.trust.len());
 
-        let manufacturer_provider = self.build_manufacturer_auth_provider().map_err(|e| {
-            ActrCliError::command_error(format!(
-                "Failed to prepare manufacturer registration signer: {e}"
-            ))
-        })?;
-        if manufacturer_provider.is_some() {
-            info!("🔏 Manufacturer registration signer prepared from mfr.keychain");
-        } else {
-            info!(
-                "No mfr.keychain configured; continuing without manufacturer registration signature"
-            );
-        }
-
         // 6. Initialize observability
         let _obs_guard = init_observability(&config.observability).map_err(|e| {
             ActrCliError::command_error(format!("Failed to initialize observability: {}", e))
@@ -205,28 +151,25 @@ impl RunCommand {
         info!("✅ Hyper initialized");
 
         // 8. Node typestate chain: from_hyper → attach → register → start
-        let ais_endpoint = config.ais_endpoint.clone();
+        let issuer_endpoint = config.issuer_endpoint.clone();
         let attached = actr_hyper::Node::from_hyper(hyper, config.clone())
             .attach(&package)
             .await
             .map_err(|e| ActrCliError::command_error(format!("Failed to attach package: {}", e)))?;
         info!("✅ Package attached");
 
-        let registered = attached
-            .register_with_manufacturer_auth(&ais_endpoint, manufacturer_provider)
-            .await
-            .map_err(|e| {
-                ActrCliError::command_error(format!(
-                    "Failed to register with AIS at {}.\n\n\
+        let registered = attached.register(&issuer_endpoint).await.map_err(|e| {
+            ActrCliError::command_error(format!(
+                "Failed to register with Issuer at {}.\n\n\
                  Possible causes:\n\
-                 - AIS server is not running\n\
-                 - Incorrect [ais_endpoint] url in the runtime config\n\
+                 - Issuer server is not running\n\
+                 - Incorrect [issuer_endpoint] url in the runtime config\n\
                  - Network connectivity issues\n\n\
                  Error: {}",
-                    ais_endpoint, e
-                ))
-            })?;
-        info!("✅ AIS registration successful");
+                issuer_endpoint, e
+            ))
+        })?;
+        info!("✅ Issuer registration successful");
 
         let actr_ref = registered
             .start()
@@ -298,7 +241,7 @@ impl RunCommand {
         actr_config::PackageInfo {
             name: manifest.name.clone(),
             actr_type: actr_protocol::ActrType {
-                manufacturer: manifest.manufacturer.clone(),
+                publisher: manifest.publisher.clone(),
                 name: manifest.name.clone(),
                 version: manifest.version.clone(),
             },
@@ -306,28 +249,6 @@ impl RunCommand {
             authors: vec![],
             license: manifest.metadata.license.clone(),
         }
-    }
-
-    /// Build a manufacturer re-signing provider backed by the configured MFR
-    /// keychain, if any.
-    ///
-    /// Returns `Ok(None)` when no keychain is configured (published-package or
-    /// no-keychain runs). The provider does **not** hold the private key in
-    /// memory — it reloads it from the keychain file on every sign call. The
-    /// manifest pins Path 2 verification to its build-time key, so rotating the
-    /// MFR key requires rebuilding and re-signing that package before it can use
-    /// Path 2 again. Published Path 1 remains unaffected.
-    fn build_manufacturer_auth_provider(
-        &self,
-    ) -> anyhow::Result<Option<std::sync::Arc<dyn actr_hyper::ManufacturerAuthProvider>>> {
-        let cli_config = crate::config::resolver::resolve_effective_cli_config()?;
-        let Some(keychain) = cli_config.mfr.keychain.as_deref() else {
-            return Ok(None);
-        };
-        let key_path = crate::commands::package_build::resolve_key_path(None, Some(keychain))?;
-        Ok(Some(std::sync::Arc::new(
-            KeychainManufacturerAuthProvider { key_path },
-        )))
     }
 
     async fn init_hyper(
@@ -378,7 +299,7 @@ impl RunCommand {
                     })?)
                 }
                 actr_config::TrustAnchor::Registry { endpoint } => {
-                    let base = endpoint.trim_end_matches("/ais").to_string();
+                    let base = endpoint.trim_end_matches("/issuer").to_string();
                     Arc::new(RegistryTrust::new(base))
                 }
             };
@@ -468,7 +389,7 @@ impl RunCommand {
                  # or\n\
                  [[trust]]\n\
                  kind = \"registry\"\n\
-                 endpoint = \"http://localhost:8081/ais\"",
+                 endpoint = \"http://localhost:8081/issuer\"",
                 key_path.display()
             )));
         }
@@ -847,12 +768,14 @@ impl RunCommand {
             .url
             .clone()
             .unwrap_or_else(|| "ws://localhost:8081/signaling/ws".to_string());
-        let ais_endpoint = raw
-            .ais_endpoint
+        let issuer_endpoint = raw
+            .issuer_endpoint
             .url
             .clone()
-            .unwrap_or_else(|| "http://localhost:8081/ais".to_string());
-        let realm_id = raw.deployment.realm_id.unwrap_or(0);
+            .unwrap_or_else(|| "http://localhost:8081/issuer".to_string());
+        let realm = raw.deployment.realm.clone().ok_or_else(|| {
+            ActrCliError::command_error("deployment.realm is required".to_string())
+        })?;
         let visible = raw.discovery.visible.unwrap_or(true);
         let force_relay = raw.webrtc.force_relay;
         let stun_urls = &raw.webrtc.stun_urls;
@@ -868,7 +791,7 @@ impl RunCommand {
 
         // Try to read package manifest for metadata
         let mut package_name = String::new();
-        let mut manufacturer = String::new();
+        let mut publisher = String::new();
         let mut actr_name = String::new();
         let mut version = String::new();
         let mut acl_rules: Vec<serde_json::Value> = Vec::new();
@@ -878,7 +801,7 @@ impl RunCommand {
                 if let Ok(bytes) = std::fs::read(pkg_path) {
                     if let Ok(manifest) = actr_pack::read_manifest(&bytes) {
                         package_name.clone_from(&manifest.name);
-                        manufacturer.clone_from(&manifest.manufacturer);
+                        publisher.clone_from(&manifest.publisher);
                         actr_name.clone_from(&manifest.name);
                         version.clone_from(&manifest.version);
                     }
@@ -916,7 +839,7 @@ impl RunCommand {
             })
             .collect();
 
-        let full_type = format!("{}:{}:{}", manufacturer, actr_name, version);
+        let full_type = format!("{}/{}@{}", publisher, actr_name, version);
 
         // Extract web-specific fields
         let web = raw.web.as_ref();
@@ -973,15 +896,15 @@ impl RunCommand {
 
         let config_json = serde_json::json!({
             "signaling_url": signaling_url,
-            "ais_endpoint": ais_endpoint,
-            "realm_id": realm_id,
+            "issuer_endpoint": issuer_endpoint,
+            "realm": realm,
             "visible": visible,
             "force_relay": force_relay,
             "stun_urls": stun_urls,
             "turn_urls": turn_urls,
             "package": {
                 "name": package_name,
-                "manufacturer": manufacturer,
+                "publisher": publisher,
                 "actr_name": actr_name,
                 "version": version,
                 "full_type": full_type,

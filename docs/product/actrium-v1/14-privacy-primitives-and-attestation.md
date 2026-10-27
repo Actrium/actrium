@@ -1,89 +1,89 @@
-# 14. Privacy, remote certification and credible algorithms
+# 14. Privacy primitives, remote attestation, and trusted compute
 
-> Security syntax [docs/security](../../security/README.zh.md) This chapter only writes how the original language, certification and arithmetic enters the current assessment, without defining the colour or the root.
+> Security semantics follow [docs/security](../../architecture/security/actrium/README.zh.md). This chapter only describes how primitives, attestation, and compute enter the existing appraisal; it does not separately define colors or the graph root.
 
 ## 1. Objective
 
-The application of green cannot come from a single technology or a single manufacturer, but must come from a combination of verifiable and avoidable private language:
+Application green cannot come from a single technology or a single vendor; it must come from a set of composable, verifiable, and revocable privacy primitives:
 
 ```text
-Declaration (what do you want to allow)
+Declaration (what is allowed to happen)
   ↓
-Enforcement (de facto only what to do)
+Enforcement (what can actually happen)
   ↓
-Evidence / Attestation(How far away do you know that the binding has entered into force)
+Evidence / Attestation (how the remote side knows the constraint took effect)
   ↓
-Policy Appraisal(Current data available)
+Policy Appraisal (whether the current data may enter)
   ↓
-Privacy Graph Aggregation(The article as a whole) Actor Whether or not the data path is established)
+Privacy Graph Aggregation (whether the whole Actor data path holds)
 ```
 
 This chapter answers:
 
-- “Actor Network-wide encryption”(a) Specific guarantees of what;
-- WASM, Native Capsule with Confidential Computing (b) Which issues are addressed separately;
-- Agent Use CPU, GPU, NPU or how to prove the operating environment when the edge is calculated;
-- Different manufacturers show how to map to be uniform. Actrium claims;
-- When the key will be released;
-- How many pieces of evidence enter? `ActorAssurance` the facts of the case (art.`CONTROLLED / UNKNOWN / UNCONTROLLED`).
+- What "end-to-end encryption across the Actor network" actually guarantees;
+- What problems WASM, Native Capsule, and Confidential Computing each solve;
+- How an Agent proves its runtime environment when using CPU, GPU, NPU, or edge compute;
+- How different vendors' attestations map to unified Actrium claims;
+- When keys may be released;
+- How multiple pieces of evidence enter the fact fields of `ActorAssurance` (`CONTROLLED / UNKNOWN / UNCONTROLLED`).
 
-## 2. Accurate product commitments
+## 2. Accurate product claims
 
-### 2.1 Do Not Use“The data is always a secret.”
+### 2.1 Do not claim "data is always ciphertext"
 
-The normal calculation must be specified within an operational boundary. FHE, MPC The Quakers are the only ones who have a problem with the Quakers.Actrium Data should not be claimed to be secret at every point.
+Ordinary computation must use plaintext within some execution boundary. Unless using specialized cryptographic computation such as FHE or MPC, Actrium should not claim that data is ciphertext at every moment.
 
-Recommended formulation and [Overview](../../security/01-overview.zh.md) Unanimously:
+The recommended wording is consistent with the [overview](../../architecture/security/actrium/01-overview.zh.md):
 
-> Data exist in secret on protected links and storage; it should only be specified in a processing environment where the identity is known and the boundary meets the requirements. Green ensures only that the current level of readiness is met and the new configuration only binds new data.
+> Data exists as ciphertext on protected links and protected storage; plaintext should appear only in processing environments where identity is known and the boundary meets requirements. Green only guarantees the current ready facet; a new configuration only binds new data.
 
-“Protection throughout the life cycle”Division:
+"Protection across the full lifecycle" breaks down as:
 
-| Data Status | Main mechanisms |
+| Data state | Primary mechanism |
 |---|---|
-| in transit | Actor Secure Channel, AEADIdentified, forwarded, protected from re-enactment |
-| at rest | Workspace envelope encryptionEquipment Keystore/KMSBackup key policy |
-| in use | WASM/Native confinement;sensitive data by policy Request TEE/CC |
-| on output | Type results, data labels,declassificationRate/Aggregation/Audit |
+| in transit | Actor Secure Channel, AEAD, identity binding, forward secrecy, replay protection |
+| at rest | Workspace envelope encryption, device Keystore/KMS, backup key policy |
+| in use | WASM/Native confinement; policy may require TEE/CC for highly sensitive data |
+| on output | typed results, data labels, declassification, rate limiting/aggregation/audit |
 
-### 2.2 “Network-wide encryption”the boundary of the
+### 2.2 The boundary of "end-to-end network encryption"
 
-Actr We have to make sure every network is in place. Actor edge:
+Actr must guarantee, for every network Actor edge:
 
-- Two-way authentication;
-- Confidentiality and integrity;
-- (b) Protection against re-emergence;
-- Session Keys & Two Sides Actor/runtime (a) Identity binding;
-- Use of temporary keys and support for consultations;
-- signaling, TURN And normal relay Not held payload key;
-- The transfer cannot be downgraded to an uncertified express.
+- mutual authentication;
+- confidentiality and integrity;
+- replay protection;
+- the session key bound to both endpoints' Actor/runtime identity;
+- use of ephemeral keys with support for rekeying;
+- signaling, TURN, and ordinary relays do not hold the payload key;
+- the transport cannot be downgraded to unauthenticated plaintext.
 
-But a distinction must be made between:
+But a distinction must be made:
 
 ```text
 Actor A ── encrypted edge ── Actor B ── encrypted edge ── Actor C
 ```
 
-If B To process data,B It's a mandatory execution. It's a private-constructed requirement. Actor.A→C We can't skip the right link because it's encrypted. B Assessment.
+If B has to process the data, B is a plaintext execution endpoint and a necessary Actor in the privacy closure. A→C cannot skip the evaluation of B just because both links are encrypted.
 
-Only not. payload It's... signaling/TURN/relay Not the data execution end. They can still see IP, time series, package length and connection, and“payload Encryption”Not equal to“Metadata Anonymous”.
+Only a signaling/TURN/relay that does not process the payload is not a data execution endpoint. It can still see IP addresses, timing, packet length, and connection relationships, so "payload encryption" does not equal "metadata anonymity".
 
-## 3. Private Source Matrix
+## 3. Privacy primitive matrix
 
-| Original language | Main opponent | What can you prove? | It doesn't prove anything. |
+| Primitive | Primary adversary | What it can prove | What it cannot prove |
 |---|---|---|---|
-| Actor Secure Channel | Internet bugging, tampering, replaying,relay | payload Decrypted only by a certified endpoint | The endpoint will not be leaked after it's confirmed. |
-| `.actr` Signature and provenance | CDN, mirror alteration, supply chain replacement | Run artifact Sources and digest | artifact There's no bad logic in itself. |
-| WASM capability sandbox | Malicious./Error workload | importsRAM BORDERS AND POSSIBLE EXPORTS | Host/kernels don't peek; recipients of exports are allowed to abuse |
-| Native Capsule | Third parties native workload | native Process cannot be bypassed broker Use of original resources | Zero kernel loophole; and WASM Same portable, verifiable |
-| TEE / Confidential Computing | Cloud Administrator, Host,Hypervisor Waiting for infrastructure competition | Specifies the execution of the boundary data in use Hardware quarantine. | workload It's not a spontaneous leak. |
-| Remote Attestation | Fake operating environment, error version | Some Attester It gives an acceptable view of the state of the environment. Evidence | The state automatically meets business policy |
-| KMS / Key Broker | Unrecognized environment pre-empted | ♪ Just by ♪ appraisal , and the data key is available for the example. | After obtaining the key workload Behavior security |
-| Workspace encryption | Disk, snapshot, backup leak. | Static data cannot be read without key | The data of the run-time is not leaked after decryption |
-| Data tags and declassification | Over-output on a legal channel | What data allows to leave at what particle level? | The common algorithm automatically corresponds to the business minimization |
-| DP / MPC / FHE | Specific statistics or multiple counting opponents | Reduce or avoid explicit exposure under qualified models | Universal, low-cost replacement for all common calculations |
+| Actor Secure Channel | network eavesdropping, tampering, replay, relay | the payload is decrypted only by an authenticated endpoint | the endpoint won't leak the plaintext once it has it |
+| `.actr` signature and provenance | CDN, mirror tampering, supply-chain substitution | the source and digest of the running artifact | the artifact itself has no malicious logic |
+| WASM capability sandbox | malicious/buggy workload | imports, memory boundaries, and possible egress are enumerable and enforceable | the Actr Host/kernel won't peek; a permitted egress recipient won't misuse it |
+| Native Capsule | third-party native workload | the native process cannot bypass the broker to use raw resources | zero kernel vulnerabilities; portability and verifiability equal to WASM |
+| TEE / Confidential Computing | infrastructure adversaries such as cloud administrators, the host machine, the hypervisor | data in use within the designated execution boundary is hardware-isolated | the workload itself won't actively exfiltrate |
+| Remote Attestation | forged runtime environment, wrong version | an Attester gave verifiable Evidence about the environment state | that state automatically satisfies business policy |
+| KMS / Key Broker | an unapproved environment obtaining plaintext early | only an instance that passed appraisal gets the data key | the workload's behavior after obtaining the key is safe |
+| Workspace encryption | disk, snapshot, backup leakage | data at rest cannot be read without the key | decrypted runtime data won't leak |
+| Data labels and declassification | excessive output over a legitimate channel | which data may leave, and at what granularity | that a generic algorithm automatically satisfies business minimization |
+| DP / MPC / FHE | adversaries in specific statistical or multi-party computation settings | reducing or avoiding plaintext exposure under a bounded model | being a generic, low-cost replacement for all ordinary computation |
 
-Conclusions
+Conclusions:
 
 ```text
 WASM ≠ CC
@@ -92,7 +92,7 @@ Attestation ≠ Authorization
 Encryption ≠ Endpoint Privacy
 ```
 
-The best high-level combination of privacy is usually:
+The best high-privacy combination is usually:
 
 ```text
 signed WASM workload
@@ -104,9 +104,9 @@ inside attested confidential execution environment
 
 ## 4. Internal Assurance Vector
 
-Show only green to users / Yellow / Red (or cannot be created), but not only one boolean value can be stored internally.
+Users still see only green / yellow / red (or "cannot be established"), but internally a single boolean is not enough.
 
-Every one. Actor runtime At least:
+Every Actor runtime produces at least:
 
 ```text
 ActorAssuranceVector {
@@ -121,62 +121,62 @@ ActorAssuranceVector {
 }
 ```
 
-Assessment of each dimension:
+The assessment result for each dimension:
 
 ```text
 pass | indeterminate | fail | not-required
 ```
 
-Map:
+Mapping:
 
-| Dimension Results | The export facts |
+| Dimension result | Egress fact |
 | --- | --- |
-| All policy-required Dimensions Average pass | `CONTROLLED` |
-| At least one. required Dimensions indeterminate | `UNKNOWN` |
-| At least one. required Dimensions fail | `UNCONTROLLED` |
-| Non-current data/Operating requirements | Not participating in this gathering. |
+| all policy-required dimensions pass | `CONTROLLED` |
+| at least one required dimension is indeterminate | `UNKNOWN` |
+| at least one required dimension fails | `UNCONTROLLED` |
+| not required for the current data/operation | does not participate in this aggregation |
 
-Presentation: All `CONTROLLED` and `Ready` And the tunnel works. → Green; no red and unknown → yellow; any `UNCONTROLLED` → red;cut face not ready → Do not show the colour.
+Display: all `CONTROLLED`, `Ready`, and the channel valid → green; no red but some unknown → yellow; any `UNCONTROLLED` → red; facet not ready → no color shown.
 
-Not all of them. ActorAll data is mandatory. CCFor example. public Data allows in normal WASM Host (a) Run up;secret The organizational strategy for data can be requested `compute_confidentiality=pass`.
+Not every Actor or every piece of data mandates CC. For example, `public` data may be allowed to run on an ordinary WASM Actr Host; an organization's policy for `secret` data may require `compute_confidentiality=pass`.
 
-### 4.1 The main green mark:Application Instance Snapshot
+### 4.1 The subject of the green mark: Application Instance Snapshot
 
-Conclusion binds current readiness rather than general ProgramIt's not a short time. transport session.Front / Primary Service Only for position maps, no access `structureId` When the root.
+The conclusion is bound to the current ready facet, not to a Program in general, nor to a transient transport session. Front / Service is used only to locate the graph and does not enter `structureDigest` as a root.
 
 ```text
-ApplicationStateId =
+ApplicationStateDigest =
   H(actrium/application-state/v1,
-    structureId,          # EncGraph
+    structureDigest,          # EncGraph
     principal,
-    MerkleRoot(ActorId + ActorStateId + H(ActorAssurance)))
+    MerkleRoot(ActorId + ActorStateDigest + H(ActorAssurance)))
 ```
 
-`ActorStateId` Change, evidence or strategy can make old. `ApplicationAssurance` Expiry.Tab Reconnection,direct/TURN Switch (relay never explicitly) without changing the chart.
+A change in `ActorStateDigest`, evidence, or policy invalidates the old `ApplicationAssurance`. A Tab reconnect or a direct/TURN switch (the relay never has plaintext) does not change the graph.
 
-Program release It provides a static, audited state. Contract and evidence, helps to draw conclusions, but Catalog Show only "Specific Supports Which profileThe government has been working on the issue of the ‘Absorture’ in the past.
+A Program release may provide an audited static Contract and evidence to help form the conclusion, but the Catalog can only show "which verifiable profiles are supported"; it cannot stand in for the current facet.
 
 ### 4.2 Program Privacy Contract
 
-The application of the case structure can change dynamically, but its type of structure and capacity must remain static:
+An application instance's structure may change dynamically, but its structural type and capability upper bound must remain static:
 
 ```text
 static graph grammar
 → dynamic actor instances
 ```
 
-Contract Freeze at least:
+The Contract freezes at least:
 
-- Allowed to appear Actor role/type/release or assurance profile;
-- required/optional, cardinality and possible establishment edge;
-- Every one. edge (a) Portable data categories and operations;
+- the Actor role/type/release or assurance profile allowed to appear;
+- required/optional, cardinality, and the edges that may be established;
+- the data classes and operations each edge may carry;
 - Actor/network/Workspace/storage/compute/audit capabilities;
-- terminal egress, purpose, retention and consent;
-- Requirements sandbox, CC, Verifier And trust. Privacy Domain profile;
-- output/declassification Rules;
-- The action of unknown or invalid evidence.
+- terminal egress, purpose, retention, and consent;
+- the required sandbox, CC, Verifier, and trusted Privacy Domain profile;
+- output/declassification rules;
+- the action to take on unknown or invalid evidence.
 
-Indications:
+Illustration:
 
 ```toml
 [actrium.privacy_contract]
@@ -185,8 +185,8 @@ contract_id = "notes.example/team-notes@1.4.2#privacy"
 package_digest = "sha256:..."
 
 [[actrium.privacy_contract.actor_role]]
-role = "primary-service"
-actr_type = "notes.example:team-notes-service:1.4.2"
+role = "service"
+actr_type = "notes.example/team-notes-service@1.4.2"
 cardinality = "1"
 required = true
 
@@ -196,13 +196,13 @@ cardinality = "0..n"
 required_assurance_profile = "confidential-ai-v1"
 
 [[actrium.privacy_contract.edge]]
-source = "primary-service"
+source = "service"
 target = "ai-inference"
 data_classes = ["private"]
 capabilities = ["actor.call:infer.v1"]
 ```
 
-The statement is not a statement, but a statement. Host Top-level ability to deliver:
+The declaration is not descriptive text; it is the upper bound on the capability the Actr Host may grant:
 
 ```text
 Effective Capability =
@@ -212,76 +212,76 @@ Effective Capability =
   ∩ Instance Grant
 ```
 
-Undeclared Actor role, edge, audit sink, terminal, documents, networks or computing capabilities are not available handle. Could not use“Connect, report.”Expansion Contract.
+An undeclared Actor role, edge, audit sink, terminal, file, network, or compute capability must not obtain a handle. The runtime must not expand the Contract by "connect first, report later".
 
-Contract It's the effect of changing all the maps. capability It can be stopped before it is created. It is a border, not a green one.
+The Contract's role is to make every graph change interceptable before the capability is created. It is a boundary, not the application's green mark itself.
 
-### 4.3 State change
+### 4.3 State changes
 
-Do not submit changes in full-map distribution. Actor Local Atom Switch `ActorStateId`, synchronized with old keys, old channels and old Capability, the entry security is hung.`ActorState` The new state of affairs is also taken by the one-way revision: the configuration rolls back, abolition is durable, and old power is not restored by rollback.
-
-```text
-Change → SUSPENDED → Evidence / Assessment → Resume(To have current AA)→ Try Publish
-```
-
-You can not process or send application data to a member who does not depend on the change node. `LocalContinue` Old data cannot be rewrited to new exports.
-
-Control face (college,attestation, UI; agreed) may continue; operational data may not be carried.
-
-### 4.4 Compare downgrade with recovery
-
-The change in structure or state does not necessarily bother the user.
+There is no full-graph distributed commit. The changed Actor atomically switches `ActorStateDigest` locally, revoking the old key, old channel, and old Actor Grant in the same step, and enters assurance suspension. Events may be lost. `ActorState` carries a monotonic revision number: a configuration rollback also gets a new state root, revocation is durable, and old authority is not revived by a rollback.
 
 ```text
-Colours are not weakened and strategy allows
-  → Auto-renewal of related work (required) Ready I'm just showing green.
-
-Colours yellow or red
-  → Hold the block.
-  → Show exact diff
-  → Request for risk acceptance (no colour change)
-
-A channel is invalid or touch platform hard bottom line
-  → Block
-  → User cannot overwrite
+Change → SUSPENDED → forensics / appraisal → Resume (requires current AA) → attempt Publish
 ```
 
-"Weaker" cannot read only colours. required Dimensions from `pass→indeterminate`, profile Degraded, change of faith,terminal / audit / retention Expansion, all downgraded. One dimension is not enough to offset another.
+While suspended, application data must not be processed, and must not be sent to it. Members that don't depend on the changed node may continue their own work under `LocalContinue`, but the top level must not show application green. Old data must not have its generation rewritten to use a new egress.
 
-Risk acceptance binding Principal, object, cause, scope, state of the time, and strategy version. Agree to leave only the example in yellow. / Red-down running cannot turn the missing proof into green.
+The control plane (forensics, attestation, UI, consent) may continue; it must not smuggle in business data.
 
-### 4.5 Which events count as structural changes
+### 4.4 Downgrade comparison and recovery
 
-Changed structural identity or current status (and thus the old conclusion lapsed):
+A structural or state change does not necessarily disturb the user. Relative to the old conclusion:
 
-- Actor/Privacy Domain Add, replace, relocate or remove;
-- Actor workload/config/Host/compute/accelerator assurance Changes;
-- Add or Expand Actor edge, data class, purpose, terminal;
-- audit/log/telemetry sink, field, reading subject or retention Changes;
-- Workspace/storage/provider Changes;
-- capability or declassification Expansion.
+```text
+Color did not weaken and policy allows it
+  → automatically resume related work (still requires Ready to show green)
 
-No changes to the structure of the map (which may still be re-evaluated because of the expiry of the evidence):
+Color turns yellow or red
+  → keep blocking
+  → show the exact diff
+  → request risk acceptance (does not change the color)
 
-- Same Actor/runtime/evidence Down transport reconnect;
-- direct/relay/TURN Path Switches and relay Never. payload key;
-- No privacy. claims Changes in health, delay or condensation indicators.
+Channel invalid or hits a platform hard floor
+  → block
+  → user cannot override
+```
 
-The same figure does not mean that the conclusion will never be the same. / TCB / - It's old. `ActorAssurance` Show must still be evaluated. `Ready`.
+"Weaker" cannot be judged by color alone. Any required dimension going from `pass` to `indeterminate`, a profile downgrade, a change of trusted Verifier, or an expansion of terminal / audit / retention all count as a downgrade. Strengthening one dimension cannot offset another one weakening.
+
+Risk acceptance is bound to the Principal, the object, the reason, the scope, the state root at the time, and the policy version. Consent can only let the instance keep running under yellow / red; it cannot turn missing proof into green.
+
+### 4.5 Which events count as a structural change
+
+Events that change structural identity or the current state (and thus invalidate the old conclusion):
+
+- an Actor/Privacy Domain joining, being replaced, migrating, or being removed;
+- a change in Actor workload/config/Host/compute/accelerator assurance;
+- adding or expanding an Actor edge, data class, purpose, or terminal;
+- a change to an audit/log/telemetry sink, its fields, the reading subject, or retention;
+- a change of Workspace or Workspace Provider;
+- an expansion of capability or declassification.
+
+Events that do not change the graph structure (but may still trigger re-evaluation because evidence expired):
+
+- a transport reconnect under the same Actor/runtime/evidence;
+- a direct/relay/TURN path switch, provided the relay never holds the payload key;
+- health, latency, or scaling metric changes that don't affect privacy claims.
+
+An unchanged graph doesn't mean the conclusion never changes. Evidence expiry, Verifier / TCB / credential revocation, or a policy update invalidates the old `ActorAssurance` and requires re-evaluation. Display still requires `Ready`.
 
 ### 4.6 UI
 
-| Location | Presentation |
+| Location | Display |
 |---|---|
-| Catalog/Install Page | Program Supported privacy profiles, Contract and static audit information, do not show instance green |
-| App Library | Last for each application `ApplicationAssurance`, state root and time of update (must indicate whether or not to remain Ready) |
-| Active Tab Address Bar | The green side of the current readiness / Yellow / red; showing 'revalidating 'when re-evaluated or hung / "Communications have been blocked." |
-| Degrade confirmation page | Add/Replace Actor, audit/terminal Change, weakest dimensions, impact data and functions |
-| Details Panel | Current Actor/Edge, Assured Domain, Evidence* The present document was not edited before being sent to the United Nations translation services. |
+| Catalog/install page | the privacy profiles a Program supports, the Contract, and static audit information; no instance green mark shown |
+| App Library | each app's most recent `ApplicationAssurance`, state root, and update time (must indicate whether it is still Ready) |
+| Active Tab address bar | green / yellow / red for the current ready facet; shows "re-verifying / communication blocked" while re-evaluating or suspended |
+| Downgrade confirmation page | added/replaced Actor, audit/terminal changes, the weakest dimension, and the affected data and functionality |
+| Details panel | current Actor/Edge, Assured Domain, Evidence, authorization history, and expiry time |
 
-## 5. Data Policy Evidence for decision
+## 5. Data Policy determines the required evidence
 
-Indications:
+Illustration:
 
 ```toml
 [[actrium.privacy.data_policy]]
@@ -318,34 +318,34 @@ required = [
 ]
 ```
 
-Publisher Can declare minimum needs, users/Division can be tightened. Publisher Relax the platform or organizational bottom line.
+A Publisher may declare a minimum requirement; the user/organization may tighten it. A Publisher cannot relax the platform's or organization's floor.
 
 ## 6. Actor Secure Channel
 
-### 6.1 Two-level protection.
+### 6.1 Two layers of protection
 
-Actr The network should provide both:
+The Actr network should provide, together:
 
-1. transport protection: e.g. TLS 1.3, QUIC or WebRTC DTLS;
-2. Actor Secure Envelope: Tie Actor Semantic End to End AEAD.
+1. transport protection: e.g., TLS 1.3, QUIC, or WebRTC DTLS;
+2. Actor Secure Envelope: an end-to-end AEAD bound to Actor semantics.
 
-The second tier is:
+The second layer's purpose is to:
 
-- Even if... signaling, TURNor a paragraph transport Replaced,relay Still not available payload;
-- Tie the password endpoint to `ActorId + runtimeInstanceId`;
-- - Put it on. privacy policy, attestation result and session (a) Tied together;
-- It's not legal to just one. Realm credential Bring the traffic to another one. workload.
+- ensure that even if signaling, TURN, a proxy, or some transport segment is substituted, the relay still cannot obtain the payload;
+- bind the cryptographic endpoint to `ActorId + runtimeInstanceId`;
+- bind the privacy policy, attestation result, and the specific session together;
+- prevent a single legitimate Actor credential alone from redirecting traffic to a different workload.
 
-### 6.2 Handshake Tie
+### 6.2 Handshake binding
 
-Shake hands. transcript Coverage of at least:
+The handshake transcript covers at least:
 
 ```text
 protocolVersion
 sourceActorId
 targetActorId
-sourceActorStateId
-targetActorStateId
+sourceActorStateDigest
+targetActorStateDigest
 sourceRuntimeInstanceId
 targetRuntimeInstanceId
 sourceCredentialDigest
@@ -359,21 +359,21 @@ channelNonce
 roles
 ```
 
-Current situation of the parties `ActorStateId` We must enter the union. transcript and certified in two-way: only for the field MAC Not enough to resist the old state of greeting again. [Security agreement](../../security/03-protocol.zh.md) §3 and form model F-CHAN-01One of them. `ActorStateId` The old channel cannot carry the application data after the change and must be reshocked for the new state.
+Both parties' current `ActorStateDigest` must enter the joint transcript and be mutually authenticated: MACing only one's own fields is not enough to resist a replay of an old-state greeting (see [security protocol](../../architecture/security/actrium/03-protocol.zh.md) §3 and formal model F-CHAN-01). Once either party's `ActorStateDigest` changes, the old channel must not carry application data and must re-handshake for the new state.
 
-Actor Host It has to be proven that it is. Actor key & Temporary Sessions key. If the target runs in TEE , the temporary decryption key must be TEE internal generation, or by TEE Safely held and entered attestation Evidence/Result.
+The Actor's Actr Host must prove possession of the Actor key and the ephemeral session key. If the target runs inside a TEE, the ephemeral decryption public key must be generated inside the TEE, or be securely held by the TEE, and enter the attestation Evidence/Result.
 
-### 6.3 Data Face
+### 6.3 Data plane
 
-Every one. encrypted record:
+Every encrypted record:
 
-- Use AEAD;
-- - Yeah. session id, direction, epoch, sequence;
-- Will Actor edge id, data type, message type as authenticated additional data;
-- Reject nonce/sequence (a) Reuse;
-- Testing duplication, disorder and epoch (a) Reversal;
-- Regular or by volume rekey;
-- private/secret No change of status may be requested without equivalent value 0-RTT Send.
+- uses AEAD;
+- carries a session id, direction, epoch, and sequence;
+- treats the Actor edge id, data class, and message type as authenticated additional data;
+- rejects nonce/sequence reuse;
+- detects duplication, reordering, and epoch rollback;
+- rekeys periodically or by data volume;
+- a private/secret state-change request must not be sent over 0-RTT that lacks equivalent replay-protection semantics.
 
 ### 6.4 Channel Evidence
 
@@ -398,43 +398,43 @@ Every one. encrypted record:
 }
 ```
 
-“TLS Connected”It's not enough to generate it. Actor channel `pass`; must be completed Actor Identity and runtime/session Tie.
+"TLS is connected" by itself is not enough to produce an Actor channel `pass`; Actor identity and runtime/session binding must also be completed.
 
 ## 7. Confidential Computing
 
-### 7.1 What does it solve?
+### 7.1 What it solves
 
-CC The goal is to protect data in use, which makes code and data hardware-supported, verifiable Trusted Execution Environment Run in.
+CC's goal is to protect data in use, so that code and data run inside a hardware-backed, provable Trusted Execution Environment.
 
-Its main value is to remove or diminish the powers of the following subjects from the privacy and trust borders:
+Its main value is to remove the following parties from the privacy trust boundary, or weaken their privileges:
 
-- Cloud Platform Administrator;
-- Host OS / Hypervisor;
-- Co-permit Other VM(a) The container or process;
-- Some physical and equipment attackers.
+- the cloud platform administrator;
+- the Actr Host OS / hypervisor;
+- other VMs, containers, or processes on the same machine;
+- some physical and device-level attackers.
 
-Which rivals are specifically excluded, depending on the hardware and the profile, cannot be written in unison `cc=true`.
+Exactly which adversaries can be excluded depends on the hardware and the profile; it cannot be uniformly written as `cc=true`.
 
-### 7.2 It doesn't solve anything.
+### 7.2 What it does not solve
 
-CC Inner-run malice workload The data can still be sent to an open web target.
+A malicious workload running inside CC can still send data to an already-open network target. Therefore:
 
 ```text
 compute_confidentiality = pass
 ```
 
-No substitute:
+cannot substitute for:
 
 ```text
 workload_confinement = pass
 egress_closure = pass
 ```
 
-I am not a writer.WASM The lockdown doesn't prove that the cloudkeeper can't read normal. Host Memory.
+Likewise, WASM egress closure cannot prove that the cloud administrator cannot read an ordinary Actr Host's memory.
 
 ### 7.3 Canonical Compute Claims
 
-Different. TEE/CC backend Must map to unified claims, not expose a manufacturer's boolean value:
+Different TEE/CC backends must map to unified claims rather than exposing a single vendor boolean:
 
 ```json
 {
@@ -462,17 +462,17 @@ Different. TEE/CC backend Must map to unified claims, not expose a manufacturer'
 }
 ```
 
-Don't put it in the car. vendor/product name It's self-depreciation. `pass`. Only the corresponding Verifier profile, Endorsements, Reference Values, TCB Status and freshness Satisfied policy It's only then.
+The vendor/product name itself must not be interpreted as `pass`. It passes only when the corresponding Verifier profile, Endorsements, Reference Values, TCB status, and freshness all satisfy policy.
 
-## 8. RATS Role Model
+## 8. RATS role model
 
-Actrium Use of standard remote proof of role:
+Actrium adopts the standard remote attestation roles:
 
-| Role | Actrium Entities in | Duties |
+| Role | Entity in Actrium | Responsibility |
 |---|---|---|
-| Attester | Host TEEequipment, equipment,GPU/NPUTrustable launcher | Generates about Target Environment It's... Evidence |
-| Verifier | Realm/Organizations/Locally. Verifier with vendor adapter | Validation of signatures, chain of certificates, values measured, reference values, withdrawals and freshness |
-| Relying Party | Data release Actor Host, Privacy Agent, Key Broker | Based on Attestation Result and local policy - Make a decision on the authorization. |
+| Attester | Actr Host TEE, device, GPU/NPU, trusted launcher | produces Evidence about the Target Environment |
+| Verifier | a Realm's/organization's/local trusted Verifier and vendor adapter | verifies signatures, certificate chains, measurements, reference values, revocation, and freshness |
+| Relying Party | the data-sending Actor's Actr Host, Privacy Agent, Key Broker | makes the authorization decision based on the Attestation Result and local policy |
 
 A strict distinction is required:
 
@@ -488,48 +488,48 @@ Attestation Result
   → allow | unknown | block
 ```
 
-Attester You can't give yourself the final word. `ActorAssurance`(`issuer ≠ subject`).Verifier Only a certificate assessment is given; final data release is still determined by the relying party in accordance with current strategy.
+An Attester cannot issue the final `ActorAssurance` to itself (`issuer ≠ subject`). A Verifier only gives an attestation assessment; the final data release decision is still made by the relying party under current policy. The same appraisal context takes the weakest item.
 
-Evidence code priority compatibility EAT/CWT/COSE;manufacturing quote/report/document It may be sealed, but the original signature material and the results of the authentication must be retroactive.
+Evidence encoding should preferentially be compatible with EAT/CWT/COSE; a vendor's native quote/report/document may be wrapped, but the original signature material and verification result must remain traceable.
 
-### 8.1 Assured Actor Edge with Certified Privacy Domain
+### 8.1 Assured Actor Edge and Certified Privacy Domain
 
-Cross-organizational or large cloud services do not necessarily disclose the full internal content to the caller Actor Figure.Actrium Allowing credibility Verifier Seal a closed internal sub-graph into a single, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, `CertifiedPrivacyDomain`:
+A cross-organization or large cloud service does not necessarily disclose its full internal Actor graph to the caller. Actrium allows a trusted Verifier to encapsulate an already-closed internal subgraph as a `CertifiedPrivacyDomain`:
 
 ```text
 Actor A
   └── AssuredActorEdge
       └── Certified Privacy Domain B
-          └── internal Actor graph"No direction A Expand)
+          └── internal Actor graph (not expanded to A)
 ```
 
 The boundary certificate contains at least:
 
 - domain/endpoint identity;
-- Type of data accepted,purpose and operations;
-- Observable exits,retention, audit and deletion contract;
-- Internal privacy graph/evidence Merkle root;
-- assurance profile and does not cover the attack surface;
+- the accepted data classes, purpose, and operations;
+- observable egress, retention, audit, and deletion contract;
+- the internal privacy graph/evidence Merkle root;
+- the assurance profile and the attack surface not covered;
 - Verifier/issuer, trust chain, policy digest;
-- workload/service release Scope;
-- freshness, revocation and incident obligations.
+- the workload/service release scope;
+- freshness, revocation, and incident obligations.
 
-Upstream policy Trust in the right. Verifier and profile , you can participate as a proven node. meetNo more re-entry inside the proliferation. unknown. This is not to eliminate the unknown, but to encapsulate the responsibility for internal certification into a clear and revocable subject of trust.
+When upstream policy trusts that Verifier and profile, the entire subgraph may participate in the `meet` as a single proven node, without recursively propagating the internal unknown. This does not eliminate the unknown; it encapsulates the internal verification responsibility into a well-defined, revocable trust subject.
 
-Service Auto-Sign“I'm safe.”Can't form Assured Edge. Only users/Organizations/Realm policy Trusted VerifierCertificate scope With Current endpoint/session Only when you match.
+A Service self-attesting "I am safe" cannot form an Assured Edge. It can only do so when the Verifier is already trusted by user/organization/Realm policy, and the certificate scope matches the current endpoint/session.
 
-## 9. Attestation Sessions/Key binding
+## 9. Attestation and session/key binding
 
-### 9.1 It has to be prevented.“It proves it's true. The connection is fake.”
+### 9.1 Must prevent "the attestation is real, but the connection is fake"
 
-Legal Evidence If no current binding sessionThe assailants may have put another one in order. TEE The certificate was forwarded and the data was then directed to an environment that was not protected.
+If legitimate Evidence is not bound to the current session, an attacker could forward the attestation of a different, healthy TEE and then route the data toward an unprotected environment.
 
-And so... attestation challenge At least bind:
+So the attestation challenge binds at least:
 
 ```text
 fresh nonce
 + ActorId
-+ current ActorStateId
++ current ActorStateDigest
 + runtimeInstanceId
 + workload/package digest
 + policy digest
@@ -539,27 +539,27 @@ fresh nonce
 
 ### 9.2 Attestation-gated Key Release
 
-private/secret Data recommended for adoption:
+For private/secret data, the recommended flow is:
 
 ```text
-1. Scheduler Select Candidate Compute Actor
-2. Relying Party Send nonce and policy digest
-3. TEE Internal Generate ephemeral key
-4. Attester Generate binding workload, key, nonce It's... Evidence
-5. Verifier Generate short-term Attestation Result
-6. Relying Party Inspection Actor/edge/data policy
-7. Key Broker - Put it on. Workspace/session DEK Encapsulated for attested ephemeral key
-8. TEE Unlock and start processing
-9. Result Due,TCB Withdrawal or withdrawal graph When change re-attest/rekey
+1. Scheduler selects a candidate Compute Actor
+2. Relying Party sends the nonce and policy digest
+3. an ephemeral key is generated inside the TEE
+4. Attester generates Evidence binding the workload, key, and nonce
+5. Verifier generates a short-lived Attestation Result
+6. Relying Party checks Actor/edge/data policy
+7. Key Broker wraps the Workspace/session DEK for the attested ephemeral key
+8. unwrapping happens inside the TEE and processing begins
+9. re-attest/rekey when the Result expires, the TCB is revoked, or the graph changes
 ```
 
-It didn't pass. appraisal , the key cannot be released to normal first. Host, again Host Forward TEE.
+When appraisal has not passed, the sensitive data key must not be released to an ordinary Actr Host first and then forwarded into the TEE by that Actr Host.
 
-## 10. GPU, NPU And the isomeric force.
+## 10. GPU, NPU, and heterogeneous compute
 
 ### 10.1 Composite Attestation
 
-Agent Use GPU/NPU ♪ And then, just ♪ CPU TEE The privacy boundary may include:
+When an Agent uses GPU/NPU, having only the CPU TEE pass attestation is not enough. The privacy boundary may include:
 
 ```text
 CPU TEE / Confidential VM
@@ -574,7 +574,7 @@ CPU TEE / Confidential VM
     └── device memory
 ```
 
-The blogger says that the government is not a party to the law, but that it is not a party to the law.`compute_confidentiality` Yeah. `indeterminate`.
+If any link can see plaintext but cannot prove it, `compute_confidentiality` is `indeterminate`.
 
 ### 10.2 Accelerator Claims
 
@@ -596,7 +596,7 @@ The blogger says that the government is not a party to the law, but that it is n
 }
 ```
 
-If accelerator No equipment level certification, or CPU→The equipment will be transferred in normal. Host/Driver-exposure express:
+If the accelerator has no device-level attestation, or the CPU→device transfer exposes plaintext in an ordinary Actr Host/driver:
 
 ```text
 compute_confidentiality = indeterminate
@@ -605,7 +605,7 @@ reason = ACCELERATOR_CONFIDENTIALITY_NOT_PROVEN
 
 ### 10.3 Vendor compatibility
 
-Actrium No, no, no. Intel, AMD, Arm, NVIDIAHua Zhuo Ascend Or a cloud service is written as a fixed trust conclusion and is used:
+Actrium does not hard-code Intel, AMD, Arm, NVIDIA, Huawei Ascend, or a given cloud service as a fixed trust conclusion; instead it uses:
 
 ```text
 vendor evidence
@@ -614,53 +614,53 @@ vendor evidence
   → organization/Realm appraisal policy
 ```
 
-Every one. adapter It is important to state that:
+Every adapter must declare:
 
-- Supported hardware, solidware, driver and deployment enhancements;
+- the supported hardware, firmware, driver, and deployment topology;
 - vendor trust roots;
-- Evidence Format and signature algorithms;
-- Endorsements and Reference Values (a) The means of access;
-- TCB advisory/(a) Undo the source;
-- (b) The face of attack that can and cannot be protected;
-- freshness and nonce Semantics;
-- Test vector and negative test;
-- adapter Sign, version and undo.
+- the Evidence format and signature algorithm;
+- how Endorsements and Reference Values are obtained;
+- the TCB advisory/revocation source;
+- the attack surface it can and cannot protect;
+- freshness and nonce semantics;
+- test vectors and negative tests;
+- the adapter's own signature, version, and revocation.
 
-The manufacturer's publicity material can only be used to detect capabilityIt can't be. `CONTROLLED` basis. Only when all the public or organizationally validated authentication interfaces, reference values, certificate chains and repetitious negative testing are available production profile.
+Vendor marketing material can only be used for capability discovery; it cannot directly be the basis for `CONTROLLED`. A production profile is possible only once public or organization-audited verification interfaces, reference values, certificate chains, and reproducible negative tests are all in place.
 
-## 11. Workspace With static data
+## 11. Workspace and data at rest
 
 ### 11.1 Envelope Encryption
 
-Every one. Workspace/Service At least use independence Data Encryption Key:
+Every Workspace/Service uses at least an independent Data Encryption Key:
 
 ```text
 Workspace data ── DEK
 DEK ── KEK in local Keystore / organization KMS / Realm-approved KMS
 ```
 
-Requests:
+Requirements:
 
-- ActorId Not decryption keys;
-- DB Save Only ciphertext, key id And necessary metadata;
-- backup/snapshot (a) Keep encryption;
-- Service Delete, equipment cancel or policy Change is avoidable KEK/DEK Visits;
-- key rotation No re-profiling requested ActorId;
-- Same log, index, cache and temporary file followed data class.
+- the ActorId is not the decryption key;
+- the DB stores only ciphertext, key id, and necessary metadata;
+- backups/snapshots stay encrypted;
+- Service deletion, device revocation, or a policy change can revoke KEK/DEK access;
+- key rotation does not require reissuing the ActorId;
+- logs, indexes, caches, and temporary files follow the same data class.
 
-### 11.2 CC scene
+### 11.2 CC scenarios
 
-If policy Request confidential compute:
+If policy requires confidential compute:
 
-- KMS policy We have to check. Attestation Result;
-- DEK Only for proven. ephemeral key;
-- Decryption only occurs at the performance boundary that is certified to be covered;
-- snapshot, migration and accelerator offload (a) Must be covered by the certificate;
-- Proofing expiry does not require immediate loss of active status of memory, but grace window After that, we must stop receiving new ones. secret and re-attest/rekey.
+- KMS policy must check the Attestation Result;
+- the DEK is wrapped only for an attested ephemeral key;
+- decryption happens only within the execution boundary covered by the attestation;
+- snapshot, migration, and accelerator offload must stay within the scope covered by the attestation;
+- attestation expiry does not require immediately discarding in-memory runtime state, but after the grace window it must stop accepting new secrets and re-attest/rekey.
 
-### 11.3 Audit log
+### 11.3 Audit logs
 
-Servers must keep the audit log itself static Contract In-Focus storage/audit sink:
+A server retaining audit logs must itself be an explicit storage/audit sink in the static Contract:
 
 ```toml
 [[actrium.privacy_contract.audit_sink]]
@@ -673,43 +673,43 @@ operator_visibility = "authorized-security-admin"
 encrypted = true
 ```
 
-Host It has to be a log. capabilityfields schema, target, encryption, retention period, reading the subject and exporting behavior into the private map. payload, prompt, Workspace Content, model input output or stable user identifiers must be genuine data class Re-evaluate, not all.“Audit”Go around the strategy.
+The Actr Host must bring the log capability, field schema, destination, encryption, retention period, reading subject, and export behavior into the privacy graph. When it can record payload, prompt, Workspace content, model input/output, or a stable user identifier, it must be re-evaluated under its true data class; it cannot be lumped together as "audit" to bypass policy.
 
-Attestation Could not close temporary folder: %s workload/Environment,Host broker It can be proved that only statements are issued. audit capability; it can't just be based on“The server has an audit log.”Proves that the server has no other hidden records.
+Attestation can prove that a workload/environment running a given log configuration is currently running, and the Host broker can prove that only the declared audit capability was granted; it cannot prove, merely from "the server has an audit log," that the server has no other hidden recording. Therefore:
 
-- WASM/Native confinement It proves that it didn't go around. broker (b) Other log exports;
-- CC Prove it. Host/Cloud managers cannot read and record their memory outside the border;
-- audit sink Their own storage, administrator and exporter continue to be closed node or Certified Privacy Domain;
-- Undeclared logs,Host Class specified or unproven retention And make the facts `UNKNOWN` or `UNCONTROLLED`.
+- WASM/Native confinement proves there is no other log egress that bypasses the broker;
+- CC proves the Actr Host/cloud administrator cannot read memory outside the boundary and secretly record it;
+- the audit sink's own storage, administrator, and exporter continue to act as a closure node or a Certified Privacy Domain;
+- an undeclared log, Actr-Host-level plaintext collection, or unprovable retention makes the relevant fact `UNKNOWN` or `UNCONTROLLED`.
 
-Yeah. LLM Server and GPU/NPU In particular, a distinction is made between:
+For an LLM Server and GPU/NPU in particular, distinguish:
 
-- accelerator Attestation Usually prove the identity of the equipment, the solid,CC mode - state of equipment, not automatically certifying the upper layer LLM Server No, I didn't. prompt/response Writing logs;
-- If the log is accessed through a controlled file, object storage, network or Actor capability The government is not going to be able to get out of the border.Host We must observe. audit edge;
-- If log logic is measured workload The government is not a party to the law.workload/config digest It's a proof.“Which log code and configuration is running”But it's still closed. egress And trust. Verifier The blogger says that the government is not in a position to prove that there are no other words.
-- If it is, opaque Third parties LLM APIExternal calls cannot be made by the only means GPU Proof of technical testing for internal retention; reliance only Certified Privacy Domain Yeah. retention/audit Yes. scope Proof. No such certificate is available. `UNKNOWN`.
+- accelerator Attestation typically proves device identity, firmware, CC mode, and device state; it does not automatically prove that the LLM Server above it isn't writing prompts/responses to a log;
+- if the log leaves the attested boundary through a controlled file, object storage, network, or Actor capability, the Actr Host must observe the audit edge;
+- if the log logic sits inside the measured workload, the workload/config digest can prove "which logging code and configuration is running", but proving there is no other outlet still requires combining it with closed egress and a trusted Verifier;
+- if it is an opaque third-party LLM API, an external caller cannot technically detect its internal retention just from GPU attestation; it can only rely on a Certified Privacy Domain's scoped proof of retention/audit. Without that proof, this item is `UNKNOWN`.
 
-So...“The server left an audit log.”Not natural. Only the log exits are made. capability Or the entire service boundary log./retention Authentication provided aggregateIt just entered. Actrium Proven private maps.
+So "the server keeps an audit log" is not naturally observable from outside. It enters Actrium's provable privacy graph only once the log egress is turned into a capability, or the whole service boundary provides a verifiable aggregate for log/retention.
 
 ## 12. Output and secondary leakage
 
-“No original socket”It's not a precaution. workload - Put it on. secret I'm gonna put it in a legal one. Actor Response.
+"No raw socket" does not stop a workload from stuffing a secret into a legitimate Actor response.
 
-Therefore, the high-sensitivity data also requires:
+So highly sensitive data also needs:
 
-- Input, Internal Values and Output schema - Yeah. data class;
-- Cross-category output requires a visible declassification capability;
-- Host (a) Validation of structure, size, objectives and uses;
-- Aggregation query can be requested k-anonymity(i) Disparity of privacy budget or minimum sample number;
-- model inference Clear prompt, embedding, cache, tool result and telemetry Classification of the
-- - Yes, high bandwidth. covert channel (b) Quotas, speed rates and call shape limits;
-- It can't be completely closed. timing/size/side-channel Yes. assurance Medium-notation disclosure.
+- input, internal values, and output schemas carrying a data class;
+- cross-category output requiring an explicit declassification capability;
+- the Actr Host validating structure, size, destination, and purpose;
+- aggregate queries that may require k-anonymity, a differential-privacy budget, or a minimum sample count;
+- model inference explicitly classifying prompt, embedding, cache, tool result, and telemetry;
+- quota, rate, and call-shape limits on high-bandwidth covert channels;
+- timing/size/side-channel leakage that cannot be fully closed being explicitly disclosed in the assurance.
 
-This still does not automatically support the minimization of data from any business algorithm; high-risk processes need to be tailored policy, test or formalization models.
+This still does not automatically prove data minimization for an arbitrary business algorithm; high-risk programs need dedicated policy, testing, or formal models.
 
 ## 13. Evidence Bundle
 
-`ActorAssurance` The reference, not all of the inline originals:
+`ActorAssurance` references, rather than inlines, all the raw proofs:
 
 ```json
 {
@@ -748,8 +748,8 @@ This still does not automatically support the minimization of data from any busi
     }
   ],
   "binding": {
-    "actorStateId": "…",
-    "structureId": "…"
+    "actorStateDigest": "…",
+    "structureDigest": "…"
   },
   "issuedAt": "2026-07-29T12:00:00Z",
   "expiresAt": "2026-07-29T12:05:00Z",
@@ -761,19 +761,19 @@ This still does not automatically support the minimization of data from any busi
 }
 ```
 
-Original hardware Evidence It may contain sensitive data such as the device serial number. peer Defaults only get:
+Raw hardware Evidence may contain sensitive data such as a device serial number. An ordinary peer gets, by default, only:
 
-- Attestation Result;
-- canonical claims (a) The necessary subsets;
-- Evidence digest;
-- Verifier identity;
-- profile/version;
+- the Attestation Result;
+- the necessary subset of canonical claims;
+- the Evidence digest;
+- the Verifier identity;
+- the profile/version;
 - freshness;
-- Uncheck the status.
+- the revocation check status.
 
-## 14. Compositing algorithms
+## 14. Aggregation algorithm
 
-For Transport Category `d` It's... edge `e = A → B`:
+For an edge `e = A → B` carrying data class `d`:
 
 ```text
 Required(d, operation, organizationPolicy)
@@ -788,18 +788,18 @@ EdgePrivacy(e, d) = meet(
 )
 ```
 
-Application as a whole is no root figure nodes \(R_A\) the weakest item and display of the mustache `Ready`.
+The application as a whole is the weakest of the per-node \(R_A\) values on the rootless graph, and display still requires `Ready`.
 
 Rules:
 
-- Only current data and operations required The dimensions of the project are brought together;
-- Missing / Expiry / Unsupported Evidence Yes. `UNKNOWN`;
-- Signing failed,measurement Not matching, revocation or strategic rejection is `UNCONTROLLED`;
-- Strengths cannot offset either. required fail / indeterminate;
-- Figureworkloadchange of equipment or session material `ActorStateId` / `ApplicationStateId`;
-- The old-fashioned. Attestation Result No new side can be authorized.
+- only aggregate the dimensions required for the current data and operation;
+- missing / expired / unsupported Evidence is `UNKNOWN`;
+- a signature failure, a measurement mismatch, revocation, or an explicit policy rejection is `UNCONTROLLED`;
+- a strong item cannot offset any required fail / indeterminate;
+- a change to the graph, workload, device, or session material changes `ActorStateDigest` / `ApplicationStateDigest`;
+- an Attestation Result bound to an old state cannot authorize a new edge.
 
-## 15. Control Component
+## 15. Control-plane components
 
 ```text
 Actrium / Actr Privacy Control Plane
@@ -822,33 +822,33 @@ Actrium / Actr Privacy Control Plane
 └── Audit & Transparency Log
 ```
 
-Realm It can be operated or commissioned Verifier, Reference Value, Revocation and Key Broker Service, but it's not the only global trust. Organization and local. Actrium You can choose your own. Verifier with appraisal policy.
+The Realm signing key holder (the Realm domain owner), or a Realm Infra Provider it delegates to, may operate or delegate the Verifier, Reference Value, Revocation, and Key Broker services, but it is not the sole global root of trust; an individual instance Realm chooses which Verifiers to trust only within its own policy. Organizations and local Actrium installations may choose their own Verifier and appraisal policy.
 
-## 16. Failed and Undo
+## 16. Failure and revocation
 
-The following events must trigger a re-evaluation:
+The following events must trigger re-evaluation:
 
-- workload, package, guest image, driver, firmware digest Changes;
-- Actor runtime (a) Reconstruction or relocation;
-- accelerator Add/Remove;
-- channel re-handshake or endpoint key Changes;
-- Attestation Result/Endorsement (a) Due;
-- vendor TCB advisory or key revocation;
-- organization policy Changes;
+- a change to the workload, package, guest image, driver, or firmware digest;
+- the Actor runtime being rebuilt or migrated;
+- an accelerator being added/removed;
+- a channel re-handshake or an endpoint key change;
+- Attestation Result/Endorsement expiry;
+- a vendor TCB advisory or key revocation;
+- an organization policy change;
 - Workspace key rotation;
-- `ActorStateId` or `structureId` Change.
+- a change to `ActorStateDigest` or `structureDigest`.
 
 Actions:
 
 ```text
-indeterminate → Stop sending new private/secret♪ Into ♪ re-attestation
-fail          → Close edge/ Withdrawn capabilityStop. key release
-recovered     → New nonceNew ResultTie it up. `ActorStateId` Channels and Keys
+indeterminate → stop sending new private/secret data, enter re-attestation
+fail          → close the edge, revoke the capability, stop key release
+recovered     → new nonce, new Result, channel and keys bound to the new `ActorStateDigest`
 ```
 
-It can't be because Verifier For the time being, the certificate of indefinite cache continues to be used. `expiresAt`, Attestation Result with Capability Local clock used for validity is not available——The time clock to which the operator is bound and the assessor is called back to allow the expired material to be reaccepted.
+A temporarily unavailable Verifier is not grounds to keep relying on an indefinitely cached attestation. The local clock used to check `expiresAt`, the Attestation Result, and the Actor Grant's validity period must not be set back — both the enforcing party and the appraising party are bound by this; a clock that can be set back would let expired material be accepted again.
 
-## 17. Stable Error Code
+## 17. Stable error codes
 
 ```text
 CHANNEL_IDENTITY_BINDING_MISMATCH
@@ -890,30 +890,30 @@ PRIVACY_DOMAIN_SCOPE_MISMATCH
 PRIVACY_AUDIT_SINK_NOT_DECLARED
 ```
 
-## 18. Order of delivery
+## 18. Delivery order
 
-### P0: Unique semantic
+### P0: Unified semantics
 
 - Actor Secure Channel requirements;
 - Assurance Vector;
-- RATS Role and Evidence Bundle;
+- RATS roles and Evidence Bundle;
 - data class→required claims policy;
 - evidence freshness, binding, revocation.
 
-### P1: Local and ordinary clouds
+### P1: Local and ordinary cloud
 
 - WASM egress closure;
 - Workspace envelope encryption;
 - package provenance;
-- Non-auto-signed `ActorAssurance`(Host assessable Guest, no sign-in Host);
-- No request. CC It's... public/private policy.
+- a non-self-signed `ActorAssurance` (the Actr Host may assess the Guest, but must not self-sign the Actr Host);
+- a public/private policy that does not require CC.
 
 ### P2: Confidential CPU
 
-- First production TEE/CVM profile;
+- the first production TEE/CVM profile;
 - Verifier adapter;
 - attestation-bound session key;
-- KMS/Key Broker (a) Release on condition;
+- conditional KMS/Key Broker release;
 - migration, snapshot, revocation tests.
 
 ### P3: Confidential Accelerator
@@ -921,13 +921,13 @@ PRIVACY_AUDIT_SINK_NOT_DECLARED
 - CPU+GPU/NPU composite attestation;
 - driver/device/firmware/reference values;
 - secure device assignment/link/memory claims;
-- Different manufacturers adapter conformance suite.
+- a conformance suite for adapters across different vendors.
 
 ### P4: Advanced output privacy
 
 - declassification;
 - DP budget;
-- MPC/FHE Specific workload profile;
+- MPC/FHE-specific workload profiles;
 - side-channel assurance disclosure.
 
 ## 19. References
@@ -938,5 +938,5 @@ PRIVACY_AUDIT_SINK_NOT_DECLARED
 - [RFC 9180: HPKE](https://www.rfc-editor.org/rfc/rfc9180.html)
 - [Confidential Computing Consortium](https://confidentialcomputing.io/)
 - [NVIDIA Confidential Containers: CPU + GPU composite attestation](https://docs.nvidia.com/datacenter/cloud-native/confidential-containers/latest/attestation.html)
-- [The clouds are so strong QingTian Enclave Password certificate](https://support.huaweicloud.com/intl/zh-cn/twp-ecs/ecs_twp_0010.html)
-- [Retrenching communities: based on TEE With remote proof AI Credible calculations](https://www.hiascend.com/activities/dynamic-news/733)
+- [Huawei Cloud QingTian Enclave cryptographic attestation](https://support.huaweicloud.com/intl/zh-cn/twp-ecs/ecs_twp_0010.html)
+- [Ascend Community: trusted AI computing based on Ascend TEE and remote attestation](https://www.hiascend.com/activities/dynamic-news/733)

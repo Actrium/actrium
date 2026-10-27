@@ -86,25 +86,50 @@ impl IceService for TurnService {
 
         self.socket = Some(socket.clone());
 
-        // Create TURN server
+        // Create TURN server. Credentials of Realms that are not served are
+        // refused.
         let realm = self.config.turn.realm.clone();
+        let inactive_realms = turn::InactiveRealms::default();
+        let _realm_watch = inactive_realms.watch().await;
         let auth_handler = Arc::new(
-            turn::Authenticator::new(self.config.turn.turn_secret.clone())
-                .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?,
+            turn::Authenticator::new(
+                self.config.turn.turn_secret.clone(),
+                self.config
+                    .authority
+                    .provider_id()
+                    .map_err(anyhow::Error::msg)?,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?
+            .with_inactive_realms(inactive_realms.clone()),
         );
+        let relay_port_range = self
+            .config
+            .turn
+            .relay_port_bounds()
+            .map_err(|error| anyhow::anyhow!(error))?;
 
+        // The disposable Realm E2E relays between private addresses. This
+        // exception does not exist in production binaries or ordinary tests.
+        #[cfg(test)]
+        let allow_private_relay_peers = std::env::var("ACTR_PACKAGE_RUNTIME_FIXTURE").as_deref()
+            == Ok("1")
+            && std::env::var_os("ACTR_REALM_E2E_DOCUMENTS").is_some();
+        #[cfg(not(test))]
+        let allow_private_relay_peers = false;
         let turn_server = match turn::create_turn_server(
             socket.clone(),
             &self.config.bind.ice.advertised_ip,
             &realm,
+            relay_port_range,
             auth_handler,
+            allow_private_relay_peers,
         )
         .await
         {
             Ok(server) => {
                 let url = Url::parse(&format!(
                     "turn:{}:{}?transport=udp",
-                    ice_bind.ip, ice_bind.port
+                    ice_bind.advertised_ip, ice_bind.advertised_port
                 ))?;
                 self.info.set_running(url);
                 // Attach counters to ServiceInfo and record TURN allocation
@@ -126,9 +151,33 @@ impl IceService for TurnService {
             }
         };
 
+        // A Realm that stops being served, or a disabled Actor, loses its
+        // allocations too, not only their refreshes.
+        let turn_server = Arc::new(turn_server);
+        let closer = {
+            let server = turn_server.clone();
+            tokio::spawn(async move {
+                loop {
+                    inactive_realms.deactivated().await;
+                    match turn::close_unauthorized_allocations(&server, &inactive_realms).await {
+                        Ok(0) => {}
+                        Ok(closed) => platform::recording::info!(
+                            "Closed the TURN allocations of {} credentials of inactive Realms or Actors",
+                            closed
+                        ),
+                        Err(e) => platform::recording::warn!(
+                            "Failed to close TURN allocations of inactive Realms or Actors: {}",
+                            e
+                        ),
+                    }
+                }
+            })
+        };
+
         // Wait for shutdown signal
         let _ = shutdown_rx.recv().await;
         platform::recording::info!("TURN service received shutdown signal");
+        closer.abort();
 
         // Shut down TURN server
         if let Err(e) = turn::shutdown_turn_server(&turn_server).await {

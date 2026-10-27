@@ -88,13 +88,8 @@ impl Context for MockCtx {
     fn self_id(&self) -> &ActrId {
         static ID: std::sync::OnceLock<ActrId> = std::sync::OnceLock::new();
         ID.get_or_init(|| ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 99,
-            r#type: actr_protocol::ActrType {
-                manufacturer: "test".to_string(),
-                name: "trace-echo".to_string(),
-                version: "0.1.0".to_string(),
-            },
         })
     }
 
@@ -218,13 +213,8 @@ struct InprocHarness {
 impl InprocHarness {
     async fn build() -> Self {
         let actor_id = ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 77,
-            r#type: actr_protocol::ActrType {
-                manufacturer: "test".to_string(),
-                name: "trace-target".to_string(),
-                version: "0.1.0".to_string(),
-            },
         };
 
         // Shell -> Workload channel

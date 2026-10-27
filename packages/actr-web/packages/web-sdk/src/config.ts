@@ -14,19 +14,32 @@ export type WorkerType = 'service-worker' | 'web-worker';
  * then forwarded to WASM register_client().
  */
 export interface SwRuntimeConfig {
-  /** AIS (Actor Identity Service) endpoint URL (e.g. http://host:port/ais) */
-  ais_endpoint: string;
+  /** Issuer endpoint URL (e.g. http://host:port/issuer) */
+  issuer_endpoint: string;
 
   /** Signaling WebSocket URL (e.g. wss://host:port/signaling/ws) */
   signaling_url: string;
 
-  /** Deployment realm ID */
-  realm_id: number;
+  /** Realm name (`<realm_id>@<domain>`) */
+  realm: string;
 
-  /** This actor's type (manufacturer:name:version) */
+  /** Authorized device key JSON produced by `actr realm join`. Import once;
+   * subsequent starts restore it from the browser's Realm/Issuer secret store.
+   * Supply at runtime through the Host's credential import flow, never embed
+   * a private key in a public JavaScript bundle or generated config. */
+  realm_client_key?: {
+    realm: string;
+    provider_id: string;
+    issuer: string;
+    key_id: string;
+    private_key: string;
+    public_key: string;
+  };
+
+  /** This actor's type (publisher/program@version) */
   client_actr_type: string;
 
-  /** Target actor type for peer discovery (manufacturer:name:version) */
+  /** Target actor type for peer discovery (publisher/program@version) */
   /** Optional legacy default target. New workloads resolve dependency aliases at call time. */
   target_actr_type?: string;
 
@@ -64,7 +77,7 @@ export interface SwRuntimeConfig {
 /** Trust anchor config, matching `actr_config::TrustAnchor` in `actr_config`. */
 export type TrustAnchor =
   | {
-      /** Pre-shared Ed25519 public key; accepts any manufacturer. */
+      /** Pre-shared Ed25519 public key; accepts any publisher. */
       kind: 'static';
       /** Base64 (standard) of the 32-byte Ed25519 public key. */
       pubkey_b64?: string;
@@ -74,7 +87,7 @@ export type TrustAnchor =
       pubkey_file?: string;
     }
   | {
-      /** Look up MFR public keys via AIS HTTP registry. Not yet implemented
+      /** Look up publisher public keys via Issuer HTTP registry. Not yet implemented
        *  in the browser SW; a registry-only config fails closed. */
       kind: 'registry';
       endpoint: string;

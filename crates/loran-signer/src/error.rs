@@ -10,7 +10,6 @@ use thiserror::Error;
 
 /// Signer service error type
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub enum SignerError {
     /// Database error
     #[error("Database error: {0}")]
@@ -36,15 +35,9 @@ pub enum SignerError {
     #[error("Key not found: key_id={0}")]
     KeyNotFound(u32),
 
-    /// The key exists but has passed its `expires_at`, so signing is refused
-    ///
-    /// Verifier caches drop verifying keys at
-    /// `expires_at` without any tolerance, so a signature minted afterwards
-    /// would produce a credential that fails every handshake. The tolerance
-    /// window only keeps key material
-    /// around for reads; it never extends the signing window.
-    #[error("Signing key expired: key_id={0}")]
-    KeyExpired(u32),
+    /// The named key was retired: its private key is gone and it never signs
+    #[error("Signing key retired: key_id={0}")]
+    KeyRetired(u32),
 
     /// Resource not found
     #[error("Not found: {0}")]
@@ -58,11 +51,11 @@ pub enum SignerError {
     #[error("Configuration error: {0}")]
     Config(String),
 
-    /// Base64 encoding/decoding error
+    /// Base64 encode/decode error
     #[error("Base64 error: {0}")]
     Base64(#[from] base64::DecodeError),
 
-    /// JSON serialization/deserialization error
+    /// JSON serialize/deserialize error
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -92,12 +85,12 @@ impl IntoResponse for SignerError {
                 "Invalid request parameters".to_string(),
             ),
             SignerError::KeyNotFound(_) | SignerError::NotFound(_) => {
-                // Do not leak specific key_id in production
+                // Do not leak the concrete key_id in production
                 (StatusCode::NOT_FOUND, "Resource not found".to_string())
             }
-            SignerError::KeyExpired(_) => (StatusCode::GONE, "Signing key expired".to_string()),
+            SignerError::KeyRetired(_) => (StatusCode::GONE, "Signing key retired".to_string()),
             SignerError::Database(_) | SignerError::Internal(_) | SignerError::Crypto(_) => {
-                // Do not expose internal error details to the client
+                // Never expose internal error details to the client
                 crate::recording::error!("Internal error: {:?}", self);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -122,8 +115,45 @@ impl IntoResponse for SignerError {
     }
 }
 
+/// Maps a `SignerError` to a `tonic::Status` for the gRPC surface.
+///
+/// The client-facing message is always a fixed, opaque string; every concrete
+/// detail (sqlx table names, file paths, nonce failure kind, key ids) is kept
+/// server-side in the recording log only. In particular, all authentication
+/// failures — invalid signature, replayed nonce, and timestamp-out-of-window —
+/// collapse into a single `unauthenticated("authentication failed")` so a caller
+/// cannot use the response to distinguish them and build a signing oracle.
+impl From<SignerError> for tonic::Status {
+    fn from(err: SignerError) -> Self {
+        match &err {
+            SignerError::Authentication(_)
+            | SignerError::NonceAuth(_)
+            | SignerError::ReplayAttack(_) => {
+                crate::recording::warn!("gRPC authentication rejected: {err:?}");
+                tonic::Status::unauthenticated("authentication failed")
+            }
+            SignerError::InvalidRequest(_) => {
+                crate::recording::debug!("gRPC invalid request: {err:?}");
+                tonic::Status::invalid_argument("invalid request")
+            }
+            SignerError::KeyNotFound(_) | SignerError::NotFound(_) => {
+                crate::recording::debug!("gRPC resource not found: {err:?}");
+                tonic::Status::not_found("not found")
+            }
+            SignerError::KeyRetired(_) => {
+                crate::recording::warn!("gRPC sign refused: {err:?}");
+                tonic::Status::failed_precondition("key retired")
+            }
+            _ => {
+                crate::recording::error!("gRPC internal error: {err:?}");
+                tonic::Status::internal("internal error")
+            }
+        }
+    }
+}
+
 /// Signer result type alias
 pub type SignerResult<T> = Result<T, SignerError>;
 
-// ECIES error handling - temporarily simplified due to error type changes in the ecies library
-// More detailed error conversion can be added later as needed
+// ECIES error handling - simplified for now due to ecies crate error-type churn.
+// More detailed error conversions can be added later as needed.

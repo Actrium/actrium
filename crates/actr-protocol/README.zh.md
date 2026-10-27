@@ -27,7 +27,7 @@ graph TD
         
         subgraph "代码实现 (src/)"
             Generated["generated/<br/><i>(prost 生成的 Rust 类型)</i>"]
-            Utils["手写工具模块<br/><i>actor_ext.rs<br/>uri.rs<br/>error.rs</i>"]
+            Utils["手写工具模块<br/><i>actr_ext.rs<br/>uri.rs<br/>error.rs</i>"]
             LibRs["lib.rs<br/><i>(统一导出)</i>"]
         end
 
@@ -50,52 +50,38 @@ graph TD
 
 ### 3.2. 核心工具与扩展
 
-#### a) Actor ID 扩展 (`actor_ext.rs`)
+#### a) Actor ID 扩展 (`actr_ext.rs`)
 
-为 `ActrId` 提供了字符串表示的互相转换能力，格式定义为：`<serial_number>@<realm_id>:<manufacturer>+<name>`。
+为 `ActrId` 提供了字符串表示的互相转换能力，格式为 ActorId `<serial_hex>.<realm_id>@<domain>`（见 `actr/protocols/uri.zh.md` §5.2）。`ActrId` 只含 Realm 名与 Actor serial，Actor 类型由 Actor credential 携带。旧的 `<serial_hex>@<realm_id>/<type>` 形式会被拒绝。
 
 ```rust
-use actr_protocol::{ActrId, ActrType, Realm};
+use actr_protocol::ActrId;
 
-// 示例
 let id = ActrId {
-    realm: Realm { realm_id: 101 },
-    serial_number: 0x1a2b3c,
-    r#type: ActrType {
-        manufacturer: "acme".to_string(),
-        name: "echo-service".to_string(),
-    },
+    realm: "k7m2q9xh@example.com".to_string(),
+    serial_number: 0x2af01,
 };
 
 let id_str = id.to_string_repr();
-assert_eq!(id_str, "1a2b3c@101:acme+echo-service");
+assert_eq!(id_str, "2af01.k7m2q9xh@example.com");
 
 let parsed_id = ActrId::from_string_repr(&id_str).unwrap();
-assert_eq!(id.serial_number, parsed_id.serial_number);
+assert_eq!(id, parsed_id);
 ```
 
 #### b) URI 解析 (`uri.rs`)
 
-提供 authority-based `actr://<authority>/<opaque-target>` URI 的解析、规范化和构建功能。
-公开 URI 不把 realm、manufacturer、version 或运行中 Actor identity 固定到 path 位置。
+`actr://` 指向 Realm 或其中的 Actor：`actr://<domain>/<realm_id>[/path]` 或 `actr://<domain>/<serial>.<realm_id>[/path]`，见 `actr/protocols/uri.zh.md`。`parse_realm_name` 校验 Realm 名 `<realm_id>@<domain>`。
 
 ```rust
-use std::str::FromStr;
-use actr_protocol::uri::{ActrUri, ActrUriBuilder};
+use actr_protocol::uri::{ActrUri, parse_realm_name};
 
-// 从字符串解析
-let uri = "actr://example.com/apps/echo".parse::<ActrUri>().unwrap();
-assert_eq!(uri.authority(), "example.com");
-assert_eq!(uri.target(), Some("apps/echo"));
-assert_eq!(uri.discovery_url(), "https://example.com/.well-known/actr");
+let uri = "actr://example.com/k7m2q9xh".parse::<ActrUri>().unwrap();
+assert_eq!(uri.domain(), "example.com");
+assert_eq!(uri.realm_name().as_deref(), Some("k7m2q9xh@example.com"));
+assert_eq!(uri.discovery_url().as_deref(), Some("https://example.com/.well-known/actr"));
 
-// 使用构建器创建
-let uri = ActrUriBuilder::new()
-    .authority("example.com")
-    .target("apps/echo")
-    .build()
-    .unwrap();
-assert_eq!(uri.to_string(), "actr://example.com/apps/echo");
+assert!(parse_realm_name("k7m2q9xh@example.com").is_ok());
 ```
 
 #### c) 错误处理 (`error.rs`)

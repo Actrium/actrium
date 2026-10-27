@@ -34,7 +34,7 @@
 //!     description: Some("User service".to_string()),
 //!     fingerprint,
 //!     protobufs: proto_files.into_iter().map(|pf| actr_protocol::service_spec::Protobuf {
-//!         uri: format!("actr://user-service/{}", pf.name),
+//!         package: "user.v1".to_string(),
 //!         content: pf.content,
 //!         fingerprint: "file_fp".to_string(),
 //!     }).collect(),

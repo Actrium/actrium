@@ -377,7 +377,7 @@ exports = []
 
 [package]
 name = "my-actor-service"
-manufacturer = "my-company"
+publisher = "my-company"
 description = "An Actor-RTC service"
 authors = []
 license = "Apache-2.0"
@@ -388,11 +388,11 @@ tags = ["latest"]
 [system.signaling]
 url = "ws://127.0.0.1:8080"
 
-[system.ais_endpoint]
-url = "http://127.0.0.1:8080/ais"
+[system.issuer_endpoint]
+url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 
 [system.discovery]
 visible = true

@@ -1,4 +1,4 @@
-//! Smoke test: start a fully-linked Node against a mock signaling/AIS server.
+//! Smoke test: start a fully-linked Node against a mock signaling/Issuer server.
 //!
 //! Drives the `Node::from_hyper → link → register → start` typestate chain,
 //! which is the only path that exercises `lifecycle::node::Inner::start` (the
@@ -15,7 +15,7 @@ use actr_framework::{Bytes, Context, Dest, MessageDispatcher, Workload};
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrError, ActrId, ActrType, PayloadType, Realm, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActrError, ActrId, ActrType, PayloadType, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use tempfile::TempDir;
 
@@ -92,7 +92,7 @@ fn runtime_config(
         server,
         name,
         ActrType {
-            manufacturer: "test-mfr".to_string(),
+            publisher: "test-publisher".to_string(),
             name: name.to_string(),
             version: "1.0.0".to_string(),
         },
@@ -114,9 +114,9 @@ fn runtime_config_with_type(
             license: None,
         },
         signaling_url: url::Url::parse(&server.url()).unwrap(),
-        realm: Realm { realm_id: 7 },
-        ais_endpoint: format!("http://127.0.0.1:{}/ais", server.port()),
-        realm_secret: None,
+        realm: "test7@example.com".to_string(),
+        issuer_endpoint: format!("http://127.0.0.1:{}/issuer", server.port()),
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,
@@ -196,11 +196,11 @@ async fn linked_node_starts_and_shuts_down_cleanly() {
         .await
         .expect("link should attach the workload");
 
-    // register hits the mock AIS (MockActrixServer serves /ais/register).
+    // register hits the mock Issuer (MockActrixServer serves /issuer/register).
     let mut registered = node
-        .register(&format!("http://127.0.0.1:{}/ais", server.port()))
+        .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
         .await
-        .expect("register should succeed against mock AIS");
+        .expect("register should succeed against mock Issuer");
     let _network_events = registered.create_gated_network_event_handle(25);
 
     let actr = registered.start().await.expect("node should start");
@@ -255,12 +255,12 @@ async fn linked_node_advertises_websocket_listen_port() {
     cfg.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg.websocket_advertised_host = Some("127.0.0.1".to_string());
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let registered = Node::from_hyper(hyper, cfg)
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .expect("register should succeed");
 
@@ -273,8 +273,8 @@ async fn linked_node_advertises_websocket_listen_port() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn register_against_unreachable_ais_errors() {
-    // A garbage AIS endpoint must surface a registration error rather than
+async fn register_against_unreachable_issuer_errors() {
+    // A garbage Issuer endpoint must surface a registration error rather than
     // hanging or starting the node.
     let mut server = TestSignalingServer::start().await.expect("server start");
     let dir = TempDir::new().unwrap();
@@ -286,16 +286,16 @@ async fn register_against_unreachable_ais_errors() {
     .await
     .unwrap();
 
-    let node = Node::from_hyper(hyper, runtime_config(&dir, &server, "AisFail"))
+    let node = Node::from_hyper(hyper, runtime_config(&dir, &server, "IssuerFail"))
         .link(EchoWorkload)
         .await
         .unwrap();
 
-    // Point AIS at a closed port → register must fail.
-    let result = node.register("http://127.0.0.1:1/ais").await;
+    // Point Issuer at a closed port → register must fail.
+    let result = node.register("http://127.0.0.1:1/issuer").await;
     assert!(
         result.is_err(),
-        "register against an unreachable AIS must error"
+        "register against an unreachable Issuer must error"
     );
 
     server.shutdown().await;
@@ -316,12 +316,12 @@ async fn linked_node_runs_background_tasks_before_shutdown() {
     .await
     .unwrap();
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, runtime_config(&dir, &server, "BgRun"))
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .expect("register")
         .start()
@@ -350,12 +350,12 @@ async fn double_shutdown_is_idempotent() {
     .await
     .unwrap();
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, runtime_config(&dir, &server, "DoubleStop"))
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -384,12 +384,12 @@ async fn discover_unknown_type_returns_no_candidates() {
     .await
     .unwrap();
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, runtime_config(&dir, &server, "Discover"))
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -397,7 +397,7 @@ async fn discover_unknown_type_returns_no_candidates() {
         .unwrap();
 
     let unknown_type = ActrType {
-        manufacturer: "nobody".to_string(),
+        publisher: "nobody".to_string(),
         name: "NoSuchActor".to_string(),
         version: "0.0.0".to_string(),
     };
@@ -430,7 +430,7 @@ async fn two_nodes_connect_and_exchange_rpc() {
     let dir_b = TempDir::new().unwrap();
 
     let echo_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "EchoService".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -445,12 +445,12 @@ async fn two_nodes_connect_and_exchange_rpc() {
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
     cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -466,7 +466,7 @@ async fn two_nodes_connect_and_exchange_rpc() {
     .await
     .unwrap();
     let caller_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "Caller".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -475,7 +475,7 @@ async fn two_nodes_connect_and_exchange_rpc() {
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -501,7 +501,7 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
     let dir_b = TempDir::new().unwrap();
 
     let echo_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "EchoService".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -515,12 +515,12 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
     cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -535,7 +535,7 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
     .await
     .unwrap();
     let caller_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "Caller2".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -544,7 +544,7 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -588,7 +588,7 @@ async fn two_nodes_connect_over_webrtc() {
     let dir_b = TempDir::new().unwrap();
 
     let echo_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "EchoWebrtc".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -601,12 +601,12 @@ async fn two_nodes_connect_over_webrtc() {
     .await
     .unwrap();
     let cfg_b = runtime_config_with_type(&dir_b, &server, "EchoWebrtcNode", echo_type.clone());
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -621,7 +621,7 @@ async fn two_nodes_connect_over_webrtc() {
     .await
     .unwrap();
     let caller_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "CallerWebrtc".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -630,7 +630,7 @@ async fn two_nodes_connect_over_webrtc() {
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -662,12 +662,12 @@ async fn node_remains_running_during_signaling_pause_and_resume_smoke() {
     .await
     .unwrap();
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, runtime_config(&dir, &server, "Reconnect"))
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -701,12 +701,12 @@ async fn headless_node_reconnects_after_signaling_endpoint_restart() {
     .await
     .unwrap();
 
-    let ais = format!("http://127.0.0.1:{signaling_port}/ais");
+    let issuer = format!("http://127.0.0.1:{signaling_port}/issuer");
     let actr = Node::from_hyper(hyper, runtime_config(&dir, &server, "HeadlessReconnect"))
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -762,12 +762,12 @@ async fn node_handles_signaling_blackhole_io_without_panic_smoke() {
     .await
     .unwrap();
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, runtime_config(&dir, &server, "Blackhole"))
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -795,7 +795,7 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
     let dir_b = TempDir::new().unwrap();
 
     let echo_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "EchoIce".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -807,12 +807,12 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
     .await
     .unwrap();
     let cfg_b = runtime_config_with_type(&dir_b, &server, "EchoIceNode", echo_type.clone());
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -831,7 +831,7 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
         &server,
         "CallerIceNode",
         ActrType {
-            manufacturer: "test-mfr".into(),
+            publisher: "test-publisher".into(),
             name: "CallerIce".into(),
             version: "1.0.0".into(),
         },
@@ -840,7 +840,7 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -882,10 +882,10 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn linked_node_registers_with_realm_secret() {
-    // Setting realm_secret exercises the linked-registration auth path that
-    // supplies the x-actrix-realm-secret header, a distinct branch from the
-    // default linked register flow.
+async fn linked_node_registers_with_a_realm_client_key() {
+    // Setting realm_client_key exercises the linked-registration auth path
+    // that loads the key file and signs the x-actr-client-proof header, a
+    // distinct branch from the default linked register flow.
     let mut server = TestSignalingServer::start().await.expect("server start");
     let dir = TempDir::new().unwrap();
 
@@ -896,17 +896,30 @@ async fn linked_node_registers_with_realm_secret() {
     .await
     .unwrap();
 
-    let mut cfg = runtime_config(&dir, &server, "RealmSecretNode");
-    cfg.realm_secret = Some("test-realm-secret".to_string());
+    let mut cfg = runtime_config(&dir, &server, "RealmClientKeyNode");
+    let key_path = dir.path().join("realm-client.json");
+    let key_file = actr_protocol::realm_membership::RealmClientKeyFile::new(
+        &cfg.realm,
+        "127.0.0.1",
+        &cfg.issuer_endpoint,
+        &ed25519_dalek::SigningKey::from_bytes(&[5; 32]),
+    );
+    std::fs::write(&key_path, serde_json::to_string(&key_file).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    cfg.realm_client_key = Some(key_path);
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, cfg)
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
-        .expect("register with realm secret should succeed")
+        .expect("register with a Realm client key should succeed")
         .start()
         .await
         .expect("start");
@@ -937,12 +950,12 @@ async fn linked_node_run_with_acl_and_scripts_config() {
     cfg.scripts
         .insert("greet".to_string(), "echo hi".to_string());
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, cfg)
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -991,14 +1004,14 @@ async fn linked_node_accepts_extra_hook_observer() {
     .await
     .unwrap();
 
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let actr = Node::from_hyper(hyper, runtime_config(&dir, &server, "ObsNode"))
         .link(EchoWorkload)
         .await
         .unwrap()
         // Chain a second (no-op) host observer alongside the linked observer.
         .with_hook_observer(NoopObserver)
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -1021,7 +1034,7 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
     let dir_b = TempDir::new().unwrap();
 
     let echo_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "EchoDisconnect".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -1035,12 +1048,12 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
     let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoDiscNode", echo_type.clone());
     cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
     cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
-    let ais = format!("http://127.0.0.1:{}/ais", server.port());
+    let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()
@@ -1059,7 +1072,7 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
         &server,
         "CallerDiscNode",
         ActrType {
-            manufacturer: "test-mfr".into(),
+            publisher: "test-publisher".into(),
             name: "CallerDisc".into(),
             version: "1.0.0".into(),
         },
@@ -1068,7 +1081,7 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
         .link(EchoWorkload)
         .await
         .unwrap()
-        .register(&ais)
+        .register(&issuer)
         .await
         .unwrap()
         .start()

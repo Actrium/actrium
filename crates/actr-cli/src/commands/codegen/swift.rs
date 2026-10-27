@@ -182,8 +182,8 @@ impl LanguageGenerator for SwiftGenerator {
         // dependency metadata from the DispatchSpec — no more
         // RemoteFiles/RemoteFileActrTypes/LocalFiles parameters.
         let mut options = format!(
-            "Visibility=Public,manufacturer={}",
-            context.config.package.actr_type.manufacturer
+            "Visibility=Public,publisher={}",
+            context.config.package.actr_type.publisher
         );
 
         // Pass dispatch spec path and hash to the protoc plugin.

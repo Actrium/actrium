@@ -197,7 +197,7 @@ export async function componentize(
       format: 'esm',
       platform: 'node',
       target: 'es2022',
-      external: ['actr:workload/host@0.7.0'],
+      external: ['actr:workload/host@0.8.0'],
       absWorkingDir: projectDir,
       sourcemap: false,
       logLevel: 'silent',

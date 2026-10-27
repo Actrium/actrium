@@ -1,5 +1,5 @@
 {
-  "description": "Existing runtime identifiers and their documentation retained until the dependent cutover; remove allowances as references are retired.",
+  "description": "Existing runtime identifiers and explicit historical/protocol-rejection references; remove allowances as references are retired.",
   "pending_cutover": "https://github.com/Actrium/actrium/pull/288",
   "references": {
     "android/android/app/Actr.toml": {
@@ -23,6 +23,7 @@
     "android/android/app/src/Actr.toml": {
       "actro": 2,
       "actro+app_server": 2,
+      "actro@example.com": 1,
       "stun:actrix1.actro.chat:3479": 1,
       "turn:actrix1.actro.chat:3479": 1,
       "wss://actrix1.actro.chat:443/signaling/ws": 1
@@ -54,7 +55,7 @@
       "actro_browser_sync_credentials": 1
     },
     "android/android/app/src/main/java/io/actrium/app/datastream/UnifiedWorkload.kt": {
-      "actro": 1
+      "actro@example.com": 1
     },
     "android/android/app/src/main/java/io/actrium/app/generated/ActriumAndroidPersistenceContract.kt": {
       "actro_database": 1
@@ -202,9 +203,6 @@
       "actro://history": 1,
       "actro://history.": 1,
       "actro://home": 1
-    },
-    "docs/product/actrium-v1/02-domain-model.md": {
-      "Intent.Actro:": 1
     },
     "examples/actrium/echo/run-macos.sh": {
       "actro://": 1
@@ -718,6 +716,12 @@
       "http://account-actro.develenv.com": 1,
       "https://account-actro.betaenv.com": 1,
       "https://account.actro.chat": 3
+    },
+    "crates/actr-protocol/src/uri.rs": {
+      "actro://acme.com": 1
+    },
+    "docs/GLOSSARY.zh.md": {
+      "Actro": 1
     }
   }
 }

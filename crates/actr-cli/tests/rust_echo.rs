@@ -104,7 +104,9 @@ fn init_rust_echo_app(parent: &std::path::Path, name: &str) -> std::path::PathBu
             "app",
             "--signaling",
             "wss://actrix1.develenv.com",
-            "--manufacturer",
+            "--realm",
+            "dev@example.com",
+            "--publisher",
             "acme",
             name,
         ],
@@ -126,7 +128,9 @@ fn init_rust_echo_service(parent: &std::path::Path, name: &str) -> std::path::Pa
             "service",
             "--signaling",
             "wss://actrix1.develenv.com",
-            "--manufacturer",
+            "--realm",
+            "dev@example.com",
+            "--publisher",
             "acme",
             name,
         ],
@@ -148,7 +152,9 @@ fn init_rust_empty_service(parent: &std::path::Path, name: &str) -> std::path::P
             "service",
             "--signaling",
             "wss://actrix1.develenv.com",
-            "--manufacturer",
+            "--realm",
+            "dev@example.com",
+            "--publisher",
             "acme",
             name,
         ],
@@ -170,7 +176,9 @@ fn init_rust_echo_both(parent: &std::path::Path, name: &str) -> std::path::PathB
             "both",
             "--signaling",
             "wss://actrix1.develenv.com",
-            "--manufacturer",
+            "--realm",
+            "dev@example.com",
+            "--publisher",
             "example",
             name,
         ],
@@ -223,7 +231,7 @@ fn rust_echo_app_scaffold() {
     // -- manifest.toml --
     let actr = std::fs::read_to_string(dir.join("manifest.toml")).unwrap();
     assert!(
-        actr.contains(r#"EchoService = { actr_type = "acme:EchoService:1.0.0" }"#),
+        actr.contains(r#"EchoService = { actr_type = "acme/EchoService@1.0.0" }"#),
         "app should point to the real EchoService actr_type"
     );
     assert!(
@@ -273,8 +281,8 @@ fn rust_echo_app_scaffold() {
         "main.rs should attach the local guest package through Node"
     );
     assert!(
-        main.contains(".register(&ais_endpoint)"),
-        "main.rs should register with AIS"
+        main.contains(".register(&issuer_endpoint)"),
+        "main.rs should register with Issuer"
     );
     assert!(
         main.contains("let response = actr_ref"),
@@ -429,7 +437,7 @@ fn rust_echo_both_app_uses_local_service_dependency() {
 
     let app_actr = std::fs::read_to_string(dir.join("echo-app/manifest.toml")).unwrap();
     assert!(
-        app_actr.contains(r#"EchoService = { actr_type = "example:EchoService:1.0.0" }"#),
+        app_actr.contains(r#"EchoService = { actr_type = "example/EchoService@1.0.0" }"#),
         "role=both app should directly target the generated service actr_type, got:\n{app_actr}"
     );
     assert!(
@@ -458,6 +466,8 @@ fn rust_echo_init_fails_if_directory_exists() {
             "app",
             "--signaling",
             "wss://actrix1.develenv.com",
+            "--realm",
+            "dev@example.com",
             "duplicate-svc",
         ],
         tmp.path(),
@@ -658,7 +668,7 @@ fn rust_echo_app_gen_two_remote_services() {
     let tmp = TempDir::new().unwrap();
     let dir = init_rust_echo_app(tmp.path(), "two-svc-app");
 
-    add_manifest_dependency(&dir, "ChatService", "acme:ChatService:1.0.0");
+    add_manifest_dependency(&dir, "ChatService", "acme/ChatService@1.0.0");
     write_remote_proto(&dir, "EchoService", "echo", ECHO_PROTO);
     write_remote_proto(&dir, "ChatService", "chat", CHAT_PROTO);
 
@@ -840,7 +850,7 @@ fn rust_gen_stale_adapter_removed_when_local_routes_disappear() {
         )
         .replace(
             "[dependencies]",
-            "[dependencies]\nsvc = { actr_type = \"acme:AskService:1.0.0\" }",
+            "[dependencies]\nsvc = { actr_type = \"acme/AskService@1.0.0\" }",
         );
     std::fs::write(&manifest_path, manifest).unwrap();
     // Drop user-owned files so run 2 recreates the remote-only entry.

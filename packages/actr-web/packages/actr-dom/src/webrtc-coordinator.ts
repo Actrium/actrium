@@ -49,7 +49,7 @@ export class WebRtcCoordinator {
   private reassembly: Map<string, FragmentEntry> = new Map();
   private commandQueues: Map<string, Promise<void>> = new Map();
   private config: WebRtcConfig;
-  /** Dynamic TURN credentials received from SW (AIS registration) */
+  /** Dynamic TURN credentials received from SW (Issuer registration) */
   private turnCredential: { username: string; credential: string } | null = null;
   private laneConfigs = [
     { id: 0, label: 'RPC_RELIABLE', ordered: true, maxRetransmits: undefined },

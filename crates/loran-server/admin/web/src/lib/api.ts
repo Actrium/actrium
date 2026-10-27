@@ -75,21 +75,16 @@ export interface NodeInfo {
   services: ServiceStatus[];
 }
 
+export type RealmStatus = "pending" | "active" | "retired";
+
 export interface RealmInfo {
-  realm_id: number;
-  name: string;
+  realm: string;
+  /** false = suspended by the operator */
   enabled: boolean;
   created_at: number;
   updated_at: number | null;
-  use_servers: number[];
-  version: number;
   expires_at: number;
-  status: string;
-  secret_rotation_state?: {
-    current_hash_preview: string;
-    previous_hash_preview?: string;
-    previous_valid_until?: number;
-  } | null;
+  status: RealmStatus;
 }
 
 export interface RealmsResponse {
@@ -102,15 +97,45 @@ export interface RealmMutationResponse {
   success: boolean;
   error_message: string | null;
   realm?: RealmInfo | null;
-  realm_secret?: string | null;
+  /** The owner invite of a created Realm, returned once. */
+  owner_invite?: string | null;
+  /** RFC 3339. */
+  owner_invite_expires_at?: string | null;
 }
 
-export interface RealmSecretRotationResponse {
+export interface OwnerInviteResponse {
   success: boolean;
-  realm_id: number;
-  realm_secret: string;
-  previous_valid_until: number | null;
-  grace_seconds: number;
+  realm: string;
+  owner_invite: string;
+  /** RFC 3339. */
+  expires_at: string;
+}
+
+/** A member's client: its Realm client key, without the key itself. */
+export interface RealmClientInfo {
+  key_id: string;
+  label: string | null;
+  /** RFC 3339. */
+  registered_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface RealmMemberInfo {
+  member_id: string;
+  role: "owner" | "editor" | "viewer";
+  status: "active" | "removed";
+  /** RFC 3339. */
+  created_at: string;
+  removed_at: string | null;
+  clients: RealmClientInfo[];
+}
+
+export interface RealmMembersResponse {
+  success: boolean;
+  members: RealmMemberInfo[];
+  /** Open invites, without their secrets. */
+  invites: { invite_id: string; expires_at: string }[];
 }
 
 export interface ResolvedField {
@@ -160,11 +185,8 @@ export interface PlatformDetail {
 export interface KeyEntry {
   key_id: number;
   pk_size: number;
-  created_at?: number;
-  fetched_at?: number;
-  expires_at: number;
-  tolerance_seconds?: number;
-  is_expired: boolean;
+  created_at: number;
+  retired: boolean;
 }
 
 export interface MetricSample {
@@ -215,35 +237,44 @@ export const api = {
 
   listRealms: () => request<RealmsResponse>("/realms"),
 
+  /** A Realm under the Provider domain needs the package of its first Realm Profile. */
   createRealm: (data: {
-    realm_id?: number;
-    name: string;
+    realm: string;
     enabled?: boolean;
+    display_name?: string;
+    package?: { href: string; sha256: string; type: string };
   }) =>
     request<RealmMutationResponse>("/realms", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  getRealm: (id: number) =>
-    request<{ success: boolean; realm: RealmInfo | null }>(`/realms/${id}`),
+  getRealm: (realm: string) =>
+    request<{ success: boolean; realm: RealmInfo | null }>(
+      `/realms/${encodeURIComponent(realm)}`,
+    ),
 
-  updateRealm: (id: number, data: { name?: string; enabled?: boolean }) =>
-    request<RealmMutationResponse>(`/realms/${id}`, {
+  /** `enabled: false` suspends the Realm, `true` resumes it. */
+  updateRealm: (realm: string, data: { enabled?: boolean; expires_at?: number }) =>
+    request<RealmMutationResponse>(`/realms/${encodeURIComponent(realm)}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
 
-  deleteRealm: (id: number) =>
-    request<{ success: boolean; error_message: string | null }>(
-      `/realms/${id}`,
-      { method: "DELETE" },
-    ),
-
-  rotateRealmSecret: (id: number) =>
-    request<RealmSecretRotationResponse>(`/realms/${id}/secret/rotate`, {
+  retireRealm: (realm: string) =>
+    request<RealmMutationResponse>(`/realms/${encodeURIComponent(realm)}/retire`, {
       method: "POST",
     }),
+
+  /** A new owner invite (owner recovery); unused earlier ones stop working. */
+  issueOwnerInvite: (realm: string) =>
+    request<OwnerInviteResponse>(`/realms/${encodeURIComponent(realm)}/owner-invite`, {
+      method: "POST",
+    }),
+
+  /** Members, clients and open invites of a Realm, read-only. */
+  listRealmMembers: (realm: string) =>
+    request<RealmMembersResponse>(`/realms/${encodeURIComponent(realm)}/members`),
 
   getConfig: (configType: number, key: string) =>
     request<{
@@ -293,20 +324,6 @@ export const api = {
   getSignerKeys: () =>
     request<{ keys: KeyEntry[]; total_count: number }>("/services/signer/keys"),
 
-  cleanupSignerKeys: () =>
-    request<{ deleted: number; remaining: number; tolerance_seconds: number }>(
-      "/services/signer/keys/cleanup",
-      { method: "POST" },
-    ),
-
-  getAisKeys: () =>
-    request<{ keys: KeyEntry[] }>("/services/ais/keys"),
-
-  rotateAisKey: () =>
-    request<{ status: string; new_key_id: number }>("/services/ais/keys/rotate", {
-      method: "POST",
-    }),
-
   getRegistry: () =>
     request<ConfigFieldDef[]>("/registry"),
 
@@ -331,14 +348,14 @@ export const api = {
     request<TimeseriesResponse>(`/metrics/timeseries?service_type=${serviceType}&tier=${tier}`),
 };
 
-// MFR types
-export interface Manufacturer {
+// Publisher Registry API types.
+export interface PublisherRecord {
   id: number;
   name: string;
   public_key: string;
   key_id: string;
   contact?: string;
-  status: 'pending' | 'active' | 'suspended' | 'revoked';
+  status: 'active' | 'suspended' | 'revoked';
   created_at: number;
   updated_at?: number;
   verified_at?: number;
@@ -349,8 +366,8 @@ export interface Manufacturer {
 
 export interface ActrPackage {
   id: number;
-  mfr_id: number;
-  manufacturer: string;
+  publisher_id: number;
+  publisher: string;
   name: string;
   version: string;
   type_str: string;
@@ -363,17 +380,9 @@ export interface ActrPackage {
   revoked_at?: number;
 }
 
-export interface MfrCertificate {
-  key_id: string;
-  mfr_name: string;
-  mfr_pubkey: string;
-  issued_at: number;
-  expires_at: number;
-}
-
-export interface MfrKeyHistory {
+export interface PublisherKeyHistory {
   id: number;
-  mfr_id: number;
+  publisher_id: number;
   key_id: string;
   public_key: string;
   status: 'retired' | 'revoked';
@@ -381,82 +390,64 @@ export interface MfrKeyHistory {
   retired_at: number;
 }
 
-export type KeySource = 'generated' | 'uploaded';
-
-export interface ActivateResponse {
-  key_source: KeySource;
-  /** Present ONLY when key_source == 'generated'. */
-  private_key?: string;
-  certificate: MfrCertificate;
-}
-
-export interface ApplyRequest {
-  github_login: string;
-  contact?: string;
-}
-
-export interface ApplyResponse {
-  mfr_id: number;
-  challenge_token: string;
-  expires_at: number;
-  verify_file: string;
-  instructions: string;
-}
-
-// MFR API functions — routed through /admin/api/mfr, so paths are relative to BASE
-export const mfrApi = {
+// Publisher Registry API functions, mounted under /admin/api/publishers.
+export const publisherApi = {
   list: (status?: string) => {
     const params = status ? `?status=${status}` : '';
-    return request<Manufacturer[]>(`/mfr/admin/list${params}`);
+    return request<PublisherRecord[]>(`/publishers/admin/list${params}`);
   },
 
-  apply: (req: ApplyRequest) =>
-    request<ApplyResponse>('/mfr/apply', {
-      method: 'POST',
-      body: JSON.stringify(req),
-    }),
-
-  verify: (id: number, publicKey?: string) =>
-    request<ActivateResponse>(`/mfr/${id}/verify`, {
-      method: 'POST',
-      body: publicKey ? JSON.stringify({ public_key: publicKey }) : undefined,
-    }),
-
-  getChallenge: (id: number) =>
-    request<ApplyResponse>(`/mfr/${id}/challenge`),
-
-  approve: (id: number, publicKey?: string) =>
-    request<ActivateResponse>(`/mfr/admin/${id}/approve`, {
-      method: 'POST',
-      body: publicKey ? JSON.stringify({ public_key: publicKey }) : undefined,
-    }),
-
   suspend: (id: number) =>
-    request<void>(`/mfr/admin/${id}/suspend`, { method: 'POST' }),
-
-  renewKey: (id: number, publicKey?: string) =>
-    request<ActivateResponse>(`/mfr/admin/${id}/renew`, {
-      method: 'POST',
-      body: publicKey ? JSON.stringify({ public_key: publicKey }) : undefined,
-    }),
+    request<void>(`/publishers/admin/${id}/suspend`, { method: 'POST' }),
 
   reinstate: (id: number) =>
-    request<void>(`/mfr/admin/${id}/reinstate`, { method: 'POST' }),
+    request<void>(`/publishers/admin/${id}/reinstate`, { method: 'POST' }),
 
   delete: (id: number) =>
-    request<void>(`/mfr/admin/${id}`, { method: 'DELETE' }),
+    request<void>(`/publishers/admin/${id}`, { method: 'DELETE' }),
 
-  listPackages: (mfr?: string) => {
-    const params = mfr ? `?mfr=${mfr}` : '';
-    return request<ActrPackage[]>(`/mfr/pkg${params}`);
+  listPackages: (publisher?: string) => {
+    const params = publisher ? `?publisher=${publisher}` : '';
+    return request<ActrPackage[]>(`/publishers/packages${params}`);
   },
 
   revokePackage: (id: number) =>
-    request<void>(`/mfr/pkg/${id}/revoke`, { method: 'POST' }),
+    request<void>(`/publishers/packages/${id}/revoke`, { method: 'POST' }),
 
-  listKeys: (mfrId: number) =>
-    request<MfrKeyHistory[]>(`/mfr/admin/${mfrId}/keys`),
+  listKeys: (publisherId: number) =>
+    request<PublisherKeyHistory[]>(`/publishers/admin/${publisherId}/keys`),
 
   revokeHistoricalKey: (historyId: number) =>
-    request<void>(`/mfr/admin/keys/${historyId}/revoke`, { method: 'POST' }),
+    request<void>(`/publishers/admin/keys/${historyId}/revoke`, { method: 'POST' }),
+
+  revokeActiveKey: (publisherId: number) =>
+    request<void>(`/publishers/admin/${publisherId}/keys/active/revoke`, { method: 'POST' }),
+};
+
+// Identity re-confirmation: pinned vs served signing keys of a Realm domain
+// or a publisher (authority-discovery section 4.4 step 6).
+export type IdentityKind = 'realm-domains' | 'publishers';
+
+export interface IdentityKeys {
+  sequence: number;
+  digest: string;
+  keys: { id: string; status: 'active' | 'retired' | 'removed'; fingerprint: string }[];
+}
+
+export interface IdentityView {
+  pinned: IdentityKeys;
+  fetched: IdentityKeys;
+  outcome: 'accepted' | 'identity_change' | 'rejected';
+  reason?: string;
+}
+
+export const identityApi = {
+  get: (kind: IdentityKind, name: string) =>
+    request<IdentityView>(`/identity/${kind}/${encodeURIComponent(name)}`),
+
+  confirm: (kind: IdentityKind, name: string, digest: string) =>
+    request<{ pinned: IdentityKeys }>(`/identity/${kind}/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      body: JSON.stringify({ digest }),
+    }),
 };

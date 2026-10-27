@@ -1,6 +1,6 @@
 [package]
 name = "echo-client-app"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "Echo Client App"
 authors = ["Actr Dev Team"]
@@ -9,4 +9,4 @@ tags = ["dev", "client"]
 exports = []
 
 [dependencies]
-EchoService = { actr_type = "acme:EchoService:1.0.0" }
+EchoService = { actr_type = "acme/EchoService@1.0.0" }

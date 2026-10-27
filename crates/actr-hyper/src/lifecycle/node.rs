@@ -6,11 +6,11 @@
 //! it indirectly through `Node<S>` → `ActrRef` transitions.
 
 use crate::actr_ref::{ActrRef, ActrRefShared};
-use crate::ais_client::AisClient;
 use crate::context::{
     BootstrapContextBuilder, RuntimeContext, build_alias_map, build_dependency_fingerprints,
 };
 use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
+use crate::issuer_client::IssuerClient;
 use crate::lifecycle::credential_manager::{
     CredentialManager, HardRebindHandles, RegistrationContext,
 };
@@ -69,6 +69,139 @@ fn error_response_for_wire(error: &ActrError) -> actr_protocol::ErrorResponse {
         code: protocol_error_to_code(error),
         message: encode_delivery_uncertain_for_wire(error),
     }
+}
+
+/// Verified Actor types of connected peers, keyed by `ActrId`.
+///
+/// Filled from `ActrRelay.source_type` (written by Signaling from the
+/// sender's verified credential) and from `IdentityClaims.actor_type` on
+/// locally verified WebSocket connections. An inbound message takes its
+/// sender's type from here when it is enqueued and keeps it in the mailbox
+/// row; the inbound ACL checks that recorded type. A peer with no known type
+/// matches no ACL rule.
+///
+/// Each peer also carries a count of its open connections (inbound WebSocket
+/// connections and the WebRTC connection together); the entry is dropped
+/// when the last one closes, unless its type was recorded within
+/// [`PEER_TYPE_SETUP_SECS`]: Signaling relays a connection's type before the
+/// connection is counted, possibly while the peer's previous connection is
+/// still closing. Such an entry, and one whose connection never opens, is
+/// dropped by a later [`PeerTypes::record`] once that time has passed.
+#[derive(Clone, Default)]
+pub(crate) struct PeerTypes(Arc<std::sync::Mutex<HashMap<ActrId, PeerTypeEntry>>>);
+
+/// How long a recorded type waits for its connection.
+pub(crate) const PEER_TYPE_SETUP_SECS: u64 = 60;
+
+#[derive(Default)]
+struct PeerTypeEntry {
+    actor_type: Option<ActrType>,
+    connections: usize,
+    recorded_at: Option<tokio::time::Instant>,
+}
+
+impl PeerTypeEntry {
+    /// No open connection and no connection being set up.
+    fn unused(&self) -> bool {
+        self.connections == 0
+            && self.recorded_at.is_none_or(|recorded_at| {
+                recorded_at.elapsed() >= Duration::from_secs(PEER_TYPE_SETUP_SECS)
+            })
+    }
+}
+
+impl PeerTypes {
+    fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<ActrId, PeerTypeEntry>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Record the verified type of `peer`.
+    pub(crate) fn record(&self, peer: ActrId, actor_type: ActrType) {
+        let mut entries = self.entries();
+        entries.retain(|_, entry| !entry.unused());
+        let entry = entries.entry(peer).or_default();
+        entry.actor_type = Some(actor_type);
+        entry.recorded_at = Some(tokio::time::Instant::now());
+    }
+
+    /// The verified type of `peer`, if known.
+    pub(crate) fn get(&self, peer: &ActrId) -> Option<ActrType> {
+        self.entries()
+            .get(peer)
+            .and_then(|entry| entry.actor_type.clone())
+    }
+
+    /// A connection to `peer` opened.
+    pub(crate) fn connection_opened(&self, peer: &ActrId) {
+        let mut entries = self.entries();
+        let entry = entries.entry(peer.clone()).or_default();
+        entry.connections += 1;
+        entry.recorded_at = None;
+    }
+
+    /// A connection to `peer` closed; the last one drops the entry unless a
+    /// connection is being set up.
+    pub(crate) fn connection_closed(&self, peer: &ActrId) {
+        let mut entries = self.entries();
+        if let Some(entry) = entries.get_mut(peer) {
+            entry.connections = entry.connections.saturating_sub(1);
+            if entry.unused() {
+                entries.remove(peer);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn connections(&self, peer: &ActrId) -> usize {
+        self.entries()
+            .get(peer)
+            .map_or(0, |entry| entry.connections)
+    }
+
+    /// Count every peer the WebRTC manager holds as one open connection,
+    /// until the manager lets it go, and stop at `shutdown`.
+    pub(crate) async fn follow_webrtc_peers(
+        self,
+        manager: Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
+        shutdown: CancellationToken,
+    ) {
+        let mut changes = manager.subscribe_peers();
+        let mut counted = std::collections::HashSet::new();
+        loop {
+            let current: std::collections::HashSet<ActrId> =
+                manager.peer_ids().await.into_iter().collect();
+            for peer in current.difference(&counted) {
+                self.connection_opened(peer);
+            }
+            for peer in counted.difference(&current) {
+                self.connection_closed(peer);
+            }
+            counted = current;
+            tokio::select! {
+                _ = shutdown.cancelled() => return,
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The caller of an inbound message: its `ActrId` and, when known, the
+/// verified `ActrType` recorded when the message arrived.
+pub type IncomingCaller<'a> = (&'a ActrId, Option<&'a ActrType>);
+
+/// The sender type recorded with a mailbox message; an undecodable one
+/// counts as unknown.
+fn recorded_caller_type(record: &actr_runtime_mailbox::MessageRecord) -> Option<ActrType> {
+    record
+        .from_type
+        .as_deref()
+        .and_then(|bytes| ActrType::decode(bytes).ok())
 }
 
 pub(crate) type MailboxTail = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -771,6 +904,9 @@ pub(crate) struct Inner {
     /// The map is keyed by `ActrId`.
     pub(crate) discovered_ws_addresses:
         Arc<tokio::sync::RwLock<std::collections::HashMap<ActrId, String>>>,
+
+    /// Verified Actor types of peers, read by the inbound ACL.
+    pub(crate) peer_types: PeerTypes,
 
     /// Handle to the per-actor serial command runner.
     ///
@@ -1783,7 +1919,7 @@ impl Inner {
     pub async fn handle_incoming(
         &self,
         envelope: RpcEnvelope,
-        caller_id: Option<&ActrId>,
+        caller: Option<IncomingCaller<'_>>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingOutcome {
@@ -1792,7 +1928,7 @@ impl Inner {
         // bit-for-bit the pre-B2 path (ACL → dedup → ctx → dispatch → dedup
         // complete), used directly by the mailbox lane and by the in-proc lane
         // when the dispatch gate is off.
-        self.admit_incoming(envelope, caller_id, reply_sink, scope)
+        self.admit_incoming(envelope, caller, reply_sink, scope)
             .await
             .await
     }
@@ -1837,10 +1973,12 @@ impl Inner {
     pub(crate) async fn admit_incoming(
         &self,
         mut envelope: RpcEnvelope,
-        caller_id: Option<&ActrId>,
+        caller: Option<IncomingCaller<'_>>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingContinuation {
+        let caller_id = caller.map(|(id, _)| id);
+        let caller_type = caller.and_then(|(_, actor_type)| actor_type);
         // Package-less routes emitted by older generators had one leading
         // dot (`.Service.Method`). Normalize it before every admission-stage
         // consumer (reply-mode lookup, scheduler, and all runner variants)
@@ -1874,9 +2012,14 @@ impl Inner {
             }
         };
 
-        // 0.1. ACL Permission Check (before processing message)
-        let acl_allowed = match check_acl_permission(caller_id, actor_id, self.config.acl.as_ref())
-        {
+        // 0.1. ACL Permission Check (before processing message), against the
+        // caller type recorded when the message arrived.
+        let acl_allowed = match check_acl_permission(
+            caller_id,
+            caller_type,
+            actor_id,
+            self.config.acl.as_ref(),
+        ) {
             Ok(allowed) => allowed,
             Err(err_msg) => {
                 return ready_continuation(Err(ActrError::Internal(format!(
@@ -2525,6 +2668,7 @@ impl Inner {
             discovered_ws_addresses: Arc::new(tokio::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            peer_types: PeerTypes::default(),
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
             package_uses_explicit_reply_boundary,
@@ -2667,12 +2811,14 @@ impl Inner {
         )
     }
 
-    /// Attach a credential already issued by AIS so that `start()` can skip
+    /// Attach a credential already issued by Issuer so that `start()` can skip
     /// the signaling registration step.
     ///
     /// Called by the Hyper layer between `Hyper::register()` and `Hyper::start()`.
     pub fn set_preregistered_credential(&mut self, register_ok: register_response::RegisterOk) {
-        tracing::debug!("Pre-registered credential attached; start() will skip AIS registration");
+        tracing::debug!(
+            "Pre-registered credential attached; start() will skip Issuer registration"
+        );
         self.preregistered_credential = Some(register_ok);
     }
 
@@ -2752,7 +2898,7 @@ impl Inner {
 
         let register_request = RegisterRequest {
             actr_type: actr_type.clone(),
-            realm: self.config.realm,
+            realm: self.config.realm.clone(),
             service_spec,
             acl: self.config.acl.clone(),
             service: None,
@@ -2762,30 +2908,35 @@ impl Inner {
         };
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 1. Obtain registration info (Hyper pre-injected or AIS HTTP)
+        // 1. Obtain registration info (Hyper pre-injected or Issuer HTTP)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        let client_key = crate::issuer_client::RealmClientKey::load_for(
+            self.config.realm_client_key.as_deref(),
+            &self.config.realm,
+        )
+        .map_err(|e| ActrError::InvalidArgument(e.to_string()))?;
         let register_ok = if let Some(injected) = self.preregistered_credential.take() {
             tracing::info!(
-                "Using Hyper pre-injected registration credential; skipping AIS registration"
+                "Using Hyper pre-injected registration credential; skipping Issuer registration"
             );
             injected
         } else {
-            let ais_endpoint = &self.config.ais_endpoint;
+            let issuer_endpoint = &self.config.issuer_endpoint;
             tracing::info!(
-                ais_endpoint = %ais_endpoint,
-                "Registering actor with AIS via HTTP"
+                issuer_endpoint = %issuer_endpoint,
+                "Registering actor with Issuer via HTTP"
             );
-            let mut ais = AisClient::new(ais_endpoint);
-            if let Some(ref secret) = self.config.realm_secret {
-                ais = ais.with_realm_secret(secret);
+            let mut issuer = IssuerClient::new(issuer_endpoint);
+            if let Some(key) = client_key.clone() {
+                issuer = issuer.with_client_key(key);
             }
-            let resp = ais
+            let resp = issuer
                 .register_linked(register_request.clone())
                 .await
-                .map_err(|e| ActrError::Unavailable(format!("AIS registration failed: {e}")))?;
+                .map_err(|e| ActrError::Unavailable(format!("Issuer registration failed: {e}")))?;
             match resp.result {
                 Some(register_response::Result::Success(ok)) => {
-                    tracing::info!("✅ AIS HTTP registration successful");
+                    tracing::info!("✅ Issuer HTTP registration successful");
                     ok
                 }
                 Some(register_response::Result::Error(error)) => {
@@ -2793,12 +2944,12 @@ impl Inner {
                         severity = 10,
                         error_category = "registration_error",
                         error_code = error.code,
-                        "❌ AIS registration failed: code={}, message={}",
+                        "❌ Issuer registration failed: code={}, message={}",
                         error.code,
                         error.message
                     );
                     return Err(ActrError::Unavailable(format!(
-                        "AIS registration rejected: {} (code: {})",
+                        "Issuer registration rejected: {} (code: {})",
                         error.message, error.code
                     )));
                 }
@@ -2806,10 +2957,10 @@ impl Inner {
                     tracing::error!(
                         severity = 10,
                         error_category = "registration_error",
-                        "❌ AIS registration response missing result"
+                        "❌ Issuer registration response missing result"
                     );
                     return Err(ActrError::Unavailable(
-                        "Invalid AIS registration response: missing result".to_string(),
+                        "Invalid Issuer registration response: missing result".to_string(),
                     ));
                 }
             }
@@ -2820,7 +2971,7 @@ impl Inner {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // The signaling server requires credential params in the WS URL for
         // authentication. We must set actor_id + credential BEFORE connecting
-        // so that build_url_with_identity() includes them in the query string.
+        // so that the signaling handshake includes them in authenticated headers.
         let pre_connect_credential_state = {
             let actor_id = register_ok.actr_id.clone();
             let credential_state = CredentialState::new(
@@ -2970,13 +3121,12 @@ impl Inner {
                 .take()
                 .unwrap_or_else(|| RegistrationContext::Linked {
                     request: register_request.clone(),
-                    realm_secret: self.config.realm_secret.clone(),
                 });
             credential_manager = CredentialManager::new(
                 session_state.clone(),
                 registration_context,
-                self.config.ais_endpoint.clone(),
-                self.config.realm_secret.clone(),
+                self.config.issuer_endpoint.clone(),
+                client_key.clone(),
             );
 
             // Build the node-level lifecycle hook callback once: it is
@@ -3021,7 +3171,7 @@ impl Inner {
 
             // Fire `on_credential_renewed` at initial registration: the
             // credential is considered "renewed" from "nothing" to the
-            // value just issued by AIS. Subsequent renewals fire the
+            // value just issued by Issuer. Subsequent renewals fire the
             // same hook from `lifecycle::heartbeat`.
             if let Some(expires_at) = &register_ok.credential_expires_at {
                 if let Some(new_expiry) =
@@ -3178,6 +3328,7 @@ impl Inner {
                     Arc::new(crate::inbound::dispatcher::InboundDispatcher::new(
                         pending_requests.clone(),
                         self.data_chunk_registry.clone(),
+                        self.peer_types.clone(),
                     ));
                 let (inbound_handler, inbound_dispatch_tasks) =
                     rtc::inbound_bridge::dispatcher_bridge(
@@ -3198,7 +3349,7 @@ impl Inner {
                     )
                     .with_media_registry(media_frame_registry.clone()),
                 );
-                // AIS rotates the HMAC TURN credential together with the actor
+                // Issuer rotates the HMAC TURN credential together with the actor
                 // credential. Apply the new value to live RTC sessions via
                 // set_configuration(); every future Factory build also reads
                 // the same shared provider, so idle/new generations cannot
@@ -3244,6 +3395,7 @@ impl Inner {
                     self.signaling_client.clone(),
                     rtc_local_id.clone(),
                     credential_state.clone(),
+                    self.peer_types.clone(),
                 );
                 let rtc_router = rtc::signaling::router::SignalingRouter::new(
                     rtc_manager.clone(),
@@ -3273,6 +3425,10 @@ impl Inner {
                     }
                 });
                 task_handles.push(router_handle);
+                task_handles.push(tokio::spawn(self.peer_types.clone().follow_webrtc_peers(
+                    rtc_manager.clone(),
+                    self.shutdown_token.child_token(),
+                )));
 
                 // Pull forward the snapshot→hook projection (B3): subscribe
                 // to each peer's snapshot and fire the 3 hooks on transitions.
@@ -3521,25 +3677,25 @@ impl Inner {
             // 1.7.6. WebSocket Server (direct-connect mode, optional)
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             if let Some((ws_server, conn_rx)) = ws_listener {
-                use crate::key_cache::AisKeyCache;
+                use crate::key_cache::IssuerKeyCache;
                 use crate::wire::websocket::WebSocketGate;
                 use crate::wire::websocket::gate::WsAuthContext;
 
-                // Build AisKeyCache and seed it with the signing key from the registration response
-                let ais_key_cache = AisKeyCache::new();
+                // Build IssuerKeyCache and seed it with the signing key from the registration response
+                let issuer_key_cache = IssuerKeyCache::new();
                 if !register_ok.signing_pubkey.is_empty() {
-                    match ais_key_cache
+                    match issuer_key_cache
                         .seed(register_ok.signing_key_id, &register_ok.signing_pubkey)
                         .await
                     {
                         Ok(()) => tracing::info!(
                             key_id = register_ok.signing_key_id,
-                            "🔑 AisKeyCache seeded from RegisterOk"
+                            "🔑 IssuerKeyCache seeded from RegisterOk"
                         ),
                         Err(e) => tracing::warn!(
                             key_id = register_ok.signing_key_id,
                             error = ?e,
-                            "AisKeyCache seed failed; WebSocket will reject all inbound connections"
+                            "IssuerKeyCache seed failed; WebSocket will reject all inbound connections"
                         ),
                     }
                 } else {
@@ -3549,10 +3705,11 @@ impl Inner {
                 }
 
                 let auth_ctx = WsAuthContext {
-                    ais_key_cache,
+                    issuer_key_cache,
                     actor_id: actor_id.clone(),
                     credential_state: credential_state.clone(),
                     signaling_client: self.signaling_client.clone(),
+                    peer_types: self.peer_types.clone(),
                 };
 
                 // The listener was bound before registration so the advertised
@@ -3623,8 +3780,8 @@ impl Inner {
                 } else {
                     Duration::from_secs(30)
                 };
-                let ais_endpoint_for_heartbeat = self.config.ais_endpoint.clone();
-                let realm_secret_for_heartbeat = self.config.realm_secret.clone();
+                let issuer_endpoint_for_heartbeat = self.config.issuer_endpoint.clone();
+                let client_key_for_heartbeat = client_key.clone();
                 let heartbeat_handle = tokio::spawn(crate::lifecycle::heartbeat::heartbeat_task(
                     shutdown,
                     client,
@@ -3633,8 +3790,8 @@ impl Inner {
                     mailbox_for_heartbeat,
                     heartbeat_interval,
                     register_request_for_heartbeat,
-                    ais_endpoint_for_heartbeat,
-                    realm_secret_for_heartbeat,
+                    issuer_endpoint_for_heartbeat,
+                    client_key_for_heartbeat,
                     Some(credential_manager_for_heartbeat),
                     node_hook_callback.clone(),
                     membership_handle_for_heartbeat,
@@ -4523,9 +4680,13 @@ impl Inner {
 
                                                 // Decode caller_id from MessageRecord.from (transport layer)
                                                 let caller_id_result = ActrId::decode(&msg_record.from[..]);
-                                                let caller_id_ref = caller_id_result.as_ref().ok();
+                                                let caller_type = recorded_caller_type(&msg_record);
+                                                let caller_ref = caller_id_result
+                                                    .as_ref()
+                                                    .ok()
+                                                    .map(|id| (id, caller_type.as_ref()));
 
-                                                if caller_id_ref.is_none() {
+                                                if caller_ref.is_none() {
                                                     tracing::warn!(
                                                         request_id = %request_id,
                                                         "⚠️  Failed to decode caller_id from MessageRecord.from"
@@ -4556,7 +4717,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let cont = node
-                                                        .admit_incoming(envelope.clone(), caller_id_ref, Some(reply_sink), None)
+                                                        .admit_incoming(envelope.clone(), caller_ref, Some(reply_sink), None)
                                                         .await;
                                                     inflight.push(Box::pin(async move {
                                                         match cont.await {
@@ -4583,7 +4744,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let handle_incoming_fut =
-                                                        node.handle_incoming(envelope.clone(), caller_id_ref, Some(reply_sink), None);
+                                                        node.handle_incoming(envelope.clone(), caller_ref, Some(reply_sink), None);
                                                     #[cfg(feature = "opentelemetry")]
                                                     let handle_incoming_fut =
                                                         handle_incoming_fut.instrument(span.clone());

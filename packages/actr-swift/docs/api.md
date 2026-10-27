@@ -261,19 +261,18 @@ Actor identifier structure.
 
 ```swift
 public struct ActrId: Equatable, Hashable {
-    public var realm: Realm
+    public var realm: String  // Realm name, `<realm_id>@<domain>`
     public var serialNumber: UInt64
-    public var type: ActrType
 }
 ```
 
 #### `ActrType`
 
-Actor type identifier (manufacturer + name).
+Actor type identifier (publisher + name).
 
 ```swift
 public struct ActrType: Equatable, Hashable {
-    public var manufacturer: String
+    public var publisher: String
     public var name: String
 }
 ```

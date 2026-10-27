@@ -99,8 +99,8 @@ actr-a (Relay/Caller)          actr-b (Receiver/Host)
 let workload = RelayClientWorkload::new();
 let init = Node::from_hyper(hyper, config).await?;
 let attached = init.link(workload).await?;
-let ais_endpoint = attached.ais_endpoint().to_string();
-let actr_ref = attached.register(&ais_endpoint).await?.start().await?;
+let issuer_endpoint = attached.issuer_endpoint().to_string();
+let actr_ref = attached.register(&issuer_endpoint).await?.start().await?;
 
 for frame in video_source {
     let request = RelayFrameRequest { frame: Some(frame) };

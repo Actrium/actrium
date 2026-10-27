@@ -276,7 +276,7 @@ pub struct Bookmark {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_used_at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub manufacturer: Option<String>,
+    pub publisher: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

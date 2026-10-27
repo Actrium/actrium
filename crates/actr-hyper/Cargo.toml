@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Hyper — Actor platform infrastructure: sandbox, transport, scheduler, WASM engine, signing, AIS bootstrap, persistence & crypto primitives"
+description = "Hyper — Actor platform infrastructure: sandbox, transport, scheduler, WASM engine, signing, Issuer bootstrap, persistence & crypto primitives"
 keywords = ["actor", "sandbox", "webassembly", "transport", "platform"]
 categories = ["asynchronous", "cryptography", "network-programming"]
 
@@ -33,6 +33,7 @@ test-utils = [
   "dep:actrix-signaling-service",
   "dep:actrix-stun-service",
   "dep:actrix-turn",
+  "actrix-turn/test-utils",
   "dep:axum",
   "dep:hmac",
   "dep:platform",

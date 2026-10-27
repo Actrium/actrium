@@ -2,7 +2,7 @@ edition = 1
 
 [package]
 name = "EchoService"
-manufacturer = "actrium"
+publisher = "actrium"
 version = "0.2.2"
 description = "Signed Echo guest actor distributed as an ActrPackage"
 license = "Apache-2.0"

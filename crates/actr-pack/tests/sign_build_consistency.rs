@@ -24,7 +24,7 @@ use zip::write::SimpleFileOptions;
 /// build a PackageManifest, serialize via to_toml(), sign the manifest bytes.
 /// Returns (manifest_toml_string, 64-byte raw signature, manifest struct).
 fn simulate_sign(
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     version: &str,
     target: &str,
@@ -50,7 +50,7 @@ fn simulate_sign(
 
     // Build PackageManifest (same structure as sign command)
     let manifest = PackageManifest {
-        manufacturer: manufacturer.to_string(),
+        publisher: publisher.to_string(),
         name: name.to_string(),
         version: version.to_string(),
         binary: BinaryEntry {
@@ -81,7 +81,7 @@ fn simulate_sign(
 /// Simulate the `actr build` workflow using actr_pack::pack.
 /// Returns the .actr package bytes.
 fn simulate_build(
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     version: &str,
     target: &str,
@@ -93,7 +93,7 @@ fn simulate_build(
     let key_id = actr_pack::compute_key_id(&verifying_key.to_bytes());
 
     let manifest = PackageManifest {
-        manufacturer: manufacturer.to_string(),
+        publisher: publisher.to_string(),
         name: name.to_string(),
         version: version.to_string(),
         binary: BinaryEntry {
@@ -223,7 +223,7 @@ fn sign_output_passes_verification() {
     );
 
     let verified = result.unwrap();
-    assert_eq!(verified.manifest.manufacturer, "acme");
+    assert_eq!(verified.manifest.publisher, "acme");
     assert_eq!(verified.manifest.name, "EchoService");
     assert_eq!(verified.manifest.version, "1.0.0");
 }
@@ -408,12 +408,13 @@ fn key_id_format_is_correct() {
     let key = SigningKey::generate(&mut OsRng);
     let key_id = actr_pack::compute_key_id(&key.verifying_key().to_bytes());
 
-    // Must start with "mfr-"
-    assert!(key_id.starts_with("mfr-"), "key_id must start with 'mfr-'");
-    // Must be "mfr-" + 16 hex chars = 20 chars total
-    assert_eq!(key_id.len(), 20, "key_id must be 20 chars (mfr- + 16 hex)");
+    assert!(
+        key_id.starts_with("actr-pub-"),
+        "key_id must start with 'actr-pub-'"
+    );
+    assert_eq!(key_id.len(), 25, "key_id must be actr-pub- + 16 hex chars");
     // The hex part must be valid hex
-    let hex_part = &key_id[4..];
+    let hex_part = &key_id["actr-pub-".len()..];
     assert!(
         hex_part.chars().all(|c| c.is_ascii_hexdigit()),
         "key_id suffix must be valid hex"

@@ -9,14 +9,15 @@
 //! | Concern | RTC inbound dispatch | WebSocketGate |
 //! |---------|-----------|---------------|
 //! | Transport | WebRTC DataChannel | WebSocket (TCP) |
-//! | Sender auth | actrix signaling verifies credential | Local Ed25519 verification (AisKeyCache) |
+//! | Sender auth | actrix signaling verifies credential | Local Ed25519 verification (IssuerKeyCache) |
 //! | Message aggregation | Session lane pumps → `InboundRouter` | Per-connection `DataLane` reading |
 
 use super::connection::WebSocketConnection;
 use super::server::InboundWsConn;
 use crate::inbound::DataChunkRegistry;
-use crate::key_cache::AisKeyCache;
+use crate::key_cache::IssuerKeyCache;
 use crate::lifecycle::CredentialState;
+use crate::lifecycle::node::PeerTypes;
 use crate::transport::WsSink;
 use crate::transport::correlation::PendingRequestsMap;
 use crate::transport::secure_channel::SecureCell;
@@ -27,7 +28,7 @@ use crate::wire::{DirectionError, direction_for_routing};
 use actr_framework::Bytes;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
-    AIdCredential, ActrId, DataChunk, Direction, IdentityClaims, PayloadType, RpcEnvelope,
+    AIdCredential, ActrId, ActrType, DataChunk, Direction, IdentityClaims, PayloadType, RpcEnvelope,
 };
 use actr_protocol::{ActorResult, ActrError};
 use actr_runtime_mailbox::{Mailbox, MessagePriority};
@@ -44,14 +45,17 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 /// - Connections that fail verification are dropped without starting lane readers
 /// - Connections without credentials are treated as verification failures
 pub(crate) struct WsAuthContext {
-    /// AIS signing public key cache (local hit verifies directly, miss fetches via signaling)
-    pub(crate) ais_key_cache: Arc<AisKeyCache>,
+    /// Issuer signing public key cache (local hit verifies directly, miss fetches via signaling)
+    pub(crate) issuer_key_cache: Arc<IssuerKeyCache>,
     /// Local ActrId (needed when requesting public key from signaling on cache miss)
     pub(crate) actor_id: ActrId,
     /// Local credential state (needed for signaling authentication on cache miss)
     pub(crate) credential_state: CredentialState,
     /// Signaling client (used to fetch public key on cache miss)
     pub(crate) signaling_client: Arc<dyn SignalingClient>,
+    /// Verified peer Actor types; a verified connection records the
+    /// `actor_type` from its credential claims here while it is open.
+    pub(crate) peer_types: PeerTypes,
 }
 
 /// Registry type: inbound peer ActrId → (write-half, secure cell) of the
@@ -212,6 +216,7 @@ impl WebSocketGate {
     async fn handle_envelope(
         envelope: RpcEnvelope,
         from_bytes: Vec<u8>,
+        from_type: Option<ActrType>,
         data: Bytes,
         payload_type: PayloadType,
         pending_requests: PendingRequestsMap,
@@ -242,7 +247,15 @@ impl WebSocketGate {
         };
 
         if matches!(direction, Direction::Request | Direction::Tell) {
-            Self::enqueue_request(from_bytes, data, payload_type, mailbox, &request_id).await;
+            Self::enqueue_request(
+                from_bytes,
+                from_type,
+                data,
+                payload_type,
+                mailbox,
+                &request_id,
+            )
+            .await;
             return;
         }
 
@@ -263,6 +276,7 @@ impl WebSocketGate {
     /// Enqueue an explicit inbound RPC request or tell to the Mailbox.
     async fn enqueue_request(
         from_bytes: Vec<u8>,
+        from_type: Option<ActrType>,
         data: Bytes,
         payload_type: PayloadType,
         mailbox: Arc<dyn Mailbox>,
@@ -275,7 +289,11 @@ impl WebSocketGate {
             _ => MessagePriority::Normal,
         };
 
-        match mailbox.enqueue(from_bytes, data.to_vec(), priority).await {
+        let from_type = from_type.map(|actor_type| actor_type.encode_to_vec());
+        match mailbox
+            .enqueue(from_bytes, from_type, data.to_vec(), priority)
+            .await
+        {
             Ok(msg_id) => {
                 tracing::debug!(
                     "✅ WS RPC message enqueued: msg_id={}, priority={:?}",
@@ -294,6 +312,7 @@ impl WebSocketGate {
         peer_id_for_lane: Option<ActrId>,
         hook_cb_for_lane: Option<HookCallback>,
         sinks_for_lane: InboundSinkMap,
+        peer_types: PeerTypes,
     ) {
         let remaining = active_lanes
             .fetch_sub(1, std::sync::atomic::Ordering::AcqRel)
@@ -301,6 +320,7 @@ impl WebSocketGate {
         if remaining == 0 {
             if let Some(ref peer) = peer_id_for_lane {
                 sinks_for_lane.write().await.remove(peer);
+                peer_types.connection_closed(peer);
                 tracing::debug!(peer = %peer, "WS inbound sink removed (all lanes closed)");
             }
             if let (Some(peer), Some(cb)) = (peer_id_for_lane, hook_cb_for_lane) {
@@ -311,13 +331,13 @@ impl WebSocketGate {
 
     /// Verify AIdCredential Ed25519 signature of an inbound connection
     ///
-    /// Returns `Some(verified_actor_id_str)` on successful verification, `None` on failure (already logged).
+    /// Returns the verified Actor type of the peer, `None` on failure (already logged).
     /// `source_id_bytes` is the ActrId protobuf bytes from `X-Actr-Source-ID`.
     async fn verify_credential(
         credential: &AIdCredential,
         source_id_bytes: &[u8],
         auth_ctx: &WsAuthContext,
-    ) -> Option<()> {
+    ) -> Option<ActrType> {
         // Get local credential (for signaling authentication on cache miss)
         let local_credential = auth_ctx.credential_state.credential().await;
 
@@ -328,9 +348,9 @@ impl WebSocketGate {
             credential: local_credential,
         };
 
-        // Get verifying key for key_id from AisKeyCache (local hit or fetch from signaling)
+        // Get verifying key for key_id from IssuerKeyCache (local hit or fetch from signaling)
         let verifying_key = match auth_ctx
-            .ais_key_cache
+            .issuer_key_cache
             .get_or_fetch(credential.key_id, &fetcher)
             .await
         {
@@ -373,7 +393,7 @@ impl WebSocketGate {
             }
         };
 
-        // AIS TTLs are configurable and claims do not carry an issued-at
+        // Issuer TTLs are configurable and claims do not carry an issued-at
         // value, so only the signed absolute expiry can be evaluated here.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -400,18 +420,27 @@ impl WebSocketGate {
                     );
                     return None;
                 }
+                // The credential's Realm and issuer are both the source's Realm name.
+                if claims.realm != source_actor_id.realm || claims.issuer != source_actor_id.realm {
+                    tracing::warn!(
+                        realm = %claims.realm,
+                        issuer = %claims.issuer,
+                        source_id = %source_repr,
+                        "WS credential Realm or issuer does not match the source Realm, rejecting connection"
+                    );
+                    return None;
+                }
                 tracing::info!(
                     actor_id = %claims.actor_id,
                     "WS inbound connection identity verification passed"
                 );
+                Some(claims.actor_type)
             }
             Err(e) => {
                 tracing::warn!(error = ?e, "WS X-Actr-Source-ID decode failed, rejecting connection");
-                return None;
+                None
             }
         }
-
-        Some(())
     }
 
     /// Spawn receive tasks for a single WebSocket connection
@@ -425,14 +454,17 @@ impl WebSocketGate {
     /// The sink is registered synchronously (before any lane task is spawned)
     /// so that `send_response` can find it even when the first request arrives
     /// via a parallel transport (e.g. WebRTC) before the lanes are fully up.
+    #[allow(clippy::too_many_arguments)]
     async fn spawn_connection_tasks(
         conn: WebSocketConnection,
         source_id: Vec<u8>,
+        actor_type: ActrType,
         pending_requests: PendingRequestsMap,
         data_chunk_registry: Arc<DataChunkRegistry>,
         mailbox: Arc<dyn Mailbox>,
         hook_callback: Option<HookCallback>,
         inbound_sinks: InboundSinkMap,
+        peer_types: PeerTypes,
     ) {
         // Fire `WebSocketConnected` for the peer once the connection is
         // accepted. Decoding the peer `ActrId` may fail if the source-id
@@ -459,6 +491,9 @@ impl WebSocketGate {
                 .write()
                 .await
                 .insert(peer.clone(), (sink, secure));
+            // Counted until the last lane exits (`finish_lane_task`).
+            peer_types.record(peer.clone(), actor_type.clone());
+            peer_types.connection_opened(peer);
         }
 
         // Count active per-lane reader tasks. When the last one exits
@@ -480,6 +515,8 @@ impl WebSocketGate {
             let peer_id_for_lane = peer_id.clone();
             let hook_cb_for_lane = hook_callback.clone();
             let sinks_for_lane = inbound_sinks.clone();
+            let peer_types_for_lane = peer_types.clone();
+            let actor_type = actor_type.clone();
             active_lanes.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 
             tokio::spawn(async move {
@@ -507,6 +544,7 @@ impl WebSocketGate {
                                                 Self::handle_envelope(
                                                     envelope,
                                                     src.clone(),
+                                                    Some(actor_type.clone()),
                                                     data_bytes,
                                                     pt,
                                                     pending.clone(),
@@ -581,6 +619,7 @@ impl WebSocketGate {
                     peer_id_for_lane,
                     hook_cb_for_lane,
                     sinks_for_lane,
+                    peer_types_for_lane,
                 )
                 .await;
             });
@@ -630,20 +669,19 @@ impl WebSocketGate {
 
                 // Credential verification (if auth_ctx is configured)
                 if let Some(ref ctx) = auth_ctx {
-                    match credential_opt {
+                    let actor_type = match credential_opt {
                         Some(ref credential) => {
-                            if Self::verify_credential(credential, &source_id, ctx)
-                                .await
-                                .is_none()
-                            {
-                                tracing::warn!(
-                                    "WS inbound connection credential verification failed, dropping connection"
-                                );
-                                // Tear the connection down explicitly: dropping
-                                // it must not leave the accepted socket and its
-                                // receive loop alive without authentication.
-                                let _ = conn.close().await;
-                                continue; // drop connection, wait for next one
+                            match Self::verify_credential(credential, &source_id, ctx).await {
+                                Some(actor_type) => actor_type,
+                                None => {
+                                    tracing::warn!(
+                                        "WS inbound connection credential verification failed, dropping connection"
+                                    );
+                                    // Close the accepted socket and its receive
+                                    // loop explicitly when authentication fails.
+                                    let _ = conn.close().await;
+                                    continue;
+                                }
                             }
                         }
                         None => {
@@ -653,16 +691,18 @@ impl WebSocketGate {
                             let _ = conn.close().await;
                             continue;
                         }
-                    }
+                    };
 
                     Self::spawn_connection_tasks(
                         conn,
                         source_id,
+                        actor_type,
                         pending_requests.clone(),
                         data_chunk_registry.clone(),
                         mailbox.clone(),
                         hook_cb.clone(),
                         inbound_sinks.clone(),
+                        ctx.peer_types.clone(),
                     )
                     .await;
                 } else {

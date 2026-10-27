@@ -457,7 +457,7 @@ pub unsafe extern "C" fn actr_node_from_config(
 ///
 /// Returns a replacement `ActrNodeInitHandle`, or null when the input actor
 /// type is invalid or the supplied handle is stale or has the wrong state. The
-/// actor type must be `manufacturer:name:version` and satisfies the protocol
+/// actor type must be `publisher/program@version` and satisfies the protocol
 /// identity validation rules.
 ///
 /// # Safety
@@ -598,20 +598,20 @@ pub unsafe extern "C" fn actr_node_with_observer(
 
 // ── node: register ──────────────────────────────────────────────────────────
 
-/// Register the node with the AIS endpoint. Async — result via `callback`.
+/// Register the node with the Issuer endpoint. Async — result via `callback`.
 ///
 /// # Safety
 ///
 /// `attached_handle` must be a valid `ActrNodeAttachedHandle` not yet
-/// consumed (it is consumed by this call). `ais_ptr` may point to `ais_len`
-/// valid UTF-8 bytes, or be null to use the node's configured AIS endpoint.
+/// consumed (it is consumed by this call). `issuer_ptr` may point to `issuer_len`
+/// valid UTF-8 bytes, or be null to use the node's configured Issuer endpoint.
 /// `callback` must be a valid function pointer. `user_data` is passed
 /// verbatim and must be safe to send across threads.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn actr_node_register(
     attached_handle: *mut c_void,
-    ais_ptr: *const c_char,
-    ais_len: usize,
+    issuer_ptr: *const c_char,
+    issuer_len: usize,
     callback: Option<ActrHandleCallback>,
     user_data: *mut c_void,
 ) -> i32 {
@@ -628,26 +628,31 @@ pub unsafe extern "C" fn actr_node_register(
                 return HANDLE_INVALID;
             }
         };
-        // If the caller passes no ais_endpoint (nil), extract it from the node
-        // runtime config — mirrors libactr's `attached.ais_endpoint()` path.
-        let ais = if ais_ptr.is_null() {
-            if ais_len != 0 {
+        // If the caller passes no issuer_endpoint (nil), extract it from the node
+        // runtime config — mirrors libactr's `attached.issuer_endpoint()` path.
+        let issuer = if issuer_ptr.is_null() {
+            if issuer_len != 0 {
                 emit_handle_error(
                     NULL_POINTER,
-                    "AIS pointer is null with a non-zero length",
+                    "Issuer pointer is null with a non-zero length",
                     callback,
                     user_data,
                 );
                 return NULL_POINTER;
             }
-            node.ais_endpoint().to_string()
+            node.issuer_endpoint().to_string()
         } else {
-            // SAFETY: the function's contract requires a non-null `ais_ptr` to
-            // be readable for `ais_len` bytes.
-            match unsafe { decode_str(ais_ptr, ais_len) } {
-                Ok(ais) => ais,
+            // SAFETY: the function's contract requires a non-null `issuer_ptr` to
+            // be readable for `issuer_len` bytes.
+            match unsafe { decode_str(issuer_ptr, issuer_len) } {
+                Ok(issuer) => issuer,
                 Err(code) => {
-                    emit_handle_error(code, input_error(code, "AIS endpoint"), callback, user_data);
+                    emit_handle_error(
+                        code,
+                        input_error(code, "Issuer endpoint"),
+                        callback,
+                        user_data,
+                    );
                     return code;
                 }
             }
@@ -655,7 +660,7 @@ pub unsafe extern "C" fn actr_node_register(
         let ud = user_data as usize;
         runtime::spawn_guarded(
             async move {
-                match node.register(&ais).await {
+                match node.register(&issuer).await {
                     Ok(registered) => {
                         let h = box_registered(registered);
                         callback(SUCCESS, h, std::ptr::null(), 0, ud as *mut c_void);

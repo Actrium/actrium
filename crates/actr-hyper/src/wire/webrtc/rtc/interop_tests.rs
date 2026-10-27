@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use actr_protocol::{ActrId, ActrType, Realm};
+use actr_protocol::ActrId;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
@@ -28,13 +28,8 @@ const WAIT: Duration = Duration::from_secs(20);
 
 fn test_actor_id(serial_number: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number,
-        r#type: ActrType {
-            manufacturer: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
     }
 }
 

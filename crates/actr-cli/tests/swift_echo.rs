@@ -32,6 +32,8 @@ fn init_swift_echo(parent: &std::path::Path, project_name: &str) -> std::path::P
             "echo",
             "--signaling",
             "wss://actrix1.develenv.com",
+            "--realm",
+            "dev@example.com",
             project_name,
         ],
         parent,
@@ -171,6 +173,8 @@ fn swift_echo_init_fails_if_directory_exists() {
             "echo",
             "--signaling",
             "wss://actrix1.develenv.com",
+            "--realm",
+            "dev@example.com",
             "DuplicateApp",
         ],
         tmp.path(),
@@ -188,7 +192,7 @@ fn swift_echo_init_fails_if_directory_exists() {
 }
 
 #[test]
-#[ignore = "TODO: re-enable when AIS is implemented; also requires macOS and xcodegen"]
+#[ignore = "TODO: re-enable when Issuer is implemented; also requires macOS and xcodegen"]
 fn swift_echo_full_workflow_init_install_gen() {
     let tmp = TempDir::new().unwrap();
     let project_name = "EchoWorkflowApp";

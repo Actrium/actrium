@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use actr_hyper::test_support::{TestSignalingServer, attached_node_has_hook_observer};
 use actr_hyper::{Hyper, HyperConfig, Node, StaticTrust, WorkloadPackage};
-use actr_protocol::{ActrType, Realm};
+use actr_protocol::ActrType;
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use tempfile::TempDir;
@@ -29,7 +29,7 @@ fn test_runtime_config(
     name: &str,
 ) -> actr_config::RuntimeConfig {
     let actr_type = ActrType {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: name.to_string(),
         version: "1.0.0".to_string(),
     };
@@ -43,9 +43,9 @@ fn test_runtime_config(
             license: None,
         },
         signaling_url: url::Url::parse(&server.url()).unwrap(),
-        realm: Realm { realm_id: 7 },
-        ais_endpoint: ais_endpoint(server),
-        realm_secret: None,
+        realm: "test7@example.com".to_string(),
+        issuer_endpoint: issuer_endpoint(server),
+        realm_client_key: None,
         visible_in_discovery: true,
         acl: None,
         mailbox_path: None,
@@ -70,8 +70,8 @@ fn test_runtime_config(
     }
 }
 
-fn ais_endpoint(server: &TestSignalingServer) -> String {
-    format!("http://127.0.0.1:{}/ais", server.port())
+fn issuer_endpoint(server: &TestSignalingServer) -> String {
+    format!("http://127.0.0.1:{}/issuer", server.port())
 }
 
 fn build_package(
@@ -83,7 +83,7 @@ fn build_package(
     signing_key: &SigningKey,
 ) -> WorkloadPackage {
     let manifest = actr_pack::PackageManifest {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: name.to_string(),
         version: "1.0.0".to_string(),
         binary: actr_pack::BinaryEntry {
@@ -127,7 +127,7 @@ async fn assert_package_on_start_failure(
         .await
         .unwrap();
     let config = test_runtime_config(&dir, &server, actor_name);
-    let ais_endpoint = ais_endpoint(&server);
+    let issuer_endpoint = issuer_endpoint(&server);
 
     let attached = Node::from_hyper(hyper, config)
         .attach(&package)
@@ -138,9 +138,9 @@ async fn assert_package_on_start_failure(
         "package attach should install hook observer"
     );
     let registered = attached
-        .register(&ais_endpoint)
+        .register(&issuer_endpoint)
         .await
-        .expect("package should register with mock AIS");
+        .expect("package should register with mock Issuer");
 
     let err = match registered.start().await {
         Ok(_) => panic!("start should abort when package on_start returns Err"),

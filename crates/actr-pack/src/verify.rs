@@ -52,7 +52,7 @@ impl Default for PackageVerificationLimits {
 /// Result of a successful package verification.
 ///
 /// Contains the parsed manifest along with the raw bytes needed for
-/// transparent forwarding to AIS for signature verification.
+/// transparent forwarding to Issuer for signature verification.
 #[derive(Debug, Clone)]
 pub struct VerifiedPackage {
     /// Parsed package manifest.
@@ -61,6 +61,8 @@ pub struct VerifiedPackage {
     pub manifest_raw: Vec<u8>,
     /// Raw `manifest.sig` bytes (64-byte Ed25519 signature).
     pub sig_raw: Vec<u8>,
+    /// Ed25519 public key the signature was verified with.
+    pub signing_public_key: [u8; 32],
 }
 
 /// Verify an .actr package with a safe default payload limit.
@@ -150,7 +152,7 @@ pub fn verify_with_limits(
     // Trust-boundary check: a valid signature proves provenance, not that the
     // identity strings are safe to use (CWE-22 / CWE-73). Enforce the protocol
     // identity rules before any caller can use this manifest for storage-path
-    // derivation, registry lookup, or AIS registration.
+    // derivation, registry lookup, or Issuer registration.
     crate::identity::ValidatedActorIdentity::from_manifest(&manifest)
         .map_err(|error| PackError::InvalidPackage(format!("invalid actor identity: {error}")))?;
 
@@ -272,6 +274,7 @@ pub fn verify_with_limits(
         manifest,
         manifest_raw: manifest_bytes,
         sig_raw,
+        signing_public_key: pubkey.to_bytes(),
     })
 }
 
@@ -412,7 +415,7 @@ mod tests {
 
     fn test_manifest() -> PackageManifest {
         PackageManifest {
-            manufacturer: "test-mfr".to_string(),
+            publisher: "test-publisher".to_string(),
             name: "TestActor".to_string(),
             version: "1.0.0".to_string(),
             binary: BinaryEntry {
@@ -496,7 +499,7 @@ mod tests {
         let key = SigningKey::generate(&mut OsRng);
         let pkg = make_package(&key, b"wasm bytes", vec![]);
         let result = verify(&pkg, &key.verifying_key()).unwrap();
-        assert_eq!(result.manifest.manufacturer, "test-mfr");
+        assert_eq!(result.manifest.publisher, "test-publisher");
         assert_eq!(result.manifest.name, "TestActor");
         assert_eq!(result.sig_raw.len(), 64);
         assert!(!result.manifest_raw.is_empty());

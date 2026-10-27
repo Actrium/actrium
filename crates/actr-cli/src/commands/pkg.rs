@@ -21,7 +21,7 @@ use clap::{Args, Subcommand};
 use ed25519_dalek::SigningKey;
 
 use crate::commands::package_build::{
-    binary_kind_for_target, ensure_manufacturer_matches, load_signing_key_with_manufacturer,
+    binary_kind_for_target, ensure_publisher_matches, load_signing_key_with_publisher,
     load_verifying_key, load_verifying_key_from_dev_key, resolve_key_path, validated_packaged_lock,
 };
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
@@ -34,19 +34,19 @@ pub struct PkgArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PkgCommand {
-    /// Build and sign a versioned actr-package/1 archive from a manifest and payload tree.
+    /// Build and sign a versioned actr-package/2 archive from a manifest and payload tree.
     Pack(PkgPackArgs),
-    /// Sign a manifest.toml manifest with an MFR private key (offline signing).
+    /// Sign a manifest.toml manifest with an Publisher Registry private key (offline signing).
     Sign(PkgSignArgs),
     /// Verify a signed .actr package.
     Verify(PkgVerifyArgs),
-    /// Generate an Ed25519 MFR signing key pair.
+    /// Generate an Ed25519 Publisher signing key pair.
     Keygen(PkgKeygenArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct PkgPackArgs {
-    /// Path to an actr-package/1 manifest.toml template.
+    /// Path to an actr-package/2 manifest.toml template.
     #[arg(
         long = "manifest-path",
         short = 'm',
@@ -59,7 +59,7 @@ pub struct PkgPackArgs {
     #[arg(long, default_value = ".", value_name = "DIR")]
     pub payload_root: PathBuf,
 
-    /// Path to MFR signing key file (overrides config mfr.keychain).
+    /// Path to Publisher Registry signing key file (overrides config publisher.keychain).
     #[arg(long, short = 'k', value_name = "FILE")]
     pub key: Option<PathBuf>,
 
@@ -79,7 +79,7 @@ pub struct PkgSignArgs {
     )]
     pub manifest_path: PathBuf,
 
-    /// Path to MFR signing key file (overrides config mfr.keychain)
+    /// Path to Publisher signing key file
     #[arg(long, short = 'k', value_name = "FILE")]
     pub key: Option<PathBuf>,
 
@@ -102,7 +102,7 @@ pub struct PkgVerifyArgs {
     #[arg(long, short = 'p', value_name = "FILE")]
     pub package: PathBuf,
 
-    /// Public key file (default: derive from config mfr.keychain)
+    /// Public key file (default: derive from the configured Publisher keychain)
     #[arg(long, value_name = "FILE")]
     pub pubkey: Option<PathBuf>,
 }
@@ -115,17 +115,17 @@ pub struct PkgKeygenArgs {
     /// Force overwrite existing key
     #[arg(long)]
     pub force: bool,
-    /// Bind this keychain to a manufacturer; signing/publishing packages for
-    /// any other manufacturer will then be rejected (issue #425).
+    /// Bind this keychain to a publisher; signing/publishing packages for
+    /// any other publisher will then be rejected (issue #425).
     #[arg(long, value_name = "NAME")]
-    pub manufacturer: Option<String>,
+    pub publisher: Option<String>,
 }
 
 #[async_trait]
 impl Command for PkgArgs {
     async fn execute(&self, _ctx: &CommandContext) -> Result<CommandResult> {
         let cli_config = crate::config::resolver::resolve_effective_cli_config()?;
-        let keychain_ref = cli_config.mfr.keychain.as_deref();
+        let keychain_ref = cli_config.publisher.keychain.as_deref();
 
         match &self.command {
             PkgCommand::Pack(a) => execute_pack(a, keychain_ref)?,
@@ -151,14 +151,11 @@ impl Command for PkgArgs {
 
 fn execute_pack(args: &PkgPackArgs, config_keychain: Option<&str>) -> Result<()> {
     let key_path = resolve_key_path(args.key.as_deref(), config_keychain)?;
-    let (signing_key, keychain_manufacturer) = load_signing_key_with_manufacturer(&key_path)?;
+    let (signing_key, keychain_publisher) = load_signing_key_with_publisher(&key_path)?;
     let manifest_source = std::fs::read_to_string(&args.manifest_path)
         .with_context(|| format!("Failed to read manifest: {}", args.manifest_path.display()))?;
     let manifest = actr_pack::ActorPackageManifest::from_toml(&manifest_source)?;
-    ensure_manufacturer_matches(
-        keychain_manufacturer.as_deref(),
-        &manifest.actor.manufacturer,
-    )?;
+    ensure_publisher_matches(keychain_publisher.as_deref(), &manifest.actor.publisher)?;
 
     let canonical_root = args.payload_root.canonicalize().with_context(|| {
         format!(
@@ -245,11 +242,11 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         "created_at": now,
         "note": "Development signing key, for StaticTrust use only, not for production use"
     });
-    if let Some(ref manufacturer) = args.manufacturer {
-        if manufacturer.trim().is_empty() {
-            anyhow::bail!("--manufacturer cannot be empty");
+    if let Some(ref publisher) = args.publisher {
+        if publisher.trim().is_empty() {
+            anyhow::bail!("--publisher cannot be empty");
         }
-        key_json["manufacturer"] = serde_json::Value::String(manufacturer.clone());
+        key_json["publisher"] = serde_json::Value::String(publisher.clone());
     }
 
     let json_str = serde_json::to_string_pretty(&key_json)?;
@@ -281,7 +278,7 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
     let global_path = crate::config::loader::global_config_path()?;
     let mut global_config =
         crate::config::loader::load_cli_config(&global_path)?.unwrap_or_default();
-    global_config.mfr.keychain = Some(key_path.display().to_string());
+    global_config.publisher.keychain = Some(key_path.display().to_string());
     if let Some(parent) = global_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create {}", parent.display()))?;
@@ -292,7 +289,7 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         .with_context(|| format!("Failed to write {}", global_path.display()))?;
     println!();
     println!(
-        "✅ Global config updated: mfr.keychain = {}",
+        "✅ Global config updated: publisher.keychain = {}",
         key_path.display()
     );
 
@@ -318,7 +315,7 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
     use std::io::Write;
 
     let key_path = resolve_key_path(args.key.as_deref(), config_keychain)?;
-    let (signing_key, keychain_manufacturer) = load_signing_key_with_manufacturer(&key_path)?;
+    let (signing_key, keychain_publisher) = load_signing_key_with_publisher(&key_path)?;
     let verifying_key = signing_key.verifying_key();
     let key_id = actr_pack::compute_key_id(&verifying_key.to_bytes());
 
@@ -343,16 +340,16 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
             .ok_or_else(|| anyhow::anyhow!("manifest.toml [package].{key} missing"))
     };
 
-    let manufacturer = get_str("manufacturer")?;
+    let publisher = get_str("publisher")?;
     let name = get_str("name")?;
     let version = get_str("version")?;
     let parsed_config = actr_config::ConfigParser::from_manifest_file(config_path)
         .with_context(|| "Invalid manifest.toml package configuration")?;
     let lock_file = validated_packaged_lock(&parsed_config)?;
 
-    // Reject cross-manufacturer signing before computing hashes or writing the
+    // Reject cross-publisher signing before computing hashes or writing the
     // signature (issue #425).
-    ensure_manufacturer_matches(keychain_manufacturer.as_deref(), &manufacturer)?;
+    ensure_publisher_matches(keychain_publisher.as_deref(), &publisher)?;
 
     let (binary_hash, binary_size) = if let Some(binary_path) = &args.binary {
         let binary_data = std::fs::read(binary_path)
@@ -405,7 +402,7 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
     }
 
     let manifest = actr_pack::PackageManifest {
-        manufacturer: manufacturer.clone(),
+        publisher: publisher.clone(),
         name: name.clone(),
         version: version.clone(),
         binary: actr_pack::BinaryEntry {
@@ -465,7 +462,7 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
     println!("  manifest:  {} (signed content)", manifest_path.display());
     println!("  sig file:  {} (64 bytes raw Ed25519)", sig_path.display());
     println!("  key_id:    {}", key_id);
-    println!("  actr_type: {}:{}:{}", manufacturer, name, version);
+    println!("  actr_type: {}/{}@{}", publisher, name, version);
     println!("  target:    {}", args.target);
 
     Ok(())
@@ -489,7 +486,7 @@ async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> 
             let verified = actr_pack::verify_actor_package(&package_bytes, &pubkey)?;
             println!("Package verification passed");
             println!();
-            println!("  manufacturer: {}", manifest.actor.manufacturer);
+            println!("  publisher: {}", manifest.actor.publisher);
             println!("  type:         {}", verified.manifest.actor_type());
             println!("  workload:     {}", manifest.workload.entry);
             println!("  profile:      {}", manifest.workload.profile);
@@ -522,7 +519,7 @@ async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> 
 
     println!("Package verification passed");
     println!();
-    println!("  manufacturer: {}", verified.manifest.manufacturer);
+    println!("  publisher: {}", verified.manifest.publisher);
     println!("  type:         {}", verified.manifest.actr_type_str());
     println!("  binary:       {}", verified.manifest.binary.path);
     println!(

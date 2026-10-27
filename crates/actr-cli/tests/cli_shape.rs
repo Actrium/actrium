@@ -47,7 +47,7 @@ fn top_level_has_expected_commands() {
         );
     }
     // Resource groups
-    for name in ["deps", "pkg", "registry", "dlq"] {
+    for name in ["deps", "pkg", "registry", "dlq", "realm", "publisher"] {
         assert!(names.contains(&name.to_string()), "missing group `{name}`");
     }
     // Meta
@@ -104,6 +104,33 @@ fn registry_group_has_discover_publish_fingerprint() {
             "discover".to_string(),
             "fingerprint".to_string(),
             "publish".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn realm_group_exposes_the_signing_and_membership_tools() {
+    let mut subs = subcommand_names("realm");
+    subs.sort();
+    assert_eq!(
+        subs,
+        [
+            "create-request",
+            "draft-request",
+            "invite",
+            "join",
+            "keygen",
+            "leave",
+            "members",
+            "register-publisher",
+            "reissue-request",
+            "remove-member",
+            "retire",
+            "revoke-client",
+            "revoke-invite",
+            "set-role",
+            "sign-profile",
+            "transfer-owner",
         ]
     );
 }

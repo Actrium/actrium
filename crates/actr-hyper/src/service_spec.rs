@@ -19,7 +19,7 @@ use crate::error::{HyperError, HyperResult};
 /// Build a [`ServiceSpec`] from the package's proto exports.
 ///
 /// Returns `Ok(None)` when the manifest declares no proto files — such
-/// packages register with AIS without a service spec.
+/// packages register with Issuer without a service spec.
 pub(crate) fn calculate_service_spec_from_package(
     package_bytes: &[u8],
     manifest: &PackageManifest,

@@ -4,18 +4,76 @@ Command-line tool for Actor-RTC projects. Handles project scaffolding, codegen,
 packaging (`.actr`), signing, installation of service dependencies, and runtime
 instance management.
 
-## Quick reference (19 top-level subcommands)
+## Quick reference (21 top-level subcommands)
 
 ```
 Development (flat, 5):  actr init | gen | build | check | doc
 Runtime (flat, 7):      actr run | ps | logs | start | stop | restart | rm
-Resources (grouped, 4): actr deps | pkg | registry | dlq
+Resources (grouped, 6): actr deps | pkg | registry | dlq | realm | publisher
 Meta (3):               actr config | version | completion
 ```
 
 Full help: `actr --help`, then drill down with `actr <command> --help`.
 
+## Publisher Profile keys and signing
+
+The Publisher Profile signing key signs the domain's public metadata. The
+package signing key signs `.actr` packages. Generate them separately:
+
+```sh
+actr publisher profile keygen --key-id publisher-root-1 \
+  --output publisher-profile-key.json > publisher-profile-public.json
+actr pkg keygen --publisher apps.example.com --output package-key.json
+
+actr publisher profile sign --key publisher-profile-key.json \
+  --domain apps.example.com --package-key package-key.json \
+  --security-contact mailto:security@apps.example.com > publisher.json
+```
+
+`keygen` writes the private key with owner-only permissions on Unix and prints
+only its public `profile_signing_keys` entry. It refuses to replace an existing
+file unless `--force` is given and leaves the configured package keychain alone.
+
+`sign` prints the complete signed `publisher` member. Insert that object into
+the authority descriptor served at `https://apps.example.com/.well-known/actr`,
+keeping the descriptor's `authority` and service links. The command uses the
+protocol's JCS and detached Ed25519 implementation, derives every package key ID
+from its public key, and checks the result with the consumer's acceptance path.
+Both commands work offline outside a project.
+
+The default sequence is `1`, valid for 30 days. For an update with the same
+Profile signing key, increase `--sequence` and renew before expiry; change the
+validity with `--valid-for-days`. The command constructs a Profile with one
+Profile signing key; rotation chains for that key remain a separate tool.
+Repeat `--package-key` to list package keys. Each file may be a keychain or
+public-only JSON with `public_key` and optional `status` (`active` or `retired`),
+`not_before` and `not_after`. Keep retired package keys listed while their
+packages must remain verifiable. The protocol allows at most eight package
+keys, including at most two active keys. Private material never enters the
+printed Profile.
+
+The Profile key file also works with the existing Publisher registration tool:
+
+```sh
+actr realm register-publisher --key publisher-profile-key.json \
+  --publisher apps.example.com --provider infra.example.com
+```
+
 ---
+
+## Browser Host Realm client key
+
+Run `actr run --web -c actr.toml`, open its local page, choose the authorized
+Realm client key JSON file written by `actr realm join`, then select **Start
+Actor**. The file must name the configured Realm and Issuer. The page passes
+the key directly to its Service Worker before initialization; the worker
+validates it and stores it in its scoped browser secret store. The page shows
+the Actor as ready only after the worker confirms registration.
+
+Select the key when opening the bundled page. Host-side
+`deployment.realm_client_key` paths are not served to the browser, and private
+key material is not included in `/actr-runtime-config.json` or uploaded to the
+local static server. Package verification still uses public trust anchors.
 
 ## Organization principles
 
@@ -42,8 +100,12 @@ Groups are named after **what the subcommand operates on**:
 
 - `deps` — local dependency manifest / lockfile
 - `pkg` — a local `.actr` package file (sign, verify, keygen)
-- `registry` — the remote registry / AIS (discover, publish, fingerprint)
+- `registry` — the remote registry / Issuer (discover, publish, fingerprint)
 - `dlq` — the Dead Letter Queue
+- `realm` — a Realm signing key (keygen, and signed Realm management requests),
+  and a member's Realm client key (join, invite, members, …)
+- `publisher profile` — a Publisher Profile signing key and the signed
+  `publisher` member of a domain's authority descriptor
 
 **Do not** group by workflow phase (`build`, `release`, `ops`, etc.) — those
 names rot as the workflow evolves.

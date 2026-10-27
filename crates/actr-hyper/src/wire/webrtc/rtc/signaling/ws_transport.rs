@@ -9,7 +9,7 @@
 //! * `Offer { desc, exchange_id }` → correlated `SessionDescription { type: OFFER, sdp }`
 //! * `Answer { desc, exchange_id }` → correlated `SessionDescription { type: ANSWER, sdp }`
 //! * `Candidate(init)` → `IceCandidate { candidate, sdp_mid, ... }`
-//! * `RoleNegotiation` → `RoleNegotiation { from, to, realm_id }`
+//! * `RoleNegotiation` → `RoleNegotiation { from, to }`
 //! * `RoleAssignment { is_offerer }` → `RoleAssignment { is_offerer, .. }`
 //! * `IceRestartRequestAck { .. }` → `IceRestartRequestAck { .. }`
 //!
@@ -28,6 +28,7 @@ use async_trait::async_trait;
 use webrtc::peer_connection::{RTCIceCandidateInit, RTCSdpType, RTCSessionDescription};
 
 use crate::lifecycle::CredentialState;
+use crate::lifecycle::node::PeerTypes;
 use crate::wire::webrtc::rtc::peer::reducer::SignalingMessage;
 use crate::wire::webrtc::signaling::SignalingClient;
 use tracing::Instrument;
@@ -50,6 +51,9 @@ pub(crate) struct RtcSignalingTransport {
     /// envelope stamps the *current* value.
     local_id: SharedLocalId,
     credential_state: CredentialState,
+    /// Records each relay's `source_type` (set by Signaling from the
+    /// sender's verified credential) for the inbound ACL.
+    peer_types: PeerTypes,
 }
 
 impl RtcSignalingTransport {
@@ -57,11 +61,13 @@ impl RtcSignalingTransport {
         signaling_client: Arc<dyn SignalingClient>,
         local_id: SharedLocalId,
         credential_state: CredentialState,
+        peer_types: PeerTypes,
     ) -> Self {
         Self {
             signaling_client,
             local_id,
             credential_state,
+            peer_types,
         }
     }
 
@@ -119,7 +125,6 @@ impl RtcSignalingTransport {
             SignalingMessage::RoleNegotiation => {
                 let local_id = self.local_id.get();
                 actr_relay::Payload::RoleNegotiation(actr_protocol::RoleNegotiation {
-                    realm_id: local_id.realm.realm_id,
                     from: local_id,
                     to: to.clone(),
                 })
@@ -242,6 +247,7 @@ impl SignalingTransport for RtcSignalingTransport {
                     negotiation_epoch: Some(attempt.negotiation_epoch),
                 }
             }),
+            source_type: None,
             payload: Some(payload),
         };
         let envelope = SignalingEnvelope {
@@ -348,6 +354,9 @@ impl SignalingTransport for RtcSignalingTransport {
                     };
                     let source = relay.source.clone();
                     let target = relay.target.clone();
+                    if let Some(source_type) = relay.source_type {
+                        self.peer_types.record(source.clone(), source_type);
+                    }
                     if let Some(payload) = relay.payload
                         && let Some(message) = Self::payload_to_message(payload)
                     {
@@ -430,13 +439,8 @@ mod tests {
 
     fn test_id(serial: u64) -> ActrId {
         ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: serial,
-            r#type: actr_protocol::ActrType {
-                manufacturer: "acme".to_string(),
-                name: "node".to_string(),
-                version: "1.0.0".to_string(),
-            },
         }
     }
 
@@ -454,6 +458,7 @@ mod tests {
             client,
             SharedLocalId::new(test_id(1)),
             CredentialState::new(credential, None, None),
+            PeerTypes::default(),
         )
     }
 
@@ -573,6 +578,7 @@ mod tests {
                     },
                     target: local.clone(),
                     delivery_context: None,
+                    source_type: None,
                     payload: Some(actr_relay::Payload::SessionDescription(
                         actr_protocol::SessionDescription {
                             r#type: session_description::Type::Offer as i32,
@@ -599,6 +605,7 @@ mod tests {
                 None,
                 None,
             ),
+            PeerTypes::default(),
         );
 
         let (peer, message) = crate::timer::timeout(
@@ -615,12 +622,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn relay_source_type_is_recorded_for_the_peer() {
+        let local = test_id(1);
+        let remote = test_id(2);
+        let remote_type = actr_protocol::ActrType {
+            publisher: "acme".to_string(),
+            name: "node".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        let envelope = SignalingEnvelope {
+            envelope_version: SIGNALING_ENVELOPE_VERSION,
+            envelope_id: "typed-relay".to_string(),
+            reply_for: None,
+            traceparent: None,
+            tracestate: None,
+            flow: Some(signaling_envelope::Flow::ActrRelay(
+                actr_protocol::ActrRelay {
+                    source: remote.clone(),
+                    credential: actr_protocol::AIdCredential::default(),
+                    target: local.clone(),
+                    delivery_context: None,
+                    source_type: Some(remote_type.clone()),
+                    payload: Some(actr_relay::Payload::RoleNegotiation(
+                        actr_protocol::RoleNegotiation {
+                            from: remote.clone(),
+                            to: local.clone(),
+                        },
+                    )),
+                },
+            )),
+        };
+        let client: Arc<dyn SignalingClient> = Arc::new(ScriptedReceiveClient {
+            receives: Mutex::new(VecDeque::from([Some(envelope)])),
+            sent: Mutex::new(Vec::new()),
+        });
+        let peer_types = PeerTypes::default();
+        let transport = RtcSignalingTransport::new(
+            client,
+            SharedLocalId::new(local),
+            CredentialState::new(actr_protocol::AIdCredential::default(), None, None),
+            peer_types.clone(),
+        );
+
+        let (peer, _) = SignalingTransport::recv(&transport)
+            .await
+            .expect("scripted relay");
+
+        assert_eq!(peer, remote);
+        assert_eq!(peer_types.get(&remote), Some(remote_type));
+    }
+
+    #[tokio::test]
     async fn critical_relay_carries_attempt_identity() {
         let client = Arc::new(ScriptedReceiveClient::default());
         let transport = RtcSignalingTransport::new(
             client.clone(),
             SharedLocalId::new(test_id(1)),
             CredentialState::new(actr_protocol::AIdCredential::default(), None, None),
+            PeerTypes::default(),
         );
         let dispatch = SignalingDispatch::tracked(
             test_id(2),
@@ -684,6 +743,7 @@ mod tests {
             client,
             SharedLocalId::new(local),
             CredentialState::new(actr_protocol::AIdCredential::default(), None, None),
+            PeerTypes::default(),
         );
 
         let event = SignalingTransport::recv_event(&transport)
@@ -749,6 +809,7 @@ mod tests {
             client,
             SharedLocalId::new(local),
             CredentialState::new(actr_protocol::AIdCredential::default(), None, None),
+            PeerTypes::default(),
         );
 
         let event = SignalingTransport::recv_event(&transport)

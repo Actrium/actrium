@@ -2115,9 +2115,8 @@ mod inv33_peer_coverage {
     use crate::wire::webrtc::rtc::recovery::PeerRecoveryTarget;
     use crate::wire::webrtc::{SignalingEvent, SignalingStats};
     use actr_protocol::{
-        AIdCredential, ActrId, ActrType, Pong, Realm, RegisterRequest, RegisterResponse,
-        RouteCandidatesRequest, RouteCandidatesResponse, ServiceAvailabilityState,
-        SignalingEnvelope, UnregisterResponse,
+        AIdCredential, ActrId, Pong, RegisterRequest, RegisterResponse, RouteCandidatesRequest,
+        RouteCandidatesResponse, ServiceAvailabilityState, SignalingEnvelope, UnregisterResponse,
     };
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
@@ -2131,13 +2130,8 @@ mod inv33_peer_coverage {
 
     fn peer_id(serial: u64) -> ActrId {
         ActrId {
-            realm: Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: serial,
-            r#type: ActrType {
-                manufacturer: "acme".to_string(),
-                name: "node".to_string(),
-                version: "1.0.0".to_string(),
-            },
         }
     }
 

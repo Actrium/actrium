@@ -1,14 +1,14 @@
 edition = 1
 
 [signaling]
-url = "ws://127.0.0.1:8081/signaling/ws"
+url = "ws://127.0.0.1:__HTTP_PORT__/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:8081/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:__HTTP_PORT__/issuer"
 
 [deployment]
-realm_id = __REALM_ID__
-realm_secret = "__REALM_SECRET__"
+realm = "__REALM__"
+realm_client_key = "__REALM_CLIENT_KEY__"
 
 [discovery]
 visible = true
@@ -21,11 +21,11 @@ tracing_service_name = "package-runtime-echo-client"
 
 [webrtc]
 force_relay = false
-stun_urls = ["stun:127.0.0.1:3478"]
-turn_urls = ["turn:127.0.0.1:3478"]
+stun_urls = ["stun:127.0.0.1:__ICE_PORT__"]
+turn_urls = ["turn:127.0.0.1:__ICE_PORT__"]
 
 [acl]
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:EchoService:__ECHO_SERVICE_VERSION__"
+type = "e2e.actrium.test/EchoService@__ECHO_SERVICE_VERSION__"

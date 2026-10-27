@@ -408,6 +408,12 @@ pub(crate) trait RtcPeerEffectPort: Send + Sync {
         sender: Arc<dyn ActrRtpSender>,
     ) -> Option<Result<(), webrtc::error::Error>>;
 
+    /// Test-only physical driver failure; keep the logical runner accepting effects.
+    #[cfg(all(test, feature = "test-utils"))]
+    async fn close_physical_session_for_test(&self, _generation: u64) -> Result<(), String> {
+        Err("physical session close is unsupported by this effect port".to_owned())
+    }
+
     async fn close_all_sessions(&self);
 }
 
@@ -1219,6 +1225,20 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
         WebRtcEffectRunner::remove_track(self, generation, sender).await
     }
 
+    #[cfg(all(test, feature = "test-utils"))]
+    async fn close_physical_session_for_test(&self, generation: u64) -> Result<(), String> {
+        let ops = self
+            .sessions
+            .lock()
+            .expect("sessions lock")
+            .get(&generation)
+            .map(|session| session.ops().clone())
+            .ok_or_else(|| format!("physical session {generation} is missing"))?;
+        // Close only this PC; ordinary Controller retirement still owns the
+        // Session's lane/resource cleanup and the runner remains open.
+        ops.close().await.map_err(|error| error.to_string())
+    }
+
     async fn close_all_sessions(&self) {
         WebRtcEffectRunner::close_all_sessions(self).await;
     }
@@ -1340,13 +1360,8 @@ mod tracing_lifetime_tests {
         };
         tracing::subscriber::with_default(subscriber, || {
             let peer_id = ActrId {
-                realm: actr_protocol::Realm { realm_id: 1 },
+                realm: "test@example.com".to_string(),
                 serial_number: 1,
-                r#type: actr_protocol::ActrType {
-                    manufacturer: "test".into(),
-                    name: "node".into(),
-                    version: "1".into(),
-                },
             };
             let attempt = tracing::info_span!("webrtc.recover");
             let operation = attempt.in_scope(|| {

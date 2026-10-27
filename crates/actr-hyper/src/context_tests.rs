@@ -8,9 +8,9 @@ fn ctx() -> RuntimeContext {
     runtime_context_with_host_transport(ActrId::default(), Arc::new(HostTransport::new()))
 }
 
-fn actr_type(mfr: &str, name: &str, ver: &str) -> ActrType {
+fn actr_type(publisher: &str, name: &str, ver: &str) -> ActrType {
     ActrType {
-        manufacturer: mfr.into(),
+        publisher: publisher.into(),
         name: name.into(),
         version: ver.into(),
     }
@@ -442,7 +442,7 @@ fn dep(actr_type: &str, fingerprint: &str) -> LockedDependency {
 
 #[test]
 fn lock_alias_map_requires_v2_and_never_uses_name_as_alias() {
-    let mut dependency = dep("acme:Sensor:1.0.0", "sha256:sensor");
+    let mut dependency = dep("acme/Sensor@1.0.0", "sha256:sensor");
     dependency.name = "SensorService".to_string();
     dependency.alias = "sensor".to_string();
 
@@ -466,7 +466,7 @@ fn lock_alias_map_requires_v2_and_never_uses_name_as_alias() {
             .get("sensor")
             .map(ActrType::to_string_repr)
             .as_deref(),
-        Some("acme:Sensor:1.0.0")
+        Some("acme/Sensor@1.0.0")
     );
 }
 
@@ -487,7 +487,7 @@ async fn get_dependency_fingerprint_exact_key_match() {
             version: LOCK_FILE_VERSION,
             generated_at: String::new(),
         }),
-        dependencies: vec![dep("acme:Sensor:1.0.0", "sha256:exact")],
+        dependencies: vec![dep("acme/Sensor@1.0.0", "sha256:exact")],
     };
     let c = ctx_with_lock(Some(lock));
     assert_eq!(
@@ -500,7 +500,7 @@ async fn get_dependency_fingerprint_exact_key_match() {
 async fn get_dependency_fingerprint_missing_dependency() {
     let lock = LockFile {
         metadata: None,
-        dependencies: vec![dep("acme:Other:2.0.0", "sha256:other")],
+        dependencies: vec![dep("acme/Other@2.0.0", "sha256:other")],
     };
     let c = ctx_with_lock(Some(lock));
     assert_eq!(

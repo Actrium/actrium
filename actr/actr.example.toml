@@ -3,11 +3,11 @@ edition = 1
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 1001
+realm = "demo@example.com"
 
 # Package signature trust anchors. One entry = a single provider;
 # multiple entries are tried in order (first match wins).
@@ -17,10 +17,10 @@ realm_id = 1001
 #   kind = "static"
 #   pubkey_file = "public-key.json"
 #
-# Registry anchor — look up MFR keys from AIS:
+# Registry anchor — look up publisher keys from Issuer:
 [[trust]]
 kind = "registry"
-endpoint = "http://localhost:8081/ais"
+endpoint = "http://localhost:8081/issuer"
 
 # Hyper-layer configuration (host runtime infrastructure). All fields
 # are optional; defaults resolve to ~/.actr/hyper for `data_dir` and

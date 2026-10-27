@@ -2,6 +2,7 @@ use super::admin_api::{AdminApiState, build_admin_api_router};
 use actrix_sdk::control::{AdminApiService, AuthService, NodeAdminServiceServer};
 use anyhow::Result;
 use axum::{Json, Router, routing::get};
+use issuer::realm_profile::RealmProfiles;
 use platform::{
     ServiceCollector, config::ActrixConfig, config::config_store::ConfigOverrideStore,
     monitoring::MetricsStore, storage::nonce::SqliteNonceStorage,
@@ -19,9 +20,9 @@ use tokio::sync::broadcast;
 /// When `None`, a new random secret is generated.  Pass the same secret on
 /// reload to avoid invalidating active admin sessions.
 ///
-/// `ais_issuer` is the issuer backing the public `/ais` router when AIS is
-/// enabled, so the control plane can trigger authenticated key rotation on
-/// the live issuer.
+/// `aid_issuer` is the issuer backing the public `/issuer` router when Issuer is
+/// enabled, so a Realm created here gets its issuer key from the live issuer. `realm_profiles` signs Realm Profiles when this Loran is
+/// the Realm Infra Provider for its own domain.
 ///
 /// Returns `(Router, jwt_secret)` — the caller should persist the secret
 /// for subsequent reloads.
@@ -34,10 +35,14 @@ pub async fn build_control_router(
     jwt_secret: Option<Vec<u8>>,
     config_store: Arc<ConfigOverrideStore>,
     metrics_store: MetricsStore,
-    ais_issuer: Option<Arc<ais::AIdIssuer>>,
+    aid_issuer: Option<Arc<issuer::AIdIssuer>>,
+    realm_profiles: Option<Arc<RealmProfiles>>,
 ) -> Result<(Router, Vec<u8>)> {
     let mut router = Router::new();
-    let mut jwt = jwt_secret.unwrap_or_default();
+    // Discard any carried-over secret that is empty or too short: an empty key
+    // makes admin JWTs forgeable, so it must never be reused as-is. A discarded
+    // secret becomes `None` below so the admin router generates a fresh one.
+    let mut jwt = jwt_secret.filter(|s| s.len() >= 32).unwrap_or_default();
     let admin_ui_enabled = config.admin_ui_enabled();
     let grpc_api_enabled = config.grpc_api_enabled();
 
@@ -47,10 +52,11 @@ pub async fn build_control_router(
             service_collector.clone(),
             shutdown_tx.clone(),
             config_path.clone(),
-            Some(jwt),
+            if jwt.is_empty() { None } else { Some(jwt) },
             config_store.clone(),
             metrics_store,
-            ais_issuer.clone(),
+            aid_issuer.clone(),
+            realm_profiles.clone(),
         )
         .await?;
         router = router.merge(admin_router);
@@ -64,7 +70,8 @@ pub async fn build_control_router(
             shutdown_tx,
             config_store,
             !admin_ui_enabled,
-            ais_issuer,
+            aid_issuer,
+            realm_profiles,
         )
         .await?;
         router = router.merge(grpc_router);
@@ -86,7 +93,8 @@ async fn build_admin_ui_router(
     jwt_secret: Option<Vec<u8>>,
     config_store: Arc<ConfigOverrideStore>,
     metrics_store: MetricsStore,
-    ais_issuer: Option<Arc<ais::AIdIssuer>>,
+    aid_issuer: Option<Arc<issuer::AIdIssuer>>,
+    realm_profiles: Option<Arc<RealmProfiles>>,
 ) -> Result<(Router, Vec<u8>)> {
     // Read raw TOML content for L1 detection
     let toml_content = tokio::fs::read_to_string(&config_path)
@@ -108,8 +116,11 @@ async fn build_admin_ui_router(
         .with_toml_content(toml_content)
         .with_config_path(config_path);
 
-    if let Some(issuer) = ais_issuer {
-        service = service.with_ais_issuer(issuer);
+    if let Some(issuer) = aid_issuer {
+        service = service.with_aid_issuer(issuer);
+    }
+    if let Some(profiles) = realm_profiles {
+        service = service.with_realm_profiles(profiles);
     }
 
     let shutdown_tx_for_handler = shutdown_tx.clone();
@@ -126,8 +137,10 @@ async fn build_admin_ui_router(
         }
     });
 
-    // Reuse existing JWT secret on reload, generate only on first call
-    let jwt_secret: Vec<u8> = jwt_secret.unwrap_or_else(|| {
+    // Reuse existing JWT secret on reload, generate only on first call.
+    // Reject empty/short secrets defensively: an empty HMAC key would let anyone
+    // forge admin tokens, so fall back to a freshly generated 32-byte secret.
+    let jwt_secret: Vec<u8> = jwt_secret.filter(|s| s.len() >= 32).unwrap_or_else(|| {
         use rand::RngCore;
         let mut buf = vec![0u8; 32];
         rand::rng().fill_bytes(&mut buf);
@@ -150,28 +163,22 @@ async fn build_admin_ui_router(
         realm_writes_enabled: !config.superv_managed(),
     });
 
-    // Build MFR router and nest under /admin/api/mfr
-    let mfr_router = {
-        use actrix_mfr::{
-            MfrManager,
-            handlers::{MfrState, create_admin_router},
+    // Build Publisher Registry management router.
+    let publisher_registry_router = {
+        use actrix_publisher_registry::{
+            PublisherRegistryManager,
+            handlers::{PublisherRegistryState, create_admin_router},
         };
         let pool = platform::storage::db::get_database().get_pool().clone();
-        let domain = config
-            .bind
-            .http
-            .as_ref()
-            .map(|h| h.domain_name.clone())
-            .unwrap_or_else(|| "localhost".to_string());
-        let manager = MfrManager::new(pool).with_domain(domain);
-        let mfr_state = MfrState {
+        let manager = PublisherRegistryManager::new(pool);
+        let publisher_registry_state = PublisherRegistryState {
             manager: Arc::new(manager),
         };
-        create_admin_router(mfr_state)
+        create_admin_router(publisher_registry_state)
     };
 
     Ok((
-        build_admin_api_router(state, Some(mfr_router)),
+        build_admin_api_router(state, Some(publisher_registry_router)),
         jwt_secret_clone,
     ))
 }
@@ -182,7 +189,8 @@ async fn build_grpc_api_router(
     shutdown_tx: broadcast::Sender<()>,
     config_store: Arc<ConfigOverrideStore>,
     include_admin_index_and_alias: bool,
-    ais_issuer: Option<Arc<ais::AIdIssuer>>,
+    aid_issuer: Option<Arc<issuer::AIdIssuer>>,
+    realm_profiles: Option<Arc<RealmProfiles>>,
 ) -> Result<Router> {
     let grpc_cfg = &config.control.grpc_api;
     let shared_secret = Arc::new(
@@ -208,8 +216,11 @@ async fn build_grpc_api_router(
         .with_override_store(config_store)
         .with_running_config(config.clone());
 
-    if let Some(issuer) = ais_issuer {
-        service = service.with_ais_issuer(issuer);
+    if let Some(issuer) = aid_issuer {
+        service = service.with_aid_issuer(issuer);
+    }
+    if let Some(profiles) = realm_profiles {
+        service = service.with_realm_profiles(profiles);
     }
 
     let shutdown_tx_for_handler = shutdown_tx.clone();

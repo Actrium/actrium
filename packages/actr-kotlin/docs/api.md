@@ -204,7 +204,7 @@ interface Workload {
 |-------|-------------|
 | `SimpleWorkload` | Concrete workload with DataChunk channel support, target server routing, and handler hooks |
 | `RoutedWorkload` | Abstract base class with target server routing — subclass and override lifecycle hooks |
-| `WorkloadBuilder` | DSL builder: `workload { realm = ...; type = ...; onStart { }; onStop { } }` |
+| `WorkloadBuilder` | DSL builder: `workload { type = ...; onStart { }; onStop { } }` |
 
 **Factory functions:**
 
@@ -271,31 +271,30 @@ TURN-relayed WebRTC, `false` for direct P2P, and `null` for WebSocket.
 
 #### ActrType
 
-Actor type identifier (manufacturer:name:version).
+Actor type identifier (publisher/program@version).
 
 ```kotlin
 // Factory functions
-fun actrType(manufacturer: String, name: String, version: String): ActrType
+fun actrType(publisher: String, name: String, version: String): ActrType
 inline fun actrType(builder: ActrTypeBuilder.() -> Unit): ActrType
 fun String.toActrType(): ActrType
 
 // Extensions
-fun ActrType.toTypeString(): String          // "manufacturer:name:version"
+fun ActrType.toTypeString(): String          // "publisher/program@version"
 fun ActrType.matches(typeString: String): Boolean
 ```
 
 #### ActrId
 
-Actor identifier (realm + serial number + type).
+Actor identifier (Realm name + Actor serial).
 
 ```kotlin
 // Factory
 inline fun actrId(builder: ActrIdBuilder.() -> Unit): ActrId
 
 // Extensions
-val ActrId.realmId: UInt
-fun ActrId.toShortString(): String
-fun ActrId.toFullString(): String
+val ActrId.realmId: String      // RealmId part of the Realm name
+fun ActrId.toFullString(): String  // "<serial_hex>.<realm_id>@<domain>"
 ```
 
 #### DataChunk
@@ -312,21 +311,12 @@ fun DataChunk.hasMetadata(key: String): Boolean
 fun DataChunk.metadataMap(): Map<String, String>
 ```
 
-#### Realm
-
-Security realm identifier.
-
-```kotlin
-fun realm(id: UInt): Realm
-fun realm(id: Int): Realm
-```
-
 ---
 
 ### Manifest
 
 Typed access to `actr.toml` manifest files — resolve package identity and dependency
-types without hardcoding `"manufacturer:name:version"` strings.
+types without hardcoding `"publisher/program@version"` strings.
 
 #### Manifest class
 
@@ -554,9 +544,8 @@ The low-level API is in `io.actrium.actr` and consists of UniFFI-generated bindi
 
 | Struct | Fields |
 |--------|--------|
-| `ActrType` | `manufacturer: String`, `name: String`, `version: String` |
-| `ActrId` | `realm: Realm`, `serialNumber: ULong`, `type: ActrType` |
-| `Realm` | `realmId: UInt` |
+| `ActrType` | `publisher: String`, `name: String`, `version: String` |
+| `ActrId` | `realm: String` (Realm name, `<realm_id>@<domain>`), `serialNumber: ULong` |
 | `DataChunk` | `streamId: String`, `sequence: ULong`, `payload: ByteArray`, `metadata: List<MetadataEntry>`, `timestampMs: Long?` |
 | `MetadataEntry` | `key: String`, `value: String` |
 | `RpcEnvelopeBridge` | `routeKey: String`, `payload: ByteArray`, `requestId: String`, `timeoutMs: Long` |

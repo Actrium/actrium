@@ -8,7 +8,7 @@ extension Tag {
     static let defaultColors: [String] = defaultTagColors()
 
     static let systemApp = systemTag(named: "App")
-    static let systemManufacturer = systemTag(named: "Manufacturer")
+    static let systemPublisher = systemTag(named: "Publisher")
     static let systemLastUsed = systemTag(named: "LastUsed")
     static let systemFrequent = systemTag(named: "Frequent")
 

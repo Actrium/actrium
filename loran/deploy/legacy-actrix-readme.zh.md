@@ -115,7 +115,7 @@ enable → start；并询问是否应用 ufw 防火墙规则。
 deploy status --install-dir /opt/actrix --service-name actrix  # 当前版本 + 运行版本 + 已装版本
 systemctl is-active actrix                          # active
 journalctl -u actrix -f                             # 日志
-curl -k https://localhost/ais/health                # 健康检查（端口见 config）
+curl -k https://localhost/issuer/health                # 健康检查（端口见 config）
 ```
 
 ### 升级 / 回滚

@@ -780,14 +780,14 @@ public func FfiConverterTypeActiveTabRowInfo_lower(_ value: ActiveTabRowInfo) ->
 
 
 public struct ActrActorTypeInfo {
-    public var manufacturer: String
+    public var publisher: String
     public var name: String
     public var version: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(manufacturer: String, name: String, version: String) {
-        self.manufacturer = manufacturer
+    public init(publisher: String, name: String, version: String) {
+        self.publisher = publisher
         self.name = name
         self.version = version
     }
@@ -800,7 +800,7 @@ extension ActrActorTypeInfo: Sendable {}
 
 extension ActrActorTypeInfo: Equatable, Hashable {
     public static func ==(lhs: ActrActorTypeInfo, rhs: ActrActorTypeInfo) -> Bool {
-        if lhs.manufacturer != rhs.manufacturer {
+        if lhs.publisher != rhs.publisher {
             return false
         }
         if lhs.name != rhs.name {
@@ -813,7 +813,7 @@ extension ActrActorTypeInfo: Equatable, Hashable {
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(manufacturer)
+        hasher.combine(publisher)
         hasher.combine(name)
         hasher.combine(version)
     }
@@ -828,14 +828,14 @@ public struct FfiConverterTypeActrActorTypeInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrActorTypeInfo {
         return
             try ActrActorTypeInfo(
-                manufacturer: FfiConverterString.read(from: &buf),
+                publisher: FfiConverterString.read(from: &buf),
                 name: FfiConverterString.read(from: &buf),
                 version: FfiConverterString.read(from: &buf)
         )
     }
 
     public static func write(_ value: ActrActorTypeInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.manufacturer, into: &buf)
+        FfiConverterString.write(value.publisher, into: &buf)
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterString.write(value.version, into: &buf)
     }
@@ -2950,20 +2950,20 @@ public struct CoreBookmarkInfo {
     public var appId: String?
     public var createdAtSeconds: Int64
     public var lastUsedAtSeconds: Int64?
-    public var manufacturer: String?
+    public var publisher: String?
     public var notes: String?
     public var favicon: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, appUrl: String?, appId: String?, createdAtSeconds: Int64, lastUsedAtSeconds: Int64?, manufacturer: String?, notes: String?, favicon: String?) {
+    public init(id: String, title: String, appUrl: String?, appId: String?, createdAtSeconds: Int64, lastUsedAtSeconds: Int64?, publisher: String?, notes: String?, favicon: String?) {
         self.id = id
         self.title = title
         self.appUrl = appUrl
         self.appId = appId
         self.createdAtSeconds = createdAtSeconds
         self.lastUsedAtSeconds = lastUsedAtSeconds
-        self.manufacturer = manufacturer
+        self.publisher = publisher
         self.notes = notes
         self.favicon = favicon
     }
@@ -2994,7 +2994,7 @@ extension CoreBookmarkInfo: Equatable, Hashable {
         if lhs.lastUsedAtSeconds != rhs.lastUsedAtSeconds {
             return false
         }
-        if lhs.manufacturer != rhs.manufacturer {
+        if lhs.publisher != rhs.publisher {
             return false
         }
         if lhs.notes != rhs.notes {
@@ -3013,7 +3013,7 @@ extension CoreBookmarkInfo: Equatable, Hashable {
         hasher.combine(appId)
         hasher.combine(createdAtSeconds)
         hasher.combine(lastUsedAtSeconds)
-        hasher.combine(manufacturer)
+        hasher.combine(publisher)
         hasher.combine(notes)
         hasher.combine(favicon)
     }
@@ -3034,7 +3034,7 @@ public struct FfiConverterTypeCoreBookmarkInfo: FfiConverterRustBuffer {
                 appId: FfiConverterOptionString.read(from: &buf),
                 createdAtSeconds: FfiConverterInt64.read(from: &buf),
                 lastUsedAtSeconds: FfiConverterOptionInt64.read(from: &buf),
-                manufacturer: FfiConverterOptionString.read(from: &buf),
+                publisher: FfiConverterOptionString.read(from: &buf),
                 notes: FfiConverterOptionString.read(from: &buf),
                 favicon: FfiConverterOptionString.read(from: &buf)
         )
@@ -3047,7 +3047,7 @@ public struct FfiConverterTypeCoreBookmarkInfo: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.appId, into: &buf)
         FfiConverterInt64.write(value.createdAtSeconds, into: &buf)
         FfiConverterOptionInt64.write(value.lastUsedAtSeconds, into: &buf)
-        FfiConverterOptionString.write(value.manufacturer, into: &buf)
+        FfiConverterOptionString.write(value.publisher, into: &buf)
         FfiConverterOptionString.write(value.notes, into: &buf)
         FfiConverterOptionString.write(value.favicon, into: &buf)
     }
@@ -3242,20 +3242,20 @@ public struct CoreBookmarkRowInfo {
     public var appId: String?
     public var createdAtSeconds: Int64
     public var lastUsedAtSeconds: Int64?
-    public var manufacturer: String?
+    public var publisher: String?
     public var notes: String?
     public var favicon: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, appUrl: String?, appId: String?, createdAtSeconds: Int64, lastUsedAtSeconds: Int64?, manufacturer: String?, notes: String?, favicon: String?) {
+    public init(id: String, title: String, appUrl: String?, appId: String?, createdAtSeconds: Int64, lastUsedAtSeconds: Int64?, publisher: String?, notes: String?, favicon: String?) {
         self.id = id
         self.title = title
         self.appUrl = appUrl
         self.appId = appId
         self.createdAtSeconds = createdAtSeconds
         self.lastUsedAtSeconds = lastUsedAtSeconds
-        self.manufacturer = manufacturer
+        self.publisher = publisher
         self.notes = notes
         self.favicon = favicon
     }
@@ -3286,7 +3286,7 @@ extension CoreBookmarkRowInfo: Equatable, Hashable {
         if lhs.lastUsedAtSeconds != rhs.lastUsedAtSeconds {
             return false
         }
-        if lhs.manufacturer != rhs.manufacturer {
+        if lhs.publisher != rhs.publisher {
             return false
         }
         if lhs.notes != rhs.notes {
@@ -3305,7 +3305,7 @@ extension CoreBookmarkRowInfo: Equatable, Hashable {
         hasher.combine(appId)
         hasher.combine(createdAtSeconds)
         hasher.combine(lastUsedAtSeconds)
-        hasher.combine(manufacturer)
+        hasher.combine(publisher)
         hasher.combine(notes)
         hasher.combine(favicon)
     }
@@ -3326,7 +3326,7 @@ public struct FfiConverterTypeCoreBookmarkRowInfo: FfiConverterRustBuffer {
                 appId: FfiConverterOptionString.read(from: &buf),
                 createdAtSeconds: FfiConverterInt64.read(from: &buf),
                 lastUsedAtSeconds: FfiConverterOptionInt64.read(from: &buf),
-                manufacturer: FfiConverterOptionString.read(from: &buf),
+                publisher: FfiConverterOptionString.read(from: &buf),
                 notes: FfiConverterOptionString.read(from: &buf),
                 favicon: FfiConverterOptionString.read(from: &buf)
         )
@@ -3339,7 +3339,7 @@ public struct FfiConverterTypeCoreBookmarkRowInfo: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.appId, into: &buf)
         FfiConverterInt64.write(value.createdAtSeconds, into: &buf)
         FfiConverterOptionInt64.write(value.lastUsedAtSeconds, into: &buf)
-        FfiConverterOptionString.write(value.manufacturer, into: &buf)
+        FfiConverterOptionString.write(value.publisher, into: &buf)
         FfiConverterOptionString.write(value.notes, into: &buf)
         FfiConverterOptionString.write(value.favicon, into: &buf)
     }
@@ -8444,7 +8444,7 @@ public func normalizeSha256Hex(hash: String) -> String?  {
 })
 }
 /**
- * Parse an Actr actor type wire value in `manufacturer+name` format.
+ * Parse an Actor type in `publisher/program@version` form.
  */
 public func parseActrActorType(raw: String)throws  -> ActrActorTypeInfo  {
     return try  FfiConverterTypeActrActorTypeInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
@@ -8454,7 +8454,7 @@ public func parseActrActorType(raw: String)throws  -> ActrActorTypeInfo  {
 })
 }
 /**
- * Parse and validate an actr-package/1 TOML manifest.
+ * Parse and validate an actr-package/2 TOML manifest.
  */
 public func parseActrPackageManifest(source: String)throws  -> ActrPackageManifestInfo  {
     return try  FfiConverterTypeActrPackageManifestInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
@@ -9010,7 +9010,7 @@ public func userInfoBridgeContract() -> UserInfoBridgeContractInfo  {
 })
 }
 /**
- * Validate an actr-package/1 TOML manifest without returning normalized fields.
+ * Validate an actr-package/2 TOML manifest without returning normalized fields.
  */
 public func validateActrPackageManifest(source: String)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
     uniffi_actrium_core_fn_func_validate_actr_package_manifest(

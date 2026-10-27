@@ -34,7 +34,7 @@ use std::rc::Rc;
 
 use actr_protocol::{
     ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, DataChunk, PayloadType,
-    Realm, RpcRequest,
+    RpcRequest,
 };
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
@@ -115,7 +115,7 @@ impl WebContext {
 
 fn actr_type_to_wit(t: &ActrType) -> wit::ActrType {
     wit::ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }
@@ -123,7 +123,7 @@ fn actr_type_to_wit(t: &ActrType) -> wit::ActrType {
 
 fn actr_type_from_wit(t: &wit::ActrType) -> ActrType {
     ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }
@@ -131,21 +131,15 @@ fn actr_type_from_wit(t: &wit::ActrType) -> ActrType {
 
 fn actr_id_to_wit(id: &ActrId) -> wit::ActrId {
     wit::ActrId {
-        realm: wit::Realm {
-            realm_id: id.realm.realm_id,
-        },
+        realm: id.realm.clone(),
         serial_number: id.serial_number,
-        actr_type: actr_type_to_wit(&id.r#type),
     }
 }
 
 fn actr_id_from_wit(id: &wit::ActrId) -> ActrId {
     ActrId {
-        realm: Realm {
-            realm_id: id.realm.realm_id,
-        },
+        realm: id.realm.clone(),
         serial_number: id.serial_number,
-        r#type: actr_type_from_wit(&id.actr_type),
     }
 }
 

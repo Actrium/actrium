@@ -66,7 +66,7 @@ service Client {
             env!("CARGO_BIN_EXE_protoc-gen-actrframework")
         ))
         .arg(format!(
-            "--actrframework_opt=manufacturer=acme,dispatch_spec={},dispatch_spec_hash=",
+            "--actrframework_opt=publisher=acme,dispatch_spec={},dispatch_spec_hash=",
             spec_path.display()
         ))
         .arg(format!("--actrframework_out={}", output_dir.display()))
@@ -115,7 +115,7 @@ service Client {
         "actr_dispatch.rs must not reference DEFAULT_RPC_TIMEOUT_MS"
     );
     assert!(
-        !dispatch_code.contains("manufacturer"),
+        !dispatch_code.contains("publisher"),
         "actr_dispatch.rs must not embed ActrType fields"
     );
     assert!(

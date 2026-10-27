@@ -2,7 +2,7 @@ edition = 1
 
 [package]
 name = "package-echo-client-guest"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 description = "Package Echo Client Guest — cdylib workload for the client host"
 authors = ["Actr Dev Team"]
@@ -11,4 +11,4 @@ tags = ["dev", "example", "client-guest"]
 exports = []
 
 [dependencies]
-EchoService = { actr_type = "actrium:EchoService:0.2.2" }
+EchoService = { actr_type = "actrium/EchoService@0.2.2" }

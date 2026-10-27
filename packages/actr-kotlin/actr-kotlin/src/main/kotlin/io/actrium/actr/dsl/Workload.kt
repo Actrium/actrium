@@ -34,10 +34,7 @@ fun dynamicWorkload(
  *
  * Example:
  * ```kotlin
- * val workload = SimpleWorkload(
- *     realm = 2281844430u,
- *     type = "acme:my-client"
- * )
+ * val workload = SimpleWorkload("acme/MyClient@1.0.0")
  * val node = createActrNode("actr.toml", "dist/app.actr")
  * val actrRef = node.start()
  *
@@ -50,7 +47,6 @@ fun dynamicWorkload(
  * ```
  */
 open class SimpleWorkload(
-    private val realmId: UInt,
     private val type: ActrType,
     private val onStartHandler: suspend (ActrContext) -> Unit = {},
     private val onStopHandler: suspend (ActrContext) -> Unit = {},
@@ -75,22 +71,19 @@ open class SimpleWorkload(
     /**
      * Create a SimpleWorkload from a type string.
      *
-     * @param realmId The realm ID
-     * @param typeString Actor type in "manufacturer:name:version" format
+     * @param typeString Actor type in "publisher/program@version" format
      */
     constructor(
-        realmId: UInt,
         typeString: String,
         onStartHandler: suspend (ActrContext) -> Unit = {},
         onStopHandler: suspend (ActrContext) -> Unit = {},
         onReadyHandler: suspend (ActrContext) -> Unit = {},
         onErrorHandler: suspend (ActrContext, ErrorEvent) -> Unit = { _, _ -> },
-    ) : this(realmId, typeString.toActrType(), onStartHandler, onStopHandler, onReadyHandler, onErrorHandler)
+    ) : this(typeString.toActrType(), onStartHandler, onStopHandler, onReadyHandler, onErrorHandler)
 
     /** Create a SimpleWorkload with named parameters. */
     constructor(
-        realm: UInt,
-        manufacturer: String,
+        publisher: String,
         name: String,
         version: String,
         onStartHandler: suspend (ActrContext) -> Unit = {},
@@ -98,8 +91,7 @@ open class SimpleWorkload(
         onReadyHandler: suspend (ActrContext) -> Unit = {},
         onErrorHandler: suspend (ActrContext, ErrorEvent) -> Unit = { _, _ -> },
     ) : this(
-        realm,
-        ActrType(manufacturer = manufacturer, name = name, version = version),
+        ActrType(publisher = publisher, name = name, version = version),
         onStartHandler,
         onStopHandler,
         onReadyHandler,
@@ -198,8 +190,7 @@ open class SimpleWorkload(
  * Example:
  * ```kotlin
  * val workload = workload {
- *     realm = 2281844430u
- *     type = "acme:my-service"
+ *     type = "acme/MyService@1.0.0"
  *
  *     onStart { ctx ->
  *         // Called when the workload starts
@@ -215,7 +206,6 @@ inline fun workload(builder: WorkloadBuilder.() -> Unit): SimpleWorkload = Workl
 
 /** Builder for creating workloads. */
 class WorkloadBuilder {
-    var realm: UInt = 0u
     private var _type: ActrType? = null
     private var startHandler: suspend (ActrContext) -> Unit = {}
     private var readyHandler: suspend (ActrContext) -> Unit = {}
@@ -234,13 +224,13 @@ class WorkloadBuilder {
         _type = actrType
     }
 
-    /** Set the actor type with manufacturer, name, and version. */
+    /** Set the actor type with publisher, name, and version. */
     fun type(
-        manufacturer: String,
+        publisher: String,
         name: String,
         version: String,
     ) {
-        _type = ActrType(manufacturer = manufacturer, name = name, version = version)
+        _type = ActrType(publisher = publisher, name = name, version = version)
     }
 
     /**
@@ -284,9 +274,8 @@ class WorkloadBuilder {
      * calls.
      */
     fun build(): SimpleWorkload {
-        require(realm > 0u) { "realm must be set" }
         requireNotNull(_type) { "type must be set" }
-        return SimpleWorkload(realm, _type!!, startHandler, stopHandler, readyHandler, errorHandler)
+        return SimpleWorkload(_type!!, startHandler, stopHandler, readyHandler, errorHandler)
     }
 }
 
@@ -298,10 +287,7 @@ class WorkloadBuilder {
  *
  * Example:
  * ```kotlin
- * class MyWorkload : RoutedWorkload(
- *     realm = 2281844430u,
- *     type = "acme:my-service"
- * ) {
+ * class MyWorkload : RoutedWorkload("acme/MyService@1.0.0") {
  *     override suspend fun onStart(ctx: ActrContext) {
  *         // Custom start logic
  *     }
@@ -313,10 +299,9 @@ class WorkloadBuilder {
  * ```
  */
 abstract class RoutedWorkload(
-    private val realmId: UInt,
     private val type: ActrType,
 ) : Workload {
-    constructor(realmId: UInt, typeString: String) : this(realmId, typeString.toActrType())
+    constructor(typeString: String) : this(typeString.toActrType())
 
     /**
      * The target server ID for RPC calls. Must be set before making RPC calls via

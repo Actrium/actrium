@@ -1,7 +1,7 @@
 # Counter Keel Guest
 
 Counter is a small reusable `keel.guest/1` workload for exercising Actrium's
-Actor Host. It is distributed only as an `actr-package/1` `.actr` archive.
+Actor Host. It is distributed only as an `actr-package/2` `.actr` archive.
 
 From this directory:
 

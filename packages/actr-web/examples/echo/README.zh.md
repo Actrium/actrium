@@ -73,7 +73,7 @@ This is a complete, production-ready example demonstrating Actor-RTC Web communi
 ### Automated Setup (Recommended)
 
 Self-contained launcher using the in-repo `actr-mock-actrix` crate as
-signaling/AIS/MFR — no external `actrix` checkout or SQLite seeding required:
+signaling/Issuer/Publisher Registry — no external `actrix` checkout or SQLite seeding required:
 
 ```bash
 cd packages/actr-web/examples/echo
@@ -81,7 +81,7 @@ cd packages/actr-web/examples/echo
 ```
 
 `start-mock.sh` launches the `mock-actrix` binary (`cargo run -p
-actr-mock-actrix --bin mock-actrix`), seeds the realm/MFR/packages via
+actr-mock-actrix --bin mock-actrix`), seeds the realm/publisher/packages via
 `register-mock.sh` (HTTP `/admin/*`, no `sqlite3`), and then runs the
 puppeteer `test-auto.js` matrix (default `BasicFunction`; pass
 `SUITES='BasicFunction MultiTab'` for the full set) against the web client

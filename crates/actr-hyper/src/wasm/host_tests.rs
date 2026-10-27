@@ -76,11 +76,11 @@ fn probe_world_rejects_retired_v1_component_with_rebuild_hint() {
 }
 
 #[test]
-fn probe_world_accepts_current_v07_component() {
+fn probe_world_accepts_current_v08_component() {
     let src = r#"
         (component
-          (instance $v07)
-          (export "actr:workload/workload@0.7.0" (instance $v07))
+          (instance $v08)
+          (export "actr:workload/workload@0.8.0" (instance $v08))
         )
     "#;
     probe_wat(src).expect("current workload ABI should be accepted");
@@ -98,11 +98,27 @@ fn probe_world_rejects_retired_v06_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("@0.6.0")
-            && err.to_string().contains("@0.7.0")
+            && err.to_string().contains("@0.8.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
         "unexpected message: {err}"
+    );
+}
+
+#[test]
+fn probe_world_rejects_retired_v07_actor_identity_with_rebuild_hint() {
+    let src = r#"(component
+      (instance $old)
+      (export "actr:workload/workload@0.7.0" (instance $old))
+    )"#;
+    let err = probe_wat(src).unwrap_err().to_string();
+    assert!(
+        err.contains("retired")
+            && err.contains("@0.7.0")
+            && err.contains("@0.8.0")
+            && err.contains("rebuild"),
+        "{err}"
     );
 }
 
@@ -118,7 +134,7 @@ fn probe_world_rejects_retired_v5_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("EXPLICIT reply")
-            && err.to_string().contains("@0.7.0")
+            && err.to_string().contains("@0.8.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
@@ -138,7 +154,7 @@ fn probe_world_rejects_retired_v4_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("on-webrtc-state-changed")
-            && err.to_string().contains("@0.7.0")
+            && err.to_string().contains("@0.8.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
@@ -158,7 +174,7 @@ fn probe_world_rejects_retired_v3_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("payload-type lane")
-            && err.to_string().contains("@0.7.0")
+            && err.to_string().contains("@0.8.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
@@ -177,7 +193,7 @@ fn probe_world_rejects_retired_v2_component_with_rebuild_hint() {
     let err = probe_wat(src).unwrap_err();
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
-        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.7.0"),
+        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.8.0"),
         "unexpected message: {err}"
     );
 }
@@ -236,13 +252,8 @@ impl Deliver for CaptureDeliver {
 fn invocation_context(request_id: &str) -> InvocationContext {
     InvocationContext {
         self_id: actr_protocol::ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 1,
-            r#type: actr_protocol::ActrType {
-                manufacturer: "test".to_string(),
-                name: "host-state".to_string(),
-                version: "0.1.0".to_string(),
-            },
         },
         caller_id: None,
         request_id: request_id.to_string(),

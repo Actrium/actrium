@@ -28,23 +28,23 @@ pub struct RegisteredActor {
 /// `RegisterRequest`).
 #[derive(Clone, Debug)]
 pub struct RealmEntry {
-    pub id: u32,
-    pub name: String,
+    /// Realm name, `<realm_id>@<domain>`.
+    pub realm: String,
 }
 
-/// Manufacturer entry — exposed via `GET /mfr/{name}/verifying_key`.
+/// Publisher entry — exposed via `GET /registry/publishers/{name}/verifying-key`.
 #[derive(Clone, Debug)]
-pub struct MfrEntry {
+pub struct PublisherEntry {
     pub name: String,
     pub verifying_key: VerifyingKey,
     pub contact: Option<String>,
 }
 
-/// Package registration entry — populated by `POST /mfr/pkg/publish` or the
+/// Package registration entry — populated by `POST /registry/packages/publish` or the
 /// admin seeding endpoint.
 #[derive(Clone, Debug)]
 pub struct PackageEntry {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
     pub target: String,
@@ -52,33 +52,33 @@ pub struct PackageEntry {
     pub signature_b64: String,
 }
 
-/// Publish nonces issued via `POST /mfr/pkg/nonce`; consumed once by
-/// `POST /mfr/pkg/publish`.
+/// Publish nonces issued via `POST /registry/packages/nonce`; consumed once by
+/// `POST /registry/packages/publish`.
 #[derive(Default)]
 pub struct NonceStore {
-    inner: RwLock<HashMap<String, String>>, // manufacturer -> nonce (b64)
+    inner: RwLock<HashMap<String, String>>, // publisher -> nonce (b64)
 }
 
 impl NonceStore {
-    pub async fn issue(&self, manufacturer: &str, nonce_b64: String) {
+    pub async fn issue(&self, publisher: &str, nonce_b64: String) {
         self.inner
             .write()
             .await
-            .insert(manufacturer.to_string(), nonce_b64);
+            .insert(publisher.to_string(), nonce_b64);
     }
 
-    pub async fn take(&self, manufacturer: &str, expected: &str) -> bool {
+    pub async fn take(&self, publisher: &str, expected: &str) -> bool {
         let mut map = self.inner.write().await;
-        matches!(map.remove(manufacturer), Some(v) if v == expected)
+        matches!(map.remove(publisher), Some(v) if v == expected)
     }
 }
 
 /// All shared state owned by the server.
 pub struct MockState {
     // --- Signing material -------------------------------------------------
-    ais_signing_key: SigningKey,
-    ais_signing_key_id: u32,
-    builtin_mfr_signing_key: SigningKey,
+    issuer_signing_key: SigningKey,
+    issuer_signing_key_id: u32,
+    builtin_publisher_signing_key: SigningKey,
 
     /// Cancellation token that signaling connections watch in their recv
     /// loop: when cancelled, each open WS breaks out and drops the stream so
@@ -93,9 +93,9 @@ pub struct MockState {
     pub client_to_actr_id: RwLock<HashMap<String, ActrId>>,
     pub next_serial: AtomicU64,
 
-    // --- AIS/MFR registry -------------------------------------------------
-    pub realms: RwLock<HashMap<u32, RealmEntry>>,
-    pub mfrs: RwLock<HashMap<String, MfrEntry>>,
+    // --- Issuer/Publisher Registry registry -------------------------------------------------
+    pub realms: RwLock<HashMap<String, RealmEntry>>,
+    pub publishers: RwLock<HashMap<String, PublisherEntry>>,
     pub packages: RwLock<Vec<PackageEntry>>,
     pub nonces: NonceStore,
 
@@ -118,22 +118,22 @@ pub struct MockState {
 
 impl MockState {
     pub fn new(
-        ais_signing_key: SigningKey,
-        ais_signing_key_id: u32,
-        builtin_mfr_signing_key: SigningKey,
+        issuer_signing_key: SigningKey,
+        issuer_signing_key_id: u32,
+        builtin_publisher_signing_key: SigningKey,
         cancel: CancellationToken,
     ) -> Self {
         Self {
-            ais_signing_key,
-            ais_signing_key_id,
-            builtin_mfr_signing_key,
+            issuer_signing_key,
+            issuer_signing_key_id,
+            builtin_publisher_signing_key,
             cancel,
             clients: RwLock::new(HashMap::new()),
             registry: RwLock::new(Vec::new()),
             client_to_actr_id: RwLock::new(HashMap::new()),
             next_serial: AtomicU64::new(1),
             realms: RwLock::new(HashMap::new()),
-            mfrs: RwLock::new(HashMap::new()),
+            publishers: RwLock::new(HashMap::new()),
             packages: RwLock::new(Vec::new()),
             nonces: NonceStore::default(),
             message_count: Arc::new(AtomicU32::new(0)),
@@ -153,29 +153,29 @@ impl MockState {
         }
     }
 
-    pub fn ais_signing_key(&self) -> &SigningKey {
-        &self.ais_signing_key
+    pub fn issuer_signing_key(&self) -> &SigningKey {
+        &self.issuer_signing_key
     }
 
-    pub fn ais_signing_key_id(&self) -> u32 {
-        self.ais_signing_key_id
+    pub fn issuer_signing_key_id(&self) -> u32 {
+        self.issuer_signing_key_id
     }
 
-    pub fn builtin_mfr_signing_key(&self) -> &SigningKey {
-        &self.builtin_mfr_signing_key
+    pub fn builtin_publisher_signing_key(&self) -> &SigningKey {
+        &self.builtin_publisher_signing_key
     }
 
-    pub async fn add_realm(&self, id: u32, name: String) {
+    pub async fn add_realm(&self, realm: String) {
         self.realms
             .write()
             .await
-            .insert(id, RealmEntry { id, name });
+            .insert(realm.clone(), RealmEntry { realm });
     }
 
-    pub async fn add_mfr(&self, name: String, verifying_key: VerifyingKey) {
-        self.mfrs.write().await.insert(
+    pub async fn add_publisher(&self, name: String, verifying_key: VerifyingKey) {
+        self.publishers.write().await.insert(
             name.clone(),
-            MfrEntry {
+            PublisherEntry {
                 name,
                 verifying_key,
                 contact: None,
@@ -185,9 +185,9 @@ impl MockState {
 
     pub async fn add_package(&self, pkg: PackageEntry) {
         let mut packages = self.packages.write().await;
-        // De-duplicate by (manufacturer, name, version, target).
+        // De-duplicate by (publisher, name, version, target).
         packages.retain(|p| {
-            !(p.manufacturer == pkg.manufacturer
+            !(p.publisher == pkg.publisher
                 && p.name == pkg.name
                 && p.version == pkg.version
                 && p.target == pkg.target)
@@ -195,12 +195,12 @@ impl MockState {
         packages.push(pkg);
     }
 
-    /// Look up a manufacturer's verifying key, falling back to the built-in
-    /// MFR key when no explicit entry exists. This makes the mock forgiving
-    /// for tests that never register an MFR.
-    pub async fn mfr_verifying_key(&self, name: &str) -> Option<VerifyingKey> {
-        if let Some(mfr) = self.mfrs.read().await.get(name) {
-            return Some(mfr.verifying_key);
+    /// Look up a publisher's verifying key, falling back to the built-in
+    /// Publisher Registry key when no explicit entry exists. This makes the mock forgiving
+    /// for tests that never register an Publisher Registry.
+    pub async fn publisher_verifying_key(&self, name: &str) -> Option<VerifyingKey> {
+        if let Some(record) = self.publishers.read().await.get(name) {
+            return Some(record.verifying_key);
         }
         None
     }

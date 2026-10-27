@@ -310,8 +310,15 @@ async fn cmd_replay(args: &DlqReplayArgs) -> Result<()> {
         .await
         .with_context(|| format!("Failed to open mailbox: {}", args.mailbox.display()))?;
 
+    // The DLQ does not keep the sender's verified type: the replayed
+    // message matches no inbound ACL rule.
     let msg_id = mailbox
-        .enqueue(from, record.raw_bytes.clone(), MessagePriority::Normal)
+        .enqueue(
+            from,
+            None,
+            record.raw_bytes.clone(),
+            MessagePriority::Normal,
+        )
         .await
         .context("Failed to re-enqueue into mailbox")?;
 

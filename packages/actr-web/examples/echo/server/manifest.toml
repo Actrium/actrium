@@ -1,13 +1,13 @@
 # NOTE: This manifest is kept for web platform config reference.
 # For actr pkg build, use server-guest/manifest.toml instead.
-# For runtime config (signaling, AIS, WebRTC, ACL), use server-actr.toml.
+# For runtime config (signaling, Issuer, WebRTC, ACL), use server-actr.toml.
 
 edition = 1
 exports = ["../proto/echo.proto"]
 
 [package]
 name = "EchoService"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.2.0"
 description = "Echo Server - Browser-side Actor Service"
 authors = ["Actr Dev Team"]

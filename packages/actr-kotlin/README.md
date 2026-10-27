@@ -153,7 +153,7 @@ object EchoEchoRpc : RpcRequest<EchoRequest, EchoResponse> {
 val response: EchoResponse = ref.call(EchoEchoRpc, request)
 
 // Discovery
-val server = ref.discoverOne("acme:EchoService:1.0.0")
+val server = ref.discoverOne("acme/EchoService@1.0.0")
 
 // Clean shutdown
 ref.stop()
@@ -269,7 +269,7 @@ val result = withRetry(shouldRetry = { it is java.io.IOException }) {
 
 // Scoped actor lifecycle (auto-shutdown)
 node.withStartedActor { ref ->
-    val target = ref.discoverOne("acme:EchoService:1.0.0")
+    val target = ref.discoverOne("acme/EchoService@1.0.0")
     val response = ref.call("echo.EchoService.Echo", payload)
 }
 ```
@@ -279,10 +279,10 @@ node.withStartedActor { ref ->
 ```kotlin
 // ActrType
 val type = actrType("acme", "EchoService", "1.0.0")
-val type = actrType { manufacturer = "acme"; name = "EchoService"; version = "1.0.0" }
+val type = actrType { publisher = "acme"; name = "EchoService"; version = "1.0.0" }
 
 // ActrId
-val id = actrId { realm = 2281844430u; serialNumber = 1uL; type = "acme:EchoService:1.0.0" }
+val id = actrId { realm = "k7m2q9xh@acme.com"; serialNumber = 0x2af01uL }
 
 // DataChunk
 val chunk = dataChunk {
@@ -292,7 +292,7 @@ val chunk = dataChunk {
 
 // Workload
 val wl = workload {
-    realm = 2281844430u; type = "acme:my-service"
+    type = "acme/MyService@1.0.0"
     onStart { ctx -> /* setup */ }
     onStop { ctx -> /* teardown */ }
 }

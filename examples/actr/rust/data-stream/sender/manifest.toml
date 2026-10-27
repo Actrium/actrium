@@ -1,6 +1,6 @@
 [package]
 name = "GenericClient"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "File transfer sender using DataChunk API"
 authors = ["Actr Dev Team"]
@@ -9,4 +9,4 @@ tags = ["dev", "example"]
 exports = []
 
 [dependencies]
-FileTransferService = { actr_type = "acme:FileTransferService:1.0.0" }
+FileTransferService = { actr_type = "acme/FileTransferService@1.0.0" }

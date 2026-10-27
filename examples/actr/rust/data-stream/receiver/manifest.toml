@@ -1,6 +1,6 @@
 [package]
 name = "FileTransferService"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "File transfer receiver using DataChunk API"
 authors = ["Actr Dev Team"]

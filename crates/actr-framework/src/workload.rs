@@ -157,7 +157,7 @@ pub enum ErrorCategory {
     /// User handler returned `Err` normally. `source` is the handler's
     /// own [`ActrError`] value.
     HandlerError,
-    /// Signaling layer failure (AIS registration, reconnect, credential
+    /// Signaling layer failure (Issuer registration, reconnect, credential
     /// verification).
     SignalingFailure,
     /// Transport layer failure: WebSocket / WebRTC connection errors, lane

@@ -21,21 +21,21 @@ fn write_manifest_with_dependency(root: &std::path::Path) -> actr_config::Manife
 exports = []
 
 [dependencies]
-echo-server = { actr_type = "acme:Echo:1.0.0" }
+echo-server = { actr_type = "acme/Echo@1.0.0" }
 
 [package]
 name = "TestApp"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [system.signaling]
 url = "ws://127.0.0.1:8080"
 
-[system.ais_endpoint]
-url = "http://127.0.0.1:8080/ais"
+[system.issuer_endpoint]
+url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 "#,
     )
     .unwrap();
@@ -51,17 +51,17 @@ exports = []
 
 [package]
 name = "TestApp"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [system.signaling]
 url = "ws://127.0.0.1:8080"
 
-[system.ais_endpoint]
-url = "http://127.0.0.1:8080/ais"
+[system.issuer_endpoint]
+url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 "#,
     )
     .unwrap();
@@ -161,7 +161,7 @@ fn dispatch_spec_remote_routes_preserve_declared_payload_type() {
                 reply_mode: ReplyMode::Return,
                 route_key: "signal.SignalService.Notify".to_string(),
             }],
-            actr_type: Some("acme:SignalService:1.0.0".to_string()),
+            actr_type: Some("acme/SignalService@1.0.0".to_string()),
         }],
     };
 
@@ -189,7 +189,7 @@ fn dispatch_spec_rejects_non_rpc_payload_type_for_remote_route() {
                 reply_mode: ReplyMode::Return,
                 route_key: "stream.StreamService.Send".to_string(),
             }],
-            actr_type: Some("acme:StreamService:1.0.0".to_string()),
+            actr_type: Some("acme/StreamService@1.0.0".to_string()),
         }],
     };
 
@@ -479,7 +479,7 @@ fn dispatch_spec_allows_colliding_method_names_for_remote_routes() {
             reply_mode: ReplyMode::Return,
             route_key: "svc.remote.RemoteService.Echo".to_string(),
         }],
-        actr_type: Some("acme:Echo:1.0.0".to_string()),
+        actr_type: Some("acme/Echo@1.0.0".to_string()),
     };
 
     let model = ProtoModel {

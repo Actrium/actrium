@@ -23,11 +23,12 @@ impl ProjectInitializer for RustInitializer {
         let mut template_context = TemplateContext::new(
             &context.project_name,
             &context.signaling_url,
-            &context.manufacturer,
+            &context.publisher,
             context.template.to_service_name(),
             is_service,
         );
         template_context.is_both = context.is_both;
+        template_context.realm = context.realm.clone();
 
         template.generate(&context.project_dir, &template_context)?;
 
@@ -75,7 +76,7 @@ impl RustInitializer {
         let template_path = fixtures_root.join("protos/local.echo.rust-client.hbs");
         let template = read_fixture_text(&template_path)?;
         let template_context =
-            TemplateContext::new(&context.project_name, "", &context.manufacturer, "", false);
+            TemplateContext::new(&context.project_name, "", &context.publisher, "", false);
 
         let content = Handlebars::new()
             .render_template(&template, &template_context)

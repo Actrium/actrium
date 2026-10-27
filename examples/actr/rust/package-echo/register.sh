@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# register.sh — Register MFR manufacturer and publish echo-actr package to a running actrix instance.
+# register.sh — Register publisher and publish echo-actr package to a running actrix instance.
 # Usage: ./register.sh [--db <path>] [--endpoint <url>] [--package <path>]
 set -euo pipefail
 
@@ -31,7 +31,7 @@ _detect_actrix_db() {
     )
     local best="" best_mtime=0
     for db in "${candidates[@]}"; do
-        if [ -f "$db" ] && sqlite3 "$db" ".tables" 2>/dev/null | grep -q "mfr"; then
+        if [ -f "$db" ] && sqlite3 "$db" ".tables" 2>/dev/null | grep -q "publisher"; then
             local mtime
             mtime=$(stat -f "%m" "$db" 2>/dev/null || stat -c "%Y" "$db" 2>/dev/null || echo 0)
             if [ "$mtime" -gt "$best_mtime" ]; then
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  actr register — MFR setup for package-echo"
+echo "  actr register — publisher setup for package-echo"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  DB:       $ACTRIX_DB"
 echo "  Endpoint: $ENDPOINT"
@@ -101,42 +101,42 @@ fi
 
 # ── Step 1: Create realm ──────────────────────────────────────────────────────
 echo ""
-echo "🔑 Step 1: Creating realm 1001..."
+echo "🔑 Step 1: Creating realm package-echo@example.com..."
 
 sqlite3 "$ACTRIX_DB" \
-    "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) \
-     VALUES (1001, 'package-echo-realm', 'Active', 1, strftime('%s','now'), '');"
+    "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) \
+     VALUES ('package-echo@example.com', 'active', 1, strftime('%s','now'));"
 
-echo -e "${GREEN}✅ Realm 1001 ready${NC}"
+echo -e "${GREEN}✅ Realm package-echo@example.com ready${NC}"
 
-# ── Step 2: Register MFR manufacturer ────────────────────────────────────────
+# ── Step 2: Register publisher ────────────────────────────────────────
 echo ""
-echo "🏷️  Step 2: Registering MFR manufacturer 'actrium'..."
+echo "🏷️  Step 2: Registering publisher 'actrium'..."
 
 NOW=$(date +%s)
 EXPIRES_AT=$((NOW + 86400 * 365))
-MFR_PUBKEY=$(jq -r '.public_key' "$PUBLIC_KEY_PATH")
+PUBLISHER_PUBKEY=$(jq -r '.public_key' "$PUBLIC_KEY_PATH")
 
-if [ -z "$MFR_PUBKEY" ]; then
+if [ -z "$PUBLISHER_PUBKEY" ]; then
     echo -e "${RED}❌ Failed to extract public_key from $PUBLIC_KEY_PATH${NC}"
     exit 1
 fi
 
-MFR_KEY_ID=$(printf '%s' "$MFR_PUBKEY" | base64 -d | openssl dgst -sha256 -r | awk '{print "mfr-" substr($1, 1, 16)}')
+PUBLISHER_KEY_ID=$(printf '%s' "$PUBLISHER_PUBKEY" | base64 -d | openssl dgst -sha256 -r | awk '{print "publisher-" substr($1, 1, 16)}')
 
-if [ -z "$MFR_KEY_ID" ]; then
+if [ -z "$PUBLISHER_KEY_ID" ]; then
     echo -e "${RED}❌ Failed to compute key_id${NC}"
     exit 1
 fi
 
 sqlite3 "$ACTRIX_DB" << SQL
-INSERT OR IGNORE INTO mfr
+INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
-VALUES ('actrium', '$MFR_PUBKEY', '$MFR_KEY_ID', 'examples@actrium.local', 'active',
+VALUES ('actrium', '$PUBLISHER_PUBKEY', '$PUBLISHER_KEY_ID', 'examples@actrium.local', 'active',
         $NOW, $NOW, $NOW, $EXPIRES_AT);
-UPDATE mfr
-   SET public_key     = '$MFR_PUBKEY',
-       key_id         = '$MFR_KEY_ID',
+UPDATE publisher
+   SET public_key     = '$PUBLISHER_PUBKEY',
+       key_id         = '$PUBLISHER_KEY_ID',
        status         = 'active',
        updated_at     = $NOW,
        verified_at    = $NOW,
@@ -146,11 +146,11 @@ UPDATE mfr
  WHERE name = 'actrium';
 SQL
 
-echo -e "${GREEN}✅ MFR 'actrium' registered (key_id: $MFR_KEY_ID)${NC}"
+echo -e "${GREEN}✅ publisher 'actrium' registered (key_id: $PUBLISHER_KEY_ID)${NC}"
 
 # ── Step 3: Publish package via actr pkg publish ──────────────────────────────
 echo ""
-echo "📡 Step 3: Publishing package to MFR..."
+echo "📡 Step 3: Publishing package to publisher..."
 
 cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- pkg publish \
     --package "$ACTR_PACKAGE" \

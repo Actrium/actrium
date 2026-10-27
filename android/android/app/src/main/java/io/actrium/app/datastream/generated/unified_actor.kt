@@ -43,10 +43,10 @@ interface UnifiedHandler : AskLocalServiceHandler {
 object RemoteServiceRegistry {
     /**
      * Map of route key prefix to actor type for remote services
-     * actrium+app_server
+     * actrium/app_server@<version>
      */
     val remoteRoutes: Map<String, ActrType> = mapOf(
-        "ask.Ask" to ActrType(manufacturer = "actrium", name = "app_server", version = "")
+        "ask.Ask" to ActrType(publisher = "actrium", name = "app_server", version = "")
     )
 
     /**

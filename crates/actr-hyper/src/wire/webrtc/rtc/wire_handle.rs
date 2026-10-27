@@ -326,7 +326,6 @@ impl WireHandle for RtcWireHandle {
 mod tests {
     use std::time::Duration;
 
-    use actr_protocol::{ActrType, Realm};
     use async_trait::async_trait;
     use tokio::sync::mpsc;
     use webrtc::error::Error as RtcError;
@@ -368,13 +367,8 @@ mod tests {
 
     fn test_actor_id(serial_number: u64) -> ActrId {
         ActrId {
-            realm: Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number,
-            r#type: ActrType {
-                manufacturer: "acme".to_string(),
-                name: "wire-handle-test".to_string(),
-                version: "1.0.0".to_string(),
-            },
         }
     }
 

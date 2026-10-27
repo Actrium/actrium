@@ -1,26 +1,21 @@
-//! Storage backend configuration
+//! Storage backend configuration.
 //!
-//! Defines configuration structures for various storage backends
+//! Defines the configuration structures for the various storage backends.
 
 use serde::{Deserialize, Serialize};
 
-/// Storage configuration
+/// Storage configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    /// Storage backend type
+    /// Storage backend type.
     pub backend: StorageBackend,
 
-    /// Key TTL (seconds)
-    ///
-    /// Validity period for generated keys; keys older than this are considered expired
-    /// Set to 0 for no expiration
-    pub key_ttl_seconds: u64,
-
-    /// SQLite configuration (required when backend = "sqlite")
+    /// SQLite configuration (required when `backend = "sqlite"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sqlite: Option<SqliteConfig>,
 
-    /// PostgreSQL configuration (required when backend = "postgres")
+    /// PostgreSQL configuration (required when `backend = "postgres"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub postgres: Option<PostgresConfig>,
 }
@@ -29,53 +24,66 @@ impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             backend: StorageBackend::Sqlite,
-            key_ttl_seconds: 3600,
             sqlite: Some(SqliteConfig::default()),
             postgres: None,
         }
     }
 }
 
-/// Storage backend type enum
+/// Storage backend type.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageBackend {
-    /// SQLite database
+    /// SQLite database.
     Sqlite,
-    /// PostgreSQL database
+    /// PostgreSQL database.
     Postgres,
 }
 
-/// SQLite configuration
+/// SQLite configuration.
 ///
-/// Note: The database path is passed via the db_path parameter of KeyStorage::from_config
-/// TODO: define grain config for sqlite
+/// Note: the effective database file is currently `signer_keys.db` inside the
+/// instance data directory (`ActrixConfig.sqlite_path`), supplied via the
+/// `db_path` argument of `KeyStorage::from_config`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SqliteConfig {}
+#[serde(deny_unknown_fields)]
+pub struct SqliteConfig {
+    /// Optional database path override.
+    ///
+    /// Accepted for configuration compatibility — generated, example, and
+    /// deployment templates all emit `path = "ks.db"` under this section, and
+    /// silently rejecting it would break existing configs on upgrade. It is
+    /// currently informational only: the key database location is derived from
+    /// the instance data directory, not from this field. Honouring it would
+    /// relocate the key store, so wiring is deferred to a deliberate change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
 
-/// PostgreSQL configuration
+/// PostgreSQL configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PostgresConfig {
-    /// Database host address
+    /// Database host address.
     pub host: String,
 
-    /// Database port
+    /// Database port.
     pub port: u16,
 
-    /// Database name
+    /// Database name.
     pub database: String,
 
-    /// Username
+    /// Username.
     pub username: String,
 
-    /// Password
+    /// Password.
     pub password: String,
 
-    /// Connection pool size
+    /// Connection pool size.
     #[serde(default = "default_postgres_pool_size")]
     pub pool_size: u32,
 
-    /// Connection maximum lifetime (seconds)
+    /// Maximum connection lifetime, in seconds.
     #[serde(default = "default_max_lifetime_secs")]
     pub max_lifetime_secs: u64,
 }
@@ -85,7 +93,7 @@ impl Default for PostgresConfig {
         Self {
             host: "localhost".to_string(),
             port: 5432,
-            database: "actrix_ks".to_string(),
+            database: "actrix_signer".to_string(),
             username: "actrix".to_string(),
             password: "".to_string(),
             pool_size: default_postgres_pool_size(),
@@ -110,7 +118,6 @@ mod tests {
     fn test_default_storage_config() {
         let config = StorageConfig::default();
         assert_eq!(config.backend, StorageBackend::Sqlite);
-        assert_eq!(config.key_ttl_seconds, 3600);
         assert!(config.sqlite.is_some());
     }
 
@@ -118,21 +125,18 @@ mod tests {
     fn test_serialize_sqlite_config() {
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
-            key_ttl_seconds: 7200,
-            sqlite: Some(SqliteConfig {}),
+            sqlite: Some(SqliteConfig::default()),
             postgres: None,
         };
 
         let toml = toml::to_string(&config).unwrap();
         assert!(toml.contains("backend = \"sqlite\""));
-        assert!(toml.contains("key_ttl_seconds = 7200"));
     }
 
     #[test]
     fn test_deserialize_postgres_config() {
         let toml_str = r#"
             backend = "postgres"
-            key_ttl_seconds = 1800
 
             [postgres]
             host = "localhost"
@@ -145,7 +149,6 @@ mod tests {
 
         let config: StorageConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.backend, StorageBackend::Postgres);
-        assert_eq!(config.key_ttl_seconds, 1800);
 
         let postgres = config.postgres.unwrap();
         assert_eq!(postgres.host, "localhost");
@@ -154,5 +157,40 @@ mod tests {
         assert_eq!(postgres.username, "actrix");
         assert_eq!(postgres.password, "secret");
         assert_eq!(postgres.pool_size, 30);
+    }
+
+    #[test]
+    fn test_reject_unknown_storage_field() {
+        let toml_str = r#"
+            backend = "sqlite"
+            unknown_field = "typo"
+        "#;
+
+        let result: Result<StorageConfig, _> = toml::from_str(toml_str);
+        assert!(
+            result.is_err(),
+            "unknown top-level storage field must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_reject_unknown_postgres_field() {
+        let toml_str = r#"
+            backend = "postgres"
+
+            [postgres]
+            host = "localhost"
+            port = 5432
+            database = "actrix"
+            username = "actrix"
+            password = "secret"
+            typo_field = 1
+        "#;
+
+        let result: Result<StorageConfig, _> = toml::from_str(toml_str);
+        assert!(
+            result.is_err(),
+            "unknown nested postgres field must be rejected"
+        );
     }
 }

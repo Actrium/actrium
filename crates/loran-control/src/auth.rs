@@ -1,11 +1,11 @@
 use actrix_proto::{
     CreateRealmRequest, CreateRealmResponse, DeleteConfigOverrideRequest,
-    DeleteConfigOverrideResponse, DeleteRealmRequest, DeleteRealmResponse, GetConfigRequest,
-    GetConfigResponse, GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest, GetRealmResponse,
-    ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse,
-    NodeAdminService, NonceCredential, RotateAisSigningKeyRequest, RotateAisSigningKeyResponse,
-    SetConfigOverrideRequest, SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse,
-    UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest, UpdateRealmResponse,
+    DeleteConfigOverrideResponse, GetConfigRequest, GetConfigResponse, GetNodeInfoRequest,
+    GetNodeInfoResponse, GetRealmRequest, GetRealmResponse, ListConfigOverridesRequest,
+    ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse, NodeAdminService,
+    NonceCredential, RetireRealmRequest, RetireRealmResponse, SetConfigOverrideRequest,
+    SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse, UpdateConfigRequest,
+    UpdateConfigResponse, UpdateRealmRequest, UpdateRealmResponse,
 };
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
@@ -18,8 +18,8 @@ pub trait CredentialPayload {
     fn auth_payload(&self, node_id: &str) -> String;
     /// Digest of the request body (excluding the `credential` field) for mutable
     /// operations. Appended to `auth_payload` as `{op}:{node_id}:{subject}:{digest}`
-    /// so the signature binds the security-critical body fields (e.g. realm secret
-    /// hashes) against in-transit tampering. Returns empty for read-only ops, which
+    /// so the signature binds the security-critical body fields (e.g. `enabled`,
+    /// `expires_at`) against in-transit tampering. Returns empty for read-only ops, which
     /// have no mutable body beyond what `auth_payload` already binds.
     fn body_digest(&self) -> String {
         String::new()
@@ -166,12 +166,12 @@ where
         self.inner.update_realm(request).await
     }
 
-    async fn delete_realm(
+    async fn retire_realm(
         &self,
-        request: Request<DeleteRealmRequest>,
-    ) -> Result<Response<DeleteRealmResponse>, Status> {
+        request: Request<RetireRealmRequest>,
+    ) -> Result<Response<RetireRealmResponse>, Status> {
         self.verify_body(request.get_ref()).await?;
-        self.inner.delete_realm(request).await
+        self.inner.retire_realm(request).await
     }
 
     async fn list_realms(
@@ -221,14 +221,6 @@ where
         self.verify_body(request.get_ref()).await?;
         self.inner.delete_config_override(request).await
     }
-
-    async fn rotate_ais_signing_key(
-        &self,
-        request: Request<RotateAisSigningKeyRequest>,
-    ) -> Result<Response<RotateAisSigningKeyResponse>, Status> {
-        self.verify_body(request.get_ref()).await?;
-        self.inner.rotate_ais_signing_key(request).await
-    }
 }
 
 // ========= Request type payload construction implementations =========
@@ -265,20 +257,13 @@ impl CredentialPayload for CreateRealmRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("create_realm:{node_id}:{}", self.realm_id.unwrap_or(0))
+        format!("create_realm:{node_id}:{}", self.realm)
     }
 
     fn body_digest(&self) -> String {
         let canon = format!(
-            "realm_id={}&name={}&enabled={}&status={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
-            self.realm_id.unwrap_or(0),
-            self.name,
-            self.enabled,
-            opt_str(self.status.as_deref()),
-            self.expires_at,
-            opt_str(self.secret_current_hash.as_deref()),
-            opt_str(self.secret_previous_hash.as_deref()),
-            opt_u64(self.secret_previous_valid_until),
+            "realm={}&enabled={}&expires_at={}",
+            self.realm, self.enabled, self.expires_at,
         );
         sha256_hex(&canon)
     }
@@ -290,7 +275,7 @@ impl CredentialPayload for GetRealmRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("get_realm:{node_id}:{}", self.realm_id)
+        format!("get_realm:{node_id}:{}", self.realm)
     }
 }
 
@@ -300,32 +285,27 @@ impl CredentialPayload for UpdateRealmRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("update_realm:{node_id}:{}", self.realm_id)
+        format!("update_realm:{node_id}:{}", self.realm)
     }
 
     fn body_digest(&self) -> String {
         let canon = format!(
-            "realm_id={}&name={}&enabled={}&status={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
-            self.realm_id,
-            opt_str(self.name.as_deref()),
+            "realm={}&enabled={}&expires_at={}",
+            self.realm,
             opt_bool(self.enabled),
-            opt_str(self.status.as_deref()),
             opt_u64(self.expires_at),
-            opt_str(self.secret_current_hash.as_deref()),
-            opt_str(self.secret_previous_hash.as_deref()),
-            opt_u64(self.secret_previous_valid_until),
         );
         sha256_hex(&canon)
     }
 }
 
-impl CredentialPayload for DeleteRealmRequest {
+impl CredentialPayload for RetireRealmRequest {
     fn credential(&self) -> &NonceCredential {
         &self.credential
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("delete_realm:{node_id}:{}", self.realm_id)
+        format!("retire_realm:{node_id}:{}", self.realm)
     }
 }
 
@@ -399,16 +379,6 @@ impl CredentialPayload for DeleteConfigOverrideRequest {
     }
 }
 
-impl CredentialPayload for RotateAisSigningKeyRequest {
-    fn credential(&self) -> &NonceCredential {
-        &self.credential
-    }
-
-    fn auth_payload(&self, node_id: &str) -> String {
-        format!("rotate_ais_signing_key:{node_id}")
-    }
-}
-
 fn map_nonce_error(err: NonceError, context: &str) -> Status {
     match err {
         NonceError::DuplicateNonce => {
@@ -432,7 +402,7 @@ mod tests {
     /// the superv client must build the identical string for the same logical
     /// fields. Any change to field order/rendering here must be mirrored on the
     /// superv side (see its `realm_body_digest` test, same expected digest).
-    const REALM_CANON: &str = "realm_id=42&name=managed&enabled=true&status=Active&expires_at=1900000000&secret_current_hash=hash-42&secret_previous_hash=&secret_previous_valid_until=";
+    const REALM_CANON: &str = "realm=managed@example.com&enabled=true&expires_at=1900000000";
 
     fn dummy_credential() -> NonceCredential {
         NonceCredential {
@@ -445,15 +415,10 @@ mod tests {
     #[test]
     fn create_realm_body_digest_matches_canonical() {
         let req = CreateRealmRequest {
-            realm_id: Some(42),
-            name: "managed".to_string(),
+            realm: "managed@example.com".to_string(),
             enabled: true,
             credential: dummy_credential(),
             expires_at: 1_900_000_000,
-            status: Some("Active".to_string()),
-            secret_current_hash: Some("hash-42".to_string()),
-            secret_previous_hash: None,
-            secret_previous_valid_until: None,
         };
         assert_eq!(sha256_hex(REALM_CANON), req.body_digest());
     }
@@ -461,15 +426,10 @@ mod tests {
     #[test]
     fn update_realm_body_digest_matches_canonical() {
         let req = UpdateRealmRequest {
-            realm_id: 42,
-            name: Some("managed".to_string()),
+            realm: "managed@example.com".to_string(),
             enabled: Some(true),
             credential: dummy_credential(),
-            status: Some("Active".to_string()),
             expires_at: Some(1_900_000_000),
-            secret_current_hash: Some("hash-42".to_string()),
-            secret_previous_hash: None,
-            secret_previous_valid_until: None,
         };
         assert_eq!(sha256_hex(REALM_CANON), req.body_digest());
     }
@@ -489,22 +449,9 @@ mod tests {
     #[test]
     fn read_ops_have_empty_body_digest() {
         let get_realm = GetRealmRequest {
-            realm_id: 42,
+            realm: "managed@example.com".to_string(),
             credential: dummy_credential(),
         };
         assert_eq!(get_realm.body_digest(), "");
-    }
-
-    #[test]
-    fn rotate_ais_signing_key_payload_is_canonical() {
-        let req = RotateAisSigningKeyRequest {
-            credential: dummy_credential(),
-        };
-        assert_eq!(
-            req.auth_payload("actrix-node"),
-            "rotate_ais_signing_key:actrix-node"
-        );
-        // No client-controlled mutable body fields, so no digest is appended.
-        assert_eq!(req.body_digest(), "");
     }
 }

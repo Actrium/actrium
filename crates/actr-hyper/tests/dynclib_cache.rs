@@ -58,7 +58,7 @@ fn dynclib_suffix() -> &'static str {
 
 fn build_dynclib_package(binary: &[u8], signing_key: &SigningKey) -> Vec<u8> {
     let manifest = actr_pack::PackageManifest {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "DynActor".to_string(),
         version: "1.0.0".to_string(),
         binary: actr_pack::BinaryEntry {

@@ -26,7 +26,7 @@ const nodeSections = [
   },
   {
     title: "HTTP Binding",
-    desc: "Foundation for Signaling, AIS, Signer, and Control",
+    desc: "Foundation for Signaling, Issuer, Signer, and Control",
     keys: ["bind.http"],
   },
   {
@@ -81,19 +81,19 @@ export function Overview2Page() {
         }
 
         const ENABLE_BITS: Record<string, number> = {
-          Signaling: 1, STUN: 2, TURN: 4, AIS: 8, Signer: 16,
+          Signaling: 1, STUN: 2, TURN: 4, Issuer: 8, Signer: 16,
         };
         const serviceOn = (name: string) =>
           (enableMask & (ENABLE_BITS[name] ?? 0)) !== 0 || name === "Control";
 
         const pillRoutes: Record<string, string> = {
           Admin: "/admin", Control: "/admin/services/control", Signer: "/admin/services/signer",
-          AIS: "/admin/services/ais", MFR: "/admin/mfr", Signaling: "/admin/services/signaling",
+          Issuer: "/admin/services/issuer", "Publisher Registry": "/admin/publishers", Signaling: "/admin/services/signaling",
           STUN: "/admin/services/stun", TURN: "/admin/services/turn",
         };
         const pillHoverStrokes: Record<string, string> = {
           Admin: "#6366f1", Control: "#d97706", Signer: "#d97706",
-          AIS: "#16a34a", MFR: "#16a34a", Signaling: "#16a34a", STUN: "#16a34a", TURN: "#16a34a",
+          Issuer: "#16a34a", "Publisher Registry": "#16a34a", Signaling: "#16a34a", STUN: "#16a34a", TURN: "#16a34a",
         };
         const pill = (x: number, y: number, label: string, on: boolean, w = 84, colors?: { fill: string; stroke: string; text: string }) => {
           const fill = colors?.fill ?? (on ? "#ecfdf5" : "#f8fafc");
@@ -201,8 +201,8 @@ export function Overview2Page() {
                   {pill(16, 41, "Admin", true, 112, controlColors)}
                   {pill(140, 41, "Control", true, 112, signerColors)}
                   {pill(264, 41, "Signer", serviceOn("Signer"), 112, signerColors)}
-                  {pill(388, 41, "AIS", serviceOn("AIS"), 112)}
-                  {pill(512, 41, "MFR", true, 112)}
+                  {pill(388, 41, "Issuer", serviceOn("Issuer"), 112)}
+                  {pill(500, 41, "Publisher Registry", true, 136)}
                   {pill(636, 41, "Signaling", serviceOn("Signaling"), 112)}
                   {pill(760, 41, "STUN", serviceOn("STUN"), 112)}
                   {pill(884, 41, "TURN", serviceOn("TURN"), 112)}
@@ -210,8 +210,8 @@ export function Overview2Page() {
                   <text x={72} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/admin</text>
                   <text x={196} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">gRPC</text>
                   <text x={320} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">gRPC</text>
-                  <text x={444} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/ais</text>
-                  <text x={568} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/mfr</text>
+                  <text x={444} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/issuer</text>
+                  <text x={568} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/registry</text>
                   <text x={692} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/signaling</text>
                   <text x={816} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}</text>
                   <text x={940} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}, 49152-65535</text>
@@ -301,7 +301,7 @@ export function Overview2Page() {
                   {/* Connecting lines — center-to-center direction, drawn edge-to-edge */}
                   {/* ACL(134,64) → Realm(78,148): exit ACL ~(115,93), enter Realm ~(96,121) */}
                   <line x1={115} y1={93} x2={96} y2={121} stroke="#86efac" strokeWidth={1} />
-                  <text x={94} y={110} fontSize={6.5} fill="#6ee7b7">realm_id</text>
+                  <text x={94} y={110} fontSize={6.5} fill="#6ee7b7">realm</text>
                   {/* ACL(134,64) → ActorType(242,120): exit ACL ~(180,88), enter ActorType ~(197,96) */}
                   <line x1={180} y1={88} x2={197} y2={96} stroke="#86efac" strokeWidth={1} strokeDasharray="3,3" />
 
@@ -309,7 +309,7 @@ export function Overview2Page() {
                   <ellipse cx={134} cy={64} rx={74} ry={30} fill="#d1fae5" fillOpacity={0.4} stroke="#4ade80" strokeWidth={0.8} />
                   <text x={134} y={56} textAnchor="middle" fontSize={11} fontWeight={700} fill="#166534">ACL</text>
                   <text x={134} y={68} textAnchor="middle" fontSize={7} fill="#475569">Allow / Deny from:</text>
-                  <text x={134} y={78} textAnchor="middle" fontSize={7} fill="#475569">[$realm-id] [$actr-type]</text>
+                  <text x={134} y={78} textAnchor="middle" fontSize={7} fill="#475569">[$realm] [$actr-type]</text>
 
                   {/* Realm ellipse — lower left */}
                   <ellipse cx={78} cy={148} rx={64} ry={28} fill="#dcfce7" fillOpacity={0.5} stroke="#22c55e" strokeWidth={0.8} />
@@ -320,7 +320,7 @@ export function Overview2Page() {
                   {/* ActorType ellipse — right, higher than Realm */}
                   <ellipse cx={242} cy={120} rx={76} ry={32} fill="#bbf7d0" fillOpacity={0.35} stroke="#86efac" strokeWidth={0.8} />
                   <text x={242} y={112} textAnchor="middle" fontSize={11} fontWeight={700} fill="#166534">ActorType</text>
-                  <text x={242} y={124} textAnchor="middle" fontSize={7} fill="#475569">manufacturer : name : version</text>
+                  <text x={242} y={124} textAnchor="middle" fontSize={7} fill="#475569">publisher / program @ version</text>
                   <text x={242} y={134} textAnchor="middle" fontSize={7} fill="#475569">ServiceSpec · fingerprint</text>
                   </g>
 

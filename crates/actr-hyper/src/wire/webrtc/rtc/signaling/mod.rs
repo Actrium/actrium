@@ -226,13 +226,8 @@ mod tracing_lifetime_tests {
         let closed_names = || closed.lock().unwrap().clone();
         tracing::subscriber::with_default(subscriber, || {
             let peer = ActrId {
-                realm: actr_protocol::Realm { realm_id: 1 },
+                realm: "test@example.com".to_string(),
                 serial_number: 1,
-                r#type: actr_protocol::ActrType {
-                    manufacturer: "test".into(),
-                    name: "node".into(),
-                    version: "1".into(),
-                },
             };
             let attempt = tracing::info_span!("webrtc.recover");
             let dispatch = attempt.in_scope(|| {

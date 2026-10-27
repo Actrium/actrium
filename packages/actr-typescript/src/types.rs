@@ -1,33 +1,10 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-// Realm
-#[napi(object)]
-pub struct Realm {
-    #[napi(js_name = "realmId")]
-    pub realm_id: u32,
-}
-
-impl From<actr_protocol::Realm> for Realm {
-    fn from(realm: actr_protocol::Realm) -> Self {
-        Self {
-            realm_id: realm.realm_id,
-        }
-    }
-}
-
-impl From<Realm> for actr_protocol::Realm {
-    fn from(realm: Realm) -> Self {
-        Self {
-            realm_id: realm.realm_id,
-        }
-    }
-}
-
 // ActrType
 #[napi(object)]
 pub struct ActrType {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
 }
@@ -35,7 +12,7 @@ pub struct ActrType {
 impl From<actr_protocol::ActrType> for ActrType {
     fn from(t: actr_protocol::ActrType) -> Self {
         Self {
-            manufacturer: t.manufacturer,
+            publisher: t.publisher,
             name: t.name,
             version: t.version,
         }
@@ -45,7 +22,7 @@ impl From<actr_protocol::ActrType> for ActrType {
 impl From<ActrType> for actr_protocol::ActrType {
     fn from(t: ActrType) -> Self {
         Self {
-            manufacturer: t.manufacturer,
+            publisher: t.publisher,
             name: t.name,
             version: t.version,
         }
@@ -55,18 +32,17 @@ impl From<ActrType> for actr_protocol::ActrType {
 // ActrId
 #[napi(object)]
 pub struct ActrId {
-    pub realm: Realm,
+    /// Realm name, `<realm_id>@<domain>`
+    pub realm: String,
     #[napi(js_name = "serialNumber")]
     pub serial_number: BigInt,
-    pub r#type: ActrType,
 }
 
 impl From<actr_protocol::ActrId> for ActrId {
     fn from(id: actr_protocol::ActrId) -> Self {
         Self {
-            realm: id.realm.into(),
+            realm: id.realm,
             serial_number: id.serial_number.into(),
-            r#type: id.r#type.into(),
         }
     }
 }
@@ -83,9 +59,8 @@ impl TryFrom<ActrId> for actr_protocol::ActrId {
             ));
         }
         Ok(Self {
-            realm: id.realm.into(),
+            realm: id.realm,
             serial_number,
-            r#type: id.r#type.into(),
         })
     }
 }
@@ -219,13 +194,8 @@ mod tests {
 
     fn actor_id(serial_number: u64) -> actr_protocol::ActrId {
         actr_protocol::ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".into(),
             serial_number,
-            r#type: actr_protocol::ActrType {
-                manufacturer: "test".into(),
-                name: "Binding".into(),
-                version: "1.0.0".into(),
-            },
         }
     }
 

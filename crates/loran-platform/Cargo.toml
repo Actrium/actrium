@@ -12,6 +12,7 @@ default = []
 opentelemetry = ["dep:opentelemetry", "dep:tracing-opentelemetry"]
 
 [dependencies]
+argon2 = "0.5"
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -27,12 +28,13 @@ tokio-rustls = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 rand = "0.8.5"
-ecies = { workspace = true }
 uuid = { workspace = true }
 hex = { workspace = true }
+hkdf = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 url = { version = "2", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 actr-protocol = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
@@ -51,6 +53,7 @@ actrix-proto = { path = "../loran-proto", version = "0.10.7" }
 strum = { version = "0.27.2", features = ["derive"] }
 
 [dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
 serial_test = { workspace = true }
 tempfile = { workspace = true }
 
