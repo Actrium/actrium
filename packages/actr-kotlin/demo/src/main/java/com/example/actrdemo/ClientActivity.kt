@@ -120,13 +120,21 @@ class ClientActivity : AppCompatActivity() {
         initViews()
         initLogcatReader() // Start early to capture actr library's early logs
         setupClickListeners()
-        mainTabContent.addView(Button(this).apply {
-            text = "Realm membership / devices"
-            setOnClickListener {
-                if (clientSystem == null && connectButton.isEnabled) startActivity(Intent(this@ClientActivity, RealmMembershipActivity::class.java))
-                else Toast.makeText(this@ClientActivity, "Disconnect before managing membership", Toast.LENGTH_SHORT).show()
-            }
-        }, 0)
+        mainTabContent.addView(
+            Button(this).apply {
+                text = "Realm membership / devices"
+                setOnClickListener {
+                    if (clientSystem == null &&
+                        connectButton.isEnabled
+                    ) {
+                        startActivity(Intent(this@ClientActivity, RealmMembershipActivity::class.java))
+                    } else {
+                        Toast.makeText(this@ClientActivity, "Disconnect before managing membership", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            0,
+        )
         switchToTab(TAB_MAIN)
 
         log("Ready to connect (linked multi-service workload)")
@@ -266,11 +274,17 @@ class ClientActivity : AppCompatActivity() {
                 val configPath = copyAssetToInternalStorage("actr.toml")
                 val manifestPath = copyAssetToInternalStorage("manifest.toml")
                 val realmConfig = io.actrium.actr.readRealmRuntimeConfiguration(configPath)
-                val provider = getSharedPreferences("realm-membership", MODE_PRIVATE)
-                    .getString("provider:${realmConfig.realm}", null)
-                    ?: error("Join this Realm using the membership screen first")
-                val membership = RealmIdentityStore(this@ClientActivity).membership(
-                    realmConfig.realm, provider, realmConfig.issuer, true)
+                val provider =
+                    getSharedPreferences("realm-membership", MODE_PRIVATE)
+                        .getString("provider:${realmConfig.realm}", null)
+                        ?: error("Join this Realm using the membership screen first")
+                val membership =
+                    RealmIdentityStore(this@ClientActivity).membership(
+                        realmConfig.realm,
+                        provider,
+                        realmConfig.issuer,
+                        true,
+                    )
                 membership.members()
                 Log.i(TAG, "Config path: $configPath")
                 Log.i(TAG, "Manifest path: $manifestPath")

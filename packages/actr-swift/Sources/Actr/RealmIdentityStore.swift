@@ -74,8 +74,10 @@ public final class RealmIdentityStore: @unchecked Sendable {
     }
 
     /// Persist before exchanging an invite. Errors never replace an existing key.
-    public func membership(realm: String, providerId: String, issuer: String,
-        allowInsecureDevelopment: Bool = false) throws -> ActrBindings.RealmMembership {
+    public func membership(
+        realm: String, providerId: String, issuer: String,
+        allowInsecureDevelopment: Bool = false
+    ) throws -> ActrBindings.RealmMembership {
         let publicKey = try locked { installation -> Data in
             if try read(installation, realm) == nil {
                 guard !FileManager.default.fileExists(atPath: record(realm).path) else {

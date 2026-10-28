@@ -32,42 +32,78 @@ class RealmMembershipActivity : AppCompatActivity() {
         val config = readRealmRuntimeConfiguration(file.path)
         val store = RealmIdentityStore(this)
         val preferences = getSharedPreferences("realm-membership", MODE_PRIVATE)
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 24, 24, 24) }
+        val layout =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(24, 24, 24, 24)
+            }
         setContentView(ScrollView(this).apply { addView(layout) })
         layout.addView(TextView(this).apply { text = "Realm: ${config.realm}\nIssuer: ${config.issuer}" })
-        val provider = EditText(this).apply {
-            hint = "Trusted provider ID"
-            setText(preferences.getString("provider:${config.realm}", URI(config.issuer).authority))
-        }
-        val invite = EditText(this).apply {
-            hint = "One-time Realm invitation"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            isSaveEnabled = false
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-        }
+        val provider =
+            EditText(this).apply {
+                hint = "Trusted provider ID"
+                setText(preferences.getString("provider:${config.realm}", URI(config.issuer).authority))
+            }
+        val invite =
+            EditText(this).apply {
+                hint = "One-time Realm invitation"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                isSaveEnabled = false
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+            }
         val target = EditText(this).apply { hint = "Client key ID to revoke (empty = this device)" }
         val status = TextView(this)
-        layout.addView(provider); layout.addView(invite); layout.addView(target); layout.addView(status)
+        layout.addView(provider)
+        layout.addView(invite)
+        layout.addView(target)
+        layout.addView(status)
         var busy = false
-        fun action(label: String, work: suspend () -> String) {
-            layout.addView(Button(this).apply {
-                text = label
-                setOnClickListener {
-                    if (busy) return@setOnClickListener
-                    busy = true
-                    val button = this
-                    button.isEnabled = false
-                    lifecycleScope.launch {
-                        try { status.text = withContext(Dispatchers.IO) { work() } }
-                        catch (error: RealmMembershipException.Rejected) { status.text = error.code }
-                        catch (_: RealmMembershipException.Uncertain) { status.text = "Result unknown. Retry the same invitation; your key is saved." }
-                        catch (_: Exception) { status.text = "Identity or membership unavailable. No key was replaced." }
-                        finally { busy = false; button.isEnabled = true }
+
+        fun action(
+            label: String,
+            work: suspend () -> String,
+        ) {
+            layout.addView(
+                Button(this).apply {
+                    text = label
+                    setOnClickListener {
+                        if (busy) return@setOnClickListener
+                        busy = true
+                        val button = this
+                        button.isEnabled = false
+                        lifecycleScope.launch {
+                            try {
+                                status.text = withContext(Dispatchers.IO) { work() }
+                            } catch (
+                                error: RealmMembershipException.Rejected,
+                            ) {
+                                status.text = error.code
+                            } catch (_: RealmMembershipException.Uncertain) {
+                                status.text =
+                                    "Result unknown. Retry the same invitation; your key is saved."
+                            } catch (
+                                _: Exception,
+                            ) {
+                                status.text = "Identity or membership unavailable. No key was replaced."
+                            } finally {
+                                busy = false
+                                button.isEnabled = true
+                            }
+                        }
                     }
-                }
-            })
+                },
+            )
         }
-        suspend fun membership() = store.membership(config.realm, withContext(Dispatchers.Main) { provider.text.toString().trim() }, config.issuer, true)
+
+        suspend fun membership() =
+            store.membership(
+                config.realm,
+                withContext(Dispatchers.Main) {
+                    provider.text.toString().trim()
+                },
+                config.issuer,
+                true,
+            )
         action("Join / retry invitation") {
             val providerId = withContext(Dispatchers.Main) { provider.text.toString().trim() }
             val text = withContext(Dispatchers.Main) { invite.text.toString().trim() }
@@ -89,7 +125,16 @@ class RealmMembershipActivity : AppCompatActivity() {
                     if (clients.getJSONObject(j).getString("key_id") == member.keyId()) memberId = row.getString("member_id")
                 }
             }
-            val result = org.json.JSONObject(member.inviteClient(checkNotNull(memberId), java.time.Instant.now().plusSeconds(900).toString()))
+            val result =
+                org.json.JSONObject(
+                    member.inviteClient(
+                        checkNotNull(memberId),
+                        java.time.Instant
+                            .now()
+                            .plusSeconds(900)
+                            .toString(),
+                    ),
+                )
             // FLAG_SECURE prevents screenshots; activity state is not persisted.
             result.getString("invite")
         }
@@ -99,20 +144,26 @@ class RealmMembershipActivity : AppCompatActivity() {
             member.revokeClient(key.ifEmpty { member.keyId() })
             "Client revoked"
         }
-        layout.addView(Button(this).apply {
-            text = "Start a new identity after revocation"
-            setOnClickListener {
-                if (busy) return@setOnClickListener
-                AlertDialog.Builder(this@RealmMembershipActivity)
-                    .setMessage("Discard this device's saved Realm identity? A new invitation is required. Other devices are unaffected.")
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Reset identity") { _, _ ->
-                        status.text = runCatching {
-                            store.forgetForRejoin(config.realm)
-                            "Enter a new invitation to rejoin."
-                        }.getOrDefault("Unable to reset local identity.")
-                    }.show()
-            }
-        })
+        layout.addView(
+            Button(this).apply {
+                text = "Start a new identity after revocation"
+                setOnClickListener {
+                    if (busy) return@setOnClickListener
+                    AlertDialog
+                        .Builder(this@RealmMembershipActivity)
+                        .setMessage(
+                            "Discard this device's saved Realm identity? " +
+                                "A new invitation is required. Other devices are unaffected.",
+                        ).setNegativeButton("Cancel", null)
+                        .setPositiveButton("Reset identity") { _, _ ->
+                            status.text =
+                                runCatching {
+                                    store.forgetForRejoin(config.realm)
+                                    "Enter a new invitation to rejoin."
+                                }.getOrDefault("Unable to reset local identity.")
+                        }.show()
+                }
+            },
+        )
     }
 }

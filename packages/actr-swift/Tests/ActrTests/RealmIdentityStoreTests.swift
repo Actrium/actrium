@@ -69,10 +69,16 @@ struct RealmIdentityStoreTests {
         #expect(await observerB.count >= 2)
         let beforeRevoke = await observerB.count
         _ = try await mb.revokeClient(keyId: ma.keyId())
-        do { _ = try await ma.members(); Issue.record("revoked client accepted") }
-        catch RealmMembershipError.Rejected(_, let code) { #expect(code == "client_revoked") }
-        do { _ = try await register(ma); Issue.record("revoked client registered") }
-        catch is ActrError { }
+        do {
+            _ = try await ma.members()
+            Issue.record("revoked client accepted")
+        } catch RealmMembershipError.Rejected(_, let code) {
+            #expect(code == "client_revoked")
+        }
+        do {
+            _ = try await register(ma)
+            Issue.record("revoked client registered")
+        } catch is ActrError { }
         _ = try await register(mb)
         _ = try await mb.members()
         for _ in 0..<600 {
@@ -103,8 +109,10 @@ struct RealmIdentityStoreTests {
         #expect(excluded.isExcludedFromBackup == true)
         try a.forgetForRejoin(realm: "one@example.com")
         #expect(old.keyId() != (try member(a)).keyId())
-        do { _ = try await old.members(); Issue.record("stale signer must not sign with replacement key") }
-        catch RealmMembershipError.KeyUnavailable { }
+        do {
+            _ = try await old.members()
+            Issue.record("stale signer must not sign with replacement key")
+        } catch RealmMembershipError.KeyUnavailable { }
         // Losing the Keychain entry while keeping installation data fails closed.
         let installation = try String(contentsOf: root.appendingPathComponent("a/installation"), encoding: .utf8)
         let digest = SHA256.hash(data: Data("one@example.com".utf8)).map { String(format: "%02x", $0) }.joined()
