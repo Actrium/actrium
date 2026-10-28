@@ -746,6 +746,7 @@ impl Drop for DataChunkRegistryCleanupGuard {
 /// public `Node<S>` wrappers in `crate::lib` and the `ActrRef` handle
 /// returned by `Node::start`.
 pub(crate) struct Inner {
+    pub(crate) realm_client_key: Option<crate::issuer_client::RealmClientKey>,
     /// Runtime configuration
     pub(crate) config: actr_config::RuntimeConfig,
 
@@ -2663,6 +2664,7 @@ impl Inner {
             ),
             max_pending_replies: 1024,
             package_manifest,
+            realm_client_key: None,
             preregistered_credential: None,
             preregistered_registration_context: None,
             discovered_ws_addresses: Arc::new(tokio::sync::RwLock::new(
@@ -2811,6 +2813,20 @@ impl Inner {
         )
     }
 
+    /// Use the same platform signer throughout the credential lifecycle,
+    /// retaining the existing key-file path for desktop Hosts.
+    pub(crate) fn resolved_realm_client_key(
+        &self,
+    ) -> Result<Option<crate::issuer_client::RealmClientKey>, crate::error::HyperError> {
+        match &self.realm_client_key {
+            Some(key) => Ok(Some(key.clone())),
+            None => crate::issuer_client::RealmClientKey::load_for(
+                self.config.realm_client_key.as_deref(),
+                &self.config.realm,
+            ),
+        }
+    }
+
     /// Attach a credential already issued by Issuer so that `start()` can skip
     /// the signaling registration step.
     ///
@@ -2910,11 +2926,9 @@ impl Inner {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 1. Obtain registration info (Hyper pre-injected or Issuer HTTP)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        let client_key = crate::issuer_client::RealmClientKey::load_for(
-            self.config.realm_client_key.as_deref(),
-            &self.config.realm,
-        )
-        .map_err(|e| ActrError::InvalidArgument(e.to_string()))?;
+        let client_key = self
+            .resolved_realm_client_key()
+            .map_err(|e| ActrError::InvalidArgument(e.to_string()))?;
         let register_ok = if let Some(injected) = self.preregistered_credential.take() {
             tracing::info!(
                 "Using Hyper pre-injected registration credential; skipping Issuer registration"
