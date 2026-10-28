@@ -230,7 +230,18 @@ impl PublisherRegistryManager {
         profile: &PublisherProfile,
         keys: &PublisherKeys,
     ) -> Result<Publisher, PublisherRegistryError> {
-        self.register(publisher, profile, keys, None).await
+        self.register(publisher, profile, keys, None, false).await
+    }
+
+    /// Refresh an existing registration under its stored pins. A concurrent
+    /// admin deletion must not turn a refresh into a new trust bootstrap.
+    pub async fn refresh_publisher(
+        &self,
+        publisher: &str,
+        profile: &PublisherProfile,
+        keys: &PublisherKeys,
+    ) -> Result<Publisher, PublisherRegistryError> {
+        self.register(publisher, profile, keys, None, true).await
     }
 
     /// Accept `profile` of a registered publisher as its new baseline after
@@ -247,7 +258,8 @@ impl PublisherRegistryManager {
         keys: &PublisherKeys,
         digest: &str,
     ) -> Result<Publisher, PublisherRegistryError> {
-        self.register(publisher, profile, keys, Some(digest)).await
+        self.register(publisher, profile, keys, Some(digest), false)
+            .await
     }
 
     async fn register(
@@ -256,6 +268,7 @@ impl PublisherRegistryManager {
         profile: &PublisherProfile,
         keys: &PublisherKeys,
         confirmed: Option<&str>,
+        must_exist: bool,
     ) -> Result<Publisher, PublisherRegistryError> {
         let invalid = PublisherRegistryError::InvalidRequest;
         if canonical_publisher_domain(publisher)? != publisher || profile.domain != publisher {
@@ -313,6 +326,9 @@ impl PublisherRegistryManager {
             .bind(publisher)
             .fetch_optional(&mut *tx)
             .await?;
+        if must_exist && existing.is_none() {
+            return Err(PublisherRegistryError::NotFound);
+        }
         if let Some(record) = &existing {
             if record.status != PublisherStatus::Active {
                 return Err(PublisherRegistryError::InvalidStatus(format!(
