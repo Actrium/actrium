@@ -150,6 +150,14 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 
 `realm.status` 为 `active` 时 **MUST** 包含 `package`。
 
+所有端点 **MUST** 包含非空 host。`package.href` 和 `issuer.url` **MUST** 使用 HTTPS，
+`provider.signaling[].url` **MUST** 使用 WSS。每个 `provider.ice[].urls` 列表
+**MUST** 非空，并包含遵循 [RFC 7064](https://www.rfc-editor.org/rfc/rfc7064) 或
+[RFC 7065](https://www.rfc-editor.org/rfc/rfc7065) 的 STUN/TURN 地址：
+`scheme:host[:port]`，IP literal 用方括号包裹，仅 TURN 可附加 `?transport=...`。
+ICE 地址 **MUST NOT** 包含 `//`、userinfo、path 或 fragment。
+即使 Profile 签名有效，消费者也 **MUST** 拒绝格式错误的端点。
+
 Realm Profile **MUST NOT** 包含 secret、私钥、access token、成员列表或用户专属数据。
 Actr Host **MUST** 忽略未知 member。
 

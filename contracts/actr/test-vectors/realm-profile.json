@@ -2442,5 +2442,1526 @@
       "remove": [],
       "valid": true
     }
+  ],
+  "endpoint_cases": [
+    {
+      "name": "package missing host ''",
+      "set": {
+        "/package/href": "https://"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package missing host '/x'",
+      "set": {
+        "/package/href": "https:///x"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package missing host '?q=1'",
+      "set": {
+        "/package/href": "https://?q=1"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package missing host '#fragment'",
+      "set": {
+        "/package/href": "https://#fragment"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package missing host ':443/x'",
+      "set": {
+        "/package/href": "https://:443/x"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package missing host 'user@/x'",
+      "set": {
+        "/package/href": "https://user@/x"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package missing host 'user@:443/x'",
+      "set": {
+        "/package/href": "https://user@:443/x"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package missing host '[]/x'",
+      "set": {
+        "/package/href": "https://[]/x"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package malformed address '[2001:db8::xyz]/x'",
+      "set": {
+        "/package/href": "https://[2001:db8::xyz]/x"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package malformed address 'host.example:bad/x'",
+      "set": {
+        "/package/href": "https://host.example:bad/x"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package malformed address 'host.example/\\n'",
+      "set": {
+        "/package/href": "https://host.example/\n"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package malformed address 'host.example/invalid%'",
+      "set": {
+        "/package/href": "https://host.example/invalid%"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package wrong scheme",
+      "set": {
+        "/package/href": "http://host.example/x"
+      },
+      "valid": false,
+      "error_field": "package.href"
+    },
+    {
+      "name": "package valid host host.example",
+      "set": {
+        "/package/href": "https://host.example"
+      },
+      "valid": true
+    },
+    {
+      "name": "package valid host host.example:8443/x?q=1",
+      "set": {
+        "/package/href": "https://host.example:8443/x?q=1"
+      },
+      "valid": true
+    },
+    {
+      "name": "package valid host 192.0.2.1:8443/x",
+      "set": {
+        "/package/href": "https://192.0.2.1:8443/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "package valid host [2001:db8::1]:8443/x",
+      "set": {
+        "/package/href": "https://[2001:db8::1]:8443/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "package valid host [::ffff:192.0.2.1]/x",
+      "set": {
+        "/package/href": "https://[::ffff:192.0.2.1]/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "issuer missing host ''",
+      "set": {
+        "/issuer/url": "https://"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer missing host '/x'",
+      "set": {
+        "/issuer/url": "https:///x"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer missing host '?q=1'",
+      "set": {
+        "/issuer/url": "https://?q=1"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer missing host '#fragment'",
+      "set": {
+        "/issuer/url": "https://#fragment"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer missing host ':443/x'",
+      "set": {
+        "/issuer/url": "https://:443/x"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer missing host 'user@/x'",
+      "set": {
+        "/issuer/url": "https://user@/x"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer missing host 'user@:443/x'",
+      "set": {
+        "/issuer/url": "https://user@:443/x"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer missing host '[]/x'",
+      "set": {
+        "/issuer/url": "https://[]/x"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer malformed address '[2001:db8::xyz]/x'",
+      "set": {
+        "/issuer/url": "https://[2001:db8::xyz]/x"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer malformed address 'host.example:bad/x'",
+      "set": {
+        "/issuer/url": "https://host.example:bad/x"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer malformed address 'host.example/\\n'",
+      "set": {
+        "/issuer/url": "https://host.example/\n"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer malformed address 'host.example/invalid%'",
+      "set": {
+        "/issuer/url": "https://host.example/invalid%"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer wrong scheme",
+      "set": {
+        "/issuer/url": "http://host.example/x"
+      },
+      "valid": false,
+      "error_field": "issuer.url"
+    },
+    {
+      "name": "issuer valid host host.example",
+      "set": {
+        "/issuer/url": "https://host.example"
+      },
+      "valid": true
+    },
+    {
+      "name": "issuer valid host host.example:8443/x?q=1",
+      "set": {
+        "/issuer/url": "https://host.example:8443/x?q=1"
+      },
+      "valid": true
+    },
+    {
+      "name": "issuer valid host 192.0.2.1:8443/x",
+      "set": {
+        "/issuer/url": "https://192.0.2.1:8443/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "issuer valid host [2001:db8::1]:8443/x",
+      "set": {
+        "/issuer/url": "https://[2001:db8::1]:8443/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "issuer valid host [::ffff:192.0.2.1]/x",
+      "set": {
+        "/issuer/url": "https://[::ffff:192.0.2.1]/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "signaling missing host ''",
+      "set": {
+        "/provider/signaling/0/url": "wss://"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling missing host '/x'",
+      "set": {
+        "/provider/signaling/0/url": "wss:///x"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling missing host '?q=1'",
+      "set": {
+        "/provider/signaling/0/url": "wss://?q=1"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling missing host '#fragment'",
+      "set": {
+        "/provider/signaling/0/url": "wss://#fragment"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling missing host ':443/x'",
+      "set": {
+        "/provider/signaling/0/url": "wss://:443/x"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling missing host 'user@/x'",
+      "set": {
+        "/provider/signaling/0/url": "wss://user@/x"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling missing host 'user@:443/x'",
+      "set": {
+        "/provider/signaling/0/url": "wss://user@:443/x"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling missing host '[]/x'",
+      "set": {
+        "/provider/signaling/0/url": "wss://[]/x"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling malformed address '[2001:db8::xyz]/x'",
+      "set": {
+        "/provider/signaling/0/url": "wss://[2001:db8::xyz]/x"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling malformed address 'host.example:bad/x'",
+      "set": {
+        "/provider/signaling/0/url": "wss://host.example:bad/x"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling malformed address 'host.example/\\n'",
+      "set": {
+        "/provider/signaling/0/url": "wss://host.example/\n"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling malformed address 'host.example/invalid%'",
+      "set": {
+        "/provider/signaling/0/url": "wss://host.example/invalid%"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling wrong scheme",
+      "set": {
+        "/provider/signaling/0/url": "ws://host.example/x"
+      },
+      "valid": false,
+      "error_field": "provider.signaling[0].url"
+    },
+    {
+      "name": "signaling valid host host.example",
+      "set": {
+        "/provider/signaling/0/url": "wss://host.example"
+      },
+      "valid": true
+    },
+    {
+      "name": "signaling valid host host.example:8443/x?q=1",
+      "set": {
+        "/provider/signaling/0/url": "wss://host.example:8443/x?q=1"
+      },
+      "valid": true
+    },
+    {
+      "name": "signaling valid host 192.0.2.1:8443/x",
+      "set": {
+        "/provider/signaling/0/url": "wss://192.0.2.1:8443/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "signaling valid host [2001:db8::1]:8443/x",
+      "set": {
+        "/provider/signaling/0/url": "wss://[2001:db8::1]:8443/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "signaling valid host [::ffff:192.0.2.1]/x",
+      "set": {
+        "/provider/signaling/0/url": "wss://[::ffff:192.0.2.1]/x"
+      },
+      "valid": true
+    },
+    {
+      "name": "stun malformed or missing host ''",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host ':3478'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun::3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host '/x'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:/x"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host '//host.example:3478'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun://host.example:3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host '?transport=tcp'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:?transport=tcp"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host 'user@host.example'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:user@host.example"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host '[]'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[]"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host '[2001:::1]'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[2001:::1]"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host 'host.example:bad'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:host.example:bad"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host 'host.example/path'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:host.example/path"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host 'host.example#fragment'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:host.example#fragment"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host 'host.example\\n'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:host.example\n"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun malformed or missing host 'invalid%'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:invalid%"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stun valid host host.example",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:host.example"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stun valid host 192.0.2.1:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:192.0.2.1:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stun valid host [2001:db8::1]:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[2001:db8::1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stun valid host [::1]",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[::1]"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stun valid host [::ffff:192.0.2.1]:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[::ffff:192.0.2.1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stun valid host host.example:",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:host.example:"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stun rejects query",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:host.example?transport=udp"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host ''",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host ':3478'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns::3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host '/x'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:/x"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host '//host.example:3478'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns://host.example:3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host '?transport=tcp'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:?transport=tcp"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host 'user@host.example'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:user@host.example"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host '[]'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:[]"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host '[2001:::1]'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:[2001:::1]"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host 'host.example:bad'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:host.example:bad"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host 'host.example/path'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:host.example/path"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host 'host.example#fragment'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:host.example#fragment"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host 'host.example\\n'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:host.example\n"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns malformed or missing host 'invalid%'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:invalid%"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "stuns valid host host.example",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:host.example"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stuns valid host 192.0.2.1:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:192.0.2.1:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stuns valid host [2001:db8::1]:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:[2001:db8::1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stuns valid host [::1]",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:[::1]"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stuns valid host [::ffff:192.0.2.1]:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:[::ffff:192.0.2.1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stuns valid host host.example:",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:host.example:"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "stuns rejects query",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stuns:host.example?transport=udp"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host ''",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host ':3478'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn::3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host '/x'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:/x"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host '//host.example:3478'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn://host.example:3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host '?transport=tcp'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:?transport=tcp"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host 'user@host.example'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:user@host.example"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host '[]'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:[]"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host '[2001:::1]'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:[2001:::1]"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host 'host.example:bad'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example:bad"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host 'host.example/path'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example/path"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host 'host.example#fragment'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example#fragment"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host 'host.example\\n'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example\n"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn malformed or missing host 'invalid%'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:invalid%"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn valid host host.example",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid host 192.0.2.1:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:192.0.2.1:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid host [2001:db8::1]:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:[2001:db8::1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid host [::1]",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:[::1]"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid host [::ffff:192.0.2.1]:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:[::ffff:192.0.2.1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid host host.example:",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example:"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid transport host.example?transport=udp",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example?transport=udp"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid transport host.example:3478?transport=tcp",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example:3478?transport=tcp"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid transport [2001:db8::1]:5349?transport=tcp",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:[2001:db8::1]:5349?transport=tcp"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn valid transport host.example?transport=future-1",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example?transport=future-1"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turn invalid transport host.example?transport=",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example?transport="
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn invalid transport host.example?unknown=tcp",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example?unknown=tcp"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turn invalid transport host.example?transport=tcp&extra=1",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turn:host.example?transport=tcp&extra=1"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host ''",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host ':3478'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns::3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host '/x'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:/x"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host '//host.example:3478'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns://host.example:3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host '?transport=tcp'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:?transport=tcp"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host 'user@host.example'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:user@host.example"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host '[]'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:[]"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host '[2001:::1]'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:[2001:::1]"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host 'host.example:bad'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example:bad"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host 'host.example/path'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example/path"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host 'host.example#fragment'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example#fragment"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host 'host.example\\n'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example\n"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns malformed or missing host 'invalid%'",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:invalid%"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns valid host host.example",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid host 192.0.2.1:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:192.0.2.1:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid host [2001:db8::1]:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:[2001:db8::1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid host [::1]",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:[::1]"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid host [::ffff:192.0.2.1]:3478",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:[::ffff:192.0.2.1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid host host.example:",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example:"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid transport host.example?transport=udp",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example?transport=udp"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid transport host.example:3478?transport=tcp",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example:3478?transport=tcp"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid transport [2001:db8::1]:5349?transport=tcp",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:[2001:db8::1]:5349?transport=tcp"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns valid transport host.example?transport=future-1",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example?transport=future-1"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "turns invalid transport host.example?transport=",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example?transport="
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns invalid transport host.example?unknown=tcp",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example?unknown=tcp"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "turns invalid transport host.example?transport=tcp&extra=1",
+      "set": {
+        "/provider/ice/0/urls": [
+          "turns:host.example?transport=tcp&extra=1"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "ICE IP literal 1:2:3:4:5:6:7:8",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3:4:5:6:7:8]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal ::2:3:4:5:6:7:8",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[::2:3:4:5:6:7:8]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal 1::3:4:5:6:7:8",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1::3:4:5:6:7:8]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal 1:2::4:5:6:7:8",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2::4:5:6:7:8]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal 1:2:3::5:6:7:8",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3::5:6:7:8]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal 1:2:3:4::6:7:8",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3:4::6:7:8]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal 1:2:3:4:5::7:8",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3:4:5::7:8]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal 1:2:3:4:5:6::8",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3:4:5:6::8]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal 1:2:3:4:5:6:7::",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3:4:5:6:7::]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal ::",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[::]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal 1:2:3:4:5:6:192.0.2.1",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3:4:5:6:192.0.2.1]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE IP literal v1.example",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[v1.example]:3478"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "ICE invalid IP literal 1:2:3:4:5:6:7",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3:4:5:6:7]:3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "ICE invalid IP literal 1:2:3:4:5:6:7:8:9",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[1:2:3:4:5:6:7:8:9]:3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "ICE invalid IP literal ::ffff:192.0.2.999",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[::ffff:192.0.2.999]:3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "ICE invalid IP literal ::ffff:192.0.2.01",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:[::ffff:192.0.2.01]:3478"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "ICE wrong scheme",
+      "set": {
+        "/provider/ice/0/urls": [
+          "https://host.example"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[0]"
+    },
+    {
+      "name": "ICE empty URL list",
+      "set": {
+        "/provider/ice/0/urls": []
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls"
+    },
+    {
+      "name": "ICE second URL missing host",
+      "set": {
+        "/provider/ice/0/urls": [
+          "stun:host.example:3478",
+          "turn:"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[0].urls[1]"
+    },
+    {
+      "name": "ICE second endpoint missing host",
+      "set": {
+        "/provider/ice/1/urls": [
+          "turns:"
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.ice[1].urls[0]"
+    },
+    {
+      "name": "second signaling endpoint missing host",
+      "set": {
+        "/provider/signaling": [
+          {
+            "url": "wss://signal.provider.example/ws",
+            "priority": 10,
+            "control_plane_id": "provider.example/v1",
+            "ticket_audience": "signal-a",
+            "x-extension": {
+              "enabled": true
+            }
+          },
+          {
+            "url": "wss://",
+            "priority": 10,
+            "control_plane_id": "provider.example/v1",
+            "ticket_audience": "signal-a",
+            "x-extension": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "valid": false,
+      "error_field": "provider.signaling[1].url"
+    }
   ]
 }

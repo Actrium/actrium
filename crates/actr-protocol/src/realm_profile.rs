@@ -12,6 +12,7 @@ use crate::uri::ActrUri;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use fluent_uri::{Uri, UriRef};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -84,9 +85,8 @@ pub struct RealmPackage {
 impl RealmPackage {
     /// Check `href`, `sha256` and `type`.
     pub fn check(&self) -> Result<(), String> {
-        if !self.href.starts_with("https://") {
-            return Err(format!("package.href '{}' is not HTTPS", self.href));
-        }
+        check_endpoint_url(&self.href, "https")
+            .map_err(|error| format!("package.href: {error}"))?;
         if self.sha256.len() != 64
             || !self
                 .sha256
@@ -104,6 +104,52 @@ impl RealmPackage {
         crate::ActrType::from_program_identity(&self.r#type)
             .map_err(|error| format!("package.type: {error}"))
     }
+}
+
+// Parse the original RFC 3986 URI without repairing missing authorities (for
+// example, treating https:///path as https://path would accept an empty host).
+fn check_endpoint_url(value: &str, scheme: &str) -> Result<(), String> {
+    let uri = Uri::parse(value).map_err(|error| format!("invalid URI: {error}"))?;
+    if uri.scheme().as_str() != scheme || uri.authority().is_none_or(|auth| auth.host().is_empty())
+    {
+        return Err(format!("must be a {scheme} URI with a nonempty host"));
+    }
+    Ok(())
+}
+
+fn check_ice_uri(value: &str) -> Result<(), String> {
+    let invalid = || "must be a STUN/TURN URI with a nonempty host".to_string();
+    let (scheme, address) = value.split_once(':').ok_or_else(invalid)?;
+    if !matches!(scheme, "stun" | "stuns" | "turn" | "turns") {
+        return Err(invalid());
+    }
+    // RFC 7064/7065 use scheme:host[:port], not scheme://authority/path.
+    // Parse only their shared RFC 3986 host/port components as an authority;
+    // this also validates bracketed IPv6, which is not a generic URI path.
+    let reference = format!("//{address}");
+    let uri = UriRef::parse(reference.as_str()).map_err(|_| invalid())?;
+    let auth = uri.authority().ok_or_else(invalid)?;
+    let valid_query = uri.query().is_none_or(|query| {
+        matches!(scheme, "turn" | "turns")
+            && query
+                .as_str()
+                .strip_prefix("transport=")
+                .is_some_and(|transport| {
+                    !transport.is_empty()
+                        && transport
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"-._~".contains(&b))
+                })
+    });
+    if auth.host().is_empty()
+        || auth.has_userinfo()
+        || !uri.path().is_empty()
+        || uri.has_fragment()
+        || !valid_query
+    {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -303,6 +349,21 @@ impl RealmProfile {
             (None, RealmStatus::Active) => return Err("active Realm has no package".into()),
             (Some(package), _) => package.check()?,
             (None, RealmStatus::Retired) => {}
+        }
+        check_endpoint_url(&self.issuer.url, "https")
+            .map_err(|error| format!("issuer.url: {error}"))?;
+        for (index, endpoint) in self.provider.signaling.iter().enumerate() {
+            check_endpoint_url(&endpoint.url, "wss")
+                .map_err(|error| format!("provider.signaling[{index}].url: {error}"))?;
+        }
+        for (index, endpoint) in self.provider.ice.iter().enumerate() {
+            if endpoint.urls.is_empty() {
+                return Err(format!("provider.ice[{index}].urls must not be empty"));
+            }
+            for (url_index, url) in endpoint.urls.iter().enumerate() {
+                check_ice_uri(url)
+                    .map_err(|error| format!("provider.ice[{index}].urls[{url_index}]: {error}"))?;
+            }
         }
         let provider = ActrUri::from_domain(&self.provider.id)
             .map_err(|error| format!("provider.id: {error}"))?;

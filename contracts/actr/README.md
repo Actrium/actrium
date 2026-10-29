@@ -21,6 +21,14 @@ Actor-type semantics, unique UInt32 issuer key IDs, decoded key/signature validi
 and historical key-ID reuse are not fully expressible in this schema. A valid
 schema result must never bypass the protocol verifier. HTTPS/WSS and ICE URI
 constraints describe the public network contract, not insecure test transports.
+Every endpoint must have a nonempty host. ICE addresses follow
+[RFC 7064](https://www.rfc-editor.org/rfc/rfc7064) and
+[RFC 7065](https://www.rfc-editor.org/rfc/rfc7065), including bracketed IPv6
+hosts and TURN transport queries. They do not use `//`, userinfo, paths or
+fragments. Their scheme-specific schema deliberately does not use generic
+`format: uri`, which would reject bracketed IPv6 outside a URI authority.
+The protocol verifier checks these endpoint constraints even when callers
+do not run the JSON Schema validator.
 
 [`test-vectors/realm-profile.json`](test-vectors/realm-profile.json) is a shared
 fixture for implementations in any language:
@@ -40,6 +48,12 @@ fixture for implementations in any language:
 - `schema_cases` starts from a named Profile and applies JSON Pointer object/array
   replacements in `set`, then object-member removals in `remove`. These unsigned
   mutations only test schema expectations (`valid`), not signature acceptance.
+- `endpoint_cases` applies `set` replacements to the active Profile and checks
+  the same `valid` expectation in the schema and protocol verifier. The Rust
+  suite re-signs each document with a fresh, separately accepted test key, so
+  malformed endpoints are rejected even with a valid signature. Negative cases
+  also name the expected `error_field`. Positive cases cover DNS, IPv4, IPv6,
+  optional ports and TURN transport queries.
 
 Run the schema and interoperability tests with:
 

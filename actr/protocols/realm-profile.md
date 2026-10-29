@@ -175,6 +175,16 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 
 When `realm.status` is `active`, the Realm Profile **MUST** include `package`.
 
+Every endpoint **MUST** contain a nonempty host. `package.href` and `issuer.url`
+**MUST** use HTTPS; `provider.signaling[].url` **MUST** use WSS. Each
+`provider.ice[].urls` list **MUST** be nonempty and contain STUN/TURN addresses
+following [RFC 7064](https://www.rfc-editor.org/rfc/rfc7064) or
+[RFC 7065](https://www.rfc-editor.org/rfc/rfc7065): `scheme:host[:port]`, with
+brackets around IP literals and an optional `?transport=...` only for TURN.
+ICE addresses **MUST NOT** contain `//`, userinfo, a path or a fragment.
+Consumers **MUST** reject malformed endpoints even when the Profile signature
+is valid.
+
 A Realm Profile **MUST NOT** contain secrets, private keys, access tokens,
 member lists, or user-specific data. Actr Hosts **MUST** ignore unknown
 members.

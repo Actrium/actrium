@@ -3,7 +3,10 @@
 
 use actr_protocol::realm_profile::{RealmProfile, jcs};
 use actr_protocol::{KeyPinOutcome, RealmSigningKeys};
-use serde_json::Value;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use ed25519_dalek::{Signer, SigningKey};
+use serde_json::{Value, json};
 
 fn vectors() -> Value {
     serde_json::from_str(include_str!(
@@ -124,6 +127,60 @@ fn schema_rejects_malformed_shapes_but_allows_extensions() {
             "{name}: {:?}",
             schema.iter_errors(&document).collect::<Vec<_>>()
         );
+    }
+}
+
+#[test]
+fn endpoint_vectors_match_schema_and_signed_verification() {
+    let vectors = vectors();
+    let schema = schema();
+    // Sign each mutation with a fresh, separately accepted key so rejection
+    // cannot be attributed to tampering with a published fixture's signature.
+    let signer = SigningKey::from_bytes(&rand::random());
+    let resign = |document: &mut Value, key_id: &str| {
+        document.as_object_mut().unwrap().remove("signature");
+        let signature = signer.sign(jcs(document).as_bytes());
+        document["signature"] = json!({
+            "key_id": key_id,
+            "algorithm": "Ed25519",
+            "value": BASE64.encode(signature.to_bytes()),
+        });
+    };
+    let mut key_document = vectors["key_sets"]["initial"]["document"].clone();
+    let key_id = key_document["keys"][0]["id"].as_str().unwrap().to_owned();
+    key_document["keys"][0]["public_key"] = json!(BASE64.encode(signer.verifying_key().to_bytes()));
+    resign(&mut key_document, &key_id);
+    let (keys, _) = RealmSigningKeys::accept(&key_document, None).unwrap();
+
+    for case in vectors["endpoint_cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let valid = case["valid"].as_bool().unwrap();
+        let mut document = vectors["profiles"]["active"]["document"].clone();
+        for (pointer, value) in case["set"].as_object().unwrap() {
+            *document.pointer_mut(pointer).expect("existing endpoint") = value.clone();
+        }
+        assert_eq!(
+            schema.is_valid(&document),
+            valid,
+            "{name}: {:?}",
+            schema.iter_errors(&document).collect::<Vec<_>>()
+        );
+        resign(&mut document, &key_id);
+        let result = RealmProfile::verify(
+            &serde_json::to_vec(&document).unwrap(),
+            vectors["realm"].as_str().unwrap(),
+            &keys,
+        );
+        assert_eq!(result.is_ok(), valid, "{name}: {result:?}");
+        if let Err(error) = result {
+            assert_eq!(error.code(), "REALM_PROFILE_INVALID", "{name}: {error}");
+            assert!(
+                error
+                    .to_string()
+                    .contains(case["error_field"].as_str().unwrap()),
+                "{name}: {error}"
+            );
+        }
     }
 }
 

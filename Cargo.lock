@@ -352,6 +352,7 @@ dependencies = [
  "bytes",
  "chrono",
  "ed25519-dalek",
+ "fluent-uri",
  "glob",
  "hex",
  "idna",

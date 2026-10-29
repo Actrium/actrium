@@ -28,6 +28,7 @@ serde_json = { workspace = true, features = ["float_roundtrip"] }
 base64 = { workspace = true }
 hex = { workspace = true }
 idna = "1.1"
+fluent-uri = "0.4.1"
 ed25519-dalek = { workspace = true }
 sha2 = { workspace = true }
 
