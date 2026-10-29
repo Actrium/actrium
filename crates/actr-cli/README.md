@@ -75,6 +75,17 @@ Select the key when opening the bundled page. Host-side
 key material is not included in `/actr-runtime-config.json` or uploaded to the
 local static server. Package verification still uses public trust anchors.
 
+### Pinned Realm trust
+
+`actr realm join` does not re-trust a domain's keys on every run. It pins the
+accepted `realm_signing_keys` and the accepted Realm Profile under
+`~/.actr/realms/<domain>.json` (owner-only). A later join accepts the domain's
+keys only under those pins: a sequence rollback, a same-sequence content
+change, or an un-chained signing key is refused (FR-NET-015, AC-021). When the
+Realm operator confirmed a key change out of band, confirm it locally with
+`actr realm trust <domain>`; drop the pins with
+`actr realm trust <domain> --reset`.
+
 ## Organization principles
 
 These rules govern where a new command lives. Add commands that fit; if a new

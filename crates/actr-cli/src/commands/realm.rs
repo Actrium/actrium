@@ -35,6 +35,7 @@ use super::realm_members::{
     self, InviteArgs, InviteIdArgs, JoinArgs, KeyArgs, MemberArgs, RevokeClientArgs, SetRoleArgs,
     TransferOwnerArgs,
 };
+use super::realm_pins::{self, TrustArgs};
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
 
 #[derive(Args, Debug)]
@@ -85,6 +86,10 @@ pub enum RealmCommand {
     TransferOwner(TransferOwnerArgs),
     /// Leave the Realm; revokes all your clients.
     Leave(KeyArgs),
+    /// Confirm a Realm domain's pinned signing keys, accept an identity
+    /// change after verifying it out of band, or drop the pinned trust
+    /// (`--reset`). `join` pins and enforces this trust (FR-NET-015).
+    Trust(TrustArgs),
 }
 
 #[derive(Args, Debug)]
@@ -273,6 +278,7 @@ impl Command for RealmArgs {
             RealmCommand::SetRole(args) => realm_members::set_role(args).await?,
             RealmCommand::TransferOwner(args) => realm_members::transfer_owner(args).await?,
             RealmCommand::Leave(args) => realm_members::leave(args).await?,
+            RealmCommand::Trust(args) => realm_pins::trust(args).await?,
         };
         Ok(CommandResult::Success(serde_json::to_string_pretty(
             &output,
