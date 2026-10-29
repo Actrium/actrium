@@ -50,6 +50,7 @@ struct ActrixHarness {
     #[allow(dead_code)]
     tmp: tempfile::TempDir,
     port: u16,
+    tls: bool,
     /// Dedicated Signer gRPC listener port (SGN-02).
     signer_port: u16,
     log_path: PathBuf,
@@ -64,9 +65,36 @@ impl ActrixHarness {
     }
 
     async fn start_with_login_limits(token_ttl: u64, limits: Option<&str>) -> Self {
+        Self::start_with_transport(token_ttl, limits, false).await
+    }
+
+    async fn start_tls(token_ttl: u64) -> Self {
+        Self::start_with_transport(token_ttl, None, true).await
+    }
+
+    async fn start_with_transport(token_ttl: u64, limits: Option<&str>, tls: bool) -> Self {
         let tmp = tempfile::tempdir().expect("temp dir");
         let port = choose_port();
         let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, token_ttl);
+        if tls {
+            let (cert, key, _) = test_tls();
+            let cert_path = tmp.path().join("tls-cert.pem");
+            let key_path = tmp.path().join("tls-key.pem");
+            fs::write(&cert_path, cert).unwrap();
+            fs::write(&key_path, key).unwrap();
+            let mut config: toml::Value =
+                fs::read_to_string(&config_path).unwrap().parse().unwrap();
+            let http = config["bind"]["http"].as_table_mut().unwrap();
+            http.insert(
+                "cert".into(),
+                toml::Value::String(cert_path.display().to_string()),
+            );
+            http.insert(
+                "key".into(),
+                toml::Value::String(key_path.display().to_string()),
+            );
+            fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
+        }
         if let Some(limits) = limits {
             let mut file = fs::OpenOptions::new()
                 .append(true)
@@ -79,7 +107,8 @@ impl ActrixHarness {
         ensure_realm(&data_dir, TEST_REALM).await;
         let mut child = spawn_actrix(&config_path, &log_path);
 
-        let base = format!("http://127.0.0.1:{port}");
+        let scheme = if tls { "https" } else { "http" };
+        let base = format!("{scheme}://127.0.0.1:{port}");
         wait_for_signer_ready(
             &format!("http://127.0.0.1:{signer_port}"),
             &mut child,
@@ -93,6 +122,7 @@ impl ActrixHarness {
         Self {
             tmp,
             port,
+            tls,
             signer_port,
             log_path,
             data_dir,
@@ -101,7 +131,8 @@ impl ActrixHarness {
     }
 
     fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
+        let scheme = if self.tls { "https" } else { "http" };
+        format!("{scheme}://127.0.0.1:{}", self.port)
     }
 
     fn log_path(&self) -> &Path {
@@ -112,6 +143,28 @@ impl ActrixHarness {
     fn shutdown(self) {
         graceful_shutdown(self.child);
     }
+}
+
+// Disposable test certificates are trusted only by this integration binary.
+fn test_tls() -> &'static (String, String, Vec<u8>) {
+    static TLS: std::sync::OnceLock<(String, String, Vec<u8>)> = std::sync::OnceLock::new();
+    TLS.get_or_init(|| {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let tls = rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()])
+            .unwrap();
+        (
+            tls.cert.pem(),
+            tls.signing_key.serialize_pem(),
+            tls.cert.der().to_vec(),
+        )
+    })
+}
+
+fn test_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .add_root_certificate(reqwest::Certificate::from_der(&test_tls().2).unwrap())
+        .build()
+        .unwrap()
 }
 
 #[cfg(test)]
@@ -527,7 +580,7 @@ async fn membership(
     request: actr_protocol::realm_membership::MembershipRequest,
     label: &str,
 ) -> (reqwest::StatusCode, Value) {
-    let response = reqwest::Client::new()
+    let response = test_http_client()
         .post(format!("{base}/issuer/membership"))
         .json(&request.sign(&client_key(label)))
         .send()
@@ -642,7 +695,7 @@ async fn issuer_register_result(
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         signing_public_key: None,
     };
-    let client = reqwest::Client::new();
+    let client = test_http_client();
     let register_url = format!("{base_url}/issuer/register");
     let body = register_req.encode_to_vec();
     let mut req = client
@@ -701,6 +754,41 @@ async fn connect_ws_authenticated(
     let request = authenticated_ws_request(port, ok);
     let (ws_stream, _) = connect_async(request).await.expect("ws connect");
     ws_stream.split()
+}
+
+async fn connect_wss(
+    port: u16,
+    ok: &register_response::RegisterOk,
+) -> Result<WsStream, tokio_tungstenite::tungstenite::Error> {
+    let mut request = authenticated_ws_request(port, ok);
+    *request.uri_mut() = request
+        .uri()
+        .to_string()
+        .replacen("ws://", "wss://", 1)
+        .parse()
+        .unwrap();
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(test_tls().2.clone().into()).unwrap();
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    tokio_tungstenite::connect_async_tls_with_config(
+        request,
+        None,
+        false,
+        Some(tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(
+            config,
+        ))),
+    )
+    .await
+    .map(|(stream, _)| stream)
+}
+
+async fn connect_wss_authenticated(
+    port: u16,
+    ok: &register_response::RegisterOk,
+) -> (WsWrite, WsRead) {
+    connect_wss(port, ok).await.expect("wss connect").split()
 }
 
 /// Unauthenticated raw WS connection (expected to be rejected — negative test only)
@@ -967,7 +1055,7 @@ fn make_service_spec(
 }
 
 async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
-    let client = reqwest::Client::new();
+    let client = test_http_client();
     let start = Instant::now();
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
@@ -1604,8 +1692,8 @@ async fn authority_descriptor_publishes_signed_realm_signing_keys() {
 async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
     use actr_protocol::realm_profile::{RealmProfile, RealmStatus};
 
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    let client = reqwest::Client::new();
+    let harness = ActrixHarness::start_tls(DEFAULT_TOKEN_TTL).await;
+    let client = test_http_client();
     let base = harness.base_url();
     let name = "k7m2q9xh@localhost";
     let public_url = format!("{base}/actr/realms/localhost/k7m2q9xh");
@@ -1677,6 +1765,14 @@ async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
     assert_eq!(first.sequence, 1);
     assert_eq!(first.realm.display_name, "Notes");
     assert_eq!(first.provider.id, "localhost");
+    assert!(first.issuer.url.starts_with("https://"));
+    assert!(
+        first
+            .provider
+            .signaling
+            .iter()
+            .all(|endpoint| endpoint.url.starts_with("wss://"))
+    );
     assert_eq!(
         first.package.as_ref().expect("package").sha256,
         "ab".repeat(32)
@@ -4739,8 +4835,8 @@ fn any_realm_allow_acl(from: &str) -> Acl {
 #[tokio::test]
 #[serial]
 async fn admin_api_manages_many_realms_by_name() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    let client = reqwest::Client::new();
+    let harness = ActrixHarness::start_tls(DEFAULT_TOKEN_TTL).await;
+    let client = test_http_client();
     let base = harness.base_url();
     const MANAGED: &str = "second@localhost";
     let realm_url = format!("{base}/admin/api/realms/second%40localhost");
@@ -5220,10 +5316,10 @@ fn turn_password(key: &[u8], username: &str) -> String {
 async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
     const ALPHA: &str = "alpha@localhost";
     const BETA: &str = "beta@localhost";
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = ActrixHarness::start_tls(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
     let base = harness.base_url();
-    let client = reqwest::Client::new();
+    let client = test_http_client();
 
     let login: Value = client
         .post(format!("{base}/admin/api/auth/login"))
@@ -5286,15 +5382,15 @@ async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
     for (ok, other_realm) in [(&alpha_client, BETA), (&beta_client, ALPHA)] {
         let mut replayed = ok.clone();
         replayed.actr_id.realm = other_realm.to_string();
-        let result = connect_async(authenticated_ws_request(port, &replayed)).await;
+        let result = connect_wss(port, &replayed).await;
         assert!(
             result.is_err(),
             "a credential of one Realm must not open a connection in another"
         );
     }
 
-    let (mut alpha_w, mut alpha_r) = connect_ws_authenticated(port, &alpha_client).await;
-    let (mut beta_w, mut beta_r) = connect_ws_authenticated(port, &beta_client).await;
+    let (mut alpha_w, mut alpha_r) = connect_wss_authenticated(port, &alpha_client).await;
+    let (mut beta_w, mut beta_r) = connect_wss_authenticated(port, &beta_client).await;
 
     // An envelope for the other Realm is refused on this connection, even
     // with that Realm's valid credential.
@@ -5343,8 +5439,8 @@ async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
     )
     .await;
     let _ = recv_envelope(&mut alpha_r).await; // subscribe ack
-    let (_beta_svc_w, _beta_svc_r) = connect_ws_authenticated(port, &beta_svc).await;
-    let (_alpha_svc_w, _alpha_svc_r) = connect_ws_authenticated(port, &alpha_svc).await;
+    let (_beta_svc_w, _beta_svc_r) = connect_wss_authenticated(port, &beta_svc).await;
+    let (_alpha_svc_w, _alpha_svc_r) = connect_wss_authenticated(port, &alpha_svc).await;
     let up = tokio::time::timeout(Duration::from_secs(8), async {
         loop {
             if let Some(signaling_envelope::Flow::ServerToActr(server_msg)) =

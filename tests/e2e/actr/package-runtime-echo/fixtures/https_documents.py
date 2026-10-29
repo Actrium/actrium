@@ -34,7 +34,7 @@ def certificates(directory):
         "extendedKeyUsage=serverAuth\n"
         "subjectKeyIdentifier=hash\n"
         "authorityKeyIdentifier=keyid,issuer\n"
-        "subjectAltName=" + ",".join("DNS:" + host for host in HOSTS) + "\n"
+        "subjectAltName=" + ",".join("DNS:" + host for host in HOSTS) + ",IP:127.0.0.1\n"
     )
     commands = [
         ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",

@@ -89,6 +89,14 @@ restart and live Actor revocation; CI retains the default full runtime matrix.
 its separate dynamic signed-document fixture (`MODE=rotation` defaults to
 `REALM_HTTPS=0`), because it intentionally edits Registry key states directly.
 
+Every formal Realm scenario, including the map-only diagnostic mode, runs its
+Issuer and signaling endpoints over HTTPS/WSS to satisfy the signed Realm
+Profile contract. Each run generates a separate disposable server certificate
+and CA under `actrix-tls/`. `SSL_CERT_FILE` adds that CA to a copy of the system
+roots for the CLI and isolated Host processes; `CURL_CA_BUNDLE` configures curl.
+Certificate and hostname verification remain enabled, and system trust is not
+modified. Legacy scenarios without a Realm Profile retain HTTP/WS.
+
 Both paths resolve and verify the Profile before redeeming owner/editor invites,
 use independent Realm client keys, run the real Issuer, signaling and Host Echo
 round-trip, repeat the round-trip after restarting the Service Host, remove the
@@ -156,8 +164,7 @@ explicit CLI lib-test entry point `realm_runtime_join_fixture` use real reqwest
 HTTPS requests with the isolated test CA/tunnel. The entry point runs the
 production Profile resolver and join implementation without `--issuer`, plus
 package verification before joining. Membership and the Loran runtime control
-plane still use the test server's HTTP/WS endpoints. This is not a production
-deployment or an assertion that public control-plane endpoints may be plaintext.
+plane use the test server's HTTPS/WSS endpoints with the run's disposable CA.
 Signatures, domain binding, membership handlers and client proofs are not
 stubbed. Production executables have no test CA, tunnel or document-map override.
 
