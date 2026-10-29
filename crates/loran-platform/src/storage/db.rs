@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 9;
+const LORAN_SCHEMA_VERSION: i64 = 10;
 
 /// Database manager
 #[derive(Clone)]
@@ -367,6 +367,37 @@ impl Database {
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_issued_actor_identity_client_key
              ON issued_actor_identity(realm, client_key_id)",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Service instance ACL (FR-SEC-013): which Realm members may attach
+        // to a Service Actor, granted by the Service's owner (the member the
+        // Actor identity was issued to). The owner is implicit — a row names
+        // a delegate, never the owner. Expiry is required: a grant without
+        // one is refused at the Issuer.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS service_acl (
+                realm TEXT NOT NULL,
+                serial_number INTEGER NOT NULL,
+                member_id TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('editor', 'viewer')),
+                granted_by TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                revoked_at INTEGER,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(realm, serial_number, member_id),
+                FOREIGN KEY(realm, serial_number)
+                    REFERENCES issued_actor_identity(realm, serial_number)
+                    ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_service_acl_member
+             ON service_acl(realm, member_id)",
         )
         .execute(&mut *tx)
         .await?;

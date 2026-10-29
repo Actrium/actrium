@@ -203,6 +203,12 @@ pub enum MembershipOp {
     TransferOwner,
     Leave,
     UpdateRealm,
+    /// `service_acl_grant`: give a Realm member a role on one Service Actor.
+    ServiceAclGrant,
+    /// `service_acl_revoke`: remove a member's role on one Service Actor.
+    ServiceAclRevoke,
+    /// `service_acl_list`: the Service Actor's ACL entries (its owner).
+    ServiceAclList,
 }
 
 /// A membership request (section 4).
@@ -249,6 +255,14 @@ pub struct MembershipRequest {
     /// `update_realm`: only `retired`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// `service_acl_grant`, `service_acl_revoke`, `service_acl_list`: the
+    /// Service Actor, the serial of this Realm's issued identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_serial: Option<u64>,
+    /// `service_acl_grant`: RFC 3339, when the grant ends. Required: a grant
+    /// without an expiry is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_expires_at: Option<String>,
     pub nonce: String,
     /// RFC 3339.
     pub issued_at: String,
@@ -353,6 +367,8 @@ impl MembershipRequest {
             package: None,
             display_name: None,
             status: None,
+            service_serial: None,
+            grant_expires_at: None,
             nonce: nonce.to_string(),
             issued_at: rfc3339(now),
             expires_at: rfc3339(

@@ -1585,12 +1585,20 @@ async fn handle_actr_to_server(
                 client_id,
                 server,
                 request_envelope_id,
+                &claims.member,
             )
             .await?;
         }
         Some(actr_to_signaling::Payload::GetServiceSpecRequest(req)) => {
-            handle_get_service_spec_request(source, req, client_id, server, request_envelope_id)
-                .await?;
+            handle_get_service_spec_request(
+                source,
+                req,
+                client_id,
+                server,
+                request_envelope_id,
+                &claims.member,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::SubscribeActrUpRequest(req)) => {
             handle_subscribe_actr_up(
@@ -2754,6 +2762,7 @@ async fn handle_route_candidates_request(
     client_id: &str,
     server: &SignalingServerHandle,
     request_envelope_id: &str,
+    caller_member: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "🎯 Processing RouteCandidates request from Actor {}: target_type={}/{}",
@@ -2847,6 +2856,39 @@ async fn handle_route_candidates_request(
         acl_filtered_candidates.len()
     );
 
+    // Service instance ACL (FR-SEC-013): Realm membership alone is not
+    // instance access. A candidate issued by this Provider is reachable only
+    // by its owner or a member with a live grant; the check reads the store,
+    // so a revocation is live from the next request. A check error denies
+    // the candidate: fail closed.
+    let mut service_acl_candidates = Vec::new();
+    for candidate in acl_filtered_candidates {
+        match platform::realm::service_acl::service_attachee_allowed(
+            &candidate.actor_id,
+            caller_member,
+        )
+        .await
+        {
+            Ok(true) => service_acl_candidates.push(candidate),
+            Ok(false) => {
+                platform::recording::debug!(
+                    "Service ACL denied: member {} cannot attach to {}",
+                    caller_member,
+                    candidate.actor_id.to_string_repr(),
+                );
+            }
+            Err(error) => {
+                platform::recording::warn!(
+                    "Service ACL check failed for {} (member {}): {}",
+                    candidate.actor_id.to_string_repr(),
+                    caller_member,
+                    error,
+                );
+            }
+        }
+    }
+    let acl_filtered_candidates = service_acl_candidates;
+
     // Extract client location from request (if provided)
     let client_location = req.client_location.as_ref().and_then(|loc| {
         if let (Some(lat), Some(lon)) = (loc.latitude, loc.longitude) {
@@ -2928,6 +2970,7 @@ async fn handle_get_service_spec_request(
     client_id: &str,
     server: &SignalingServerHandle,
     request_envelope_id: &str,
+    caller_member: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let service_name = req.name.as_str();
     platform::recording::info!(
@@ -2937,21 +2980,55 @@ async fn handle_get_service_spec_request(
     );
 
     // Find matching ServiceSpec in ActorRegistry by spec name, only among
-    // services of the requester's own Realm.
-    let result = server
+    // services of the requester's own Realm, and only services the caller's
+    // member may attach to (FR-SEC-013; same rule as route candidates). A
+    // failed check denies that service: fail closed.
+    let matches: Vec<(ActrId, actr_protocol::ServiceSpec)> = server
         .actor_registry
         .read()
         .await
         .discover_by_spec_name(&source.realm, service_name)
         .into_iter()
-        .find_map(|service| service.service_spec.clone())
-        .map(actr_protocol::get_service_spec_response::Result::Success)
-        .unwrap_or_else(|| {
-            actr_protocol::get_service_spec_response::Result::Error(ErrorResponse {
-                code: 404,
-                message: format!("Service specification not found for name={service_name}"),
-            })
-        });
+        .filter_map(|service| {
+            service
+                .service_spec
+                .clone()
+                .map(|spec| (service.actor_id.clone(), spec))
+        })
+        .collect();
+    let mut result = None;
+    for (actor_id, spec) in &matches {
+        match platform::realm::service_acl::service_attachee_allowed(actor_id, caller_member).await
+        {
+            Ok(true) => {
+                result = Some(actr_protocol::get_service_spec_response::Result::Success(
+                    spec.clone(),
+                ));
+                break;
+            }
+            Ok(false) => {
+                platform::recording::debug!(
+                    "Service ACL denied spec: member {} cannot attach to {}",
+                    caller_member,
+                    actor_id.to_string_repr(),
+                );
+            }
+            Err(error) => {
+                platform::recording::warn!(
+                    "Service ACL check failed for {} (member {}): {}",
+                    actor_id.to_string_repr(),
+                    caller_member,
+                    error,
+                );
+            }
+        }
+    }
+    let result = result.unwrap_or_else(|| {
+        actr_protocol::get_service_spec_response::Result::Error(ErrorResponse {
+            code: 404,
+            message: format!("Service specification not found for name={service_name}"),
+        })
+    });
 
     let response = actr_protocol::GetServiceSpecResponse {
         result: Some(result),
@@ -4247,6 +4324,7 @@ mod tests {
                     "lookup-source",
                     &server,
                     "lookup-request",
+                    "test-member",
                 )
                 .await
                 .unwrap();
@@ -4268,6 +4346,111 @@ mod tests {
                 );
                 assert_eq!(ok.ws_address_map.len(), ok.candidates.len());
             }
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn route_candidates_enforce_the_service_instance_acl() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 950, "acl-lookup").await;
+            let candidate = connect(&server, 5000, "acl-guarded").await;
+            register(&server, &candidate.id, worker()).await;
+
+            // The candidate is a Service Actor whose identity was issued to
+            // "owner-member". The default test credential claims "member-1",
+            // which has no grant: the candidate is filtered out. Actors with
+            // no issued identity stay reachable (enforce what is known).
+            let pool = platform::storage::db::get_database().get_pool();
+            sqlx::query(
+                "INSERT INTO issued_actor_identity
+                     (realm, serial_number, actor_type, member_id, client_key_id,
+                      issued_at)
+                 VALUES (?, ?, 'acme.com/worker@1.0.0', 'owner-member',
+                         '0000000000000000', ?)",
+            )
+            .bind(REALM)
+            .bind(candidate.id.serial_number as i64)
+            .bind(now() as i64)
+            .execute(pool)
+            .await
+            .unwrap();
+            let unguarded = connect(&server, 5001, "acl-unguarded").await;
+            register(&server, &unguarded.id, worker()).await;
+
+            // The stranger sees only the unguarded Actor; the owner sees both.
+            let seen = lookup_candidates(&server, &mut source, "member-1", "acl-lookup").await;
+            assert_eq!(seen, vec![unguarded.id.clone()]);
+            let seen = lookup_candidates(&server, &mut source, "owner-member", "acl-lookup").await;
+            assert_eq!(seen.len(), 2);
+
+            // A grant opens the Service, a revocation closes it again — from
+            // the very next request, no broadcast involved.
+            sqlx::query(
+                "INSERT INTO service_acl
+                     (realm, serial_number, member_id, role, granted_by,
+                      expires_at, created_at)
+                 VALUES (?, ?, 'member-1', 'editor', 'owner-key',
+                         ?, ?)",
+            )
+            .bind(REALM)
+            .bind(candidate.id.serial_number as i64)
+            .bind((now() + 3600) as i64)
+            .bind(now() as i64)
+            .execute(pool)
+            .await
+            .unwrap();
+            let seen = lookup_candidates(&server, &mut source, "member-1", "acl-lookup").await;
+            assert_eq!(seen.len(), 2);
+            sqlx::query(
+                "UPDATE service_acl SET revoked_at = ?
+                 WHERE realm = ? AND serial_number = ? AND member_id = 'member-1'",
+            )
+            .bind(now() as i64)
+            .bind(REALM)
+            .bind(candidate.id.serial_number as i64)
+            .execute(pool)
+            .await
+            .unwrap();
+            let seen = lookup_candidates(&server, &mut source, "member-1", "acl-lookup").await;
+            assert_eq!(seen, vec![unguarded.id.clone()]);
+        }
+
+        /// `handle_route_candidates_request` against the fixture, returning
+        /// the candidate Actor ids of the reply.
+        async fn lookup_candidates(
+            server: &SignalingServerHandle,
+            source: &mut Peer,
+            caller_member: &str,
+            client_id: &str,
+        ) -> Vec<ActrId> {
+            handle_route_candidates_request(
+                source.id.clone(),
+                &edge(),
+                actr_protocol::RouteCandidatesRequest {
+                    target_type: worker(),
+                    ..Default::default()
+                },
+                client_id,
+                server,
+                "acl-request",
+                caller_member,
+            )
+            .await
+            .unwrap();
+            let Some(signaling_envelope::Flow::ServerToActr(SignalingToActr {
+                payload: Some(signaling_to_actr::Payload::RouteCandidatesResponse(response)),
+                ..
+            })) = next_flow(source)
+            else {
+                panic!("missing response")
+            };
+            let Some(actr_protocol::route_candidates_response::Result::Success(ok)) =
+                response.result
+            else {
+                panic!("lookup failed")
+            };
+            ok.candidates
         }
 
         fn credential(actor: &ActrId, actor_type: ActrType) -> AIdCredential {

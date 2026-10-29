@@ -14,7 +14,7 @@ use actr_protocol::{AuthorityDescriptor, RealmSigningKeys};
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use clap::Args;
+use clap::{Args, Subcommand};
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
 use std::future::Future;
@@ -582,6 +582,93 @@ pub async fn transfer_owner(args: &TransferOwnerArgs) -> Result<Value> {
 pub async fn leave(args: &KeyArgs) -> Result<Value> {
     let member = Member::load(args)?;
     member.send(member.request(MembershipOp::Leave)).await
+}
+
+#[derive(Args, Debug)]
+pub struct ServiceAclArgs {
+    #[command(subcommand)]
+    pub command: ServiceAclCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ServiceAclCommand {
+    /// Give a member a role on a Service Actor (the Service's owner only)
+    Grant(ServiceAclGrantArgs),
+    /// Remove a member's grant on a Service Actor (the Service's owner only)
+    Revoke(ServiceAclRevokeArgs),
+    /// List a Service Actor's grants (the Service's owner only)
+    List(ServiceAclListArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ServiceAclGrantArgs {
+    #[command(flatten)]
+    pub key: KeyArgs,
+    /// The Service Actor: the serial of its identity in the key file's Realm
+    #[arg(long, value_name = "SERIAL")]
+    pub service: u64,
+    /// The member to grant
+    #[arg(long, value_name = "MEMBER_ID")]
+    pub member: String,
+    #[arg(long, value_name = "ROLE", value_parser = parse_role)]
+    pub role: Role,
+    /// Days the grant stays valid (1 to 366)
+    #[arg(long, value_name = "DAYS", conflicts_with = "expires_at")]
+    pub days: Option<u32>,
+    /// RFC 3339 expiry of the grant, instead of --days
+    #[arg(long, value_name = "TIME", conflicts_with = "days")]
+    pub expires_at: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct ServiceAclRevokeArgs {
+    #[command(flatten)]
+    pub key: KeyArgs,
+    #[arg(long, value_name = "SERIAL")]
+    pub service: u64,
+    #[arg(long, value_name = "MEMBER_ID")]
+    pub member: String,
+}
+
+#[derive(Args, Debug)]
+pub struct ServiceAclListArgs {
+    #[command(flatten)]
+    pub key: KeyArgs,
+    #[arg(long, value_name = "SERIAL")]
+    pub service: u64,
+}
+
+pub async fn service_acl(command: &ServiceAclCommand) -> Result<Value> {
+    match command {
+        ServiceAclCommand::Grant(args) => {
+            let member = Member::load(&args.key)?;
+            let expires_at = match (&args.days, &args.expires_at) {
+                (Some(days), None) => (chrono::Utc::now() + chrono::Duration::days((*days).into()))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                (None, Some(expires_at)) => expires_at.clone(),
+                _ => bail!("give --days or --expires-at"),
+            };
+            let mut request = member.request(MembershipOp::ServiceAclGrant);
+            request.service_serial = Some(args.service);
+            request.member_id = Some(args.member.clone());
+            request.role = Some(args.role);
+            request.grant_expires_at = Some(expires_at);
+            member.send(request).await
+        }
+        ServiceAclCommand::Revoke(args) => {
+            let member = Member::load(&args.key)?;
+            let mut request = member.request(MembershipOp::ServiceAclRevoke);
+            request.service_serial = Some(args.service);
+            request.member_id = Some(args.member.clone());
+            member.send(request).await
+        }
+        ServiceAclCommand::List(args) => {
+            let member = Member::load(&args.key)?;
+            let mut request = member.request(MembershipOp::ServiceAclList);
+            request.service_serial = Some(args.service);
+            member.send(request).await
+        }
+    }
 }
 
 #[cfg(test)]
