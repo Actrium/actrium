@@ -15,15 +15,28 @@ fn envelope(rid: &str) -> RpcEnvelope {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(start_paused = true)]
 async fn send_request_with_type_reliable_times_out_without_response() {
-    let gate = gate();
+    let transport = Arc::new(HostTransport::new());
+    let gate = HostGate::new(transport.clone());
     let mut env = envelope("req-1");
     env.timeout_ms = 10;
-    let err = gate
-        .send_request_with_type(&ActrId::default(), PayloadType::RpcReliable, None, env)
-        .await
-        .unwrap_err();
+    let request = tokio::spawn(async move {
+        gate.send_request_with_type(&ActrId::default(), PayloadType::RpcReliable, None, env)
+            .await
+    });
+    // Delivery is uncertain only after submission, not when CI scheduling
+    // consumes the deadline before the request reaches the workload queue.
+    let submitted = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        transport.recv_reliable_raw(),
+    )
+    .await
+    .expect("request must reach the workload queue")
+    .unwrap();
+    assert_eq!(submitted.request_id, "req-1");
+    tokio::time::advance(std::time::Duration::from_millis(10)).await;
+    let err = request.await.unwrap().unwrap_err();
     assert!(
         matches!(&err, ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "req-1"),
         "got {err:?}"
