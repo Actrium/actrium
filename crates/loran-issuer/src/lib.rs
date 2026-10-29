@@ -171,7 +171,7 @@ pub async fn create_issuer_state(
     };
 
     // Create AId token issuer
-    let issuer = AIdIssuer::new(signer_client, issuer_config, cancel)
+    let issuer = AIdIssuer::new(signer_client, issuer_config, cancel.clone())
         .await
         .context("Failed to create Issuer issuer")?;
 
@@ -186,9 +186,10 @@ pub async fn create_issuer_state(
         std::time::Duration::ZERO,
         10,
     ));
-    let issuer = issuer.with_publisher_profiles(Arc::new(
-        publisher_profiles::PublisherProfileRefresher::with_defaults(fetcher),
-    ));
+    let publisher_profiles =
+        Arc::new(publisher_profiles::PublisherProfileRefresher::with_defaults(fetcher));
+    publisher_profiles.spawn(cancel);
+    let issuer = issuer.with_publisher_profiles(publisher_profiles);
 
     let state = if let Some(ctr) = counters {
         IssuerState::new(issuer).with_counters(ctr)
