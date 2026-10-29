@@ -296,6 +296,16 @@ Publisher 数（不论状态）达到 `[realm] max_publishers`（默认 1000；�
 不受限），`503` 取不到 descriptor。
 公开文档中不放 challenge，也没有 `/.well-known/actr/publisher.json`。
 
+Issuer 启动后立即巡检已登记且 active 的 Publisher，此后每轮结束等待 60 秒再扫描。
+扫描按 ID 分页（每页 64 条），最多同时复检 8 个域名；单个域名失败不阻塞其余域名。
+巡检与注册请求共用同一复检器：成功缓存 24 小时（不能超过 Profile 的签名有效期），
+失败至少等待 60 秒再试，仍使用 SSRF 防护抓取、验签与已接受的 key pin。
+因此无需等下一次注册请求，已到期的缓存也会更新；正常抓取时，key 移除的同步延迟
+最多为剩余成功 TTL、一次扫描间隔与扫描耗时之和。取不到或拒绝新 Profile 时保留
+最后已接受的投影并记录告警，注册继续 fail-closed；不会自动停用 Publisher 或确认
+新身份。已停用、撤销的 Publisher 不参与扫描，管理员并发删除的登记也不会被巡检重建。
+Issuer 关闭时取消扫描及尚未完成的抓取。
+
 管理路由前缀：`/admin/api/publishers`，受 Admin JWT 保护：列表、状态、停用/恢复、删除、key
 历史与撤销（含当前 key 的紧急撤销，之后须登记新的 Publisher Profile 才能再发布）、包列表与撤销；
 没有由管理员登记 Publisher 的入口。包的长期真实性由 publisher key、signature 与 digest 决定，下载 origin/包 registry
