@@ -79,6 +79,7 @@ impl Entry {
 /// during registration ([`crate::issuer::AIdIssuer`]'s package verification).
 pub struct PublisherProfileRefresher {
     fetcher: Arc<dyn PublicDocumentFetcher>,
+    pool: sqlx::SqlitePool,
     ttl: Duration,
     retry_after_failure: Duration,
     entries: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Entry>>>>,
@@ -90,8 +91,23 @@ impl PublisherProfileRefresher {
         ttl: Duration,
         retry_after_failure: Duration,
     ) -> Self {
+        Self::with_pool(
+            platform::storage::db::get_database().get_pool().clone(),
+            fetcher,
+            ttl,
+            retry_after_failure,
+        )
+    }
+
+    fn with_pool(
+        pool: sqlx::SqlitePool,
+        fetcher: Arc<dyn PublicDocumentFetcher>,
+        ttl: Duration,
+        retry_after_failure: Duration,
+    ) -> Self {
         Self {
             fetcher,
+            pool,
             ttl,
             retry_after_failure,
             entries: Mutex::new(HashMap::new()),
@@ -132,7 +148,7 @@ impl PublisherProfileRefresher {
     }
 
     async fn sweep(self: &Arc<Self>) -> Result<(), sqlx::Error> {
-        let pool = platform::storage::db::get_database().get_pool();
+        let pool = &self.pool;
         // A fixed high-water mark makes a pass finite even during ongoing
         // registrations. Keyset pages avoid loading every Profile into memory
         // and do not skip rows when an administrator removes a publisher.
@@ -257,8 +273,7 @@ impl PublisherProfileRefresher {
                 message: error.to_string(),
             })?
             .with_timezone(&chrono::Utc);
-        let pool = platform::storage::db::get_database().get_pool().clone();
-        actrix_publisher_registry::PublisherRegistryManager::new(pool)
+        actrix_publisher_registry::PublisherRegistryManager::new(self.pool.clone())
             .refresh_publisher(domain, &profile, &keys)
             .await
             .map(|_| expires_at)

@@ -4,7 +4,6 @@ use actrix_publisher_registry::{PublisherRegistryManager, model::Publisher};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ed25519_dalek::SigningKey;
 use serde_json::{Value, json};
-use serial_test::serial;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_util::sync::CancellationToken;
 
@@ -65,21 +64,15 @@ impl PublicDocumentFetcher for Fetcher {
     }
 }
 
-async fn setup() -> PublisherRegistryManager {
-    crate::idempotency::tests::setup_db().await;
-    let pool = platform::storage::db::get_database().get_pool();
-    for table in [
-        "publisher_key_history",
-        "publisher_package",
-        "publisher_publish_nonce",
-        "publisher",
-    ] {
-        sqlx::query(&format!("DELETE FROM {table}"))
-            .execute(pool)
-            .await
-            .unwrap();
-    }
-    PublisherRegistryManager::new(pool.clone())
+async fn setup() -> (tempfile::TempDir, PublisherRegistryManager) {
+    // Each test owns a production-schema database, independent of the
+    // process-wide database used by other Issuer tests.
+    let dir = tempfile::tempdir().unwrap();
+    let database = platform::storage::db::Database::new(dir.path())
+        .await
+        .unwrap();
+    let manager = PublisherRegistryManager::new(database.get_pool().clone());
+    (dir, manager)
 }
 
 fn profile(domain: &str, sequence: u64, root: u8, package: u8) -> Value {
@@ -122,10 +115,42 @@ async fn wait_until(mut condition: impl FnMut() -> bool) {
     .expect("background check made progress");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_sweeps_keep_their_databases_isolated() {
+    let (_first_dir, first) = setup().await;
+    let (_second_dir, second) = setup().await;
+    let domain = "isolated.example";
+    let mut refreshers = Vec::new();
+    // The same domain has different successors in the two registries. Both
+    // the scan and its refresh must use the database supplied to that test.
+    for (manager, package) in [(&first, 3), (&second, 4)] {
+        register(manager, profile(domain, 1, 1, 2)).await;
+        let fetcher = Arc::new(Fetcher::default());
+        fetcher.serve(domain, profile(domain, 2, 1, package));
+        refreshers.push(Arc::new(PublisherProfileRefresher::with_pool(
+            manager.pool().clone(),
+            fetcher,
+            DEFAULT_TTL,
+            RETRY_AFTER_FAILURE,
+        )));
+    }
+    let (a, b) = tokio::join!(refreshers[0].sweep(), refreshers[1].sweep());
+    a.unwrap();
+    b.unwrap();
+    for (manager, package) in [(&first, 3), (&second, 4)] {
+        let row = Publisher::get_by_name(manager.pool(), domain)
+            .await
+            .unwrap()
+            .unwrap();
+        let accepted: Value = serde_json::from_str(&row.profile_json).unwrap();
+        assert_eq!(accepted["sequence"], 2);
+        assert_eq!(accepted["keys"], profile(domain, 2, 1, package)["keys"]);
+    }
+}
+
 #[tokio::test]
-#[serial]
 async fn background_revokes_removed_keys_without_registration_and_repeats() {
-    let manager = setup().await;
+    let (_dir, manager) = setup().await;
     let domain = "background.example";
     let first = profile(domain, 1, 1, 2);
     let first_id = first["keys"][0]["id"].as_str().unwrap().to_string();
@@ -134,7 +159,8 @@ async fn background_revokes_removed_keys_without_registration_and_repeats() {
     let second_id = second["keys"][0]["id"].as_str().unwrap().to_string();
     let fetcher = Arc::new(Fetcher::default());
     fetcher.serve(domain, second);
-    let refresher = Arc::new(PublisherProfileRefresher::new(
+    let refresher = Arc::new(PublisherProfileRefresher::with_pool(
+        manager.pool().clone(),
         fetcher.clone(),
         Duration::ZERO,
         Duration::ZERO,
@@ -172,9 +198,8 @@ async fn background_revokes_removed_keys_without_registration_and_repeats() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sweep_is_bounded_paginates_and_isolates_failed_and_disabled_publishers() {
-    let manager = setup().await;
+    let (_dir, manager) = setup().await;
     let fetcher = Arc::new(Fetcher::default());
     for n in 0..SWEEP_PAGE_SIZE + 3 {
         let domain = format!("publisher-{n}.example");
@@ -186,7 +211,7 @@ async fn sweep_is_bounded_paginates_and_isolates_failed_and_disabled_publishers(
             _ => fetcher.serve(&domain, profile(&domain, 3, 1, 3)),
         }
     }
-    let pool = platform::storage::db::get_database().get_pool();
+    let pool = manager.pool();
     for status in ["pending", "suspended", "revoked"] {
         let domain = format!("{status}.example");
         register(&manager, profile(&domain, 1, 1, 2)).await;
@@ -197,7 +222,12 @@ async fn sweep_is_bounded_paginates_and_isolates_failed_and_disabled_publishers(
             .await
             .unwrap();
     }
-    let refresher = Arc::new(PublisherProfileRefresher::with_defaults(fetcher.clone()));
+    let refresher = Arc::new(PublisherProfileRefresher::with_pool(
+        pool.clone(),
+        fetcher.clone(),
+        DEFAULT_TTL,
+        RETRY_AFTER_FAILURE,
+    ));
     refresher.sweep().await.unwrap();
     assert_eq!(fetcher.count(), (SWEEP_PAGE_SIZE + 3) as usize);
     assert!(fetcher.peak.load(Ordering::SeqCst) <= SWEEP_CONCURRENCY);
@@ -233,15 +263,19 @@ async fn sweep_is_bounded_paginates_and_isolates_failed_and_disabled_publishers(
 }
 
 #[tokio::test]
-#[serial]
 async fn registration_and_sweep_share_one_domain_check() {
-    let manager = setup().await;
+    let (_dir, manager) = setup().await;
     let domain = "single-flight.example";
     let document = profile(domain, 1, 1, 2);
     register(&manager, document.clone()).await;
     let fetcher = Arc::new(Fetcher::default());
     fetcher.serve(domain, document);
-    let refresher = Arc::new(PublisherProfileRefresher::with_defaults(fetcher.clone()));
+    let refresher = Arc::new(PublisherProfileRefresher::with_pool(
+        manager.pool().clone(),
+        fetcher.clone(),
+        DEFAULT_TTL,
+        RETRY_AFTER_FAILURE,
+    ));
     let (sweep, registration) = tokio::join!(refresher.sweep(), refresher.ensure_current(domain));
     sweep.unwrap();
     registration.unwrap();
@@ -249,15 +283,19 @@ async fn registration_and_sweep_share_one_domain_check() {
 }
 
 #[tokio::test]
-#[serial]
 async fn cancellation_stops_pending_fetches_and_startup() {
-    let manager = setup().await;
+    let (_dir, manager) = setup().await;
     register(&manager, profile("blocked.example", 1, 1, 2)).await;
     let fetcher = Arc::new(Fetcher {
         blocked: Some(tokio::sync::Semaphore::new(0)),
         ..Fetcher::default()
     });
-    let refresher = Arc::new(PublisherProfileRefresher::with_defaults(fetcher.clone()));
+    let refresher = Arc::new(PublisherProfileRefresher::with_pool(
+        manager.pool().clone(),
+        fetcher.clone(),
+        DEFAULT_TTL,
+        RETRY_AFTER_FAILURE,
+    ));
     let cancel = CancellationToken::new();
     let task = refresher.spawn(cancel.clone());
     wait_until(|| fetcher.count() == 1).await;
@@ -273,9 +311,8 @@ async fn cancellation_stops_pending_fetches_and_startup() {
 }
 
 #[tokio::test]
-#[serial]
 async fn refresh_cannot_recreate_a_deleted_registration() {
-    let manager = setup().await;
+    let (_dir, manager) = setup().await;
     let domain = "deleted.example";
     let document = profile(domain, 1, 1, 2);
     register(&manager, document.clone()).await;
@@ -284,10 +321,15 @@ async fn refresh_cannot_recreate_a_deleted_registration() {
         ..Fetcher::default()
     });
     fetcher.serve(domain, document);
-    let refresher = Arc::new(PublisherProfileRefresher::with_defaults(fetcher.clone()));
+    let refresher = Arc::new(PublisherProfileRefresher::with_pool(
+        manager.pool().clone(),
+        fetcher.clone(),
+        DEFAULT_TTL,
+        RETRY_AFTER_FAILURE,
+    ));
     let task = tokio::spawn(async move { refresher.sweep().await });
     wait_until(|| fetcher.count() == 1).await;
-    let pool = platform::storage::db::get_database().get_pool();
+    let pool = manager.pool();
     sqlx::query("DELETE FROM publisher WHERE name = ?")
         .bind(domain)
         .execute(pool)
