@@ -14,11 +14,11 @@ realm = "__REALM__"
 realm_client_key = "__REALM_CLIENT_KEY__"
 
 [[trust]]
-# RegistryTrust fetches publisher pubkeys at {endpoint}/publisher-registry/{name}/verifying_key,
-# which lives at the actrix base (PublisherRegistryService mounts /publisher), NOT under /issuer.
+# RegistryTrust fetches publisher pubkeys at {endpoint}/registry/publishers/{name}/verifying-key,
+# which lives at the actrix base, not under /issuer.
 # [issuer_endpoint] above keeps the /issuer suffix because /register is mounted there.
 kind = "registry"
-endpoint = "http://127.0.0.1:__HTTP_PORT__"
+endpoint = "__HTTP_BASE__"
 
 [discovery]
 visible = true
