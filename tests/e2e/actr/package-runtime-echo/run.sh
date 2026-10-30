@@ -21,6 +21,8 @@ if [ "$REALM_STAGE" = profile ] && [ "$REALM_MODE" = legacy ]; then
 fi
 
 HTTP_PORT="${HTTP_PORT:-8081}"
+HTTP_BASE="http://127.0.0.1:${HTTP_PORT}"
+WS_BASE="ws://127.0.0.1:${HTTP_PORT}"
 ICE_PORT="${ICE_PORT:-3478}"
 REALM=""
 ADMIN_PASSWORD="e2e-test-password"
@@ -214,11 +216,11 @@ start_actrix() {
         "$ACTRIX_BIN" package_runtime_fixture --exact --ignored --nocapture >"$LOG_DIR/actrix.log" 2>&1 &
     ACTRIX_PID=$!
 
-    if ! wait_for_http_ok "http://127.0.0.1:${HTTP_PORT}/signaling/health" 120; then
+    if ! wait_for_http_ok "${HTTP_BASE}/signaling/health" 120; then
         cat "$LOG_DIR/actrix.log" >&2 || true
         fail "actrix did not become healthy on port $HTTP_PORT"
     fi
-    success "actrix is healthy on http://127.0.0.1:${HTTP_PORT}"
+    success "actrix is healthy on ${HTTP_BASE}"
 }
 
 login_admin() {
@@ -226,7 +228,7 @@ login_admin() {
     local response_file="$RUN_DIR/admin-login.json"
     curl -fsS \
         -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/auth/login" \
+        "${HTTP_BASE}/admin/api/auth/login" \
         -H 'Content-Type: application/json' \
         -d "{\"password\":\"${ADMIN_PASSWORD}\"}" \
         >"$response_file"
@@ -240,7 +242,7 @@ wait_for_signer() {
     local attempt=0
 
     while [ $attempt -lt 60 ]; do
-        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/issuer/health" >"$health_file" 2>/dev/null \
+        if curl -fsS "${HTTP_BASE}/issuer/health" >"$health_file" 2>/dev/null \
             && [ "$(jq -r '.signer_service // "missing"' "$health_file" 2>/dev/null)" = "ok" ]; then
             success "Signer is ready"
             return 0
@@ -304,7 +306,7 @@ scaffold_service_guest() {
         -l rust \
         --template echo \
         --role service \
-        --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
+        --signaling "${WS_BASE}/signaling/ws" \
         --publisher "$PUBLISHER" \
         --realm "$REALM" \
         "$TMP_SERVICE_DIR"
@@ -357,7 +359,7 @@ publish_service_package() {
     run_actr registry publish \
         --package "$SERVICE_PACKAGE" \
         --keychain "$SERVICE_KEYCHAIN" \
-        --endpoint "http://127.0.0.1:${HTTP_PORT}"
+        --endpoint "${HTTP_BASE}"
     success "Server package published"
 }
 
@@ -396,8 +398,8 @@ build_client_guest_package() {
 version = 1
 
 [network]
-signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
-issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
+signaling_url = "${WS_BASE}/signaling/ws"
+issuer_endpoint = "${HTTP_BASE}/issuer"
 realm = "$REALM"
 realm_client_key = "$REALM_CLIENT_KEY"
 EOF
@@ -458,7 +460,7 @@ run_client_and_assert() {
     ) | \
         HOME="$client_home" \
         ECHO_ACTR_VERSION="$SERVICE_VERSION" \
-        ISSUER_ENDPOINT="http://127.0.0.1:${HTTP_PORT}/issuer" \
+        ISSUER_ENDPOINT="${HTTP_BASE}/issuer" \
         CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
@@ -513,7 +515,7 @@ assert_removed_member_refused() {
     echo "quit" | \
         HOME="$client_home" \
         ECHO_ACTR_VERSION="$SERVICE_VERSION" \
-        ISSUER_ENDPOINT="http://127.0.0.1:${HTTP_PORT}/issuer" \
+        ISSUER_ENDPOINT="${HTTP_BASE}/issuer" \
         CLIENT_RUNTIME_CONFIG_PATH="$CLIENT_RUNTIME_PATH" \
         CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
         CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
@@ -570,6 +572,7 @@ render_server_runtime() {
     render_template \
         "$SCRIPT_DIR/config/server-runtime.toml.tpl" \
         "$SERVER_RUNTIME_PATH" \
+        "__HTTP_BASE__=$HTTP_BASE" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__PACKAGE_PATH__=$SERVICE_PACKAGE" \

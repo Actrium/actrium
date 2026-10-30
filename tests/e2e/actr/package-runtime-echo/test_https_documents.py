@@ -65,6 +65,12 @@ class HttpsDocumentsTest(unittest.TestCase):
             with self.assertRaises(ssl.SSLCertVerificationError):
                 context.wrap_socket(connection, server_hostname="wrong.realm-e2e.test")
 
+    def test_loopback_ip_certificate_is_verified(self):
+        context = ssl.create_default_context(cafile=self.gateway.config["ca_file"])
+        with socket.create_connection(self.gateway.https.server_address, timeout=5) as connection:
+            with context.wrap_socket(connection, server_hostname="127.0.0.1") as secured:
+                self.assertIn(("IP Address", "127.0.0.1"), secured.getpeercert()["subjectAltName"])
+
     def test_proxy_cannot_reach_arbitrary_destinations(self):
         with socket.create_connection(self.gateway.proxy.server_address, timeout=5) as connection:
             connection.sendall(b"CONNECT example.com:443 HTTP/1.1\r\n\r\n")

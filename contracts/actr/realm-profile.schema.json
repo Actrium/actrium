@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Actr Realm Profile",
+  "description": "Public actr.realm/v1 document (actr/protocols/realm-profile.md). Structural validation is not signature verification, domain trust, Realm-name binding, or successor acceptance. Unknown members remain allowed and are covered by the signature. Enable format assertions when validating.",
+  "type": "object",
+  "required": [
+    "schema",
+    "sequence",
+    "realm",
+    "issuer",
+    "provider",
+    "policy",
+    "issued_at",
+    "signature"
+  ],
+  "properties": {
+    "schema": {
+      "const": "actr.realm/v1"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "realm": {
+      "$ref": "#/$defs/realm"
+    },
+    "package": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/package"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "issuer": {
+      "$ref": "#/$defs/issuer"
+    },
+    "provider": {
+      "$ref": "#/$defs/provider"
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "membership"
+      ],
+      "properties": {
+        "membership": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "issued_at": {
+      "description": "Informational RFC 3339 signing time; Profiles do not expire.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "$ref": "#/$defs/signature"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "realm": {
+            "properties": {
+              "status": {
+                "const": "active"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "package"
+        ],
+        "properties": {
+          "package": {
+            "$ref": "#/$defs/package"
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "dnsAuthority": {
+      "description": "Lowercase A-label DNS authority, without a port. IDNA normalization and IP-literal rejection also require the protocol verifier.",
+      "type": "string",
+      "format": "hostname",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$",
+      "not": {
+        "pattern": "(?:^|\\.)actr\\.alt$|[^a-z0-9.-]"
+      }
+    },
+    "realm": {
+      "type": "object",
+      "required": [
+        "name",
+        "display_name",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "description": "Network Realm name; local .actr.alt Realms have no Profile. The verifier must bind this to the requested Realm.",
+          "type": "string",
+          "maxLength": 317,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "not": {
+            "pattern": "(?:@|\\.)actr\\.alt$|[^a-z0-9@.-]"
+          }
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "href",
+        "sha256",
+        "type"
+      ],
+      "properties": {
+        "href": {
+          "$ref": "#/$defs/httpsUri"
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "type": {
+          "description": "publisher/program@version; Publisher identity and version semantics require the Actor-type parser.",
+          "type": "string",
+          "pattern": "^[^/@\\s]+/[^/@\\s]+@[^/@\\s]+$"
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpsUri": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://(?:[^/?#@]*@)?(?:\\[[^\\]]+\\]|[^:/?#@\\[\\]]+)(?::[0-9]*)?(?:[/?#]|$)",
+      "description": "HTTPS URI with a nonempty host, including bracketed IP literals.",
+      "not": {
+        "pattern": "\\s"
+      }
+    },
+    "publicKey": {
+      "description": "Standard padded base64 of a 32-byte Ed25519 public key; the verifier checks the decoded key.",
+      "type": "string",
+      "minLength": 44,
+      "maxLength": 44,
+      "pattern": "^[A-Za-z0-9+/]{43}=$"
+    },
+    "issuer": {
+      "type": "object",
+      "required": [
+        "url",
+        "keys"
+      ],
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/httpsUri"
+        },
+        "keys": {
+          "description": "One to three keys. The verifier also enforces unique IDs and their UInt32 range; historical ID reuse is forbidden.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/issuerKey"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "issuerKey": {
+      "type": "object",
+      "required": [
+        "id",
+        "algorithm",
+        "public_key",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "description": "Decimal credential key_id without leading zeros; the verifier enforces the UInt32 upper bound.",
+          "type": "string",
+          "maxLength": 10,
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "not": {
+            "pattern": "[^0-9]"
+          }
+        },
+        "algorithm": {
+          "const": "Ed25519"
+        },
+        "public_key": {
+          "$ref": "#/$defs/publicKey"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "provider": {
+      "type": "object",
+      "required": [
+        "id",
+        "signaling",
+        "ice"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/dnsAuthority"
+        },
+        "signaling": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/signalingEndpoint"
+          }
+        },
+        "ice": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/iceEndpoint"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "signalingEndpoint": {
+      "type": "object",
+      "required": [
+        "url",
+        "priority",
+        "control_plane_id",
+        "ticket_audience"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^wss://(?:[^/?#@]*@)?(?:\\[[^\\]]+\\]|[^:/?#@\\[\\]]+)(?::[0-9]*)?(?:[/?#]|$)",
+          "not": {
+            "pattern": "\\s"
+          }
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "control_plane_id": {
+          "type": "string"
+        },
+        "ticket_audience": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "iceEndpoint": {
+      "type": "object",
+      "required": [
+        "urls"
+      ],
+      "properties": {
+        "urls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/iceUri"
+          }
+        },
+        "credential_audience": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "signature": {
+      "type": "object",
+      "required": [
+        "key_id",
+        "algorithm",
+        "value"
+      ],
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "algorithm": {
+          "const": "Ed25519"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 88,
+          "maxLength": 88,
+          "pattern": "^[A-Za-z0-9+/]{86}==$"
+        }
+      },
+      "additionalProperties": true
+    },
+    "iceUri": {
+      "description": "RFC 7064/7065 STUN/TURN URI with a nonempty RFC 3986 host. Only TURN permits a transport query; userinfo, paths and fragments are not allowed.",
+      "$comment": "The pattern expands RFC 3986 host (nonempty reg-name, IPv6address or IPvFuture) and port, plus RFC 7065 transport. Do not add format: uri: a generic URI path cannot contain the brackets of an ICE IPv6 literal.",
+      "type": "string",
+      "pattern": "^(?:stun|stuns|turn|turns):(?:(?:[A-Za-z0-9._~!$&\\x27()*+,;=-]|%[0-9A-Fa-f]{2})+|\\[(?:(?:[0-9A-Fa-f]{1,4}:){6}(?:[0-9A-Fa-f]{1,4}:[0-9A-Fa-f]{1,4}|(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})|::(?:[0-9A-Fa-f]{1,4}:){5}(?:[0-9A-Fa-f]{1,4}:[0-9A-Fa-f]{1,4}|(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})|(?:[0-9A-Fa-f]{1,4})?::(?:[0-9A-Fa-f]{1,4}:){4}(?:[0-9A-Fa-f]{1,4}:[0-9A-Fa-f]{1,4}|(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})|(?:(?:[0-9A-Fa-f]{1,4}:){0,1}[0-9A-Fa-f]{1,4})?::(?:[0-9A-Fa-f]{1,4}:){3}(?:[0-9A-Fa-f]{1,4}:[0-9A-Fa-f]{1,4}|(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})|(?:(?:[0-9A-Fa-f]{1,4}:){0,2}[0-9A-Fa-f]{1,4})?::(?:[0-9A-Fa-f]{1,4}:){2}(?:[0-9A-Fa-f]{1,4}:[0-9A-Fa-f]{1,4}|(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})|(?:(?:[0-9A-Fa-f]{1,4}:){0,3}[0-9A-Fa-f]{1,4})?::[0-9A-Fa-f]{1,4}:(?:[0-9A-Fa-f]{1,4}:[0-9A-Fa-f]{1,4}|(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})|(?:(?:[0-9A-Fa-f]{1,4}:){0,4}[0-9A-Fa-f]{1,4})?::(?:[0-9A-Fa-f]{1,4}:[0-9A-Fa-f]{1,4}|(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})|(?:(?:[0-9A-Fa-f]{1,4}:){0,5}[0-9A-Fa-f]{1,4})?::[0-9A-Fa-f]{1,4}|(?:(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4})?::|[vV][0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&\\x27()*+,;=:-]+)\\])(?::[0-9]*)?(?:\\?transport=[A-Za-z0-9._~-]+)?$",
+      "not": {
+        "pattern": "\\s|^stuns?:[^?]*\\?"
+      }
+    }
+  }
+}

@@ -150,6 +150,14 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 
 `realm.status` 为 `active` 时 **MUST** 包含 `package`。
 
+所有端点 **MUST** 包含非空 host。`package.href` 和 `issuer.url` **MUST** 使用 HTTPS，
+`provider.signaling[].url` **MUST** 使用 WSS。每个 `provider.ice[].urls` 列表
+**MUST** 非空，并包含遵循 [RFC 7064](https://www.rfc-editor.org/rfc/rfc7064) 或
+[RFC 7065](https://www.rfc-editor.org/rfc/rfc7065) 的 STUN/TURN 地址：
+`scheme:host[:port]`，IP literal 用方括号包裹，仅 TURN 可附加 `?transport=...`。
+ICE 地址 **MUST NOT** 包含 `//`、userinfo、path 或 fragment。
+即使 Profile 签名有效，消费者也 **MUST** 拒绝格式错误的端点。
+
 Realm Profile **MUST NOT** 包含 secret、私钥、access token、成员列表或用户专属数据。
 Actr Host **MUST** 忽略未知 member。
 
@@ -367,7 +375,9 @@ Authority Discovery 第 4.5 节用它登记 publisher，Actr Realm Membership �
 
 ## 10. 待完成工作
 
-- 为 `actr.realm/v1` 与 Realm 管理请求定义机器可读的 JSON Schema 与签名 test vector；
+- 为 Realm 管理请求定义机器可读的 JSON Schema 与签名 test vector；Realm Profile 的
+  Schema 与互操作向量已提供于 [`contracts/actr`](../../contracts/actr/README.md#realm-profile)，
+  结构校验不替代签名、信任与后继 Profile 检查；
 - 定义限定 RealmId 前缀与有效期的创建委派 key；
 - Realm Infra Provider 域名下由用户以 Realm Infra Provider 账号（例如 OAuth 2.0 授权码 + PKCE）自助创建与
   管理 Realm，并按账号计配额。

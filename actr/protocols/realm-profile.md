@@ -175,6 +175,16 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 
 When `realm.status` is `active`, the Realm Profile **MUST** include `package`.
 
+Every endpoint **MUST** contain a nonempty host. `package.href` and `issuer.url`
+**MUST** use HTTPS; `provider.signaling[].url` **MUST** use WSS. Each
+`provider.ice[].urls` list **MUST** be nonempty and contain STUN/TURN addresses
+following [RFC 7064](https://www.rfc-editor.org/rfc/rfc7064) or
+[RFC 7065](https://www.rfc-editor.org/rfc/rfc7065): `scheme:host[:port]`, with
+brackets around IP literals and an optional `?transport=...` only for TURN.
+ICE addresses **MUST NOT** contain `//`, userinfo, a path or a fragment.
+Consumers **MUST** reject malformed endpoints even when the Profile signature
+is valid.
+
 A Realm Profile **MUST NOT** contain secrets, private keys, access tokens,
 member lists, or user-specific data. Actr Hosts **MUST** ignore unknown
 members.
@@ -478,8 +488,10 @@ quotas per Realm domain and per Realm.
 
 ## 10. Open work
 
-- Define machine-readable JSON Schemas for `actr.realm/v1` and Realm
-  management requests, with signing test vectors.
+- Define machine-readable JSON Schemas and signing test vectors for Realm
+  management requests. The Realm Profile schema and interoperability vectors
+  are available in [`contracts/actr`](../../contracts/actr/README.md#realm-profile);
+  schema validation does not replace signature, trust or successor checks.
 - Define delegated creation keys with scoped RealmId prefixes and lifetimes.
 - Let users create and manage Realms under a Realm Infra Provider's domain
   themselves with Realm Infra Provider accounts (for example OAuth 2.0 authorization
