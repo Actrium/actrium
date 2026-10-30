@@ -8,7 +8,7 @@ repository.workspace = true
 description = "WebRTC STUN service implementation, as a component of aux-servers"
 
 [dependencies]
-webrtc-stun = { version = "0.17.2", package = "stun" }
+webrtc-stun = { workspace = true }
 
 tokio = { workspace = true, features = ["net", "signal"] }
 tracing = { workspace = true }
