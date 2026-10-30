@@ -4453,6 +4453,8 @@ mod tests {
             .unwrap();
             let unguarded = connect(&server, 5001, "acl-unguarded").await;
             register(&server, &unguarded.id, worker()).await;
+            insert_active_member("owner-member").await;
+            insert_active_member("member-1").await;
 
             // The stranger sees only the unguarded Actor; the owner sees both.
             let seen = lookup_candidates(&server, &mut source, "member-1", "acl-lookup").await;
@@ -4493,6 +4495,11 @@ mod tests {
 
             // The fixture rows leave with the test: other tests share this
             // database and these serials.
+            sqlx::query("DELETE FROM realm_member WHERE realm = ? AND member_id IN ('owner-member', 'member-1')")
+                .bind(REALM)
+                .execute(pool)
+                .await
+                .unwrap();
             sqlx::query("DELETE FROM service_acl WHERE realm = ? AND serial_number = ?")
                 .bind(REALM)
                 .bind(candidate.id.serial_number as i64)
@@ -4514,6 +4521,21 @@ mod tests {
                 name: "guarded".to_string(),
                 version: "1.0.0".to_string(),
             }
+        }
+
+        /// An active member row: the ACL only honors grants of active
+        /// members (a removed member's grants stop counting immediately).
+        async fn insert_active_member(member_id: &str) {
+            sqlx::query(
+                "INSERT INTO realm_member (realm, member_id, role, status, created_at)
+                 VALUES (?, ?, 'editor', 'active', ?)",
+            )
+            .bind(REALM)
+            .bind(member_id)
+            .bind(now() as i64)
+            .execute(platform::storage::db::get_database().get_pool())
+            .await
+            .unwrap();
         }
 
         async fn insert_identity_binding(serial: u64, member: &str) {
@@ -4593,6 +4615,9 @@ mod tests {
             let mut front = connect(&server, 6102, "relay-front").await;
             register(&server, &front.id, worker()).await;
             insert_identity_binding(6102, "front-owner").await;
+            insert_active_member("owner-member").await;
+            insert_active_member("member-1").await;
+            insert_active_member("front-owner").await;
 
             // A stranger cannot relay to the guarded Service, even knowing
             // its actor_id; a bound Front relays freely (only the
@@ -4705,6 +4730,11 @@ mod tests {
             ActorAcl::delete_by_target(REALM, &guarded().to_string_repr())
                 .await
                 .unwrap();
+            sqlx::query("DELETE FROM realm_member WHERE realm = ? AND member_id IN ('owner-member', 'member-1', 'front-owner')")
+                .bind(REALM)
+                .execute(pool)
+                .await
+                .unwrap();
         }
 
         /// `get_subscribers_with_acl` against the fixture server's presence
@@ -4751,6 +4781,8 @@ mod tests {
             // Issued to "owner-member": only its own member hears; the
             // stranger's actor_id disclosure stops (it was the last input a
             // direct relay attach needed).
+            insert_active_member("owner-member").await;
+            insert_active_member("stranger").await;
             insert_identity_binding(6200, "owner-member").await;
             let seen = presence_subscribers(&server, &announced).await;
             assert_eq!(seen, vec![create_test_actr_id(6201)]);
@@ -4794,6 +4826,11 @@ mod tests {
             sqlx::query("DELETE FROM issued_actor_identity WHERE realm = ? AND serial_number = ?")
                 .bind(REALM)
                 .bind(6200i64)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM realm_member WHERE realm = ? AND member_id IN ('owner-member', 'stranger')")
+                .bind(REALM)
                 .execute(pool)
                 .await
                 .unwrap();

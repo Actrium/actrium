@@ -695,6 +695,10 @@ mode_runtime() {
     start_server_isolated "$home_dir" "$hyper_dir" "server.log"
     expect_server_started "server.log"
     assert_publisher_provenance
+    # The client is an editor member, not the Service's owner: the instance
+    # ACL needs the owner's grant before the guest build (which resolves the
+    # service) and the echo round-trip.
+    grant_client_service_access
     # Dependency installation resolves the service over signaling, so the
     # service must also be online before the client guest lockfile is
     # generated. Reuse this server for the final echo round-trip.

@@ -279,6 +279,9 @@ pub async fn attachee_status_on(
     let row: Option<(String, bool)> = sqlx::query_as(
         "SELECT i.member_id,
                 EXISTS(SELECT 1 FROM service_acl a
+                       JOIN realm_member m
+                         ON m.realm = a.realm AND m.member_id = a.member_id
+                            AND m.status = 'active'
                        WHERE a.realm = i.realm AND a.serial_number = i.serial_number
                          AND a.member_id = ? AND a.revoked_at IS NULL
                          AND a.expires_at > ?)

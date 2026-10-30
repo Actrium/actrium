@@ -370,3 +370,22 @@ ensure_realm() {
         fail "The client did not join as an editor"
     success "Owner and client joined the Realm"
 }
+
+# The client is a different Realm member (editor) than the Service's owner:
+# the instance ACL (FR-SEC-013) needs an explicit grant before the client
+# guest build (dependency resolution) and the echo round-trip.
+grant_client_service_access() {
+    section "🔓 Granting the client member access to the Service"
+    local serial
+    serial="$(sqlite3 "$LORAN_DB" \
+        "SELECT serial_number FROM issued_actor_identity
+         WHERE realm='${REALM}' AND actor_type LIKE '%/EchoService@%' LIMIT 1")"
+    [ -n "$serial" ] || fail "No issued EchoService identity to grant on"
+    run_actr realm service-acl grant \
+        --key "$REALM_OWNER_KEY" \
+        --service "$serial" \
+        --member "$REALM_CLIENT_MEMBER_ID" \
+        --role editor --days 1 >"$RUN_DIR/service-acl-grant.json" \
+        || fail "Service ACL grant failed"
+    success "Granted member ${REALM_CLIENT_MEMBER_ID} on Service serial ${serial}"
+}
