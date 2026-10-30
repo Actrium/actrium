@@ -379,7 +379,7 @@ grant_client_service_access() {
     local serial
     serial="$(sqlite3 "$LORAN_DB" \
         "SELECT serial_number FROM issued_actor_identity
-         WHERE realm='${REALM}' AND actor_type LIKE '%/EchoService@%' LIMIT 1")"
+         WHERE realm='${REALM}' AND actor_type LIKE '%/EchoService@%' ORDER BY rowid DESC LIMIT 1")"
     [ -n "$serial" ] || fail "No issued EchoService identity to grant on"
     run_actr realm service-acl grant \
         --key "$REALM_OWNER_KEY" \

@@ -708,6 +708,9 @@ mode_runtime() {
         stop_server
         start_server_isolated "$home_dir" "$hyper_dir" "server-restarted.log"
         expect_server_started "server-restarted.log"
+        # The restart may register a new actor serial: the instance ACL is
+        # per issued identity, so the Service needs the grant again.
+        grant_client_service_access
         run_client_and_assert
     fi
     assert_removed_member_refused
