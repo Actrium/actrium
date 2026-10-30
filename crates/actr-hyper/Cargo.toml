@@ -176,6 +176,7 @@ name = "recovery_latency"
 harness = false
 
 [dev-dependencies]
+rcgen = "0.14.8"
 tokio = { workspace = true }
 rand.workspace = true
 base64.workspace = true

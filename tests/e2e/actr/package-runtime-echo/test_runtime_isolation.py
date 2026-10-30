@@ -26,6 +26,8 @@ class RuntimeIsolationTests(unittest.TestCase):
             public.write_text("public-package-material")
             realm = root / "realm-client.json"
             realm.write_text("runtime-owned-realm-material")
+            ca = root / "test-ca.pem"
+            ca.write_text("disposable-public-test-ca")
             runtime = root / "runtime"
             runtime.mkdir()
             program = """
@@ -52,6 +54,7 @@ for operation in [lambda: secret.write_text('overwritten'),
         raise SystemExit('runtime modified or reparented Publisher signing material')
 assert 'ACTR_TEST_PUBLISHER_PRIVATE_KEY' not in os.environ
 assert 'ACTR_REALM_E2E_DOCUMENTS' not in os.environ
+assert pathlib.Path(os.environ['SSL_CERT_FILE']).read_text() == 'disposable-public-test-ca'
 assert pathlib.Path(os.environ['HOME']) == pathlib.Path(sys.argv[5])
 (pathlib.Path(sys.argv[5]) / 'runtime-state').write_text('started')
 print('Publisher keys denied; public package and Realm key remain usable')
@@ -62,6 +65,7 @@ print('Publisher keys denied; public package and Realm key remain usable')
                  str(realm), str(runtime)],
                 env={**os.environ, "HOME": str(runtime),
                      "ACTR_TEST_PUBLISHER_PRIVATE_KEY": "disposable-environment-canary",
+                     "SSL_CERT_FILE": str(ca),
                      "ACTR_REALM_E2E_DOCUMENTS": "builder-only-documents"},
                 capture_output=True, text=True, timeout=15,
             )

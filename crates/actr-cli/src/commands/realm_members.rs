@@ -324,9 +324,21 @@ where
 
 /// POST `document` to `<issuer>/membership`; the reply, or its error.
 async fn send(issuer: &str, document: &Value) -> std::result::Result<Value, SendError> {
+    send_with(
+        &http_client().map_err(SendError::Refused)?,
+        issuer,
+        document,
+    )
+    .await
+}
+
+async fn send_with(
+    client: &reqwest::Client,
+    issuer: &str,
+    document: &Value,
+) -> std::result::Result<Value, SendError> {
     let url = format!("{}/membership", issuer.trim_end_matches('/'));
-    let response = http_client()
-        .map_err(SendError::Refused)?
+    let response = client
         .post(&url)
         .header("Content-Type", "application/json")
         .body(document.to_string())
@@ -417,15 +429,20 @@ fn interrupted_join_key(
 /// already registered otherwise).
 pub async fn join(args: &JoinArgs) -> Result<Value> {
     let client = discovery_client()?;
-    join_with(args, move |url| {
-        let client = client.clone();
-        async move { fetch_public(&client, url).await }
-    })
+    join_with(
+        args,
+        move |url| {
+            let client = client.clone();
+            async move { fetch_public(&client, url).await }
+        },
+        &http_client()?,
+    )
     .await
 }
 
-/// [`join`], fetching public documents with `fetch`.
-async fn join_with<F, Fut>(args: &JoinArgs, fetch: F) -> Result<Value>
+/// [`join`], fetching public documents with `fetch` and sending membership
+/// requests with `client`.
+async fn join_with<F, Fut>(args: &JoinArgs, fetch: F, client: &reqwest::Client) -> Result<Value>
 where
     F: Fn(String) -> Fut,
     Fut: Future<Output = Result<Vec<u8>>>,
@@ -488,7 +505,7 @@ where
     request.invite = Some(invite.secret.clone());
     request.public_key = Some(BASE64.encode(key.verifying_key().to_bytes()));
     request.label = args.label.clone();
-    match send(&issuer, &request.sign(&key)).await {
+    match send_with(client, &issuer, &request.sign(&key)).await {
         Ok(reply) => {
             eprintln!("Realm client key written to {}", args.output.display());
             Ok(reply)
@@ -654,7 +671,7 @@ mod tests {
             label: Some(request["label"].as_str().context("label")?.into()),
             force: false,
         };
-        let joined = join_with(&args, e2e_documents::fetch).await?;
+        let joined = join_with(&args, e2e_documents::fetch, &http_client()?).await?;
         std::fs::write(
             request["result_file"].as_str().context("result_file")?,
             serde_json::to_vec(&serde_json::json!({ "joined": joined, "profile": profile }))?,
@@ -997,11 +1014,15 @@ mod tests {
 
     /// A fixture of `https://acme.com` (descriptor of `key`, and the Realm
     /// Profile `served` makes from the base URL, if any) and of its Issuer's
-    /// membership endpoint; returns the base URL.
-    async fn serve_domain(key: &SigningKey, served: impl FnOnce(&str) -> Option<Value>) -> String {
+    /// membership endpoint; returns the base URL and a client that trusts
+    /// the fixture's disposable TLS certificate.
+    async fn serve_domain(
+        key: &SigningKey,
+        served: impl FnOnce(&str) -> Option<Value>,
+    ) -> (String, reqwest::Client) {
         use axum::routing::get;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
+        let base = format!("https://{}", listener.local_addr().unwrap());
         let descriptor = descriptor(key);
         let served = served(&base);
         let app =
@@ -1026,18 +1047,40 @@ mod tests {
                         Json(serde_json::from_slice::<Value>(&body).unwrap())
                     }),
                 );
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        base
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let tls = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).unwrap();
+        let client = reqwest::Client::builder()
+            .add_root_certificate(reqwest::Certificate::from_der(tls.cert.der()).unwrap())
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let config = axum_server::tls_rustls::RustlsConfig::from_pem(
+            tls.cert.pem().into_bytes(),
+            tls.signing_key.serialize_pem().into_bytes(),
+        )
+        .await
+        .unwrap();
+        let listener = listener.into_std().unwrap();
+        tokio::spawn(async move {
+            axum_server::from_tcp_rustls(listener, config)
+                .unwrap()
+                .serve(app.into_make_service())
+                .await
+                .unwrap()
+        });
+        (base, client)
     }
 
     /// Fetches `https://acme.com/…` from the fixture at `base`.
     fn fetch_from(
         base: String,
+        client: reqwest::Client,
     ) -> impl Fn(String) -> futures_util::future::BoxFuture<'static, Result<Vec<u8>>> {
         move |url: String| {
             let url = url.replace("https://acme.com", &base);
+            let client = client.clone();
             Box::pin(async move {
-                let reply = reqwest::get(&url).await?.error_for_status()?;
+                let reply = client.get(&url).send().await?.error_for_status()?;
                 Ok(reply.bytes().await?.to_vec())
             })
         }
@@ -1057,7 +1100,7 @@ mod tests {
     #[tokio::test]
     async fn join_takes_the_issuer_from_the_verified_realm_profile() {
         let key = SigningKey::from_bytes(&[8; 32]);
-        let base = serve_domain(&key, |base| {
+        let (base, client) = serve_domain(&key, |base| {
             Some(profile(&key, 3, &format!("{base}/issuer"), "p.example"))
         })
         .await;
@@ -1067,7 +1110,8 @@ mod tests {
 
         let sent = join_with(
             &join_args(RealmInvite::new(REALM, &secret), output.clone()),
-            fetch_from(base.clone()),
+            fetch_from(base.clone(), client.clone()),
+            &client,
         )
         .await
         .unwrap();
@@ -1085,7 +1129,7 @@ mod tests {
         let key = SigningKey::from_bytes(&[8; 32]);
         let forger = SigningKey::from_bytes(&[9; 32]);
         // The domain serves no Realm Profile at its realms location.
-        let base = serve_domain(&key, |_| None).await;
+        let (base, client) = serve_domain(&key, |_| None).await;
         let issuer = format!("{base}/issuer");
         let dir = tempfile::tempdir().unwrap();
         let secret = URL_SAFE_NO_PAD.encode([6u8; 32]);
@@ -1094,9 +1138,13 @@ mod tests {
         let mut invite = RealmInvite::new(REALM, &secret);
         invite.profile = Some(profile(&forger, 9, &issuer, "evil.example"));
         let output = dir.path().join("forged.json");
-        let error = join_with(&join_args(invite, output.clone()), fetch_from(base.clone()))
-            .await
-            .unwrap_err();
+        let error = join_with(
+            &join_args(invite, output.clone()),
+            fetch_from(base.clone(), client.clone()),
+            &client,
+        )
+        .await
+        .unwrap_err();
         assert!(
             format!("{error:#}").contains("No verified Realm Profile"),
             "{error:#}"
@@ -1107,16 +1155,20 @@ mod tests {
         let mut invite = RealmInvite::new(REALM, &secret);
         invite.profile = Some(profile(&key, 2, &issuer, "p.example"));
         let output = dir.path().join("embedded.json");
-        let sent = join_with(&join_args(invite, output), fetch_from(base))
-            .await
-            .unwrap();
+        let sent = join_with(
+            &join_args(invite, output),
+            fetch_from(base, client.clone()),
+            &client,
+        )
+        .await
+        .unwrap();
         assert_eq!(sent["provider_id"], "p.example");
     }
 
     #[tokio::test]
     async fn join_prefers_the_newer_of_the_fetched_and_embedded_profiles() {
         let key = SigningKey::from_bytes(&[8; 32]);
-        let base = serve_domain(&key, |base| {
+        let (base, client) = serve_domain(&key, |base| {
             Some(profile(&key, 4, &format!("{base}/issuer"), "p.example"))
         })
         .await;
@@ -1125,11 +1177,15 @@ mod tests {
 
         // An older embedded Profile loses to the fetched one.
         let mut invite = RealmInvite::new(REALM, &secret);
-        invite.profile = Some(profile(&key, 1, "http://127.0.0.1:9/old", "p.example"));
+        invite.profile = Some(profile(&key, 1, "https://127.0.0.1:9/old", "p.example"));
         let output = dir.path().join("a.json");
-        join_with(&join_args(invite, output.clone()), fetch_from(base.clone()))
-            .await
-            .unwrap();
+        join_with(
+            &join_args(invite, output.clone()),
+            fetch_from(base.clone(), client.clone()),
+            &client,
+        )
+        .await
+        .unwrap();
         let file = Member::load(&KeyArgs { key: output }).unwrap().file;
         assert_eq!(file.issuer, format!("{base}/issuer"));
 
@@ -1138,7 +1194,8 @@ mod tests {
         invite.profile = Some(profile(&key, 5, &format!("{base}/issuer"), "q.example"));
         let error = join_with(
             &join_args(invite, dir.path().join("b.json")),
-            fetch_from(base),
+            fetch_from(base, client.clone()),
+            &client,
         )
         .await
         .unwrap_err();
@@ -1155,6 +1212,7 @@ mod tests {
                 output.clone(),
             ),
             |url| async move { Err(anyhow::anyhow!("{url}: 404 Not Found")) },
+            &http_client().unwrap(),
         )
         .await
         .unwrap_err();

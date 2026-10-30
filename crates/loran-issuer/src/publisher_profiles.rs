@@ -1,4 +1,4 @@
-//! Registration-time freshness of Publisher Profiles
+//! Background and registration-time freshness of Publisher Profiles
 //! (`actr/protocols/actor-package.zh.md` section 6.8): the package signing
 //! key a registration resolves in this Loran's Publisher Registry must still
 //! be listed by the publisher domain's current Publisher Profile.
@@ -7,7 +7,7 @@
 //! refresher re-checks the domain within [`DEFAULT_TTL`] and accepts the
 //! fetched Profile into the registry, which enforces the pins stored when the
 //! publisher registered: a key the domain has removed is revoked here on the
-//! next registration instead of waiting for the publisher to register again.
+//! next check, even without another Actor registration.
 //! Checks fail closed — a registration whose Publisher Profile cannot be
 //! re-checked is refused rather than verified against a stale projection.
 
@@ -22,6 +22,12 @@ pub const DEFAULT_TTL: Duration = Duration::from_secs(24 * 3600);
 
 /// Shortest spacing of fetch attempts for one publisher after a failure.
 pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(60);
+
+/// Check which registered publishers are due once per minute. Successful
+/// checks still have a 24-hour TTL; failures retain the shared retry spacing.
+pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+const SWEEP_PAGE_SIZE: i64 = 64;
+const SWEEP_CONCURRENCY: usize = 8;
 
 /// Fetches a public document over HTTPS. Production passes the SSRF-checked
 /// [`platform::net::CachedFetcher`]; tests substitute a stub.
@@ -69,10 +75,11 @@ impl Entry {
     }
 }
 
-/// Re-checks registered publishers' Publisher Profiles during registration
-/// ([`crate::issuer::AIdIssuer`]'s package verification).
+/// Re-checks registered publishers' Publisher Profiles in the background and
+/// during registration ([`crate::issuer::AIdIssuer`]'s package verification).
 pub struct PublisherProfileRefresher {
     fetcher: Arc<dyn PublicDocumentFetcher>,
+    pool: sqlx::SqlitePool,
     ttl: Duration,
     retry_after_failure: Duration,
     entries: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Entry>>>>,
@@ -84,8 +91,23 @@ impl PublisherProfileRefresher {
         ttl: Duration,
         retry_after_failure: Duration,
     ) -> Self {
+        Self::with_pool(
+            platform::storage::db::get_database().get_pool().clone(),
+            fetcher,
+            ttl,
+            retry_after_failure,
+        )
+    }
+
+    fn with_pool(
+        pool: sqlx::SqlitePool,
+        fetcher: Arc<dyn PublicDocumentFetcher>,
+        ttl: Duration,
+        retry_after_failure: Duration,
+    ) -> Self {
         Self {
             fetcher,
+            pool,
             ttl,
             retry_after_failure,
             entries: Mutex::new(HashMap::new()),
@@ -94,6 +116,85 @@ impl PublisherProfileRefresher {
 
     pub fn with_defaults(fetcher: Arc<dyn PublicDocumentFetcher>) -> Self {
         Self::new(fetcher, DEFAULT_TTL, RETRY_AFTER_FAILURE)
+    }
+
+    /// Start an immediate sweep, then repeat until the Issuer shuts down.
+    /// The same refresher is shared with registration: neither path bypasses
+    /// pins, successful TTLs, signed expiry, or failed-check backoff.
+    pub fn spawn(
+        self: &Arc<Self>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(self.clone().run(SWEEP_INTERVAL, cancel))
+    }
+
+    async fn run(self: Arc<Self>, interval: Duration, cancel: tokio_util::sync::CancellationToken) {
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return,
+                result = self.sweep() => {
+                    if let Err(error) = result {
+                        platform::recording::warn!("Publisher Profile sweep failed: {error}");
+                    }
+                }
+            }
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(interval) => {}
+            }
+        }
+    }
+
+    async fn sweep(self: &Arc<Self>) -> Result<(), sqlx::Error> {
+        let pool = &self.pool;
+        // A fixed high-water mark makes a pass finite even during ongoing
+        // registrations. Keyset pages avoid loading every Profile into memory
+        // and do not skip rows when an administrator removes a publisher.
+        let end: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM publisher")
+            .fetch_one(pool)
+            .await?;
+        let mut after = 0_i64;
+        loop {
+            let page: Vec<(i64, String)> = sqlx::query_as(
+                "SELECT id, name FROM publisher
+                 WHERE id > ? AND id <= ? AND status = 'active' AND profile_pins IS NOT NULL
+                 ORDER BY id LIMIT ?",
+            )
+            .bind(after)
+            .bind(end)
+            .bind(SWEEP_PAGE_SIZE)
+            .fetch_all(pool)
+            .await?;
+            if page.is_empty() {
+                return Ok(());
+            }
+            // JoinSet aborts its children when cancellation drops the sweep,
+            // including a fetch or a wait for a registration's domain lock.
+            let mut checks = tokio::task::JoinSet::new();
+            for (id, domain) in page {
+                after = id;
+                if checks.len() == SWEEP_CONCURRENCY {
+                    Self::join_check(&mut checks).await;
+                }
+                let refresher = self.clone();
+                checks.spawn(async move {
+                    if let Err(error) = refresher.ensure_current(&domain).await {
+                        platform::recording::warn!("Publisher Profile check failed: {error}");
+                    }
+                });
+            }
+            while !checks.is_empty() {
+                Self::join_check(&mut checks).await;
+            }
+        }
+    }
+
+    async fn join_check(checks: &mut tokio::task::JoinSet<()>) {
+        if let Some(Err(error)) = checks.join_next().await {
+            platform::recording::warn!("Publisher Profile check task failed: {error}");
+        }
     }
 
     /// Ensure `domain`'s Publisher Profile was checked recently, fetching and
@@ -172,9 +273,8 @@ impl PublisherProfileRefresher {
                 message: error.to_string(),
             })?
             .with_timezone(&chrono::Utc);
-        let pool = platform::storage::db::get_database().get_pool().clone();
-        actrix_publisher_registry::PublisherRegistryManager::new(pool)
-            .register_publisher(domain, &profile, &keys)
+        actrix_publisher_registry::PublisherRegistryManager::new(self.pool.clone())
+            .refresh_publisher(domain, &profile, &keys)
             .await
             .map(|_| expires_at)
             .map_err(|error| RefreshError::Profile {
@@ -183,6 +283,9 @@ impl PublisherProfileRefresher {
             })
     }
 }
+
+#[cfg(test)]
+mod maintenance_tests;
 
 /// The verified `publisher` member of `domain`'s authority descriptor: its
 /// own signature, domain binding and validity period; pinning against the

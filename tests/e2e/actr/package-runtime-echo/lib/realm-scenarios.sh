@@ -21,6 +21,7 @@ PY
 }
 
 prepare_realm_scenario() {
+    require_cmd openssl
     export ACTR_REALM_E2E_DOCUMENTS="$RUN_DIR/realm-documents.json"
     printf '{}\n' >"$ACTR_REALM_E2E_DOCUMENTS"
     REALM_DOMAIN=localhost
@@ -28,10 +29,18 @@ prepare_realm_scenario() {
     REALM="echo-${RUN_ID}@${REALM_DOMAIN}"
     # Authority and its signing key must be enabled; a development Realm
     # without a Profile is deliberately not this scenario.
-    python3 - "$ACTRIX_CONFIG_PATH" "${REALM_ICE_IP:-}" <<'PY'
-import ipaddress, pathlib, re, socket, sys
+    PYTHONPATH="$SCRIPT_DIR/fixtures" python3 - "$ACTRIX_CONFIG_PATH" "${REALM_ICE_IP:-}" "$RUN_DIR/actrix-tls" <<'PY'
+import ipaddress, json, pathlib, re, socket, ssl, sys
+from https_documents import certificates
 path = pathlib.Path(sys.argv[1])
 ice_ip = sys.argv[2]
+tls_dir = pathlib.Path(sys.argv[3])
+ca, cert, key = certificates(tls_dir)
+# Preserve the system roots for later Cargo builds while adding only this
+# run's disposable CA to the CLI and Host's native certificate store.
+roots = ssl.create_default_context().get_ca_certs(binary_form=True)
+(tls_dir / 'trusted.pem').write_text(
+    ''.join(ssl.DER_cert_to_PEM_cert(root) for root in roots) + ca.read_text())
 if not ice_ip:
     # UDP connect selects a local route without transmitting any packet.
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
@@ -43,6 +52,8 @@ if not ice_ip:
 ice_ip = str(ipaddress.IPv4Address(ice_ip))
 text = path.read_text().replace('[authority]\n', '[authority]\nenabled = true\n')
 text = text.replace('domain_name = "127.0.0.1"', 'domain_name = "localhost"')
+text = text.replace('[bind.http]\n', '[bind.http]\ncert = ' + json.dumps(str(cert))
+                    + '\nkey = ' + json.dumps(str(key)) + '\n')
 text = text.replace('enable = 25\n', 'enable = 31\n')
 start, rest = text.split('[bind.ice]\n', 1)
 ice, end = rest.split('\n[turn]', 1)
@@ -53,6 +64,10 @@ text = start + '[bind.ice]\n' + ice + '\n[turn]' + end
 text += '\n[realm]\nprofile_refresh_secs = 86400\n'
 path.write_text(text)
 PY
+    export SSL_CERT_FILE="$RUN_DIR/actrix-tls/trusted.pem"
+    export CURL_CA_BUNDLE="$SSL_CERT_FILE"
+    HTTP_BASE="https://127.0.0.1:${HTTP_PORT}"
+    WS_BASE="wss://127.0.0.1:${HTTP_PORT}"
     section "Building the test-only CLI document transport"
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" cargo test -p actr-cli --lib --no-run \
         --message-format=json >"$RUN_DIR/cli-fixture-build.jsonl"
@@ -77,7 +92,7 @@ PY
 }
 
 post_realm_management() {
-    realm_curl --fail-with-body -sS -X POST "http://127.0.0.1:${HTTP_PORT}/actr/realm-management" \
+    realm_curl --fail-with-body -sS -X POST "${HTTP_BASE}/actr/realm-management" \
         -H 'Content-Type: application/json' --data-binary "@$1" >"$2"
 }
 
@@ -96,7 +111,7 @@ realm_fixture_join() {
 
 create_profile_realm() {
     section "Creating the ${REALM_MODE} domain Realm through its formal API"
-    local base="http://127.0.0.1:${HTTP_PORT}" create="$RUN_DIR/realm-create.json"
+    local base="${HTTP_BASE}" create="$RUN_DIR/realm-create.json"
     local profile="$RUN_DIR/realm-profile.json" descriptor="$RUN_DIR/realm-descriptor.json"
     local package_hash package_type package_href
     package_hash="$(python3 - "$SERVICE_PACKAGE" <<'PY'
@@ -311,7 +326,7 @@ PY
 }
 
 retire_profile_realm() {
-    local base="http://127.0.0.1:${HTTP_PORT}" profile="$RUN_DIR/retired-profile.json"
+    local base="${HTTP_BASE}" profile="$RUN_DIR/retired-profile.json"
     if [ "$REALM_MODE" = provider ]; then
         realm_curl --fail-with-body -sS -X POST "$base/admin/api/realms/${REALM}/retire" \
             -H "Authorization: Bearer ${ADMIN_TOKEN}" >"$RUN_DIR/retired.json"

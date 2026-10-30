@@ -93,15 +93,24 @@ async fn send_message_fails_for_unknown_stream_channel() {
     assert!(matches!(err, NetworkError::ChannelNotFound(_)));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn send_request_times_out_without_response() {
-    let t = HostTransport::new();
+    let t = Arc::new(HostTransport::new());
+    let caller = t.clone();
     let mut env = envelope("req-timeout");
     env.timeout_ms = 10; // 10ms
-    let err = t
-        .send_request(PayloadType::RpcReliable, None, env)
+    let request = tokio::spawn(async move {
+        caller
+            .send_request(PayloadType::RpcReliable, None, env)
+            .await
+    });
+    let submitted = tokio::time::timeout(Duration::from_secs(1), t.recv_reliable_raw())
         .await
-        .unwrap_err();
+        .expect("request must reach the workload queue")
+        .unwrap();
+    assert_eq!(submitted.request_id, "req-timeout");
+    tokio::time::advance(Duration::from_millis(10)).await;
+    let err = request.await.unwrap().unwrap_err();
     assert!(
         matches!(err, ActrError::DeliveryUncertain { .. }),
         "got {err:?}"
@@ -109,15 +118,24 @@ async fn send_request_times_out_without_response() {
     assert!(!err.is_retryable());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn send_request_timeout_removes_pending_entry() {
-    let t = HostTransport::new();
+    let t = Arc::new(HostTransport::new());
+    let caller = t.clone();
     let mut env = envelope("req-timeout-cleanup");
     env.timeout_ms = 10;
-    let err = t
-        .send_request(PayloadType::RpcReliable, None, env)
+    let request = tokio::spawn(async move {
+        caller
+            .send_request(PayloadType::RpcReliable, None, env)
+            .await
+    });
+    let submitted = tokio::time::timeout(Duration::from_secs(1), t.recv_reliable_raw())
         .await
-        .unwrap_err();
+        .expect("request must reach the workload queue")
+        .unwrap();
+    assert_eq!(submitted.request_id, "req-timeout-cleanup");
+    tokio::time::advance(Duration::from_millis(10)).await;
+    let err = request.await.unwrap().unwrap_err();
     assert!(
         matches!(err, ActrError::DeliveryUncertain { .. }),
         "got {err:?}"

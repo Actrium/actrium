@@ -131,8 +131,14 @@ rtc = { version = "0.21.1", default-features = false, features = ["crypto-ring"]
 rtc-rtp = "0.21.1"
 
 # === Loran server dependencies (compatibility crate names remain Actrix) ===
-turn_crate = { package = "turn", version = "0.17.2" }
-webrtc-util = "0.17.2"
+# Issue #248: released turn 0.17.2 predates the Allocate replay fix in upstream #896.
+# Pin the v0.17.x fix; STUN, TURN, and Net must use the same Git source.
+# TODO(#248): Once upstream publishes TURN with webrtc-rs/webrtc#896, switch
+# turn_crate, webrtc-stun, and webrtc-util back to matching crates.io versions,
+# remove git/rev, and regenerate the root and examples workspace lockfiles.
+turn_crate = { package = "turn", version = "0.17.2", git = "https://github.com/webrtc-rs/webrtc", rev = "ae66ebd503f013a1f7360a3fd45a8cf83993ee2b" }
+webrtc-stun = { package = "stun", version = "0.17.2", git = "https://github.com/webrtc-rs/webrtc", rev = "ae66ebd503f013a1f7360a3fd45a8cf83993ee2b" }
+webrtc-util = { version = "0.17.2", git = "https://github.com/webrtc-rs/webrtc", rev = "ae66ebd503f013a1f7360a3fd45a8cf83993ee2b" }
 tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"

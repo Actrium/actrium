@@ -180,6 +180,11 @@ impl NetworkServiceDiscovery {
             &actr_id,
             &credential,
         )?;
+        if self.context.signaling_url.scheme() == "wss" {
+            // Ring and AWS-LC can both be enabled by the dependency graph.
+            // Keep an application-selected provider, or select the TLS default.
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        }
         let (socket, _) = connect_async(signaling_request).await.with_context(|| {
             format!(
                 "Failed to connect to signaling: {}",
