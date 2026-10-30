@@ -283,14 +283,22 @@ where
 {
     const HINT: &str = "a Realm without a Realm Profile is joined with --issuer";
     let uri = parse_realm_name(realm)?;
-    let (descriptor, member) = domain_authority(uri.domain(), &fetch).await.context(HINT)?;
-    let (keys, mut trust) = realm_pins::accept_member(store, uri.domain(), &member)?;
+    // The hint belongs to a failed fetch only. A descriptor that fails to
+    // parse or validate is a security error on its own — wrapping it in
+    // "join with --issuer" would suggest skipping domain verification at
+    // exactly the moment it matters most.
+    let hinted = |url: String| {
+        let future = fetch(url);
+        async move { future.await.context(HINT) }
+    };
+    let (descriptor, member) = domain_authority(uri.domain(), hinted).await?;
+    let mut accepted = realm_pins::accept_member(store, uri.domain(), &member)?;
 
     let mut failures = Vec::new();
     let mut fetched = None;
     for url in realm_profile_urls(&descriptor, realm)? {
         let verified = match fetch(url.clone()).await {
-            Ok(document) => RealmProfile::verify(&document, realm, &keys)
+            Ok(document) => RealmProfile::verify(&document, realm, &accepted.keys)
                 .map(|profile| (profile, String::from_utf8_lossy(&document).into_owned()))
                 .map_err(Into::into),
             Err(error) => Err(error),
@@ -306,7 +314,7 @@ where
     let embedded = match embedded {
         Some(document) => {
             let text = document.to_string();
-            match RealmProfile::verify(text.as_bytes(), realm, &keys) {
+            match RealmProfile::verify(text.as_bytes(), realm, &accepted.keys) {
                 Ok(profile) => Some((profile, text)),
                 Err(error) => {
                     failures.push(format!("the invite's Realm Profile: {error}"));
@@ -340,7 +348,7 @@ where
     if profile.realm.status == RealmStatus::Retired {
         bail!("Realm {realm} is retired");
     }
-    realm_pins::accept_profile(store, realm, &mut trust, &keys, &profile, &document)?;
+    realm_pins::accept_profile(store, realm, &mut accepted, &profile, &document)?;
     Ok(profile)
 }
 
@@ -700,7 +708,14 @@ mod tests {
         let invite_path = request["invite_file"].as_str().context("invite_file")?;
         let invite_text = std::fs::read_to_string(invite_path)?;
         let invite = RealmInvite::decode(&invite_text)?;
-        let mut store = realm_pins::MemoryTrustStore::default();
+        // The fixture exercises the real file store (not MemoryTrustStore):
+        // the pins must survive on disk between the two calls below.
+        let pins_dir =
+            std::path::Path::new(request["result_file"].as_str().context("result_file")?)
+                .parent()
+                .context("result_file directory")?
+                .join("pins");
+        let mut store = realm_pins::FileTrustStore::new(pins_dir);
         let profile = realm_profile(
             &invite.realm,
             invite.profile.as_ref(),
@@ -1350,8 +1365,8 @@ mod tests {
                 output.clone(),
             ),
             |url| async move { Err(anyhow::anyhow!("{url}: 404 Not Found")) },
+            Some(&mut realm_pins::MemoryTrustStore::default()),
             &http_client().unwrap(),
-            &mut realm_pins::MemoryTrustStore::default(),
         )
         .await
         .unwrap_err();
@@ -1496,7 +1511,7 @@ mod tests {
         // Out-of-band confirmation accepts the new keys; the join succeeds
         // and the Profile baseline moves to them.
         let member = domain.descriptor.lock().unwrap()["realm_signing_keys"].clone();
-        let reply = realm_pins::trust_with("acme.com", member, &mut store).unwrap();
+        let reply = realm_pins::trust_with("acme.com", member, &mut store, None).unwrap();
         assert_eq!(reply["status"], "identity-change-confirmed");
         join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("b.json")),

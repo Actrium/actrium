@@ -12,6 +12,10 @@ fn run(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_actr"))
         .args(args)
         .current_dir(dir)
+        // ACTR_HOME, not HOME/USERPROFILE: `dirs` resolves the real home on
+        // Windows via SHGetKnownFolderPath, which ignores those variables —
+        // only ACTR_HOME reliably redirects the pin store on every platform.
+        .env("ACTR_HOME", dir)
         .env("HOME", dir)
         .env("USERPROFILE", dir)
         .env("NO_COLOR", "1")
@@ -39,7 +43,7 @@ fn trust_reset_reports_and_removes_pinned_trust() {
     assert_eq!(reply["reset"], false);
 
     // A pinned file is removed and reported.
-    let pins = dir.path().join(".actr").join("realms");
+    let pins = dir.path().join("realms");
     fs::create_dir_all(&pins).unwrap();
     let file = pins.join("acme.com.json");
     fs::write(&file, "{}").unwrap();

@@ -348,20 +348,27 @@ fn keygen(args: &KeygenArgs) -> Result<Value> {
 }
 
 /// Write `contents` to a file only its owner can read, from its creation on.
+/// Write `contents` atomically (same-directory temporary file + rename),
+/// readable by its owner alone.
 pub(crate) fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(path)?;
-    // An existing file keeps its mode on open.
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let mut temporary = match parent {
+        Some(parent) => tempfile::NamedTempFile::new_in(parent)?,
+        None => tempfile::NamedTempFile::new()?,
+    };
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        temporary
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    file.write_all(contents)
+    temporary.write_all(contents)?;
+    temporary
+        .persist(path)
+        .map(|_| ())
+        .map_err(|error| error.error)
 }
 
 fn new_request(op: ManagementOp, realm: &str, provider: &str) -> ManagementRequest {
