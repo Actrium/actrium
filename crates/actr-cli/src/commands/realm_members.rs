@@ -708,13 +708,11 @@ mod tests {
         let invite_path = request["invite_file"].as_str().context("invite_file")?;
         let invite_text = std::fs::read_to_string(invite_path)?;
         let invite = RealmInvite::decode(&invite_text)?;
-        // The fixture exercises the real file store (not MemoryTrustStore):
-        // the pins must survive on disk between the two calls below.
+        // Each invocation is a separate client; the two resolutions below
+        // share its real on-disk pins, but independent scenarios do not.
         let pins_dir =
             std::path::Path::new(request["result_file"].as_str().context("result_file")?)
-                .parent()
-                .context("result_file directory")?
-                .join("pins");
+                .with_extension("pins");
         let mut store = realm_pins::FileTrustStore::new(pins_dir);
         let profile = realm_profile(
             &invite.realm,
