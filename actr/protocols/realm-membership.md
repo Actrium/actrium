@@ -185,16 +185,30 @@ expiry. Only the owner grants, revokes and lists. A known Service answers
 the existence of a serial is not the secret, and the owner must learn that
 theirs does not exist.
 
-Signaling enforces the ACL where attach starts: a `route_candidates` or
-`get_service_spec` request reaches a Service Actor only when the caller's
-credential names the owner as its `member` claim, or names a member with an
-unrevoked, unexpired grant. The check reads the store on every request, so a
-revocation or expiry is live from the next call — matching the rule of section
-6 that a decision based on `member`/`role` claims never outlives the
-credential. An Actor this Realm Infra Provider did not issue has no owner
-record and is not guarded by this layer (the type-level ACL still applies).
-Signaling cannot distinguish `editor` from `viewer` traffic; that distinction
-belongs to the Service, once the Host hands it the caller's claims (section 6).
+Signaling enforces the ACL on every path whose output feeds a direct attach:
+
+- `route_candidates` and `get_service_spec` only return a Service the
+  caller's credential may attach to: the `member` claim is the owner, or
+  names a member with an unrevoked, unexpired grant.
+- `ActrRelay` applies the same rule when the target is this Realm's
+  profile-package Service (the actor the Realm Profile names). Fronts and
+  helpers are not instance-guarded at the relay — guarding every issued
+  Actor would break the service -> front return path of an authorized
+  session.
+- Presence pushes (`ActrUpEvent`) disclose an Actor's identity only to
+  subscribers whose member may attach to it: for an issued Actor the
+  actor_id reaches its owner and grantees, nobody else. Knowing the
+  actor_id was the last input a direct relay attach needed.
+
+The checks read the store on every request, so a revocation or expiry is
+live from the next message — matching the rule of section 6 that a decision
+based on `member`/`role` claims never outlives the credential. An Actor this
+Realm Infra Provider did not issue has no owner record and is not guarded by
+this layer (the type-level ACL still applies). A store failure fails the
+request closed and honestly: the reply is a 503-class error, never a
+pretense that the Service does not exist. Signaling cannot distinguish
+`editor` from `viewer` traffic; that distinction belongs to the Service, once
+the Host hands it the caller's claims (section 6).
 
 ## 5. Issuing owner invites
 

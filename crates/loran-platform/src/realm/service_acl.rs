@@ -134,11 +134,7 @@ pub async fn acl_grant(
     .bind(service_serial as i64)
     .bind(member_id)
     // `Owner` returned above.
-    .bind(match role {
-        Role::Editor => "editor",
-        Role::Viewer => "viewer",
-        Role::Owner => unreachable!("owner grants are refused above"),
-    })
+    .bind(role.as_str())
     .bind(&signer.key_id)
     .bind(expires_at)
     .bind(now)
@@ -151,7 +147,7 @@ pub async fn acl_grant(
         "realm": signer.realm,
         "service_serial": service_serial,
         "member_id": member_id,
-        "role": if role == Role::Editor { "editor" } else { "viewer" },
+        "role": role.as_str(),
         "expires_at": super::membership::rfc3339(expires_at),
     }))
 }
@@ -248,6 +244,61 @@ pub async fn acl_list(signer: &Signer, service_serial: u64) -> Result<Value, Mem
     }))
 }
 
+/// The instance-ACL decision for one (Actor, member) pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attachee {
+    /// No identity issued here for the Actor: not instance-guarded.
+    Unissued,
+    /// The member the identity was issued to: always allowed.
+    Owner,
+    /// An unrevoked, unexpired grant.
+    Granted,
+    /// Issued to another member, with no live grant.
+    Denied,
+}
+
+impl Attachee {
+    pub fn allowed(self) -> bool {
+        !matches!(self, Self::Denied)
+    }
+}
+
+/// The instance-ACL decision for (`service`, `member_id`): the binding and
+/// the grant existence in a single round trip (one pool acquire, one query).
+pub async fn attachee_status(service: &ActrId, member_id: &str) -> Result<Attachee, sqlx::Error> {
+    let mut conn = get_database().get_pool().acquire().await?;
+    attachee_status_on(&mut conn, service, member_id).await
+}
+
+/// [`attachee_status`] on an existing connection.
+pub async fn attachee_status_on(
+    conn: &mut SqliteConnection,
+    service: &ActrId,
+    member_id: &str,
+) -> Result<Attachee, sqlx::Error> {
+    let row: Option<(String, bool)> = sqlx::query_as(
+        "SELECT i.member_id,
+                EXISTS(SELECT 1 FROM service_acl a
+                       WHERE a.realm = i.realm AND a.serial_number = i.serial_number
+                         AND a.member_id = ? AND a.revoked_at IS NULL
+                         AND a.expires_at > ?)
+         FROM issued_actor_identity i
+         WHERE i.realm = ? AND i.serial_number = ?",
+    )
+    .bind(member_id)
+    .bind(now_secs())
+    .bind(&service.realm)
+    .bind(service.serial_number as i64)
+    .fetch_optional(conn)
+    .await?;
+    Ok(match row {
+        None => Attachee::Unissued,
+        Some((owner, _)) if owner == member_id => Attachee::Owner,
+        Some((_, true)) => Attachee::Granted,
+        Some((_, false)) => Attachee::Denied,
+    })
+}
+
 /// Whether `member_id` may attach to `service`: the owner always may, an
 /// unrevoked unexpired grant may, and an Actor this Provider did not issue
 /// is not ACL-guarded here.
@@ -255,8 +306,7 @@ pub async fn service_attachee_allowed(
     service: &ActrId,
     member_id: &str,
 ) -> Result<bool, sqlx::Error> {
-    let mut conn = get_database().get_pool().acquire().await?;
-    service_attachee_allowed_on(&mut conn, service, member_id).await
+    Ok(attachee_status(service, member_id).await?.allowed())
 }
 
 /// [`service_attachee_allowed`] on an existing connection.
@@ -265,23 +315,69 @@ pub async fn service_attachee_allowed_on(
     service: &ActrId,
     member_id: &str,
 ) -> Result<bool, sqlx::Error> {
-    let Some(binding) = actor_binding_on(conn, service).await? else {
-        return Ok(true);
-    };
-    if binding.member_id == member_id {
+    Ok(attachee_status_on(conn, service, member_id)
+        .await?
+        .allowed())
+}
+
+/// Whether `target` is this Realm's profile-package Service: the Actor the
+/// Realm Profile names (any version). Only that Actor is instance-guarded at
+/// the relay — Fronts and helpers must relay freely once the type-level ACL
+/// passes, or the service -> front return path of an authorized session
+/// would die on the first SDP/ICE answer.
+pub async fn relay_target_guarded(
+    target: &ActrId,
+    target_type: &actr_protocol::ActrType,
+) -> Result<bool, sqlx::Error> {
+    let mut conn = get_database().get_pool().acquire().await?;
+    relay_target_guarded_with(&mut conn, target, target_type).await
+}
+
+/// Relay-layer instance ACL (FR-SEC-013): the Realm's profile-package
+/// Service relays only for its owner and grantees; every other Actor passes
+/// once the type-level ACL accepted the hop. A caller the Actor was not
+/// issued to only pays the profile lookup when it is otherwise denied.
+pub async fn relay_attachee_allowed(
+    target: &ActrId,
+    target_type: &actr_protocol::ActrType,
+    member_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let mut conn = get_database().get_pool().acquire().await?;
+    if attachee_status_on(&mut conn, target, member_id)
+        .await?
+        .allowed()
+    {
         return Ok(true);
     }
-    sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM service_acl
-         WHERE realm = ? AND serial_number = ? AND member_id = ?
-             AND revoked_at IS NULL AND expires_at > ?)",
-    )
-    .bind(&service.realm)
-    .bind(service.serial_number as i64)
-    .bind(member_id)
-    .bind(now_secs())
-    .fetch_one(conn)
-    .await
+    // Otherwise denied: only a target outside the Realm's profile-package
+    // Service still relays (Fronts and helpers).
+    Ok(!relay_target_guarded_with(&mut conn, target, target_type).await?)
+}
+
+/// [`relay_target_guarded`] on an existing connection.
+async fn relay_target_guarded_with(
+    conn: &mut SqliteConnection,
+    target: &ActrId,
+    target_type: &actr_protocol::ActrType,
+) -> Result<bool, sqlx::Error> {
+    let Some(document) =
+        sqlx::query_scalar::<_, String>("SELECT document FROM realm_profile WHERE realm = ?")
+            .bind(&target.realm)
+            .fetch_optional(conn)
+            .await?
+    else {
+        return Ok(false);
+    };
+    let Ok(profile) = serde_json::from_str::<serde_json::Value>(&document) else {
+        return Ok(false);
+    };
+    let Some(service) = profile["package"]["type"]
+        .as_str()
+        .and_then(|text| actr_protocol::ActrType::from_program_identity(text).ok())
+    else {
+        return Ok(false);
+    };
+    Ok(service.publisher == target_type.publisher && service.name == target_type.name)
 }
 
 #[cfg(test)]

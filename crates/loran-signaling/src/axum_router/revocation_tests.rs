@@ -560,6 +560,7 @@ async fn live_reissue_closes_old_connection_and_preserves_replacement() {
         actor.clone(),
         actor_type.clone(),
         actor_type.clone(),
+        "member-1".to_string(),
     );
     // Also exercise cleanup of an obsolete connection alongside an installed
     // replacement, as can happen to a change subscriber's earlier snapshot.

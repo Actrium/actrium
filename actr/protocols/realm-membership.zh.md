@@ -137,12 +137,22 @@ Service Actor 由 `service_serial` 指定，即该 Realm Infra Provider 签发�
 授权人与过期时刻。只有 owner 可以授权、撤销与查看。已存在的 Service 对非 owner 一律回答 `forbidden`；未知 serial 或成员得到
 `not_found`——serial 的存在本身不是秘密，且 owner 必须知道自己的 serial 不存在。
 
-Signaling 在 attach 的起点执行该 ACL：`route_candidates` 与 `get_service_spec` 请求只有在调用方 credential 的
-`member` claim 是 owner，或属于持有未撤销、未过期授权的成员时，才能到达 Service Actor。检查在每次请求时读存储，
-因此撤销或过期从下一次调用即生效——与第 6 节的规则一致：基于 `member`/`role` claim 的决定不得超过 credential
-自身的有效期。不是该 Realm Infra Provider 签发的 Actor 没有 owner 记录，不受这一层约束（类型级 ACL 仍然生效）。
-Signaling 无法区分 `editor` 与 `viewer` 的流量；这一区分属于 Service 自身，待 Host 把调用方 claim 交给它之后
-（第 6 节）。
+Signaling 在每条会促成直连 attach 的路径上执行该 ACL：
+
+- `route_candidates` 与 `get_service_spec` 只返回调用方 credential 有权 attach 的
+  Service：`member` claim 是 owner，或属于持有未撤销、未过期授权的成员。
+- `ActrRelay` 在目标是本 Realm Profile 所指的 Service（profile-package 类型）时适用同一
+  规则。Front 与辅助 Actor 不受 relay 层的实例约束——若对每个已签发 Actor 都强制，已授权会话的
+  service → front 回程会在协商中途被切断。
+- Presence 推送（`ActrUpEvent`）只把 Actor 身份披露给其 member 有权 attach 的订阅者：对已签发
+  的 Actor，actor_id 只到达 owner 与授权成员。掌握 actor_id 曾是直连 relay attach 所需的最后一个
+  输入。
+
+检查在每次请求时读存储，因此撤销或过期从下一次消息即生效——与第 6 节的规则一致：基于 `member`/`role`
+claim 的决定不得超过 credential 自身的有效期。不是该 Realm Infra Provider 签发的 Actor 没有 owner 记录，
+不受这一层约束（类型级 ACL 仍然生效）。存储故障时请求以 fail-closed 且诚实的方式失败：回复是 503 类错误，
+绝不伪装成 Service 不存在。Signaling 无法区分 `editor` 与 `viewer` 的流量；这一区分属于 Service 自身，
+待 Host 把调用方 claim 交给它之后（第 6 节）。
 
 ## 5. owner 邀请的签发
 

@@ -643,8 +643,16 @@ pub async fn service_acl(command: &ServiceAclCommand) -> Result<Value> {
         ServiceAclCommand::Grant(args) => {
             let member = Member::load(&args.key)?;
             let expires_at = match (&args.days, &args.expires_at) {
-                (Some(days), None) => (chrono::Utc::now() + chrono::Duration::days((*days).into()))
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                (Some(days), None) => {
+                    // Validated before chrono: Duration::days panics far past
+                    // this range instead of returning the server's
+                    // invalid_request.
+                    if !(1..=366).contains(days) {
+                        bail!("--days must be 1 to 366");
+                    }
+                    (chrono::Utc::now() + chrono::Duration::days((*days).into()))
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                }
                 (None, Some(expires_at)) => expires_at.clone(),
                 _ => bail!("give --days or --expires-at"),
             };

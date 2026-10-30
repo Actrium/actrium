@@ -395,13 +395,6 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_service_acl_member
-             ON service_acl(realm, member_id)",
-        )
-        .execute(&mut *tx)
-        .await?;
-
         // Publisher Registry tables
         // name is the canonical HTTPS publisher domain.
         sqlx::query(
