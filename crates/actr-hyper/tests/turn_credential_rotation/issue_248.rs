@@ -1,7 +1,8 @@
-//! Manual regression probes for issue #248 on the webrtc 0.21.0 client and
-//! turn 0.17.2 server. Assertions describe the fixed behavior; the probes
-//! remain ignored until the corresponding upstream releases are available.
-//! Run with `cargo test -p actr-hyper --test turn_credential_rotation issue_248 -- --ignored --nocapture`.
+//! Issue #248 regressions on the webrtc 0.21.1 client and the pinned TURN server.
+//! Allocate replay is covered by the server pin to upstream webrtc-rs/webrtc#896.
+//! The client includes the retirement fix from webrtc-rs/webrtc#912; retirement
+//! probes remain manual pending integration validation. Run those probes with
+//! `cargo test -p actr-hyper --features test-utils --test turn_credential_rotation issue_248 -- --ignored --nocapture`.
 
 use super::*;
 use rtc::sansio::Protocol;
@@ -27,7 +28,6 @@ async fn exchange(socket: &UdpSocket, server: SocketAddr, raw: &[u8]) -> Message
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "issue #248: turn 0.17.2 awaits the upstream Allocate replay release"]
 async fn allocate_retransmission_replays_success() {
     install_test_crypto_provider();
     let auth = Arc::new(
@@ -153,6 +153,7 @@ async fn allocate_retransmission_replays_success() {
         replay.typ, first.typ,
         "same Allocate transaction must replay success, not 437"
     );
+    assert_eq!(replay.raw, first.raw, "replay must preserve the response");
     let mut replay_relay = rtc::turn::proto::relayaddr::RelayedAddress::default();
     replay_relay.get_from(&replay).unwrap();
     assert_eq!(
@@ -250,13 +251,13 @@ async fn allocation_lifecycle(restart: bool) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "issue #248: webrtc 0.21.0 leaves allocations after PeerConnection close"]
+#[ignore = "issue #248: manual validation of allocation release on close"]
 async fn peer_close_releases_allocations() {
     allocation_lifecycle(false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "issue #248: webrtc 0.21.0 leaves allocations after ICE transport rebind"]
+#[ignore = "issue #248: manual validation of allocation release on ICE rebind"]
 async fn ice_restart_releases_old_allocations() {
     allocation_lifecycle(true).await;
 }
