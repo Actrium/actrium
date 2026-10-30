@@ -51,3 +51,20 @@ fn trust_reset_reports_and_removes_pinned_trust() {
     assert_eq!(reply["reset"], true);
     assert!(!file.exists());
 }
+
+#[test]
+fn keygen_writes_a_bare_relative_output_path() {
+    let dir = tempfile::tempdir().unwrap();
+    succeeds(run(
+        dir.path(),
+        &[
+            "realm",
+            "keygen",
+            "--key-id",
+            "realm-key",
+            "--output",
+            "key.json",
+        ],
+    ));
+    assert!(dir.path().join("key.json").is_file());
+}

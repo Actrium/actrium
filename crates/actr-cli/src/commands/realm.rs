@@ -347,16 +347,15 @@ fn keygen(args: &KeygenArgs) -> Result<Value> {
     Ok(member)
 }
 
-/// Write `contents` to a file only its owner can read, from its creation on.
 /// Write `contents` atomically (same-directory temporary file + rename),
 /// readable by its owner alone.
 pub(crate) fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
-    let mut temporary = match parent {
-        Some(parent) => tempfile::NamedTempFile::new_in(parent)?,
-        None => tempfile::NamedTempFile::new()?,
-    };
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;

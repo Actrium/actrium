@@ -127,6 +127,26 @@ impl FileTrustStore {
             .join(format!("{}.json", normalized_domain(domain)?)))
     }
 
+    /// Serialize the complete compare-and-swap or reset across processes.
+    /// The lock file is never replaced, so every writer locks the same inode.
+    fn lock_domain(&self, domain: &str) -> Result<std::fs::File> {
+        std::fs::create_dir_all(&self.dir)
+            .with_context(|| format!("Failed to create {}", self.dir.display()))?;
+        let path = self
+            .dir
+            .join(format!("{}.lock", normalized_domain(domain)?));
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let file = options
+            .open(&path)
+            .with_context(|| format!("Failed to open trust lock: {}", path.display()))?;
+        file.lock()
+            .with_context(|| format!("Failed to lock pinned trust: {}", path.display()))?;
+        Ok(file)
+    }
+
     /// The on-disk record and its revision, tolerating absence only.
     fn read_current(&self, domain: &str) -> Result<Option<(RealmTrust, u64)>> {
         let path = self.path(domain)?;
@@ -176,9 +196,10 @@ impl TrustStore for FileTrustStore {
     }
 
     fn save(&mut self, trust: &RealmTrust) -> Result<()> {
-        // Compare-and-swap: only the writer who loaded the record at this
-        // revision may replace it. A concurrent join/trust bumps it and the
-        // loser is told to re-run instead of silently overwriting newer pins.
+        // Hold the lock from the revision read through the atomic rename:
+        // checking first and locking only the write would still allow two
+        // writers to accept the same revision and overwrite one another.
+        let _lock = self.lock_domain(&trust.domain)?;
         let current = self.read_current(&trust.domain)?;
         let current_revision = current.map(|(_, revision)| revision).unwrap_or(0);
         let expected = self.expected.get(&trust.domain).copied().unwrap_or(0);
@@ -192,8 +213,6 @@ impl TrustStore for FileTrustStore {
         let mut trust = trust.clone();
         trust.revision = current_revision + 1;
         let path = self.path(&trust.domain)?;
-        std::fs::create_dir_all(&self.dir)
-            .with_context(|| format!("Failed to create {}", self.dir.display()))?;
         super::realm::write_private(&path, serde_json::to_string_pretty(&trust)?.as_bytes())
             .with_context(|| format!("Failed to write pinned trust: {}", path.display()))?;
         self.expected.insert(trust.domain.clone(), trust.revision);
@@ -201,13 +220,17 @@ impl TrustStore for FileTrustStore {
     }
 
     fn reset(&mut self, domain: &str) -> Result<bool> {
+        let _lock = self.lock_domain(domain)?;
         let path = self.path(domain)?;
         match std::fs::remove_file(&path) {
             Ok(()) => {
                 self.expected.insert(domain.to_string(), 0);
                 Ok(true)
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.expected.insert(domain.to_string(), 0);
+                Ok(false)
+            }
             Err(error) => {
                 Err(error).with_context(|| format!("Failed to remove {}", path.display()))
             }
@@ -781,5 +804,31 @@ mod tests {
         let error = second.save(&stale).unwrap_err();
         assert!(error.to_string().contains("concurrently"), "{error:#}");
         assert_eq!(second.load("acme.com").unwrap().unwrap().pins.sequence, 2);
+    }
+
+    #[test]
+    fn file_store_serializes_concurrent_compare_and_swap() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut initial = FileTrustStore::new(dir.path().to_path_buf());
+        accept_member(&mut initial, "acme.com", &member("realm-key-1", &key(), 1)).unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(16));
+        let mut writers = Vec::new();
+        for _ in 0..16 {
+            let mut store = FileTrustStore::new(dir.path().to_path_buf());
+            let trust = store.load("acme.com").unwrap().unwrap();
+            let barrier = barrier.clone();
+            writers.push(std::thread::spawn(move || {
+                barrier.wait();
+                store.save(&trust)
+            }));
+        }
+        let successes = writers
+            .into_iter()
+            .map(|writer| writer.join().unwrap())
+            .filter(|result| result.is_ok())
+            .count();
+        assert_eq!(successes, 1, "only one writer may advance revision 1");
+        assert_eq!(initial.load("acme.com").unwrap().unwrap().revision, 2);
     }
 }

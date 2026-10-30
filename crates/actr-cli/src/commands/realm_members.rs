@@ -345,10 +345,12 @@ where
             bail!("No verified Realm Profile for {realm} ({HINT}): {failures}");
         }
     };
+    // A verified retirement is permanent even though it refuses this join:
+    // persist it before returning so a replayed active Profile cannot rejoin.
+    realm_pins::accept_profile(store, realm, &mut accepted, &profile, &document)?;
     if profile.realm.status == RealmStatus::Retired {
         bail!("Realm {realm} is retired");
     }
-    realm_pins::accept_profile(store, realm, &mut accepted, &profile, &document)?;
     Ok(profile)
 }
 
@@ -1458,6 +1460,60 @@ mod tests {
             fetch_from(domain.base, http_client().unwrap()),
             Some(&mut store),
             &http_client().unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("REALM_PROFILE_ROLLBACK"),
+            "{error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn retirement_is_pinned_before_the_join_is_refused() {
+        let key = SigningKey::from_bytes(&[8; 32]);
+        let domain = serve_domain_mutable(&key, 31).await;
+        let dir = tempfile::tempdir().unwrap();
+        let secret = URL_SAFE_NO_PAD.encode([14u8; 32]);
+        let mut store = realm_pins::MemoryTrustStore::default();
+        let active = profile(&key, 31, &format!("{}/issuer", domain.base), "p.example");
+
+        join_with(
+            &join_args(RealmInvite::new(REALM, &secret), dir.path().join("a.json")),
+            fetch_from(domain.base.clone(), domain.client.clone()),
+            Some(&mut store),
+            &domain.client,
+        )
+        .await
+        .unwrap();
+
+        let mut retired = profile(&key, 32, &format!("{}/issuer", domain.base), "p.example");
+        retired["realm"]["status"] = serde_json::json!("retired");
+        retired.as_object_mut().unwrap().remove("package");
+        sign_document(&mut retired, "rs-1", &key);
+        *domain.profile.lock().unwrap() = Some(retired);
+        let error = join_with(
+            &join_args(RealmInvite::new(REALM, &secret), dir.path().join("b.json")),
+            fetch_from(domain.base.clone(), domain.client.clone()),
+            Some(&mut store),
+            &domain.client,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("retired"), "{error:#}");
+        assert_eq!(
+            store.load("acme.com").unwrap().unwrap().profiles[REALM].sequence,
+            32
+        );
+
+        // The refused join still advanced the baseline: the old active
+        // Profile cannot be replayed to redeem another invite.
+        *domain.profile.lock().unwrap() = Some(active);
+        let error = join_with(
+            &join_args(RealmInvite::new(REALM, &secret), dir.path().join("c.json")),
+            fetch_from(domain.base, domain.client.clone()),
+            Some(&mut store),
+            &domain.client,
         )
         .await
         .unwrap_err();
