@@ -720,9 +720,17 @@ impl RelayClient {
                     match expected {
                         Some(expected) if expected.to_string_repr() == peer => {}
                         Some(_) => {
-                            return Err(NetworkError::DeserializationError(
-                                "Relay response identity mismatch".into(),
-                            ));
+                            // Fail only this dial. The channel number belongs to
+                            // an untrusted response and may name an unrelated
+                            // live channel, so do not close or install it.
+                            if let Some(pending) = self.pending.lock().unwrap().remove(&request_id)
+                            {
+                                let _ =
+                                    pending.reply.send(Err(NetworkError::DeserializationError(
+                                        "Relay response identity mismatch".into(),
+                                    )));
+                            }
+                            return Ok(());
                         }
                         None => {
                             // A cancelled outbound dial can share an incoming

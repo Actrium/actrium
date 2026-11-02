@@ -247,12 +247,33 @@ impl Drop for Fixture {
 #[tokio::test]
 async fn connected_response_cannot_replace_the_requested_peer() {
     let mut fixture = Fixture::new().await;
+    let (first_request, first_dial) = fixture.start_dial(fixture.remote.clone()).await;
+    fixture.connected(Some(first_request)).await.unwrap();
+    let mut remote = fixture.handshake().await;
+    let (_, connection) = first_dial.await.unwrap().unwrap();
+
     let target = ActrId::from_string_repr("3.test@example.com").unwrap();
     let (request, dial) = fixture.start_dial(target).await;
-    assert!(fixture.connected(Some(request)).await.is_err());
-    assert!(!fixture.client.channels.read().await.contains_key(&42));
-    fixture.client.clear().await;
+    fixture.connected(Some(request)).await.unwrap();
     assert!(dial.await.unwrap().is_err());
+    assert!(!fixture.transport.cancel.is_cancelled());
+    assert!(connection.is_connected());
+    assert!(fixture.client.channels.read().await.contains_key(&42));
+
+    let lane = connection
+        .get_lane(PayloadType::StreamReliable)
+        .await
+        .unwrap();
+    lane.send(Bytes::from_static(b"unrelated channel survives"))
+        .await
+        .unwrap();
+    let ciphertext = fixture.next_binary().await;
+    let plaintext = remote
+        .receive(&ciphertext, None, fixture.now)
+        .unwrap()
+        .application
+        .unwrap();
+    assert!(plaintext.ends_with(b"unrelated channel survives"));
 }
 
 #[tokio::test]
