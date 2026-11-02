@@ -24,7 +24,7 @@ use loran_relay_protocol::{
     encode_data,
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         Arc, OnceLock, RwLock as SyncRwLock, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -42,6 +42,8 @@ use tokio_util::sync::CancellationToken;
 
 const MAX_FRAME: usize = 8 * 1024 * 1024 + 64;
 const QUEUE_BYTES: usize = 16 * 1024 * 1024;
+const OUTGOING_QUEUE_SLOTS: usize = 128;
+const CLOSE_QUEUE_SLOTS: usize = 512;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_DESIRED_PEERS: usize = 1024;
@@ -56,13 +58,29 @@ fn ws_closed() -> WsError {
 struct Outgoing {
     message: Message,
     ack: Option<oneshot::Sender<Result<(), WsError>>>,
-    _permit: OwnedSemaphorePermit,
+    _permit: Option<OwnedSemaphorePermit>,
+    _slot: OwnedSemaphorePermit,
+    _close: Option<CloseTicket>,
+}
+
+struct CloseTicket {
+    channel: u64,
+    pending: Arc<std::sync::Mutex<HashSet<u64>>>,
+}
+
+impl Drop for CloseTicket {
+    fn drop(&mut self) {
+        self.pending.lock().unwrap().remove(&self.channel);
+    }
 }
 
 #[derive(Clone)]
 struct Transport {
     tx: mpsc::Sender<Outgoing>,
     budget: Arc<Semaphore>,
+    outgoing_slots: Arc<Semaphore>,
+    close_slots: Arc<Semaphore>,
+    pending_closes: Arc<std::sync::Mutex<HashSet<u64>>>,
     encryption_budget: Arc<Semaphore>,
     cancel: CancellationToken,
     identity: Arc<LocalIdentity>,
@@ -84,12 +102,20 @@ impl Transport {
                 .acquire_many_owned(size as u32)
                 .await
                 .map_err(|_| ws_closed())?;
+            let slot = self
+                .outgoing_slots
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| ws_closed())?;
             let (tx, rx) = oneshot::channel();
             self.tx
                 .send(Outgoing {
                     message,
                     ack: Some(tx),
-                    _permit: permit,
+                    _permit: Some(permit),
+                    _slot: slot,
+                    _close: None,
                 })
                 .await
                 .map_err(|_| ws_closed())?;
@@ -115,25 +141,35 @@ impl Transport {
         if self.cancel.is_cancelled() {
             return;
         }
-        let message = serde_json::to_string(&ClientControl::Close { channel }).unwrap();
-        let Ok(permit) = self
-            .budget
-            .clone()
-            .try_acquire_many_owned(message.len() as u32)
-        else {
-            self.cancel.cancel();
+        if !self.pending_closes.lock().unwrap().insert(channel) {
+            return;
+        }
+        let ticket = CloseTicket {
+            channel,
+            pending: self.pending_closes.clone(),
+        };
+        // Close controls have their own queue and byte reservation. A peer
+        // exhausting the data budget must not tear down the shared socket.
+        let Ok(slot) = self.close_slots.clone().try_acquire_owned() else {
+            tracing::warn!(channel, "Relay close queue is full");
             return;
         };
+        let message = serde_json::to_string(&ClientControl::Close { channel }).unwrap();
         if self
             .tx
             .try_send(Outgoing {
                 message: Message::Text(message.into()),
                 ack: None,
-                _permit: permit,
+                _permit: None,
+                _slot: slot,
+                _close: Some(ticket),
             })
             .is_err()
         {
-            self.cancel.cancel();
+            tracing::debug!(
+                channel,
+                "Relay writer is no longer accepting close controls"
+            );
         }
     }
 }
@@ -499,12 +535,15 @@ impl RelayClient {
             return Err(closed());
         }
         let (mut sink, mut stream) = socket.split();
-        let (tx, mut rx) = mpsc::channel::<Outgoing>(128);
+        let (tx, mut rx) = mpsc::channel::<Outgoing>(OUTGOING_QUEUE_SLOTS + CLOSE_QUEUE_SLOTS);
         let cancel = self.shutdown.child_token();
         let _cancel_on_drop = cancel.clone().drop_guard();
         let transport = Transport {
             tx,
             budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
+            outgoing_slots: Arc::new(Semaphore::new(OUTGOING_QUEUE_SLOTS)),
+            close_slots: Arc::new(Semaphore::new(CLOSE_QUEUE_SLOTS)),
+            pending_closes: Arc::new(std::sync::Mutex::new(HashSet::new())),
             encryption_budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             cancel: cancel.clone(),
             identity: identity.clone(),

@@ -111,7 +111,8 @@ impl Fixture {
             shutdown.clone(),
         );
         client.issuers.write().await.insert(1, issuer.clone());
-        let (tx, mut outgoing) = mpsc::channel::<Outgoing>(16);
+        let (tx, mut outgoing) =
+            mpsc::channel::<Outgoing>(OUTGOING_QUEUE_SLOTS + CLOSE_QUEUE_SLOTS);
         let (captured_tx, captured) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             while let Some(out) = outgoing.recv().await {
@@ -127,6 +128,9 @@ impl Fixture {
         let transport = Transport {
             tx,
             budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
+            outgoing_slots: Arc::new(Semaphore::new(OUTGOING_QUEUE_SLOTS)),
+            close_slots: Arc::new(Semaphore::new(CLOSE_QUEUE_SLOTS)),
+            pending_closes: Arc::new(std::sync::Mutex::new(HashSet::new())),
             encryption_budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             cancel: shutdown.child_token(),
             identity: Arc::new(local_identity),
@@ -280,6 +284,53 @@ async fn connected_response_cannot_replace_the_requested_peer() {
         .application
         .unwrap();
     assert!(plaintext.ends_with(b"unrelated channel survives"));
+}
+
+#[tokio::test]
+async fn channel_close_survives_exhausted_data_budget_and_queue() {
+    let mut fixture = Fixture::new().await;
+    let budget = fixture
+        .transport
+        .budget
+        .clone()
+        .acquire_many_owned(QUEUE_BYTES as u32)
+        .await
+        .unwrap();
+    let slots = fixture
+        .transport
+        .outgoing_slots
+        .clone()
+        .acquire_many_owned(OUTGOING_QUEUE_SLOTS as u32)
+        .await
+        .unwrap();
+
+    fixture.transport.try_close(42);
+    let Message::Text(text) = fixture.next_message().await else {
+        panic!("expected a channel close control");
+    };
+    assert!(matches!(
+        serde_json::from_str::<ClientControl>(&text).unwrap(),
+        ClientControl::Close { channel: 42 }
+    ));
+    assert!(!fixture.transport.cancel.is_cancelled());
+
+    drop(slots);
+    drop(budget);
+    fixture
+        .transport
+        .control(ClientControl::Connect {
+            request: 7,
+            peer: fixture.remote.to_string_repr(),
+        })
+        .await
+        .unwrap();
+    let Message::Text(text) = fixture.next_message().await else {
+        panic!("expected another peer's connect control");
+    };
+    assert!(matches!(
+        serde_json::from_str::<ClientControl>(&text).unwrap(),
+        ClientControl::Connect { request: 7, .. }
+    ));
 }
 
 #[tokio::test]
