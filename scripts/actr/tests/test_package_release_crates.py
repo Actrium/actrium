@@ -20,7 +20,7 @@ spec.loader.exec_module(packager)
 class PackageReleaseCratesTests(unittest.TestCase):
     def check_artifact_directory(self, environment, configured_target):
         with tempfile.TemporaryDirectory(prefix="actr-package-test-") as directory:
-            repo = Path(directory)
+            repo = Path(directory).resolve()
             crate = repo / "crates/example"
             abi = repo / "packages/actr-web/crates/actr-web-abi"
             for path in [crate, abi, repo / "scripts/actr"]:
