@@ -341,6 +341,28 @@ mod tests {
 
     wasm_bindgen_test_configure!(run_in_browser);
 
+    #[wasm_bindgen_test]
+    async fn empty_relay_chunk_retains_its_transport_header() {
+        use std::{cell::RefCell, rc::Rc};
+        use wasm_bindgen::closure::Closure;
+
+        let frames = Rc::new(RefCell::new(Vec::new()));
+        let captured = frames.clone();
+        let sender = Closure::wrap(Box::new(move |frame: js_sys::Uint8Array| {
+            captured.borrow_mut().push(frame.to_vec());
+        }) as Box<dyn FnMut(js_sys::Uint8Array)>);
+        let lane = DataLane::Relay {
+            send: Arc::new(sender.as_ref().unchecked_ref::<js_sys::Function>().clone()),
+            connected: Arc::new(Mutex::new(true)),
+            payload_type: PayloadType::StreamReliable,
+        };
+        lane.send(Bytes::new()).await.unwrap();
+        assert_eq!(
+            frames.borrow().as_slice(),
+            &[vec![PayloadType::StreamReliable as u8, 0, 0, 0, 0]]
+        );
+    }
+
     // ===== PortFailureNotifier tests =====
 
     #[test]

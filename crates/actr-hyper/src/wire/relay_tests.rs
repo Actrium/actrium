@@ -402,6 +402,17 @@ async fn matching_outbound_peer_completes_handshake_and_carries_data() {
         .application
         .unwrap();
     assert!(plaintext.ends_with(b"valid peer"));
+
+    // An empty lane payload still carries the five-byte transport header.
+    lane.send(Bytes::new()).await.unwrap();
+    let ciphertext = fixture.next_binary().await;
+    let plaintext = remote
+        .receive(&ciphertext, None, fixture.now)
+        .unwrap()
+        .application
+        .unwrap();
+    assert_eq!(plaintext, [PayloadType::StreamReliable as u8, 0, 0, 0, 0]);
+    assert!(connection.is_connected());
 }
 
 #[tokio::test]
