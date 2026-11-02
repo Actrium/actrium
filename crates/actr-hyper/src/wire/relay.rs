@@ -737,7 +737,47 @@ impl RelayClient {
                         }
                     }
                 }
-                let entry = self.install(channel, peer, transport).await?;
+                let entry = self.install(channel, peer.clone(), transport).await?;
+                if entry.cancel.is_cancelled() || !entry.conn.is_connected() {
+                    // A local close may be waiting for the old sink while a
+                    // concurrent dial receives the server's accepted channel.
+                    // Retire it before asking for a fresh channel; the writer
+                    // preserves the Close-before-Connect control ordering.
+                    let stale = {
+                        let mut channels = self.channels.write().await;
+                        if channels
+                            .get(&channel)
+                            .is_some_and(|current| Arc::ptr_eq(current, &entry))
+                        {
+                            channels.remove(&channel)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(stale) = stale {
+                        if let Some(request) = request {
+                            let mut previous = stale.pending_request.lock().await;
+                            if *previous == Some(request) {
+                                *previous = None;
+                            }
+                        }
+                        stale.cancel.cancel();
+                        let client = self.clone();
+                        tokio::spawn(async move {
+                            client.dispose_channel(channel, stale).await;
+                        });
+                    }
+                    transport.try_close(channel);
+                    if let Some(request) = request {
+                        let still_pending = self.pending.lock().unwrap().contains_key(&request);
+                        if still_pending {
+                            transport
+                                .control(ClientControl::Connect { request, peer })
+                                .await?;
+                        }
+                    }
+                    return Ok(());
+                }
                 if let Some(request) = request {
                     let mut pending_request = entry.pending_request.lock().await;
                     if *entry.ready.borrow() {
@@ -793,21 +833,25 @@ impl RelayClient {
     async fn close_channel(&self, id: u64) {
         let entry = self.channels.write().await.remove(&id);
         if let Some(entry) = entry {
-            if let Some(request) = entry.pending_request.lock().await.take() {
-                if let Some(pending) = self.pending.lock().unwrap().remove(&request) {
-                    let _ = pending.reply.send(Err(closed()));
-                }
-            }
-            entry.cancel.cancel();
-            entry.security.lock().await.close();
-            entry.receive_permits.lock().await.clear();
-            let mut peers = self.peers.write().await;
-            if peers.get(&entry.peer) == Some(&id) {
-                peers.remove(&entry.peer);
-            }
-            drop(peers);
-            let _ = entry.conn.close().await;
+            self.dispose_channel(id, entry).await;
         }
+    }
+
+    async fn dispose_channel(&self, id: u64, entry: Arc<Channel>) {
+        if let Some(request) = entry.pending_request.lock().await.take() {
+            if let Some(pending) = self.pending.lock().unwrap().remove(&request) {
+                let _ = pending.reply.send(Err(closed()));
+            }
+        }
+        entry.cancel.cancel();
+        entry.security.lock().await.close();
+        entry.receive_permits.lock().await.clear();
+        let mut peers = self.peers.write().await;
+        if peers.get(&entry.peer) == Some(&id) {
+            peers.remove(&entry.peer);
+        }
+        drop(peers);
+        let _ = entry.conn.close().await;
     }
 
     async fn clear(&self) {

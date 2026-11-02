@@ -1411,10 +1411,9 @@ async fn receive_loop_admits_verified_connection() {
 
 // ── send_response secure gate (RFC-0563 re-review) ──────────────────────
 
-/// A raw-sink `send_response` while the session is alive but NOT sendable
-/// (e.g. `Handshaking`) must fail closed — no bytes reach the sink.
+/// A non-sendable session must allow another route without writing any bytes.
 #[tokio::test]
-async fn send_response_rejected_while_secure_channel_not_sendable() {
+async fn send_response_falls_back_before_sending_when_channel_not_ready() {
     let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
     let gate = WebSocketGate::new(
         rx,
@@ -1423,7 +1422,16 @@ async fn send_response_rejected_while_secure_channel_not_sendable() {
         None,
     );
     let peer = test_actor_id(310);
-    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(None));
+    let writes = Arc::new(AtomicUsize::new(0));
+    let observed = writes.clone();
+    let sink = futures_util::sink::unfold((), move |(), _: WsMessage| {
+        let observed = observed.clone();
+        async move {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, tokio_tungstenite::tungstenite::Error>(())
+        }
+    });
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
     gate.inbound_sinks.write().await.insert(
         peer.clone(),
         (sink, SecureCell::new(SecureChannelState::Handshaking)),
@@ -1431,11 +1439,33 @@ async fn send_response_rejected_while_secure_channel_not_sendable() {
 
     let result = gate.send_response(&peer, RpcEnvelope::default()).await;
     assert!(
-        matches!(result, Err(actr_protocol::ActrError::Unavailable(_))),
-        "non-sendable secure channel must fail send_response, got {result:?}"
+        matches!(result, Ok(false)),
+        "expected fallback, got {result:?}"
     );
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
     // Registration is kept: the session is alive and may become sendable.
     assert!(gate.inbound_sinks.read().await.contains_key(&peer));
+}
+
+#[tokio::test]
+async fn send_response_preserves_uncertain_sink_errors() {
+    let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        empty_pending(),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+    let peer = test_actor_id(312);
+    let sink = futures_util::sink::unfold((), |(), _: WsMessage| async {
+        Err::<(), _>(tokio_tungstenite::tungstenite::Error::ConnectionClosed)
+    });
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
+    insert_sink_entry(&gate.inbound_sinks, &peer, sink).await;
+    assert!(matches!(
+        gate.send_response(&peer, RpcEnvelope::default()).await,
+        Err(ActrError::Unavailable(_))
+    ));
 }
 
 /// A terminal session must drop the registration and report "no inbound

@@ -205,9 +205,9 @@ impl WebSocketGate {
     /// Send a response envelope back to a peer that connected to us inbound.
     ///
     /// Looks up the peer's write-half in `inbound_sinks`.  Returns `Ok(false)`
-    /// (not an error) when no inbound connection from `peer` is known — the
-    /// caller should fall back to another transport (e.g. `WebRtcGate`).
-    /// Returns `Ok(true)` on a successful send.
+    /// (not an error) when there is no sendable inbound connection from
+    /// `peer`, so the caller may try another transport. Returns `Ok(true)`
+    /// on a successful send; an error may mean submission was attempted.
     pub async fn send_response(
         &self,
         peer: &ActrId,
@@ -225,9 +225,8 @@ impl WebSocketGate {
 
         // Secure-session gate for this raw-sink send path: the frame below
         // bypasses the lane abstraction, so check the cell directly instead.
-        // Terminal → drop the registration (the wire is gone). Alive but not
-        // sendable (e.g. `Rekeying`) → transient error; the caller may retry
-        // or fall back once the session is sendable again.
+        // Terminal → drop the registration (the wire is gone). A live but
+        // non-sendable session has not submitted bytes and can fall back.
         let state = secure.state();
         if state.is_terminal() {
             let mut sinks = self.inbound_sinks.write().await;
@@ -240,9 +239,7 @@ impl WebSocketGate {
             return Ok(false);
         }
         if !state.is_sendable() {
-            return Err(ActrError::Unavailable(format!(
-                "secure channel not sendable ({state:?}); cannot send response"
-            )));
+            return Ok(false);
         }
 
         envelope.direction = Some(Direction::Response as i32);

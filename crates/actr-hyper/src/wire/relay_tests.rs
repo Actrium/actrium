@@ -147,12 +147,16 @@ impl Fixture {
     }
 
     async fn next_binary(&mut self) -> Bytes {
+        self.next_binary_on(42).await
+    }
+
+    async fn next_binary_on(&mut self, expected_channel: u64) -> Bytes {
         let message = self.next_message().await;
         let Message::Binary(frame) = message else {
             panic!("expected binary frame: {message:?}");
         };
         let (channel, payload) = decode_data(frame, MAX_FRAME).unwrap();
-        assert_eq!(channel, 42);
+        assert_eq!(channel, expected_channel);
         payload
     }
 
@@ -191,20 +195,24 @@ impl Fixture {
     }
 
     async fn handshake(&mut self) -> SecureSession {
+        self.handshake_on(42).await
+    }
+
+    async fn handshake_on(&mut self, channel: u64) -> SecureSession {
         let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
         let mut remote = SecureSession::new(
             &self.remote_identity,
             &self.local.to_string_repr(),
-            42,
+            channel,
             self.now,
         )
         .unwrap();
         let first = remote.start().unwrap().unwrap();
         self.client
-            .receive_secure(42, Bytes::from(first), &self.transport, &budget)
+            .receive_secure(channel, Bytes::from(first), &self.transport, &budget)
             .await
             .unwrap();
-        let second = self.next_binary().await;
+        let second = self.next_binary_on(channel).await;
         let third = remote
             .receive(&second, Some(&self.issuer), self.now)
             .unwrap()
@@ -212,10 +220,10 @@ impl Fixture {
             .pop()
             .unwrap();
         self.client
-            .receive_secure(42, Bytes::from(third), &self.transport, &budget)
+            .receive_secure(channel, Bytes::from(third), &self.transport, &budget)
             .await
             .unwrap();
-        let fourth = self.next_binary().await;
+        let fourth = self.next_binary_on(channel).await;
         let fifth = remote
             .receive(&fourth, None, self.now)
             .unwrap()
@@ -223,7 +231,7 @@ impl Fixture {
             .pop()
             .unwrap();
         self.client
-            .receive_secure(42, Bytes::from(fifth), &self.transport, &budget)
+            .receive_secure(channel, Bytes::from(fifth), &self.transport, &budget)
             .await
             .unwrap();
         remote
@@ -305,6 +313,139 @@ async fn reused_ready_channel_completes_the_pending_dial() {
         .unwrap()
         .unwrap();
     assert_eq!(id, 42);
+}
+
+#[tokio::test]
+async fn reconnect_replaces_an_accepted_channel_while_its_sink_is_closing() {
+    let mut fixture = Fixture::new().await;
+    let (request, first_dial) = fixture.start_dial(fixture.remote.clone()).await;
+    fixture.connected(Some(request)).await.unwrap();
+    let _remote = fixture.handshake().await;
+    let (_, connection) = first_dial.await.unwrap().unwrap();
+    let sink = connection.sink();
+    let sink_guard = sink.lock().await;
+    let closing_connection = connection.clone();
+    let closing = tokio::spawn(async move { closing_connection.close().await });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while connection.is_connected() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let (request, redial) = fixture.start_dial(fixture.remote.clone()).await;
+    fixture.connected(Some(request)).await.unwrap();
+    let Message::Text(close) = fixture.next_message().await else {
+        panic!("expected stale channel close");
+    };
+    assert!(matches!(
+        serde_json::from_str::<ClientControl>(&close).unwrap(),
+        ClientControl::Close { channel: 42 }
+    ));
+    let Message::Text(retry) = fixture.next_message().await else {
+        panic!("expected connect retry");
+    };
+    assert!(matches!(
+        serde_json::from_str::<ClientControl>(&retry).unwrap(),
+        ClientControl::Connect { request: id, peer } if id == request && peer == fixture.remote.to_string_repr()
+    ));
+    drop(sink_guard);
+    closing.await.unwrap().unwrap();
+    fixture
+        .client
+        .handle_control(
+            ServerControl::Connected {
+                channel: 43,
+                request: Some(request),
+                peer: fixture.remote.to_string_repr(),
+                metadata: String::new(),
+            },
+            &fixture.transport,
+        )
+        .await
+        .unwrap();
+    let _new_remote = fixture.handshake_on(43).await;
+    let (id, replacement) = tokio::time::timeout(Duration::from_secs(3), redial)
+        .await
+        .expect("replacement dial must complete")
+        .unwrap()
+        .unwrap();
+    assert_eq!(id, 43);
+    assert!(replacement.is_connected());
+    fixture
+        .client
+        .handle_control(
+            ServerControl::Closed {
+                channel: 42,
+                request: None,
+                reason: loran_relay_protocol::CloseReason::Closed,
+            },
+            &fixture.transport,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture.client.peers.read().await.get(&fixture.remote),
+        Some(&43)
+    );
+}
+
+#[tokio::test]
+async fn stale_handshake_retry_keeps_the_original_pending_dial() {
+    let mut fixture = Fixture::new().await;
+    let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;
+    fixture.connected(Some(request)).await.unwrap();
+    let connection = fixture.client.channels.read().await[&42].conn.clone();
+    let sink = connection.sink();
+    let sink_guard = sink.lock().await;
+    let closing_connection = connection.clone();
+    let closing = tokio::spawn(async move { closing_connection.close().await });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while connection.is_connected() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    fixture.connected(Some(request)).await.unwrap();
+    let Message::Text(close) = fixture.next_message().await else {
+        panic!("expected stale channel close");
+    };
+    assert!(matches!(
+        serde_json::from_str::<ClientControl>(&close).unwrap(),
+        ClientControl::Close { channel: 42 }
+    ));
+    let Message::Text(retry) = fixture.next_message().await else {
+        panic!("expected connect retry");
+    };
+    assert!(matches!(
+        serde_json::from_str::<ClientControl>(&retry).unwrap(),
+        ClientControl::Connect { request: id, .. } if id == request
+    ));
+    drop(sink_guard);
+    closing.await.unwrap().unwrap();
+    fixture
+        .client
+        .handle_control(
+            ServerControl::Connected {
+                channel: 43,
+                request: Some(request),
+                peer: fixture.remote.to_string_repr(),
+                metadata: String::new(),
+            },
+            &fixture.transport,
+        )
+        .await
+        .unwrap();
+    let _remote = fixture.handshake_on(43).await;
+    let (id, replacement) = tokio::time::timeout(Duration::from_secs(3), dial)
+        .await
+        .expect("replacement dial must complete")
+        .unwrap()
+        .unwrap();
+    assert_eq!(id, 43);
+    assert!(replacement.is_connected());
 }
 
 #[tokio::test]

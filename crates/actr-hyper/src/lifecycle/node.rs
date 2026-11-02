@@ -458,7 +458,7 @@ async fn send_envelope_to_caller(
                 tracing::debug!(
                     request_id = request_id,
                     caller = %caller,
-                    "No accepted relay connection for caller; falling back to WebRTC gate"
+                    "No sendable relay connection for caller; falling back to WebRTC gate"
                 );
             }
             Err(e) => {
