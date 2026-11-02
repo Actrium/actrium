@@ -139,16 +139,24 @@ impl WirePool {
     /// Non-blocking, returns immediately and attempts connection concurrently in background
     ///
     /// # Behavior
-    /// - **Unconditionally starts**: Always starts connection attempt, even if a connection already exists
-    /// - Use `add_connection_smart()` if you want to skip already-ready connections
+    /// - Keeps an existing Connecting or Ready owner of the same type.
+    /// - Starts a new attempt for a vacant or Failed slot.
     pub(crate) async fn add_connection(&self, connection: Arc<dyn WireHandle>) {
         let conn_type = connection.connection_type();
-        if conn_type == ConnType::WebRTC {
-            *self.webrtc_lifecycle.write().await = None;
-        }
         {
             let mut conns = self.connections.write().await;
+            if self.closed.load(Ordering::Acquire)
+                || matches!(
+                    &conns[conn_type.as_index()],
+                    Some(WireStatus::Connecting(_) | WireStatus::Ready(_))
+                )
+            {
+                return;
+            }
             conns[conn_type.as_index()] = Some(WireStatus::Connecting(Arc::clone(&connection)));
+        }
+        if conn_type == ConnType::WebRTC {
+            *self.webrtc_lifecycle.write().await = None;
         }
 
         let connections = Arc::clone(&self.connections);
