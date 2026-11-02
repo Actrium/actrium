@@ -377,6 +377,12 @@ retries = 0
 filter = 'binary(ice_restart_unilateral_outage)'
 retries = 0
 
+# TURN lifecycle regressions must expose the first failed release, including
+# allocation growth across consecutive ICE restarts (issue #248).
+[[profile.default.overrides]]
+filter = 'binary(turn_credential_rotation)'
+retries = 0
+
 # Governance tests keep protocol failures and autonomous-recovery contract
 # gaps visible. Do not hide their first outcome behind automatic retries.
 [[profile.default.overrides]]

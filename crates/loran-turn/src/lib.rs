@@ -38,6 +38,51 @@ pub async fn create_turn_server(
     // legitimately relay between local addresses.
     allow_private_relay_peers: bool,
 ) -> error::Result<Server> {
+    create_turn_server_inner(
+        socket,
+        advertised_ip,
+        realm,
+        relay_port_range,
+        auth_handler,
+        allow_private_relay_peers,
+        None,
+    )
+    .await
+}
+
+/// Create the production server with observations of actual allocation closes.
+/// The receiver must be drained by the test; notifications never initiate cleanup.
+#[cfg(feature = "test-utils")]
+pub async fn create_turn_server_with_close_notify(
+    socket: Arc<UdpSocket>,
+    advertised_ip: &str,
+    realm: &str,
+    relay_port_range: (u16, u16),
+    auth_handler: Arc<dyn AuthHandler + Send + Sync>,
+    allow_private_relay_peers: bool,
+    alloc_close_notify: tokio::sync::mpsc::Sender<turn_crate::allocation::AllocationInfo>,
+) -> error::Result<Server> {
+    create_turn_server_inner(
+        socket,
+        advertised_ip,
+        realm,
+        relay_port_range,
+        auth_handler,
+        allow_private_relay_peers,
+        Some(alloc_close_notify),
+    )
+    .await
+}
+
+async fn create_turn_server_inner(
+    socket: Arc<UdpSocket>,
+    advertised_ip: &str,
+    realm: &str,
+    relay_port_range: (u16, u16),
+    auth_handler: Arc<dyn AuthHandler + Send + Sync>,
+    allow_private_relay_peers: bool,
+    alloc_close_notify: Option<tokio::sync::mpsc::Sender<turn_crate::allocation::AllocationInfo>>,
+) -> error::Result<Server> {
     platform::recording::info!("Creating TURN server with advertised IP: {}", advertised_ip);
 
     // Get the local address of the socket
@@ -105,7 +150,7 @@ pub async fn create_turn_server(
         realm: realm.to_string(),
         auth_handler,
         channel_bind_timeout: std::time::Duration::from_secs(600), // 10 minutes
-        alloc_close_notify: None, // No allocation close notification handler
+        alloc_close_notify,
     };
 
     // Create the actual server instance
