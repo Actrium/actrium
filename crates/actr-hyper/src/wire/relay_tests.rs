@@ -449,6 +449,88 @@ async fn stale_handshake_retry_keeps_the_original_pending_dial() {
 }
 
 #[tokio::test]
+async fn relay_wire_status_waits_for_a_contended_connection_lock() {
+    let mut fixture = Fixture::new().await;
+    let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;
+    fixture.connected(Some(request)).await.unwrap();
+    let _remote = fixture.handshake().await;
+    let (_, connection) = dial.await.unwrap().unwrap();
+    let expected_epoch = connection.secure_epoch();
+    let wire = Arc::new(RelayWire {
+        client: fixture.client.clone(),
+        peer: fixture.remote.clone(),
+        generation: 1,
+        connection: SyncRwLock::new(Some(connection)),
+    });
+    let guard = wire.connection.write().unwrap();
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let reader = wire.clone();
+    let thread = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        result_tx
+            .send((
+                reader.is_connected(),
+                reader.secure_channel_state(),
+                reader.secure_epoch(),
+            ))
+            .unwrap();
+    });
+    started_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+    assert!(matches!(
+        result_rx.recv_timeout(Duration::from_millis(50)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ));
+    drop(guard);
+    let (connected, state, epoch) = result_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+    assert!(connected);
+    assert_eq!(state, SecureChannelState::Verified);
+    assert_eq!(epoch, expected_epoch);
+    thread.join().unwrap();
+}
+
+#[tokio::test]
+async fn closing_a_relay_wire_preserves_a_concurrent_replacement() {
+    let mut fixture = Fixture::new().await;
+    let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;
+    fixture.connected(Some(request)).await.unwrap();
+    let _remote = fixture.handshake().await;
+    let (_, connection) = dial.await.unwrap().unwrap();
+    let replacement = fixture
+        .client
+        .install(43, fixture.remote.to_string_repr(), &fixture.transport)
+        .await
+        .unwrap()
+        .conn
+        .clone();
+    let sink = connection.sink();
+    let sink_guard = sink.lock().await;
+    let wire = Arc::new(RelayWire {
+        client: fixture.client.clone(),
+        peer: fixture.remote.clone(),
+        generation: 1,
+        connection: SyncRwLock::new(Some(connection.clone())),
+    });
+    let closing_wire = wire.clone();
+    let closing = tokio::spawn(async move { closing_wire.close().await });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while connection.is_connected() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    *wire.connection.write().unwrap() = Some(replacement.clone());
+    drop(sink_guard);
+    closing.await.unwrap().unwrap();
+    assert!(wire.is_connected());
+    assert!(Arc::ptr_eq(
+        &wire.connection.read().unwrap().as_ref().unwrap().sink(),
+        &replacement.sink()
+    ));
+}
+
+#[tokio::test]
 async fn cancelled_request_does_not_break_an_existing_incoming_channel() {
     let mut fixture = Fixture::new().await;
     fixture

@@ -26,7 +26,7 @@ use loran_relay_protocol::{
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        Arc, OnceLock, Weak,
+        Arc, OnceLock, RwLock as SyncRwLock, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
@@ -271,7 +271,7 @@ impl RelayClient {
             client: self.clone(),
             peer,
             generation,
-            connection: RwLock::new(None),
+            connection: SyncRwLock::new(None),
         })
     }
 
@@ -288,7 +288,7 @@ impl RelayClient {
             client: self.clone(),
             peer: peer.clone(),
             generation: self.next_wire.fetch_add(1, Ordering::Relaxed),
-            connection: RwLock::new(Some(entry.conn.clone())),
+            connection: SyncRwLock::new(Some(entry.conn.clone())),
         }))
     }
 
@@ -977,7 +977,7 @@ struct RelayWire {
     client: Arc<RelayClient>,
     peer: ActrId,
     generation: u64,
-    connection: RwLock<Option<WebSocketConnection>>,
+    connection: SyncRwLock<Option<WebSocketConnection>>,
 }
 impl std::fmt::Debug for RelayWire {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -998,19 +998,28 @@ impl WireHandle for RelayWire {
     }
     async fn connect(&self) -> NetworkResult<()> {
         let (_, connection) = self.client.connect_peer(self.peer.clone()).await?;
-        *self.connection.write().await = Some(connection);
+        *self.connection.write().unwrap() = Some(connection);
         Ok(())
     }
     fn is_connected(&self) -> bool {
         self.connection
-            .try_read()
-            .ok()
-            .and_then(|guard| guard.as_ref().map(WireHandle::is_connected))
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(WireHandle::is_connected)
             .unwrap_or(false)
     }
     async fn close(&self) -> NetworkResult<()> {
-        if let Some(connection) = self.connection.write().await.take() {
+        let connection = self.connection.read().unwrap().clone();
+        if let Some(connection) = connection {
             connection.close().await?;
+            let mut current = self.connection.write().unwrap();
+            if current
+                .as_ref()
+                .is_some_and(|other| Arc::ptr_eq(&other.sink(), &connection.sink()))
+            {
+                current.take();
+            }
         }
         Ok(())
     }
@@ -1020,7 +1029,7 @@ impl WireHandle for RelayWire {
                 "Native media requires WebRTC".into(),
             ));
         }
-        let connection = self.connection.read().await.clone().ok_or_else(closed)?;
+        let connection = self.connection.read().unwrap().clone().ok_or_else(closed)?;
         connection.get_lane(payload_type).await
     }
     fn identity(&self) -> Option<WireIdentity> {
@@ -1031,20 +1040,22 @@ impl WireHandle for RelayWire {
     }
     fn secure_channel_state(&self) -> SecureChannelState {
         self.connection
-            .try_read()
-            .ok()
-            .and_then(|guard| guard.as_ref().map(WireHandle::secure_channel_state))
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(WireHandle::secure_channel_state)
             .unwrap_or(SecureChannelState::Handshaking)
     }
     fn secure_epoch(&self) -> u64 {
         self.connection
-            .try_read()
-            .ok()
-            .and_then(|guard| guard.as_ref().map(WireHandle::secure_epoch))
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(WireHandle::secure_epoch)
             .unwrap_or(0)
     }
     async fn await_secure_state_change(&self, observed: u64) {
-        let connection = self.connection.read().await.clone();
+        let connection = self.connection.read().unwrap().clone();
         if let Some(connection) = connection {
             connection.await_secure_state_change(observed).await;
         } else {
