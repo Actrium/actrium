@@ -150,44 +150,7 @@ pub fn pin_echo_service_dependency_version(project_dir: &Path, publisher: &str) 
 pub fn align_rust_project_with_workspace(project_dir: &Path) -> Result<()> {
     let workspace = workspace_root();
     let cargo_toml_path = project_dir.join("Cargo.toml");
-    let mut content = fs::read_to_string(&cargo_toml_path)
-        .with_context(|| format!("failed to read {}", cargo_toml_path.display()))?;
-
-    if content.contains("[patch.crates-io]") && content.contains("actr = { path =") {
-        upstream_patch_support::append_upstream_patches(&workspace, &cargo_toml_path)?;
-        return Ok(());
-    }
-
-    let mut patch = String::from("\n[patch.crates-io]\n");
-    let crates = [
-        ("actr", workspace.join("crates/actr")),
-        ("actr-protocol", workspace.join("crates/actr-protocol")),
-        ("actr-framework", workspace.join("crates/actr-framework")),
-        ("actr-hyper", workspace.join("crates/actr-hyper")),
-        ("actr-runtime", workspace.join("crates/actr-runtime")),
-        ("actr-config", workspace.join("crates/actr-config")),
-        (
-            "actr-service-compat",
-            workspace.join("crates/actr-service-compat"),
-        ),
-        (
-            "actr-runtime-mailbox",
-            workspace.join("crates/actr-runtime-mailbox"),
-        ),
-    ];
-
-    for (name, path) in crates {
-        patch.push_str(&format!(
-            "{name} = {{ path = \"{}\" }}\n",
-            normalize_path_for_toml(&path)
-        ));
-    }
-
-    content.push_str(&patch);
-    fs::write(&cargo_toml_path, content)
-        .with_context(|| format!("failed to write {}", cargo_toml_path.display()))?;
-    upstream_patch_support::append_upstream_patches(&workspace, &cargo_toml_path)?;
-    Ok(())
+    upstream_patch_support::align_with_workspace(&workspace, &cargo_toml_path)
 }
 
 #[derive(Clone, Debug)]

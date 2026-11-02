@@ -44,7 +44,7 @@ hex = { workspace = true }
 [dev-dependencies]
 md5 = "0.8"
 sha2 = "0.10"
-stun-protocol = { package = "stun", version = "=0.17.2" }
+stun-protocol = { workspace = true }
 tokio = { workspace = true, features = ["macros", "test-util"] }
 serial_test = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }

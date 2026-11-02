@@ -36,37 +36,7 @@ fn workspace_root() -> PathBuf {
 fn append_workspace_patch(project_dir: &std::path::Path) {
     let workspace = workspace_root();
     let cargo_toml = project_dir.join("Cargo.toml");
-    // Adding an explicit `[workspace]` marker pins this project as its own
-    // workspace root and stops cargo from walking up into unrelated parent
-    // `Cargo.toml` files (e.g. a stray `/tmp/Cargo.toml`).
-    let patch = format!(
-        r#"
-
-[workspace]
-
-[patch.crates-io]
-actr = {{ path = "{}" }}
-actr-protocol = {{ path = "{}" }}
-actr-framework = {{ path = "{}" }}
-actr-hyper = {{ path = "{}" }}
-actr-runtime = {{ path = "{}" }}
-actr-config = {{ path = "{}" }}
-actr-service-compat = {{ path = "{}" }}
-actr-runtime-mailbox = {{ path = "{}" }}
-"#,
-        workspace.join("crates/actr").display(),
-        workspace.join("crates/actr-protocol").display(),
-        workspace.join("crates/actr-framework").display(),
-        workspace.join("crates/actr-hyper").display(),
-        workspace.join("crates/actr-runtime").display(),
-        workspace.join("crates/actr-config").display(),
-        workspace.join("crates/actr-service-compat").display(),
-        workspace.join("crates/actr-runtime-mailbox").display(),
-    );
-    let mut content = std::fs::read_to_string(&cargo_toml).unwrap();
-    content.push_str(&patch);
-    std::fs::write(&cargo_toml, content).unwrap();
-    upstream_patch_support::append_upstream_patches(&workspace, &cargo_toml).unwrap();
+    upstream_patch_support::align_with_workspace(&workspace, &cargo_toml).unwrap();
 }
 
 fn cargo_check(project_dir: &std::path::Path) -> Output {

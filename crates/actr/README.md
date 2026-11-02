@@ -32,15 +32,12 @@ The lock stores each dependency's alias and canonical
 `publisher/program@version` ActrType; v1 locks must be migrated by the CLI and
 are not accepted by the runtime.
 
-### Native Cargo dependency overrides
+### Native Cargo dependencies
 
-Git/path consumers inherit the native SDK's explicit RTC/WebRTC Git dependencies.
-PR #325 temporarily pins a WebRTC fork while [upstream #944](https://github.com/webrtc-rs/webrtc/pull/944)
-is pending; it must switch to a suitable official upstream commit or published
-versions before merging. External TURN/STUN server consumers still need the
-server `[patch.crates-io]` entries from the
-[root Cargo manifest](https://github.com/Actrium/actrium/blob/main/Cargo.toml).
-Published registry dependencies require upstream versions containing the fixes.
+Git/path consumers inherit the SDK and TURN/STUN server Git dependencies without
+workspace overrides. The CLI's generated Rust apps include the overrides needed
+when consuming registry packages until upstream publishes the required fixes.
+Other registry consumers must add those overrides to their own workspace root.
 See the [upstream dependency notes](https://github.com/Actrium/actrium/blob/main/docs/actr/upstream-patches.md).
 
 ---

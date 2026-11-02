@@ -64,7 +64,9 @@ def check_dependencies(root, expected_version=None):
 
 
 check_dependencies(repo)
-upstream_patches = tomllib.loads((repo / "Cargo.toml").read_text())["patch"]
+upstream_names = ("webrtc", "rtc", "rtc-rtp", "turn_crate", "webrtc-stun", "stun-protocol", "webrtc-util")
+workspace_deps = tomllib.loads((repo / "Cargo.toml").read_text())["workspace"]["dependencies"]
+upstream_sources = {name: (workspace_deps[name]["git"], workspace_deps[name]["rev"]) for name in upstream_names}
 # Execute the real release version updater against isolated copies, never the checkout.
 updater = script.split("update_versions() {", 1)[1].split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
 with tempfile.TemporaryDirectory(prefix="actr-relay-release-") as directory:
@@ -83,6 +85,8 @@ with tempfile.TemporaryDirectory(prefix="actr-relay-release-") as directory:
     version = "0.11.0-review-test"
     subprocess.run([sys.executable, "-", str(copied), version, "true"], input=updater, text=True, check=True)
     check_dependencies(copied, version)
-    assert tomllib.loads((copied / "Cargo.toml").read_text())["patch"] == upstream_patches, "release bump changed upstream patches"
+    updated_deps = tomllib.loads((copied / "Cargo.toml").read_text())["workspace"]["dependencies"]
+    for name, source in upstream_sources.items():
+        assert (updated_deps[name]["git"], updated_deps[name]["rev"]) == source, (name, "release bump changed upstream source")
 print("Release dependency order, publishable versions and isolated version bump passed.")
 PY

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge the root workspace's upstream patches into a test project manifest."""
+"""Merge the generated app's registry overrides into a Cargo manifest."""
 
 import argparse
 import json
@@ -12,6 +12,7 @@ except ModuleNotFoundError as error:
 
 
 REPO = Path(__file__).resolve().parents[2]
+PATCH_SOURCE = REPO / "crates/actr-cli/fixtures/rust/Cargo.toml.hbs"
 
 
 def apply(source: Path, target: Path) -> None:
@@ -39,7 +40,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     args = parser.parse_args()
-    apply(REPO / "Cargo.toml", args.manifest)
+    apply(PATCH_SOURCE, args.manifest)
 
 
 if __name__ == "__main__":
