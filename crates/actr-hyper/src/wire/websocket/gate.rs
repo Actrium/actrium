@@ -258,31 +258,44 @@ impl WebSocketGate {
         frame.extend_from_slice(&len.to_be_bytes());
         frame.extend_from_slice(&payload_buf);
 
-        tokio::select! {
+        let mut write_started = false;
+        let write = async {
+            let mut sink_guard = sink.lock().await;
+            match sink_guard.as_mut() {
+                Some(s) => {
+                    // The session may have stopped being sendable while the
+                    // shared writer was busy. No bytes have been attempted.
+                    if !secure.state().is_sendable() {
+                        return Ok(false);
+                    }
+                    write_started = true;
+                    s.send(WsMessage::Binary(frame.into())).await.map_err(|e| {
+                        ActrError::Unavailable(format!("WebSocketGate: send_response failed: {e}"))
+                    })?;
+                    tracing::debug!(
+                        peer = %peer,
+                        request_id = %envelope.request_id,
+                        "WebSocketGate: response sent via inbound connection"
+                    );
+                    Ok(true)
+                }
+                None => {
+                    tracing::warn!(peer = %peer, "WebSocketGate: inbound sink gone, cannot send response");
+                    Ok(false)
+                }
+            }
+        };
+        let result = tokio::select! {
             biased;
-            _ = secure.wait_terminal() => Err(ActrError::Unavailable(
+            _ = secure.wait_terminal() => None,
+            result = write => Some(result),
+        };
+        match result {
+            Some(result) => result,
+            None if write_started => Err(ActrError::Unavailable(
                 "WebSocket session retired during response send".into(),
             )),
-            result = async {
-                let mut sink_guard = sink.lock().await;
-                match sink_guard.as_mut() {
-                    Some(s) => {
-                        s.send(WsMessage::Binary(frame.into())).await.map_err(|e| {
-                            ActrError::Unavailable(format!("WebSocketGate: send_response failed: {e}"))
-                        })?;
-                        tracing::debug!(
-                            peer = %peer,
-                            request_id = %envelope.request_id,
-                            "WebSocketGate: response sent via inbound connection"
-                        );
-                        Ok(true)
-                    }
-                    None => {
-                        tracing::warn!(peer = %peer, "WebSocketGate: inbound sink gone, cannot send response");
-                        Ok(false)
-                    }
-                }
-            } => result,
+            None => Ok(false),
         }
     }
 

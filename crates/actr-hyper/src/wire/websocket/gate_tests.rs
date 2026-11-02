@@ -5,6 +5,7 @@ use actr_runtime_mailbox::{MailboxStats, MessageRecord, StorageResult};
 use async_trait::async_trait;
 use ed25519_dalek::{Signer, SigningKey};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 use uuid::Uuid;
 
 // ─── helpers ─────────────────────────────────────────────────────────────
@@ -1466,6 +1467,120 @@ async fn send_response_preserves_uncertain_sink_errors() {
         gate.send_response(&peer, RpcEnvelope::default()).await,
         Err(ActrError::Unavailable(_))
     ));
+}
+
+#[tokio::test]
+async fn send_response_falls_back_if_session_closes_while_waiting_for_sink() {
+    let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        empty_pending(),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+    let peer = test_actor_id(313);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let observed = writes.clone();
+    let sink = futures_util::sink::unfold((), move |(), _: WsMessage| {
+        let observed = observed.clone();
+        async move {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, tokio_tungstenite::tungstenite::Error>(())
+        }
+    });
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
+    let secure = SecureCell::new(SecureChannelState::Verified);
+    gate.inbound_sinks
+        .write()
+        .await
+        .insert(peer.clone(), (sink.clone(), secure.clone()));
+    let _guard = sink.lock().await;
+    let response = gate.send_response(&peer, RpcEnvelope::default());
+    tokio::pin!(response);
+    assert!(futures_util::poll!(response.as_mut()).is_pending());
+    secure.drive_terminal(SecureChannelState::Closed);
+    let result = tokio::time::timeout(Duration::from_secs(1), response)
+        .await
+        .expect("terminal state must wake the response");
+    assert!(
+        matches!(result, Ok(false)),
+        "expected fallback, got {result:?}"
+    );
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn send_response_keeps_an_inflight_write_uncertain_on_close() {
+    let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        empty_pending(),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+    let peer = test_actor_id(314);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let observed = writes.clone();
+    let sink = futures_util::sink::unfold((), move |(), _: WsMessage| {
+        observed.fetch_add(1, Ordering::SeqCst);
+        std::future::pending::<Result<(), tokio_tungstenite::tungstenite::Error>>()
+    });
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
+    let secure = SecureCell::new(SecureChannelState::Verified);
+    gate.inbound_sinks
+        .write()
+        .await
+        .insert(peer.clone(), (sink, secure.clone()));
+    let response = gate.send_response(&peer, RpcEnvelope::default());
+    tokio::pin!(response);
+    assert!(futures_util::poll!(response.as_mut()).is_pending());
+    assert_eq!(writes.load(Ordering::SeqCst), 1);
+    secure.drive_terminal(SecureChannelState::Closed);
+    let result = tokio::time::timeout(Duration::from_secs(1), response)
+        .await
+        .expect("terminal state must wake the response");
+    assert!(matches!(result, Err(ActrError::Unavailable(_))));
+}
+
+#[tokio::test]
+async fn send_response_rechecks_sendability_after_acquiring_sink() {
+    let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        empty_pending(),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+    let peer = test_actor_id(315);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let observed = writes.clone();
+    let sink = futures_util::sink::unfold((), move |(), _: WsMessage| {
+        let observed = observed.clone();
+        async move {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, tokio_tungstenite::tungstenite::Error>(())
+        }
+    });
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
+    let secure = SecureCell::new(SecureChannelState::Verified);
+    gate.inbound_sinks
+        .write()
+        .await
+        .insert(peer.clone(), (sink.clone(), secure.clone()));
+    let guard = sink.lock().await;
+    let response = gate.send_response(&peer, RpcEnvelope::default());
+    tokio::pin!(response);
+    assert!(futures_util::poll!(response.as_mut()).is_pending());
+    assert!(secure.set_state_validated(SecureChannelState::Verified, SecureChannelState::Rekeying));
+    drop(guard);
+    let result = tokio::time::timeout(Duration::from_secs(1), response)
+        .await
+        .expect("response must wake after the sink is released");
+    assert!(
+        matches!(result, Ok(false)),
+        "expected fallback, got {result:?}"
+    );
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
 }
 
 /// A terminal session must drop the registration and report "no inbound
