@@ -10,8 +10,8 @@ publish = false
 
 [dependencies]
 # Match the patched Component Model runtime used by the main workspace.
-wasmtime = { version = "=48.0.7", features = ["component-model", "runtime", "cranelift"] }
-wasmtime-wasi = "=48.0.7"
+wasmtime = { version = "=48.0.8", features = ["component-model", "runtime", "cranelift"] }
+wasmtime-wasi = "=48.0.8"
 anyhow = "1"
 
 [profile.release]
