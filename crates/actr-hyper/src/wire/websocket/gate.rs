@@ -194,6 +194,17 @@ impl WebSocketGate {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) async fn install_response_sink_for_test(&self, peer: ActrId, sink: WsSink) {
+        self.inbound_sinks.write().await.insert(
+            peer,
+            (
+                sink,
+                SecureCell::new(crate::transport::SecureChannelState::Verified),
+            ),
+        );
+    }
+
     /// Install the WebSocket peer-lifecycle hook callback.
     ///
     /// Idempotent: subsequent calls are silently ignored. Invoked once

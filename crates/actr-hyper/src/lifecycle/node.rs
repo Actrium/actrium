@@ -411,81 +411,38 @@ async fn send_envelope_to_caller(
     );
     // Promote responses too: retaining the relay receive path must not pin
     // every reply to WSS after direct ICE becomes usable.
-    if let Some(manager) = rtc_route
-        && let Some(handle) = manager.get_controller(caller).await
-        && handle.snapshot().sendable
-        && handle.snapshot().network_path == crate::wire::webrtc::rtc::status::NetworkPath::Direct
+    let direct = if let Some(manager) = rtc_route {
+        manager.get_controller(caller).await.filter(|handle| {
+            let snapshot = handle.snapshot();
+            snapshot.sendable
+                && snapshot.network_path == crate::wire::webrtc::rtc::status::NetworkPath::Direct
+        })
+    } else {
+        None
+    };
+    let direct_send = direct.map(|handle| {
+        let payload = Bytes::from(response_envelope.encode_to_vec());
+        async move {
+            handle
+                .send_with_progress(
+                    crate::wire::webrtc::rtc::status::LaneKind::RpcReliable,
+                    payload,
+                    false,
+                )
+                .await
+        }
+    });
+    if try_direct_or_relay(
+        direct_send,
+        ws_gate,
+        caller,
+        &response_envelope,
+        request_id,
+        route_key,
+    )
+    .await
     {
-        let attempt = handle
-            .send_with_progress(
-                crate::wire::webrtc::rtc::status::LaneKind::RpcReliable,
-                Bytes::from(response_envelope.encode_to_vec()),
-                false,
-            )
-            .await;
-        match attempt.result {
-            Ok(()) => {
-                tracing::info!(
-                    target: "actr_response_send",
-                    request_id = %request_id,
-                    target_actor = %caller,
-                    "response send succeeded via direct RTC reliable lane"
-                );
-                return;
-            }
-            // Only a proven pre-send failure can safely try another route.
-            Err(error) if attempt.proven_pre_send => tracing::warn!(
-                target: "actr_response_send",
-                request_id = %request_id,
-                target_actor = %caller,
-                error = ?error,
-                "direct RTC response failed before submission; falling back to relay"
-            ),
-            Err(error) => {
-                tracing::warn!(
-                    target: "actr_response_send",
-                    request_id = %request_id,
-                    target_actor = %caller,
-                    error = ?error,
-                    "direct RTC response submission failed; delivery may be uncertain"
-                );
-                return;
-            }
-        }
-    }
-
-    // Try the already-accepted relay without waiting for ICE.
-    if let Some(wsg) = ws_gate {
-        match wsg.send_response(caller, response_envelope.clone()).await {
-            Ok(true) => {
-                tracing::info!(
-                    target: "actr_response_send",
-                    request_id = %request_id,
-                    route_key = %route_key,
-                    payload_type = "RpcReliable",
-                    target_actor = %caller,
-                    "response send succeeded via relay gate"
-                );
-                return; // sent successfully
-            }
-            Ok(false) => {
-                tracing::debug!(
-                    request_id = request_id,
-                    caller = %caller,
-                    "No sendable relay connection for caller; falling back to WebRTC gate"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(
-                    severity = 5,
-                    error_category = "transport_error",
-                    request_id = request_id,
-                    "Relay response submission failed; delivery may be uncertain: {:?}",
-                    e
-                );
-                return;
-            }
-        }
+        return;
     }
 
     // 2. RTC backend: route the response through the peer's reliable lane.
@@ -604,6 +561,92 @@ async fn send_envelope_to_caller(
             "❌ no RTC controller for response caller"
         );
     }
+}
+
+/// Returns `true` when delivery succeeded or may have been attempted, so the
+/// caller must not retry. Returns `false` only when another route is safe.
+async fn try_direct_or_relay<F>(
+    direct_send: Option<F>,
+    ws_gate: &Option<Arc<crate::wire::websocket::WebSocketGate>>,
+    caller: &ActrId,
+    response_envelope: &RpcEnvelope,
+    request_id: &str,
+    route_key: &str,
+) -> bool
+where
+    F: std::future::Future<Output = crate::wire::webrtc::rtc::peer::send::RtcSendAttempt>,
+{
+    if let Some(send) = direct_send {
+        let attempt = send.await;
+        match attempt.result {
+            Ok(()) => {
+                tracing::info!(
+                    target: "actr_response_send",
+                    request_id = %request_id,
+                    target_actor = %caller,
+                    "response send succeeded via direct RTC reliable lane"
+                );
+                return true;
+            }
+            Err(error)
+                if attempt.proven_pre_send
+                    && attempt.progress == crate::transport::DeliveryProgress::NotAttempted =>
+            {
+                tracing::warn!(
+                    target: "actr_response_send",
+                    request_id = %request_id,
+                    target_actor = %caller,
+                    error = ?error,
+                    "direct RTC response failed before submission; falling back to relay"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "actr_response_send",
+                    request_id = %request_id,
+                    target_actor = %caller,
+                    error = ?error,
+                    "direct RTC response submission failed; delivery may be uncertain"
+                );
+                return true;
+            }
+        }
+    }
+
+    // Try the already-accepted relay without waiting for ICE.
+    if let Some(wsg) = ws_gate {
+        match wsg.send_response(caller, response_envelope.clone()).await {
+            Ok(true) => {
+                tracing::info!(
+                    target: "actr_response_send",
+                    request_id = %request_id,
+                    route_key = %route_key,
+                    payload_type = "RpcReliable",
+                    target_actor = %caller,
+                    "response send succeeded via relay gate"
+                );
+                return true;
+            }
+            Ok(false) => {
+                tracing::debug!(
+                    request_id = request_id,
+                    caller = %caller,
+                    "No sendable relay connection for caller; falling back to WebRTC gate"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    severity = 5,
+                    error_category = "transport_error",
+                    request_id = request_id,
+                    "Relay response submission failed; delivery may be uncertain: {:?}",
+                    e
+                );
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Send the RESPONSE envelope for an inbound mailbox call (Ok or Err path).
