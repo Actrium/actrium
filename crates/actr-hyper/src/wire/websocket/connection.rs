@@ -108,6 +108,9 @@ pub(crate) struct WebSocketConnection {
 
     /// Shared by connection clones; cancellation also interrupts a full lane.
     teardown: Arc<CancelOnDrop>,
+
+    /// Cancel an in-flight virtual relay write before acquiring the sink lock.
+    relay_write_cancel: Option<CancellationToken>,
 }
 
 impl WebSocketConnection {
@@ -121,6 +124,7 @@ impl WebSocketConnection {
             connected: Arc::new(AtomicBool::new(false)),
             secure: SecureCell::new(SecureChannelState::LegacyBypass),
             teardown: Arc::new(CancelOnDrop(CancellationToken::new())),
+            relay_write_cancel: None,
         }
     }
 
@@ -133,7 +137,7 @@ impl WebSocketConnection {
         + Send
         + 'static,
     ) -> Self {
-        Self::from_parts_with_state(sink, stream, SecureChannelState::LegacyBypass)
+        Self::from_parts_with_state(sink, stream, SecureChannelState::LegacyBypass, None)
     }
 
     pub(crate) fn from_encrypted_parts(
@@ -141,8 +145,14 @@ impl WebSocketConnection {
         stream: impl Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
         + Send
         + 'static,
+        write_cancel: CancellationToken,
     ) -> Self {
-        Self::from_parts_with_state(sink, stream, SecureChannelState::Handshaking)
+        Self::from_parts_with_state(
+            sink,
+            stream,
+            SecureChannelState::Handshaking,
+            Some(write_cancel),
+        )
     }
 
     pub(crate) fn mark_relay_verified(&self) -> bool {
@@ -158,6 +168,7 @@ impl WebSocketConnection {
         + Send
         + 'static,
         initial: SecureChannelState,
+        relay_write_cancel: Option<CancellationToken>,
     ) -> Self {
         let router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>> =
             Arc::new(RwLock::new([None, None, None, None, None]));
@@ -182,6 +193,7 @@ impl WebSocketConnection {
             connected,
             secure,
             teardown,
+            relay_write_cancel,
         }
     }
 
@@ -399,6 +411,9 @@ impl WebSocketConnection {
 
         self.teardown.0.cancel();
         self.connected.store(false, Ordering::Release);
+        if let Some(cancel) = &self.relay_write_cancel {
+            cancel.cancel();
+        }
 
         // Close WebSocket (Send Close message)
         let mut sink_opt = self.sink.lock().await;

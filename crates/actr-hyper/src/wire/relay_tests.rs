@@ -277,6 +277,42 @@ async fn connected_response_cannot_replace_the_requested_peer() {
 }
 
 #[tokio::test]
+async fn closing_unverified_channel_interrupts_its_waiting_sink() {
+    let mut fixture = Fixture::new().await;
+    let entry = fixture
+        .client
+        .install(42, fixture.remote.to_string_repr(), &fixture.transport)
+        .await
+        .unwrap();
+    let sink = entry.conn.sink();
+    let (started_tx, started_rx) = oneshot::channel();
+    let sending = tokio::spawn(async move {
+        let mut sink = sink.lock().await;
+        let _ = started_tx.send(());
+        sink.as_mut()
+            .unwrap()
+            .send(Message::Binary(Bytes::from_static(b"waiting")))
+            .await
+    });
+    started_rx.await.unwrap();
+    tokio::task::yield_now().await;
+
+    tokio::time::timeout(Duration::from_secs(1), entry.conn.close())
+        .await
+        .expect("closing must interrupt the unverified sink")
+        .unwrap();
+    assert!(sending.await.unwrap().is_err());
+    let Message::Text(text) = fixture.next_message().await else {
+        panic!("expected a channel close control");
+    };
+    assert!(matches!(
+        serde_json::from_str::<ClientControl>(&text).unwrap(),
+        ClientControl::Close { channel: 42 }
+    ));
+    assert!(!fixture.transport.cancel.is_cancelled());
+}
+
+#[tokio::test]
 async fn matching_outbound_peer_completes_handshake_and_carries_data() {
     let mut fixture = Fixture::new().await;
     let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;

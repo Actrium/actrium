@@ -188,6 +188,7 @@ struct SinkState {
     ready: watch::Receiver<bool>,
     security: Arc<Mutex<SecureSession>>,
     cancel: CancellationToken,
+    write_cancel: CancellationToken,
 }
 impl Drop for SinkState {
     fn drop(&mut self) {
@@ -610,12 +611,14 @@ impl RelayClient {
         let (tx, rx) = mpsc::channel::<Message>(16);
         let (ready, ready_rx) = watch::channel(false);
         let cancel = transport.cancel.child_token();
+        let write_cancel = cancel.child_token();
         let state = SinkState {
             transport: transport.clone(),
             channel,
             ready: ready_rx,
             security: security.clone(),
             cancel: cancel.clone(),
+            write_cancel: write_cancel.clone(),
         };
         let sink = futures_util::sink::unfold(state, |mut state, message| async move {
             let send = async {
@@ -669,11 +672,16 @@ impl RelayClient {
                     _ => Err(ws_closed()),
                 }
             };
-            tokio::select! { _ = state.cancel.cancelled() => return Err(ws_closed()), result = send => result? }
+            tokio::select! {
+                _ = state.cancel.cancelled() => return Err(ws_closed()),
+                _ = state.write_cancel.cancelled() => return Err(ws_closed()),
+                result = send => result?,
+            }
             Ok::<_, WsError>(state)
         });
         let incoming = tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok);
-        let conn = WebSocketConnection::from_encrypted_parts(Box::pin(sink), incoming);
+        let conn =
+            WebSocketConnection::from_encrypted_parts(Box::pin(sink), incoming, write_cancel);
         let entry = Arc::new(Channel {
             security,
             receive_permits: Mutex::new(Vec::new()),
