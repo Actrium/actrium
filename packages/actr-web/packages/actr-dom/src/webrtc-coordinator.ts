@@ -39,6 +39,7 @@ export class WebRtcCoordinator {
   private static readonly DC_MAX_MESSAGE_SIZE = 65535;
   private static readonly DC_MAX_PAYLOAD_SIZE =
     WebRtcCoordinator.DC_MAX_MESSAGE_SIZE - WebRtcCoordinator.FRAGMENT_HEADER_SIZE;
+  private static readonly PATH_OBSERVATION_INTERVAL_MS = 5000;
 
   private swBridge: ServiceWorkerBridge;
   private forwarder: FastPathForwarder;
@@ -876,7 +877,7 @@ export class WebRtcCoordinator {
     if (!this.pathTimers.has(peerId)) {
       this.pathTimers.set(peerId, setInterval(() => {
         void this.observeNetworkPath(peerId, connection);
-      }, 1000));
+      }, WebRtcCoordinator.PATH_OBSERVATION_INTERVAL_MS));
     }
   }
 
