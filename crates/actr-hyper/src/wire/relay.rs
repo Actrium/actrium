@@ -792,7 +792,20 @@ impl RelayClient {
                         }
                     }
                 }
-                let entry = self.install(channel, peer.clone(), transport).await?;
+                let entry = match self.install(channel, peer.clone(), transport).await {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        // The untrusted channel id may refer to another live
+                        // peer. Reject the affected dial without retiring it.
+                        tracing::warn!(channel, %error, "Rejected relay channel response");
+                        if let Some(request) = request
+                            && let Some(pending) = self.pending.lock().unwrap().remove(&request)
+                        {
+                            let _ = pending.reply.send(Err(error));
+                        }
+                        return Ok(());
+                    }
+                };
                 if entry.cancel.is_cancelled() || !entry.conn.is_connected() {
                     // A local close may be waiting for the old sink while a
                     // concurrent dial receives the server's accepted channel.

@@ -284,6 +284,27 @@ async fn connected_response_cannot_replace_the_requested_peer() {
         .application
         .unwrap();
     assert!(plaintext.ends_with(b"unrelated channel survives"));
+
+    // Even a response naming the requested peer must not reuse a channel
+    // that is already bound to a different, still-connected peer.
+    let other = ActrId::from_string_repr("4.test@example.com").unwrap();
+    let (request, dial) = fixture.start_dial(other.clone()).await;
+    fixture
+        .client
+        .handle_control(
+            ServerControl::Connected {
+                channel: 42,
+                request: Some(request),
+                peer: other.to_string_repr(),
+                metadata: String::new(),
+            },
+            &fixture.transport,
+        )
+        .await
+        .unwrap();
+    assert!(dial.await.unwrap().is_err());
+    assert!(connection.is_connected());
+    assert!(!fixture.transport.cancel.is_cancelled());
 }
 
 #[tokio::test]
