@@ -48,9 +48,12 @@ pub struct RealmTrust {
     pub pins: KeyPins,
     pub pinned_at: String,
     pub checked_at: String,
-    /// Compare-and-swap generation of the on-disk record: every save must
-    /// find the revision its writer loaded, so a concurrent join/trust
-    /// cannot be overwritten (and roll the pins back) unnoticed.
+    /// Unique identity of this record creation. Unlike `revision`, it is
+    /// never reused after a reset, so a pre-reset writer cannot pass CAS.
+    #[serde(default)]
+    pub generation: String,
+    /// Compare-and-swap revision within one record generation: every save
+    /// must find the revision and generation its writer loaded.
     #[serde(default)]
     pub revision: u64,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -67,6 +70,7 @@ impl RealmTrust {
             pins,
             pinned_at: now.clone(),
             checked_at: now,
+            generation: hex::encode(rand::random::<[u8; 16]>()),
             revision: 0,
             profiles: BTreeMap::new(),
         }
@@ -99,8 +103,9 @@ pub trait TrustStore: Send {
 /// with compare-and-swap saves across processes.
 pub struct FileTrustStore {
     dir: PathBuf,
-    /// The on-disk revision each domain's record was loaded at (0 = absent).
-    expected: BTreeMap<String, u64>,
+    /// The on-disk revision and generation each domain's record was loaded
+    /// at (`None` = absent).
+    expected: BTreeMap<String, Option<(u64, String)>>,
 }
 
 impl FileTrustStore {
@@ -188,24 +193,34 @@ impl FileTrustStore {
 impl TrustStore for FileTrustStore {
     fn load(&mut self, domain: &str) -> Result<Option<RealmTrust>> {
         let current = self.read_current(domain)?;
-        self.expected.insert(
-            domain.to_string(),
-            current.as_ref().map(|(_, revision)| *revision).unwrap_or(0),
-        );
+        let version = current
+            .as_ref()
+            .map(|(trust, revision)| (*revision, trust.generation.clone()));
+        self.expected.insert(domain.to_string(), version);
         Ok(current.map(|(trust, _)| trust))
     }
 
     fn save(&mut self, trust: &RealmTrust) -> Result<()> {
-        // Hold the lock from the revision read through the atomic rename:
+        // Hold the lock from the version read through the atomic rename:
         // checking first and locking only the write would still allow two
-        // writers to accept the same revision and overwrite one another.
+        // writers to accept the same version and overwrite one another.
         let _lock = self.lock_domain(&trust.domain)?;
-        let current = self.read_current(&trust.domain)?;
-        let current_revision = current.map(|(_, revision)| revision).unwrap_or(0);
-        let expected = self.expected.get(&trust.domain).copied().unwrap_or(0);
-        if current_revision != expected {
+        let current = self
+            .read_current(&trust.domain)?
+            .map(|(trust, revision)| (revision, trust.generation));
+        let expected = self
+            .expected
+            .get(&trust.domain)
+            .cloned()
+            .unwrap_or_default();
+        let current_revision = current.as_ref().map(|(revision, _)| *revision).unwrap_or(0);
+        let expected_revision = expected
+            .as_ref()
+            .map(|(revision, _)| *revision)
+            .unwrap_or(0);
+        if current != expected {
             bail!(
-                "Pinned trust for {} changed concurrently (revision {expected} -> \
+                "Pinned trust for {} changed concurrently (revision {expected_revision} -> \
                  {current_revision}); re-run the command",
                 trust.domain
             );
@@ -215,7 +230,10 @@ impl TrustStore for FileTrustStore {
         let path = self.path(&trust.domain)?;
         super::realm::write_private(&path, serde_json::to_string_pretty(&trust)?.as_bytes())
             .with_context(|| format!("Failed to write pinned trust: {}", path.display()))?;
-        self.expected.insert(trust.domain.clone(), trust.revision);
+        self.expected.insert(
+            trust.domain.clone(),
+            Some((trust.revision, trust.generation.clone())),
+        );
         Ok(())
     }
 
@@ -224,11 +242,11 @@ impl TrustStore for FileTrustStore {
         let path = self.path(domain)?;
         match std::fs::remove_file(&path) {
             Ok(()) => {
-                self.expected.insert(domain.to_string(), 0);
+                self.expected.insert(domain.to_string(), None);
                 Ok(true)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                self.expected.insert(domain.to_string(), 0);
+                self.expected.insert(domain.to_string(), None);
                 Ok(false)
             }
             Err(error) => {
@@ -830,5 +848,31 @@ mod tests {
             .count();
         assert_eq!(successes, 1, "only one writer may advance revision 1");
         assert_eq!(initial.load("acme.com").unwrap().unwrap().revision, 2);
+    }
+
+    #[test]
+    fn file_store_reset_invalidates_pre_reset_writers() {
+        let dir = tempfile::tempdir().unwrap();
+        let old_member = member("realm-key-1", &key(), 1);
+        let new_member = member("realm-key-9", &key(), 9);
+        let mut old = FileTrustStore::new(dir.path().to_path_buf());
+        accept_member(&mut old, "acme.com", &old_member).unwrap();
+        let stale = old.load("acme.com").unwrap().unwrap();
+
+        let mut reset = FileTrustStore::new(dir.path().to_path_buf());
+        assert!(reset.reset("acme.com").unwrap());
+        let mut confirmed = FileTrustStore::new(dir.path().to_path_buf());
+        trust_with("acme.com", new_member.clone(), &mut confirmed, None).unwrap();
+        let current = confirmed.load("acme.com").unwrap().unwrap();
+        assert_eq!(current.revision, 1);
+        assert_ne!(current.generation, stale.generation);
+
+        // Revision 1 was reused by the new record, but its generation was
+        // not: the pre-reset writer cannot overwrite the confirmed keys.
+        let error = old.save(&stale).unwrap_err();
+        assert!(error.to_string().contains("concurrently"), "{error:#}");
+        let current = confirmed.load("acme.com").unwrap().unwrap();
+        assert_eq!(current.member, new_member);
+        assert_eq!(current.revision, 1);
     }
 }

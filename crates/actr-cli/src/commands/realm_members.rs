@@ -734,7 +734,13 @@ mod tests {
             label: Some(request["label"].as_str().context("label")?.into()),
             force: false,
         };
-        let joined = join_with(&args, e2e_documents::fetch, Some(&mut store), &http_client()?).await?;
+        let joined = join_with(
+            &args,
+            e2e_documents::fetch,
+            Some(&mut store),
+            &http_client()?,
+        )
+        .await?;
         std::fs::write(
             request["result_file"].as_str().context("result_file")?,
             serde_json::to_vec(&serde_json::json!({ "joined": joined, "profile": profile }))?,
@@ -1176,6 +1182,7 @@ mod tests {
     /// mid-test.
     struct MutableDomain {
         base: String,
+        client: reqwest::Client,
         descriptor: std::sync::Arc<std::sync::Mutex<Value>>,
         profile: std::sync::Arc<std::sync::Mutex<Option<Value>>>,
     }
@@ -1183,7 +1190,7 @@ mod tests {
     async fn serve_domain_mutable(key: &SigningKey, sequence: u64) -> MutableDomain {
         use axum::routing::get;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
+        let base = format!("https://{}", listener.local_addr().unwrap());
         let descriptor =
             std::sync::Arc::new(std::sync::Mutex::new(descriptor_with("rs-1", key, 1)));
         let served = std::sync::Arc::new(std::sync::Mutex::new(Some(profile(
@@ -1226,9 +1233,30 @@ mod tests {
                     Json(serde_json::from_slice::<Value>(&body).unwrap())
                 }),
             );
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let tls = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).unwrap();
+        let client = reqwest::Client::builder()
+            .add_root_certificate(reqwest::Certificate::from_der(tls.cert.der()).unwrap())
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let config = axum_server::tls_rustls::RustlsConfig::from_pem(
+            tls.cert.pem().into_bytes(),
+            tls.signing_key.serialize_pem().into_bytes(),
+        )
+        .await
+        .unwrap();
+        let listener = listener.into_std().unwrap();
+        tokio::spawn(async move {
+            axum_server::from_tcp_rustls(listener, config)
+                .unwrap()
+                .serve(app.into_make_service())
+                .await
+                .unwrap()
+        });
         MutableDomain {
             base,
+            client,
             descriptor,
             profile: served,
         }
@@ -1384,9 +1412,9 @@ mod tests {
 
         join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("a.json")),
-            fetch_from(domain.base.clone(), http_client().unwrap()),
+            fetch_from(domain.base.clone(), domain.client.clone()),
             Some(&mut store),
-            &http_client().unwrap(),
+            &domain.client,
         )
         .await
         .unwrap();
@@ -1402,9 +1430,9 @@ mod tests {
         ));
         let error = join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("b.json")),
-            fetch_from(domain.base.clone(), http_client().unwrap()),
+            fetch_from(domain.base.clone(), domain.client.clone()),
             Some(&mut store),
-            &http_client().unwrap(),
+            &domain.client,
         )
         .await
         .unwrap_err();
@@ -1423,9 +1451,9 @@ mod tests {
         ));
         join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("c.json")),
-            fetch_from(domain.base, http_client().unwrap()),
+            fetch_from(domain.base, domain.client.clone()),
             Some(&mut store),
-            &http_client().unwrap(),
+            &domain.client,
         )
         .await
         .unwrap();
@@ -1443,9 +1471,9 @@ mod tests {
 
         join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("a.json")),
-            fetch_from(domain.base.clone(), http_client().unwrap()),
+            fetch_from(domain.base.clone(), domain.client.clone()),
             Some(&mut store),
-            &http_client().unwrap(),
+            &domain.client,
         )
         .await
         .unwrap();
@@ -1457,9 +1485,9 @@ mod tests {
         *domain.profile.lock().unwrap() = Some(changed);
         let error = join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("b.json")),
-            fetch_from(domain.base, http_client().unwrap()),
+            fetch_from(domain.base, domain.client.clone()),
             Some(&mut store),
-            &http_client().unwrap(),
+            &domain.client,
         )
         .await
         .unwrap_err();
@@ -1533,9 +1561,9 @@ mod tests {
 
         join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("a.json")),
-            fetch_from(domain.base.clone(), http_client().unwrap()),
+            fetch_from(domain.base.clone(), domain.client.clone()),
             Some(&mut store),
-            &http_client().unwrap(),
+            &domain.client,
         )
         .await
         .unwrap();
@@ -1550,9 +1578,9 @@ mod tests {
 
         let error = join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("b.json")),
-            fetch_from(domain.base.clone(), http_client().unwrap()),
+            fetch_from(domain.base.clone(), domain.client.clone()),
             Some(&mut store),
-            &http_client().unwrap(),
+            &domain.client,
         )
         .await
         .unwrap_err();
@@ -1569,9 +1597,9 @@ mod tests {
         assert_eq!(reply["status"], "identity-change-confirmed");
         join_with(
             &join_args(RealmInvite::new(REALM, &secret), dir.path().join("b.json")),
-            fetch_from(domain.base, http_client().unwrap()),
+            fetch_from(domain.base, domain.client.clone()),
             Some(&mut store),
-            &http_client().unwrap(),
+            &domain.client,
         )
         .await
         .unwrap();
