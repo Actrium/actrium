@@ -416,28 +416,42 @@ async fn send_envelope_to_caller(
         && handle.snapshot().sendable
         && handle.snapshot().network_path == crate::wire::webrtc::rtc::status::NetworkPath::Direct
     {
-        match handle
-            .send(
+        let attempt = handle
+            .send_with_progress(
                 crate::wire::webrtc::rtc::status::LaneKind::RpcReliable,
                 Bytes::from(response_envelope.encode_to_vec()),
+                false,
             )
-            .await
-        {
-            Ok(()) => tracing::info!(
-                target: "actr_response_send",
-                request_id = %request_id,
-                target_actor = %caller,
-                "response send succeeded via direct RTC reliable lane"
-            ),
-            Err(error) => tracing::warn!(
+            .await;
+        match attempt.result {
+            Ok(()) => {
+                tracing::info!(
+                    target: "actr_response_send",
+                    request_id = %request_id,
+                    target_actor = %caller,
+                    "response send succeeded via direct RTC reliable lane"
+                );
+                return;
+            }
+            // Only a proven pre-send failure can safely try another route.
+            Err(error) if attempt.proven_pre_send => tracing::warn!(
                 target: "actr_response_send",
                 request_id = %request_id,
                 target_actor = %caller,
                 error = ?error,
-                "direct RTC response submission failed; delivery may be uncertain"
+                "direct RTC response failed before submission; falling back to relay"
             ),
+            Err(error) => {
+                tracing::warn!(
+                    target: "actr_response_send",
+                    request_id = %request_id,
+                    target_actor = %caller,
+                    error = ?error,
+                    "direct RTC response submission failed; delivery may be uncertain"
+                );
+                return;
+            }
         }
-        return;
     }
 
     // Try the already-accepted relay without waiting for ICE.
