@@ -478,6 +478,63 @@ async fn close_with_outstanding_bytes_reports_delivery_uncertain() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn buffer_full_after_a_fragment_is_delivery_uncertain() {
+    for non_blocking in [false, true] {
+        let mut h = spawn_send_harness(1);
+        drive_to_sendable(&mut h).await;
+        let channel = channel_of(&h, "RPC_RELIABLE");
+        channel.buffer_full_after.store(1, Ordering::SeqCst);
+        let payload = bytes::Bytes::from(vec![0; crate::transport::DC_MAX_PAYLOAD_SIZE + 1]);
+        let attempt = h
+            .handle
+            .send_with_progress(LaneKind::RpcReliable, payload, non_blocking)
+            .await;
+        assert_eq!(
+            attempt.result,
+            Err(RtcSendError::DataChunkDeliveryUncertain)
+        );
+        assert_eq!(
+            attempt.progress,
+            crate::transport::DeliveryProgress::Unknown
+        );
+        assert!(!attempt.proven_pre_send);
+        let sent = if non_blocking {
+            channel.try_sent.lock().unwrap().len()
+        } else {
+            channel.sent.lock().unwrap().len()
+        };
+        assert_eq!(sent, 1, "only the first fragment should have been accepted");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unavailable_outstanding_count_is_delivery_uncertain() {
+    let mut h = spawn_send_harness(2);
+    drive_to_sendable(&mut h).await;
+    let channel = channel_of(&h, "RPC_RELIABLE");
+    channel.fail_send.store(true, Ordering::SeqCst);
+    channel.fail_outstanding.store(true, Ordering::SeqCst);
+
+    let attempt = h
+        .handle
+        .send_with_progress(
+            LaneKind::RpcReliable,
+            bytes::Bytes::from_static(b"reply"),
+            false,
+        )
+        .await;
+    assert_eq!(
+        attempt.result,
+        Err(RtcSendError::DataChunkDeliveryUncertain)
+    );
+    assert_eq!(
+        attempt.progress,
+        crate::transport::DeliveryProgress::Unknown
+    );
+    assert!(!attempt.proven_pre_send);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn close_with_no_outstanding_is_terminal_channel_closed() {
     let mut h = spawn_send_harness(1);
     drive_to_sendable(&mut h).await;
