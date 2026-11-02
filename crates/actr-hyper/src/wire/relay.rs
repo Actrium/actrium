@@ -1291,10 +1291,12 @@ impl RelayClient {
             let value = session.peer_actor_type().ok_or_else(closed)?;
             actr_protocol::ActrType::from_string_repr(value).map_err(|_| closed())?
         };
-        self.gate
-            .attach_relay(entry.conn.clone(), entry.peer.clone(), actor_type)
-            .await
-            .map_err(|error| NetworkError::ConnectionError(error.to_string()))?;
+        tokio::select! {
+            _ = entry.cancel.cancelled() => return Err(closed()),
+            result = self.gate.attach_relay(entry.conn.clone(), entry.peer.clone(), actor_type) => {
+                result.map_err(|error| NetworkError::ConnectionError(error.to_string()))?;
+            }
+        }
         entry.ready.send_replace(true);
         self.gate.relay_ready(entry.peer.clone());
         let _ = self.remember_peer(&entry.peer).await;

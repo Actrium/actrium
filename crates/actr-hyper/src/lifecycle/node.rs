@@ -3073,6 +3073,7 @@ impl Inner {
 
         // Collect background task handles so they can be managed by ActrRefShared later.
         let mut task_handles = Vec::new();
+        let relay_client_to_start: Arc<crate::wire::relay::RelayClient>;
 
         // Node-level hook callback, built inside the registration
         // setup block below and published back out into this wider
@@ -3730,7 +3731,10 @@ impl Inner {
                     self.hook_observer.clone(),
                     ctx_builder,
                 ));
-                task_handles.push(relay_client.start());
+                // Start only after the ingress mailbox has been published.
+                // A later startup error must not strand the relay read loop
+                // waiting for a mailbox that will never become available.
+                relay_client_to_start = relay_client;
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3975,6 +3979,7 @@ impl Inner {
                 .map_err(|e| {
                     ActrError::Unavailable(format!("WebSocketGate receive loop start failed: {e}"))
                 })?;
+            task_handles.push(relay_client_to_start.start());
             tracing::info!("✅ WebSocketGate → Mailbox routing started");
         }
         tracing::info!("✅ WebRTC background loops started");

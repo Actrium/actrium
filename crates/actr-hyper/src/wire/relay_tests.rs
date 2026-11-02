@@ -80,6 +80,10 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
+        Self::new_with_mailbox(true).await
+    }
+
+    async fn new_with_mailbox(publish_mailbox: bool) -> Self {
         let now = now_secs();
         let local = ActrId::from_string_repr("2.test@example.com").unwrap();
         let remote = ActrId::from_string_repr("1.test@example.com").unwrap();
@@ -91,9 +95,11 @@ impl Fixture {
             Arc::new(DataChunkRegistry::new()),
             PeerTypes::default(),
         ));
-        gate.start_receive_loop(Arc::new(EmptyMailbox))
-            .await
-            .unwrap();
+        if publish_mailbox {
+            gate.start_receive_loop(Arc::new(EmptyMailbox))
+                .await
+                .unwrap();
+        }
         let session = SessionState::new(SessionSnapshot::empty_with_id(local.clone(), 1));
         let shutdown = CancellationToken::new();
         let client = RelayClient::new(
@@ -310,6 +316,67 @@ async fn closing_unverified_channel_interrupts_its_waiting_sink() {
         ClientControl::Close { channel: 42 }
     ));
     assert!(!fixture.transport.cancel.is_cancelled());
+}
+
+#[tokio::test]
+async fn shutdown_interrupts_handshake_waiting_for_ingress_mailbox() {
+    let mut fixture = Fixture::new_with_mailbox(false).await;
+    fixture.connected(None).await.unwrap();
+    let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
+    let mut remote = SecureSession::new(
+        &fixture.remote_identity,
+        &fixture.local.to_string_repr(),
+        42,
+        fixture.now,
+    )
+    .unwrap();
+    let first = remote.start().unwrap().unwrap();
+    fixture
+        .client
+        .receive_secure(42, Bytes::from(first), &fixture.transport, &budget)
+        .await
+        .unwrap();
+    let second = fixture.next_binary().await;
+    let third = remote
+        .receive(&second, Some(&fixture.issuer), fixture.now)
+        .unwrap()
+        .outbound
+        .pop()
+        .unwrap();
+    fixture
+        .client
+        .receive_secure(42, Bytes::from(third), &fixture.transport, &budget)
+        .await
+        .unwrap();
+    let fourth = fixture.next_binary().await;
+    let fifth = remote
+        .receive(&fourth, None, fixture.now)
+        .unwrap()
+        .outbound
+        .pop()
+        .unwrap();
+    let client = fixture.client.clone();
+    let transport = fixture.transport.clone();
+    let receiving = tokio::spawn(async move {
+        client
+            .receive_secure(42, Bytes::from(fifth), &transport, &budget)
+            .await
+    });
+    let entry = fixture.client.channels.read().await[&42].clone();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while entry.conn.secure_channel_state() != SecureChannelState::Verified {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("handshake should reach the mailbox attachment");
+    assert!(!receiving.is_finished());
+    fixture.shutdown.cancel();
+    let result = tokio::time::timeout(Duration::from_secs(1), receiving)
+        .await
+        .expect("shutdown must interrupt the mailbox wait")
+        .unwrap();
+    assert!(result.is_err());
 }
 
 #[tokio::test]
