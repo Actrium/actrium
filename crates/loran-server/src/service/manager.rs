@@ -55,10 +55,8 @@ use url::Url;
 
 /// Swappable make service for hot-reloading the Router.
 ///
-/// Each new TCP connection clones the current Router from the watch channel.
-/// SIGHUP triggers a new Router to be sent through the channel, so new
-/// connections immediately use the updated routes while existing connections
-/// continue with their previously obtained Router.
+/// Each HTTP request uses the current router, including requests on existing
+/// keep-alive connections. Upgraded WebSocket sessions keep their own state.
 #[derive(Clone)]
 struct SwappableMakeService {
     router_rx: watch::Receiver<Router>,
@@ -71,19 +69,44 @@ impl SwappableMakeService {
 }
 
 impl Service<SocketAddr> for SwappableMakeService {
-    type Response = Router;
+    type Response = SwappableService;
     type Error = Infallible;
-    type Future = Ready<Result<Router, Infallible>>;
+    type Future = Ready<Result<SwappableService, Infallible>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, target: SocketAddr) -> Self::Future {
-        let router = self.router_rx.borrow().clone();
-        // Inject ConnectInfo<SocketAddr> so handlers (e.g. signaling WS) can extract it.
-        let router = router.layer(axum::Extension(ConnectInfo(target)));
-        ready(Ok(router))
+        ready(Ok(SwappableService {
+            router_rx: self.router_rx.clone(),
+            target,
+        }))
+    }
+}
+
+#[derive(Clone)]
+struct SwappableService {
+    router_rx: watch::Receiver<Router>,
+    target: SocketAddr,
+}
+
+impl<B> Service<axum::http::Request<B>> for SwappableService
+where
+    Router:
+        Service<axum::http::Request<B>, Response = axum::response::Response, Error = Infallible>,
+{
+    type Response = axum::response::Response;
+    type Error = Infallible;
+    type Future = <Router as Service<axum::http::Request<B>>>::Future;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, mut request: axum::http::Request<B>) -> Self::Future {
+        request.extensions_mut().insert(ConnectInfo(self.target));
+        self.router_rx.borrow().clone().call(request)
     }
 }
 
@@ -1085,6 +1108,15 @@ impl ServiceManager {
         reasons
     }
 
+    fn turn_auth_changed(old: &ActrixConfig, new: &ActrixConfig) -> bool {
+        let old_realm_auth = old.uses_realm_turn_auth();
+        let new_realm_auth = new.uses_realm_turn_auth();
+        old_realm_auth != new_realm_auth
+            || (old_realm_auth
+                && new_realm_auth
+                && old.authority.provider_id().ok() != new.authority.provider_id().ok())
+    }
+
     fn signer_restart_required(old: &ActrixConfig, new: &ActrixConfig) -> bool {
         old.is_signer_enabled() != new.is_signer_enabled()
             || ((old.is_signer_enabled() || new.is_signer_enabled())
@@ -1264,7 +1296,7 @@ impl ServiceManager {
                     if let Some(ref tx) = self.router_tx {
                         let _ = tx.send(new_router);
                         platform::recording::info!(
-                            "Router hot-swapped successfully. New connections will use updated routes."
+                            "Router hot-swapped successfully. New requests will use updated routes."
                         );
                     }
                 }
@@ -1302,7 +1334,8 @@ impl ServiceManager {
             || old_config.turn != self.config.turn
             || old_config.is_ice_enabled() != self.config.is_ice_enabled()
             || old_config.is_stun_enabled() != self.config.is_stun_enabled()
-            || old_config.is_turn_enabled() != self.config.is_turn_enabled();
+            || old_config.is_turn_enabled() != self.config.is_turn_enabled()
+            || Self::turn_auth_changed(&old_config, &self.config);
 
         if ice_changed {
             platform::recording::info!("ICE configuration changed, restarting ICE services...");
@@ -1493,7 +1526,7 @@ impl SignerRateLimiter {
 /// Wrap the Signer gRPC router with a per-source-IP token-bucket rate limit.
 ///
 /// The source IP is read from the `ConnectInfo<SocketAddr>` extension injected
-/// per-connection in [`SwappableMakeService::call`]. If it is unavailable the
+/// per-request in [`SwappableService::call`]. If it is unavailable the
 /// request is allowed through (fail-open) rather than dropped. Over-limit
 /// requests get HTTP 429, which gRPC clients surface as an `UNAVAILABLE`
 /// transport error.
@@ -1562,6 +1595,33 @@ mod tests {
         assert!(original.is_cancelled());
         assert!(!manager.bg_cancel.as_ref().unwrap().is_cancelled());
         manager.bg_cancel.take().unwrap().cancel();
+    }
+}
+
+#[cfg(test)]
+mod turn_reload_tests {
+    use super::*;
+
+    #[test]
+    fn changing_turn_auth_mode_or_provider_requires_ice_restart() {
+        let mut rest = ActrixConfig {
+            enable: platform::config::ENABLE_TURN,
+            ..Default::default()
+        };
+        rest.turn.users.clear();
+        rest.authority.uri = None;
+        assert!(!rest.uses_realm_turn_auth());
+        let mut realm = rest.clone();
+        realm.authority.uri = Some("actr://provider.example".into());
+        assert!(realm.uses_realm_turn_auth());
+        assert!(ServiceManager::turn_auth_changed(&rest, &realm));
+        let mut replacement = realm.clone();
+        replacement.authority.uri = Some("actr://other.example".into());
+        assert!(ServiceManager::turn_auth_changed(&realm, &replacement));
+        assert!(!ServiceManager::turn_auth_changed(&realm, &realm));
+        realm.turn.users.insert("user".into(), "password".into());
+        replacement.turn.users = realm.turn.users.clone();
+        assert!(!ServiceManager::turn_auth_changed(&realm, &replacement));
     }
 }
 

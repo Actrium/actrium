@@ -524,13 +524,20 @@ async fn typed_call_rejects_non_positive_timeout() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn typed_call_honors_caller_timeout() {
-    let c = ctx();
-    let err = c
-        .call(&Dest::Workload, TimeoutRequest::default(), 5)
+    let transport = Arc::new(HostTransport::new());
+    let c = runtime_context_with_host_transport(ActrId::default(), transport.clone());
+    let call =
+        tokio::spawn(async move { c.call(&Dest::Workload, TimeoutRequest::default(), 5).await });
+    let submitted = tokio::time::timeout(Duration::from_secs(1), transport.recv_reliable_raw())
         .await
-        .unwrap_err();
+        .expect("request must reach the workload queue")
+        .unwrap();
+    assert_eq!(submitted.route_key, TimeoutRequest::route_key());
+    assert_eq!(submitted.timeout_ms, 5);
+    tokio::time::advance(Duration::from_millis(5)).await;
+    let err = call.await.unwrap().unwrap_err();
 
     assert!(
         matches!(err, ActrError::DeliveryUncertain { .. }),

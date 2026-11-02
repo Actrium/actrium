@@ -1321,9 +1321,23 @@ package_workspace_dir() {
   esac
 }
 
+validate_registry_dependencies() {
+  # Cargo replaces Git sources with registry versions in published manifests.
+  # Verify this package before uploading any Rust crates, without --no-verify.
+  log_info "Checking the registry-resolved TURN dependencies"
+  if ! (
+    cd "$WORK_REPO_ROOT"
+    cargo package -p actrix-stun --locked --allow-dirty
+  ); then
+    fail "Could not verify actrix-stun with published registry dependencies; resolve the Cargo error before publishing"
+    return 1
+  fi
+}
+
 run_validation_suite() {
   python3 scripts/actr/tests/test_package_release_crates.py
   bash scripts/actr/tests/release-train-relay-dependencies.sh
+  validate_registry_dependencies || return 1
   log_info "Running formatter and compile checks"
   log_info "Generating CLI web runtime assets"
   bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -2014,7 +2028,7 @@ publish_rust_package() {
   fi
 
   if [[ "$DRY_RUN" == true ]]; then
-    append_state "$package" "$stage" "crate" "success" "dry_run_validated" "$registry_url" "$RELEASE_SHA"
+    append_state "$package" "$stage" "crate" "success" "dry_run_no_registry_verification" "$registry_url" "$RELEASE_SHA"
     return
   fi
 
@@ -2169,6 +2183,12 @@ stage_create_tag() {
 
 stage_publish_rust() {
   read_context
+
+  if [[ "$DRY_RUN" == false ]]; then
+    validate_registry_dependencies || return 1
+  else
+    log_warn "Dry-run does not verify registry-resolved Rust packages"
+  fi
 
   local package
   for package in "${FOUNDATION_CRATES[@]}"; do
@@ -2493,6 +2513,9 @@ run_release_train() {
 
   if [[ "$DRY_RUN" == false ]]; then
     ensure_publish_worktree_clean
+    validate_registry_dependencies || return 1
+  else
+    log_warn "Dry-run does not verify registry-resolved Rust packages"
   fi
   set_release_sha
   # Persist the release context so stage functions (e.g.

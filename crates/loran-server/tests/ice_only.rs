@@ -153,6 +153,23 @@ async fn allocate_with(socket: &UdpSocket, username: &str, password: &str) -> Ve
     nonce.to_vec()
 }
 
+#[cfg(unix)]
+async fn allocate_response(socket: &UdpSocket, username: &str, password: &str) -> Message {
+    let mut message = request(METHOD_ALLOCATE);
+    message.add(ATTR_REQUESTED_TRANSPORT, &[17, 0, 0, 0]);
+    let challenge = exchange(socket, &message).await;
+    assert_eq!(challenge.typ.class, CLASS_ERROR_RESPONSE);
+    let nonce = challenge.get(ATTR_NONCE).unwrap();
+    let mut message = request(METHOD_ALLOCATE);
+    message.add(ATTR_REQUESTED_TRANSPORT, &[17, 0, 0, 0]);
+    message.add(ATTR_USERNAME, username.as_bytes());
+    message.add(ATTR_REALM, b"turn.example.org");
+    message.add(ATTR_NONCE, &nonce);
+    let key = turn_crate::auth::generate_auth_key(username, "turn.example.org", password);
+    MessageIntegrity(key).add_to(&mut message).unwrap();
+    exchange(socket, &message).await
+}
+
 async fn allocate(socket: &UdpSocket) {
     allocate_with(socket, "alice", "test-password").await;
 }
@@ -216,6 +233,75 @@ async fn standalone_shared_secret_accepts_external_rest_credentials() {
     allocate_with(&client, &username, &password).await;
     shutdown.send(()).unwrap();
     task.await.unwrap().unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn turn_auth_mode_reload_replaces_the_old_rest_authenticator() {
+    let directory = tempfile::tempdir().unwrap();
+    let secret = "qQ3ry54gn6iDjz02rBGn3YRmxZv8bqsf1qB9Gcb2";
+    let mut config = test_turn_config();
+    config.turn.users.clear();
+    config.turn.turn_secret = secret.into();
+    config.sqlite_path = directory.path().join("database");
+    config.actrix_shared_key = "b2xISzUdwmiURo7wKFL6K9tbkRHhTfM2E83r".into();
+    let http = platform::config::bind::HttpBindConfig {
+        ip: "127.0.0.1".into(),
+        port: std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port(),
+        ..Default::default()
+    };
+    config.bind.http = Some(http);
+    assert!(config.validate().is_ok(), "{:?}", config.validate());
+    assert!(!config.uses_realm_turn_auth());
+    let path = directory.path().join("ice.toml");
+    let log = directory.path().join("server.log");
+    std::fs::write(&path, config.to_toml().unwrap()).unwrap();
+    let output = std::fs::File::create(&log).unwrap();
+    let child = Command::new(env!("CARGO_BIN_EXE_actrix"))
+        .arg("--config")
+        .arg(&path)
+        .current_dir(directory.path())
+        .stdout(output.try_clone().unwrap())
+        .stderr(output)
+        .spawn()
+        .unwrap();
+    let mut process = Process { child, log };
+    let client = wait_for_binding(&mut process, config.bind.ice.port).await;
+    let expires = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    let username = format!("{expires}:external-client");
+    let mut mac = Hmac::<Sha1>::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(username.as_bytes());
+    let password = STANDARD.encode(mac.finalize().into_bytes());
+    allocate_with(&client, &username, &password).await;
+
+    // Let the launcher install its SIGHUP handler before triggering reload.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    config.authority.uri = Some("actr://provider.example".into());
+    assert!(config.uses_realm_turn_auth());
+    std::fs::write(&path, config.to_toml().unwrap()).unwrap();
+    process.signal("-HUP");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !process
+        .logs()
+        .contains("Configuration reload completed successfully")
+    {
+        process.assert_running();
+        assert!(Instant::now() < deadline, "{}", process.logs());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let client = wait_for_binding(&mut process, config.bind.ice.port).await;
+    let response = allocate_response(&client, &username, &password).await;
+    assert_eq!(response.typ.class, CLASS_ERROR_RESPONSE);
+    let code = response.get(ATTR_ERROR_CODE).unwrap();
+    assert_eq!(((code[2] & 7) as u16) * 100 + code[3] as u16, 401);
 }
 
 #[tokio::test]

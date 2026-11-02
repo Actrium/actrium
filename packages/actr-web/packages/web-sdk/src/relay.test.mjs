@@ -43,6 +43,34 @@ function fixture(prepare, options = {}) {
   return { client, events, intervals, identity: () => identity, replaceIdentity: (value) => { identity = value; } };
 }
 
+test('historical failed targets do not permanently exhaust relay capacity', async () => {
+  const { client } = fixture();
+  client.waitSocket = async () => { throw new Error('offline'); };
+  for (let i = 0; i < 1024; i++) {
+    await assert.rejects(client.ensurePeer(`peer-${i}`), /offline/);
+  }
+  await nextTurn();
+  assert.equal(client.desired.size, 1024);
+  assert.equal(client.channels.size, 0);
+  await assert.rejects(client.ensurePeer('new-peer'), /offline/);
+  assert.equal(client.desired.size, 1024);
+  assert.equal(client.desired.has('peer-0'), false);
+  assert.equal(client.desired.has('new-peer'), true);
+  await assert.rejects(client.ensurePeer('peer-0', true), /no longer desired/);
+  assert.equal(client.desired.has('peer-0'), false);
+});
+
+test('capacity eviction keeps active and in-flight peers', () => {
+  const { client } = fixture();
+  for (let i = 0; i < 1024; i++) client.rememberPeer(`peer-${i}`);
+  client.peers.set('peer-0', 42);
+  client.dials.set('peer-1', Promise.resolve());
+  assert.equal(client.rememberPeer('new-peer'), true);
+  assert.equal(client.desired.has('peer-0'), true);
+  assert.equal(client.desired.has('peer-1'), true);
+  assert.equal(client.desired.has('peer-2'), false);
+});
+
 async function login(client) {
   client.start();
   await until(() => Socket.instances.length > 0);

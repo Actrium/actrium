@@ -22,6 +22,7 @@ fail() {
 _original_fail=$(declare -f fail)
 _original_update_versions=$(declare -f update_versions)
 _original_run_validation_suite=$(declare -f run_validation_suite)
+_original_validate_registry_dependencies=$(declare -f validate_registry_dependencies)
 _original_ensure_clean_worktree=$(declare -f ensure_clean_worktree)
 _original_prepare_paths=$(declare -f prepare_paths)
 _original_prepare_worktree=$(declare -f prepare_worktree)
@@ -57,6 +58,7 @@ restore_all_functions() {
   eval "$_original_fail"
   eval "$_original_update_versions"
   eval "$_original_run_validation_suite"
+  eval "$_original_validate_registry_dependencies"
   eval "$_original_ensure_clean_worktree"
   eval "$_original_prepare_paths"
   eval "$_original_prepare_worktree"
@@ -975,6 +977,7 @@ test_publish_mode_uses_prepared_versions_without_mutating() {
   run_validation_suite() { calls+=("run_validation_suite"); }
   ensure_versions_prepared() { calls+=("ensure_versions_prepared"); }
   ensure_publish_worktree_clean() { calls+=("ensure_publish_worktree_clean"); }
+  validate_registry_dependencies() { calls+=("validate_registry_dependencies"); }
   commit_release_prepare() { calls+=("commit_release_prepare"); }
   append_skipped_components() { calls+=("append_skipped_components"); }
   set_release_sha() { calls+=("set_release_sha"); RELEASE_SHA="test-sha"; }
@@ -1015,7 +1018,8 @@ test_publish_mode_uses_prepared_versions_without_mutating() {
   assert_eq "ensure_versions_prepared" "${calls[0]}" "first publish step"
   # run_validation_suite removed from publish path (now covered by CI gate test job)
   assert_eq "ensure_publish_worktree_clean" "${calls[1]}" "second publish step"
-  assert_eq "set_release_sha" "${calls[2]}" "third publish step"
+  assert_eq "validate_registry_dependencies" "${calls[2]}" "registry validation before publish"
+  assert_eq "set_release_sha" "${calls[3]}" "release identity after registry validation"
 }
 
 test_prepare_only_updates_validates_and_commits_without_publishing() {
@@ -2334,12 +2338,44 @@ test_publish_rust_stage_publishes_packages() {
 
   local calls=()
   read_context() { calls+=("read_context"); }
+  validate_registry_dependencies() { calls+=("validate_registry_dependencies"); }
   publish_rust_package() { calls+=("publish_rust_package:$1:$2"); }
 
   stage_publish_rust
 
   assert_eq "read_context" "${calls[0]}" "publish-rust context load"
-  assert_eq "publish_rust_package:loran-relay-protocol:foundation" "${calls[1]}" "first Rust publish"
+  assert_eq "validate_registry_dependencies" "${calls[1]}" "registry validation before Rust publish"
+  assert_eq "publish_rust_package:loran-relay-protocol:foundation" "${calls[2]}" "first Rust publish"
+}
+
+test_publish_rust_stage_stops_when_registry_validation_fails() {
+  reset_release_train_state
+  local published=false
+  read_context() { :; }
+  validate_registry_dependencies() { return 1; }
+  publish_rust_package() { published=true; }
+
+  if stage_publish_rust; then
+    printf 'publish-rust must fail when registry dependencies cannot build\n' >&2
+    exit 1
+  fi
+  assert_eq "false" "$published" "no Rust crate published before registry validation"
+}
+
+test_registry_validation_packages_without_skipping_verification() {
+  reset_release_train_state
+  WORK_REPO_ROOT=$repo_root
+  local cargo_log
+  cargo_log=$(mktemp)
+  cargo() { printf '%s\n' "$*" >"$cargo_log"; return 1; }
+
+  if validate_registry_dependencies; then
+    printf 'registry validation must fail when cargo package fails\n' >&2
+    exit 1
+  fi
+  assert_eq "package -p actrix-stun --locked --allow-dirty" "$(cat "$cargo_log")" "verified registry package"
+  unset -f cargo
+  rm -f "$cargo_log"
 }
 
 test_python_release_tools_are_stage_scoped() {
@@ -2654,6 +2690,8 @@ test_cli_has_no_unused_git2_dependency
 test_release_train_delegates_cli_release_operations
 test_actrix_crates_publish_in_dependency_order
 test_publish_rust_stage_publishes_packages
+test_publish_rust_stage_stops_when_registry_validation_fails
+test_registry_validation_packages_without_skipping_verification
 test_python_release_tools_are_stage_scoped
 test_cli_release_workflows_share_one_matrix
 test_release_train_reuses_cli_workflow

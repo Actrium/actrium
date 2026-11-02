@@ -178,6 +178,7 @@ let wsProbeDone = false;
 // @relay-client begin
 // Generic loran-relay.v1 client. Identity and application framing are injected
 // by the worker adapter below; this class does not know business identities.
+const MAX_DESIRED_PEERS = 1024;
 class LoranRelayClient {
   constructor({ credentials, discover, prepare, onError = () => {}, WebSocketImpl = WebSocket }) {
     this.credentials = credentials;
@@ -343,7 +344,19 @@ class LoranRelayClient {
     const offset = (this.warmOffset || 0) % peers.length;
     const count = Math.min(peers.length, 16);
     this.warmOffset = offset + count;
-    for (let i = 0; i < count; i++) this.ensurePeer(peers[(offset + i) % peers.length]).catch(() => {});
+    for (let i = 0; i < count; i++) this.ensurePeer(peers[(offset + i) % peers.length], true).catch(() => {});
+  }
+
+  rememberPeer(peer) {
+    if (this.desired.has(peer)) {
+      this.desired.delete(peer);
+    } else if (this.desired.size >= MAX_DESIRED_PEERS) {
+      const stale = [...this.desired].find((candidate) => !this.peers.has(candidate) && !this.dials.has(candidate));
+      if (stale === undefined) return false;
+      this.desired.delete(stale);
+    }
+    this.desired.add(peer);
+    return true;
   }
 
   async prepareChannel(channel, peer, generation) {
@@ -430,7 +443,7 @@ class LoranRelayClient {
     clearTimeout(entry.handshakeTimer);
     entry.ready = true;
     this.peers.set(entry.peer, entry.channel);
-    if (this.desired.size < 1024) this.desired.add(entry.peer);
+    this.rememberPeer(entry.peer);
     const pending = this.pending.get(entry.request);
     if (pending) {
       if (pending.peer !== entry.peer) throw new Error('Relay response identity mismatch');
@@ -438,14 +451,17 @@ class LoranRelayClient {
     }
   }
 
-  ensurePeer(peer) {
+  ensurePeer(peer, warm = false) {
     if (!this.validEndpoint(peer)) return Promise.reject(new Error('Invalid relay endpoint'));
     const id = this.peers.get(peer);
     const existing = this.channels.get(id);
-    if (existing && existing.ready) return Promise.resolve(existing);
+    if (existing && existing.ready) {
+      if (!warm) this.rememberPeer(peer);
+      return Promise.resolve(existing);
+    }
     if (this.dials.has(peer)) return this.dials.get(peer);
-    if (this.desired.size >= 1024 && !this.desired.has(peer)) return Promise.reject(new Error('Relay peer capacity exhausted'));
-    this.desired.add(peer);
+    if (warm && !this.desired.has(peer)) return Promise.reject(new Error('Relay peer no longer desired'));
+    if (!warm && !this.rememberPeer(peer)) return Promise.reject(new Error('Relay peer capacity exhausted'));
     const dial = (async () => {
       await this.waitSocket();
       const request = this.request++;

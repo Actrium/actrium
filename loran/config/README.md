@@ -110,6 +110,8 @@ Relay adds bit 32 to the existing enable mask. `enable = 38` runs relay plus
 UDP STUN/TURN; `enable = 63` runs all six services. Add the ICE binding and TURN
 authentication settings from `ice.example.toml` when enabling bits 2/4.
 Existing masks retain their previous meaning and do not silently enable relay.
+For SDK traffic, `relay.limits.max_frame_bytes` must be at least 65556 bytes;
+Loran rejects smaller values when the local relay is enabled.
 
 The trusted bootstrap origin exposes `GET /relay/config` with protocol version,
 local availability and optional public WebSocket URL. `relay.public_url` can

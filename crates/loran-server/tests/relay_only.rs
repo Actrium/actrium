@@ -27,6 +27,91 @@ fn tcp_port() -> u16 {
         .port()
 }
 
+#[test]
+fn loran_frame_limit_fits_the_largest_sdk_record() {
+    let mut config =
+        actrix::ActrixConfig::from_toml(include_str!("../../../loran/config/relay.example.toml"))
+            .unwrap();
+    let required = actr_relay_security::MAX_RECORD_BYTES + loran_relay_protocol::DATA_HEADER_LEN;
+    config.relay.limits.max_frame_bytes = required - 1;
+    assert!(config.relay.validate(true, false).is_err());
+    config.relay.limits.max_frame_bytes = required;
+    assert!(config.relay.validate(true, false).is_ok());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn static_relay_can_be_disabled_without_database_on_reload() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = directory.path().join("storage-must-stay-a-file");
+    std::fs::write(&storage, b"untouched").unwrap();
+    let mut config =
+        actrix::ActrixConfig::from_toml(include_str!("../../../loran/config/relay.example.toml"))
+            .unwrap();
+    config.sqlite_path = storage.clone();
+    let port = tcp_port();
+    config.bind.http.as_mut().unwrap().port = port;
+    let path = directory.path().join("relay.toml");
+    std::fs::write(&path, config.to_toml().unwrap()).unwrap();
+    let log_path = directory.path().join("server.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut process = Process(
+        Command::new(env!("CARGO_BIN_EXE_actrix"))
+            .arg("--config")
+            .arg(&path)
+            .current_dir(directory.path())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .unwrap(),
+    );
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(1))
+        .build()
+        .unwrap();
+    let url = format!("http://127.0.0.1:{port}/relay/config");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        assert!(process.0.try_wait().unwrap().is_none());
+        if let Ok(response) = http.get(&url).send().await
+            && response.json::<RelayDiscovery>().await.unwrap().enabled
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{}",
+            std::fs::read_to_string(&log_path).unwrap()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    config.enable = 0;
+    std::fs::write(&path, config.to_toml().unwrap()).unwrap();
+    assert!(
+        Command::new("kill")
+            .args(["-HUP", &process.0.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        assert!(process.0.try_wait().unwrap().is_none());
+        if let Ok(response) = http.get(&url).send().await
+            && !response.json::<RelayDiscovery>().await.unwrap().enabled
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{}",
+            std::fs::read_to_string(&log_path).unwrap()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(std::fs::read(storage).unwrap(), b"untouched");
+}
+
 #[tokio::test]
 async fn regular_launcher_serves_static_relay_without_database_alone_or_with_ice() {
     tokio::time::timeout(Duration::from_secs(60), exercise_regular_launcher())

@@ -646,13 +646,15 @@ impl ActrixConfig {
 
     /// The HTTP service stack uses persistent storage; UDP STUN/TURN does not.
     pub fn requires_database(&self) -> bool {
-        if self.is_relay_enabled()
-            && self.relay.auth == RelayAuthMode::Static
+        if self.relay.auth == RelayAuthMode::Static
             && !self.is_signaling_enabled()
             && !self.is_issuer_enabled()
             && !self.is_signer_enabled()
             && !self.admin_ui_enabled()
             && !self.grpc_api_enabled()
+            && !self.authority.enabled
+            && self.services.packages.is_none()
+            && (self.is_relay_enabled() || self.authority.uri.is_none())
         {
             return false;
         }
@@ -1402,6 +1404,15 @@ mod tests {
         assert!(!config.requires_database());
         assert!(config.actrix_shared_key.is_empty());
         assert!(config.validate().is_ok(), "{:?}", config.validate());
+        let mut disabled = config.clone();
+        disabled.enable = 0;
+        assert!(!disabled.requires_database());
+        assert!(disabled.validate().is_ok(), "{:?}", disabled.validate());
+        disabled.authority.enabled = true;
+        assert!(disabled.requires_database());
+        disabled.authority.enabled = false;
+        disabled.authority.uri = Some("actr://provider.example".into());
+        assert!(disabled.requires_database());
         config.bind.http = None;
         assert!(
             config

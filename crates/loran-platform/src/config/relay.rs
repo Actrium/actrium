@@ -1,7 +1,11 @@
 //! WebSocket relay configuration and deployment-specific authentication.
 
-use loran_relay_protocol::{RelayLimits, valid_endpoint};
+use loran_relay_protocol::{DATA_HEADER_LEN, RelayLimits, valid_endpoint};
 use serde::{Deserialize, Serialize};
+
+// One maximum-sized SDK Noise record plus the relay's channel identifier.
+// The server integration test checks this against the security crate's limit.
+const MIN_SDK_FRAME_BYTES: usize = 65535 + 13 + DATA_HEADER_LEN;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -62,6 +66,11 @@ impl RelayConfig {
             return Ok(());
         }
         self.limits.validate().map_err(str::to_owned)?;
+        if self.limits.max_frame_bytes < MIN_SDK_FRAME_BYTES {
+            return Err(format!(
+                "relay.limits.max_frame_bytes must be at least {MIN_SDK_FRAME_BYTES} for SDK frames"
+            ));
+        }
         if self.limits.max_connections > tokio::sync::Semaphore::MAX_PERMITS
             || self.limits.queue_messages > tokio::sync::Semaphore::MAX_PERMITS
             || self.limits.queue_bytes as usize > tokio::sync::Semaphore::MAX_PERMITS

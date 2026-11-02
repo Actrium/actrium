@@ -24,7 +24,7 @@ use loran_relay_protocol::{
     encode_data,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, VecDeque},
     sync::{
         Arc, OnceLock, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -44,6 +44,7 @@ const MAX_FRAME: usize = 8 * 1024 * 1024 + 64;
 const QUEUE_BYTES: usize = 16 * 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_DESIRED_PEERS: usize = 1024;
 
 fn closed() -> NetworkError {
     NetworkError::WebSocketClosed("Relay channel closed".into())
@@ -154,8 +155,11 @@ impl AsRef<[u8]> for BudgetedPayload {
         &self.payload
     }
 }
-type PendingMap =
-    Arc<std::sync::Mutex<HashMap<u64, oneshot::Sender<NetworkResult<(u64, WebSocketConnection)>>>>>;
+struct PendingRequest {
+    peer: ActrId,
+    reply: oneshot::Sender<NetworkResult<(u64, WebSocketConnection)>>,
+}
+type PendingMap = Arc<std::sync::Mutex<HashMap<u64, PendingRequest>>>;
 struct PendingGuard {
     pending: PendingMap,
     request: u64,
@@ -210,10 +214,10 @@ pub(crate) struct RelayClient {
     channels: RwLock<HashMap<u64, Arc<Channel>>>,
     peers: RwLock<HashMap<ActrId, u64>>,
     pending: PendingMap,
-    desired: Mutex<HashSet<ActrId>>,
+    desired: Mutex<VecDeque<ActrId>>,
     transport_manager: OnceLock<Weak<PeerTransport>>,
     next_wire: AtomicU64,
-    peer_locks: Mutex<HashMap<ActrId, Arc<Mutex<()>>>>,
+    peer_locks: Mutex<HashMap<ActrId, Weak<Mutex<()>>>>,
     next_request: AtomicU64,
 }
 
@@ -242,7 +246,7 @@ impl RelayClient {
             channels: RwLock::new(HashMap::new()),
             peers: RwLock::new(HashMap::new()),
             pending: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            desired: Mutex::new(HashSet::new()),
+            desired: Mutex::new(VecDeque::new()),
             transport_manager: OnceLock::new(),
             next_wire: AtomicU64::new(1),
             peer_locks: Mutex::new(HashMap::new()),
@@ -295,7 +299,7 @@ impl RelayClient {
                 .map(|peer| {
                     let client = self.clone();
                     async move {
-                        let _ = client.connect_peer(peer).await;
+                        let _ = client.connect_desired_peer(peer).await;
                     }
                 })
                 .buffer_unordered(16)
@@ -702,13 +706,45 @@ impl RelayClient {
             }
             ServerControl::Connected {
                 channel,
-                request,
+                mut request,
                 peer,
                 ..
             } => {
+                if let Some(request_id) = request {
+                    let expected = self
+                        .pending
+                        .lock()
+                        .unwrap()
+                        .get(&request_id)
+                        .map(|pending| pending.peer.clone());
+                    match expected {
+                        Some(expected) if expected.to_string_repr() == peer => {}
+                        Some(_) => {
+                            return Err(NetworkError::DeserializationError(
+                                "Relay response identity mismatch".into(),
+                            ));
+                        }
+                        None => {
+                            // A cancelled outbound dial can share an incoming
+                            // channel. Keep its handshake, but never associate
+                            // the expired request with that channel.
+                            if self.channels.read().await.contains_key(&channel) {
+                                request = None;
+                            } else {
+                                transport.try_close(channel);
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
                 let entry = self.install(channel, peer, transport).await?;
                 if let Some(request) = request {
-                    *entry.pending_request.lock().await = Some(request);
+                    let mut pending_request = entry.pending_request.lock().await;
+                    if *entry.ready.borrow() {
+                        self.complete_pending(request, channel, &entry);
+                    } else {
+                        *pending_request = Some(request);
+                    }
                 }
                 if !entry.connected.swap(true, Ordering::AcqRel) {
                     if let Some(first) =
@@ -727,7 +763,7 @@ impl RelayClient {
             } => {
                 if let Some(request) = request {
                     if let Some(pending) = self.pending.lock().unwrap().remove(&request) {
-                        let _ = pending.send(Err(closed()));
+                        let _ = pending.reply.send(Err(closed()));
                     }
                 }
                 self.close_channel(channel).await;
@@ -737,9 +773,11 @@ impl RelayClient {
                 code,
             } => {
                 if let Some(pending) = self.pending.lock().unwrap().remove(&request) {
-                    let _ = pending.send(Err(NetworkError::ConnectionError(format!(
-                        "Relay connect rejected: {code:?}"
-                    ))));
+                    let _ = pending
+                        .reply
+                        .send(Err(NetworkError::ConnectionError(format!(
+                            "Relay connect rejected: {code:?}"
+                        ))));
                 }
             }
             ServerControl::Error { request: None, .. } => {}
@@ -757,7 +795,7 @@ impl RelayClient {
         if let Some(entry) = entry {
             if let Some(request) = entry.pending_request.lock().await.take() {
                 if let Some(pending) = self.pending.lock().unwrap().remove(&request) {
-                    let _ = pending.send(Err(closed()));
+                    let _ = pending.reply.send(Err(closed()));
                 }
             }
             entry.cancel.cancel();
@@ -778,27 +816,60 @@ impl RelayClient {
             self.close_channel(id).await;
         }
         for (_, pending) in self.pending.lock().unwrap().drain() {
-            let _ = pending.send(Err(closed()));
+            let _ = pending.reply.send(Err(closed()));
         }
     }
 
-    async fn connect_peer(&self, peer: ActrId) -> NetworkResult<(u64, WebSocketConnection)> {
-        {
-            let mut desired = self.desired.lock().await;
-            if desired.len() >= 1024 && !desired.contains(&peer) {
+    async fn remember_peer(&self, peer: &ActrId) -> NetworkResult<()> {
+        let mut desired = self.desired.lock().await;
+        if let Some(index) = desired.iter().position(|item| item == peer) {
+            desired.remove(index);
+        } else if desired.len() >= MAX_DESIRED_PEERS {
+            let active = self.peers.read().await;
+            let dialing = self.peer_locks.lock().await;
+            let Some(index) = desired.iter().position(|item| {
+                !active.contains_key(item)
+                    && !dialing
+                        .get(item)
+                        .is_some_and(|lock| lock.strong_count() != 0)
+            }) else {
                 return Err(NetworkError::ConnectionError(
                     "Relay peer capacity exhausted".into(),
                 ));
-            }
-            desired.insert(peer.clone());
+            };
+            desired.remove(index);
         }
-        let lock = self
-            .peer_locks
-            .lock()
-            .await
-            .entry(peer.clone())
-            .or_default()
-            .clone();
+        desired.push_back(peer.clone());
+        Ok(())
+    }
+
+    async fn connect_peer(&self, peer: ActrId) -> NetworkResult<(u64, WebSocketConnection)> {
+        self.remember_peer(&peer).await?;
+        self.dial_peer(peer).await
+    }
+
+    async fn connect_desired_peer(
+        &self,
+        peer: ActrId,
+    ) -> NetworkResult<(u64, WebSocketConnection)> {
+        if !self.desired.lock().await.contains(&peer) {
+            return Err(closed());
+        }
+        self.dial_peer(peer).await
+    }
+
+    async fn dial_peer(&self, peer: ActrId) -> NetworkResult<(u64, WebSocketConnection)> {
+        let lock = {
+            let mut locks = self.peer_locks.lock().await;
+            locks.retain(|_, lock| lock.strong_count() != 0);
+            if let Some(lock) = locks.get(&peer).and_then(Weak::upgrade) {
+                lock
+            } else {
+                let lock = Arc::new(Mutex::new(()));
+                locks.insert(peer.clone(), Arc::downgrade(&lock));
+                lock
+            }
+        };
         let _peer_guard = lock.lock().await;
         if let Some(id) = self.peers.read().await.get(&peer).copied() {
             if let Some(entry) = self.channels.read().await.get(&id) {
@@ -828,7 +899,13 @@ impl RelayClient {
         }).await.map_err(|_| closed())??;
         let request = self.next_request.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(request, tx);
+        self.pending.lock().unwrap().insert(
+            request,
+            PendingRequest {
+                peer: peer.clone(),
+                reply: tx,
+            },
+        );
         let _pending_guard = PendingGuard {
             pending: self.pending.clone(),
             request,
@@ -1149,12 +1226,7 @@ impl RelayClient {
             .map_err(|error| NetworkError::ConnectionError(error.to_string()))?;
         entry.ready.send_replace(true);
         self.gate.relay_ready(entry.peer.clone());
-        {
-            let mut desired = self.desired.lock().await;
-            if desired.len() < 1024 {
-                desired.insert(entry.peer.clone());
-            }
-        }
+        let _ = self.remember_peer(&entry.peer).await;
         self.peers.write().await.insert(entry.peer.clone(), id);
         if let Some(manager) = self.transport_manager.get().and_then(Weak::upgrade) {
             if let Some(wire) = self.existing_wire(&entry.peer).await {
@@ -1162,10 +1234,25 @@ impl RelayClient {
             }
         }
         if let Some(request) = entry.pending_request.lock().await.take() {
-            if let Some(pending) = self.pending.lock().unwrap().remove(&request) {
-                let _ = pending.send(Ok((id, entry.conn.clone())));
-            }
+            self.complete_pending(request, id, entry);
         }
         Ok(())
     }
+
+    fn complete_pending(&self, request: u64, id: u64, entry: &Channel) {
+        if let Some(pending) = self.pending.lock().unwrap().remove(&request) {
+            let result = if pending.peer == entry.peer {
+                Ok((id, entry.conn.clone()))
+            } else {
+                Err(NetworkError::DeserializationError(
+                    "Relay response identity mismatch".into(),
+                ))
+            };
+            let _ = pending.reply.send(result);
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "relay_tests.rs"]
+mod tests;
