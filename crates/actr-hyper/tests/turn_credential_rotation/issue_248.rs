@@ -1,8 +1,10 @@
 //! Issue #248 regressions on the webrtc 0.21.1 client and the pinned TURN server.
 //! Allocate replay is covered by the server pin to upstream webrtc-rs/webrtc#896.
-//! The client includes the retirement fix from webrtc-rs/webrtc#912; retirement
-//! probes remain manual pending integration validation. Run those probes with
-//! `cargo test -p actr-hyper --features test-utils --test turn_credential_rotation issue_248 -- --ignored --nocapture`.
+//! The client includes the retirement fix from webrtc-rs/webrtc#912. These tests
+//! exercise Actr's production RTC recovery/close path against a real UDP TURN
+//! server, including consecutive ICE restarts and bidirectional business RPCs.
+//! Run with `cargo test --locked -p actr-hyper --features test-utils
+//! --test turn_credential_rotation -- --nocapture --test-threads=1`.
 
 use super::*;
 use rtc::sansio::Protocol;
@@ -177,7 +179,7 @@ async fn wait_for_retirement(server: &turn_crate::server::Server, old: &[FiveTup
     }
 }
 
-async fn allocation_lifecycle(restart: bool) {
+async fn allocation_lifecycle(restarts: usize) {
     install_test_crypto_provider();
     let auth = Arc::new(
         turn::Authenticator::new(
@@ -204,10 +206,22 @@ async fn allocation_lifecycle(restart: bool) {
     }
     harness.connect(46_551, 46_552).await;
     rpc(&harness, 46_551, 46_552, "allocation_initial").await;
+    rpc(&harness, 46_552, 46_551, "allocation_initial_reverse").await;
     let initial = server.get_allocations_info(None).await.unwrap();
     assert_eq!(initial.len(), 2, "one relay allocation per loopback peer");
-    let old: Vec<_> = initial.keys().copied().collect();
-    if restart {
+    let mut active: Vec<_> = initial.keys().copied().collect();
+    for restart in 1..=restarts {
+        let mut generations = Vec::new();
+        for (serial, other) in [(46_551, 46_552), (46_552, 46_551)] {
+            let peer = harness.peer(serial);
+            let remote = &harness.peer(other).id;
+            generations.push((
+                serial,
+                other,
+                peer.rtc.generation(remote).await.unwrap(),
+                peer.rtc.ice_generation(remote).await.unwrap(),
+            ));
+        }
         for serial in [46_551, 46_552] {
             harness.peer(serial).rtc.network_unavailable();
         }
@@ -222,42 +236,85 @@ async fn allocation_lifecycle(restart: bool) {
         for serial in [46_551, 46_552] {
             harness.peer(serial).rtc.network_available();
         }
-        for (serial, other) in [(46_551, 46_552), (46_552, 46_551)] {
-            harness
-                .peer(serial)
-                .rtc
-                .wait_sendable(&harness.peer(other).id, WAIT)
-                .await;
+        for (serial, other, pc_generation, ice_generation) in generations {
+            let peer = harness.peer(serial);
+            let remote = &harness.peer(other).id;
+            peer.rtc
+                .wait_ice_generation(remote, ice_generation, WAIT)
+                .await
+                .expect("recovery must advance the ICE generation");
+            peer.rtc.wait_sendable(remote, WAIT).await;
+            assert_eq!(
+                peer.rtc.generation(remote).await,
+                Some(pc_generation),
+                "ICE restart must exercise rebind on the existing PeerConnection"
+            );
+            rpc(
+                &harness,
+                serial,
+                other,
+                &format!("allocation_restart_{restart}_{serial}"),
+            )
+            .await;
         }
-        rpc(&harness, 46_551, 46_552, "allocation_after_restart").await;
-    } else {
-        for serial in [46_551, 46_552] {
-            harness.peer(serial).rtc.close_all().await;
-        }
+        let remaining = wait_for_retirement(&server, &active).await;
+        let current = server.get_allocations_info(None).await.unwrap();
+        eprintln!(
+            "restart={restart}/{restarts}: retired_still_present={remaining}, total={}",
+            current.len()
+        );
+        assert_eq!(
+            remaining, 0,
+            "restart {restart} must release the old generation"
+        );
+        assert_eq!(
+            current.len(),
+            2,
+            "restart {restart} must not grow allocations"
+        );
+        assert!(
+            active.iter().all(|tuple| !current.contains_key(tuple)),
+            "restart {restart} must replace both old transport tuples"
+        );
+        active = current.keys().copied().collect();
     }
-    let remaining = wait_for_retirement(&server, &old).await;
+
+    // Check the application's close path before shutting down the fixture:
+    // server shutdown must never supply the cleanup that this test asserts.
+    for serial in [46_551, 46_552] {
+        harness.peer(serial).rtc.close_all().await;
+    }
+    let remaining = wait_for_retirement(&server, &active).await;
     let total = server.get_allocations_info(None).await.unwrap().len();
-    eprintln!(
-        "restart={restart}: initial={}, retired_still_present={remaining}, total={total}",
-        initial.len()
-    );
+    eprintln!("close after {restarts} restarts: retired_still_present={remaining}, total={total}");
     harness.shutdown().await;
     turn::shutdown_turn_server(&server).await.unwrap();
     assert_eq!(
         remaining, 0,
         "retired transport allocations must be released before the 600-second server expiry"
     );
-    assert_eq!(total, if restart { 2 } else { 0 });
+    assert_eq!(total, 0, "close must release every allocation");
+}
+
+async fn bounded_allocation_lifecycle(restarts: usize) {
+    // The real server uses the upstream 600-second allocation lifetime. Bound
+    // the whole case below it, so natural expiry cannot satisfy our assertions.
+    tokio::time::timeout(Duration::from_secs(180), allocation_lifecycle(restarts))
+        .await
+        .expect("allocation lifecycle must finish before server expiry");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "issue #248: manual validation of allocation release on close"]
 async fn peer_close_releases_allocations() {
-    allocation_lifecycle(false).await;
+    bounded_allocation_lifecycle(0).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "issue #248: manual validation of allocation release on ICE rebind"]
 async fn ice_restart_releases_old_allocations() {
-    allocation_lifecycle(true).await;
+    bounded_allocation_lifecycle(1).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn consecutive_ice_restarts_release_each_generation() {
+    bounded_allocation_lifecycle(3).await;
 }
