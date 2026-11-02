@@ -129,14 +129,17 @@ async fn exercise_regular_launcher() {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        let discovery: RelayDiscovery = http
+        let response = http
             .get(format!("{origin}/relay/config"))
+            .header(reqwest::header::ORIGIN, "https://app.example.com")
             .send()
             .await
-            .unwrap()
-            .json()
-            .await
             .unwrap();
+        assert_eq!(
+            response.headers()[reqwest::header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "*"
+        );
+        let discovery: RelayDiscovery = response.json().await.unwrap();
         assert!(discovery.enabled);
         assert_eq!(discovery.version, 1);
         let mut sockets = Vec::new();

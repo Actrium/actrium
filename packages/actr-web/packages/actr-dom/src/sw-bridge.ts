@@ -14,7 +14,7 @@ export type MessageToSW =
   | { type: 'webrtc_event'; payload: WebRtcEventPayload }
   | { type: 'control'; payload: ControlCommandPayload }
   | { type: 'unregister_client' }
-  | { type: 'register_datachannel_port'; payload: { peerId: string; port: MessagePort } };
+  | { type: 'register_datachannel_port'; payload: { peerId: string; connectionId: string; port: MessagePort } };
 
 /**
  * Control command payload
@@ -78,8 +78,9 @@ export type WebRtcEventPayload =
   | { eventType: 'relay_state_changed'; data: { peerId: string; connected: boolean } }
   | {
       eventType: 'connection_state_changed';
-      data: { peerId: string; state: RTCPeerConnectionState };
+      data: { peerId: string; connectionId: string; state: RTCPeerConnectionState };
     }
+  | { eventType: 'peer_connection_closed'; data: { peerId: string; connectionId: string } }
   | { eventType: 'datachannel_open'; data: { peerId: string; channelId: number; label: string } }
   | { eventType: 'datachannel_close'; data: { peerId: string; channelId: number } }
   | {
@@ -261,8 +262,8 @@ export class ServiceWorkerBridge {
    * The SW side registers this in WirePool,
    * using it as DataLane::PostMessage(port2).
    */
-  sendDataChannelPort(peerId: string, port: MessagePort): void {
-    this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, port } }, [port]);
+  sendDataChannelPort(peerId: string, connectionId: string, port: MessagePort): void {
+    this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, connectionId, port } }, [port]);
   }
 
   /**

@@ -3,7 +3,7 @@
 use actr_protocol::ActrId;
 use actr_relay_security::{IdentityClaims, IssuerKey, RelayCredential, verify_certificate};
 use async_trait::async_trait;
-use axum::{Json, Router, routing::get};
+use axum::{Json, Router, http::header, routing::get};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use loran_relay::{AuthError, Authenticator, Observer, Principal, Relay};
 use loran_relay_protocol::RelayDiscovery;
@@ -169,7 +169,15 @@ pub async fn build_relay_router(
         enabled: config.is_relay_enabled(),
         url: config.relay.public_url.clone(),
     };
-    let mut router = Router::new().route("/config", get(move || async move { Json(discovery) }));
+    let mut router = Router::new().route(
+        "/config",
+        get(move || async move {
+            (
+                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
+                Json(discovery),
+            )
+        }),
+    );
     if config.is_relay_enabled() {
         let mut watch = None;
         let auth: Arc<dyn Authenticator> = match config.relay.auth {

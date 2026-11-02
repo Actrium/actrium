@@ -190,6 +190,21 @@ impl DestTransport {
         );
     }
 
+    /// The DOM confirmed that the physical connection has been closed.
+    /// Retire its wire without removing a replacement installed meanwhile.
+    pub(crate) async fn rtc_physical_closed(&self, connection_id: &str) -> WebResult<()> {
+        if let Some(connection) = self.wire_pool.get_connection(ConnType::WebRTC).await
+            && connection.as_webrtc().and_then(|rtc| rtc.connection_id()) == Some(connection_id)
+            && self
+                .wire_pool
+                .mark_connection_failed_if_current(&connection)
+        {
+            connection.close().await?;
+        }
+        self.rtc_recovery.store(RTC_STABLE, Ordering::Release);
+        Ok(())
+    }
+
     pub(crate) async fn rtc_terminated(&self) -> WebResult<()> {
         self.rtc_recovery.store(RTC_STABLE, Ordering::Release);
         if let Some(connection) = self.wire_pool.get_connection(ConnType::WebRTC).await {
@@ -381,6 +396,59 @@ mod tests {
     wasm_bindgen_test_configure!(run_in_browser);
 
     #[wasm_bindgen_test]
+    async fn closing_an_old_rtc_instance_preserves_the_replacement_wire() {
+        let old_port = web_sys::MessageChannel::new().unwrap();
+        let mut old = WebRtcConnection::new("peer".into());
+        old.set_connection_id("old".into());
+        old.set_datachannel_port(old_port.port1());
+        let transport =
+            DestTransport::new(Dest::Peer("peer".into()), vec![WireHandle::WebRTC(old)])
+                .await
+                .unwrap();
+        let mut ready = transport.wire_pool().subscribe_changes();
+        while !ready.borrow_and_update().contains(&ConnType::WebRTC) {
+            ready.changed().await.unwrap();
+        }
+        transport.rtc_disconnected().await.unwrap();
+
+        let new_port = web_sys::MessageChannel::new().unwrap();
+        let mut replacement = WebRtcConnection::new("peer".into());
+        replacement.set_connection_id("new".into());
+        replacement.set_datachannel_port(new_port.port1());
+        transport
+            .wire_pool()
+            .reconnect(WireHandle::WebRTC(replacement.clone()));
+        while !ready.borrow_and_update().contains(&ConnType::WebRTC) {
+            ready.changed().await.unwrap();
+        }
+        transport.rtc_physical_closed("old").await.unwrap();
+        assert!(replacement.is_connected());
+        assert_eq!(
+            transport
+                .wire_pool()
+                .get_connection(ConnType::WebRTC)
+                .await
+                .unwrap()
+                .as_webrtc()
+                .unwrap()
+                .connection_id(),
+            Some("new")
+        );
+        transport.rtc_physical_closed("new").await.unwrap();
+        assert!(!replacement.is_connected());
+        assert!(
+            transport
+                .wire_pool()
+                .get_connection(ConnType::WebRTC)
+                .await
+                .is_none()
+        );
+        transport.close().await.unwrap();
+        old_port.port2().close();
+        new_port.port2().close();
+    }
+
+    #[wasm_bindgen_test]
     async fn reliable_handover_requires_ack_and_does_not_hold_rpc() {
         use std::cell::RefCell;
         use std::rc::Rc;
@@ -508,6 +576,7 @@ mod tests {
             .set_onmessage(Some(on_message.as_ref().unchecked_ref()));
         channel.port2().start();
         let mut rtc = WebRtcConnection::new("peer".into());
+        rtc.set_connection_id("old-connection".into());
         rtc.set_datachannel_port(channel.port1());
         rtc.set_network_path(Some(false));
         let transport = Arc::new(
@@ -547,7 +616,10 @@ mod tests {
             relay_frames.borrow().is_empty(),
             "new reliable data reached relay while the old RTC path could still deliver"
         );
-        transport.rtc_terminated().await.unwrap();
+        transport
+            .rtc_physical_closed("old-connection")
+            .await
+            .unwrap();
         transport
             .send(PayloadType::StreamReliable, b"after termination")
             .await

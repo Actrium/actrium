@@ -598,6 +598,8 @@ struct SwRuntime {
     ice_restart_attempts: HashMap<String, u32>,
     /// ICE restart: tracks the connection state for each peer
     peer_connection_states: HashMap<String, String>,
+    /// The DOM connection whose state was most recently observed for each peer.
+    peer_connection_ids: HashMap<String, String>,
 }
 
 impl SwRuntime {
@@ -696,6 +698,7 @@ impl SwRuntime {
             ice_restart_inflight: HashMap::new(),
             ice_restart_attempts: HashMap::new(),
             peer_connection_states: HashMap::new(),
+            peer_connection_ids: HashMap::new(),
         })
     }
 
@@ -2503,6 +2506,8 @@ impl SwRuntime {
                 struct ConnectionStateEvent {
                     #[serde(rename = "peerId")]
                     peer_id: String,
+                    #[serde(rename = "connectionId")]
+                    connection_id: String,
                     state: String,
                 }
                 let data: ConnectionStateEvent = serde_json::from_value(event.data)
@@ -2516,6 +2521,8 @@ impl SwRuntime {
 
                 self.peer_connection_states
                     .insert(data.peer_id.clone(), data.state.clone());
+                self.peer_connection_ids
+                    .insert(data.peer_id.clone(), data.connection_id);
 
                 match data.state.as_str() {
                     "disconnected" => {
@@ -2641,6 +2648,31 @@ impl SwRuntime {
                         self.invalidate_discovered_target(&data.peer_id);
                     }
                     _ => {}
+                }
+            }
+            "peer_connection_closed" => {
+                #[derive(Deserialize)]
+                struct PeerClosedEvent {
+                    #[serde(rename = "peerId")]
+                    peer_id: String,
+                    #[serde(rename = "connectionId")]
+                    connection_id: String,
+                }
+                let data: PeerClosedEvent = serde_json::from_value(event.data)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                if self.peer_connection_ids.get(&data.peer_id) == Some(&data.connection_id) {
+                    self.peer_connection_ids.remove(&data.peer_id);
+                    if let Some(ctx) =
+                        CLIENTS.with(|cell| cell.borrow().get(&self.client_id).map(Rc::clone))
+                    {
+                        let dest = actr_web_common::Dest::Peer(data.peer_id);
+                        if let Some(transport) = ctx.transport_manager.existing_transport(&dest) {
+                            transport
+                                .rtc_physical_closed(&data.connection_id)
+                                .await
+                                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                        }
+                    }
                 }
             }
             "ice_restart_local_description" => {
@@ -4151,6 +4183,7 @@ pub async fn handle_dom_webrtc_event(client_id: String, payload: JsValue) -> Res
 pub async fn register_datachannel_port(
     client_id: String,
     peer_id: String,
+    connection_id: String,
     port: MessagePort,
 ) -> Result<(), JsValue> {
     log::info!(
@@ -4171,6 +4204,7 @@ pub async fn register_datachannel_port(
 
     // Create the `WebRtcConnection` and attach the `MessagePort`.
     let mut rtc_conn = crate::transport::WebRtcConnection::new(peer_id.clone());
+    rtc_conn.set_connection_id(connection_id);
     rtc_conn.set_network_path(ctx.rtc_paths.borrow().get(&peer_id).copied().flatten());
     rtc_conn.set_datachannel_port(port);
 

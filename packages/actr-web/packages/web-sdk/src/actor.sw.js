@@ -1361,10 +1361,11 @@ self.addEventListener('message', async (event) => {
         try {
           const dcPort = message.payload.port;
           const dcPeerId = message.payload.peerId;
-          if (dcPort && dcPeerId) {
-            await wasm_bindgen.register_datachannel_port(clientId, dcPeerId, dcPort);
+          const dcConnectionId = message.payload.connectionId;
+          if (dcPort && dcPeerId && dcConnectionId) {
+            await wasm_bindgen.register_datachannel_port(clientId, dcPeerId, dcConnectionId, dcPort);
           } else {
-            console.warn('[SW] register_datachannel_port: missing port or peerId');
+            console.warn('[SW] register_datachannel_port: missing port, peerId, or connectionId');
           }
         } catch (error) {
           console.error('[SW] register_datachannel_port failed:', error);

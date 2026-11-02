@@ -19,6 +19,8 @@ use std::sync::Arc;
 pub struct WebRtcConnection {
     /// Peer ID.
     peer_id: String,
+    /// Identity of the physical DOM connection owning this port.
+    connection_id: Option<String>,
 
     /// `MessagePort` for the DataChannel, transferred from the DOM side.
     /// Once the DOM establishes the P2P connection, it sends this port to the SW.
@@ -37,11 +39,20 @@ impl WebRtcConnection {
     pub fn new(peer_id: String) -> Self {
         Self {
             peer_id,
+            connection_id: None,
             datachannel_port: None,
             connected: Arc::new(parking_lot::Mutex::new(false)),
             lane_cache: Arc::new(DashMap::new()),
             relayed: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub(crate) fn set_connection_id(&mut self, connection_id: String) {
+        self.connection_id = Some(connection_id);
+    }
+
+    pub(crate) fn connection_id(&self) -> Option<&str> {
+        self.connection_id.as_deref()
     }
 
     /// Set the DataChannel `MessagePort` after DOM-side creation completes.

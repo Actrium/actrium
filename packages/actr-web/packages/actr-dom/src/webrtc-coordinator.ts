@@ -14,6 +14,7 @@ export interface WebRtcConfig {
 
 export interface PeerConnectionInfo {
   peerId: string;
+  connectionId: string;
   connection: RTCPeerConnection;
   dataChannels: Map<number, RTCDataChannel>;
   state: RTCPeerConnectionState;
@@ -49,6 +50,8 @@ export class WebRtcCoordinator {
   private reassembly: Map<string, FragmentEntry> = new Map();
   private commandQueues: Map<string, Promise<void>> = new Map();
   private pathTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
+  private readonly connectionIdPrefix = `${Date.now()}-${Math.random()}`;
+  private nextConnectionId = 0;
   private config: WebRtcConfig;
   /** Dynamic TURN credentials received from SW (Issuer registration) */
   private turnCredential: { username: string; credential: string } | null = null;
@@ -198,6 +201,7 @@ export class WebRtcCoordinator {
 
     //  RTCPeerConnection
     const connection = new RTCPeerConnection(rtcConfig);
+    const connectionId = `${this.connectionIdPrefix}-${++this.nextConnectionId}`;
 
     // TODO: Decide whether to create 4 negotiated DataChannels here or elsewhere.
     //  .cursor/plans/webrtc-datachannel-negotiation-strategy.md
@@ -230,6 +234,7 @@ export class WebRtcCoordinator {
       console.log(`[WebRTC] Connection state changed: ${connection.connectionState}`);
       this.notifySW('connection_state_changed', {
         peerId,
+        connectionId,
         state: connection.connectionState,
       });
 
@@ -266,6 +271,7 @@ export class WebRtcCoordinator {
     //  peer
     this.peers.set(peerId, {
       peerId,
+      connectionId,
       connection,
       dataChannels,
       state: connection.connectionState,
@@ -636,7 +642,7 @@ export class WebRtcCoordinator {
 
   private bindRpcPort(peerId: string, channel: RTCDataChannel): void {
     const peer = this.peers.get(peerId);
-    if (!this.canBindRpcPort(peer, channel)) {
+    if (!peer || !this.canBindRpcPort(peer, channel)) {
       console.log(
         `[HostPage] skipBindRpcPort peer=${peerId} state=${peer?.state ?? 'missing'} dc=${channel.readyState}`
       );
@@ -679,7 +685,7 @@ export class WebRtcCoordinator {
     };
 
     this.rpcPorts.set(peerId, mc.port1);
-    this.swBridge.sendDataChannelPort(peerId, mc.port2);
+    this.swBridge.sendDataChannelPort(peerId, peer.connectionId, mc.port2);
     this.flushPendingPortFrames(peerId, channel);
   }
 
@@ -861,6 +867,7 @@ export class WebRtcCoordinator {
     this.peers.delete(peerId);
     this.dropRpcPort(peerId);
     this.dropPendingPeerFrames(peerId);
+    this.notifySW('peer_connection_closed', { peerId, connectionId: peer.connectionId });
     console.log(`[WebRTC] Peer connection closed: ${peerId}`);
   }
 

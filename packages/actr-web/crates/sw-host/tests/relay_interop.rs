@@ -173,6 +173,88 @@ async fn browser_native_rpc_streams_and_reconnect_without_rtc_or_peer_listeners(
             .iter()
             .all(|chunk| chunk.as_ref() == payload)
     );
+    // Exercise a recoverable RTC disconnect through the worker event bridge.
+    // The fake DOM port represents an ordered RTC lane; relay remains real.
+    let rtc = web_sys::MessageChannel::new().unwrap();
+    let rtc_frames = Rc::new(RefCell::new(0usize));
+    let received_rtc = rtc_frames.clone();
+    let on_rtc = Closure::wrap(Box::new(move |_event: web_sys::MessageEvent| {
+        *received_rtc.borrow_mut() += 1;
+    }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+    rtc.port2()
+        .set_onmessage(Some(on_rtc.as_ref().unchecked_ref()));
+    rtc.port2().start();
+    let peer_id = peer.to_string_repr();
+    let state = |kind: &str, state: &str, connection_id: &str| {
+        js_sys::JSON::parse(
+            &serde_json::json!({
+                "eventType": kind,
+                "data": {"peerId": peer_id, "connectionId": connection_id, "state": state}
+            })
+            .to_string(),
+        )
+        .unwrap()
+    };
+    let path = js_sys::JSON::parse(
+        &serde_json::json!({"eventType":"network_path_changed", "data":{"peerId":peer_id,"relayed":false}}).to_string(),
+    )
+    .unwrap();
+    actr_sw_host::handle_dom_webrtc_event(client.into(), path)
+        .await
+        .unwrap();
+    actr_sw_host::register_datachannel_port(
+        client.into(),
+        peer_id.clone(),
+        "old-rtc".into(),
+        rtc.port1(),
+    )
+    .await
+    .unwrap();
+    actr_sw_host::handle_dom_webrtc_event(
+        client.into(),
+        state("connection_state_changed", "connected", "old-rtc"),
+    )
+    .await
+    .unwrap();
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    ctx.send_data_chunk(&peer, "relay-interop", Bytes::from_static(b"rtc-before"))
+        .await
+        .unwrap();
+    until(|| *rtc_frames.borrow() == 1).await;
+    actr_sw_host::handle_dom_webrtc_event(
+        client.into(),
+        state("connection_state_changed", "disconnected", "old-rtc"),
+    )
+    .await
+    .unwrap();
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert!(
+        ctx.send_data_chunk(&peer, "relay-interop", Bytes::from_static(b"blocked"))
+            .await
+            .is_err()
+    );
+    actr_sw_host::handle_dom_webrtc_event(
+        client.into(),
+        state("peer_connection_closed", "closed", "stale-rtc"),
+    )
+    .await
+    .unwrap();
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert!(
+        ctx.send_data_chunk(&peer, "relay-interop", Bytes::from_static(b"still-blocked"))
+            .await
+            .is_err()
+    );
+    actr_sw_host::handle_dom_webrtc_event(
+        client.into(),
+        state("peer_connection_closed", "closed", "old-rtc"),
+    )
+    .await
+    .unwrap();
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    rtc.port2().set_onmessage(None);
+    rtc.port2().close();
+    drop(on_rtc);
     // Exercise the public browser bytes API. Both native stream lane types
     // were received above; outbound browser streams use the reliable lane.
     let reliable = Bytes::from(vec![0xB6; 64 * 1024]);
