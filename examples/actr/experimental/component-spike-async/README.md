@@ -11,7 +11,7 @@ actr's handwritten cooperative-suspend (asyncify) machinery in
 Each sub-crate declares its own `[workspace]` so the repo-root `Cargo.lock` is
 untouched.
 
-The host pins Wasmtime/WASI 48.0.7 and the guest uses wit-bindgen 0.59.0.
+The host pins Wasmtime/WASI 48.0.8 and the guest uses wit-bindgen 0.59.0.
 All suspendable imports and exports are explicit WIT `async func` declarations.
 The host uses `Accessor` for scoped state access and `Store::run_concurrent`
 to drive guest tasks. Its helper methods intentionally hold a mutable Store
