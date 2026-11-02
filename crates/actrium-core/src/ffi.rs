@@ -643,6 +643,8 @@ pub struct RuntimeSystemRootPropsInfo {
 
 #[derive(Debug, Error)]
 pub enum CoreError {
+    #[error("package verification failed: {0}")]
+    PackageVerification(String),
     #[error("manifest is invalid: {0}")]
     InvalidJson(String),
     #[error("manifest is missing required field `{0}`")]

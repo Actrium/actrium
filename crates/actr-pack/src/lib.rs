@@ -27,6 +27,8 @@ pub mod identity;
 pub mod load;
 pub mod manifest;
 pub mod pack;
+#[cfg(feature = "program")]
+pub mod program;
 pub mod verify;
 
 mod util;
