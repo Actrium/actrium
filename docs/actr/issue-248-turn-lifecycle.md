@@ -2,8 +2,9 @@
 
 Validated on 2026-11-02 against Actrium main
 `ce8b2748ea726114c5cc7d2adaef9e6739470e6a`, plus the test/CI changes
-accompanying this record. No production code or dependency changes are needed
-for the reachable-server cases below.
+accompanying this record. No production behavior or dependency changes are
+needed for the reachable-server cases below. A `test-utils` constructor adds
+allocation-close observations through the same production server configuration.
 
 ## Baseline and scope
 
@@ -35,6 +36,15 @@ signaling-service run. No allocation table, relay transport, or release result
 is mocked, and the test does not send cleanup Refresh requests on behalf of
 the application.
 
+The independent PR review identified that a UDP rebind can legally reuse the
+old source port. A table lookup by five-tuple alone would then mistake the new
+allocation for the old one. The regressions now consume the server's actual
+`alloc_close_notify` events for each round before advancing to the next one,
+matching the recorded tuple, relay address, and username. The raw UDP replay
+case deterministically allocates again on the same socket before consuming
+the old close event, verifies the replacement remains active, and then checks
+its own close. Notifications only observe cleanup; they do not cause it.
+
 ## Commands and results
 
 Run from the repository root with the stated toolchain and protoc on `PATH`.
@@ -50,7 +60,7 @@ cargo +1.95.0 test --locked -p actr-hyper --features test-utils \
 # Final suite, with lifecycle regressions enabled by default:
 cargo +1.95.0 test --locked -p actr-hyper --features test-utils \
   --test turn_credential_rotation -- --nocapture --test-threads=1
-# 6 passed, 0 failed, 0 ignored (50.09 s).
+# 6 passed, 0 failed, 0 ignored, including deterministic five-tuple reuse.
 
 cargo +1.95.0 test --locked -p actrix-turn --lib --test udp_interop \
   -- --nocapture --test-threads=1
@@ -74,16 +84,16 @@ after providing the Debian SQLite CLI locally, without modifying the repository.
 
 | Case | Observed result |
 | --- | --- |
-| Allocate replay | Byte-identical success; same relay; exactly 1 allocation; distinct transaction returns 437; explicit Refresh(0) control leaves 0 |
-| Peer close | 2 allocations initially; old tuples absent and total 0 after application close |
-| One ICE restart | Old tuples absent; 2 replacement allocations; total 0 after final application close |
-| Three consecutive ICE restarts | Each round: old tuples absent, total 2; final close: total 0 |
+| Allocate replay and tuple reuse | Byte-identical success; same relay; exactly 1 allocation; distinct transaction returns 437; explicit Refresh(0) control leaves 0; same-tuple replacement stays active while the old close is observed |
+| Peer close | 2 allocations initially; both actual close events received and total 0 after application close |
+| One ICE restart | Both old close events received; 2 current allocations; total 0 after final application close |
+| Three consecutive ICE restarts | Each round: both old close events received, total 2; final close: both close events received, total 0 |
 | Plain restart integration | Business RPC recovers and fresh TURN authentication occurs |
 | Credential rotation integration | New credentials reach the real TURN authenticator and business RPC recovers |
 
 Each lifecycle scenario verifies bidirectional business RPC. Restart checks
 also require advancing ICE generations on the same PeerConnections, so a
-silent hard rebuild cannot substitute for testing ICE rebind. Allocation
+silent hard rebuild cannot substitute for testing ICE rebind. Close event
 observations allow at most 3 seconds after recovery/close; the entire scenario
 has a 180-second limit, below the server's 600-second default allocation
 lifetime. Counts are captured before fixture/server shutdown, preventing
