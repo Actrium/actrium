@@ -12,6 +12,7 @@ mod backoff;
 pub(crate) mod correlation;
 mod dest_transport;
 mod error;
+pub(crate) mod handover;
 mod host_transport;
 pub(crate) mod lane;
 mod peer_transport;

@@ -11,6 +11,7 @@ pub mod issuer;
 pub mod packages;
 pub mod realm;
 pub mod registry;
+pub mod relay;
 pub mod resolver;
 pub mod services;
 pub mod signaling;
@@ -24,6 +25,7 @@ pub use crate::config::control::{AdminLoginLimits, AdminUiConfig, ControlConfig,
 pub use crate::config::issuer::IssuerServiceConfig;
 pub use crate::config::packages::PackagesConfig;
 pub use crate::config::realm::RealmConfig;
+pub use crate::config::relay::{RelayAuthMode, RelayConfig};
 pub use crate::config::services::ServicesConfig;
 pub use crate::config::signaling::SignalingConfig;
 pub use crate::config::turn::TurnConfig;
@@ -218,7 +220,7 @@ pub struct ActrixConfig {
     /// Service enable flags (bitmask) - Primary switch for business services
     ///
     /// This is the primary control mechanism for enabling business services.
-    /// `control` is an always-on control-plane capability and is not governed by this bitmask.
+    /// `control` has independent endpoint switches, not controlled by this bitmask.
     ///
     /// Bit positions (business services only):
     /// - Bit 0 (1): Signaling service
@@ -226,9 +228,10 @@ pub struct ActrixConfig {
     /// - Bit 2 (4): TURN service
     /// - Bit 3 (8): Issuer (Actor Identity Service)
     /// - Bit 4 (16): Signer
+    /// - Bit 5 (32): WebSocket relay
     ///
     /// Examples:
-    /// - `enable = 31` enables all services (1+2+4+8+16=31)
+    /// - `enable = 63` enables all services; 31 preserves the original five-service mask
     /// - `enable = 6` enables STUN + TURN (2+4=6)
     /// - `enable = 7` enables Signaling + STUN + TURN (1+2+4=7)
     #[serde(default = "default_enable")]
@@ -280,8 +283,13 @@ pub struct ActrixConfig {
 
     /// TURN service-specific configuration
     ///
-    /// Dedicated configuration for the TURN relay service, including public address, port range, auth realm, etc.
+    /// Dedicated configuration for the TURN relay service, including public address, port range, authentication realm, etc.
+    #[serde(default)]
     pub turn: TurnConfig,
+
+    /// Multiplexed WebSocket relay, enabled with bit 5 (32).
+    #[serde(default)]
+    pub relay: RelayConfig,
 
     /// Location tag
     ///
@@ -289,9 +297,9 @@ pub struct ActrixConfig {
     /// e.g. us-west-1, office-beijing, edge-node-01
     pub location_tag: String,
 
-    /// Control-plane configuration (always on)
+    /// Optional control plane configuration
     ///
-    /// The control plane is always available and is not governed by the `enable` bitmask.
+    /// Endpoint switches are independent of the `enable` bitmask.
     #[serde(default)]
     pub control: ControlConfig,
 
@@ -308,6 +316,7 @@ pub struct ActrixConfig {
     /// The main database file is stored as `{sqlite_path}/actrix.db`.
     /// Includes Realm info, access control lists, nonce cache, etc.
     #[serde(
+        default,
         serialize_with = "serialize_pathbuf",
         deserialize_with = "deserialize_pathbuf"
     )]
@@ -320,9 +329,10 @@ pub struct ActrixConfig {
     ///
     /// Notes:
     /// - This key is for Actrix internal services only
-    /// - Must not be used for Realm business or external API access
-    /// - A strong random key should be used in production
-    /// - The field name actrix_shared_key is retained for backward compatibility
+    /// - Not for Realm business or external API access
+    /// - A strong random key should be used in production environments
+    /// - Field name retains actrix_shared_key for backward compatibility
+    #[serde(default)]
     pub actrix_shared_key: String,
 
     /// Recording pipeline configuration (logs + tracing)
@@ -603,6 +613,7 @@ impl Default for ActrixConfig {
             authority: AuthorityConfig::default(),
             realm: RealmConfig::default(),
             turn: TurnConfig::default(),
+            relay: RelayConfig::default(),
             location_tag: "default-location".to_string(),
             control: ControlConfig::default(),
             services: ServicesConfig::default(),
@@ -620,9 +631,37 @@ pub const ENABLE_STUN: u8 = 0b00010;
 pub const ENABLE_TURN: u8 = 0b00100;
 pub const ENABLE_ISSUER: u8 = 0b01000;
 pub const ENABLE_SIGNER: u8 = 0b10000;
+pub const ENABLE_RELAY: u8 = 0b100000;
 
 impl ActrixConfig {
-    /// Check whether the signaling service is enabled
+    /// HTTP business services and control endpoints require an HTTP listener.
+    pub fn requires_http(&self) -> bool {
+        self.is_signaling_enabled()
+            || self.is_issuer_enabled()
+            || self.is_signer_enabled()
+            || self.is_relay_enabled()
+            || self.admin_ui_enabled()
+            || self.grpc_api_enabled()
+    }
+
+    /// The HTTP service stack uses persistent storage; UDP STUN/TURN does not.
+    pub fn requires_database(&self) -> bool {
+        if self.relay.auth == RelayAuthMode::Static
+            && !self.is_signaling_enabled()
+            && !self.is_issuer_enabled()
+            && !self.is_signer_enabled()
+            && !self.admin_ui_enabled()
+            && !self.grpc_api_enabled()
+            && !self.authority.enabled
+            && self.services.packages.is_none()
+            && (self.is_relay_enabled() || self.authority.uri.is_none())
+        {
+            return false;
+        }
+        self.bind.http.is_some() || self.requires_http()
+    }
+
+    /// Check if the signaling service is enabled
     ///
     /// Service is enabled if the ENABLE_SIGNALING bit is set in the enable bitmask.
     pub fn is_signaling_enabled(&self) -> bool {
@@ -639,7 +678,22 @@ impl ActrixConfig {
         self.enable & ENABLE_TURN != 0
     }
 
-    /// Check whether the Issuer (AId Issue Service) identity authentication service is enabled
+    /// Realm-scoped TURN credentials need both persistent state and an Actr
+    /// authority. Independent REST and static credentials do not.
+    pub fn uses_realm_turn_auth(&self) -> bool {
+        self.is_turn_enabled()
+            && self.turn.users.is_empty()
+            && self.requires_database()
+            && (self.is_issuer_enabled()
+                || self.is_signaling_enabled()
+                || self.authority.uri.is_some())
+    }
+
+    pub fn is_relay_enabled(&self) -> bool {
+        self.enable & ENABLE_RELAY != 0
+    }
+
+    /// Check if the AIS (AId Issue Service) identity service is enabled
     ///
     /// Service is enabled if the ENABLE_ISSUER bit is set in the enable bitmask.
     pub fn is_issuer_enabled(&self) -> bool {
@@ -837,10 +891,10 @@ impl ActrixConfig {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        // Validate bitmask value range (0-31, 5 bits)
-        if self.enable > 31 {
+        // Validate bitmask value range (0-63, 6 bits)
+        if self.enable > 63 {
             errors.push(format!(
-                "Invalid enable bitmask value: {}. Must be between 0 and 31 (5 bits)",
+                "Invalid enable bitmask value: {}. Must be between 0 and 63 (6 bits)",
                 self.enable
             ));
         }
@@ -858,11 +912,15 @@ impl ActrixConfig {
             ));
         }
 
-        // control is always mounted on the main HTTP port; a bind is required.
-        if self.bind.http.is_none() {
-            errors.push(
-                "Control plane requires bind.http because /admin is always served".to_string(),
-            );
+        if self.requires_http() && self.bind.http.is_none() {
+            errors.push("Enabled HTTP services or control endpoints require bind.http".to_string());
+        }
+
+        if let Err(error) = self
+            .relay
+            .validate(self.is_relay_enabled(), self.env == "prod")
+        {
+            errors.push(error);
         }
 
         // Validate each channel's semantic filter (empty string = use channel default, skip validation)
@@ -934,38 +992,29 @@ impl ActrixConfig {
             &mut errors,
         );
 
-        // Validate actrix_shared_key hygiene (placeholder / length / entropy).
-        validate_secret_hygiene(
-            "actrix_shared_key",
-            &self.actrix_shared_key,
-            32,
-            &mut errors,
-        );
-
-        // Issuer always issues the TURN credential carried by RegisterOk, so the
-        // Realm Infra Provider secret is required whenever either Issuer or TURN runs.
-        if self.is_turn_enabled() || self.is_issuer_enabled() {
+        if self.requires_database() {
+            validate_secret_hygiene(
+                "actrix_shared_key",
+                &self.actrix_shared_key,
+                32,
+                &mut errors,
+            );
+            if self
+                .sqlite_path
+                .to_str()
+                .map(|s| s.trim().is_empty())
+                .unwrap_or(true)
+            {
+                errors.push("SQLite database path cannot be empty".to_string());
+            }
+        }
+        if self.is_issuer_enabled() || (self.is_turn_enabled() && self.turn.users.is_empty()) {
             validate_secret_hygiene("turn.turn_secret", &self.turn.turn_secret, 32, &mut errors);
         }
-
-        // Issuer, Signaling and TURN bind credentials to the Realm Infra Provider ID.
-        if (self.is_issuer_enabled()
-            || self.is_signaling_enabled()
-            || self.is_turn_enabled()
-            || self.authority.uri.is_some())
+        if (self.is_issuer_enabled() || self.is_signaling_enabled() || self.authority.uri.is_some())
             && let Err(error) = self.authority.provider_id()
         {
             errors.push(error);
-        }
-
-        // Validate SQLite path
-        if self
-            .sqlite_path
-            .to_str()
-            .map(|s| s.trim().is_empty())
-            .unwrap_or(true)
-        {
-            errors.push("SQLite database path cannot be empty".to_string());
         }
 
         // Validate ICE configuration (if STUN or TURN is enabled)
@@ -987,6 +1036,23 @@ impl ActrixConfig {
                     "Invalid bind.ice.advertised_ip '{}', must be a valid IP address",
                     self.bind.ice.advertised_ip
                 ));
+            }
+        }
+
+        if self.is_turn_enabled() {
+            if let Err(error) = self.turn.relay_ports() {
+                errors.push(error);
+            }
+            if self.turn.users.is_empty() && self.turn.turn_secret.trim().is_empty() {
+                errors.push("TURN shared secret or static users are required".to_string());
+            }
+            if self
+                .turn
+                .users
+                .iter()
+                .any(|(user, password)| user.is_empty() || password.is_empty())
+            {
+                errors.push("TURN static usernames and passwords must not be empty".to_string());
             }
         }
 
@@ -1195,15 +1261,14 @@ impl ActrixConfig {
 
         // Production environment additional checks
         if self.env == "prod" {
-            // Production should use HTTPS (bind.http must exist and is_tls() == true)
+            // An HTTP listener in production must use HTTPS. UDP-only services
+            // do not require an unrelated HTTP/TLS listener.
             if let Some(ref http) = self.bind.http {
                 if !http.is_tls() {
                     errors.push(
                         "Production environment should enable HTTPS (configure cert and key in bind.http)".to_string(),
                     );
                 }
-            } else {
-                errors.push("Production environment requires bind.http configuration".to_string());
             }
 
             // Production should configure at least one file:// recording sink.
@@ -1215,7 +1280,10 @@ impl ActrixConfig {
             // version and full Prometheus metrics. In production they must not be
             // anonymous: require an IP allowlist or htpasswd, or force the
             // operator to make the exposure explicit.
-            if self.monitoring.allowed_ips.is_empty() && self.monitoring.htpasswd_file.is_empty() {
+            if self.bind.http.is_some()
+                && self.monitoring.allowed_ips.is_empty()
+                && self.monitoring.htpasswd_file.is_empty()
+            {
                 errors.push(
                     "Production environment requires monitoring authentication: set monitoring.allowed_ips or monitoring.htpasswd_file".to_string(),
                 );
@@ -1324,6 +1392,128 @@ impl ActrixConfig {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn standalone_relay_needs_http_but_not_business_storage() {
+        let mut config = super::ActrixConfig::from_toml(include_str!(
+            "../../../../loran/config/relay.example.toml"
+        ))
+        .unwrap();
+        assert!(config.is_relay_enabled());
+        assert!(config.requires_http());
+        assert!(!config.requires_database());
+        assert!(config.actrix_shared_key.is_empty());
+        assert!(config.validate().is_ok(), "{:?}", config.validate());
+        let mut disabled = config.clone();
+        disabled.enable = 0;
+        assert!(!disabled.requires_database());
+        assert!(disabled.validate().is_ok(), "{:?}", disabled.validate());
+        disabled.authority.enabled = true;
+        assert!(disabled.requires_database());
+        disabled.authority.enabled = false;
+        disabled.authority.uri = Some("actr://provider.example".into());
+        assert!(disabled.requires_database());
+        config.bind.http = None;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .iter()
+                .any(|error| error.contains("require bind.http"))
+        );
+    }
+
+    #[test]
+    fn relay_config_rejects_ambiguous_auth_and_insecure_advertisement() {
+        let mut config = super::ActrixConfig::from_toml(include_str!(
+            "../../../../loran/config/relay.example.toml"
+        ))
+        .unwrap();
+        config.relay.static_credentials[1].endpoint =
+            config.relay.static_credentials[0].endpoint.clone();
+        assert!(config.validate().is_err());
+        config.relay.static_credentials.pop();
+        config.relay.public_url = Some("ws://example.org/relay/ws".into());
+        assert!(config.relay.validate(true, true).is_err());
+        config.relay.public_url = Some("wss://example.org/relay/ws".into());
+        assert!(config.relay.validate(true, true).is_ok());
+        config.relay.auth = super::RelayAuthMode::Aid;
+        assert!(config.requires_database());
+        assert!(config.relay.validate(true, true).is_err());
+    }
+    #[test]
+    fn udp_only_configuration_needs_no_control_plane_or_storage() {
+        let example = include_str!("../../../../loran/config/ice.example.toml");
+        let mut config = super::ActrixConfig::from_toml(example).unwrap();
+        for enable in [2, 4, 6] {
+            config.enable = enable;
+            assert!(config.bind.http.is_none());
+            assert!(!config.requires_database());
+            assert!(config.actrix_shared_key.is_empty());
+            assert!(config.sqlite_path.as_os_str().is_empty());
+            let errors = config.validate().err().unwrap_or_default();
+            assert!(
+                errors.iter().all(|error| error.starts_with("Warning:")),
+                "{errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn independent_rest_turn_does_not_require_a_realm_authority() {
+        let mut config = super::ActrixConfig::from_toml(include_str!(
+            "../../../../loran/config/ice.example.toml"
+        ))
+        .unwrap();
+        config.env = "dev".into();
+        config.turn.users.clear();
+        config.turn.turn_secret = "qQ3ry54gn6iDjz02rBGn3YRmxZv8bqsf1qB9Gcb2".into();
+        assert!(!config.uses_realm_turn_auth());
+        assert!(config.validate().is_ok());
+
+        // An HTTP monitoring listener does not turn external REST
+        // credentials into Realm-scoped credentials.
+        config.bind.http = Some(Default::default());
+        config.sqlite_path = "database".into();
+        config.actrix_shared_key = "b2xISzUdwmiURo7wKFL6K9tbkRHhTfM2E83r".into();
+        assert!(config.requires_database());
+        assert!(!config.uses_realm_turn_auth());
+        assert!(config.validate().is_ok());
+
+        config.authority.uri = Some("actr://provider.example".into());
+        assert!(config.uses_realm_turn_auth());
+        config.turn.users.insert("alice".into(), "secret".into());
+        assert!(!config.uses_realm_turn_auth());
+    }
+
+    #[test]
+    fn enabled_http_services_still_require_their_listener() {
+        let example = include_str!("../../../../loran/config/ice.example.toml");
+        let initial = super::ActrixConfig::from_toml(example).unwrap();
+        for enable in [1, 8, 16] {
+            let mut config = initial.clone();
+            config.enable = enable;
+            assert!(config.requires_database());
+            assert!(
+                config
+                    .validate()
+                    .unwrap_err()
+                    .iter()
+                    .any(|error| error.contains("require bind.http"))
+            );
+        }
+        let mut config = initial;
+        config.control.admin_ui.enabled = true;
+        assert!(config.requires_database());
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .iter()
+                .any(|error| error.contains("require bind.http"))
+        );
+    }
+
     use super::*;
     use ::signer::SignerServiceConfig;
 
@@ -1391,7 +1581,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ActrixConfig::default();
-        assert_eq!(config.enable, 31); // All services enabled by default
+        assert_eq!(config.enable, 31); // Default: original five services enabled
         assert_eq!(config.name, "actrix-default");
         assert_eq!(config.env, "dev");
         assert!(config.is_signaling_enabled());
@@ -1493,7 +1683,7 @@ mod tests {
     fn test_toml_serialization() {
         let config = ActrixConfig::default();
         let toml_str = config.to_toml().unwrap();
-        assert!(toml_str.contains("enable = 31")); // all services
+        assert!(toml_str.contains("enable = 31")); // original five services
         assert!(toml_str.contains("name = \"actrix-default\""));
         assert!(toml_str.contains("actrix_shared_key = \""));
 

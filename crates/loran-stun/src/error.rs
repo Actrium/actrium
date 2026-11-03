@@ -115,9 +115,9 @@ pub enum StunError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// WebRTC library error
-    #[error("WebRTC error: {0}")]
-    WebRtc(#[from] webrtc::error::Error),
+    /// STUN protocol library error
+    #[error("STUN protocol error: {0}")]
+    Protocol(webrtc_stun::Error),
 
     /// Address parse error
     #[error("Address parse error: {0}")]
@@ -259,13 +259,6 @@ impl From<String> for StunError {
 impl From<&str> for StunError {
     fn from(message: &str) -> Self {
         Self::general(message.to_string())
-    }
-}
-
-// Convert to the unified BaseError
-impl From<StunError> for platform::error::BaseError {
-    fn from(err: StunError) -> Self {
-        platform::error::BaseError::stun_service(err.to_string())
     }
 }
 

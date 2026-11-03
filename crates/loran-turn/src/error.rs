@@ -111,9 +111,9 @@ pub enum TurnError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// WebRTC library error
-    #[error("WebRTC error: {0}")]
-    WebRtc(#[from] webrtc::error::Error),
+    /// TURN protocol library error
+    #[error("TURN protocol error: {0}")]
+    Protocol(#[from] turn_crate::Error),
 
     /// Address parse error
     #[error("Address parse error: {0}")]
@@ -215,13 +215,6 @@ impl From<String> for TurnError {
 impl From<&str> for TurnError {
     fn from(message: &str) -> Self {
         Self::general(message.to_string())
-    }
-}
-
-// Convert to the unified BaseError
-impl From<TurnError> for platform::error::BaseError {
-    fn from(err: TurnError) -> Self {
-        platform::error::BaseError::turn_service(err.to_string())
     }
 }
 

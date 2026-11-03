@@ -86,30 +86,45 @@ impl IceService for TurnService {
 
         self.socket = Some(socket.clone());
 
-        // Create TURN server. Credentials of Realms that are not served are
-        // refused.
+        // Realm-scoped credentials need revocation state; static and external
+        // REST credentials have no Actor binding to watch or revoke.
         let realm = self.config.turn.realm.clone();
-        let inactive_realms = turn::InactiveRealms::default();
-        let _realm_watch = inactive_realms.watch().await;
-        let auth_handler = Arc::new(
-            turn::Authenticator::new(
-                self.config.turn.turn_secret.clone(),
-                self.config
-                    .authority
-                    .provider_id()
-                    .map_err(anyhow::Error::msg)?,
-            )
-            .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?
-            .with_inactive_realms(inactive_realms.clone()),
-        );
+        let inactive_realms = self
+            .config
+            .uses_realm_turn_auth()
+            .then(turn::InactiveRealms::default);
+        let _realm_watch = match &inactive_realms {
+            Some(inactive) => Some(inactive.watch().await),
+            None => None,
+        };
+        let auth_handler: Arc<dyn turn_crate::auth::AuthHandler + Send + Sync> =
+            if !self.config.turn.users.is_empty() {
+                Arc::new(turn::StaticAuthenticator::new(
+                    self.config.turn.users.clone(),
+                )?)
+            } else if let Some(inactive) = &inactive_realms {
+                Arc::new(
+                    turn::Authenticator::new(
+                        self.config.turn.turn_secret.clone(),
+                        self.config
+                            .authority
+                            .provider_id()
+                            .map_err(anyhow::Error::msg)?,
+                    )
+                    .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?
+                    .with_inactive_realms(inactive.clone()),
+                )
+            } else {
+                Arc::new(
+                    turn::RestAuthenticator::new(self.config.turn.turn_secret.clone())
+                        .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?,
+                )
+            };
         let relay_port_range = self
             .config
             .turn
             .relay_port_bounds()
-            .map_err(|error| anyhow::anyhow!(error))?;
-
-        // The disposable Realm E2E relays between private addresses. This
-        // exception does not exist in production binaries or ordinary tests.
+            .map_err(anyhow::Error::msg)?;
         #[cfg(test)]
         let allow_private_relay_peers = std::env::var("ACTR_PACKAGE_RUNTIME_FIXTURE").as_deref()
             == Ok("1")
@@ -154,7 +169,7 @@ impl IceService for TurnService {
         // A Realm that stops being served, or a disabled Actor, loses its
         // allocations too, not only their refreshes.
         let turn_server = Arc::new(turn_server);
-        let closer = {
+        let closer = inactive_realms.map(|inactive_realms| {
             let server = turn_server.clone();
             tokio::spawn(async move {
                 loop {
@@ -172,12 +187,14 @@ impl IceService for TurnService {
                     }
                 }
             })
-        };
+        });
 
         // Wait for shutdown signal
         let _ = shutdown_rx.recv().await;
         platform::recording::info!("TURN service received shutdown signal");
-        closer.abort();
+        if let Some(closer) = closer {
+            closer.abort();
+        }
 
         // Shut down TURN server
         if let Err(e) = turn::shutdown_turn_server(&turn_server).await {

@@ -202,9 +202,6 @@ impl Nodes {
                 mailbox_path: None,
                 scripts: HashMap::new(),
                 webrtc: Default::default(),
-                websocket_listen_port: None,
-                websocket_security: Default::default(),
-                websocket_advertised_host: None,
                 observability: actr_config::ObservabilityConfig {
                     filter_level: "warn".into(),
                     tracing_enabled: false,

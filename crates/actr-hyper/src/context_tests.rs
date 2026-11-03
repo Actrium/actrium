@@ -75,7 +75,6 @@ async fn select_gate_peer_errors_when_outproc_unset() {
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         None,
-        Arc::new(RwLock::new(HashMap::new())),
         None,
         0,
     );
@@ -341,7 +340,6 @@ fn builder() -> BootstrapContextBuilder {
         None,
         Arc::new(HashMap::new()),
         Arc::new(HashMap::new()),
-        Arc::new(RwLock::new(HashMap::new())),
         None,
         0,
     )
@@ -420,7 +418,6 @@ fn ctx_with_lock(lock: Option<LockFile>) -> RuntimeContext {
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         lock.map(Arc::new),
-        Arc::new(RwLock::new(HashMap::new())),
         None,
         0,
     )
@@ -527,13 +524,20 @@ async fn typed_call_rejects_non_positive_timeout() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn typed_call_honors_caller_timeout() {
-    let c = ctx();
-    let err = c
-        .call(&Dest::Workload, TimeoutRequest::default(), 5)
+    let transport = Arc::new(HostTransport::new());
+    let c = runtime_context_with_host_transport(ActrId::default(), transport.clone());
+    let call =
+        tokio::spawn(async move { c.call(&Dest::Workload, TimeoutRequest::default(), 5).await });
+    let submitted = tokio::time::timeout(Duration::from_secs(1), transport.recv_reliable_raw())
         .await
-        .unwrap_err();
+        .expect("request must reach the workload queue")
+        .unwrap();
+    assert_eq!(submitted.route_key, TimeoutRequest::route_key());
+    assert_eq!(submitted.timeout_ms, 5);
+    tokio::time::advance(Duration::from_millis(5)).await;
+    let err = call.await.unwrap().unwrap_err();
 
     assert!(
         matches!(err, ActrError::DeliveryUncertain { .. }),

@@ -13,6 +13,7 @@ use crate::error::{HyperError, HyperResult};
 use async_trait::async_trait;
 use ed25519_dalek::VerifyingKey;
 use std::collections::HashMap;
+#[cfg(test)]
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -37,6 +38,7 @@ pub(crate) struct IssuerKeyCache {
 
 impl IssuerKeyCache {
     /// Create a new empty cache, returned in an `Arc` wrapper for sharing
+    #[cfg(test)]
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             cache: RwLock::new(HashMap::new()),
@@ -47,6 +49,7 @@ impl IssuerKeyCache {
     ///
     /// `pubkey_bytes` must be a 32-byte Ed25519 raw public key.
     /// If key_id already exists, it is overwritten (should not normally occur, kept idempotent).
+    #[cfg(test)]
     pub(crate) async fn seed(&self, key_id: u32, pubkey_bytes: &[u8]) -> HyperResult<()> {
         let verifying_key = VerifyingKey::from_bytes(pubkey_bytes.try_into().map_err(|_| {
             HyperError::InvalidManifest("signing pubkey must be 32 bytes".to_string())

@@ -434,6 +434,37 @@ impl Authenticator {
 }
 
 impl AuthHandler for Authenticator {
+    fn password_algorithms(&self) -> Vec<u16> {
+        vec![2, 1]
+    }
+
+    fn auth_handle_algorithm(
+        &self,
+        username: &str,
+        server_realm: &str,
+        src_addr: SocketAddr,
+        algorithm: u16,
+    ) -> Result<Vec<u8>, Error> {
+        let legacy = self.auth_handle(username, server_realm, src_addr)?;
+        match algorithm {
+            1 => Ok(legacy),
+            2 => {
+                let (_, scope) = username
+                    .split_once(":realm=")
+                    .ok_or_else(|| Error::Other("invalid TURN credential scope".into()))?;
+                let (realm, _) = scope
+                    .split_once(":provider=")
+                    .ok_or_else(|| Error::Other("invalid TURN credential scope".into()))?;
+                turn_crate::auth::generate_auth_key_algorithm(
+                    username,
+                    server_realm,
+                    &self.compute_password(realm, username),
+                    2,
+                )
+            }
+            _ => Err(Error::Other("unsupported password algorithm".into())),
+        }
+    }
     fn auth_handle(
         &self,
         username: &str,

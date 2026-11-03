@@ -131,7 +131,7 @@ impl RealmClientKey {
     }
 
     /// A freshly signed proof for `body` of an `op` request on `realm`.
-    fn proof(&self, op: ProofOp, realm: &str, body: &[u8]) -> String {
+    pub(crate) fn proof(&self, op: ProofOp, realm: &str, body: &[u8]) -> String {
         let nonce = uuid::Uuid::new_v4().simple().to_string();
         ClientProof::new(op, realm, &self.provider_id, body, &nonce).header_value(&self.key)
     }
@@ -399,6 +399,7 @@ impl IssuerClient {
             ProofOp::Register => "register",
             ProofOp::Reissue => "reissue",
             ProofOp::Renew => "renew",
+            ProofOp::RelayIdentity => "relay-identity",
         };
         let base = self.endpoint.to_string().trim_end_matches('/').to_string();
         let url = format!("{base}/{path}");

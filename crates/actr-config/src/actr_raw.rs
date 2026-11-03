@@ -6,7 +6,7 @@
 use crate::error::Result;
 use crate::raw::{
     RawDeploymentConfig, RawDiscoveryConfig, RawIssuerEndpointConfig, RawObservabilityConfig,
-    RawSignalingConfig, RawStorageConfig, RawWebRtcConfig, RawWebSocketConfig,
+    RawSignalingConfig, RawStorageConfig, RawWebRtcConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -53,9 +53,9 @@ pub struct RuntimeRawConfig {
     #[serde(default)]
     pub webrtc: RawWebRtcConfig,
 
-    /// WebSocket direct-connect configuration
-    #[serde(default)]
-    pub websocket: RawWebSocketConfig,
+    /// Reject obsolete peer-listener settings with migration advice.
+    #[serde(default, deserialize_with = "crate::raw::reject_peer_websocket")]
+    pub(crate) websocket: Option<()>,
 
     /// Observability (logging, tracing)
     #[serde(default)]
@@ -243,6 +243,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn removed_peer_listener_requires_migration() {
+        let error = RuntimeRawConfig::from_str("edition = 1\n[websocket]\nlisten_port = 9001\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("delete the websocket section"), "{error}");
+        assert!(RuntimeRawConfig::from_str("edition = 1\n").is_ok());
+    }
+
+    #[test]
     fn test_parse_minimal_actr_config() {
         let toml_content = r#"
 edition = 1
@@ -288,10 +297,6 @@ force_relay = false
 stun_urls = ["stun:localhost:3478"]
 turn_urls = ["turn:localhost:3478"]
 
-[websocket]
-listen_port = 9001
-advertised_host = "127.0.0.1"
-
 [observability]
 filter_level = "info"
 tracing_enabled = false
@@ -328,7 +333,6 @@ test = "cargo test"
         assert_eq!(config.discovery.visible, Some(true));
         assert!(!config.webrtc.force_relay);
         assert_eq!(config.webrtc.stun_urls.len(), 1);
-        assert_eq!(config.websocket.listen_port, Some(9001));
         assert_eq!(config.observability.filter_level.as_deref(), Some("info"));
 
         let caps = config.capabilities.unwrap();

@@ -14,6 +14,7 @@ export interface WebRtcConfig {
 
 export interface PeerConnectionInfo {
   peerId: string;
+  connectionId: string;
   connection: RTCPeerConnection;
   dataChannels: Map<number, RTCDataChannel>;
   state: RTCPeerConnectionState;
@@ -38,6 +39,7 @@ export class WebRtcCoordinator {
   private static readonly DC_MAX_MESSAGE_SIZE = 65535;
   private static readonly DC_MAX_PAYLOAD_SIZE =
     WebRtcCoordinator.DC_MAX_MESSAGE_SIZE - WebRtcCoordinator.FRAGMENT_HEADER_SIZE;
+  private static readonly PATH_OBSERVATION_INTERVAL_MS = 5000;
 
   private swBridge: ServiceWorkerBridge;
   private forwarder: FastPathForwarder;
@@ -48,6 +50,9 @@ export class WebRtcCoordinator {
   private fragmentCounters: Map<string, number> = new Map();
   private reassembly: Map<string, FragmentEntry> = new Map();
   private commandQueues: Map<string, Promise<void>> = new Map();
+  private pathTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
+  private readonly connectionIdPrefix = `${Date.now()}-${Math.random()}`;
+  private nextConnectionId = 0;
   private config: WebRtcConfig;
   /** Dynamic TURN credentials received from SW (Issuer registration) */
   private turnCredential: { username: string; credential: string } | null = null;
@@ -85,8 +90,28 @@ export class WebRtcCoordinator {
           username: message.payload.username,
           credential: message.payload.password,
         };
+        for (const [peerId, peer] of this.peers) {
+          if (peer.connection.signalingState === 'closed') continue;
+          try {
+            const current = peer.connection.getConfiguration();
+            peer.connection.setConfiguration({
+              ...current,
+              iceServers: this.withTurnCredential(current.iceServers || this.config.iceServers || []),
+            });
+          } catch (error) {
+            console.warn(`[WebRTC] Failed to update TURN credentials for ${peerId}`, error);
+          }
+        }
         console.log('[WebRTC] TURN credential received from SW');
       }
+    });
+  }
+
+  private withTurnCredential(servers: RTCIceServer[]): RTCIceServer[] {
+    return servers.map((server) => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+      const isTurn = urls.some((url) => url.startsWith('turn:') || url.startsWith('turns:'));
+      return isTurn && this.turnCredential ? { ...server, ...this.turnCredential } : server;
     });
   }
 
@@ -166,18 +191,7 @@ export class WebRtcCoordinator {
     }
 
     // Build ICE server list with TURN credentials injected
-    const iceServers = (this.config.iceServers || []).map((server) => {
-      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
-      const isTurn = urls.some((url) => url.startsWith('turn:') || url.startsWith('turns:'));
-      if (isTurn && this.turnCredential) {
-        return {
-          urls: server.urls,
-          username: this.turnCredential.username,
-          credential: this.turnCredential.credential,
-        };
-      }
-      return server;
-    });
+    const iceServers = this.withTurnCredential(this.config.iceServers || []);
 
     const rtcConfig: RTCConfiguration = {
       iceServers,
@@ -188,6 +202,7 @@ export class WebRtcCoordinator {
 
     //  RTCPeerConnection
     const connection = new RTCPeerConnection(rtcConfig);
+    const connectionId = `${this.connectionIdPrefix}-${++this.nextConnectionId}`;
 
     // TODO: Decide whether to create 4 negotiated DataChannels here or elsewhere.
     //  .cursor/plans/webrtc-datachannel-negotiation-strategy.md
@@ -216,9 +231,11 @@ export class WebRtcCoordinator {
 
     //
     connection.onconnectionstatechange = () => {
+      if (this.peers.get(peerId)?.connection !== connection) return;
       console.log(`[WebRTC] Connection state changed: ${connection.connectionState}`);
       this.notifySW('connection_state_changed', {
         peerId,
+        connectionId,
         state: connection.connectionState,
       });
 
@@ -228,6 +245,7 @@ export class WebRtcCoordinator {
       }
 
       if (connection.connectionState === 'connected') {
+        this.startPathObservation(peerId, connection);
         const rpcChannel = dataChannels.get(0);
         if (rpcChannel && this.canBindRpcPort(this.peers.get(peerId), rpcChannel)) {
           this.bindRpcPort(peerId, rpcChannel);
@@ -237,6 +255,7 @@ export class WebRtcCoordinator {
         connection.connectionState === 'failed' ||
         connection.connectionState === 'closed'
       ) {
+        this.stopPathObservation(peerId);
         this.dropRpcPort(peerId);
         this.dropPendingPeerFrames(peerId);
       }
@@ -245,15 +264,20 @@ export class WebRtcCoordinator {
     //  ICE
     connection.oniceconnectionstatechange = () => {
       console.log(`[WebRTC] ICE connection state: ${connection.iceConnectionState}`);
+      if (connection.iceConnectionState === 'connected' || connection.iceConnectionState === 'completed') {
+        void this.observeNetworkPath(peerId, connection);
+      }
     };
 
     //  peer
     this.peers.set(peerId, {
       peerId,
+      connectionId,
       connection,
       dataChannels,
       state: connection.connectionState,
     });
+    this.notifySW('network_path_changed', { peerId, relayed: null });
 
     console.log(`[WebRTC] Peer connection created: ${peerId}`);
   }
@@ -619,7 +643,7 @@ export class WebRtcCoordinator {
 
   private bindRpcPort(peerId: string, channel: RTCDataChannel): void {
     const peer = this.peers.get(peerId);
-    if (!this.canBindRpcPort(peer, channel)) {
+    if (!peer || !this.canBindRpcPort(peer, channel)) {
       console.log(
         `[HostPage] skipBindRpcPort peer=${peerId} state=${peer?.state ?? 'missing'} dc=${channel.readyState}`
       );
@@ -662,7 +686,7 @@ export class WebRtcCoordinator {
     };
 
     this.rpcPorts.set(peerId, mc.port1);
-    this.swBridge.sendDataChannelPort(peerId, mc.port2);
+    this.swBridge.sendDataChannelPort(peerId, peer.connectionId, mc.port2);
     this.flushPendingPortFrames(peerId, channel);
   }
 
@@ -827,6 +851,7 @@ export class WebRtcCoordinator {
    *  Peer Connection
    */
   private closePeerConnection(peerId: string): void {
+    this.stopPathObservation(peerId);
     const peer = this.peers.get(peerId);
     if (!peer) {
       return;
@@ -843,7 +868,47 @@ export class WebRtcCoordinator {
     this.peers.delete(peerId);
     this.dropRpcPort(peerId);
     this.dropPendingPeerFrames(peerId);
+    this.notifySW('peer_connection_closed', { peerId, connectionId: peer.connectionId });
     console.log(`[WebRTC] Peer connection closed: ${peerId}`);
+  }
+
+  private startPathObservation(peerId: string, connection: RTCPeerConnection): void {
+    void this.observeNetworkPath(peerId, connection);
+    if (!this.pathTimers.has(peerId)) {
+      this.pathTimers.set(peerId, setInterval(() => {
+        void this.observeNetworkPath(peerId, connection);
+      }, WebRtcCoordinator.PATH_OBSERVATION_INTERVAL_MS));
+    }
+  }
+
+  private stopPathObservation(peerId: string): void {
+    const timer = this.pathTimers.get(peerId);
+    if (timer !== undefined) clearInterval(timer);
+    this.pathTimers.delete(peerId);
+  }
+
+  private async observeNetworkPath(peerId: string, connection: RTCPeerConnection): Promise<void> {
+    if (this.peers.get(peerId)?.connection !== connection) return;
+    let relayed: boolean | null = null;
+    try {
+      const stats = await connection.getStats();
+      // Use the selected pair, not all gathered candidates. Gathering a TURN
+      // candidate alone says nothing about the path that carries traffic.
+      stats.forEach((entry) => {
+        if (entry.type !== 'transport' || !entry.selectedCandidatePairId) return;
+        const pair = stats.get(entry.selectedCandidatePairId);
+        const local = pair && stats.get(pair.localCandidateId);
+        const remote = pair && stats.get(pair.remoteCandidateId);
+        if (local?.candidateType === 'relay' || remote?.candidateType === 'relay') {
+          relayed = true;
+        } else if (['host', 'srflx', 'prflx'].includes(local?.candidateType)
+          && ['host', 'srflx', 'prflx'].includes(remote?.candidateType) && relayed !== true) {
+          relayed = false;
+        }
+      });
+    } catch (_) { /* Preserve conservative unknown priority. */ }
+    if (this.peers.get(peerId)?.connection !== connection || connection.connectionState === 'closed') return;
+    this.notifySW('network_path_changed', { peerId, relayed });
   }
 
   /**

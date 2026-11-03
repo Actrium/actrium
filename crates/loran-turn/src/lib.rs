@@ -8,22 +8,38 @@ mod authenticator;
 pub mod error;
 mod inactive_realms;
 mod relay_filter;
+mod rest_authenticator;
 
 // Re-export types for convenience
 pub use authenticator::Authenticator;
 pub use error::{ErrorSeverity, TurnError};
 pub use inactive_realms::{InactiveRealms, WatchGuard};
 pub use relay_filter::is_forbidden_relay_peer;
+pub use rest_authenticator::{Authenticator as RestAuthenticator, StaticAuthenticator};
 
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
-use turn_crate::auth::AuthHandler;
+pub use turn_crate::auth::AuthHandler;
 use turn_crate::relay::relay_range::*;
 use turn_crate::server::config::*;
 use turn_crate::server::*;
 use webrtc_util::vnet::net::*;
+
+/// Parse an inclusive UDP relay port range.
+pub fn parse_relay_port_range(range: &str) -> error::Result<(u16, u16)> {
+    let invalid = || TurnError::InvalidPortRange {
+        range: range.to_owned(),
+    };
+    let (min, max) = range.split_once('-').ok_or_else(invalid)?;
+    let min: u16 = min.trim().parse().map_err(|_| invalid())?;
+    let max: u16 = max.trim().parse().map_err(|_| invalid())?;
+    if min == 0 || min > max {
+        return Err(invalid());
+    }
+    Ok((min, max))
+}
 
 // Create and initialize the TURN server
 pub async fn create_turn_server(
@@ -83,19 +99,29 @@ async fn create_turn_server_inner(
     allow_private_relay_peers: bool,
     alloc_close_notify: Option<tokio::sync::mpsc::Sender<turn_crate::allocation::AllocationInfo>>,
 ) -> error::Result<Server> {
-    platform::recording::info!("Creating TURN server with advertised IP: {}", advertised_ip);
+    if relay_port_range.0 == 0 || relay_port_range.0 > relay_port_range.1 {
+        return Err(TurnError::InvalidPortRange {
+            range: format!("{}-{}", relay_port_range.0, relay_port_range.1),
+        });
+    }
+    let realm =
+        turn_crate::auth::prepare_realm(realm).map_err(|error| TurnError::Configuration {
+            field: "realm".into(),
+            value: error.to_string(),
+        })?;
+    tracing::info!("Creating TURN server with advertised IP: {}", advertised_ip);
 
     // Get the local address of the socket
-    let local_addr = match socket.local_addr() {
+    let mut local_addr = match socket.local_addr() {
         Ok(addr) => addr.ip().to_string(),
         Err(e) => {
-            platform::recording::error!("Failed to get local address from socket: {}", e);
+            tracing::error!("Failed to get local address from socket: {}", e);
             // Fall back to 0.0.0.0 if we can't get the actual address
             "0.0.0.0".to_string()
         }
     };
 
-    platform::recording::info!(
+    tracing::info!(
         "TURN server will use local address: {} and advertised IP: {}",
         local_addr,
         advertised_ip
@@ -106,13 +132,21 @@ async fn create_turn_server_inner(
         Ok(ip) => ip,
         Err(e) => {
             let err_msg = format!("Invalid advertised IP address: {e}");
-            platform::recording::error!("{}", err_msg);
+            tracing::error!("{}", err_msg);
             return Err(TurnError::Configuration {
                 field: "advertised_ip".to_string(),
                 value: advertised_ip.to_string(),
             });
         }
     };
+
+    // The relay address family can differ from the client's control transport.
+    if local_addr
+        .parse::<IpAddr>()
+        .is_ok_and(|ip| ip.is_ipv4() != relay_ip.is_ipv4())
+    {
+        local_addr = if relay_ip.is_ipv4() { "0.0.0.0" } else { "::" }.into();
+    }
 
     let (min_port, max_port) = relay_port_range;
     platform::recording::info!(
@@ -158,12 +192,12 @@ async fn create_turn_server_inner(
         Ok(server) => server,
         Err(e) => {
             let err_msg = format!("Failed to create TURN server: {e}");
-            platform::recording::error!("{}", err_msg);
+            tracing::error!("{}", err_msg);
             return Err(TurnError::ServerStartFailed { reason: err_msg });
         }
     };
 
-    platform::recording::info!("TURN server created successfully (includes STUN functionality)");
+    tracing::info!("TURN server created successfully (includes STUN functionality)");
     Ok(server)
 }
 
@@ -242,16 +276,16 @@ async fn close_allocations_matching(
 
 // Shutdown the TURN server
 pub async fn shutdown_turn_server(server: &Server) -> error::Result<()> {
-    platform::recording::info!("Shutting down TURN server");
+    tracing::info!("Shutting down TURN server");
 
     if let Err(e) = server.close().await {
-        platform::recording::error!("Error while closing TURN server: {e}");
+        tracing::error!("Error while closing TURN server: {e}");
         return Err(TurnError::ServerShutdownFailed {
             reason: format!("Failed to close TURN server: {e}"),
         });
     }
 
-    platform::recording::info!("TURN server has been shut down");
+    tracing::info!("TURN server has been shut down");
     Ok(())
 }
 
@@ -260,7 +294,7 @@ mod tests {
     use super::*;
     use std::net::SocketAddr;
     use tokio::net::UdpSocket;
-    use turn_crate::auth::AuthHandler;
+    pub use turn_crate::auth::AuthHandler;
 
     // Mock auth handler for testing
     struct MockAuthHandler;

@@ -175,6 +175,473 @@ let wasmReady = false;
 let wasmInitPromise = null;
 let wsProbeDone = false;
 
+// @relay-client begin
+// Generic loran-relay.v1 client. Identity and application framing are injected
+// by the worker adapter below; this class does not know business identities.
+const MAX_DESIRED_PEERS = 1024;
+class LoranRelayClient {
+  constructor({ credentials, discover, prepare, onError = () => {}, WebSocketImpl = WebSocket }) {
+    this.credentials = credentials;
+    this.discover = discover;
+    this.prepare = prepare;
+    this.onError = onError;
+    this.WebSocketImpl = WebSocketImpl;
+    this.channels = new Map();
+    this.peers = new Map();
+    this.pending = new Map();
+    this.dials = new Map();
+    this.desired = new Set();
+    this.waiters = new Set();
+    this.request = 1;
+    this.generation = 0;
+    this.stopped = false;
+    this.disabled = false;
+    this.authenticated = false;
+    this.socket = null;
+  }
+
+  start() {
+    if (!this.loop) this.loop = this.run();
+    return this.loop;
+  }
+
+  async run() {
+    let backoff = 250;
+    while (!this.stopped) {
+      try {
+        const url = await this.discover();
+        if (!url) {
+          this.disabled = true;
+          this.wake();
+        } else {
+          this.disabled = false;
+          const identity = await this.credentials();
+          if (this.stopped) break;
+          const lifetime = await this.cycle(url, identity);
+          if (lifetime > 10000) backoff = 250;
+        }
+      } catch (error) {
+        if (!this.stopped) this.onError(error);
+      }
+      if (this.stopped) break;
+      await new Promise((resolve) => {
+        this.resumeDelay = resolve;
+        this.delayTimer = setTimeout(resolve, backoff + Math.random() * backoff / 4);
+      });
+      this.resumeDelay = null;
+      backoff = Math.min(backoff * 2, 30000);
+    }
+  }
+
+  wake() {
+    for (const wake of this.waiters) wake();
+    this.waiters.clear();
+  }
+
+  async waitSocket() {
+    const deadline = Date.now() + 15000;
+    let retriedDisabled = false;
+    this.start();
+    while (!this.stopped) {
+      if (this.disabled) {
+        if (retriedDisabled) throw new Error('Relay service unavailable');
+        retriedDisabled = true;
+        this.disabled = false;
+        if (this.resumeDelay) {
+          clearTimeout(this.delayTimer);
+          this.resumeDelay();
+        }
+      }
+      if (this.authenticated && this.socket && this.socket.readyState === 1) return;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('Relay connection deadline exceeded');
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { this.waiters.delete(wake); reject(new Error('Relay connection deadline exceeded')); }, remaining);
+        const wake = () => { clearTimeout(timer); resolve(); };
+        this.waiters.add(wake);
+      });
+    }
+    throw new Error('Relay service unavailable');
+  }
+
+  cycle(url, identity) {
+    return new Promise((resolve, reject) => {
+      const socket = new this.WebSocketImpl(url, ['loran-relay.v1']);
+      socket.binaryType = 'arraybuffer';
+      this.socket = socket;
+      this.authenticated = false;
+      const generation = ++this.generation;
+      const started = Date.now();
+      let chain = Promise.resolve();
+      let queuedBytes = 0;
+      let finished = false;
+      let identityTimer;
+      const helloTimer = setTimeout(() => finish(new Error('Relay authentication deadline exceeded')), 10000);
+      const finish = (error) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(helloTimer);
+        clearInterval(identityTimer);
+        socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+        if (this.socket === socket) {
+          this.socket = null;
+          this.authenticated = false;
+          for (const id of [...this.channels.keys()]) this.removeChannel(id);
+          for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Relay disconnected')); }
+          this.pending.clear();
+          this.wake();
+        }
+        try { socket.close(); } catch (_) { /* already closed */ }
+        if (error) reject(error); else resolve(Date.now() - started);
+      };
+      this.finishCycle = finish;
+      socket.onopen = () => {
+        try {
+          if (socket.protocol !== 'loran-relay.v1') throw new Error('Relay subprotocol not negotiated');
+          const hello = JSON.stringify({ type: 'hello', endpoint: identity.endpoint, token: identity.token });
+          if (new TextEncoder().encode(hello).length > 32768) throw new Error('Relay credentials exceed protocol limit');
+          socket.send(hello);
+        } catch (error) { finish(error); }
+      };
+      socket.onmessage = (event) => {
+        const size = typeof event.data === 'string' ? new TextEncoder().encode(event.data).length : event.data.byteLength;
+        if (!Number.isFinite(size) || size > 8 * 1024 * 1024 + 64 || queuedBytes + size > 16 * 1024 * 1024) {
+          finish(new Error('Relay receive budget exhausted')); return;
+        }
+        queuedBytes += size;
+        chain = chain.then(async () => {
+          if (finished || this.socket !== socket) return;
+          await this.handleFrame(event.data, generation);
+          if (this.authenticated) clearTimeout(helloTimer);
+        }).catch(finish).finally(() => { queuedBytes -= size; });
+      };
+      socket.onclose = () => finish();
+      socket.onerror = () => finish(new Error('Relay WebSocket failed'));
+      identityTimer = setInterval(async () => {
+        try {
+          const current = await this.credentials();
+          if (finished) return;
+          if (current.endpoint !== identity.endpoint || current.securityEpoch !== identity.securityEpoch || (identity.expiresAt && identity.expiresAt - Date.now() < 30000 && current.token !== identity.token)) finish();
+          else if (this.authenticated) this.warmPeers();
+        } catch (error) { finish(error); }
+      }, 5000);
+    });
+  }
+
+  control(message) {
+    if (!this.socket || this.socket.readyState !== 1 || !this.authenticated) throw new Error('Relay not connected');
+    const text = JSON.stringify(message);
+    if (this.socket.bufferedAmount + new TextEncoder().encode(text).length > 16 * 1024 * 1024) throw new Error('Relay send budget exhausted');
+    this.socket.send(text);
+  }
+
+  validId(id) { return Number.isSafeInteger(id) && id > 0; }
+  validEndpoint(peer) { return typeof peer === 'string' && peer.length > 0 && new TextEncoder().encode(peer).length <= 512 && !/\p{Cc}/u.test(peer); }
+
+  warmPeers() {
+    const peers = [...this.desired];
+    if (!peers.length) return;
+    const offset = (this.warmOffset || 0) % peers.length;
+    const count = Math.min(peers.length, 16);
+    this.warmOffset = offset + count;
+    for (let i = 0; i < count; i++) this.ensurePeer(peers[(offset + i) % peers.length], true).catch(() => {});
+  }
+
+  rememberPeer(peer) {
+    if (this.desired.has(peer)) {
+      this.desired.delete(peer);
+    } else if (this.desired.size >= MAX_DESIRED_PEERS) {
+      const stale = [...this.desired].find((candidate) => !this.peers.has(candidate) && !this.dials.has(candidate));
+      if (stale === undefined) return false;
+      this.desired.delete(stale);
+    }
+    this.desired.add(peer);
+    return true;
+  }
+
+  async prepareChannel(channel, peer, generation) {
+    if (!this.validId(channel) || !this.validEndpoint(peer)) throw new Error('Invalid relay channel');
+    const existing = this.channels.get(channel);
+    if (existing) {
+      if (existing.peer !== peer) throw new Error('Relay channel identity changed');
+      return existing;
+    }
+    const key = `${generation}:${channel}`;
+    const handler = await this.prepare(channel, peer, key);
+    if (this.stopped || this.generation !== generation || !this.socket) { if (handler.closed) await handler.closed(); throw new Error('Stale relay channel'); }
+    const entry = { channel, peer, key, handler, ready: false, active: false };
+    this.channels.set(channel, entry);
+    return entry;
+  }
+
+  async handleFrame(frame, generation) {
+    if (typeof frame !== 'string') {
+      if (!this.authenticated) throw new Error('Unauthenticated relay data');
+      const data = new Uint8Array(frame);
+      if (data.byteLength < 8) throw new Error('Invalid relay data frame');
+      const id = new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(0, false);
+      if (id === 0n || id > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Invalid relay channel');
+      const entry = this.channels.get(Number(id));
+      if (entry && entry.active) {
+        try { if (await entry.handler.receive(data.subarray(8)) === true) this.completeChannel(entry); }
+        catch (error) { this.closeChannel(entry.channel); this.onError(error); }
+      }
+      return;
+    }
+    if (new TextEncoder().encode(frame).length > 32768) throw new Error('Relay control exceeds protocol limit');
+    const message = JSON.parse(frame);
+    if (message.type === 'welcome') {
+      if (this.authenticated || !this.validId(message.session)) throw new Error('Invalid relay welcome');
+      this.authenticated = true;
+      this.wake();
+      this.warmPeers();
+      return;
+    }
+    if (!this.authenticated) throw new Error('Relay authentication required');
+    switch (message.type) {
+      case 'incoming':
+        try {
+          await this.prepareChannel(message.channel, message.peer, generation);
+          this.control({ type: 'accept', channel: message.channel });
+        } catch (_) {
+          if (this.validId(message.channel)) this.control({ type: 'reject', channel: message.channel });
+          else throw new Error('Invalid relay incoming channel');
+        }
+        break;
+      case 'connected': {
+        const entry = await this.prepareChannel(message.channel, message.peer, generation);
+        if (message.request != null) entry.request = message.request;
+        if (!entry.active) {
+          entry.active = true;
+          entry.handshakeTimer = setTimeout(() => {
+            if (this.channels.get(entry.channel) === entry && !entry.ready) this.closeChannel(entry.channel);
+          }, 10000);
+          if (await entry.handler.ready() !== false) this.completeChannel(entry);
+        } else if (entry.ready) this.completeChannel(entry);
+        break;
+      }
+      case 'closed':
+        if (!this.validId(message.channel)) throw new Error('Invalid relay closed channel');
+        if (this.pending.has(message.request)) {
+          const pending = this.pending.get(message.request);
+          clearTimeout(pending.timer); this.pending.delete(message.request);
+          pending.reject(new Error(`Relay peer closed: ${message.reason}`));
+        }
+        this.removeChannel(message.channel);
+        break;
+      case 'error': {
+        const pending = this.pending.get(message.request);
+        if (pending) { clearTimeout(pending.timer); this.pending.delete(message.request); pending.reject(new Error(`Relay connect rejected: ${message.code}`)); }
+        break;
+      }
+      default: throw new Error('Unknown relay control');
+    }
+  }
+
+  completeChannel(entry) {
+    if (this.channels.get(entry.channel) !== entry || !entry.active) return;
+    clearTimeout(entry.handshakeTimer);
+    entry.ready = true;
+    this.peers.set(entry.peer, entry.channel);
+    this.rememberPeer(entry.peer);
+    const pending = this.pending.get(entry.request);
+    if (pending) {
+      if (pending.peer !== entry.peer) throw new Error('Relay response identity mismatch');
+      clearTimeout(pending.timer); this.pending.delete(entry.request); pending.resolve(entry);
+    }
+  }
+
+  ensurePeer(peer, warm = false) {
+    if (!this.validEndpoint(peer)) return Promise.reject(new Error('Invalid relay endpoint'));
+    const id = this.peers.get(peer);
+    const existing = this.channels.get(id);
+    if (existing && existing.ready) {
+      if (!warm) this.rememberPeer(peer);
+      return Promise.resolve(existing);
+    }
+    if (this.dials.has(peer)) return this.dials.get(peer);
+    if (warm && !this.desired.has(peer)) return Promise.reject(new Error('Relay peer no longer desired'));
+    if (!warm && !this.rememberPeer(peer)) return Promise.reject(new Error('Relay peer capacity exhausted'));
+    const dial = (async () => {
+      await this.waitSocket();
+      const request = this.request++;
+      return await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { this.pending.delete(request); reject(new Error('Relay peer deadline exceeded')); }, 15000);
+        this.pending.set(request, { peer, resolve, reject, timer });
+        try { this.control({ type: 'connect', request, peer }); }
+        catch (error) { clearTimeout(timer); this.pending.delete(request); reject(error); }
+      });
+    })();
+    this.dials.set(peer, dial);
+    dial.finally(() => { if (this.dials.get(peer) === dial) this.dials.delete(peer); }).catch(() => {});
+    return dial;
+  }
+
+  send(channel, payload) {
+    const entry = this.channels.get(channel);
+    if (!entry || !entry.active || !this.authenticated || !this.socket || this.socket.readyState !== 1) throw new Error('Relay peer not ready');
+    const bytes = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
+    if (bytes.byteLength + 8 > 8 * 1024 * 1024 + 64) throw new Error('Relay payload too large');
+    const frame = new Uint8Array(8 + bytes.byteLength);
+    new DataView(frame.buffer).setBigUint64(0, BigInt(channel), false);
+    frame.set(bytes, 8);
+    if (this.socket.bufferedAmount + frame.byteLength > 16 * 1024 * 1024) { this.closeChannel(channel); throw new Error('Relay send budget exhausted'); }
+    // A submitted message is never replayed on reconnect; its delivery may
+    // already have happened even if the socket closes immediately afterwards.
+    this.socket.send(frame);
+  }
+
+  removeChannel(channel) {
+    const entry = this.channels.get(channel);
+    if (!entry) return;
+    clearTimeout(entry.handshakeTimer);
+    const pending = this.pending.get(entry.request);
+    if (pending) { clearTimeout(pending.timer); this.pending.delete(entry.request); pending.reject(new Error('Relay encrypted handshake closed')); }
+    this.channels.delete(channel);
+    if (this.peers.get(entry.peer) === channel) this.peers.delete(entry.peer);
+    entry.ready = false;
+    entry.active = false;
+    if (entry.handler.closed) Promise.resolve(entry.handler.closed()).catch(this.onError);
+  }
+
+  closeChannel(channel) {
+    this.removeChannel(channel);
+    try { this.control({ type: 'close', channel }); }
+    catch (_) {
+      // A close that cannot enter the bounded queue would leave an accepted
+      // server channel behind. Retire this socket and release its channels.
+      if (this.finishCycle) this.finishCycle();
+    }
+  }
+
+  stop() {
+    this.stopped = true;
+    this.desired.clear();
+    if (this.finishCycle) this.finishCycle();
+    clearTimeout(this.delayTimer);
+    if (this.resumeDelay) this.resumeDelay();
+    this.wake();
+  }
+}
+// @relay-client end
+
+// @relay-adapter begin
+// Trusted AIS I/O stays in the worker; proof bodies never cross the DOM bridge.
+globalThis.__actrRelayTrustedRequest = async function(base, path, body, signaling, proof) {
+  const url = new URL(base);
+  const secure = new URL(signaling).protocol === 'wss:';
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || (secure && url.protocol !== 'https:')) throw new Error('Relay encryption requires trusted HTTPS AIS');
+  url.pathname = url.pathname.replace(/\/$/, '') + '/' + path;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(url, {method: body === null ? 'GET' : 'POST', body: body === null ? undefined : body, headers: body === null ? {} : {'Content-Type':'application/json', 'x-actr-client-proof':proof}, redirect:'error', signal:controller.signal});
+    if (!response.ok || !response.body) throw new Error('Trusted AIS request rejected');
+    const reader = response.body.getReader();
+    const parts = []; let size = 0;
+    try {
+      while (true) {
+        const {value,done} = await reader.read(); if (done) break;
+        size += value.byteLength; if (size > 32768) throw new Error('Trusted AIS response exceeds limit');
+        parts.push(value);
+      }
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    const bytes = new Uint8Array(size); let offset = 0;
+    for (const part of parts) { bytes.set(part,offset); offset += part.byteLength; }
+    return new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+  } finally { clearTimeout(timer); }
+};
+
+const relayClients = new Map();
+
+function startRelayForClient(clientId) {
+  if (relayClients.has(clientId)) return relayClients.get(clientId);
+  const relay = new LoranRelayClient({
+    credentials: () => wasm_bindgen.relay_connection_info(clientId),
+    discover: async () => {
+      const info = await wasm_bindgen.relay_connection_info(clientId);
+      const url = new URL(info.signalingUrl);
+      if (!['ws:', 'wss:'].includes(url.protocol)) throw new Error('Invalid signaling URL');
+      const secure = url.protocol === 'wss:';
+      url.protocol = secure ? 'https:' : 'http:';
+      url.pathname = '/relay/config'; url.search = ''; url.hash = '';
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
+        if (response.status === 404) return null;
+        if (!response.ok) throw new Error('Relay discovery failed');
+        if (!response.body) throw new Error('Empty relay discovery');
+        const reader = response.body.getReader();
+        const chunks = [];
+        let size = 0;
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > 32768) throw new Error('Relay discovery exceeds size limit');
+            chunks.push(value);
+          }
+        } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+        const bytes = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        const config = JSON.parse(text);
+        if (config.version !== 1) throw new Error('Unsupported relay discovery version');
+        if (!config.enabled && !config.url) return null;
+        url.protocol = secure ? 'wss:' : 'ws:'; url.pathname = '/relay/ws';
+        const endpoint = config.url ? new URL(config.url) : url;
+        if (!['ws:', 'wss:'].includes(endpoint.protocol) || (secure && endpoint.protocol !== 'wss:') || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid advertised relay URL');
+        return endpoint.href;
+      } finally { clearTimeout(timer); }
+    },
+    prepare: async (channel, endpoint, key) => {
+      const rawSend = (payload) => {
+        if (relay.channels.get(channel)?.key !== key) throw new Error('Stale encrypted relay channel');
+        if (payload === null) relay.closeChannel(channel);
+        else relay.send(channel, payload);
+      };
+      const peer = await wasm_bindgen.prepare_relay_connection(clientId, endpoint, key, rawSend);
+      let announced = false;
+      const notify = (connected) => {
+        try {
+          clientPorts.get(clientId)?.postMessage({ type: 'webrtc_event', payload: {
+            eventType: 'relay_state_changed', data: { peerId: peer, connected },
+          } });
+        } catch (_) { /* DOM detached; the worker still owns the connection. */ }
+      };
+      return {
+        ready: () => wasm_bindgen.start_relay_handshake(clientId, key),
+        receive: async (payload) => {
+          const ready = await wasm_bindgen.handle_relay_record(clientId, key, payload);
+          if (ready && !announced) { announced = true; notify(true); }
+          return ready;
+        },
+        closed: async () => {
+          await wasm_bindgen.relay_channel_closed(clientId, peer, key);
+          if (!relay.peers.has(endpoint)) notify(false);
+        },
+      };
+    },
+    onError: (error) => emitSwLog('debug', 'relay_connection_event', String(error)),
+  });
+  relayClients.set(clientId, relay);
+  relay.start().catch((error) => emitSwLog('warn', 'relay_start_failed', String(error)));
+  return relay;
+}
+
+globalThis.__actrRelayEnsure = (clientId, peer) => {
+  startRelayForClient(clientId).ensurePeer(peer).catch((error) => emitSwLog('debug', 'relay_peer_pending', String(error)));
+};
+globalThis.__actrRelayStop = (clientId) => {
+  const relay = relayClients.get(clientId);
+  relayClients.delete(clientId);
+  if (relay) relay.stop();
+};
+// @relay-adapter end
+
 const clientPorts = new Map();
 const browserToSwClient = new Map();
 const clientRegistrations = new Map();
@@ -240,6 +707,7 @@ async function registerClient(registration) {
     // Use the validated Host result rather than guessing from the input.
     RUNTIME_CLIENT_KEY_ID = clientKeyId;
     registration.registered = true;
+    startRelayForClient(clientId);
     delete config.realm_client_key;
     console.log('[SW] Client registered (WBG):', clientId);
     emitSwLog('info', 'client_registered', { clientId, variant: 'wbg' });
@@ -909,10 +1377,11 @@ self.addEventListener('message', async (event) => {
         try {
           const dcPort = message.payload.port;
           const dcPeerId = message.payload.peerId;
-          if (dcPort && dcPeerId) {
-            await wasm_bindgen.register_datachannel_port(clientId, dcPeerId, dcPort);
+          const dcConnectionId = message.payload.connectionId;
+          if (dcPort && dcPeerId && dcConnectionId) {
+            await wasm_bindgen.register_datachannel_port(clientId, dcPeerId, dcConnectionId, dcPort);
           } else {
-            console.warn('[SW] register_datachannel_port: missing port or peerId');
+            console.warn('[SW] register_datachannel_port: missing port, peerId, or connectionId');
           }
         } catch (error) {
           console.error('[SW] register_datachannel_port failed:', error);

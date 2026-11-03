@@ -42,7 +42,11 @@ nonce-auth = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
+md5 = "0.8"
+sha2 = "0.10"
+stun-protocol = { workspace = true }
 tokio = { workspace = true, features = ["macros", "test-util"] }
+serial_test = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 tempfile = { workspace = true }
 ed25519-dalek = { workspace = true }

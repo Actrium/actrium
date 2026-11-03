@@ -85,6 +85,17 @@ class ProtocolAuditTest(unittest.TestCase):
         self.commit_file("text.txt", b"t" + TOKEN + b"\n")
         self.audit()
 
+    def test_reviewed_upstream_prose_is_exact_and_history_safe(self):
+        line = b"    /// " + TOKEN.capitalize() + b" the server to permit traffic to and from `peer_addr`."
+        self.commit_file("upstream.rs", line + b"\n")
+        self.audit()
+        (self.repo / "upstream.rs").write_bytes(line + b" file." + TOKEN + b"\n")
+        self.assertIn("upstream.rs", self.audit(expected=1))
+        (self.repo / "upstream.rs").write_bytes(line + b"\n" + TOKEN + b"\n")
+        self.assertIn("upstream.rs", self.audit(expected=1))
+        (self.repo / "upstream.rs").write_bytes(line + b"\r\n")
+        self.audit()
+
     def test_tree_hash_bytes_are_not_scanned_as_names(self):
         failures = []
         raw_hash = b"\0" + TOKEN + b"\0" * 15

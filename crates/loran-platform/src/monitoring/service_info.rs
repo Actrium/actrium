@@ -68,7 +68,7 @@ impl ServiceInfo {
         config: &ActrixConfig,
     ) -> Self {
         let (port_info, domain_name) = match service_type {
-            ServiceType::Signaling => {
+            ServiceType::Signaling | ServiceType::Relay => {
                 if let Some(ref h) = config.bind.http {
                     (
                         h.port.to_string(),

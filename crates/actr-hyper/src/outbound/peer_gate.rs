@@ -888,6 +888,7 @@ impl PeerGate {
     }
 
     /// Get pending_requests reference (for WebRtcGate to share)
+    #[cfg(test)]
     pub(crate) fn get_pending_requests(&self) -> PendingRequestsMap {
         self.pending_requests.clone()
     }

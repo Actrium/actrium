@@ -85,6 +85,7 @@ scaffold_echo_service() {
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
+    python3 "$REPO_ROOT/scripts/actr/apply-upstream-patches.py" "$TMP_SERVICE_DIR/Cargo.toml"
     pin_workspace_actr_dependencies "$TMP_SERVICE_DIR/Cargo.toml"
     mkdir -p "$(dirname "$SERVICE_KEYCHAIN")"
     cp "$PROVISIONED_KEYCHAIN" "$SERVICE_KEYCHAIN"
