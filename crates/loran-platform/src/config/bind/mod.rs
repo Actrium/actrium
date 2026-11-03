@@ -30,6 +30,7 @@ pub struct BindConfig {
     /// ICE service binding.
     ///
     /// UDP binding for the STUN/TURN services.
+    #[serde(default)]
     pub ice: IceBindConfig,
 }
 

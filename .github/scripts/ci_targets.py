@@ -29,6 +29,7 @@ FULL_TRIGGER_PATTERNS = (
     ".github/actions/**",
     ".github/scripts/**",
     ".github/workflows/**",
+    ".cargo/config.toml",
     "Cargo.toml",
     "Cargo.lock",
     "rust-toolchain",
@@ -38,6 +39,9 @@ FULL_TRIGGER_PATTERNS = (
     "deny.toml",
     "CHANGELOG.md",
     "scripts/actr/release-train.sh",
+    "scripts/actr/check-upstream-patches.py",
+    "scripts/actr/apply-upstream-patches.py",
+    "scripts/actr/tests/test_apply_upstream_patches.py",
     "scripts/actr/generate-changelog.py",
     "scripts/actr/merge-release-pr.py",
 )

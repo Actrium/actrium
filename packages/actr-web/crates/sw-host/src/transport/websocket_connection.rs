@@ -35,6 +35,9 @@ pub struct WebSocketConnection {
 }
 
 impl WebSocketConnection {
+    pub(crate) fn same_connection(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
     /// Create a new WebSocket connection wrapper.
     pub fn new(url: impl Into<String>) -> Self {
         Self {

@@ -7,6 +7,18 @@ import ci_targets
 
 
 class CiTargetsTest(unittest.TestCase):
+    def test_upstream_overrides_run_the_full_gate(self) -> None:
+        for path in (
+            "Cargo.toml",
+            "scripts/actr/check-upstream-patches.py",
+            "scripts/actr/apply-upstream-patches.py",
+            "scripts/actr/tests/test_apply_upstream_patches.py",
+        ):
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+                self.assertTrue(all(targets.values()))
+                self.assertIn(f"full_trigger:{path}", reasons)
+
     def test_committed_kotlin_binding_runs_native_checksum_and_kotlin_checks(self) -> None:
         path = "packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/actr.kt"
         targets, reasons = ci_targets.detect_targets([path], full_run=False)

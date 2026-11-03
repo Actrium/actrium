@@ -467,7 +467,6 @@ mod projection {
                 signature: bytes::Bytes::from(vec![0; 64]),
             },
             None,
-            Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             None,
             0,
         )

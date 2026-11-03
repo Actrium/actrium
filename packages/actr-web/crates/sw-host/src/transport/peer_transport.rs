@@ -3,6 +3,7 @@
 //! Manages transports for multiple destinations and exposes a unified send API.
 
 use super::dest_transport::DestTransport;
+use super::handover::HandoverBook;
 use super::wire_builder::WireBuilder;
 use actr_web_common::{Dest, PayloadType, WebResult};
 use dashmap::DashMap;
@@ -31,6 +32,7 @@ enum DestState {
 /// - Support pluggable connection factories
 /// - Prevent duplicate creation with `DashMap` and `oneshot`
 pub struct PeerTransport {
+    pub(crate) handover: Arc<HandoverBook>,
     /// Local ID.
     local_id: String,
 
@@ -49,6 +51,7 @@ impl PeerTransport {
     /// - `wire_builder`: asynchronously creates wire handles for a destination
     pub fn new(local_id: String, wire_builder: Arc<dyn WireBuilder>) -> Self {
         Self {
+            handover: Arc::new(HandoverBook::default()),
             local_id,
             transports: Arc::new(DashMap::new()),
             wire_builder,
@@ -117,7 +120,8 @@ impl PeerTransport {
                     connections.len()
                 );
 
-                let transport = DestTransport::new(dest.clone(), connections).await?;
+                let mut transport = DestTransport::new(dest.clone(), connections).await?;
+                transport.set_handover(self.handover.clone());
                 Ok(Arc::new(transport))
             }
             .await;
@@ -229,6 +233,15 @@ impl PeerTransport {
     /// Check whether a connection exists for the specified destination.
     pub fn has_dest(&self, dest: &Dest) -> bool {
         self.transports.contains_key(dest)
+    }
+
+    pub fn existing_transport(&self, dest: &Dest) -> Option<Arc<DestTransport>> {
+        self.transports
+            .get(dest)
+            .and_then(|entry| match entry.value() {
+                DestState::Connected(transport) => Some(transport.clone()),
+                _ => None,
+            })
     }
 
     /// Inject a new connection into the WirePool for a destination.

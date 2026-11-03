@@ -11,8 +11,10 @@
 # All services are controlled by this bitmask. No individual enabled fields are needed.
 #
 # Examples:
-#   31 (0b11111) = All services (1+2+4+8+16)
-#   22 (0b10110) = Signer + TURN + STUN (16+4+2)
+#   63 (0b111111) = All services including WSS relay
+#   31 (0b011111) = All original services without WSS relay
+#   32 (0b100000) = WSS relay only
+#   22 (0b10110) = KS + TURN + STUN (16+4+2)
 #   6  (0b00110) = TURN + STUN (4+2)
 #   4  (0b00100) = TURN only
 #   2  (0b00010) = STUN only
@@ -301,3 +303,11 @@ node_name = "actrix-edge-01"
 # Required only when grpc_api is enabled. Keep empty otherwise.
 shared_secret = ""
 max_clock_skew_secs = 300
+
+# ============================================================================
+# Production Configuration Example
+# Multiplexed peer relay: add 32 to enable to host /relay/ws locally.
+# auth="aid" uses the Realm-scoped trusted Issuer signing-key cache.
+[relay]
+auth = "aid"
+# public_url = "wss://relay.example.org/relay/ws"

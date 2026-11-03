@@ -876,6 +876,7 @@ pub struct WebSocketSignalingClient {
 impl WebSocketSignalingClient {
     /// Create new WebSocket signaling client
     pub fn new(config: SignalingConfig) -> Self {
+        crate::wire::ensure_tls_provider();
         let stats = Arc::new(AtomicSignalingStats::default());
         let (inbound_egress, inbound_rx) = InboundEgress::new(config.inbound_queue, stats.clone());
         let (event_tx, _event_rx) = broadcast::channel(64);

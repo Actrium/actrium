@@ -17,13 +17,13 @@
 //!
 //! The server blocks until stdin reaches EOF (parent process exited).
 
-use std::io::Read;
+use std::io::BufRead;
 
 use actr_config::ConfigParser;
 use actr_framework::{Bytes, Context as RtContext, MessageDispatcher, Workload as RtWorkload};
 use actr_hyper::Node;
 use actr_mock_actrix::MockActrixServer;
-use actr_protocol::{ActorResult, ActrError, RpcEnvelope};
+use actr_protocol::{ActorResult, ActrError, DataChunk, PayloadType, RpcEnvelope};
 use async_trait::async_trait;
 use base64::Engine;
 use clap::Parser;
@@ -47,7 +47,7 @@ impl MessageDispatcher for FixtureDispatcher {
     async fn dispatch<C: RtContext>(
         _workload: &Self::Workload,
         envelope: RpcEnvelope,
-        _ctx: &C,
+        ctx: &C,
     ) -> ActorResult<Bytes> {
         match envelope.route_key.as_str() {
             "fixture.Fixture.Echo" => {
@@ -59,6 +59,32 @@ impl MessageDispatcher for FixtureDispatcher {
                 // Never returns — caller will time out.
                 info!("fixture: SlowEcho — blocking forever (caller timeout expected)");
                 std::future::pending::<ActorResult<Bytes>>().await
+            }
+            "fixture.Fixture.ProbePeer" => {
+                let peer = ctx.caller_id().cloned().ok_or_else(|| {
+                    ActrError::InvalidArgument("ProbePeer requires a caller".into())
+                })?;
+                let payload = envelope.payload.unwrap_or_default();
+                let reply = ctx
+                    .call_raw(&peer, "browser.Echo", payload.clone(), 5_000)
+                    .await?;
+                for (sequence, lane) in [
+                    (1, PayloadType::StreamReliable),
+                    (2, PayloadType::StreamLatencyFirst),
+                ] {
+                    ctx.send_data_chunk(
+                        &actr_framework::Dest::Peer(peer.clone()),
+                        DataChunk {
+                            stream_id: "relay-interop".into(),
+                            sequence,
+                            payload: payload.clone(),
+                            ..Default::default()
+                        },
+                        lane,
+                    )
+                    .await?;
+                }
+                Ok(reply)
             }
             route => {
                 warn!(route, "fixture: unknown route");
@@ -76,6 +102,12 @@ struct Args {
     /// Deny all inbound calls (ACL deny-all mode for PermissionDenied tests).
     #[arg(long)]
     deny_all: bool,
+    /// Register stream echo callbacks for browser relay interoperability tests.
+    #[arg(long)]
+    relay_test: bool,
+    /// Disable peer signaling forwarding so data must use the shared relay.
+    #[arg(long)]
+    pause_rtc: bool,
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -92,22 +124,17 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    // ── 1. Start mock-actrix + find a free port for the server's WS listener ───
-    let mock = MockActrixServer::start().await?;
+    // ── 1. Start mock-actrix with the shared outbound relay ──────────────────
+    let mock = MockActrixServer::start_with_relay().await?;
+    if args.pause_rtc {
+        mock.pause_forwarding();
+    }
     let port = mock.port();
     let publisher_key = mock.publisher_signing_key();
     let publisher_pubkey_b64 =
         base64::engine::general_purpose::STANDARD.encode(publisher_key.verifying_key().as_bytes());
 
-    // Allocate a free port for the fixture server's direct WebSocket listener.
-    // Binding to port 0 lets the OS pick an unused port; we retrieve it then
-    // drop the socket so the fixture server can bind the same port later.
-    let ws_port = {
-        let tmp_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        tmp_listener.local_addr()?.port()
-    };
-
-    info!(port, ws_port, "mock-actrix ready");
+    info!(port, "mock-actrix ready");
 
     // ── 2. Write a temp manifest + runtime config ────────────────────────────
     let tmp = tempfile::tempdir()?;
@@ -154,6 +181,9 @@ url = "http://127.0.0.1:{port}/issuer"
 [deployment]
 realm = "test@example.com"
 
+[hyper]
+data_dir = "{data_dir}"
+
 [discovery]
 visible = true
 
@@ -166,18 +196,14 @@ force_relay = false
 stun_urls = []
 turn_urls = []
 
-[websocket]
-listen_port = {ws_port}
-advertised_host = "127.0.0.1"
-
 {acl_section}
 [[trust]]
 kind = "static"
 pubkey_b64 = "{publisher_pubkey_b64}"
 "#,
         manifest_path = manifest_path.display(),
+        data_dir = tmp.path().join("hyper").display(),
         port = port,
-        ws_port = ws_port,
         acl_section = acl_section,
         publisher_pubkey_b64 = publisher_pubkey_b64,
     );
@@ -197,14 +223,32 @@ pubkey_b64 = "{publisher_pubkey_b64}"
 
     let actor_id = actr_ref.actor_id();
     info!(?actor_id, "fixture actor ready");
+    if args.relay_test {
+        let context = actr_ref.app_context().await;
+        let echo = context.clone();
+        context
+            .register_stream("relay-interop".into(), move |chunk, peer| {
+                let echo = echo.clone();
+                Box::pin(async move {
+                    let lane = if chunk.sequence == 3 {
+                        PayloadType::StreamLatencyFirst
+                    } else {
+                        PayloadType::StreamReliable
+                    };
+                    echo.send_data_chunk(&actr_framework::Dest::Peer(peer), chunk, lane)
+                        .await
+                })
+            })
+            .await?;
+    }
 
     // ── 4. Emit readiness JSON ───────────────────────────────────────────────
     // Use println! so it goes to stdout; tracing goes to stderr.
     let ready = serde_json::json!({
         "port": port,
-        "ws_port": ws_port,
         "publisher_pubkey_b64": publisher_pubkey_b64,
         "realm": "test@example.com",
+        "actor_id": actor_id.to_string_repr(),
         "actr_type": {
             "publisher": "test",
             "name": "ErrorFixture",
@@ -214,16 +258,27 @@ pubkey_b64 = "{publisher_pubkey_b64}"
     println!("{}", ready);
 
     // ── 5. Block until stdin closes (parent exited) ──────────────────────────
-    tokio::task::spawn_blocking(|| {
-        let mut buf = [0u8; 64];
-        loop {
-            match std::io::stdin().read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
+    let (commands, mut incoming) = tokio::sync::mpsc::unbounded_channel();
+    let input = tokio::task::spawn_blocking(move || {
+        for line in std::io::stdin().lock().lines() {
+            match line {
+                Ok(line) => {
+                    if commands.send(line).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
             }
         }
-    })
-    .await?;
+    });
+    while let Some(command) = incoming.recv().await {
+        match command.trim() {
+            "disconnect-relay" => mock.disconnect_relay_connections(),
+            "resume-rtc" => mock.resume_forwarding(),
+            _ => {}
+        }
+    }
+    input.await?;
 
     info!("fixture: stdin closed, shutting down");
     actr_ref.shutdown();

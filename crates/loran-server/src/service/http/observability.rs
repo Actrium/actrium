@@ -27,6 +27,7 @@ const KNOWN_SERVICES: &[&str] = &[
     "admin",
     "stun",
     "turn",
+    "relay",
     "daemon",
 ];
 
@@ -335,6 +336,7 @@ async fn resolve_service_status(service: &str, state: &ObservabilityState) -> St
         "signer" => cfg.is_signer_enabled(),
         "stun" => cfg.is_stun_enabled(),
         "turn" => cfg.is_turn_enabled(),
+        "relay" => cfg.is_relay_enabled(),
         // control, admin, daemon are always enabled
         "control" | "admin" | "daemon" => true,
         _ => false,
@@ -351,6 +353,7 @@ async fn resolve_service_status(service: &str, state: &ObservabilityState) -> St
         "signer" => Some("Signer Service"),
         "stun" => Some("STUN Server"),
         "turn" => Some("TURN Server"),
+        "relay" => Some("WebSocket Relay Service"),
         // control/admin/daemon don't have collector entries — always healthy
         _ => None,
     };

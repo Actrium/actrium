@@ -15,6 +15,7 @@ pub enum ServiceType {
     Issuer,
     Signer,
     PublisherRegistry,
+    Relay,
 }
 
 /// Convert ServiceType to ResourceType
@@ -27,6 +28,7 @@ impl From<ServiceType> for ResourceType {
             ServiceType::Issuer => ResourceType::Issuer,
             ServiceType::Signer => ResourceType::Signer,
             ServiceType::PublisherRegistry => ResourceType::PublisherRegistry,
+            ServiceType::Relay => ResourceType::Relay,
         }
     }
 }

@@ -8,15 +8,14 @@ repository.workspace = true
 description = "WebRTC STUN service implementation, as a component of aux-servers"
 
 [dependencies]
+turn_crate = { workspace = true }
 webrtc-stun = { workspace = true }
 
 tokio = { workspace = true, features = ["net", "signal"] }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-webrtc = { workspace = true }
-
-platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.7" }
+async-trait = { workspace = true }
 
 [lib]
 name = "stun"

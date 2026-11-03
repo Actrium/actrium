@@ -1,21 +1,18 @@
 #!/bin/bash
-set -e
-
-# Clear host-toolchain RUSTFLAGS so host-linker flags (e.g. `-fuse-ld=mold`
-# from a global ~/.cargo/config.toml `[build] rustflags`) do not leak into
-# the wasm32 target build. rust-lld does not recognize those linker args
-# and errors out.
-export RUSTFLAGS=""
-export CARGO_ENCODED_RUSTFLAGS=""
+set -euo pipefail
 
 echo "Building Service Worker Host..."
 
-# cd to the sw-host crate directory so wasm-pack reads the correct Cargo.toml.
+# Build from the sw-host crate directory with its own workspace manifest.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Avoid wasm-pack's job-time downloader on the Linux fleet's proxied egress.
-# Other platforms keep wasm-pack's native tool selection.
+# Use the repository's canonical target directory when the helper is installed.
+if [ -x /usr/local/bin/rust-target-env ]; then
+  eval "$(/usr/local/bin/rust-target-env)"
+fi
+
+# Avoid wasm-pack's downloader on the Linux fleet's proxied egress.
 if [ "$(uname -s)/$(uname -m)" = "Linux/x86_64" ]; then
   bash "$SCRIPT_DIR/../../../../tools/ci/runner/install-wasm-bindgen.sh" ../../Cargo.lock
 fi
@@ -25,15 +22,17 @@ TMPDIR="${TMPDIR:-$(pwd)/.tmp}"
 export TMPDIR
 mkdir -p "$TMPDIR"
 
-# Clean old builds
 rm -rf ../../dist/sw
 
-# Build WASM (target: no-modules, suitable for Service Workers)
-wasm-pack build \
+# Use the committed wasm32 flags instead of the runner's native RUSTFLAGS.
+# Preserve the release + bindgen pipeline without an extra Binaryen pass.
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS wasm-pack build \
   --target no-modules \
   --out-dir ../../dist/sw \
   --out-name actr_sw_host \
-  --release
+  --release \
+  --no-opt \
+  -- --locked
 
 # Generate npm package metadata
 cat > ../../dist/sw/package.json << EOF
@@ -44,7 +43,7 @@ cat > ../../dist/sw/package.json << EOF
   "main": "actr_sw_host.js",
   "types": "actr_sw_host.d.ts",
   "files": [
-    "actr_sw_host.wasm",
+    "actr_sw_host_bg.wasm",
     "actr_sw_host.js",
     "actr_sw_host.d.ts"
   ]

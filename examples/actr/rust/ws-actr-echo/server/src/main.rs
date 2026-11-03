@@ -1,10 +1,5 @@
-//! WS Echo Server - using/use WebSocket channel[...] Actor server
-//!
-//! via/throughconfig [system.websocket] [...] WebSocket direct connection[...]:
-//! - listen_port: [...]portlisten[...] WebSocket connection
-//! - advertised_host: register[...]signalingservice[...]accessibleaddress
-//!
-//! clientvia/throughsignalingservice[...]discover ws_address [...], directlyvia/through WebSocket establishconnection.
+//! Relay echo service. Peer sessions use the SDK outbound Loran relay path.
+//! No application WebSocket listener or advertised peer address is required.
 
 mod echo_service;
 mod generated;
@@ -29,16 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("🚀 WS Echo Server start");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    info!("📡 WebSocket direct connection[...]");
-    info!(
-        "🔌 WebSocket listenport: {:?}",
-        config.websocket_listen_port
-    );
-    info!(
-        "📣 advertised/broadcastaddress: {:?}",
-        config.websocket_advertised_host
-    );
-    info!("📡 need/require signaling-server [...] ws://localhost:8081");
+    info!("Peer relay is discovered from the configured Loran signaling endpoint");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -61,10 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ EchoService workload created");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // 3. start ActrNode (connectionsignalingservice[...], register ws_address, listenport)
+    // 3. start ActrNode (register with signaling and connect outbound to relay)
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     info!("🚀 start ActrNode...");
-    info!("   (nodewill[...] WebSocket addressregister[...]signalingservice[...])");
+    info!("   Peer relay requires no application listener");
 
     let actr_ref = match node.start().await {
         Ok(actr) => actr,
@@ -79,8 +65,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🆔 Server ID: {:?}", actr_ref.actor_id());
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("🎉 WS Echo Server alreadyfully/completelystart[...]register");
-    info!("🔌 WebSocket addressalreadyreport[...]signalingservice[...]");
-    info!("📡 waiting/wait forclientvia/through WebSocket connection...");
+    info!("Outbound relay discovery enabled");
+    info!("Waiting for peer RPC requests");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

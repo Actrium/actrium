@@ -126,6 +126,17 @@ impl AIdCredentialValidator {
         }
     }
 
+    /// Get currently trusted Realm issuer material for domain-separated certificates.
+    pub async fn get_verifying_key(
+        realm: &str,
+        key_id: u32,
+    ) -> Result<Option<(VerifyingKey, u64)>, AidError> {
+        let cache = Self::get_cache()?;
+        Ok(Self::accepted_cached_key(&cache, realm, key_id)
+            .await?
+            .map(|(key, expiry)| (key, if expiry == 0 { u64::MAX } else { expiry })))
+    }
+
     /// Write the Ed25519 verifying key into the global KeyCache (called by the issuer)
     ///
     /// Issuer calls this method after loading or refreshing the signing key, so that signaling and other services can verify credentials.

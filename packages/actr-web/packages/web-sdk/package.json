@@ -19,7 +19,8 @@
     "build": "tsc && cp src/actor.sw.js dist/actor.sw.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist/",
-    "test": "vitest"
+    "test": "vitest",
+    "test:relay": "vitest run src/relay.test.mjs src/peer-paths.test.js"
   },
   "dependencies": {
     "@actrium/actr-dom": "workspace:*",

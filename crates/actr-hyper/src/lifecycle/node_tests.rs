@@ -490,7 +490,6 @@ async fn actorless_harness() -> (
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         None,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         None,
         0,
     );
@@ -1187,6 +1186,167 @@ fn build_response_envelope_pins_zero_timeout_per_contract() {
     assert!(err_env.error.is_some());
 }
 
+async fn response_route_test_gate(
+    peer: &ActrId,
+) -> (
+    Option<Arc<crate::wire::websocket::WebSocketGate>>,
+    tokio::sync::mpsc::UnboundedReceiver<tokio_tungstenite::tungstenite::Message>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let sink = futures_util::sink::unfold(tx, |tx, message| async move {
+        tx.send(message)
+            .map_err(|_| tokio_tungstenite::tungstenite::Error::ConnectionClosed)?;
+        Ok(tx)
+    });
+    let sink: crate::transport::WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
+    let gate = Arc::new(crate::wire::websocket::WebSocketGate::new_relay(
+        Arc::new(crate::transport::correlation::RpcCorrelation::new()),
+        Arc::new(DataChunkRegistry::new()),
+        PeerTypes::default(),
+    ));
+    gate.install_response_sink_for_test(peer.clone(), sink)
+        .await;
+    (Some(gate), rx)
+}
+
+#[tokio::test]
+async fn response_uses_ready_relay_after_proven_pre_send_rtc_failure() {
+    use crate::wire::webrtc::rtc::peer::send::{RtcSendAttempt, RtcSendError};
+    use actr_protocol::prost::Message as _;
+
+    for error in [
+        RtcSendError::ConnectionNotReady,
+        RtcSendError::DataChannelClosed,
+    ] {
+        let peer = ActrId {
+            realm: "test@example.com".into(),
+            serial_number: 9001,
+        };
+        let (gate, mut sent) = response_route_test_gate(&peer).await;
+        let response = RpcEnvelope {
+            request_id: "response-fallback".into(),
+            route_key: "test.Response".into(),
+            payload: Some(Bytes::from_static(b"reply")),
+            ..Default::default()
+        };
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = calls.clone();
+        let direct = async move {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            RtcSendAttempt::from_result(Err(error))
+        };
+        assert!(
+            try_direct_or_relay(
+                Some(direct),
+                &gate,
+                &peer,
+                &response,
+                "response-fallback",
+                "test.Response"
+            )
+            .await
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let tokio_tungstenite::tungstenite::Message::Binary(frame) =
+            sent.try_recv().expect("relay must receive the response")
+        else {
+            panic!("expected a binary relay response");
+        };
+        assert_eq!(frame[0], PayloadType::RpcReliable as u8);
+        assert_eq!(
+            u32::from_be_bytes(frame[1..5].try_into().unwrap()) as usize,
+            frame.len() - 5
+        );
+        let decoded = RpcEnvelope::decode(&frame[5..]).unwrap();
+        assert_eq!(decoded.request_id, response.request_id);
+        assert_eq!(decoded.payload, response.payload);
+        assert_eq!(
+            decoded.direction,
+            Some(actr_protocol::Direction::Response as i32)
+        );
+        assert!(matches!(
+            sent.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn response_never_replays_a_successful_or_uncertain_rtc_send() {
+    use crate::wire::webrtc::rtc::peer::send::{RtcSendAttempt, RtcSendError};
+
+    for result in [Ok(()), Err(RtcSendError::DataChunkDeliveryUncertain)] {
+        let peer = ActrId {
+            realm: "test@example.com".into(),
+            serial_number: 9002,
+        };
+        let (gate, mut sent) = response_route_test_gate(&peer).await;
+        let response = RpcEnvelope {
+            request_id: "response-no-replay".into(),
+            ..Default::default()
+        };
+        let direct = async move { RtcSendAttempt::from_result(result) };
+        assert!(
+            try_direct_or_relay(
+                Some(direct),
+                &gate,
+                &peer,
+                &response,
+                "response-no-replay",
+                "test.Response"
+            )
+            .await
+        );
+        assert!(matches!(
+            sent.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn response_requires_both_pre_send_facts_before_using_relay() {
+    use crate::transport::DeliveryProgress;
+    use crate::wire::webrtc::rtc::peer::send::{RtcSendAttempt, RtcSendError};
+
+    for (progress, proven_pre_send) in [
+        (DeliveryProgress::Unknown, true),
+        (DeliveryProgress::NotAttempted, false),
+    ] {
+        let peer = ActrId {
+            realm: "test@example.com".into(),
+            serial_number: 9003,
+        };
+        let (gate, mut sent) = response_route_test_gate(&peer).await;
+        let response = RpcEnvelope {
+            request_id: "response-no-proof".into(),
+            ..Default::default()
+        };
+        let direct = async move {
+            RtcSendAttempt {
+                result: Err(RtcSendError::ConnectionNotReady),
+                progress,
+                proven_pre_send,
+            }
+        };
+        assert!(
+            try_direct_or_relay(
+                Some(direct),
+                &gate,
+                &peer,
+                &response,
+                "response-no-proof",
+                "test.Response"
+            )
+            .await
+        );
+        assert!(matches!(
+            sent.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+}
+
 struct ResponsePathSessionOps;
 
 #[async_trait::async_trait]
@@ -1455,9 +1615,6 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         mailbox_path: None,
         scripts: std::collections::HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
-        websocket_listen_port: None,
-        websocket_security: Default::default(),
-        websocket_advertised_host: None,
         observability: actr_config::ObservabilityConfig {
             filter_level: "info".to_string(),
             tracing_enabled: false,

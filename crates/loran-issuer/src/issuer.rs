@@ -1618,3 +1618,68 @@ async fn retire_realm_keys(
     }
     failed
 }
+
+impl AIdIssuer {
+    /// Revalidate a Realm-bound actor before certifying its relay key.
+    pub(crate) async fn relay_actor_type(
+        &self,
+        actor: &ActrId,
+        signer: &Signer,
+    ) -> Result<ActrType, AidError> {
+        let target = Self::issued_target(actor).await;
+        Ok(self
+            .recheck_existing_actor(actor, target.as_deref(), signer)
+            .await?
+            .actor_type)
+    }
+
+    pub(crate) async fn mint_relay_identity(
+        &self,
+        actor: &ActrId,
+        actor_type: &ActrType,
+        signer: &Signer,
+        public_key: [u8; 32],
+        admission_commitment: [u8; 32],
+        proof_expires_at: u64,
+    ) -> Result<actr_relay_security::IssuedIdentity, AidError> {
+        use actr_relay_security::{
+            CERTIFICATE_DOMAIN, CERTIFICATE_TTL, Certificate, IdentityClaims, IssuedIdentity,
+            IssuerKey, signing_bytes,
+        };
+        let (key_id, verifying_key) = self.realm_key(&actor.realm).await?;
+        let now = crate::renewal::now_secs() as u64;
+        let expires_at = now.saturating_add(CERTIFICATE_TTL).min(proof_expires_at);
+        if expires_at <= now {
+            return Err(AidError::InvalidFormat);
+        }
+        let claims = serde_json::to_vec(&IdentityClaims {
+            domain: CERTIFICATE_DOMAIN.into(),
+            endpoint: actor.to_string_repr(),
+            actor_type: actor_type.to_string_repr(),
+            client_key: signer.key_id.clone(),
+            public_key,
+            admission_commitment,
+            expires_at,
+        })
+        .map_err(|_| AidError::InvalidFormat)?;
+        let signature = self
+            .signer_client
+            .sign(key_id, &signing_bytes(&claims))
+            .await
+            .map_err(|error| {
+                AidError::GenerationFailed(format!("Relay certificate signing failed: {error}"))
+            })?;
+        Ok(IssuedIdentity {
+            certificate: Certificate {
+                key_id,
+                claims,
+                signature,
+            },
+            issuer: IssuerKey {
+                key_id,
+                public_key: *verifying_key.as_bytes(),
+                expires_at: now.saturating_add(CERTIFICATE_TTL),
+            },
+        })
+    }
+}

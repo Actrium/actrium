@@ -2,11 +2,12 @@ use super::*;
 use crate::transport::SendAttemptResult;
 use crate::transport::lane::DataLane;
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use tokio::time::{Duration, timeout};
 
 #[derive(Debug)]
 struct FakeLane {
+    recordings: Arc<std::sync::Mutex<Vec<bytes::Bytes>>>,
     send_count: Arc<AtomicUsize>,
     send_closed: bool,
     healthy: bool,
@@ -14,13 +15,14 @@ struct FakeLane {
 
 #[async_trait]
 impl DataLane for FakeLane {
-    async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+    async fn send(&self, data: bytes::Bytes) -> NetworkResult<()> {
         self.send_count.fetch_add(1, Ordering::Relaxed);
         if self.send_closed {
             return Err(NetworkError::DataChannelClosed(
                 "test send closed".to_string(),
             ));
         }
+        self.recordings.lock().unwrap().push(data);
         Ok(())
     }
 
@@ -52,6 +54,8 @@ impl DataLane for FakeLane {
 
 #[derive(Debug)]
 struct FakeWire {
+    secure_state: std::sync::Mutex<crate::transport::SecureChannelState>,
+    recordings: Arc<std::sync::Mutex<Vec<bytes::Bytes>>>,
     conn_type: ConnType,
     connect_fails: bool,
     lane_closed: bool,
@@ -63,11 +67,14 @@ struct FakeWire {
     invalidated: AtomicBool,
     send_count: Arc<AtomicUsize>,
     identity: Option<WireIdentity>,
+    priority: AtomicU8,
 }
 
 impl FakeWire {
     fn new(conn_type: ConnType) -> Self {
         Self {
+            secure_state: std::sync::Mutex::new(crate::transport::SecureChannelState::LegacyBypass),
+            recordings: Arc::default(),
             conn_type,
             connect_fails: false,
             lane_closed: false,
@@ -79,6 +86,7 @@ impl FakeWire {
             invalidated: AtomicBool::new(false),
             send_count: Arc::new(AtomicUsize::new(0)),
             identity: None,
+            priority: AtomicU8::new(if conn_type == ConnType::WebRTC { 1 } else { 0 }),
         }
     }
 
@@ -130,10 +138,11 @@ impl WireHandle for FakeWire {
     }
 
     fn priority(&self) -> u8 {
-        match self.conn_type {
-            ConnType::WebSocket => 0,
-            ConnType::WebRTC => 1,
-        }
+        self.priority.load(Ordering::Relaxed)
+    }
+
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        *self.secure_state.lock().unwrap()
     }
 
     async fn connect(&self) -> NetworkResult<()> {
@@ -170,6 +179,7 @@ impl WireHandle for FakeWire {
             ));
         }
         Ok(Arc::new(FakeLane {
+            recordings: self.recordings.clone(),
             send_count: Arc::clone(&self.send_count),
             send_closed: self.lane_send_closed,
             healthy: self.lane_healthy,
@@ -185,6 +195,173 @@ impl WireHandle for FakeWire {
     }
 }
 
+async fn handover_transport() -> (Arc<DestTransport>, Arc<FakeWire>, Arc<FakeWire>) {
+    let rtc = Arc::new(FakeWire::new(ConnType::WebRTC));
+    let relay = Arc::new(FakeWire::new(ConnType::WebSocket));
+    rtc.priority.store(0, Ordering::Relaxed);
+    relay.priority.store(1, Ordering::Relaxed);
+    let transport = Arc::new(test_transport(vec![rtc.clone(), relay.clone()]).await);
+    let mut ready = transport.watch_ready();
+    timeout(Duration::from_secs(1), async {
+        while ready.borrow_and_update().len() != 2 {
+            ready.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    transport
+        .send_with_identity(PayloadType::StreamReliable, b"before handover")
+        .await
+        .unwrap();
+    rtc.priority.store(2, Ordering::Relaxed);
+    (transport, rtc, relay)
+}
+
+async fn recorded_barrier(wire: &FakeWire) -> String {
+    timeout(Duration::from_secs(1), async {
+        loop {
+            let nonce = wire.recordings.lock().unwrap().iter().find_map(|data| {
+                let chunk = actr_protocol::DataChunk::decode(data.as_ref()).ok()?;
+                transport_control::barrier_nonce(&chunk).map(str::to_owned)
+            });
+            if let Some(nonce) = nonce {
+                return nonce;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn reliable_handover_waits_for_peer_ack_without_blocking_rpc() {
+    let (transport, rtc, relay) = handover_transport().await;
+    let sending = transport.clone();
+    let send = tokio::spawn(async move {
+        sending
+            .send_with_identity(PayloadType::StreamReliable, b"after handover")
+            .await
+    });
+    let nonce = recorded_barrier(&relay).await;
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 0);
+    transport
+        .send_with_identity(PayloadType::RpcReliable, b"rpc during handover")
+        .await
+        .unwrap();
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 1);
+    assert!(!send.is_finished());
+
+    let other = actr_protocol::ActrId {
+        serial_number: 1,
+        ..Default::default()
+    };
+    transport.handover.acknowledge(&other, &nonce);
+    tokio::task::yield_now().await;
+    assert!(!send.is_finished());
+    transport
+        .handover
+        .acknowledge(&actr_protocol::ActrId::default(), &nonce);
+    timeout(Duration::from_secs(1), send)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        rtc.recordings.lock().unwrap().last().unwrap().as_ref(),
+        b"after handover"
+    );
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 2); // Chunk, then barrier.
+
+    transport
+        .send_with_identity(PayloadType::StreamReliable, b"next chunk")
+        .await
+        .unwrap();
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 2);
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 3);
+}
+
+#[tokio::test]
+async fn unsupported_handover_retains_the_old_ordered_route() {
+    let (transport, rtc, relay) = handover_transport().await;
+    timeout(
+        Duration::from_secs(4),
+        transport.send_with_identity(PayloadType::StreamReliable, b"legacy peer"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 0);
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 3);
+    // The negative probe is cached; the next send cannot wait for another ACK.
+    timeout(
+        Duration::from_millis(100),
+        transport.send_with_identity(PayloadType::StreamReliable, b"next legacy chunk"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 4);
+}
+
+#[tokio::test]
+async fn cancelling_handover_never_submits_the_application_chunk() {
+    let (transport, rtc, relay) = handover_transport().await;
+    let sending = transport.clone();
+    let progress = crate::transport::new_delivery_progress_cell();
+    let observed = progress.clone();
+    let send = tokio::spawn(async move {
+        sending
+            .send_with_progress(
+                PayloadType::StreamReliable,
+                b"cancelled chunk",
+                Some(&progress),
+            )
+            .await
+    });
+    recorded_barrier(&relay).await;
+    send.abort();
+    match send.await {
+        Err(error) => assert!(error.is_cancelled()),
+        Ok(_) => panic!("cancelled handover unexpectedly completed"),
+    }
+    assert_eq!(
+        crate::transport::observed_delivery_progress(&observed),
+        None
+    );
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 0);
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 2);
+}
+
+#[tokio::test]
+async fn transient_secure_suspension_cannot_bypass_the_stream_barrier() {
+    let (transport, rtc, relay) = handover_transport().await;
+    *relay.secure_state.lock().unwrap() = crate::transport::SecureChannelState::Rekeying;
+    let attempt = transport
+        .send_with_progress(
+            PayloadType::StreamReliable,
+            b"wait for secure recovery",
+            None,
+        )
+        .await;
+    assert!(matches!(
+        attempt.result,
+        Err(NetworkError::SecureChannelNotReady(_))
+    ));
+    assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
+    assert!(attempt.proven_pre_send);
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 0);
+
+    // An explicitly terminal old session permits failure recovery, retaining
+    // the separate uncertain-delivery contract for its earlier chunks.
+    *relay.secure_state.lock().unwrap() = crate::transport::SecureChannelState::Closed;
+    transport
+        .send_with_identity(PayloadType::StreamReliable, b"after terminal failure")
+        .await
+        .unwrap();
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 1);
+}
+
 async fn test_transport(connections: Vec<Arc<dyn WireHandle>>) -> DestTransport {
     let conn_mgr = Arc::new(WirePool::new(RetryConfig {
         max_attempts: 1,
@@ -195,7 +372,12 @@ async fn test_transport(connections: Vec<Arc<dyn WireHandle>>) -> DestTransport 
     for conn in connections {
         conn_mgr.add_connection(conn).await;
     }
-    DestTransport { conn_mgr }
+    DestTransport {
+        conn_mgr,
+        dest: Dest::Peer(actr_protocol::ActrId::default()),
+        handover: Arc::new(HandoverBook::default()),
+        reliable: Mutex::new(ReliableRoute::default()),
+    }
 }
 
 #[tokio::test]
@@ -782,4 +964,43 @@ async fn not_attempted_first_lane_still_falls_back() {
         1,
         "a NotAttempted first lane may still fall back to WebSocket exactly once"
     );
+}
+
+#[tokio::test]
+async fn data_prefers_relay_until_ice_is_direct_and_falls_back_without_replaying() {
+    let rtc = Arc::new(FakeWire::new(ConnType::WebRTC));
+    let relay = Arc::new(FakeWire::new(ConnType::WebSocket));
+    rtc.priority.store(0, Ordering::Relaxed); // TURN or unknown
+    relay.priority.store(1, Ordering::Relaxed);
+    let transport = test_transport(vec![rtc.clone(), relay.clone()]).await;
+    let mut ready = transport.watch_ready();
+    timeout(Duration::from_secs(1), async {
+        while ready.borrow_and_update().len() != 2 {
+            ready.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    transport
+        .send_with_identity(PayloadType::RpcReliable, b"first through relay")
+        .await
+        .unwrap();
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 1);
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 0);
+    rtc.priority.store(2, Ordering::Relaxed); // selected ICE pair is direct
+    transport
+        .send_with_identity(PayloadType::RpcReliable, b"promoted to direct")
+        .await
+        .unwrap();
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 1);
+    transport
+        .conn_mgr
+        .mark_connection_closed(ConnType::WebRTC)
+        .await;
+    transport
+        .send_with_identity(PayloadType::RpcReliable, b"warm fallback")
+        .await
+        .unwrap();
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 2);
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 1);
 }

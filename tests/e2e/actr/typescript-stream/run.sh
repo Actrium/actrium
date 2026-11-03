@@ -445,6 +445,7 @@ actr-runtime = { path = "$REPO_ROOT/crates/actr-runtime" }
 actr-runtime-mailbox = { path = "$REPO_ROOT/crates/actr-runtime-mailbox" }
 actr-service-compat = { path = "$REPO_ROOT/crates/actr-service-compat" }
 EOF_CARGO
+  python3 "$REPO_ROOT/scripts/actr/apply-upstream-patches.py" "$RELAY/Cargo.toml"
 
   cat >"$RELAY/build.rs" <<'EOF_BUILD'
 fn main() {
@@ -802,6 +803,7 @@ actr-runtime = { path = "$REPO_ROOT/crates/actr-runtime" }
 actr-runtime-mailbox = { path = "$REPO_ROOT/crates/actr-runtime-mailbox" }
 actr-service-compat = { path = "$REPO_ROOT/crates/actr-service-compat" }
 EOF_CARGO
+  python3 "$REPO_ROOT/scripts/actr/apply-upstream-patches.py" "$CLIENT/Cargo.toml"
 
   cat >"$CLIENT/manifest.toml" <<'EOF_MANIFEST'
 edition = 1

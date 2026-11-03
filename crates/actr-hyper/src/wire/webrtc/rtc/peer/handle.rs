@@ -456,6 +456,18 @@ impl RtcPeerControllerHandle {
         sent_any: bool,
     ) -> RtcSendError {
         let base = super::send::map_send_error(&error);
+        // Once any fragment was accepted, every later send error leaves the
+        // whole message uncertain, including a full-buffer error.
+        if sent_any {
+            tracing::debug!(
+                peer = %self.peer_id().to_string_repr(),
+                generation = permit.generation(),
+                lane = ?permit.lane(),
+                error = ?base,
+                "RTC fragmented send failed after submitting a frame"
+            );
+            return RtcSendError::DataChunkDeliveryUncertain;
+        }
         if !matches!(
             base,
             RtcSendError::ConnectionNotReady | RtcSendError::DataChannelClosed
@@ -465,8 +477,20 @@ impl RtcPeerControllerHandle {
         // The send failed as not-ready. If there were outstanding (unconfirmed)
         // bytes in the buffer when the session closed, the delivery is uncertain
         // (RFC: "Actr SHOULD report DataChunkDeliveryUncertain").
-        let outstanding = permit.channel().outstanding_bytes().await.unwrap_or(0);
-        if sent_any || outstanding > 0 {
+        let outstanding = match permit.channel().outstanding_bytes().await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                tracing::debug!(
+                    peer = %self.peer_id().to_string_repr(),
+                    generation = permit.generation(),
+                    lane = ?permit.lane(),
+                    error = ?error,
+                    "RTC send failed without a reliable outstanding-byte count"
+                );
+                return RtcSendError::DataChunkDeliveryUncertain;
+            }
+        };
+        if outstanding > 0 {
             tracing::debug!(
                 peer = %self.peer_id().to_string_repr(),
                 generation = permit.generation(),

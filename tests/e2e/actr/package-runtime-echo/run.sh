@@ -312,6 +312,7 @@ scaffold_service_guest() {
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
+    python3 "$REPO_ROOT/scripts/actr/apply-upstream-patches.py" "$TMP_SERVICE_DIR/Cargo.toml"
     cp "$PROVISIONED_PUBLIC_KEY" "$SERVICE_PUBLIC_KEY"
     write_project_keychain_config "$TMP_SERVICE_DIR" "$SERVICE_KEYCHAIN"
 

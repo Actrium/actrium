@@ -226,7 +226,8 @@
           "enum": [
             "register",
             "reissue",
-            "renew"
+            "renew",
+            "relay_identity"
           ]
         },
         "body_sha256": {

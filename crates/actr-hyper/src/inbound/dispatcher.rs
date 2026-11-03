@@ -8,7 +8,7 @@
 //!   `DataChunkRegistry.dispatch`.
 //!
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use actr_framework::Bytes;
 use actr_protocol::prost::Message as ProstMessage;
@@ -17,7 +17,9 @@ use actr_runtime_mailbox::{Mailbox, MessagePriority};
 
 use crate::lifecycle::node::PeerTypes;
 use crate::transport::correlation::PendingRequestsMap;
+use crate::transport::handover::HandoverBook;
 use crate::wire::{DirectionError, direction_for_routing};
+use actr_protocol::transport_control;
 
 use super::DataChunkRegistry;
 
@@ -25,6 +27,7 @@ use super::DataChunkRegistry;
 /// (RPC), the pending-requests map (RPC responses), or the `DataChunkRegistry`
 /// (stream chunks). Used by the RTC inbound bridge.
 pub(crate) struct InboundDispatcher {
+    handover: OnceLock<Arc<HandoverBook>>,
     pending_requests: PendingRequestsMap,
     data_chunk_registry: Arc<DataChunkRegistry>,
     /// Sender types learned from Signaling; recorded with each enqueued
@@ -39,10 +42,15 @@ impl InboundDispatcher {
         peer_types: PeerTypes,
     ) -> Self {
         Self {
+            handover: OnceLock::new(),
             pending_requests,
             data_chunk_registry,
             peer_types,
         }
+    }
+
+    pub(crate) fn set_handover(&self, book: Arc<HandoverBook>) {
+        let _ = self.handover.set(book);
     }
 
     /// Dispatch one inbound message by its payload type.
@@ -61,6 +69,16 @@ impl InboundDispatcher {
             PayloadType::RpcReliable | PayloadType::RpcSignal => {
                 match RpcEnvelope::decode(&data[..]) {
                     Ok(envelope) => {
+                        if payload_type == PayloadType::RpcSignal
+                            && let Some(nonce) = transport_control::acknowledgement_nonce(&envelope)
+                        {
+                            if let (Some(book), Ok(peer)) =
+                                (self.handover.get(), ActrId::decode(from_bytes.as_slice()))
+                            {
+                                book.acknowledge(&peer, nonce);
+                            }
+                            return;
+                        }
                         let from_type = ActrId::decode(&from_bytes[..])
                             .ok()
                             .and_then(|from| self.peer_types.get(&from));
@@ -83,6 +101,7 @@ impl InboundDispatcher {
             PayloadType::StreamReliable | PayloadType::StreamLatencyFirst => {
                 Self::dispatch_data_chunk(
                     &self.data_chunk_registry,
+                    self.handover.get(),
                     &from_bytes,
                     &data,
                     payload_type,
@@ -196,6 +215,7 @@ impl InboundDispatcher {
     /// Decode a DataChunk and dispatch it to the per-stream registry worker.
     async fn dispatch_data_chunk(
         registry: &DataChunkRegistry,
+        handover: Option<&Arc<HandoverBook>>,
         from_bytes: &[u8],
         data: &[u8],
         payload_type: PayloadType,
@@ -220,6 +240,14 @@ impl InboundDispatcher {
                 return;
             }
         };
+        if payload_type == PayloadType::StreamReliable
+            && let Some(nonce) = transport_control::barrier_nonce(&chunk)
+        {
+            if let Some(book) = handover {
+                book.receive_barrier(sender_id, nonce).await;
+            }
+            return;
+        }
         registry.dispatch(chunk, sender_id, payload_type).await;
     }
 

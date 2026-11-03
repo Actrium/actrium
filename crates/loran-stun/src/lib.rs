@@ -8,12 +8,15 @@ pub mod error;
 // Re-export error types for convenience
 pub use error::{ErrorSeverity, Result, StunError};
 
-use platform::monitoring::ServiceCounters;
+/// Optional external observation hook. Protocol code has no metrics backend.
+#[async_trait::async_trait]
+pub trait RequestObserver: Send + Sync {
+    async fn on_request(&self, success: bool);
+}
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
-use webrtc_stun::message::{BINDING_REQUEST, BINDING_SUCCESS, Message};
-use webrtc_stun::xoraddr::XorMappedAddress;
+pub use turn_crate::server::request::is_stun_datagram as is_stun_message;
 
 /// Create and run a STUN server with graceful shutdown support
 pub async fn create_stun_server_with_shutdown(
@@ -27,14 +30,14 @@ pub async fn create_stun_server_with_shutdown(
 pub async fn create_stun_server_with_shutdown_and_counters(
     socket: Arc<UdpSocket>,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-    counters: Option<Arc<ServiceCounters>>,
+    counters: Option<Arc<dyn RequestObserver>>,
 ) -> Result<()> {
-    platform::recording::info!(
+    tracing::info!(
         "Starting STUN server with shutdown support on {}",
         socket.local_addr()?
     );
 
-    let mut buffer = vec![0u8; 1500]; // Standard MTU size for UDP packets
+    let mut buffer = vec![0u8; turn_crate::proto::UDP_RECEIVE_BUFFER_SIZE];
 
     loop {
         tokio::select! {
@@ -46,33 +49,25 @@ pub async fn create_stun_server_with_shutdown_and_counters(
 
                         // Check if this might be a STUN message before processing
                         if is_stun_message(packet_data) {
-                            platform::recording::debug!("Received potential STUN packet from {} ({} bytes)", src_addr, len);
+                            tracing::debug!("Received potential STUN packet from {} ({} bytes)", src_addr, len);
 
-                            // Process inline to provide natural backpressure. Unbounded
-                            // task-per-datagram spawning lets unauthenticated UDP traffic
-                            // exhaust memory and scheduler capacity.
-                            //
-                            // Record the request only after the parse attempt and with the
-                            // real outcome: the first-two-bits check is not proof of a valid
-                            // STUN message, so recording `success = true` before parsing let
-                            // malformed floods inflate the success metric (and, previously,
-                            // the unbounded latency buffer).
+                            // Parse and respond inline to bound work under unauthenticated UDP floods.
                             let parsed_ok = match process_packet(socket.clone(), packet_data, src_addr).await {
                                 Ok(parsed_ok) => parsed_ok,
                                 Err(e) => {
-                                    platform::recording::error!("Failed to process STUN packet from {}: {}", src_addr, e);
+                                    tracing::error!("Failed to process STUN packet from {}: {}", src_addr, e);
                                     false
                                 }
                             };
                             if let Some(ref ctr) = counters {
-                                ctr.record_request(parsed_ok, 0.0).await;
+                                ctr.on_request(parsed_ok).await;
                             }
                         } else {
-                            platform::recording::debug!("Received non-STUN packet from {} ({} bytes), ignoring", src_addr, len);
+                            tracing::debug!("Received non-STUN packet from {} ({} bytes), ignoring", src_addr, len);
                         }
                     }
                     Err(e) => {
-                        platform::recording::error!("Error receiving UDP packet: {}", e);
+                        tracing::error!("Error receiving UDP packet: {}", e);
                         return Err(e.into());
                     }
                 }
@@ -80,99 +75,41 @@ pub async fn create_stun_server_with_shutdown_and_counters(
 
             // Handle shutdown signal
             _ = shutdown_rx.recv() => {
-                platform::recording::info!("Received shutdown signal, stopping STUN server");
+                tracing::info!("Received shutdown signal, stopping STUN server");
                 break;
             }
         }
     }
 
-    platform::recording::info!("STUN server has been shut down");
+    tracing::info!("STUN server has been shut down");
     Ok(())
 }
 
-/// Checks if the given data could be a STUN message.
-/// STUN messages (and TURN messages that are not ChannelData) have the first two bits as 00.
-pub fn is_stun_message(data: &[u8]) -> bool {
-    if data.is_empty() {
-        return false;
-    }
-    (data[0] & 0xC0) == 0
-}
-
-/// Processes a potential STUN packet.
-/// If it's a BINDING_REQUEST, it sends a BINDING_SUCCESS response.
-/// Other STUN message types are ignored.
-///
-/// Returns `Ok(true)` when the datagram actually decoded as a STUN message and
-/// `Ok(false)` when it was malformed (the first-two-bits heuristic passed but
-/// the body failed to parse). Callers use this to record metrics by real
-/// outcome rather than treating every heuristic hit as a success.
+/// Process a Binding datagram with the shared upstream protocol implementation.
 pub async fn process_packet(socket: Arc<UdpSocket>, data: &[u8], src: SocketAddr) -> Result<bool> {
-    let mut msg = Message::new();
-    // The `write` method decodes a message from a byte slice.
-    if let Err(e) = msg.write(data) {
-        // This might not be a STUN message or it's malformed.
-        // Log as trace because other handlers (e.g., TURN) might process it.
-        platform::recording::debug!(
-            "Failed to parse data as STUN message from {}: {}, data_len={}",
-            src,
-            e,
-            data.len()
-        );
+    let mut message = webrtc_stun::message::Message::new();
+    if message.write(data).is_err()
+        || message.raw.len() != 20 + message.length as usize
+        || !message.length.is_multiple_of(4)
+    {
         return Ok(false);
     }
-
-    if msg.typ == BINDING_REQUEST {
-        if let Err(e) = handle_binding_request(&socket, &msg, src).await {
-            platform::recording::error!(
-                "Failed to handle STUN binding request from {}: {}",
-                src,
-                e
-            );
-            // Even if handling fails, we don't want to kill the server loop, so return Ok.
-        }
-    } else {
-        platform::recording::debug!(
-            "Received non-binding STUN message type {:?} from {}",
-            msg.typ,
-            src
-        );
-    }
-
+    turn_crate::server::request::handle_binding_datagram(socket, data, src)
+        .await
+        .map_err(|error| StunError::PacketSendFailed {
+            reason: error.to_string(),
+        })?;
     Ok(true)
-}
-
-async fn handle_binding_request(
-    socket: &UdpSocket,
-    request: &Message,
-    src: SocketAddr,
-) -> Result<()> {
-    platform::recording::debug!("Processing binding request from {}", src);
-
-    // Create Binding Success response
-    let mut response_msg = Message::new();
-    response_msg.set_type(BINDING_SUCCESS);
-    response_msg.transaction_id = request.transaction_id;
-
-    // Add XOR-MAPPED-ADDRESS attribute
-    let xor_addr = XorMappedAddress {
-        ip: src.ip(),
-        port: src.port(),
-    };
-
-    // Use build to correctly assemble the message with attributes
-    response_msg.build(&[Box::new(xor_addr)])?;
-
-    // Send response
-    socket.send_to(&response_msg.raw, src).await?;
-    platform::recording::debug!("Sent STUN Binding Success response to {}", src);
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use webrtc_stun::attributes::*;
+    use webrtc_stun::error_code::{CODE_UNKNOWN_ATTRIBUTE, ErrorCodeAttribute};
+    use webrtc_stun::fingerprint::FINGERPRINT;
+    use webrtc_stun::message::{BINDING_SUCCESS, Message};
+    use webrtc_stun::uattrs::UnknownAttributes;
     // use webrtc_stun::client::ClientBuilder; // Unused in current tests
     use anyhow::Result;
     // Make process_packet and handle_binding_request available
@@ -183,6 +120,42 @@ mod tests {
     use webrtc_stun::agent::TransactionId;
     use webrtc_stun::message::{BINDING_REQUEST, Getter as _};
     use webrtc_stun::xoraddr::XorMappedAddress;
+
+    #[tokio::test]
+    async fn unknown_required_attributes_and_invalid_fingerprints() -> Result<()> {
+        let server = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+        let client = UdpSocket::bind("127.0.0.1:0").await?;
+        let mut request = Message::new();
+        request.build(&[Box::new(TransactionId::new()), Box::new(BINDING_REQUEST)])?;
+        request.add(AttrType(0x1234), &[0; 4]);
+        process_packet(server.clone(), &request.raw, client.local_addr()?).await?;
+        let mut buffer = [0; 2048];
+        let (len, _) = timeout(Duration::from_secs(1), client.recv_from(&mut buffer)).await??;
+        let mut response = Message::new();
+        response.write(&buffer[..len])?;
+        let mut error = ErrorCodeAttribute::default();
+        error.get_from(&response)?;
+        assert_eq!(error.code.0, CODE_UNKNOWN_ATTRIBUTE.0);
+        let mut unknown = UnknownAttributes(vec![]);
+        unknown.get_from(&response)?;
+        assert_eq!(unknown.0, vec![AttrType(0x1234)]);
+        assert_eq!(response.transaction_id, request.transaction_id);
+        let mut invalid = Message::new();
+        invalid.build(&[
+            Box::new(TransactionId::new()),
+            Box::new(BINDING_REQUEST),
+            Box::new(FINGERPRINT),
+        ])?;
+        let last = invalid.raw.len() - 1;
+        invalid.raw[last] ^= 1;
+        process_packet(server.clone(), &invalid.raw, client.local_addr()?).await?;
+        assert!(
+            timeout(Duration::from_millis(40), client.recv_from(&mut buffer))
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_stun_packet_processing_works() -> Result<()> {

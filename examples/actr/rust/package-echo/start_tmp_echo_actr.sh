@@ -160,6 +160,7 @@ fi
 echo -e "${GREEN}✅ init left src/generated absent as expected${NC}"
 
 append_workspace_patch "$TMP_ECHO_ACTR_DIR"
+python3 "$ACTR_REPO_DIR/scripts/actr/apply-upstream-patches.py" "$TMP_ECHO_ACTR_DIR/Cargo.toml"
 
 mkdir -p "$TMP_ECHO_ACTR_DIR/packaging/keys"
 cp "$DEFAULT_SIGNING_KEY" "$TMP_ECHO_ACTR_DIR/packaging/keys/dev-signing-key.json"

@@ -5,3 +5,9 @@
 [build]
 target = "wasm32-unknown-unknown"
 target-dir = "../../target/bindings-web"
+
+# Browser modules export their entry points instead of defining a native main.
+# Explicit target flags also prevent Cargo from falling back to host linker
+# flags in a user's [build] rustflags (for example -fuse-ld=mold).
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--no-entry"]

@@ -183,7 +183,8 @@ new owner invite invalidates the Realm's earlier unused owner invites.
 
 ## 6. Actor credentials and membership
 
-When an Actr Host registers, reissues or renews an Actor credential, it
+When an Actr Host registers, reissues or renews an Actor credential, or enrolls
+a relay identity, it
 **MUST** prove possession of a Realm client key of the Actor's Realm. The proof
 goes in an HTTP request header:
 
@@ -191,10 +192,10 @@ goes in an HTTP request header:
 x-actr-client-proof: <base64url (no padding) of UTF-8 JSON>
 ```
 
-The JSON is an Actr management envelope whose `op` is `register`, `reissue` or
-`renew` (matching the registration, reissue and renewal endpoints), with an
-extra `body_sha256`: the SHA-256 of the HTTP request body bytes, in lowercase
-hex. `realm` **MUST** equal the Realm in the request body. The Issuer checks
+The JSON is an Actr management envelope whose `op` is `register`, `reissue`,
+`renew` or `relay_identity` (matching the registration, reissue, renewal and
+relay identity endpoints), with an extra `body_sha256`: the SHA-256 of the HTTP
+request body bytes, in lowercase hex. `realm` **MUST** equal the Realm in the request body. The Issuer checks
 `body_sha256`, the signature, the validity window, `provider_id` and the
 nonce. An idempotent retry of the same body carries a freshly signed proof each
 time.
@@ -206,7 +207,9 @@ The Issuer issues only when all of the following hold:
 2. for renewal, the signing key is the one the Actor is currently bound to;
    for reissue, the signing key belongs to the Actor's member, and a
    successful reissue rebinds the Actor to that key (so a member holding the
-   Actor private key can move its Actor to another of its clients);
+   Actor private key can move its Actor to another of its clients). Relay
+   identity enrollment also requires the currently bound key and an unexpired
+   renewal token;
 3. at registration, if the Actor type's publisher and program name equal those
    of the Realm Profile's `package.type` (in any version, that is, the
    instance's Service and its upgrades), the signing key belongs to the owner.

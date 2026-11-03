@@ -18,14 +18,7 @@ tracing_enabled = false
 tracing_endpoint = "http://localhost:4317"
 tracing_service_name = "ws-echo-server"
 
-# Direct WebSocket configuration
-# After the node starts, it listens for inbound WebSocket connections on this port,
-# and registers ws://advertised_host:listen_port with the signaling server.
-# After discovering the address through the signaling server, clients connect to it directly over WebSocket.
-
-[websocket]
-listen_port = 9001
-advertised_host = "127.0.0.1"
+# The SDK discovers Loran relay and creates outbound peer sessions automatically.
 
 # ACL configuration - allow ws-echo clients to connect
 

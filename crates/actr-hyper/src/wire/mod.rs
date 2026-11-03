@@ -6,12 +6,19 @@
 //!
 //! **Note**: For intra-process communication, use `crate::transport::HostTransport`
 
+pub(crate) mod relay;
 pub mod webrtc;
 pub(crate) mod websocket;
 
 use crate::key_cache::KeyFetcher;
 use actr_protocol::{AIdCredential, ActrId, Direction};
 use async_trait::async_trait;
+
+/// TLS must work even when dependencies enable both Rustls providers. Keep an
+/// application-selected provider; otherwise install the same default as Loran.
+pub(crate) fn ensure_tls_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
 
 /// Adapter from SignalingClient to KeyFetcher
 ///

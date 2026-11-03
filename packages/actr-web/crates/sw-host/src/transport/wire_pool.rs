@@ -151,6 +151,20 @@ impl WirePool {
         Self::notify_all(&self.change_notifiers);
     }
 
+    /// Retire a specific wire without removing a replacement installed meanwhile.
+    pub(crate) fn mark_connection_failed_if_current(&self, expected: &WireHandle) -> bool {
+        let conn_type = expected.conn_type();
+        let mut conns = self.connections.lock();
+        let slot = &mut conns[conn_type.as_index()];
+        if !matches!(slot, Some(WireStatus::Ready(current)) if current.same_connection(expected)) {
+            return false;
+        }
+        *slot = Some(WireStatus::Failed);
+        self.ready_set.lock().remove(&conn_type);
+        Self::notify_all(&self.change_notifiers);
+        true
+    }
+
     /// Remove a connection.
     ///
     /// Completely clears the connection state to prepare for rebuilding.

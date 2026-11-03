@@ -65,17 +65,35 @@ impl ActrixHarness {
     }
 
     async fn start_with_login_limits(token_ttl: u64, limits: Option<&str>) -> Self {
-        Self::start_with_transport(token_ttl, limits, false).await
+        Self::start_with_options(token_ttl, limits, false, false).await
+    }
+
+    async fn start_with_relay(token_ttl: u64) -> Self {
+        Self::start_with_options(token_ttl, None, true, false).await
     }
 
     async fn start_tls(token_ttl: u64) -> Self {
-        Self::start_with_transport(token_ttl, None, true).await
+        Self::start_with_options(token_ttl, None, false, true).await
     }
 
-    async fn start_with_transport(token_ttl: u64, limits: Option<&str>, tls: bool) -> Self {
+    async fn start_with_options(
+        token_ttl: u64,
+        limits: Option<&str>,
+        relay: bool,
+        tls: bool,
+    ) -> Self {
         let tmp = tempfile::tempdir().expect("temp dir");
         let port = choose_port();
         let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, token_ttl);
+        if relay {
+            let config = fs::read_to_string(&config_path).expect("read config");
+            assert!(config.contains("enable = 25"));
+            fs::write(
+                &config_path,
+                config.replacen("enable = 25", "enable = 57", 1),
+            )
+            .expect("enable relay");
+        }
         if tls {
             let (cert, key, _) = test_tls();
             let cert_path = tmp.path().join("tls-cert.pem");
@@ -105,6 +123,9 @@ impl ActrixHarness {
         let log_path = tmp.path().join("actrix_fullstack.log");
         let data_dir = tmp.path().join("data");
         ensure_realm(&data_dir, TEST_REALM).await;
+        if relay {
+            ensure_realm(&data_dir, SECOND_REALM).await;
+        }
         let mut child = spawn_actrix(&config_path, &log_path);
 
         let scheme = if tls { "https" } else { "http" };
@@ -863,6 +884,208 @@ async fn ws_register(
     acl: Option<Acl>,
 ) -> (WsWrite, WsRead, register_response::RegisterOk) {
     ws_register_with_spec(port, publisher, name, acl, None).await
+}
+
+async fn relay_identity(base: &str, name: &str, acl: Option<Acl>) -> (String, String) {
+    relay_identity_in_realm(base, TEST_REALM, name, acl).await
+}
+
+fn relay_allow_from(name: &str, realm: &str) -> Acl {
+    Acl {
+        rules: vec![AclRule {
+            permission: Permission::Allow as i32,
+            from_type: ActrType {
+                publisher: "acme".into(),
+                name: name.into(),
+                version: "1.0.0".into(),
+            },
+            source_realm: Some(SourceRealm::Realm(realm.into())),
+        }],
+    }
+}
+
+async fn relay_identity_in_realm(
+    base: &str,
+    realm: &str,
+    name: &str,
+    acl: Option<Acl>,
+) -> (String, String) {
+    let registration = issuer_register_http(base, realm, "acme", name, None, acl).await;
+    let identity = actr_relay_security::IdentityKey::generate().expect("relay key");
+    let request = actr_relay_security::IdentityRequest {
+        endpoint: registration.actr_id.to_string_repr(),
+        renewal_token: registration.renewal_token.expect("renewal token").to_vec(),
+        public_key: identity.public,
+        admission_commitment: identity.admission_commitment(),
+    };
+    let body = serde_json::to_vec(&request).expect("relay identity request");
+    let response = reqwest::Client::new()
+        .post(format!("{base}/issuer/relay-identity"))
+        .header("content-type", "application/json")
+        .header(
+            "x-actr-client-proof",
+            client_proof(
+                actr_protocol::realm_membership::ProofOp::RelayIdentity,
+                realm,
+                &body,
+                TEST_CLIENT_KEY,
+            ),
+        )
+        .body(body)
+        .send()
+        .await
+        .expect("relay identity request");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let issued: actr_relay_security::IssuedIdentity =
+        response.json().await.expect("relay identity");
+    let identity = identity
+        .certify(
+            issued,
+            &request.endpoint,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .expect("certify relay identity");
+    let token = base64::engine::general_purpose::STANDARD
+        .encode(serde_json::to_vec(&identity.relay_credential()).expect("relay credential"));
+    (request.endpoint, token)
+}
+
+async fn relay_hello(port: u16, endpoint: &str, token: &str) -> (WsStream, WsMessage) {
+    let mut request = format!("ws://127.0.0.1:{port}/relay/ws")
+        .into_client_request()
+        .expect("relay URL");
+    request.headers_mut().insert(
+        "Sec-WebSocket-Protocol",
+        loran_relay_protocol::SUBPROTOCOL.parse().unwrap(),
+    );
+    let (mut socket, _) = connect_async(request).await.expect("relay WebSocket");
+    socket
+        .send(WsMessage::Text(
+            serde_json::to_string(&loran_relay_protocol::ClientControl::Hello {
+                endpoint: endpoint.into(),
+                token: token.into(),
+            })
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .expect("relay hello");
+    let response = tokio::time::timeout(Duration::from_secs(3), socket.next())
+        .await
+        .expect("relay hello deadline")
+        .expect("relay closed without a response")
+        .expect("relay response");
+    (socket, response)
+}
+
+async fn relay_login(port: u16, endpoint: &str, token: &str) -> WsStream {
+    // Issuer registration and relay authorization use the same database;
+    // allow the relay's Actor-binding watcher to consume the registration.
+    for _ in 0..100 {
+        let (socket, response) = relay_hello(port, endpoint, token).await;
+        if let WsMessage::Text(text) = response
+            && matches!(
+                serde_json::from_str::<loran_relay_protocol::ServerControl>(&text),
+                Ok(loran_relay_protocol::ServerControl::Welcome { .. })
+            )
+        {
+            return socket;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    panic!("registered actor was not admitted by the relay");
+}
+
+async fn relay_control(socket: &mut WsStream) -> loran_relay_protocol::ServerControl {
+    let message = tokio::time::timeout(Duration::from_secs(5), socket.next())
+        .await
+        .expect("relay control deadline")
+        .expect("relay socket closed")
+        .expect("relay frame");
+    let WsMessage::Text(text) = message else {
+        panic!("expected relay control frame, got {message:?}");
+    };
+    serde_json::from_str(&text).expect("relay control")
+}
+
+async fn send_relay_control(socket: &mut WsStream, control: loran_relay_protocol::ClientControl) {
+    socket
+        .send(WsMessage::Text(
+            serde_json::to_string(&control).unwrap().into(),
+        ))
+        .await
+        .expect("send relay control");
+}
+
+async fn relay_pair(source: &mut WsStream, target: &mut WsStream, from: &str, to: &str) -> u64 {
+    use loran_relay_protocol::{ClientControl, ServerControl};
+
+    send_relay_control(
+        source,
+        ClientControl::Connect {
+            request: 1,
+            peer: to.into(),
+        },
+    )
+    .await;
+    let ServerControl::Incoming { channel, peer, .. } = relay_control(target).await else {
+        panic!("target did not receive a relay request");
+    };
+    assert_eq!(peer, from);
+    send_relay_control(target, ClientControl::Accept { channel }).await;
+    for socket in [source, target] {
+        let response = relay_control(socket).await;
+        assert!(matches!(response, ServerControl::Connected { channel: id, .. } if id == channel));
+    }
+    channel
+}
+
+async fn with_fullstack_relay<F, Fut>(scenario: F)
+where
+    F: FnOnce(String, u16) -> Fut,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let harness = ActrixHarness::start_with_relay(DEFAULT_TOKEN_TTL).await;
+    let task = tokio::spawn(scenario(harness.base_url(), harness.port));
+    let result = tokio::time::timeout(Duration::from_secs(30), task).await;
+    harness.shutdown();
+    result
+        .expect("relay integration deadline")
+        .expect("relay integration");
+}
+
+#[tokio::test]
+#[serial]
+async fn relay_issuer_credentials_authenticate_real_websocket_channels() {
+    use loran_relay_protocol::encode_data;
+
+    with_fullstack_relay(|base, port| async move {
+        let (alice, alice_token) = relay_identity(&base, "relay-alice", None).await;
+        let (bob, bob_token) = relay_identity(
+            &base,
+            "relay-bob",
+            Some(relay_allow_from("relay-alice", TEST_REALM)),
+        )
+        .await;
+        let mut a = relay_login(port, &alice, &alice_token).await;
+        let mut b = relay_login(port, &bob, &bob_token).await;
+        let (_, wrong_identity) = relay_hello(port, &bob, &alice_token).await;
+        assert!(matches!(wrong_identity, WsMessage::Close(_)));
+        let channel = relay_pair(&mut a, &mut b, &alice, &bob).await;
+
+        let frame = encode_data(channel, b"issuer-authenticated relay payload").unwrap();
+        a.send(WsMessage::Binary(frame.clone())).await.unwrap();
+        let received = tokio::time::timeout(Duration::from_secs(5), b.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(received, WsMessage::Binary(frame));
+    })
+    .await;
 }
 
 async fn query_route_candidates(
@@ -5535,4 +5758,236 @@ async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
     let _ = alpha_w.send(WsMessage::Close(None)).await;
     let _ = beta_w.send(WsMessage::Close(None)).await;
     harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn relay_rejects_a_same_realm_peer_denied_by_actor_acl() {
+    use loran_relay_protocol::{ClientControl, ServerControl};
+
+    with_fullstack_relay(|base, port| async move {
+        let denied = Acl {
+            rules: vec![AclRule {
+                permission: Permission::Deny as i32,
+                from_type: ActrType {
+                    publisher: "acme".into(),
+                    name: "relay-acl-source".into(),
+                    version: "1.0.0".into(),
+                },
+                source_realm: Some(SourceRealm::Realm(TEST_REALM.into())),
+            }],
+        };
+        let (source, source_token) = relay_identity(&base, "relay-acl-source", None).await;
+        let (target, target_token) = relay_identity(&base, "relay-acl-target", Some(denied)).await;
+        let mut source_socket = relay_login(port, &source, &source_token).await;
+        let mut target_socket = relay_login(port, &target, &target_token).await;
+        send_relay_control(
+            &mut source_socket,
+            ClientControl::Connect {
+                request: 1,
+                peer: target,
+            },
+        )
+        .await;
+
+        tokio::select! {
+            response = relay_control(&mut source_socket) => {
+                assert!(
+                    matches!(response, ServerControl::Error { request: Some(1), .. }),
+                    "relay should reject the denied actor: {response:?}"
+                );
+            }
+            response = relay_control(&mut target_socket) => {
+                panic!("ACL-denied actor reached the target relay socket: {response:?}");
+            }
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(250), target_socket.next())
+                .await
+                .is_err()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn relay_rechecks_actor_acl_before_accepting_a_pending_channel() {
+    use loran_relay_protocol::{ClientControl, CloseReason, ServerControl};
+
+    with_fullstack_relay(|base, port| async move {
+        let (source, source_token) = relay_identity(&base, "relay-acl-change-source", None).await;
+        let (target, target_token) = relay_identity(
+            &base,
+            "relay-acl-change-target",
+            Some(relay_allow_from("relay-acl-change-source", TEST_REALM)),
+        )
+        .await;
+        let mut a = relay_login(port, &source, &source_token).await;
+        let mut b = relay_login(port, &target, &target_token).await;
+        send_relay_control(&mut a, ClientControl::Connect { request: 1, peer: target }).await;
+        let ServerControl::Incoming { channel, .. } = relay_control(&mut b).await else {
+            panic!("target did not receive a pending request");
+        };
+        let mut denied = relay_allow_from("relay-acl-change-source", TEST_REALM);
+        denied.rules[0].permission = Permission::Deny as i32;
+        issuer_register_http(&base, TEST_REALM, "acme", "relay-acl-change-target", None, Some(denied)).await;
+        send_relay_control(&mut b, ClientControl::Accept { channel }).await;
+        for socket in [&mut a, &mut b] {
+            assert!(matches!(
+                relay_control(socket).await,
+                ServerControl::Closed { channel: id, reason: CloseReason::Rejected, .. } if id == channel
+            ));
+        }
+    }).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn relay_rejects_a_copied_certificate_without_key_possession() {
+    use loran_relay_protocol::ServerControl;
+
+    with_fullstack_relay(|base, port| async move {
+        let (endpoint, token) = relay_identity(&base, "relay-replay-victim", None).await;
+        let mut victim = relay_login(port, &endpoint, &token).await;
+        // A peer learns the public certificate during the Noise handshake.
+        // This socket has only that certificate, not the endpoint's private key.
+        let credential: actr_relay_security::RelayCredential = serde_json::from_slice(
+            &base64::engine::general_purpose::STANDARD.decode(&token).unwrap(),
+        )
+        .unwrap();
+        let public_certificate = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&credential.certificate).unwrap());
+        let (_, certificate_only) = relay_hello(port, &endpoint, &public_certificate).await;
+        assert!(matches!(certificate_only, WsMessage::Close(_)));
+        let copied = actr_relay_security::RelayCredential {
+            certificate: credential.certificate.clone(),
+            admission_secret: [42; 32],
+        };
+        let copied = base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&copied).unwrap());
+        let (_replay, response) = relay_hello(port, &endpoint, &copied).await;
+        let victim_result = tokio::time::timeout(Duration::from_millis(500), victim.next()).await;
+        let admitted = matches!(
+            &response,
+            WsMessage::Text(text)
+                if matches!(serde_json::from_str::<ServerControl>(text), Ok(ServerControl::Welcome { .. }))
+        );
+        assert!(
+            !admitted,
+            "copied certificate was admitted; original socket result: {victim_result:?}"
+        );
+        assert!(
+            victim_result.is_err(),
+            "rejected replay displaced the live socket"
+        );
+        let (_replacement, legitimate) = relay_hello(port, &endpoint, &token).await;
+        assert!(matches!(
+            legitimate,
+            WsMessage::Text(text)
+                if matches!(serde_json::from_str::<ServerControl>(&text), Ok(ServerControl::Welcome { .. }))
+        ));
+        let displaced = tokio::time::timeout(Duration::from_secs(3), victim.next())
+            .await
+            .expect("replacement did not close the old socket");
+        assert!(matches!(displaced, None | Some(Ok(WsMessage::Close(_)))));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn relay_revokes_one_realm_without_disconnecting_another() {
+    use loran_relay_protocol::{ServerControl, encode_data};
+
+    with_fullstack_relay(|base, port| async move {
+        let (revoked, revoked_token) = relay_identity(&base, "relay-revoked", None).await;
+        let (revoked_peer, revoked_peer_token) = relay_identity(
+            &base,
+            "relay-revoked-peer",
+            Some(relay_allow_from("relay-revoked", TEST_REALM)),
+        )
+        .await;
+        let (first, first_token) =
+            relay_identity_in_realm(&base, SECOND_REALM, "relay-first", None).await;
+        let (second, second_token) = relay_identity_in_realm(
+            &base,
+            SECOND_REALM,
+            "relay-second",
+            Some(relay_allow_from("relay-first", SECOND_REALM)),
+        )
+        .await;
+        let mut revoked_socket = relay_login(port, &revoked, &revoked_token).await;
+        let mut revoked_peer_socket = relay_login(port, &revoked_peer, &revoked_peer_token).await;
+        let mut first_socket = relay_login(port, &first, &first_token).await;
+        let mut second_socket = relay_login(port, &second, &second_token).await;
+        relay_pair(
+            &mut revoked_socket,
+            &mut revoked_peer_socket,
+            &revoked,
+            &revoked_peer,
+        )
+        .await;
+        let channel = relay_pair(&mut first_socket, &mut second_socket, &first, &second).await;
+        let before = encode_data(channel, b"before suspension").unwrap();
+        first_socket
+            .send(WsMessage::Binary(before.clone()))
+            .await
+            .unwrap();
+        assert_eq!(
+            second_socket.next().await.unwrap().unwrap(),
+            WsMessage::Binary(before)
+        );
+
+        let client = reqwest::Client::new();
+        let login: Value = client
+            .post(format!("{base}/admin/api/auth/login"))
+            .json(&json!({ "password": "testpassword123" }))
+            .send()
+            .await
+            .expect("admin login")
+            .json()
+            .await
+            .expect("admin login response");
+        let token = login["token"].as_str().expect("admin token");
+        let response = client
+            .put(format!("{base}/admin/api/realms/test%40example.com"))
+            .bearer_auth(token)
+            .json(&json!({ "enabled": false }))
+            .send()
+            .await
+            .expect("suspend realm");
+        assert!(response.status().is_success());
+        for socket in [&mut revoked_socket, &mut revoked_peer_socket] {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    match socket.next().await {
+                        None | Some(Ok(WsMessage::Close(_))) => break,
+                        Some(Ok(WsMessage::Text(text))) => assert!(matches!(
+                            serde_json::from_str::<ServerControl>(&text),
+                            Ok(ServerControl::Closed { .. })
+                        )),
+                        other => panic!("unexpected revoked relay frame: {other:?}"),
+                    }
+                }
+            })
+            .await
+            .expect("revoked socket deadline");
+        }
+        let (_, rejected) = relay_hello(port, &revoked, &revoked_token).await;
+        assert!(matches!(rejected, WsMessage::Close(_)));
+
+        let frame = encode_data(channel, b"unaffected realm").unwrap();
+        first_socket
+            .send(WsMessage::Binary(frame.clone()))
+            .await
+            .unwrap();
+        let forwarded = tokio::time::timeout(Duration::from_secs(5), second_socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(forwarded, WsMessage::Binary(frame));
+    })
+    .await;
 }

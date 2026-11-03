@@ -20,6 +20,7 @@
 //! `GET /registry/publishers/{name}/verifying-key`, etc.
 
 pub mod http;
+mod relay;
 pub mod signaling;
 pub mod state;
 
@@ -50,6 +51,17 @@ pub struct MockActrixServer {
     ice_candidate_drop_count: Arc<AtomicU32>,
     connection_count: Arc<AtomicU32>,
     disconnection_count: Arc<AtomicU32>,
+    relay: Option<Arc<loran_relay::Relay>>,
+    relay_frames: Arc<AtomicU32>,
+    relay_discovery_enabled: Arc<AtomicBool>,
+    relay_discovery_requests: Arc<AtomicU32>,
+}
+
+struct RelayFrameObserver(Arc<AtomicU32>);
+impl loran_relay::Observer for RelayFrameObserver {
+    fn received_frame(&self) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 impl MockActrixServer {
@@ -59,6 +71,11 @@ impl MockActrixServer {
         Self::start_with_listener(listener).await
     }
 
+    pub async fn start_with_relay() -> anyhow::Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        Self::start_with_options(listener, true).await
+    }
+
     /// Start the mock server on the specified port.
     pub async fn start_on_port(port: u16) -> anyhow::Result<Self> {
         let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
@@ -66,6 +83,10 @@ impl MockActrixServer {
     }
 
     pub async fn start_with_listener(listener: TcpListener) -> anyhow::Result<Self> {
+        Self::start_with_options(listener, false).await
+    }
+
+    async fn start_with_options(listener: TcpListener, enable_relay: bool) -> anyhow::Result<Self> {
         let port = listener.local_addr()?.port();
 
         // Deterministic keys so tests can reproduce signatures.
@@ -91,7 +112,43 @@ impl MockActrixServer {
         let connection_count = state.connection_count.clone();
         let disconnection_count = state.disconnection_count.clone();
 
-        let app = build_router(state.clone());
+        let mut app = build_router(state.clone());
+        let relay_frames = Arc::new(AtomicU32::new(0));
+        let relay_discovery_enabled = Arc::new(AtomicBool::new(enable_relay));
+        let relay_discovery_requests = Arc::new(AtomicU32::new(0));
+        let relay = if enable_relay {
+            let relay = loran_relay::Relay::with_observer(
+                Default::default(),
+                Arc::new(relay::RelayAuth(state.clone())),
+                cancel.child_token(),
+                Arc::new(RelayFrameObserver(relay_frames.clone())),
+            )
+            .map_err(anyhow::Error::msg)?;
+            let advertised = relay_discovery_enabled.clone();
+            let requests = relay_discovery_requests.clone();
+            let router = relay.router().route(
+                "/config",
+                axum::routing::get(move || {
+                    let enabled = advertised.load(Ordering::Relaxed);
+                    requests.fetch_add(1, Ordering::Relaxed);
+                    async move {
+                        axum::Json(loran_relay_protocol::RelayDiscovery {
+                            version: 1,
+                            enabled,
+                            url: None,
+                        })
+                    }
+                }),
+            );
+            // Keep discovery available to browser fixtures on another origin.
+            app = app.nest(
+                "/relay",
+                router.layer(tower_http::cors::CorsLayer::permissive()),
+            );
+            Some(relay)
+        } else {
+            None
+        };
 
         let cancel_clone = cancel.clone();
         let is_running_clone = is_running.clone();
@@ -130,6 +187,10 @@ impl MockActrixServer {
             ice_candidate_drop_count,
             connection_count,
             disconnection_count,
+            relay,
+            relay_frames,
+            relay_discovery_enabled,
+            relay_discovery_requests,
         })
     }
 
@@ -156,6 +217,40 @@ impl MockActrixServer {
     /// Return the bound port.
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    pub fn relay_connection_count(&self) -> usize {
+        self.relay
+            .as_ref()
+            .map_or(0, |relay| relay.connection_count())
+    }
+
+    pub fn relay_frame_count(&self) -> u32 {
+        self.relay_frames.load(Ordering::Relaxed)
+    }
+
+    pub fn set_relay_discovery_enabled(&self, enabled: bool) {
+        self.relay_discovery_enabled
+            .store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn relay_discovery_requests(&self) -> u32 {
+        self.relay_discovery_requests.load(Ordering::Relaxed)
+    }
+
+    pub fn disconnect_relay_connections(&self) {
+        self.relay
+            .as_ref()
+            .expect("relay fixture enabled")
+            .disconnect_all();
+    }
+
+    /// Simulate a temporary certificate enrollment outage without taking the
+    /// relay or trusted issuer-key endpoint down.
+    pub fn pause_relay_enrollment(&self) {
+        self.state
+            .relay_enrollment_unavailable
+            .store(true, Ordering::Relaxed);
     }
 
     /// Deterministic Issuer signing key (`SigningKey::from_bytes(&[42u8; 32])`).
@@ -355,6 +450,8 @@ fn build_router(state: Arc<MockState>) -> Router {
     let issuer_routes = Router::new()
         .route("/register", post(http::register_handler))
         .route("/renew", post(http::renew_handler))
+        .route("/relay-identity", post(http::relay_identity_handler))
+        .route("/relay-key/{realm}/{key_id}", get(http::relay_key_handler))
         .route(
             "/registry/publishers/{name}/verifying-key",
             get(http::verifying_key_handler),
@@ -376,6 +473,8 @@ fn build_router(state: Arc<MockState>) -> Router {
         // their Issuer endpoint base).
         .route("/register", post(http::register_handler))
         .route("/renew", post(http::renew_handler))
+        .route("/relay-identity", post(http::relay_identity_handler))
+        .route("/relay-key/{realm}/{key_id}", get(http::relay_key_handler))
         .route(
             "/registry/publishers/{name}/verifying-key",
             get(http::verifying_key_handler),
