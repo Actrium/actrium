@@ -103,6 +103,7 @@ Tab
 12. [参考协议与样例](12-reference-spec.md)：Manifest、Publisher/Realm Profile、握手消息和术语。
 13. [Actrium 隐私标记与图汇聚](13-privacy-state-and-aggregation.md)：把现行安全模型落到 Tab / Front / Actr Host。
 14. [隐私原语、远程证明与可信算力](14-privacy-primitives-and-attestation.md)：全过程加密、WASM/CC 分工、RATS、密钥释放与 CPU/GPU/NPU 组合证明。
+15. [Publisher 注册、Realm 创建与移动端连接 Service](15-publisher-realm-mobile-flows.zh.md)：从 Publisher 注册、程序包发布，到 Realm 创建、Owner 邀请兑换及手机端 Attach Service 的完整时序图。
 
 另有非规范性的[应用开发建议](app-development-guidance.zh.md)：写 Service 时的授权与信任建议，不属于平台规则。
 
