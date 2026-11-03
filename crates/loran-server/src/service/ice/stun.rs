@@ -3,7 +3,7 @@
 use crate::service::IceService;
 use anyhow::Result;
 use async_trait::async_trait;
-use platform::config::ActrixConfig;
+use platform::config::LoranConfig;
 use platform::monitoring::ServiceCounters;
 use platform::status::services::ServiceState;
 use platform::{ServiceInfo, ServiceType};
@@ -25,14 +25,14 @@ impl stun::RequestObserver for StunCounters {
 #[derive(Debug)]
 pub struct StunService {
     info: ServiceInfo,
-    config: ActrixConfig,
+    config: LoranConfig,
     socket: Option<Arc<UdpSocket>>,
     /// Service-level counters for metrics collection.
     pub counters: Option<Arc<ServiceCounters>>,
 }
 
 impl StunService {
-    pub fn new(config: ActrixConfig) -> Self {
+    pub fn new(config: LoranConfig) -> Self {
         Self {
             info: ServiceInfo::new(
                 "STUN Server",

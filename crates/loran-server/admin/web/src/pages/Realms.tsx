@@ -129,7 +129,7 @@ export function Realms() {
   return (
     <ServicePageLayout
       title="Realms"
-      description="Identity and trust boundaries hosted by this Actrix instance"
+      description="Identity and trust boundaries hosted by this Loran instance"
       headerActions={
         <button
           onClick={() => {
@@ -147,7 +147,7 @@ export function Realms() {
     >
       <HowItWorks storageKey="realms">
         <p className="text-xs text-gray-500 mb-4">
-          One Actrix instance hosts many Realms. A Realm is one deployed application instance,
+          One Loran instance hosts many Realms. A Realm is one deployed application instance,
           named <code>&lt;realm_id&gt;@&lt;domain&gt;</code>. Realms share this instance&apos;s
           services but never see each other&apos;s Actors. Members join with one-time invites
           and register a Realm client key per client; Issuer checks that key on every

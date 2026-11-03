@@ -42,7 +42,7 @@ cd examples/echo
 bash start-mock.sh
 ```
 
-The script builds the browser guest, packages its wasm and glue into signed `.actr` files, starts the in-repo mock actrix service, serves the web client/server through `actr run --web`, and drives the browser smoke suite.
+The script builds the browser guest, packages its wasm and glue into signed `.actr` files, starts the in-repo mock loran service, serves the web client/server through `actr run --web`, and drives the browser smoke suite.
 
 ## Legacy Data-Stream Example
 

@@ -89,7 +89,7 @@ async fn start_embedded_signer(
     for _ in 0..40 {
         let config = GrpcClientConfig {
             endpoint: endpoint.clone(),
-            actrix_shared_key: shared_key.to_string(),
+            loran_shared_key: shared_key.to_string(),
             timeout_seconds: 2,
             enable_tls: false,
             tls_domain: None,

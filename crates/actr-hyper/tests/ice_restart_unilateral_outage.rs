@@ -23,7 +23,7 @@ use actr_hyper::test_support::{
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Keep the assertion derived from the audited ten-second attempt timeout; it
 /// must remain shorter than a normal retry while leaving enough time for the
-/// real local Actrix/RTC event path.
+/// real local Loran/RTC event path.
 const WAKE_WINDOW: Duration =
     Duration::from_millis((ICE_RESTART_ATTEMPT_TIMEOUT.as_millis() / 5) as u64);
 
@@ -41,7 +41,7 @@ fn wifi() -> NetworkTransportFlags {
 async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     install_test_crypto_provider();
 
-    // Production Actrix uses reverse ActorId ordering for the role tie-break.
+    // Production Loran uses reverse ActorId ordering for the role tie-break.
     // A is the mobile/Answerer side and B is the service/Offerer side.
     let mut pair = MobileRtcPairHarness::new(52_201, 52_202).await;
     pair.establish(ConnectionInitiator::B).await;

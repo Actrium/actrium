@@ -71,7 +71,7 @@ export function Login() {
             <div className="flex items-baseline justify-between gap-3">
               <h1 className="inline-flex min-w-0 items-baseline gap-2">
                 <span className="text-3xl font-bold tracking-tight text-gray-900">
-                  Actrix
+                  Loran
                 </span>
                 <span className="relative -top-px rounded bg-blue-100 px-2 py-px text-[1.25rem] font-semibold text-blue-600">
                   Admin

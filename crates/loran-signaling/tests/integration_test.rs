@@ -9,7 +9,7 @@ use actr_protocol::{
 };
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
-use platform::config::ActrixConfig;
+use platform::config::LoranConfig;
 use platform::realm::Realm as RealmEntity;
 use platform::storage::db::set_db_path;
 use prost::Message as ProstMessage;
@@ -26,14 +26,14 @@ const TEST_REALM: &str = "test@example.com";
 
 /// Test helper: create minimal config
 #[allow(dead_code)]
-fn create_test_config() -> ActrixConfig {
+fn create_test_config() -> LoranConfig {
     toml::from_str(
         r#"
         enable = 8
         name = "test-signaling"
         env = "test"
         sqlite = ":memory:"
-        actrix_shared_key = "test-key-12345678901234567890123456789012"
+        loran_shared_key = "test-key-12345678901234567890123456789012"
 
         [bind.ice]
         ip = "127.0.0.1"
@@ -54,9 +54,9 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
         // concurrently deleted and rewritten; suffix with the PID to isolate each
         // process's test database.
         let db_dir =
-            std::env::temp_dir().join(format!("actrix_signaling_test_db_{}", std::process::id()));
+            std::env::temp_dir().join(format!("loran_signaling_test_db_{}", std::process::id()));
         std::fs::create_dir_all(&db_dir).expect("Failed to create test database directory");
-        let db_file = db_dir.join("actrix.db");
+        let db_file = db_dir.join("loran.db");
         if db_file.exists() {
             let _ = std::fs::remove_file(&db_file);
         }

@@ -49,7 +49,7 @@ targets:
       properties:
         CFBundleDisplayName: DataStreamApp
         UILaunchScreen: {}
-        NSLocalNetworkUsageDescription: DataStreamApp connects to the local actrix development server.
+        NSLocalNetworkUsageDescription: DataStreamApp connects to the local loran development server.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:

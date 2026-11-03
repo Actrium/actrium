@@ -1,4 +1,4 @@
-use actrix_proto::{
+use loran_proto::{
     CreateRealmRequest, CreateRealmResponse, DeleteConfigOverrideRequest,
     DeleteConfigOverrideResponse, GetConfigRequest, GetConfigResponse, GetNodeInfoRequest,
     GetNodeInfoResponse, GetRealmRequest, GetRealmResponse, ListConfigOverridesRequest,

@@ -159,8 +159,8 @@ jobs:
       - name: Pre-build actr CLI (release, embeds web assets)
         run: cargo build --release -p actr-cli --bin actr --features wasm-engine
 
-      - name: Pre-build mock-actrix
-        run: cargo build --release -p actr-mock-actrix --bin mock-actrix
+      - name: Pre-build mock-loran
+        run: cargo build --release -p actr-mock-loran --bin mock-loran
 
       - name: Run echo browser e2e
         working-directory: packages/actr-web/examples/echo

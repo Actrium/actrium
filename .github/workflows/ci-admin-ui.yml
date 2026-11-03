@@ -1,6 +1,6 @@
-name: CI (actrix Admin UI)
+name: CI (loran Admin UI)
 
-# The actrix Admin UI is a Vite/TypeScript frontend embedded into the actrixd
+# The loran Admin UI is a Vite/TypeScript frontend embedded into the loran-server
 # binary. It is decoupled from the Rust build (the Rust workspace builds without
 # a JS toolchain), so it gets its own job that only runs when the UI changes.
 on:

@@ -61,7 +61,7 @@ pub enum WebRtcUnavailableReason {
     PeerConnectionRebuildFailed,
     UnsupportedRtcCapability,
     RtcResourceLimitExceeded,
-    /// Actrix confirmed that the exact remote `ActrId` has no usable
+    /// Loran confirmed that the exact remote `ActrId` has no usable
     /// signaling session. The framework closes that endpoint but deliberately
     /// does not discover or select a replacement service instance.
     PeerUnavailable,

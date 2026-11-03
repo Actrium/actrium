@@ -13,9 +13,9 @@ ICE_PORT=3478
 REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="e2e.actrium.test"
-ACTRIX_BIN="${ACTRIX_BIN:-}"
+LORAN_BIN="${LORAN_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
-ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/actrix.toml"
+LORAN_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/loran.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/swift-echo-app"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
 TEMP_SERVICE_TARGET_DIR="$E2E_TARGET_ROOT/temp-service"
@@ -52,13 +52,13 @@ DIST_DIR="$RUN_DIR/dist"
 TMP_SERVICE_ROOT="$RUN_DIR/workspace"
 TMP_SERVICE_DIR="$TMP_SERVICE_ROOT/echo-actr-$RANDOM"
 TMP_APP_DIR="$TMP_SERVICE_ROOT/echo-app-$RANDOM"
-ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
+LORAN_CONFIG_PATH="$RUN_DIR/loran.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
 SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
 PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
 PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
-ECHOAPP_ACTRIX_CONFIG="$TMP_APP_DIR/actr.toml"
+ECHOAPP_LORAN_CONFIG="$TMP_APP_DIR/actr.toml"
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 ECHOAPP_PACKAGE_MANIFEST="$RUN_DIR/echoapp-package-manifest.toml"
 ECHOAPP_MARKER_BINARY="$RUN_DIR/echoapp-linked-identity.bin"
@@ -74,7 +74,7 @@ SYMBOL_DIR="$RUN_DIR/symbols"
 mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT" "$DIAGNOSTIC_DIR" "$SANITIZED_LOG_DIR"
 rm -rf "$SCRIPT_DIR/.tmp/symbols"
 
-ACTRIX_PID=""
+LORAN_PID=""
 SERVER_PID=""
 APP_PID=""
 APP_DSYM=""
@@ -245,13 +245,13 @@ capture_diagnostics() {
     # Process status
     {
         echo "=== Process Status ==="
-        echo "ACTRIX_PID=${ACTRIX_PID:-none}"
+        echo "LORAN_PID=${LORAN_PID:-none}"
         echo "SERVER_PID=${SERVER_PID:-none}"
         echo "APP_PID=${APP_PID:-none}"
-        if [ -n "${ACTRIX_PID:-}" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
-            echo "actrix: RUNNING"
+        if [ -n "${LORAN_PID:-}" ] && kill -0 "$LORAN_PID" 2>/dev/null; then
+            echo "loran: RUNNING"
         else
-            echo "actrix: NOT RUNNING"
+            echo "loran: NOT RUNNING"
         fi
         if [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
             echo "server: RUNNING"
@@ -287,9 +287,9 @@ capture_diagnostics() {
         } >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
 
-    # Ghost candidates and ACL filtering from actrix log
-    if [ -f "$LOG_DIR/actrix.log" ]; then
-        grep -iE "heartbeat|disconnect|cleanup|ghost|candidate|acl|filter" "$LOG_DIR/actrix.log" >"$diag_dir/actrix-filtered.log" 2>/dev/null || true
+    # Ghost candidates and ACL filtering from loran log
+    if [ -f "$LOG_DIR/loran.log" ]; then
+        grep -iE "heartbeat|disconnect|cleanup|ghost|candidate|acl|filter" "$LOG_DIR/loran.log" >"$diag_dir/loran-filtered.log" 2>/dev/null || true
     fi
 
     # Server log heartbeat/disconnect/registry events
@@ -376,13 +376,13 @@ cleanup() {
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null || true
     fi
-    if [ -n "$ACTRIX_PID" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
-        kill "$ACTRIX_PID" 2>/dev/null || true
+    if [ -n "$LORAN_PID" ] && kill -0 "$LORAN_PID" 2>/dev/null; then
+        kill "$LORAN_PID" 2>/dev/null || true
     fi
     wait 2>/dev/null || true
 
     # Remove generated project configs that name the per-run Realm client key.
-    rm -f "$ECHOAPP_ACTRIX_CONFIG" "$TMP_APP_DIR/.actr/config.toml"
+    rm -f "$ECHOAPP_LORAN_CONFIG" "$TMP_APP_DIR/.actr/config.toml"
     rmdir "$TMP_APP_DIR/.actr" 2>/dev/null || true
 
     # Shut down only the simulator selected for this run. Other booted
@@ -428,7 +428,7 @@ run_actr() {
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" "$ACTR_CLI_BIN" "$@"
 }
 
-# ──── Rust / actrix lifecycle (reused from package-runtime-echo) ────
+# ──── Rust / loran lifecycle (reused from package-runtime-echo) ────
 
 build_local_actr_cli() {
     section "🔧 Building local actr CLI"
@@ -459,28 +459,28 @@ build_local_actr_cli() {
     success "actr CLI ready: $ACTR_CLI_BIN"
 }
 
-build_local_actrix() {
-    if [ -n "${ACTRIX_BIN:-}" ]; then
-        local resolved_actrix
-        resolved_actrix="$(command -v "$ACTRIX_BIN" 2>/dev/null || true)"
-        if [ -z "$resolved_actrix" ] && [ -x "$ACTRIX_BIN" ]; then
-            resolved_actrix="$ACTRIX_BIN"
+build_local_loran() {
+    if [ -n "${LORAN_BIN:-}" ]; then
+        local resolved_loran
+        resolved_loran="$(command -v "$LORAN_BIN" 2>/dev/null || true)"
+        if [ -z "$resolved_loran" ] && [ -x "$LORAN_BIN" ]; then
+            resolved_loran="$LORAN_BIN"
         fi
-        [ -n "$resolved_actrix" ] || fail "ACTRIX_BIN is set but not executable: $ACTRIX_BIN"
-        ACTRIX_BIN="$resolved_actrix"
-        export ACTRIX_BIN
-        success "Using caller-provided actrix: $ACTRIX_BIN"
+        [ -n "$resolved_loran" ] || fail "LORAN_BIN is set but not executable: $LORAN_BIN"
+        LORAN_BIN="$resolved_loran"
+        export LORAN_BIN
+        success "Using caller-provided loran: $LORAN_BIN"
         return 0
     fi
 
-    section "🔨 Building local actrix from source"
+    section "🔨 Building local loran from source"
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" cargo build \
         --manifest-path "$REPO_ROOT/crates/loran-server/Cargo.toml" \
-        --bin actrix >/dev/null
-    ACTRIX_BIN="$ACTR_TARGET_DIR/debug/actrix"
-    [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
-    export ACTRIX_BIN
-    success "actrix ready: $ACTRIX_BIN"
+        --bin loran >/dev/null
+    LORAN_BIN="$ACTR_TARGET_DIR/debug/loran"
+    [ -x "$LORAN_BIN" ] || fail "loran binary missing at $LORAN_BIN"
+    export LORAN_BIN
+    success "loran ready: $LORAN_BIN"
 }
 
 append_workspace_patch() {
@@ -623,7 +623,7 @@ publish_echoapp_package_identity() {
     section "📦 Publishing EchoApp package identity"
 
     # Linked EchoApp does not load this package. It is a registry marker for
-    # actrix versions that still require the actor type to be package-registered.
+    # loran versions that still require the actor type to be package-registered.
     printf 'linked EchoApp identity marker\n' >"$ECHOAPP_MARKER_BINARY"
     cat >"$ECHOAPP_PACKAGE_MANIFEST" <<EOF
 edition = 1
@@ -694,7 +694,7 @@ render_echoapp_config() {
     section "📝 Rendering EchoApp runtime config"
     render_template \
         "$SCRIPT_DIR/actr.toml.tpl" \
-        "$ECHOAPP_ACTRIX_CONFIG" \
+        "$ECHOAPP_LORAN_CONFIG" \
         "__HOST__=127.0.0.1" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
@@ -1063,14 +1063,14 @@ run_background_recovery_cycle() {
 section "🧪 Swift EchoApp E2E"
 echo "Run directory: $RUN_DIR"
 echo "Message:       $TEST_INPUT"
-echo "Actrix binary: ${ACTRIX_BIN:-workspace source (built below)}"
+echo "Loran binary: ${LORAN_BIN:-workspace source (built below)}"
 echo "Host target:   $HOST_TARGET"
 
-# Phase 1: Prepare actrix infrastructure
+# Phase 1: Prepare loran infrastructure
 render_runtime_configs
 build_local_actr_cli
-build_local_actrix
-start_actrix
+build_local_loran
+start_loran
 login_admin
 wait_for_signer
 ensure_realm

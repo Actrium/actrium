@@ -52,12 +52,12 @@ repository layout truthfully.
 | `bindings/swift/` | `packages/actr-swift/` | Swift package root |
 | `bindings/typescript/` | `packages/actr-typescript/` | TypeScript workload package |
 | `bindings/web/` | `packages/actr-web/` | Coupled web SDK workspace; split later only if useful |
-| `actrix/crates/<name>/` | `crates/loran-<name>/` | Directory ownership changes now; public crate renames follow separately |
-| `actrix/deploy/` | `loran/deploy/` | Deployable service composition |
-| `actrix/docs/` | `loran/docs/` | Operations and service documentation |
-| `actrix/config.example.toml` | `loran/config/actrix.example.toml` | Compatibility name retained during import |
-| `actrix/benchmarks/` | `tests/benchmarks/loran/` | Service-suite performance checks |
-| `actrix/scripts/` | `scripts/loran/` | Loran operational workflows |
+| Service suite `crates/<name>/` | `crates/loran-<name>/` | Reusable Loran crates and their public package names |
+| Service suite `deploy/` | `loran/deploy/` | Deployable service composition |
+| Service suite `docs/` | `loran/docs/` | Operations and service documentation |
+| Service suite `config.example.toml` | `loran/config/loran.example.toml` | Canonical Loran example configuration |
+| Service suite `benchmarks/` | `tests/benchmarks/loran/` | Service-suite performance checks |
+| Service suite `scripts/` | `scripts/loran/` | Loran operational workflows |
 | `testing/*/` | `crates/<package-name>/` | Buildable Rust test support crates |
 | `tools/` | `tools/actr/` | Actr generators, linters, and developer tools |
 | `examples/` | `examples/actr/` | Component examples |
@@ -74,23 +74,21 @@ package section moves to `crates/actr/Cargo.toml`, while workspace
 configuration and shared dependencies remain in the repository-root
 `Cargo.toml`. A following build-system commit updates path dependencies.
 
-## Actrix to Loran rename boundary
+## Loran naming boundary
 
-The imported history keeps `Actrix` in historical commit messages and in
-historical snapshots because that was the name at the time. The relocated
-current tree uses Loran ownership paths immediately:
+The service suite uses Loran consistently in its current tree: ownership paths,
+Cargo packages, executables, configuration keys, environment variables, metrics,
+deployment assets and test fixtures. Historical Git commits retain their
+original names and paths.
 
-- `actrix/crates/*` becomes `crates/loran-*`;
-- deploy, configuration, and operations material moves under `loran/`;
-- service workflows and benchmarks move under `scripts/loran/` and
+- Reusable services live in `crates/loran-*`.
+- Deployment, configuration and operations material lives under `loran/`.
+- Operational scripts and benchmarks live under `scripts/loran/` and
   `tests/benchmarks/loran/`.
 
-Current user-facing names, documentation, binaries, Cargo packages, artifact
-names, workflow names, and environment variables are renamed in a separate
-semantic migration commit. Published package names, protocol values, stored
-configuration keys, endpoint paths, and other compatibility surfaces must be
-reviewed individually; they receive an explicit compatibility alias or a
-documented breaking change instead of an unqualified text replacement.
+The semantic migration is a breaking change for installed deployments and
+external consumers. See [the Loran naming migration guide](loran-naming.md) for
+package, configuration, storage and deployment requirements.
 
 ## Verification
 
@@ -137,7 +135,7 @@ reviewed and migrated through their consolidated ownership paths:
 | Source commit | Consolidated commit | Disposition |
 | --- | --- | --- |
 | `900d493c` | `dc1dac20` | Migrated from `bindings/kotlin` to `packages/actr-kotlin` |
-| `32927127` | `15d65aff` | Migrated from Actrix service paths to the corresponding Loran crates and documentation |
+| `32927127` | `15d65aff` | Migrated from Loran service paths to the corresponding Loran crates and documentation |
 
 The remaining source pull requests are recorded in
 [`Actrium/actrium#185`](https://github.com/Actrium/actrium/issues/185). GitHub

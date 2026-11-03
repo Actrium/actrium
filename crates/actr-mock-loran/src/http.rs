@@ -1,4 +1,4 @@
-//! HTTP handlers for the mock actrix server.
+//! HTTP handlers for the mock loran server.
 //!
 //! Covers the REST endpoints that `actr-hyper` (`IssuerClient`, `PublisherCertCache`)
 //! and the `actr` CLI (`pkg publish`) talk to, plus admin seeding routes
@@ -71,7 +71,7 @@ pub async fn register_handler(
         serial = register_ok.actr_id.serial_number,
         publisher = req.actr_type.publisher,
         name = req.actr_type.name,
-        "mock-actrix: registered actor (http)"
+        "mock-loran: registered actor (http)"
     );
 
     let bytes = response.encode_to_vec();
@@ -107,7 +107,7 @@ pub async fn renew_handler(
     if req.renewal_token.as_ref() != expected_token.as_slice() {
         tracing::warn!(
             serial = actor_id.serial_number,
-            "mock-actrix: renewal token rejected"
+            "mock-loran: renewal token rejected"
         );
         let err_response = RenewCredentialResponse {
             result: Some(renew_credential_response::Result::Error(
@@ -165,7 +165,7 @@ pub async fn renew_handler(
 
     tracing::info!(
         serial = register_ok.actr_id.serial_number,
-        "mock-actrix: renewed credentials (http)"
+        "mock-loran: renewed credentials (http)"
     );
 
     let bytes = response.encode_to_vec();
@@ -201,7 +201,7 @@ pub async fn verifying_key_handler(
     let key = match state.publisher_verifying_key(&name).await {
         Some(k) => k,
         None => {
-            tracing::warn!(publisher = %name, "mock-actrix: Publisher Registry not registered");
+            tracing::warn!(publisher = %name, "mock-loran: Publisher Registry not registered");
             return Err(ApiError::not_found(format!(
                 "publisher '{name}' not registered"
             )));
@@ -271,7 +271,7 @@ pub async fn publish_handler(
     }
 
     // Note: the mock deliberately does not verify the ed25519 signature
-    // against the Publisher Registry's registered pubkey. Real actrix does; leaving this as
+    // against the Publisher Registry's registered pubkey. Real loran does; leaving this as
     // a trust-on-first-publish flow keeps the mock simple for CLI e2e tests.
     let _ = req.nonce_sig;
     let _ = req.proto_files;
@@ -289,7 +289,7 @@ pub async fn publish_handler(
     let id = state.packages.read().await.len() as u64;
     let type_str = format!("{}/{}@{}", req.publisher, req.name, req.version);
 
-    tracing::info!(%type_str, target = %req.target, "mock-actrix: package published");
+    tracing::info!(%type_str, target = %req.target, "mock-loran: package published");
 
     Ok(Json(PublishResponse {
         id,
@@ -349,7 +349,7 @@ pub async fn admin_publisher_registry_handler(
             contact: req.contact,
         },
     );
-    tracing::info!(name = %req.name, "mock-actrix: Publisher Registry seeded via /admin/publisher");
+    tracing::info!(name = %req.name, "mock-loran: Publisher Registry seeded via /admin/publisher");
     Ok(Json(AdminOk { ok: true }))
 }
 

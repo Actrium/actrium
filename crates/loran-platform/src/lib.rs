@@ -1,6 +1,6 @@
 //! Base infrastructure library
 //!
-//! Provides infrastructure components for Actrix auxiliary services, including identity management, encryption, monitoring, storage, Realm management, and other core functionality
+//! Provides infrastructure components for Loran auxiliary services, including identity management, encryption, monitoring, storage, Realm management, and other core functionality
 #![deny(clippy::disallowed_macros)]
 
 pub mod aid;

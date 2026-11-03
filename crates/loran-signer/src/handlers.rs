@@ -20,21 +20,21 @@ use std::time::Instant;
 lazy_static! {
     /// Signer service metrics
     static ref SIGNER_REQUEST_DURATION: HistogramVec = HistogramVec::new(
-        HistogramOpts::new("actrix_request_duration_seconds", "HTTP request duration in seconds")
-            .namespace("actrix")
+        HistogramOpts::new("loran_request_duration_seconds", "HTTP request duration in seconds")
+            .namespace("loran")
             .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]),
         &["service", "method", "path", "status"]
     ).unwrap();
 
     static ref SIGNER_REQUESTS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_requests_total", "Total number of HTTP requests")
-            .namespace("actrix"),
+        Opts::new("loran_requests_total", "Total number of HTTP requests")
+            .namespace("loran"),
         &["service", "method", "path", "status"]
     ).unwrap();
 
     static ref SIGNER_AUTH_FAILURES: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_auth_failures_total", "Total number of authentication failures")
-            .namespace("actrix"),
+        Opts::new("loran_auth_failures_total", "Total number of authentication failures")
+            .namespace("loran"),
         &["service", "reason"]
     ).unwrap();
 }
@@ -102,7 +102,7 @@ impl SignerState {
 pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
     service_config: &crate::config::SignerServiceConfig,
     nonce_storage: N,
-    actrix_shared_key: &str,
+    loran_shared_key: &str,
     sqlite_path: &std::path::Path,
 ) -> Result<SignerState, SignerError> {
     crate::recording::info!("Initializing Signer state from SignerServiceConfig");
@@ -126,7 +126,7 @@ pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
     Ok(SignerState::new(
         key_storage,
         nonce_storage,
-        actrix_shared_key.to_string(),
+        loran_shared_key.to_string(),
     ))
 }
 

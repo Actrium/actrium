@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# register.sh — Register publisher and publish echo-actr package to a running actrix instance.
+# register.sh — Register publisher and publish echo-actr package to a running loran instance.
 # Usage: ./register.sh [--db <path>] [--endpoint <url>] [--package <path>]
 set -euo pipefail
 
@@ -10,13 +10,13 @@ WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTR_REPO_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
-# Auto-detect actrix database: ask the running actrix process which DB it has open.
+# Auto-detect loran database: ask the running loran process which DB it has open.
 # Falls back to checking known candidate paths by mtime if lsof is unavailable.
-_detect_actrix_db() {
+_detect_loran_db() {
     # First: ask the live process
     if command -v lsof >/dev/null 2>&1; then
         local live_db
-        live_db=$(lsof -c actrix 2>/dev/null | awk '/actrix\.db$/ {print $NF; exit}')
+        live_db=$(lsof -c loran 2>/dev/null | awk '/loran\.db$/ {print $NF; exit}')
         if [ -n "$live_db" ] && [ -f "$live_db" ]; then
             echo "$live_db"
             return
@@ -25,9 +25,9 @@ _detect_actrix_db() {
 
     # Fallback: pick the most recently modified candidate
     local candidates=(
-        "$WORKSPACE_ROOT/database/actrix.db"
-        "$(cd "$WORKSPACE_ROOT/../.." && pwd)/database/actrix.db"
-        "$(cd "$WORKSPACE_ROOT/../../.." && pwd)/actrix/database/actrix.db"
+        "$WORKSPACE_ROOT/database/loran.db"
+        "$(cd "$WORKSPACE_ROOT/../.." && pwd)/database/loran.db"
+        "$(cd "$WORKSPACE_ROOT/../../.." && pwd)/loran/database/loran.db"
     )
     local best="" best_mtime=0
     for db in "${candidates[@]}"; do
@@ -40,9 +40,9 @@ _detect_actrix_db() {
             fi
         fi
     done
-    echo "${best:-$WORKSPACE_ROOT/database/actrix.db}"
+    echo "${best:-$WORKSPACE_ROOT/database/loran.db}"
 }
-ACTRIX_DB="${ACTRIX_DB:-$(_detect_actrix_db)}"
+LORAN_DB="${LORAN_DB:-$(_detect_loran_db)}"
 ENDPOINT="${ENDPOINT:-http://localhost:8081}"
 ECHO_ACTR_DIR="$WORKSPACE_ROOT/echo-actr"
 PUBLIC_KEY_PATH="$ECHO_ACTR_DIR/public-key.json"
@@ -61,7 +61,7 @@ ACTR_PACKAGE="${ACTR_PACKAGE:-$ECHO_ACTR_DIR/dist/actrium-EchoService-${ECHO_ACT
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --db)       ACTRIX_DB="$2";  shift 2 ;;
+        --db)       LORAN_DB="$2";  shift 2 ;;
         --endpoint) ENDPOINT="$2";   shift 2 ;;
         --package)  ACTR_PACKAGE="$2"; shift 2 ;;
         *) echo -e "${RED}Unknown argument: $1${NC}"; exit 1 ;;
@@ -71,15 +71,15 @@ done
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  actr register — publisher setup for package-echo"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  DB:       $ACTRIX_DB"
+echo "  DB:       $LORAN_DB"
 echo "  Endpoint: $ENDPOINT"
 echo "  Package:  $ACTR_PACKAGE"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ── Preflight checks ──────────────────────────────────────────────────────────
-if [ ! -f "$ACTRIX_DB" ]; then
-    echo -e "${RED}❌ Actrix database not found: $ACTRIX_DB${NC}"
-    echo "   Make sure actrix is running and has created its database."
+if [ ! -f "$LORAN_DB" ]; then
+    echo -e "${RED}❌ Loran database not found: $LORAN_DB${NC}"
+    echo "   Make sure loran is running and has created its database."
     exit 1
 fi
 
@@ -103,7 +103,7 @@ fi
 echo ""
 echo "🔑 Step 1: Creating realm package-echo@example.com..."
 
-sqlite3 "$ACTRIX_DB" \
+sqlite3 "$LORAN_DB" \
     "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) \
      VALUES ('package-echo@example.com', 'active', 1, strftime('%s','now'));"
 
@@ -129,7 +129,7 @@ if [ -z "$PUBLISHER_KEY_ID" ]; then
     exit 1
 fi
 
-sqlite3 "$ACTRIX_DB" << SQL
+sqlite3 "$LORAN_DB" << SQL
 INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
 VALUES ('actrium', '$PUBLISHER_PUBKEY', '$PUBLISHER_KEY_ID', 'examples@actrium.local', 'active',

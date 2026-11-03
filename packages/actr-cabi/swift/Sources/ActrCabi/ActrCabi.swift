@@ -334,7 +334,7 @@ public final class ActrCabiNode: @unchecked Sendable {
     /// `actorType` must use the `publisher/program@version` representation.
     /// Call after `fromConfig(path:)` and before `linkWorkload(name:)`;
     /// without this call the node registers with the placeholder identity
-    /// `local/Client@0.0.0`, which actrix ACL filtering rejects. On failure
+    /// `local/Client@0.0.0`, which loran ACL filtering rejects. On failure
     /// the node is reset and must be rebuilt with `fromConfig(path:)`.
     public func withActorType(_ actorType: String) throws {
         let initHandle = try withLockedState { state -> UnsafeMutableRawPointer in

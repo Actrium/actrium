@@ -4,7 +4,7 @@ use nonce_auth::NonceCredential;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const SIGN_REQUEST_AUTH_VERSION: &str = "actrix-signer-v1";
+const SIGN_REQUEST_AUTH_VERSION: &str = "loran-signer-v1";
 
 /// Build the canonical nonce-auth payload for a signing request.
 ///

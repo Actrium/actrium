@@ -101,7 +101,7 @@ pub(crate) struct ControlAttemptStore {
 impl ControlAttemptStore {
     pub(crate) fn new(renewal_token_secret: &[u8]) -> Self {
         let mut hasher = Sha256::new();
-        hasher.update(b"actrix/issuer/control-attempt-response/v1");
+        hasher.update(b"loran/issuer/control-attempt-response/v1");
         hasher.update(renewal_token_secret);
         Self {
             encryption_key: hasher.finalize().into(),

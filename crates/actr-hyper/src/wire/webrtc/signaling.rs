@@ -1265,7 +1265,7 @@ impl WebSocketSignalingClient {
     /// Test-only convenience constructor: create, connect, and return a client.
     ///
     /// The returned client has no `actor_id` / `credential_state` bound, so the
-    /// signaling URL carries no identity query parameters — mock-actrix will
+    /// signaling URL carries no identity query parameters — mock-loran will
     /// not bind the WebSocket to any registry entry. Use this only for tests
     /// that explicitly exercise the unbound path; integration tests that need
     /// peer-to-peer relay should use [`Self::connect_to_with_identity`].
@@ -1287,10 +1287,10 @@ impl WebSocketSignalingClient {
     }
 
     /// Test-only constructor that pins identity *before* the WebSocket
-    /// handshake so mock-actrix can bind the connection to the actor on
+    /// handshake so mock-loran can bind the connection to the actor on
     /// register (`?actor_id=…` query parameter). Required by integration
     /// tests that rely on peer-to-peer signaling relay — without this binding
-    /// mock-actrix drops outbound relays for "unbound target".
+    /// mock-loran drops outbound relays for "unbound target".
     #[cfg(feature = "test-utils")]
     pub async fn connect_to_with_identity(
         url: &str,

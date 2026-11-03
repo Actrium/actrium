@@ -1,7 +1,7 @@
-//! Local Chromium/WebRTC interoperability fixture for Actrix TURN.
+//! Local Chromium/WebRTC interoperability fixture for Loran TURN.
 //!
 //! Run with:
-//! `cargo run -p actrix-turn --example browser_interop --features test-utils`
+//! `cargo run -p loran-turn --example browser_interop --features test-utils`
 //! and open the printed localhost URL in Chromium. The page forces both peers
 //! to use relay candidates and reports the selected candidate pair.
 
@@ -17,7 +17,7 @@ use tokio::net::{TcpListener, UdpSocket};
 use turn::{Authenticator, create_turn_server, shutdown_turn_server};
 use uuid::Uuid;
 
-const REALM: &str = "browser-interop.actrix.test";
+const REALM: &str = "browser-interop.loran.test";
 const ACTOR_ID: &str = "1.k7m2q9xh@example.com";
 
 fn scoped_credential(secret: &str) -> (String, String) {
@@ -50,10 +50,10 @@ fn page(turn_address: &str, username: &str, password: &str) -> String {
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Actrix TURN browser interoperability</title>
+  <title>Loran TURN browser interoperability</title>
 </head>
 <body>
-  <h1>Actrix TURN browser interoperability</h1>
+  <h1>Loran TURN browser interoperability</h1>
   <pre id="result">running</pre>
   <script>
     const result = document.getElementById("result");
@@ -115,7 +115,7 @@ fn page(turn_address: &str, username: &str, password: &str) -> String {
       const remoteChannel = new Promise((resolve) => {{
         right.ondatachannel = (event) => resolve(event.channel);
       }});
-      const localChannel = left.createDataChannel("actrix-turn-interop");
+      const localChannel = left.createDataChannel("loran-turn-interop");
 
       const offer = await left.createOffer();
       await left.setLocalDescription(offer);

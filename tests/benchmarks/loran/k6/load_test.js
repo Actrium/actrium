@@ -1,4 +1,4 @@
-// Actrix K6 load test script
+// Loran K6 load test script
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate } from 'k6/metrics';
@@ -42,7 +42,7 @@ export default function () {
 
   check(metricsRes, {
     'metrics status is 200': (r) => r.status === 200,
-    'metrics contains actrix_': (r) => r.body.includes('actrix_'),
+    'metrics contains loran_': (r) => r.body.includes('loran_'),
   }) || errorRate.add(1);
 
   sleep(1);
@@ -60,7 +60,7 @@ function htmlReport(data) {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Actrix K6 Load Test Report</title>
+  <title>Loran K6 Load Test Report</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
     h1 { color: #333; }
@@ -72,7 +72,7 @@ function htmlReport(data) {
   </style>
 </head>
 <body>
-  <h1>Actrix Load Test Report</h1>
+  <h1>Loran Load Test Report</h1>
   <p>Test Date: ${new Date().toISOString()}</p>
 
   <h2>Summary</h2>

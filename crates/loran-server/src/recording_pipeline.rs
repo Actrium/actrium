@@ -1,4 +1,4 @@
-use platform::config::{ActrixConfig, RecordingConfig};
+use platform::config::{LoranConfig, RecordingConfig};
 use platform::recording::{
     self, AuditFilter, ChannelFilters, ObservabilityFilter, OperationsFilter, SecurityFilter,
     parse_audit_filter, parse_observability_filter, parse_operations_filter, parse_security_filter,
@@ -33,10 +33,10 @@ use opentelemetry_sdk::{Resource, trace::SdkTracerProvider};
 #[cfg(feature = "opentelemetry")]
 use tracing_subscriber::filter::filter_fn;
 
-const TARGET_OBSERVABILITY: &str = "actrix::observability";
-const TARGET_AUDIT: &str = "actrix::audit";
-const TARGET_SECURITY: &str = "actrix::security";
-const TARGET_OPERATIONS: &str = "actrix::operations";
+const TARGET_OBSERVABILITY: &str = "loran::observability";
+const TARGET_AUDIT: &str = "loran::audit";
+const TARGET_SECURITY: &str = "loran::security";
+const TARGET_OPERATIONS: &str = "loran::operations";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecordingChannel {
@@ -290,7 +290,7 @@ impl<'a> fmt::MakeWriter<'a> for ChannelRoutingMakeWriter {
 }
 
 /// Initialize unified recording pipeline (logging + tracing) based on configuration.
-pub fn init_recording_pipeline(config: &ActrixConfig) -> Result<RecordingPipelineGuard> {
+pub fn init_recording_pipeline(config: &LoranConfig) -> Result<RecordingPipelineGuard> {
     let mut guard = RecordingPipelineGuard::default();
     let recording_config = config.recording_config();
 
@@ -448,7 +448,7 @@ fn init_subscriber(
     use_ansi: bool,
     #[cfg_attr(not(feature = "opentelemetry"), allow(unused_variables))]
     guard: &mut RecordingPipelineGuard,
-    config: &ActrixConfig,
+    config: &LoranConfig,
 ) -> Result<()> {
     let fmt_layer = fmt::layer()
         .with_target(true)
@@ -642,7 +642,7 @@ fn init_subscriber(
 
 #[cfg(feature = "opentelemetry")]
 fn build_tracing_provider(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     otlp: &OtlpEndpoint,
     channel: Option<RecordingChannel>,
 ) -> Result<SdkTracerProvider> {
@@ -685,7 +685,7 @@ fn build_tracing_provider(
 }
 
 #[cfg(feature = "opentelemetry")]
-fn build_otel_resource(config: &ActrixConfig, channel: Option<RecordingChannel>) -> Resource {
+fn build_otel_resource(config: &LoranConfig, channel: Option<RecordingChannel>) -> Resource {
     let mut attributes = vec![
         KeyValue::new("service.instance.id", config.name.clone()),
         KeyValue::new("service.environment", config.env.clone()),
@@ -713,7 +713,7 @@ fn build_otel_resource(config: &ActrixConfig, channel: Option<RecordingChannel>)
 ///
 /// Returns `Ok(None)` when no `ca_cert_path` is configured (plaintext endpoint).
 #[cfg(feature = "opentelemetry")]
-fn build_tls_config(config: &ActrixConfig) -> Result<Option<ClientTlsConfig>> {
+fn build_tls_config(config: &LoranConfig) -> Result<Option<ClientTlsConfig>> {
     match &config.recording_config().ca_cert_path {
         Some(path) => {
             let pem = std::fs::read(path)
@@ -749,7 +749,7 @@ impl HttpClient for OtlpHttpClient {
 
 /// Build an HTTP client with the configured OTLP CA certificate, if any.
 #[cfg(feature = "opentelemetry")]
-fn build_http_client(config: &ActrixConfig) -> Result<Option<OtlpHttpClient>> {
+fn build_http_client(config: &LoranConfig) -> Result<Option<OtlpHttpClient>> {
     match &config.recording_config().ca_cert_path {
         Some(path) => {
             let pem = std::fs::read(path)
@@ -784,7 +784,7 @@ fn apply_tls_scheme(endpoint: &str, tls_enabled: bool) -> String {
 /// endpoint as traces. Only used when `[recording].logs_enabled` is true; the
 /// emitted log records carry the same service.name so logs correlate with spans.
 #[cfg(feature = "opentelemetry")]
-fn build_logs_provider(config: &ActrixConfig, otlp: &OtlpEndpoint) -> Result<SdkLoggerProvider> {
+fn build_logs_provider(config: &LoranConfig, otlp: &OtlpEndpoint) -> Result<SdkLoggerProvider> {
     let endpoint = apply_tls_scheme(
         &otlp.endpoint,
         config.recording_config().ca_cert_path.is_some(),

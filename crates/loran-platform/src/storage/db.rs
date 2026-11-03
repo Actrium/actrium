@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const ACTRIX_SCHEMA_VERSION: i64 = 9;
+const LORAN_SCHEMA_VERSION: i64 = 9;
 
 /// Database manager
 #[derive(Clone)]
@@ -21,9 +21,9 @@ impl Database {
     ///
     /// # Arguments
     /// * `path` - Directory path for database file storage; must already exist
-    ///   The main database file will be stored as `{path}/actrix.db`
+    ///   The main database file will be stored as `{path}/loran.db`
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let db_file = path.as_ref().join("actrix.db");
+        let db_file = path.as_ref().join("loran.db");
 
         // Create connection options and enable WAL mode
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_file.display()))?
@@ -53,7 +53,7 @@ impl Database {
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&self.pool)
             .await?;
-        if version == ACTRIX_SCHEMA_VERSION {
+        if version == LORAN_SCHEMA_VERSION {
             return Ok(());
         }
 
@@ -71,8 +71,8 @@ impl Database {
         }
 
         anyhow::bail!(
-            "unsupported Actrix database schema version {version}; expected \
-             {ACTRIX_SCHEMA_VERSION}. Stop Actrix and rebuild the database"
+            "unsupported Loran database schema version {version}; expected \
+             {LORAN_SCHEMA_VERSION}. Stop Loran and rebuild the database"
         );
     }
 
@@ -557,7 +557,7 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(&format!("PRAGMA user_version = {ACTRIX_SCHEMA_VERSION}"))
+        sqlx::query(&format!("PRAGMA user_version = {LORAN_SCHEMA_VERSION}"))
             .execute(&mut *tx)
             .await?;
 
@@ -616,7 +616,7 @@ mod tests {
             .fetch_one(db.get_pool())
             .await
             .unwrap();
-        assert_eq!(version, ACTRIX_SCHEMA_VERSION);
+        assert_eq!(version, LORAN_SCHEMA_VERSION);
 
         for name in ["primary@example.com", "second@example.com"] {
             sqlx::query("INSERT INTO realm (name, created_at) VALUES (?, 1)")
@@ -715,7 +715,7 @@ mod tests {
     #[tokio::test]
     async fn unversioned_existing_database_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let db_file = dir.path().join("actrix.db");
+        let db_file = dir.path().join("loran.db");
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_file.display()))
             .unwrap()
             .create_if_missing(true);
@@ -745,7 +745,7 @@ mod tests {
         let db = Database::new(dir.path()).await.unwrap();
         sqlx::query(&format!(
             "PRAGMA user_version = {}",
-            ACTRIX_SCHEMA_VERSION - 1
+            LORAN_SCHEMA_VERSION - 1
         ))
         .execute(db.get_pool())
         .await
@@ -757,7 +757,7 @@ mod tests {
             .err()
             .expect("previous schema version must be rejected");
         let message = error.to_string();
-        assert!(message.contains(&format!("schema version {}", ACTRIX_SCHEMA_VERSION - 1)));
+        assert!(message.contains(&format!("schema version {}", LORAN_SCHEMA_VERSION - 1)));
         assert!(message.contains("rebuild the database"));
     }
 }

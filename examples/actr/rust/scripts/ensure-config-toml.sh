@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared helper for start scripts: ensure manifest.toml, actr.toml and actrix-config.toml
+# Shared helper for start scripts: ensure manifest.toml, actr.toml and loran-config.toml
 # exist by copying from example files if needed.
 #
 # New two-file layout:
@@ -27,11 +27,11 @@ ensure_actr_toml() {
 }
 
 
-# Ensure actrix-config.toml exists by copying from actrix-config.example.toml if needed
-ensure_actrix_config() {
+# Ensure loran-config.toml exists by copying from loran-config.example.toml if needed
+ensure_loran_config() {
     local workspace_root=$1
-    local config_toml="$workspace_root/actrix-config.toml"
-    local config_example="$workspace_root/actrix-config.example.toml"
+    local config_toml="$workspace_root/loran-config.toml"
+    local config_example="$workspace_root/loran-config.example.toml"
 
     local red="${RED:-}"
     local nc="${NC:-}"
@@ -41,7 +41,7 @@ ensure_actrix_config() {
             echo "📋 Copying $config_example to $config_toml"
             cp "$config_example" "$config_toml"
         else
-            echo -e "${red}❌ actrix-config.example.toml not found at $config_example${nc}" >&2
+            echo -e "${red}❌ loran-config.example.toml not found at $config_example${nc}" >&2
             return 1
         fi
     fi

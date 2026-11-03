@@ -32,7 +32,7 @@ ACTR_CABI_TARGETS="x86_64-pc-windows-msvc aarch64-apple-darwin" \
 ```
 
 actr-cabi does not enable actr-hyper's `opentelemetry` feature, so the
-Windows build avoids the OTLP compile-time timeout that skipped the actrix
+Windows build avoids the OTLP compile-time timeout that skipped the loran
 Windows release (#520).
 
 ## Use from C#
@@ -60,7 +60,7 @@ var node = new ActrCabiNode();
 await node.FromConfig("actr.toml");               // Node<Init>
 node.WithActorType("actrium/Echo@1.0.0");         // sets the Issuer actor identity
 await node.LinkWorkload("cabi.Echo");             // actr_workload_create → Node::link
-await node.Register();                            // Node::register (remote actrix Issuer)
+await node.Register();                            // Node::register (remote loran Issuer)
 await node.Start();                               // Node::start → ActrRef
 byte[] resp = await node.Call("cabi.Echo", payload, timeoutMs: 30_000);
 ```

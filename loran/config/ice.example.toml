@@ -1,5 +1,5 @@
 # Use the regular Loran executable with only UDP STUN/TURN enabled.
-# The Cargo package/executable currently retains its legacy name: actrix.
+# The Cargo package is loran-server; its executable is loran.
 name = "loran-turn"
 env = "prod"
 enable = 6 # STUN + TURN; use 2 for STUN only, 4 for TURN with built-in STUN.

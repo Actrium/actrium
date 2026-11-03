@@ -1,4 +1,4 @@
-//! Admin control-plane library for actrix nodes.
+//! Admin control-plane library for loran nodes.
 //!
 //! This crate is the canonical implementation for node-side control-plane
 //! behavior (node_admin gRPC API server).
@@ -19,8 +19,8 @@ pub use service::{
     SignerKeysResult,
 };
 
-// Re-export commonly used proto types from actrix-proto.
-pub use actrix_proto::{
+// Re-export commonly used proto types from loran-proto.
+pub use loran_proto::{
     ConfigOverrideEntry as ProtoConfigOverrideEntry, ConfigType,
     ControlHealthCheckRequest as HealthCheckRequest,
     ControlHealthCheckResponse as HealthCheckResponse, ControlService, ControlServiceClient,

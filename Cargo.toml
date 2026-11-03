@@ -33,7 +33,7 @@ members = [
     # === C ABI Primitives ===
     "crates/actr-cabi",
     # === Testing Utilities ===
-    "crates/actr-mock-actrix",
+    "crates/actr-mock-loran",
     "crates/actr-error-fixture",
     # === Loran service suite ===
     "crates/loran-*",
@@ -88,7 +88,7 @@ actr-platform-traits = { path = "crates/actr-platform-traits", version = "0.10.7
 actr-platform-native = { path = "crates/actr-platform-native", version = "0.10.7" }
 actr-pack = { path = "crates/actr-pack", version = "0.10.7" }
 actr-hlc = { path = "crates/actr-hlc", version = "0.5.9" }
-actr-mock-actrix = { path = "crates/actr-mock-actrix", version = "0.10.7" }
+actr-mock-loran = { path = "crates/actr-mock-loran", version = "0.10.7" }
 
 # === Async Runtime ===
 tokio = { version = "1.48", features = ["full"] }
@@ -132,7 +132,7 @@ webrtc = { version = "=0.21.1", git = "https://github.com/webrtc-rs/webrtc", rev
 rtc = { version = "=0.21.1", git = "https://github.com/webrtc-rs/webrtc", rev = "8ea6e2a69b0c4c97f38b0e81e5a77e1c066f3757", default-features = false, features = ["crypto-ring"] }
 rtc-rtp = { version = "=0.21.1", git = "https://github.com/webrtc-rs/webrtc", rev = "8ea6e2a69b0c4c97f38b0e81e5a77e1c066f3757" }
 
-# === Loran server dependencies (compatibility crate names remain Actrix) ===
+# === Loran server dependencies ===
 # Released TURN 0.17.2 predates the fixes in upstream #896 and #936.
 # STUN, TURN, and Net must use the same Git source.
 # TODO(#359): Once upstream publishes TURN with the required fixes, switch

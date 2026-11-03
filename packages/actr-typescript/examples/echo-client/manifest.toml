@@ -12,7 +12,7 @@ EchoService = { actr_type = "acme/EchoService@1.0.0" }
 EchoTwiceService = { actr_type = "acme/EchoTwiceService@1.0.0" }
 
 [system.signaling]
-url = "wss://actrix1.develenv.com/signaling/ws"
+url = "wss://loran.example.com/signaling/ws"
 
 [system.deployment]
 realm = "echo@example.com"
@@ -22,8 +22,8 @@ visible = true
 
 [system.webrtc]
 force_relay = false
-stun_urls = ["stun:actrix1.develenv.com:3478"]
-turn_urls = ["turn:actrix1.develenv.com:3478"]
+stun_urls = ["stun:loran.example.com:3478"]
+turn_urls = ["turn:loran.example.com:3478"]
 
 [acl]
 

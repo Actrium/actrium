@@ -13,7 +13,7 @@ import tomllib
 
 repo = Path(sys.argv[1])
 script = (repo / "scripts/actr/release-train.sh").read_text()
-groups = ["FOUNDATION_CRATES", "PROTOC_CRATES", "SDK_CRATES", "CLI_CRATES", "ACTRIX_CRATES"]
+groups = ["FOUNDATION_CRATES", "PROTOC_CRATES", "SDK_CRATES", "CLI_CRATES", "LORAN_CRATES"]
 order = []
 for group in groups:
     block = re.search(r"readonly " + group + r"=\((.*?)\n\)", script, re.S).group(1)

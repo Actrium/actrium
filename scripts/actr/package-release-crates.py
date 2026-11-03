@@ -36,7 +36,7 @@ def main() -> None:
     manifests.add(repo / "packages/actr-web/crates/actr-web-abi/Cargo.toml")
     release_script = (repo / "scripts/actr/release-train.sh").read_text()
     packages = []
-    for group in ["FOUNDATION_CRATES", "PROTOC_CRATES", "SDK_CRATES", "CLI_CRATES", "ACTRIX_CRATES"]:
+    for group in ["FOUNDATION_CRATES", "PROTOC_CRATES", "SDK_CRATES", "CLI_CRATES", "LORAN_CRATES"]:
         block = re.search(r"readonly " + group + r"=\((.*?)\n\)", release_script, re.S).group(1)
         packages.extend(re.findall(r'^\s*"([^"\n]+)"', block, re.M))
     options.output.mkdir(parents=True, exist_ok=True)

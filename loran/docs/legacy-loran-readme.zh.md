@@ -1,6 +1,6 @@
-# Actrix Auxiliary Servers
+# Loran Auxiliary Servers
 
-A production-ready collection of WebRTC auxiliary servers providing STUN, TURN, Signer, and service coordination for the Actrix ecosystem.
+A production-ready collection of WebRTC auxiliary servers providing STUN, TURN, Signer, and service coordination for the Loran ecosystem.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org/)
@@ -25,14 +25,14 @@ A production-ready collection of WebRTC auxiliary servers providing STUN, TURN, 
 
 ```bash
 # Clone repository
-git clone https://github.com/Actrium/actrix.git
-cd actrix
+git clone https://github.com/Actrium/actrium.git
+cd actrium
 
 # Build release binary
-cargo build --release
+cargo build --release -p loran-server
 
 # With OpenTelemetry support
-cargo build --release --features opentelemetry
+cargo build --release -p loran-server --features opentelemetry
 ```
 
 ### Configuration
@@ -40,12 +40,12 @@ cargo build --release --features opentelemetry
 Copy and customize the example configuration:
 
 ```bash
-cp config.example.toml config.toml
+cp loran/config/loran.example.toml config.toml
 nano config.toml
 ```
 
 Key settings to change:
-- `actrix_shared_key` - Generate with: `openssl rand -hex 32`
+- `loran_shared_key` - Generate with: `openssl rand -hex 32`
 - `turn.advertised_ip` - Your server's public IP
 - `bind.https.cert/key` - TLS certificate paths
 - `recording.sink` - Set to `file:///...` for production file sink
@@ -54,14 +54,14 @@ Key settings to change:
 
 ```bash
 # Validate configuration
-./target/release/actrix test config.toml
+./target/release/loran test config.toml
 
 # Start server
-./target/release/actrix --config config.toml
+./target/release/loran --config config.toml
 
 # Or bootstrap with deploy helper
-cargo run --manifest-path deploy/Cargo.toml -- install
-cargo run --manifest-path deploy/Cargo.toml -- service
+cargo run --manifest-path loran/deploy/Cargo.toml -- install
+cargo run --manifest-path loran/deploy/Cargo.toml -- service
 ```
 
 ## Configuration
@@ -90,13 +90,13 @@ enable = 22  # KS + TURN + STUN (recommended)
 
 ```toml
 enable = 6
-name = "actrix-01"
+name = "loran-01"
 env = "prod"
 
 [recording]
 filter_level = "info"    # RUST_LOG overrides if set
-sink = "file:///var/log/actrix/actrix.log"
-service_name = "actrix"
+sink = "file:///var/log/loran/loran.log"
+service_name = "loran"
 
 [recording.audit]
 sink = "otlp+http://127.0.0.1:4318/v1/logs"
@@ -130,8 +130,8 @@ filter_level = "debug"  # overridden by RUST_LOG if set
 ```toml
 [recording]
 filter_level = "info"  # overridden by RUST_LOG if set
-sink = "file:///var/log/actrix/actrix.log"
-service_name = "actrix-prod"
+sink = "file:///var/log/loran/loran.log"
+service_name = "loran-prod"
 
 [recording.security]
 sink = "otlp+grpc://otel-collector.internal:4317"
@@ -144,11 +144,11 @@ sink = "otlp+grpc://otel-collector.internal:4317"
 docker-compose -f docker/jaeger-compose.yml up -d
 
 # 2. Build with tracing support
-cargo build --release --features opentelemetry
+cargo build --release -p loran-server --features opentelemetry
 
 # 3. Configure endpoint
 [recording]
-service_name = "actrix"
+service_name = "loran"
 sink = "otlp+grpc://127.0.0.1:4317"
 
 # 4. Access UI
@@ -171,17 +171,17 @@ http://localhost:16686
 
 ```bash
 # Install binary payload
-cargo run --manifest-path deploy/Cargo.toml -- install
+cargo run --manifest-path loran/deploy/Cargo.toml -- install
 
 # Install systemd unit
-cargo run --manifest-path deploy/Cargo.toml -- service
+cargo run --manifest-path loran/deploy/Cargo.toml -- service
 
 # Start service
-sudo systemctl start actrix
-sudo systemctl enable actrix
+sudo systemctl start loran
+sudo systemctl enable loran
 
 # View logs
-sudo journalctl -u actrix -f
+sudo journalctl -u loran -f
 ```
 
 See [deploy/README.md](deploy/README.md) for deployment details.
@@ -234,17 +234,17 @@ cargo test -p turn
 ### Project Structure
 
 ```
-actrix/
+loran/
 ├── crates/
-│   ├── actrixd/      # Main binary crate (orchestrator)
+│   ├── loran-server/      # Main binary crate (orchestrator)
 │   │   ├── src/
 │   │   │   ├── admin/
 │   │   │   └── service/
 │   │   └── tests/
-│   ├── contracts/    # gRPC protobuf definitions (package: actrix-proto)
+│   ├── contracts/    # gRPC protobuf definitions (package: loran-proto)
 │   ├── platform/     # Shared lifecycle/config/state/auth/event foundation
 │   ├── control/      # Canonical admin control-plane implementation (package: admin)
-│   ├── sdk/          # Unified public facade (package: actrix-sdk)
+│   ├── sdk/          # Unified public facade (package: loran-sdk)
 │   ├── services/     # Node service implementations
 │   │   ├── ais/
 │   │   ├── ks/
@@ -290,7 +290,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.zh.md) for development guide.
 
 ### Deployment Requirements
 
-- ✅ Change default `actrix_shared_key`
+- ✅ Change default `loran_shared_key`
 - ✅ Use HTTPS in production
 - ✅ File permissions: `chmod 600 config.toml *.db`
 - ✅ Network isolation
@@ -320,7 +320,7 @@ See [CLAUDE.md](CLAUDE.md) for detailed security analysis.
 
 ## Contributing
 
-This is an internal project for the Actrix ecosystem. When contributing:
+This is an internal project for the Loran ecosystem. When contributing:
 
 1. Follow code patterns in [AGENTS.md](AGENTS.md)
 2. Add tests for new features
@@ -351,7 +351,7 @@ Full documentation system (~4800 lines of refined docs):
 
 ## Support
 
-- GitHub Issues: https://github.com/Actrium/actrix/issues
+- GitHub Issues: https://github.com/Actrium/actrium/issues
 - Documentation: [docs/INDEX.md](docs/INDEX.zh.md)
 
 ---

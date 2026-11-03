@@ -62,7 +62,7 @@ The terms below have one fixed meaning in this RFC:
 | **Peer wiring** | Runtime establishment and teardown of Peer edges by the SoakController through the peer-management API; the wired graph is recorded in `plan.json`. |
 | **Lease** | The exclusive assignment of a pool subset to one run; disjoint leases MAY run concurrently. |
 | **ActrNode** | The production Actr node hosted inside an Actr Soak Endpoint. |
-| **Loran** | The current name in this repository for the signaling/STUN/TURN/AIS service suite historically called Actrix in related actr issues; it is not an endpoint or test controller. |
+| **Loran** | The current name in this repository for the signaling/STUN/TURN/AIS service suite historically called Loran in related actr issues; it is not an endpoint or test controller. |
 | **Soak Dashboard** | The UI/API and persistent run store. It owns manual test runs and embeds the SoakController. |
 | **SoakController** | The deterministic planner/executor that expands a seed into actions, calls endpoints, collects evidence, and invokes the Result Evaluator. |
 | **Endpoint Control API** | Test-namespace HTTP adapter exposed by each Actr Soak Endpoint. It accepts only predefined, authenticated actions and observations. |
@@ -1206,12 +1206,12 @@ as the Endpoint Control API. Metrics requests require the Endpoint bearer
 token in Kubernetes; this deployment has no separate Endpoint metrics port.
 
 The service suite is called Loran in this RFC. The current actr-soak deployment
-retains the Kubernetes Service resource names `actrix` and `actrix-turn-relay`
+retains the Kubernetes Service resource names `loran` and `loran-turn-relay`
 for compatibility; both names route to Loran and do not identify a separate
 service. Outside these literal Kubernetes resource names, this RFC refers to
 the service suite as Loran.
-The in-cluster `actrix` Service advertises its stable ClusterIP. The deployment
-also creates an `actrix-turn-relay` ClusterIP Service with same-port UDP
+The in-cluster `loran` Service advertises its stable ClusterIP. The deployment
+also creates an `loran-turn-relay` ClusterIP Service with same-port UDP
 mappings for the configured relay allocation range (`49152-49407` in the
 current test deployment), so relay candidates are routable through kube-proxy.
 Loran configuration and Service ports MUST use the same range. External TURN

@@ -100,7 +100,7 @@ pub fn random_publisher() -> String {
     format!("test{nanos:08x}")
 }
 
-pub fn align_project_with_local_actrix(project_dir: &Path) -> Result<()> {
+pub fn align_project_with_local_loran(project_dir: &Path) -> Result<()> {
     rewrite_project_realm(project_dir, LOCAL_E2E_REALM)
 }
 
@@ -290,14 +290,14 @@ impl Drop for LoggedProcess {
     }
 }
 
-/// Mock signaling server for e2e tests (replaces LocalActrix).
+/// Mock signaling server for e2e tests (replaces LocalLoran).
 ///
 /// Runs `MockSignalingServer` on a background tokio runtime and exposes
 /// a synchronous API compatible with the test harness.
 pub struct MockSignaling {
     pub signaling_ws_url: String,
     _runtime: tokio::runtime::Runtime,
-    _server: std::sync::Arc<tokio::sync::Mutex<actr_mock_actrix::MockActrixServer>>,
+    _server: std::sync::Arc<tokio::sync::Mutex<actr_mock_loran::MockLoranServer>>,
 }
 
 impl MockSignaling {
@@ -308,7 +308,7 @@ impl MockSignaling {
             .context("failed to build tokio runtime for mock signaling")?;
 
         let server = rt
-            .block_on(actr_mock_actrix::MockActrixServer::start())
+            .block_on(actr_mock_loran::MockLoranServer::start())
             .context("failed to start mock signaling server")?;
 
         let ws_url = server.url();
@@ -322,32 +322,32 @@ impl MockSignaling {
     }
 }
 
-pub struct LocalActrix {
+pub struct LocalLoran {
     pub state_dir: TempDir,
     process: LoggedProcess,
-    actrix_bin: PathBuf,
+    loran_bin: PathBuf,
     config_path: PathBuf,
     http_port: u16,
     pub http_base_url: String,
     pub signaling_ws_url: String,
 }
 
-impl LocalActrix {
+impl LocalLoran {
     pub fn start() -> Result<Self> {
         ensure_signer_port_available()?;
-        let actrix_bin = ensure_actrix_binary()?;
+        let loran_bin = ensure_loran_binary()?;
 
-        let state_dir = TempDir::new().context("failed to create actrix state dir")?;
+        let state_dir = TempDir::new().context("failed to create loran state dir")?;
         let http_port = free_port().context("failed to allocate HTTP port")?;
         let ice_port = free_port().context("failed to allocate ICE port")?;
-        let config_path = state_dir.path().join("actrix-e2e.toml");
-        write_actrix_config(&config_path, state_dir.path(), http_port, ice_port)?;
+        let config_path = state_dir.path().join("loran-e2e.toml");
+        write_loran_config(&config_path, state_dir.path(), http_port, ice_port)?;
 
-        let mut cmd = Command::new(&actrix_bin);
+        let mut cmd = Command::new(&loran_bin);
         cmd.arg("--config")
             .arg(&config_path)
             .current_dir(state_dir.path());
-        let mut process = LoggedProcess::spawn(cmd, "actrix")?;
+        let mut process = LoggedProcess::spawn(cmd, "loran")?;
 
         let health_path = "/signaling/health";
         if !wait_for_http_ok(
@@ -358,7 +358,7 @@ impl LocalActrix {
         ) {
             let logs = process.logs();
             bail!(
-                "actrix did not become healthy within timeout (http://127.0.0.1:{http_port}{health_path})\n{logs}"
+                "loran did not become healthy within timeout (http://127.0.0.1:{http_port}{health_path})\n{logs}"
             );
         }
 
@@ -367,7 +367,7 @@ impl LocalActrix {
         Ok(Self {
             state_dir,
             process,
-            actrix_bin,
+            loran_bin,
             config_path,
             http_port,
             http_base_url: format!("http://127.0.0.1:{http_port}"),
@@ -375,23 +375,23 @@ impl LocalActrix {
         })
     }
 
-    /// Kill the actrix process without cleaning up state (SQLite remains).
+    /// Kill the loran process without cleaning up state (SQLite remains).
     pub fn kill(&mut self) {
         self.process.kill();
     }
 
-    /// Restart actrix using the same state directory and ports.
+    /// Restart loran using the same state directory and ports.
     /// The SQLite database is preserved so the Actor Registry can be restored.
     pub fn restart(&mut self) -> Result<()> {
         self.kill();
         // Brief pause to let the OS release the port
         thread::sleep(Duration::from_millis(500));
 
-        let mut cmd = Command::new(&self.actrix_bin);
+        let mut cmd = Command::new(&self.loran_bin);
         cmd.arg("--config")
             .arg(&self.config_path)
             .current_dir(self.state_dir.path());
-        let mut process = LoggedProcess::spawn(cmd, "actrix")?;
+        let mut process = LoggedProcess::spawn(cmd, "loran")?;
 
         let health_path = "/signaling/health";
         if !wait_for_http_ok(
@@ -401,7 +401,7 @@ impl LocalActrix {
             Duration::from_secs(120),
         ) {
             let logs = process.logs();
-            bail!("actrix did not become healthy after restart\n{logs}");
+            bail!("loran did not become healthy after restart\n{logs}");
         }
 
         self.process = process;
@@ -449,7 +449,7 @@ impl LocalRustEchoService {
         ensure_success(&init_out, "actr init rust service")?;
 
         let service_dir = workspace.path().join(project_name);
-        align_project_with_local_actrix(&service_dir)?;
+        align_project_with_local_loran(&service_dir)?;
         rewrite_manifest_version(&service_dir, "0.1.0")?;
         align_rust_project_with_workspace(&service_dir)?;
         let install_out = run_actr(&["deps", "install"], &service_dir);
@@ -553,7 +553,7 @@ fn rewrite_deployment_realm_in_file(path: &Path, realm: &str) -> Result<bool> {
 }
 
 fn ensure_realm_exists(sqlite_dir: &Path, realm: &str) -> Result<()> {
-    let db_path = sqlite_dir.join("actrix.db");
+    let db_path = sqlite_dir.join("loran.db");
     let deadline = Instant::now() + Duration::from_secs(10);
 
     loop {
@@ -561,7 +561,7 @@ fn ensure_realm_exists(sqlite_dir: &Path, realm: &str) -> Result<()> {
             Ok(conn) => {
                 conn.busy_timeout(Duration::from_secs(3))
                     .context("failed to set sqlite busy timeout")?;
-                // Actrix created the schema before reporting healthy.
+                // Loran created the schema before reporting healthy.
                 conn.execute(
                     "INSERT OR IGNORE INTO realm (name, status, enabled, created_at)
                      VALUES (?1, 'active', 1, strftime('%s','now'))",
@@ -576,7 +576,7 @@ fn ensure_realm_exists(sqlite_dir: &Path, realm: &str) -> Result<()> {
             }
             Err(err) => {
                 return Err(err)
-                    .with_context(|| format!("failed to open actrix db {}", db_path.display()));
+                    .with_context(|| format!("failed to open loran db {}", db_path.display()));
             }
         }
     }
@@ -751,20 +751,20 @@ fn free_port() -> Result<u16> {
     Ok(port)
 }
 
-fn ensure_actrix_binary() -> Result<PathBuf> {
-    static ACTRIX_BIN: OnceLock<PathBuf> = OnceLock::new();
-    if let Some(path) = ACTRIX_BIN.get() {
+fn ensure_loran_binary() -> Result<PathBuf> {
+    static LORAN_BIN: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(path) = LORAN_BIN.get() {
         return Ok(path.clone());
     }
 
-    if let Ok(path) = std::env::var("ACTRIX_BIN") {
+    if let Ok(path) = std::env::var("LORAN_BIN") {
         let binary_path = PathBuf::from(path);
         if binary_path.is_file() {
-            let _ = ACTRIX_BIN.set(binary_path.clone());
+            let _ = LORAN_BIN.set(binary_path.clone());
             return Ok(binary_path);
         }
         bail!(
-            "ACTRIX_BIN points to a missing file: {}",
+            "LORAN_BIN points to a missing file: {}",
             binary_path.display()
         );
     }
@@ -772,42 +772,45 @@ fn ensure_actrix_binary() -> Result<PathBuf> {
     let cache_root = workspace_root().join("target/e2e-cache");
     fs::create_dir_all(&cache_root).context("failed to create e2e cache root")?;
     let _lock = DirLock::acquire(
-        &cache_root.join("actrix-build.lock"),
+        &cache_root.join("loran-build.lock"),
         Duration::from_secs(600),
     )?;
 
-    let binary_path = build_in_tree_actrix_binary(&cache_root)?;
-    let _ = ACTRIX_BIN.set(binary_path.clone());
+    let binary_path = build_in_tree_loran_binary(&cache_root)?;
+    let _ = LORAN_BIN.set(binary_path.clone());
     Ok(binary_path)
 }
 
-fn build_in_tree_actrix_binary(cache_root: &Path) -> Result<PathBuf> {
+fn build_in_tree_loran_binary(cache_root: &Path) -> Result<PathBuf> {
     let manifest_path = workspace_root().join("crates/loran-server/Cargo.toml");
     if !manifest_path.is_file() {
         bail!(
-            "in-tree actrix manifest not found at {}",
+            "in-tree loran manifest not found at {}",
             manifest_path.display()
         );
     }
 
-    let target_dir = cache_root.join("actrix-target");
+    let target_dir = cache_root.join("loran-target");
     let mut build_cmd = Command::new("cargo");
     build_cmd
         .arg("build")
         .arg("--release")
         .arg("-p")
-        .arg("actrix")
+        .arg("loran-server")
         .arg("--bin")
-        .arg("actrix")
+        .arg("loran")
         .current_dir(workspace_root())
         .env("CARGO_TARGET_DIR", &target_dir);
-    run_checked(build_cmd, "cargo build --release -p actrix --bin actrix")?;
+    run_checked(
+        build_cmd,
+        "cargo build --release -p loran-server --bin loran",
+    )?;
 
     let binary_path = target_dir
         .join("release")
-        .join(format!("actrix{}", std::env::consts::EXE_SUFFIX));
+        .join(format!("loran{}", std::env::consts::EXE_SUFFIX));
     if !binary_path.exists() {
-        bail!("actrix binary not found at {}", binary_path.display());
+        bail!("loran binary not found at {}", binary_path.display());
     }
 
     Ok(binary_path)
@@ -829,7 +832,7 @@ fn run_checked(mut cmd: Command, context_name: &str) -> Result<Output> {
     )
 }
 
-fn write_actrix_config(
+fn write_loran_config(
     config_path: &Path,
     state_dir: &Path,
     http_port: u16,
@@ -844,11 +847,11 @@ fn write_actrix_config(
 
     let config = format!(
         r#"enable = 25
-name = "actrix-e2e"
+name = "loran-e2e"
 env = "dev"
 sqlite_path = "{sqlite_path}"
 location_tag = "local,e2e,default"
-actrix_shared_key = "actrix-e2e-shared-key-0123456789abcdef"
+loran_shared_key = "loran-e2e-shared-key-0123456789abcdef"
 
 [control]
 head = "admin_ui"
@@ -873,8 +876,8 @@ advertised_port = {ice_port}
 
 [turn]
 relay_port_range = "49152-49200"
-realm = "local.actrix"
-turn_secret = "actrix-e2e-turn-secret-0123456789abcdef"
+realm = "local.loran"
+turn_secret = "loran-e2e-turn-secret-0123456789abcdef"
 
 [services.signer]
 
@@ -892,7 +895,7 @@ ws_path = "/signaling"
     );
 
     fs::write(config_path, config)
-        .with_context(|| format!("failed to write actrix config to {}", config_path.display()))?;
+        .with_context(|| format!("failed to write loran config to {}", config_path.display()))?;
     Ok(())
 }
 

@@ -2,7 +2,7 @@
 # Test script for ws-actr-echo example - Echo using WebSocket direct connection
 #
 # Demo flow:
-#   1. Start actrix signaling server
+#   1. Start loran signaling server
 #   2. Write realm data to database
 #   3. Start ws-echo-server (listen WebSocket on port 9001, register with signaling)
 #   4. Start ws-echo-client (discover server WebSocket address from signaling, then direct connect)
@@ -30,18 +30,18 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTRIX_DIR="$ACTOR_RTC_DIR"
+LORAN_DIR="$ACTOR_RTC_DIR"
 WS_ECHO_DIR="$SCRIPT_DIR"
 SERVER_DIR="$WS_ECHO_DIR/server"
 CLIENT_DIR="$WS_ECHO_DIR/client"
 PROTO_DIR="$WS_ECHO_DIR/proto"
-ACTRIX_CONFIG="$WS_ECHO_DIR/actrix-config.toml"
+LORAN_CONFIG="$WS_ECHO_DIR/loran-config.toml"
 
 # WebSocket service port and database path
 WS_LISTEN_PORT=9001
-ACTRIX_PORT=8081
-# Database path: relative to WORKSPACE_ROOT (actrix CWD)
-DB_PATH="$WORKSPACE_ROOT/ws-echo-db/actrix.db"
+LORAN_PORT=8081
+# Database path: relative to WORKSPACE_ROOT (loran CWD)
+DB_PATH="$WORKSPACE_ROOT/ws-echo-db/loran.db"
 
 # Switch to workspace root and stay there
 cd "$WORKSPACE_ROOT"
@@ -74,7 +74,7 @@ ensure_toml() {
 
 ensure_toml "$SERVER_DIR/actr.toml"     "$SERVER_DIR/Actr.example.toml"
 ensure_toml "$CLIENT_DIR/actr.toml"     "$CLIENT_DIR/Actr.example.toml"
-ensure_toml "$ACTRIX_CONFIG"            "$WS_ECHO_DIR/actrix-config.example.toml"
+ensure_toml "$LORAN_CONFIG"            "$WS_ECHO_DIR/loran-config.example.toml"
 
 echo ""
 echo "🧰 Checking required CLI tools..."
@@ -88,9 +88,9 @@ cleanup() {
     echo ""
     echo "🧹 Cleaning up processes..."
 
-    if [ ! -z "$ACTRIX_PID" ]; then
-        echo "Stopping actrix (PID: $ACTRIX_PID)"
-        kill $ACTRIX_PID 2>/dev/null || true
+    if [ ! -z "$LORAN_PID" ]; then
+        echo "Stopping loran (PID: $LORAN_PID)"
+        kill $LORAN_PID 2>/dev/null || true
     fi
 
     if [ ! -z "$SERVER_PID" ]; then
@@ -154,63 +154,63 @@ cd "$WORKSPACE_ROOT"
 echo -e "${GREEN}✅ Client code generated${NC}"
 
 # ─────────────────────────────────────────────────────────────
-# Step 1: Build and install actrix
+# Step 1: Build and install loran
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "📦 Building and installing actrix..."
+echo "📦 Building and installing loran..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-if [ ! -d "$ACTRIX_DIR" ]; then
-    echo -e "${RED}❌ Cannot find actrix directory: $ACTRIX_DIR${NC}"
+if [ ! -d "$LORAN_DIR" ]; then
+    echo -e "${RED}❌ Cannot find loran directory: $LORAN_DIR${NC}"
     exit 1
 fi
 
-cd "$ACTRIX_DIR"
-cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" --features opentelemetry 2>&1
+cd "$LORAN_DIR"
+cargo build --manifest-path "$LORAN_DIR/crates/loran-server/Cargo.toml" --features opentelemetry 2>&1
 
-if [ ! -f "$ACTRIX_DIR/target/debug/actrix" ]; then
-    echo -e "${RED}❌ actrix build failed${NC}"
+if [ ! -f "$LORAN_DIR/target/debug/loran" ]; then
+    echo -e "${RED}❌ loran build failed${NC}"
     exit 1
 fi
 
-echo "Installing actrix to ~/.cargo/bin..."
+echo "Installing loran to ~/.cargo/bin..."
 mkdir -p ~/.cargo/bin
-cp "$ACTRIX_DIR/target/debug/actrix" ~/.cargo/bin/actrix
-chmod +x ~/.cargo/bin/actrix
+cp "$LORAN_DIR/target/debug/loran" ~/.cargo/bin/loran
+chmod +x ~/.cargo/bin/loran
 
 cd "$WORKSPACE_ROOT"
 
-if ! command -v actrix > /dev/null 2>&1; then
-    echo -e "${RED}❌ actrix command not found after install, ensure ~/.cargo/bin is in PATH${NC}"
+if ! command -v loran > /dev/null 2>&1; then
+    echo -e "${RED}❌ loran command not found after install, ensure ~/.cargo/bin is in PATH${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✅ actrix installed: $(which actrix)${NC}"
+echo -e "${GREEN}✅ loran installed: $(which loran)${NC}"
 
 # ─────────────────────────────────────────────────────────────
-# Step 2: Start actrix signaling server
+# Step 2: Start loran signaling server
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "🚀 Starting actrix signaling server..."
+echo "🚀 Starting loran signaling server..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-actrix --config "$ACTRIX_CONFIG" > "$LOG_DIR/actrix.log" 2>&1 &
-ACTRIX_PID=$!
+loran --config "$LORAN_CONFIG" > "$LOG_DIR/loran.log" 2>&1 &
+LORAN_PID=$!
 
-echo "actrix started (PID: $ACTRIX_PID)"
-echo "Waiting for actrix to be ready (port $ACTRIX_PORT)..."
+echo "loran started (PID: $LORAN_PID)"
+echo "Waiting for loran to be ready (port $LORAN_PORT)..."
 
 MAX_WAIT=15
 COUNTER=0
 while [ $COUNTER -lt $MAX_WAIT ]; do
-    if ! kill -0 $ACTRIX_PID 2>/dev/null; then
-        echo -e "${RED}❌ actrix failed to start${NC}"
-        cat "$LOG_DIR/actrix.log"
+    if ! kill -0 $LORAN_PID 2>/dev/null; then
+        echo -e "${RED}❌ loran failed to start${NC}"
+        cat "$LOG_DIR/loran.log"
         exit 1
     fi
 
-    if lsof -i:$ACTRIX_PORT > /dev/null 2>&1 || nc -z localhost $ACTRIX_PORT 2>/dev/null; then
-        echo -e "${GREEN}✅ actrix is listening on port $ACTRIX_PORT${NC}"
+    if lsof -i:$LORAN_PORT > /dev/null 2>&1 || nc -z localhost $LORAN_PORT 2>/dev/null; then
+        echo -e "${GREEN}✅ loran is listening on port $LORAN_PORT${NC}"
         break
     fi
 
@@ -219,8 +219,8 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
 done
 
 if [ $COUNTER -eq $MAX_WAIT ]; then
-    echo -e "${RED}❌ actrix did not listen on port $ACTRIX_PORT within ${MAX_WAIT} seconds${NC}"
-    cat "$LOG_DIR/actrix.log"
+    echo -e "${RED}❌ loran did not listen on port $LORAN_PORT within ${MAX_WAIT} seconds${NC}"
+    cat "$LOG_DIR/loran.log"
     exit 1
 fi
 
@@ -228,10 +228,10 @@ fi
 # Step 3: Write realm data to database
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "🔑 Writing realm data to actrix database..."
+echo "🔑 Writing realm data to loran database..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Wait for actrix to create the database file (may take a few seconds)
+# Wait for loran to create the database file (may take a few seconds)
 echo "Waiting for database file creation..."
 COUNTER=0
 while [ $COUNTER -lt 10 ]; do
@@ -244,9 +244,9 @@ while [ $COUNTER -lt 10 ]; do
 done
 
 if [ ! -f "$DB_PATH" ]; then
-    echo -e "${RED}❌ actrix database file not created: $DB_PATH${NC}"
-    echo "actrix log:"
-    cat "$LOG_DIR/actrix.log"
+    echo -e "${RED}❌ loran database file not created: $DB_PATH${NC}"
+    echo "loran log:"
+    cat "$LOG_DIR/loran.log"
     exit 1
 fi
 

@@ -28,7 +28,7 @@ pub enum RealmStatus {
 }
 
 /// Realm is an administrative and cryptographic trust boundary hosted by
-/// this Actrix instance, identified by its Realm name.
+/// this Loran instance, identified by its Realm name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Realm {
     /// Realm name `<realm_id>@<domain>`, the primary key; never changes

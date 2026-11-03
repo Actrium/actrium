@@ -4,7 +4,7 @@ use crate::service::HttpRouterService;
 use anyhow::Result;
 use async_trait::async_trait;
 use axum::{Router, routing::get};
-use platform::config::ActrixConfig;
+use platform::config::LoranConfig;
 use platform::monitoring::ServiceCounters;
 use platform::{ServiceInfo, ServiceType};
 use signaling::create_signaling_router_with_config_and_counters;
@@ -14,14 +14,14 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct SignalingService {
     info: ServiceInfo,
-    config: ActrixConfig,
+    config: LoranConfig,
     cancel: tokio_util::sync::CancellationToken,
     /// Service-level counters for metrics collection.
     counters: Option<Arc<ServiceCounters>>,
 }
 
 impl SignalingService {
-    pub fn new(config: ActrixConfig, cancel: tokio_util::sync::CancellationToken) -> Self {
+    pub fn new(config: LoranConfig, cancel: tokio_util::sync::CancellationToken) -> Self {
         Self {
             info: ServiceInfo::new(
                 "Signaling Service",

@@ -449,7 +449,7 @@ fn actr_web_calls_generated_typescript_echo_workload() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let mock = MockSignaling::start().expect("failed to start mock-actrix");
+    let mock = MockSignaling::start().expect("failed to start mock-loran");
     let tmp = TempDir::new().expect("failed to create temp dir");
     let release_dir = tmp.path().join("release");
     fs::create_dir_all(&release_dir).expect("failed to create release dir");

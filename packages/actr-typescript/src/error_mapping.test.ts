@@ -11,7 +11,7 @@
  * predicates (`isRetryable`, `isConnectionNotReady`, `requiresDlq`).
  *
  * These tests assert that contract directly against the wire payloads the
- * Rust side emits, rather than spawning a live mock-actrix + echo service.
+ * Rust side emits, rather than spawning a live mock-loran + echo service.
  * They mirror the original integration test's three protocol scenarios
  * (UnknownRoute / PermissionDenied / TimedOut) and extend coverage to the
  * fault-domain classification and recovery metadata that the current API

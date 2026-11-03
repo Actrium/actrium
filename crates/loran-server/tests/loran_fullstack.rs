@@ -33,11 +33,11 @@ type WsRead = futures::stream::SplitStream<WsStream>;
 
 const START_TIMEOUT: Duration = Duration::from_secs(20);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-const ACTRIX_SHARED_KEY: &str = "0123456789abcdef0123456789abcdef";
+const LORAN_SHARED_KEY: &str = "0123456789abcdef0123456789abcdef";
 const TEST_REALM: &str = "test@example.com";
 const SECOND_REALM: &str = "second@acme.com";
 /// Label of the owner key every seeded Realm has.
-const TEST_CLIENT_KEY: &str = "actrix-fullstack-client-key";
+const TEST_CLIENT_KEY: &str = "loran-fullstack-client-key";
 /// Member id of that owner.
 const TEST_OWNER_MEMBER: &str = "00000000000000f1";
 /// Realm Infra Provider ID of every fullstack config (`actr://localhost`).
@@ -45,8 +45,8 @@ const PROVIDER_ID: &str = "localhost";
 const DEFAULT_TOKEN_TTL: u64 = 3600;
 const RENEWAL_TOKEN_SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-/// Convenience bundle for a running actrix instance
-struct ActrixHarness {
+/// Convenience bundle for a running loran instance
+struct LoranHarness {
     #[allow(dead_code)]
     tmp: tempfile::TempDir,
     port: u16,
@@ -58,8 +58,8 @@ struct ActrixHarness {
     child: Child,
 }
 
-impl ActrixHarness {
-    /// Start actrix with default features (Issuer/Signer/Signaling) and wait for health
+impl LoranHarness {
+    /// Start loran with default features (Issuer/Signer/Signaling) and wait for health
     async fn start(token_ttl: u64) -> Self {
         Self::start_with_login_limits(token_ttl, None).await
     }
@@ -120,13 +120,13 @@ impl ActrixHarness {
                 .unwrap();
             writeln!(file, "\n[control.admin_ui.login_limits]\n{limits}").unwrap();
         }
-        let log_path = tmp.path().join("actrix_fullstack.log");
+        let log_path = tmp.path().join("loran_fullstack.log");
         let data_dir = tmp.path().join("data");
         ensure_realm(&data_dir, TEST_REALM).await;
         if relay {
             ensure_realm(&data_dir, SECOND_REALM).await;
         }
-        let mut child = spawn_actrix(&config_path, &log_path);
+        let mut child = spawn_loran(&config_path, &log_path);
 
         let scheme = if tls { "https" } else { "http" };
         let base = format!("{scheme}://127.0.0.1:{port}");
@@ -211,11 +211,11 @@ fn write_fullstack_config(dir: &Path, port: u16, token_ttl_secs: u64) -> (PathBu
     writeln!(
         f,
         r#"
-name = "actrix-fullstack-test"
+name = "loran-fullstack-test"
 enable = 25  # ENABLE_SIGNALING | ENABLE_ISSUER | ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "{shared}"
+loran_shared_key = "{shared}"
 location_tag = "local,test,fullstack"
 pid = "{pid}"
 
@@ -244,7 +244,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 turn_secret = "fullstack-turn-secret-0123456789abcdef"
 
 [services.signer]
@@ -268,12 +268,12 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 [recording]
 "#,
         sqlite = data_dir.display(),
-        shared = ACTRIX_SHARED_KEY,
+        shared = LORAN_SHARED_KEY,
         port = port,
         signer_port = signer_port,
         token_ttl = token_ttl_secs,
         renewal_secret = RENEWAL_TOKEN_SECRET,
-        pid = dir.join("actrix.pid").display()
+        pid = dir.join("loran.pid").display()
     )
     .expect("write config");
     (config_path, signer_port)
@@ -296,11 +296,11 @@ fn write_fullstack_config_with_rate_limits(
     writeln!(
         f,
         r#"
-name = "actrix-fullstack-test-rate-limit"
+name = "loran-fullstack-test-rate-limit"
 enable = 25  # ENABLE_SIGNALING | ENABLE_ISSUER | ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "{shared}"
+loran_shared_key = "{shared}"
 location_tag = "local,test,fullstack,ratelimit"
 pid = "{pid}"
 
@@ -328,7 +328,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 turn_secret = "fullstack-turn-secret-0123456789abcdef"
 
 [services.signer]
@@ -363,7 +363,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 [recording]
 "#,
         sqlite = data_dir.display(),
-        shared = ACTRIX_SHARED_KEY,
+        shared = LORAN_SHARED_KEY,
         port = port,
         signer_port = signer_port,
         token_ttl = token_ttl_secs,
@@ -371,7 +371,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
         max_concurrent = max_concurrent_per_ip,
         message_per_second = message_per_second,
         message_burst = message_burst_size,
-        pid = dir.join("actrix.pid").display()
+        pid = dir.join("loran.pid").display()
     )
     .expect("write config");
     (config_path, signer_port)
@@ -392,11 +392,11 @@ fn write_fullstack_config_with_issuer_signer_endpoint(
     writeln!(
         f,
         r#"
-name = "actrix-fullstack-test-issuer-dependency"
+name = "loran-fullstack-test-issuer-dependency"
 enable = 25  # ENABLE_SIGNALING | ENABLE_ISSUER | ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "{shared}"
+loran_shared_key = "{shared}"
 location_tag = "local,test,fullstack,issuer-dependency"
 pid = "{pid}"
 
@@ -424,7 +424,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 turn_secret = "fullstack-turn-secret-0123456789abcdef"
 
 [services.signer]
@@ -452,13 +452,13 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 [recording]
 "#,
         sqlite = data_dir.display(),
-        shared = ACTRIX_SHARED_KEY,
+        shared = LORAN_SHARED_KEY,
         port = port,
         signer_port = signer_port,
         token_ttl = token_ttl_secs,
         renewal_secret = RENEWAL_TOKEN_SECRET,
         issuer_signer_endpoint = issuer_signer_endpoint,
-        pid = dir.join("actrix.pid").display()
+        pid = dir.join("loran.pid").display()
     )
     .expect("write config");
     (config_path, signer_port)
@@ -473,11 +473,11 @@ fn write_signaling_without_local_issuer_config(dir: &Path, port: u16) -> PathBuf
     writeln!(
         f,
         r#"
-name = "actrix-fullstack-signaling-without-issuer"
+name = "loran-fullstack-signaling-without-issuer"
 enable = 17  # ENABLE_SIGNALING | ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "{shared}"
+loran_shared_key = "{shared}"
 location_tag = "local,test,fullstack,signaling-no-issuer"
 pid = "{pid}"
 
@@ -499,7 +499,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 [services.signer.storage]
@@ -520,16 +520,16 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 [recording]
 "#,
         sqlite = data_dir.display(),
-        shared = ACTRIX_SHARED_KEY,
+        shared = LORAN_SHARED_KEY,
         port = port,
-        pid = dir.join("actrix.pid").display()
+        pid = dir.join("loran.pid").display()
     )
     .expect("write config");
     config_path
 }
 
-fn spawn_actrix(config: &Path, log_path: &Path) -> Child {
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_actrix"));
+fn spawn_loran(config: &Path, log_path: &Path) -> Child {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_loran"));
     let log_file = fs::File::create(log_path).expect("create log file");
     Command::new(bin)
         .arg("--config")
@@ -537,7 +537,7 @@ fn spawn_actrix(config: &Path, log_path: &Path) -> Child {
         .stdout(Stdio::from(log_file.try_clone().expect("dup log")))
         .stderr(Stdio::from(log_file))
         .spawn()
-        .expect("spawn actrix")
+        .expect("spawn loran")
 }
 
 /// The Realm client key a test names by `label`.
@@ -1048,7 +1048,7 @@ where
     F: FnOnce(String, u16) -> Fut,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
-    let harness = ActrixHarness::start_with_relay(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start_with_relay(DEFAULT_TOKEN_TTL).await;
     let task = tokio::spawn(scenario(harness.base_url(), harness.port));
     let result = tokio::time::timeout(Duration::from_secs(30), task).await;
     harness.shutdown();
@@ -1283,7 +1283,7 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
             let log = fs::read_to_string(log_path).unwrap_or_default();
-            panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
+            panic!("loran exited early: status={status:?}\nlogs:\n{log}");
         }
 
         if let Ok(resp) = client.get(url).send().await
@@ -1308,12 +1308,12 @@ async fn wait_for_signer_ready(grpc_endpoint: &str, child: &mut Child, log_path:
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
             let log = fs::read_to_string(log_path).unwrap_or_default();
-            panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
+            panic!("loran exited early: status={status:?}\nlogs:\n{log}");
         }
 
         let config = GrpcClientConfig {
             endpoint: grpc_endpoint.to_string(),
-            actrix_shared_key: ACTRIX_SHARED_KEY.to_string(),
+            loran_shared_key: LORAN_SHARED_KEY.to_string(),
             timeout_seconds: 2,
             enable_tls: false,
             tls_domain: None,
@@ -1364,7 +1364,7 @@ async fn issuer_cors_uses_the_production_router() {
         ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS,
         ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, ORIGIN,
     };
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let origin = "http://localhost:5173";
     for route in ["register", "renew", "reissue", "membership"] {
@@ -1449,8 +1449,8 @@ async fn issuer_cors_uses_the_production_router() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_end_to_end_register_and_health() {
-    let mut harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+async fn loran_end_to_end_register_and_health() {
+    let mut harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
 
     let base = harness.base_url();
     let issuer_health = format!("{base}/issuer/health");
@@ -1468,7 +1468,7 @@ async fn actrix_end_to_end_register_and_health() {
     // Signer health via authenticated gRPC call on the dedicated listener
     let mut signer_client = GrpcClient::new(&GrpcClientConfig {
         endpoint: signer_endpoint.clone(),
-        actrix_shared_key: ACTRIX_SHARED_KEY.to_string(),
+        loran_shared_key: LORAN_SHARED_KEY.to_string(),
         timeout_seconds: 5,
         enable_tls: false,
         tls_domain: None,
@@ -1557,7 +1557,7 @@ async fn actrix_end_to_end_register_and_health() {
     assert_eq!(ok.actr_id.realm, TEST_REALM);
 
     // Validate credential through AIdCredentialValidator — reads from the same
-    // signaling_key_cache.db that actrix wrote during Issuer key loading.
+    // signaling_key_cache.db that loran wrote during Issuer key loading.
     AIdCredentialValidator::init(&harness.data_dir)
         .await
         .expect("validator init");
@@ -1735,7 +1735,7 @@ async fn actrix_end_to_end_register_and_health() {
 #[tokio::test]
 #[serial]
 async fn issuer_register_returns_error_response_for_malformed_protobuf() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let register_url = format!("{}/issuer/register", harness.base_url());
 
@@ -1771,7 +1771,7 @@ async fn issuer_register_returns_error_response_for_malformed_protobuf() {
 #[tokio::test]
 #[serial]
 async fn issuer_register_rejects_non_preprovisioned_realm() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let register_url = format!("{}/issuer/register", harness.base_url());
 
@@ -1835,7 +1835,7 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
 async fn authority_descriptor_publishes_signed_realm_signing_keys() {
     use ed25519_dalek::Verifier as _;
 
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let url = format!("{}/.well-known/actr", harness.base_url());
     let client = reqwest::Client::new();
 
@@ -1915,7 +1915,7 @@ async fn authority_descriptor_publishes_signed_realm_signing_keys() {
 async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
     use actr_protocol::realm_profile::{RealmProfile, RealmStatus};
 
-    let harness = ActrixHarness::start_tls(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start_tls(DEFAULT_TOKEN_TTL).await;
     let client = test_http_client();
     let base = harness.base_url();
     let name = "k7m2q9xh@localhost";
@@ -2060,7 +2060,7 @@ async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
 async fn realm_management_requests_are_checked_before_any_state_changes() {
     use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
 
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let url = format!("{}/actr/realm-management", harness.base_url());
     let key = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
@@ -2139,7 +2139,7 @@ async fn realm_management_requests_are_checked_before_any_state_changes() {
 #[tokio::test]
 #[serial]
 async fn issuer_has_no_global_signing_key() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let base = harness.base_url();
 
@@ -2201,7 +2201,7 @@ async fn issuer_has_no_global_signing_key() {
 #[tokio::test]
 #[serial]
 async fn issuer_register_requires_a_registered_client_key() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let base = harness.base_url();
     let register = |label: Option<&'static str>| {
         let base = base.clone();
@@ -2254,7 +2254,7 @@ async fn issuer_register_requires_a_registered_client_key() {
 #[serial]
 async fn removing_a_member_closes_its_connections_and_refuses_it() {
     use actr_protocol::realm_membership::{MembershipOp, Role};
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let base = harness.base_url();
 
     let mut invite = membership_request(MembershipOp::CreateInvite, TEST_REALM);
@@ -2338,7 +2338,7 @@ async fn removing_a_member_closes_its_connections_and_refuses_it() {
 #[tokio::test]
 #[serial]
 async fn admin_login_limits_reject_before_hashing_and_leave_services_responsive() {
-    let harness = ActrixHarness::start_with_login_limits(
+    let harness = LoranHarness::start_with_login_limits(
         DEFAULT_TOKEN_TTL,
         Some("per_ip_per_minute = 1\nper_ip_burst = 1"),
     )
@@ -2373,12 +2373,12 @@ async fn admin_login_limits_reject_before_hashing_and_leave_services_responsive(
 #[tokio::test]
 #[serial]
 async fn signer_authentication_reload_requires_restart_and_preserves_live_policy() {
-    let mut harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let mut harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let config_path = harness.tmp.path().join("config.toml");
     let mut config: toml::Value =
         toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
     let replacement_key = "abcdef0123456789abcdef0123456789";
-    config["actrix_shared_key"] = toml::Value::String(replacement_key.into());
+    config["loran_shared_key"] = toml::Value::String(replacement_key.into());
     fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
     assert_eq!(
         unsafe { libc::kill(harness.child.id() as libc::pid_t, libc::SIGHUP) },
@@ -2399,7 +2399,7 @@ async fn signer_authentication_reload_requires_restart_and_preserves_live_policy
     .expect("reload must explicitly require restart");
     let signer_config = |key: &str| GrpcClientConfig {
         endpoint: format!("http://127.0.0.1:{}", harness.signer_port),
-        actrix_shared_key: key.into(),
+        loran_shared_key: key.into(),
         timeout_seconds: 5,
         enable_tls: false,
         tls_domain: None,
@@ -2407,7 +2407,7 @@ async fn signer_authentication_reload_requires_restart_and_preserves_live_policy
         client_cert: None,
         client_key: None,
     };
-    let old_config = signer_config(ACTRIX_SHARED_KEY);
+    let old_config = signer_config(LORAN_SHARED_KEY);
     let new_config = signer_config(replacement_key);
     let mut old_client = GrpcClient::new(&old_config).await.unwrap();
     assert_eq!(old_client.health_check().await.unwrap(), "healthy");
@@ -2417,7 +2417,7 @@ async fn signer_authentication_reload_requires_restart_and_preserves_live_policy
     // A full restart, rather than router reload, adopts the new policy.
     let log_path = harness.log_path().to_path_buf();
     graceful_shutdown(harness.child);
-    harness.child = spawn_actrix(&config_path, &log_path);
+    harness.child = spawn_loran(&config_path, &log_path);
     tokio::time::timeout(START_TIMEOUT, async {
         loop {
             if let Ok(mut client) = GrpcClient::new(&new_config).await
@@ -2444,9 +2444,9 @@ async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachab
         DEFAULT_TOKEN_TTL,
         "http://127.0.0.1:1",
     );
-    let log_path = tmp.path().join("actrix_fullstack_issuer_degraded.log");
+    let log_path = tmp.path().join("loran_fullstack_issuer_degraded.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -2520,7 +2520,7 @@ async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachab
 #[tokio::test]
 #[serial]
 async fn signaling_rejects_unauthenticated_ws_connection() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
 
     // Unauthenticated raw connection should be rejected (401 Unauthorized → WS upgrade failure)
     let result = connect_ws_raw(harness.port).await;
@@ -2535,7 +2535,7 @@ async fn signaling_rejects_unauthenticated_ws_connection() {
 #[tokio::test]
 #[serial]
 async fn signaling_handshake_identity_reconnect_replaces_stale_connection() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
 
     let (mut old_write, mut old_read, register_ok) =
         ws_register(harness.port, "acme", "url-id", None).await;
@@ -2617,7 +2617,7 @@ async fn signaling_handshake_identity_reconnect_replaces_stale_connection() {
 #[tokio::test]
 #[serial]
 async fn signaling_peer_payload_none_is_ignored_and_connection_remains_usable() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let (mut write, mut read, ok) = ws_register(harness.port, "acme", "peer-none", None).await;
 
     // Send empty peer payload
@@ -2670,7 +2670,7 @@ async fn signaling_peer_payload_none_is_ignored_and_connection_remains_usable() 
 #[tokio::test]
 #[serial]
 async fn signaling_actr_payload_none_and_invalid_realm_are_rejected_safely() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let (mut write, mut read, ok) = ws_register(harness.port, "acme", "actr-none", None).await;
 
     let no_payload_msg = actr_protocol::ActrToSignaling {
@@ -2758,9 +2758,9 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
     let port = choose_port();
     let (config_path, signer_port) =
         write_fullstack_config_with_rate_limits(tmp.path(), port, DEFAULT_TOKEN_TTL, 1, 50, 50);
-    let log_path = tmp.path().join("actrix_fullstack_ratelimit_conn.log");
+    let log_path = tmp.path().join("loran_fullstack_ratelimit_conn.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -2803,9 +2803,9 @@ async fn signaling_message_rate_limit_returns_envelope_error() {
     let port = choose_port();
     let (config_path, signer_port) =
         write_fullstack_config_with_rate_limits(tmp.path(), port, DEFAULT_TOKEN_TTL, 20, 1, 1);
-    let log_path = tmp.path().join("actrix_fullstack_ratelimit_msg.log");
+    let log_path = tmp.path().join("loran_fullstack_ratelimit_msg.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -2868,9 +2868,9 @@ async fn signaling_register_and_discovery_acl_allow() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
-    let log_path = tmp.path().join("actrix_fullstack.log");
+    let log_path = tmp.path().join("loran_fullstack.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -2943,9 +2943,9 @@ async fn signaling_discovery_acl_denied() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
-    let log_path = tmp.path().join("actrix_fullstack.log");
+    let log_path = tmp.path().join("loran_fullstack.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -3004,9 +3004,9 @@ async fn signaling_rejects_expired_credential() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, 1);
-    let log_path = tmp.path().join("actrix_fullstack.log");
+    let log_path = tmp.path().join("loran_fullstack.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -3060,9 +3060,9 @@ async fn signaling_route_candidates_with_acl() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
-    let log_path = tmp.path().join("actrix_fullstack.log");
+    let log_path = tmp.path().join("loran_fullstack.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -3151,9 +3151,9 @@ async fn signaling_route_candidates_acl_denied() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
-    let log_path = tmp.path().join("actrix_fullstack.log");
+    let log_path = tmp.path().join("loran_fullstack.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -3225,7 +3225,7 @@ async fn signaling_route_candidates_acl_denied() {
 #[tokio::test]
 #[serial]
 async fn signaling_route_candidates_respects_limit_and_sorting() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     // ACL: allow client-route to reach the services
@@ -3351,7 +3351,7 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
 #[tokio::test]
 #[serial]
 async fn signaling_route_candidates_prefers_exact_fingerprint() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     // ACL allow client-fp
@@ -3469,9 +3469,9 @@ async fn signaling_get_service_spec_returns_spec() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
-    let log_path = tmp.path().join("actrix_fullstack.log");
+    let log_path = tmp.path().join("loran_fullstack.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -3536,7 +3536,7 @@ async fn signaling_get_service_spec_returns_spec() {
 #[tokio::test]
 #[serial]
 async fn signaling_get_service_spec_not_found() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     // Client without any services, just to issue request
@@ -3578,7 +3578,7 @@ async fn signaling_get_service_spec_not_found() {
 #[tokio::test]
 #[serial]
 async fn signaling_subscribe_and_unsubscribe_actr_up() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     // Subscriber
@@ -3656,7 +3656,7 @@ async fn signaling_subscribe_and_unsubscribe_actr_up() {
 #[tokio::test]
 #[serial]
 async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     // Subscriber registers
@@ -3764,7 +3764,7 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
 #[tokio::test]
 #[serial]
 async fn signaling_route_candidates_compatibility_cache_hit() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let acl = Acl {
@@ -3918,7 +3918,7 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
 #[tokio::test]
 #[serial]
 async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let acl = Acl {
@@ -4024,9 +4024,9 @@ async fn signaling_actr_relay_role_assignment() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
-    let log_path = tmp.path().join("actrix_fullstack.log");
+    let log_path = tmp.path().join("loran_fullstack.log");
     ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
@@ -4105,7 +4105,7 @@ async fn signaling_actr_relay_role_assignment() {
 #[tokio::test]
 #[serial]
 async fn signaling_rejects_register_request_via_ws() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let (mut write, mut read, _ok) = ws_register(port, "acme", "dup-client", None).await;
@@ -4160,7 +4160,7 @@ async fn signaling_rejects_register_request_via_ws() {
 #[tokio::test]
 #[serial]
 async fn signaling_unregister_removes_actor_from_route_candidates() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let acl = Acl {
@@ -4295,7 +4295,7 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
 #[tokio::test]
 #[serial]
 async fn signaling_relay_rejects_invalid_credential() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let acl = Acl {
@@ -4354,7 +4354,7 @@ async fn signaling_relay_rejects_invalid_credential() {
 #[tokio::test]
 #[serial]
 async fn signaling_relay_acl_denied_in_same_realm() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let deny_acl = Acl {
@@ -4408,7 +4408,7 @@ async fn signaling_relay_acl_denied_in_same_realm() {
 #[tokio::test]
 #[serial]
 async fn signaling_relay_rejects_role_negotiation_to_another_actor() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let allow_acl = Acl {
@@ -4464,7 +4464,7 @@ async fn signaling_relay_rejects_role_negotiation_to_another_actor() {
 #[tokio::test]
 #[serial]
 async fn signaling_relay_forwards_ice_candidate_payload() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let allow_acl = Acl {
@@ -4532,7 +4532,7 @@ async fn signaling_relay_forwards_ice_candidate_payload() {
 #[tokio::test]
 #[serial]
 async fn signaling_relay_to_missing_target_reports_failure_and_source_stays_usable() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let allow_acl = Acl {
@@ -4629,7 +4629,7 @@ async fn signaling_relay_to_missing_target_reports_failure_and_source_stays_usab
 #[tokio::test]
 #[serial]
 async fn signaling_disconnect_removes_actor_from_route_candidates() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let acl = Acl {
@@ -4683,7 +4683,7 @@ async fn signaling_disconnect_removes_actor_from_route_candidates() {
 #[serial]
 async fn retiring_a_realm_closes_its_connections_and_forgets_its_actors() {
     const GONE: &str = "gone@acme.com";
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
     let base = harness.base_url();
     ensure_realm(&harness.data_dir, GONE).await;
@@ -4768,7 +4768,7 @@ async fn retiring_a_realm_closes_its_connections_and_forgets_its_actors() {
 #[tokio::test]
 #[serial]
 async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
     let acl = Acl {
@@ -4823,17 +4823,17 @@ async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
 
 #[tokio::test]
 #[serial]
-#[ignore = "Flaky test after actrix restart, maybe due to ACL rules persistence"]
+#[ignore = "Flaky test after loran restart, maybe due to ACL rules persistence"]
 async fn actor_registry_persists_across_restart() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let data_dir = tmp.path().join("data");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
-    let log_path = tmp.path().join("actrix_persist.log");
+    let log_path = tmp.path().join("loran_persist.log");
     ensure_realm(&data_dir, TEST_REALM).await;
 
     // first run: register a service
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
         &format!("http://127.0.0.1:{signer_port}"),
@@ -4885,8 +4885,8 @@ async fn actor_registry_persists_across_restart() {
 
     // Second run: the cache restores identity and ServiceSpec metadata, but a
     // disconnected Actor must stay out of network discovery and routing.
-    let log_path2 = tmp.path().join("actrix_persist2.log");
-    let mut child2 = spawn_actrix(&config_path, &log_path2);
+    let log_path2 = tmp.path().join("loran_persist2.log");
+    let mut child2 = spawn_loran(&config_path, &log_path2);
     wait_for_signer_ready(
         &format!("http://127.0.0.1:{signer_port}"),
         &mut child2,
@@ -4950,10 +4950,10 @@ async fn service_unregister_success_is_durable_across_restart() {
     let data_dir = tmp.path().join("data");
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
-    let log_path = tmp.path().join("actrix_unregister_persist.log");
+    let log_path = tmp.path().join("loran_unregister_persist.log");
     ensure_realm(&data_dir, TEST_REALM).await;
 
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let mut child = spawn_loran(&config_path, &log_path);
     let base = format!("http://127.0.0.1:{port}");
     wait_for_signer_ready(
         &format!("http://127.0.0.1:{signer_port}"),
@@ -5015,8 +5015,8 @@ async fn service_unregister_success_is_durable_across_restart() {
     // No sleep or checkpoint: success must already mean the DELETE is durable.
     graceful_shutdown(child);
 
-    let log_path2 = tmp.path().join("actrix_unregister_persist2.log");
-    let mut child2 = spawn_actrix(&config_path, &log_path2);
+    let log_path2 = tmp.path().join("loran_unregister_persist2.log");
+    let mut child2 = spawn_loran(&config_path, &log_path2);
     wait_for_signer_ready(
         &format!("http://127.0.0.1:{signer_port}"),
         &mut child2,
@@ -5058,7 +5058,7 @@ fn any_realm_allow_acl(from: &str) -> Acl {
 #[tokio::test]
 #[serial]
 async fn admin_api_manages_many_realms_by_name() {
-    let harness = ActrixHarness::start_tls(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start_tls(DEFAULT_TOKEN_TTL).await;
     let client = test_http_client();
     let base = harness.base_url();
     const MANAGED: &str = "second@localhost";
@@ -5300,7 +5300,7 @@ async fn admin_api_manages_many_realms_by_name() {
 #[tokio::test]
 #[serial]
 async fn signaling_discovery_cross_realm_isolated() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     ensure_realm(&harness.data_dir, SECOND_REALM).await;
 
     // The same service type in both Realms, each open to clients from any Realm.
@@ -5350,7 +5350,7 @@ async fn signaling_discovery_cross_realm_isolated() {
 #[tokio::test]
 #[serial]
 async fn signaling_route_candidates_cross_realm_isolated() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     ensure_realm(&harness.data_dir, SECOND_REALM).await;
 
     let (_other_w, _other_r, _other_ok) = ws_register_in_realm_with_spec(
@@ -5402,7 +5402,7 @@ async fn signaling_route_candidates_cross_realm_isolated() {
 #[tokio::test]
 #[serial]
 async fn signaling_get_service_spec_cross_realm_isolated() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     ensure_realm(&harness.data_dir, SECOND_REALM).await;
 
     let spec = make_service_spec(
@@ -5442,7 +5442,7 @@ async fn signaling_get_service_spec_cross_realm_isolated() {
 #[tokio::test]
 #[serial]
 async fn signaling_relay_cross_realm_is_denied() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
     ensure_realm(&harness.data_dir, SECOND_REALM).await;
 
@@ -5539,7 +5539,7 @@ fn turn_password(key: &[u8], username: &str) -> String {
 async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
     const ALPHA: &str = "alpha@localhost";
     const BETA: &str = "beta@localhost";
-    let harness = ActrixHarness::start_tls(DEFAULT_TOKEN_TTL).await;
+    let harness = LoranHarness::start_tls(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
     let base = harness.base_url();
     let client = test_http_client();

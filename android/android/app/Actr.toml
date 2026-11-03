@@ -16,7 +16,7 @@ name = "actro"
 ask-service = { actr_type = "acmeopenclaw+AskService" }
 
 [system.signaling]
-url = "wss://actrix1.actro.chat:443/signaling/ws"
+url = "wss://loran.example.com:443/signaling/ws"
 
 [system.deployment]
 realm = "openclaw@example.com"
@@ -32,8 +32,8 @@ tracing_service_name = "actrium"
 
 [system.webrtc]
 force_relay = false
-stun_urls = ["stun:actrix1.actro.chat:3479"]
-turn_urls = ["turn:actrix1.actro.chat:3479"]
+stun_urls = ["stun:loran.example.com:3479"]
+turn_urls = ["turn:loran.example.com:3479"]
 
 [scripts]
 dev = "xcodegen generate"

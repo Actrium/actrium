@@ -13,6 +13,7 @@ from pathlib import Path
 ALLOWLIST = "scripts/actrium/product-name-allowlist.json"
 ARCHIVE = "docs/migration/source-archive-readiness.md"
 RETIRED = re.compile(rb"act" + rb"ro|Act" + rb"ro|ACT" + rb"RO")
+RETIRED_SERVICE = re.compile(rb"act" + rb"rix", re.IGNORECASE)
 IDENTIFIER = re.compile(rb"[A-Za-z0-9_./:@+%\\-]+")
 
 
@@ -51,10 +52,8 @@ def main():
     actual = {}
     for raw_path in sorted(set(listing.split(b"\0")) - {b""}):
         path = os.fsdecode(raw_path)
-        if RETIRED.search(raw_path):
+        if RETIRED.search(raw_path) or RETIRED_SERVICE.search(raw_path):
             failures.append(f"Retired product name in path: {path}")
-        if path in (ALLOWLIST, ARCHIVE):
-            continue
         file = root / path
         if file.is_symlink():
             data = os.fsencode(os.readlink(file))
@@ -65,6 +64,12 @@ def main():
                     continue
                 data = prefix + source.read()
         else:
+            continue
+
+        for number, line in enumerate(data.split(b"\n"), 1):
+            if RETIRED_SERVICE.search(line):
+                failures.append(f"Retired service name at {path}:{number}")
+        if path in (ALLOWLIST, ARCHIVE):
             continue
 
         counts = Counter()

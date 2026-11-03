@@ -14,7 +14,7 @@ Loran 暴露两类互补观测数据：
 限制访问。指标可能泄露 Actor 数量、连接量、错误模式和服务拓扑，不应默认公网开放。
 
 ```bash
-curl --fail --cacert /etc/actrix/pki/ca.pem \
+curl --fail --cacert /etc/loran/pki/ca.pem \
   https://realm.example.com/metrics
 ```
 
@@ -23,7 +23,7 @@ Registry 目前没有独立 ring series；其 HTTP/安全事件仍进入全局�
 
 ## 命名与标签
 
-- 新指标沿用代码中的 `actrix_` 前缀；
+- 新指标沿用代码中的 `loran_` 前缀；
 - Issuer Signer 的 label 统一为 `signer`；
 - Realm、ActorId、Publisher、Actor credential、nonce 或 secret 不得成为高基数/敏感 label；
   一个实例承载多个 Realm，Realm 名与域名尤其不得作为 label，按 Realm 的状态、配额与

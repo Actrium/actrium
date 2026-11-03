@@ -4,7 +4,7 @@
 
 use crate::error::{AdminError, Result};
 use ::nonce_auth::{CredentialBuilder, NonceCredential};
-use actrix_proto::NonceCredential as ProtoCredential;
+use loran_proto::NonceCredential as ProtoCredential;
 
 /// Convert a nonce-auth credential to protobuf format.
 ///

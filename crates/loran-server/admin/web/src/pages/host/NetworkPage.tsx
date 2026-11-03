@@ -529,9 +529,9 @@ export function NetworkPage() {
                       <td className="py-2 text-xs text-gray-500 leading-relaxed">
                         {s.enabled && !s.is_healthy && (<>
                           {label} failed to initialize. Check logs
-                          with <C c="journalctl -u actrix -n 50 --no-pager" /> and
+                          with <C c="journalctl -u loran -n 50 --no-pager" /> and
                           verify port binding via <C c={`sudo ss -tlnp sport = :${s.port}`} />.
-                          Review <C c="cat /etc/actrix/config.toml" /> for config errors.
+                          Review <C c="cat /etc/loran/config.toml" /> for config errors.
                         </>)}
                       </td>
                     )}
@@ -597,7 +597,7 @@ export function NetworkPage() {
                           {isIce && port === 3478 && <>{" "}Relay range
                             also needed: <C c="sudo ufw allow 49152:65535/udp" />.</>}
                           {isIce && <>{" "}Also verify
-                            that <C c="bind.ice.advertised_ip" /> in <C c="/etc/actrix/config.toml" /> matches
+                            that <C c="bind.ice.advertised_ip" /> in <C c="/etc/loran/config.toml" /> matches
                             the host's actual public IP: <C c="curl -s ifconfig.me" />.</>}
                         </>)}
                       </td>

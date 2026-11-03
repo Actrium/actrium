@@ -2,7 +2,7 @@
 //!
 //! Defines the types of services supported by the system
 
-use actrix_proto::ResourceType;
+use loran_proto::ResourceType;
 use serde::{Deserialize, Serialize};
 use strum::Display;
 

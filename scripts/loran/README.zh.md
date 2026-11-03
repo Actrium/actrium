@@ -1,6 +1,6 @@
 # 运维脚本
 
-本目录包含 actrix 项目的运维维护脚本。
+本目录包含 loran 项目的运维维护脚本。
 
 ## 脚本列表
 
@@ -49,7 +49,7 @@ bash scripts/security-check.sh
 
 **输出示例**：
 ```
-🔍 Actrix 安全检查...
+🔍 Loran 安全检查...
 
 1. 检查数据库文件权限...
   ✅ database.db
@@ -57,7 +57,7 @@ bash scripts/security-check.sh
 2. 检查默认密钥...
   ✅ 未发现默认密钥
 
-3. 检查 actrix_shared_key 长度...
+3. 检查 loran_shared_key 长度...
   ✅ 密钥长度 32
 
 4. 检查 TLS 证书...
@@ -103,13 +103,13 @@ cargo audit
 ### Docker
 ```bash
 # 构建镜像
-docker build -t actrix:latest .
+docker build -t loran:latest .
 
 # 启动服务
 docker-compose up -d
 
 # 查看日志
-docker-compose logs -f actrix
+docker-compose logs -f loran
 
 # 停止服务
 docker-compose down
@@ -162,7 +162,7 @@ jobs:
 crontab -e
 
 # 添加每天凌晨 3 点备份
-0 3 * * * cd /opt/actrix && bash scripts/backup.sh
+0 3 * * * cd /opt/loran && bash scripts/backup.sh
 ```
 
 ---

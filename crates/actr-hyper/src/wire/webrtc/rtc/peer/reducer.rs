@@ -140,7 +140,7 @@ pub(crate) enum RtcPeerCommand {
     /// the `SignalingRouter` from the server's `RoleAssignment` (RFC §"Role and
     /// glare handling").
     ApplyRoleAssignment { is_offerer: bool },
-    /// Actrix confirmed that the exact remote endpoint had no usable
+    /// Loran confirmed that the exact remote endpoint had no usable
     /// signaling session when this Controller/transport/PC attempt was relayed.
     /// This is a point-in-time routing fact, not proof that the ActrId is
     /// permanently gone: a mobile runtime can reconnect with the same identity
@@ -1799,7 +1799,7 @@ fn reduce_command(
                     state.is_live_generation(pc_generation)
                 };
             if exact_attempt && !state.close_requested {
-                // `TargetUnavailable` only says that Actrix had no live
+                // `TargetUnavailable` only says that Loran had no live
                 // signaling egress for the target at one instant. Mobile
                 // backgrounding routinely creates that window while retaining
                 // the same ActrId and recoverable PeerConnection. Treating the

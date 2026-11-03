@@ -1,10 +1,10 @@
 use super::admin_api::{AdminApiState, build_admin_api_router};
-use actrix_sdk::control::{AdminApiService, AuthService, NodeAdminServiceServer};
 use anyhow::Result;
 use axum::{Json, Router, routing::get};
 use issuer::realm_profile::RealmProfiles;
+use loran_sdk::control::{AdminApiService, AuthService, NodeAdminServiceServer};
 use platform::{
-    ServiceCollector, config::ActrixConfig, config::config_store::ConfigOverrideStore,
+    ServiceCollector, config::LoranConfig, config::config_store::ConfigOverrideStore,
     monitoring::MetricsStore, storage::nonce::SqliteNonceStorage,
 };
 use serde_json::json;
@@ -28,7 +28,7 @@ use tokio::sync::broadcast;
 /// for subsequent reloads.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_control_router(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     service_collector: ServiceCollector,
     shutdown_tx: broadcast::Sender<()>,
     config_path: PathBuf,
@@ -86,7 +86,7 @@ pub async fn build_control_router(
 
 #[allow(clippy::too_many_arguments)]
 async fn build_admin_ui_router(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     service_collector: ServiceCollector,
     shutdown_tx: broadcast::Sender<()>,
     config_path: PathBuf,
@@ -165,7 +165,7 @@ async fn build_admin_ui_router(
 
     // Build Publisher Registry management router.
     let publisher_registry_router = {
-        use actrix_publisher_registry::{
+        use loran_publisher_registry::{
             PublisherRegistryManager,
             handlers::{PublisherRegistryState, create_admin_router},
         };
@@ -184,7 +184,7 @@ async fn build_admin_ui_router(
 }
 
 async fn build_grpc_api_router(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     service_collector: ServiceCollector,
     shutdown_tx: broadcast::Sender<()>,
     config_store: Arc<ConfigOverrideStore>,

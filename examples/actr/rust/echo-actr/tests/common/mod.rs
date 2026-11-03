@@ -46,12 +46,10 @@ pub async fn load_package(package_path: &Path, pubkey_path: &Path) -> Result<Str
 
     if verified.manifest.binary.target.starts_with("wasm32-") {
         let temp_dir = tempfile::TempDir::new().context("failed to create tempdir")?;
-        let hyper = Hyper::new(
-            HyperConfig::new(
-                temp_dir.path(),
-                Arc::new(StaticTrust::new(verifying_key.to_bytes()).context("invalid pubkey")?),
-            ),
-        )
+        let hyper = Hyper::new(HyperConfig::new(
+            temp_dir.path(),
+            Arc::new(StaticTrust::new(verifying_key.to_bytes()).context("invalid pubkey")?),
+        ))
         .await
         .context("failed to initialize Hyper")?;
 

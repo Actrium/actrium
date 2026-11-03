@@ -16,7 +16,7 @@ use axum::{
 use issuer::realm_profile::{ProviderEndpoints, RealmProfiles};
 use issuer::signer_client_wrapper::create_signer_client;
 use loran_packages::PackageDistributor;
-use platform::config::ActrixConfig;
+use platform::config::LoranConfig;
 use platform::realm::{Realm, RealmProfileRecord, RealmStatus};
 use std::{path::PathBuf, sync::Arc};
 use url::Url;
@@ -29,7 +29,7 @@ struct AuthorityState {
 }
 
 /// Advertised HTTP origin and signaling URL of this instance.
-fn advertised(config: &ActrixConfig) -> anyhow::Result<(String, String)> {
+fn advertised(config: &LoranConfig) -> anyhow::Result<(String, String)> {
     let http = config
         .bind
         .http
@@ -48,7 +48,7 @@ fn advertised(config: &ActrixConfig) -> anyhow::Result<(String, String)> {
     Ok((origin, signaling))
 }
 
-fn ice_servers(config: &ActrixConfig) -> Vec<IceServer> {
+fn ice_servers(config: &LoranConfig) -> Vec<IceServer> {
     let mut ice_servers = Vec::new();
     if config.is_ice_enabled() {
         let ice = &config.bind.ice;
@@ -78,7 +78,7 @@ fn ice_servers(config: &ActrixConfig) -> Vec<IceServer> {
 /// Realm Profiles of this Loran as Realm Infra Provider for its own domain: the
 /// authority is enabled and the Issuer has a Signer.
 pub async fn build_realm_profiles(
-    config: &ActrixConfig,
+    config: &LoranConfig,
 ) -> anyhow::Result<Option<Arc<RealmProfiles>>> {
     if !config.authority.enabled || !config.is_issuer_enabled() {
         return Ok(None);
@@ -117,7 +117,7 @@ pub async fn build_realm_profiles(
             urls: server.urls,
         })
         .collect();
-    let signer = create_signer_client(&signer_config, &config.actrix_shared_key)
+    let signer = create_signer_client(&signer_config, &config.loran_shared_key)
         .await
         .map_err(|error| anyhow::anyhow!("Signer client: {error}"))?;
     Ok(Some(Arc::new(RealmProfiles::new(
@@ -139,7 +139,7 @@ pub async fn build_realm_profiles(
 }
 
 async fn authority_composition(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     profiles: Option<Arc<RealmProfiles>>,
 ) -> anyhow::Result<(Option<AuthorityState>, Option<PackageDistributor>)> {
     let http = config
@@ -304,7 +304,7 @@ async fn get_realm_profile(Path((domain, realm_id)): Path<(String, String)>) -> 
 }
 
 pub async fn build_authority_router(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     profiles: Option<Arc<RealmProfiles>>,
 ) -> anyhow::Result<Router> {
     let (state, packages) = authority_composition(config, profiles).await?;
@@ -346,8 +346,8 @@ mod tests {
     use platform::config::{PackagesConfig, authority::AuthorityConfig};
     use tower::ServiceExt;
 
-    fn test_config(artifact: &std::path::Path) -> ActrixConfig {
-        let mut config = ActrixConfig::default();
+    fn test_config(artifact: &std::path::Path) -> LoranConfig {
+        let mut config = LoranConfig::default();
         config.enable = platform::config::ENABLE_SIGNALING
             | platform::config::ENABLE_STUN
             | platform::config::ENABLE_TURN
@@ -368,7 +368,7 @@ mod tests {
     }
 
     /// `test_config` acting as Realm Infra Provider: the Issuer has a Signer.
-    fn provider_config(artifact: &std::path::Path) -> ActrixConfig {
+    fn provider_config(artifact: &std::path::Path) -> LoranConfig {
         let mut config = test_config(artifact);
         config.services.issuer = Some(platform::config::IssuerServiceConfig {
             server: Default::default(),
@@ -380,7 +380,7 @@ mod tests {
     }
 
     /// Request path of the single artifact hosted by `config`.
-    async fn artifact_uri(config: &ActrixConfig) -> String {
+    async fn artifact_uri(config: &LoranConfig) -> String {
         let (_, packages) = authority_composition(config, None).await.unwrap();
         let packages = packages.unwrap();
         let href = packages.artifact_hrefs().next().unwrap();
@@ -469,14 +469,14 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_plain_http_authority_in_production() {
-        let config = ActrixConfig {
+        let config = LoranConfig {
             env: "prod".to_string(),
             authority: AuthorityConfig {
                 enabled: true,
                 uri: Some("actr://localhost".to_string()),
                 ..AuthorityConfig::default()
             },
-            ..ActrixConfig::default()
+            ..LoranConfig::default()
         };
         let error = authority_composition(&config, None).await.err().unwrap();
         assert!(error.to_string().contains("requires TLS"));

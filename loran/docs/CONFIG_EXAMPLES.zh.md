@@ -10,7 +10,7 @@ v1 只推荐一种生产拓扑：单节点、SQLite、单一 Realm Infra Provide
 从仓库模板开始：
 
 ```bash
-install -m 600 config.example.toml /etc/actrix/config.toml
+install -m 600 config.example.toml /etc/loran/config.toml
 openssl rand -hex 32
 openssl rand -base64 48
 ```
@@ -18,12 +18,12 @@ openssl rand -base64 48
 核心配置形态：
 
 ```toml
-name = "actrix-prod-01"
+name = "loran-prod-01"
 env = "prod"
 enable = 31
-sqlite_path = "/var/lib/actrix"
+sqlite_path = "/var/lib/loran"
 location_tag = "single-node"
-actrix_shared_key = "<独立随机值>"
+loran_shared_key = "<独立随机值>"
 
 [authority]
 enabled = true
@@ -34,8 +34,8 @@ domain_name = "realm.example.com"
 advertised_ip = "203.0.113.10"
 ip = "::"
 port = 443
-cert = "/etc/actrix/tls/fullchain.pem"
-key = "/etc/actrix/tls/privkey.pem"
+cert = "/etc/loran/tls/fullchain.pem"
+key = "/etc/loran/tls/privkey.pem"
 
 [bind.ice]
 ip = "0.0.0.0"
@@ -49,7 +49,7 @@ relay_port_range = "49152-65535"
 turn_secret = "<独立随机值>"
 
 [services.signer]
-kek_env = "ACTRIX_SIGNER_KEK"
+kek_env = "LORAN_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
@@ -86,8 +86,8 @@ enabled = false
 启动前：
 
 ```bash
-ACTRIX_SIGNER_KEK="<64-hex-or-44-base64>" \
-  actrix test /etc/actrix/config.toml
+LORAN_SIGNER_KEK="<64-hex-or-44-base64>" \
+  loran test /etc/loran/config.toml
 ```
 
 验证通过后再由 service manager/systemd 注入同一环境变量并启动。首次启动后：
@@ -103,12 +103,12 @@ ACTRIX_SIGNER_KEK="<64-hex-or-44-base64>" \
 本地开发仍使用同一逻辑模型，只放宽 TLS：
 
 ```toml
-name = "actrix-dev"
+name = "loran-dev"
 env = "dev"
 enable = 31
 sqlite_path = "database"
 location_tag = "local"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 
 [authority]
 enabled = true
@@ -127,7 +127,7 @@ ip = "127.0.0.1"
 port = 3478
 
 [turn]
-realm = "actrix.local"
+realm = "loran.local"
 relay_port_range = "49152-65535"
 turn_secret = "0123456789abcdef0123456789abcdef"
 
@@ -172,9 +172,9 @@ endpoint = "https://signer.internal.example:8443"
 timeout_seconds = 30
 enable_tls = true
 tls_domain = "signer.internal.example"
-ca_cert = "/etc/actrix/pki/ca.pem"
-client_cert = "/etc/actrix/pki/issuer.pem"
-client_key = "/etc/actrix/pki/issuer-key.pem"
+ca_cert = "/etc/loran/pki/ca.pem"
+client_cert = "/etc/loran/pki/issuer.pem"
+client_key = "/etc/loran/pki/issuer-key.pem"
 ```
 
 这只是逻辑平面的物理隔离，不改变实例承载的 Realm 数量，也不提供 HA。首版若无该隔离需求，

@@ -1,6 +1,6 @@
-//! Mock actrix server for Actor-RTC integration tests.
+//! Mock loran server for Actor-RTC integration tests.
 //!
-//! Provides a drop-in replacement for a real `actrix` instance, covering the
+//! Provides a drop-in replacement for a real `loran` instance, covering the
 //! endpoints that `actr`'s `Hyper` runtime and the `actr` CLI talk to:
 //!
 //! - WebSocket signaling at `/signaling/ws` (also `/` for legacy tests)
@@ -13,7 +13,7 @@
 //! - HTTP publish endpoints at `/registry/packages/nonce` + `/registry/packages/publish` used by
 //!   `actr pkg publish`.
 //! - Admin seeding endpoints under `/admin/*` (replaces the old
-//!   `register.sh` that used `sqlite3` directly on actrix.db).
+//!   `register.sh` that used `sqlite3` directly on loran.db).
 //!
 //! All state lives in memory and is shared between the WS and HTTP surfaces so
 //! an Publisher Registry that was registered via `POST /admin/publisher` is immediately visible to
@@ -34,11 +34,11 @@ use tokio::sync::oneshot;
 
 pub use state::{MockState, PackageEntry, PublisherEntry, RealmEntry};
 
-/// Mock actrix server with WebSocket signaling and HTTP Issuer/Publisher Registry endpoints.
+/// Mock loran server with WebSocket signaling and HTTP Issuer/Publisher Registry endpoints.
 ///
 /// WebSocket and HTTP share a single TCP listener (axum's WS upgrade handler)
 /// so callers only need one port.
-pub struct MockActrixServer {
+pub struct MockLoranServer {
     port: u16,
     state: Arc<MockState>,
     cancel: tokio_util::sync::CancellationToken,
@@ -64,7 +64,7 @@ impl loran_relay::Observer for RelayFrameObserver {
     }
 }
 
-impl MockActrixServer {
+impl MockLoranServer {
     /// Start the mock server on a random available port.
     pub async fn start() -> anyhow::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -162,17 +162,17 @@ impl MockActrixServer {
                 })
                 .await;
             if let Err(err) = result {
-                tracing::error!(%err, "mock-actrix axum server exited with error");
+                tracing::error!(%err, "mock-loran axum server exited with error");
             }
             is_running_clone.store(false, Ordering::Release);
         });
 
         tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
             .await
-            .map_err(|_| anyhow::anyhow!("mock-actrix server failed to start on port {port}"))?
-            .map_err(|_| anyhow::anyhow!("mock-actrix startup task exited early"))?;
+            .map_err(|_| anyhow::anyhow!("mock-loran server failed to start on port {port}"))?
+            .map_err(|_| anyhow::anyhow!("mock-loran startup task exited early"))?;
 
-        tracing::info!(port, "mock-actrix listening on 127.0.0.1:{port}");
+        tracing::info!(port, "mock-loran listening on 127.0.0.1:{port}");
 
         Ok(Self {
             port,
@@ -435,7 +435,7 @@ impl MockActrixServer {
     }
 }
 
-impl Drop for MockActrixServer {
+impl Drop for MockLoranServer {
     fn drop(&mut self) {
         self.cancel.cancel();
     }
@@ -464,7 +464,7 @@ fn build_router(state: Arc<MockState>) -> Router {
         .with_state(state.clone());
 
     Router::new()
-        // WebSocket signaling — real actrix path and legacy root alias.
+        // WebSocket signaling — real loran path and legacy root alias.
         .route("/signaling/ws", get(signaling::ws_upgrade_handler))
         .route("/", get(signaling::ws_upgrade_handler))
         .route("/signaling/health", get(http::health_handler))

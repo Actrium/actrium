@@ -1,4 +1,4 @@
-# Actrix Configuration Example
+# Loran Configuration Example
 #
 # Service enable bitmask (binary representation):
 #   xxxxx
@@ -24,7 +24,7 @@
 enable = 31
 
 # Instance identifier (used for monitoring and tracing)
-name = "actrix-01"
+name = "loran-01"
 
 # Environment: dev/prod/test
 # - dev: allows HTTP for local development
@@ -33,7 +33,7 @@ name = "actrix-01"
 env = "prod"
 
 # SQLite database storage directory path
-# Main database file will be stored as {sqlite_path}/actrix.db
+# Main database file will be stored as {sqlite_path}/loran.db
 sqlite_path = "database"
 
 # Opaque deployment location label used only for observability.
@@ -43,7 +43,7 @@ location_tag = "single-node"
 # Shared PSK for inter-service authentication.
 # REQUIRED: replace this fail-closed placeholder before startup.
 # Generate: openssl rand -hex 32
-actrix_shared_key = "<generate-with-openssl-rand-hex-32>"
+loran_shared_key = "<generate-with-openssl-rand-hex-32>"
 
 # Public Actr authority. The URI is actr://<domain> without a port; its domain
 # is the Realm Infra Provider ID, required when Issuer, Signaling or TURN is enabled.
@@ -67,8 +67,8 @@ uri = "actr://realm.example.com"
 # Global sink — default for all channels. Per-channel sink overrides below.
 # Supported URI schemes: file://, otlp+http://, otlp+grpc://
 # If omitted, output goes to stderr.
-# sink = "file:///var/log/actrix/actrix.log"
-service_name = "actrix"
+# sink = "file:///var/log/loran/loran.log"
+service_name = "loran"
 
 # Each channel has its own semantic filter and optional sink override.
 # RUST_LOG env var overrides all per-channel filters (pass-all mode).
@@ -76,7 +76,7 @@ service_name = "actrix"
 [recording.observability]
 # Resolution: off / digest / detailed / full
 filter = "digest"
-# sink = "file:///var/log/actrix/observability.log"
+# sink = "file:///var/log/loran/observability.log"
 
 [recording.audit]
 # Scope: off / mutations / all
@@ -91,7 +91,7 @@ filter = "all"               # security events should not be missed
 [recording.operations]
 # Detail: off / lifecycle / detailed
 filter = "lifecycle"         # start/stop, deploy, reload
-# sink = "file:///var/log/actrix/operations.log"
+# sink = "file:///var/log/loran/operations.log"
 
 # ============================================================================
 # Monitoring Endpoints (/health, /metrics)
@@ -105,7 +105,7 @@ filter = "lifecycle"         # start/stop, deploy, reload
 # Per-service overrides completely replace global config for that service.
 [monitoring]
 # allowed_ips = ["127.0.0.1/32", "10.0.0.0/8", "::1/128"]
-# htpasswd_file = "/etc/actrix/monitoring.htpasswd"
+# htpasswd_file = "/etc/loran/monitoring.htpasswd"
 
 # Per-service override example:
 # [monitoring.services.signer]
@@ -113,9 +113,9 @@ filter = "lifecycle"         # start/stop, deploy, reload
 # htpasswd_file = ""  # disable Basic Auth for Signer endpoints
 
 # Process management (optional)
-# pid = "/var/run/actrix.pid"  # (optional)
-# user = "actrix"  # (optional) Drop privileges to this user after binding ports
-# group = "actrix"  # (optional) Drop privileges to this group
+# pid = "/var/run/loran.pid"  # (optional)
+# user = "loran"  # (optional) Drop privileges to this user after binding ports
+# group = "loran"  # (optional) Drop privileges to this group
 
 # ============================================================================
 # Network Binding Configuration
@@ -130,8 +130,8 @@ advertised_ip = "203.0.113.10"
 ip = "::"
 port = 8080
 # advertised_port = 8080  # (optional, defaults to port)
-cert = "/etc/actrix/tls/fullchain.pem"
-key = "/etc/actrix/tls/privkey.pem"
+cert = "/etc/loran/tls/fullchain.pem"
+key = "/etc/loran/tls/privkey.pem"
 
 # Dedicated Signer gRPC listener (SGN-02).
 # The Signer signing oracle is served on its own listener instead of the shared
@@ -166,7 +166,7 @@ advertised_port = 3478
 relay_port_range = "49152-65535"
 
 # TURN realm
-realm = "actrix.example.com"
+realm = "loran.example.com"
 # REQUIRED: stable TURN secret. Rotating it invalidates outstanding TURN
 # credentials, so rotate through an explicit maintenance procedure.
 # Must be independent from every other secret in this file (no reuse).
@@ -184,7 +184,7 @@ turn_secret = "<generate-distinct-turn-secret-openssl-rand-base64-48>"
 [services.signer]
 # Required in production. The environment value must be 32 random bytes
 # encoded as 64 hex characters or 44-character Base64.
-kek_env = "ACTRIX_SIGNER_KEK"
+kek_env = "LORAN_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"
@@ -208,7 +208,7 @@ worker_id = 0
 # threshold, a deterministic successor token is issued (default: 21600 = 6 hours)
 # renewal_rotation_window_secs = 21600
 # Base64-encoded secret for deterministic renewal token rotation.
-# Must decode to at least 32 bytes. Must be identical across the actrix cluster.
+# Must decode to at least 32 bytes. Must be identical across the loran cluster.
 # Must be independent from every other secret in this file (no reuse).
 # REQUIRED. Generate: openssl rand -base64 48
 renewal_token_secret = "<generate-distinct-renewal-token-secret-openssl-rand-base64-48>"
@@ -277,7 +277,7 @@ ws_path = "/signaling"
 enabled = true
 # REQUIRED: Argon2id PHC string. Plaintext passwords are rejected.
 # Example generation (argon2 CLI):
-#   printf '%s' "$ACTRIX_ADMIN_PASSWORD" |
+#   printf '%s' "$LORAN_ADMIN_PASSWORD" |
 #     argon2 "$(openssl rand -base64 18)" -id -e -m 16 -t 3 -p 1
 password_hash = "<generate-argon2id-phc>"
 # JWT session expiry in seconds (default: 86400 = 24h)
@@ -297,8 +297,8 @@ max_concurrent = 2
 # considered superv-managed: realms are pushed by superv and local realm
 # writes (create/update/rotate/delete) through the Admin UI are disabled.
 enabled = false
-node_id = "actrix-node-01"
-node_name = "actrix-edge-01"
+node_id = "loran-node-01"
+node_name = "loran-edge-01"
 # Shared secret (hex, >= 64 chars) used to sign mutable control-plane ops.
 # Required only when grpc_api is enabled. Keep empty otherwise.
 shared_secret = ""

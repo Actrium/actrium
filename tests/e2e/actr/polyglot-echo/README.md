@@ -14,7 +14,7 @@ server is deployed.
 | Server form    | `cdylib-rust` (`actr build` → `actr run`), `linked-rust` (in-process binary), `wasm-rust` (wasm32-wasip2 Component via `actr-hyper` `wasm-engine`) | other-language linked forms once their FFI workload entry lands |
 | Client driver  | Rust (`actr_hyper::Node`), TypeScript (`@actrium/actr` napi) | Python / Swift once their client bindings work on `main` (see below) |
 | Scenarios      | `echo` (unary), `server-stream` + `bidi` (via a separate linked stream server) | — |
-| Signaling      | `mock-actrix` (no real `actrix`)                    | — |
+| Signaling      | `mock-loran` (no real `loran`)                    | — |
 | Trust          | static publisher pubkey (`[[trust]] kind = "static"`)     | registry trust |
 
 Each client driver registers under its own actr_type via
@@ -71,7 +71,7 @@ tests/e2e/actr/polyglot-echo/
 │   ├── stream-server-runtime.toml.tpl rendered for the linked stream server
 │   └── client-runtime.toml.tpl       rendered for the Rust driver into RUN_DIR
 ├── lib/
-│   ├── common.sh                 shell helpers (no actrix dependency)
+│   ├── common.sh                 shell helpers (no loran dependency)
 │   └── setup.sh                  bootstrap: build → seed → run server form
 ├── services/                     server forms (see services/README.md)
 │   ├── cdylib-rust/              default; scaffolded fresh via `actr init`
@@ -112,7 +112,7 @@ The directory is removed on success. Set `KEEP_TMP=1` to preserve it.
 ## Why a separate scenario
 
 `tests/e2e/actr/package-runtime-echo` already covers the end-to-end packaging /
-trust / runtime path against a real `actrix`. This scenario focuses on
+trust / runtime path against a real `loran`. This scenario focuses on
 the *server-form* axis: it deliberately runs against the in-tree
-`mock-actrix` so it can land in CI without a private repo dependency, and
+`mock-loran` so it can land in CI without a private repo dependency, and
 the simpler bootstrap keeps onboarding cost low.

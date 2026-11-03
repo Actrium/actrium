@@ -1,6 +1,6 @@
 # Actr 基于 webrtc-rs v0.20 的分层测试与网络验证方案
 
-> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../GLOSSARY.zh.md)「历史名称对照」。
+> 历史文档：沿用撰写时的名称（如 Loran、AIS、manufacturer），现行名称见[术语表](../GLOSSARY.zh.md)「历史名称对照」。
 
 状态：Implemented（Rust T3 阶段；T4/T5/T6 仍由系统/设备门禁推进）
 
@@ -47,7 +47,7 @@ NAT 重绑定、真实地址切换等场景。当前 `with_vnet()` 也是兼容�
 - T2：v0.20 高层 API 与真实 loopback PeerConnection；
 - T2.5：可选的 `rtc` Sans-I/O 协议实验室；
 - T3：完整 Actr 生产链路集成；
-- T4：Linux netns/`tc netem`/NAT/Actrix TURN 系统网络；
+- T4：Linux netns/`tc netem`/NAT/Loran TURN 系统网络；
 - T5/T6：移动端 E2E 与多连接规模/长稳测试。
 
 本分支已经把全局丢包开关扩展为“每个远端 peer、每个方向、每个
@@ -293,7 +293,7 @@ flowchart TD
 | T2 v0.20 API | 真实 loopback PC、真实 Handler/Runtime/DataChannel/Track | Actr 对 v0.20 API 的适配契约 | Manager/业务全链路、真实 NAT |
 | T2.5 Sans-I/O | `rtc 0.20.1` 协议 rig，可选 | packet 级可重放实验、特定协议回归 | 生产 backend、业务状态机 |
 | T3 Actr 集成 | `TestHarness` + 完整 Manager/Controller/Runner + 真实 WS/PC | 业务发送、状态通知、恢复、多个 peer 隔离 | 真实系统路由/NAT |
-| T4 系统网络 | Linux netns、`tc netem`、nftables、Actrix TURN | loss/jitter/reorder/MTU/NAT/relay 的真实 socket 行为 | 移动 OS 生命周期 |
+| T4 系统网络 | Linux netns、`tc netem`、nftables、Loran TURN | loss/jitter/reorder/MTU/NAT/relay 的真实 socket 行为 | 移动 OS 生命周期 |
 | T5 平台 E2E | Android/iOS emulator/device | 系统网络事件、前后台、公开 hook/订阅、业务恢复 | 大规模并发 |
 | T6 Scale/Soak | 多 peer、长稳、资源监控 | 恢复风暴、限流、FD/内存/task 泄漏 | 每次 PR 的快速反馈 |
 
@@ -461,7 +461,7 @@ enum PacketRule {
 | N10 | 长时离线导致重建 | T3 | 恢复预算耗尽后 Hard；generation 增长一次 | 已覆盖，补精确计数 |
 | N11 | 地址变化/Wi-Fi↔蜂窝 | T1 + T4/T5 | 立即失去 sendable；优先同代 ICE restart，失败再 Hard；新地址生效 | 策略有覆盖，真实系统缺失 |
 | N12 | NAT mapping 失效/rebinding | T4 netns/NAT | 新 candidate/path；旧五元组失效；业务恢复 | 缺失 |
-| N13 | TURN relay-only 初连 | T3/T4 Actrix TURN | `network_path=Relayed`；业务正常 | 已有 Actrix TURN 集成，纳入 nightly |
+| N13 | TURN relay-only 初连 | T3/T4 Loran TURN | `network_path=Relayed`；业务正常 | 已有 Loran TURN 集成，纳入 nightly |
 | N14 | TURN 凭据轮换 | T3/T4 | `set_configuration` 成功不误断；失败转 Hard | 已覆盖，补系统级过期验证 |
 | N15 | 大消息/请求在途断网 | T3 | 不损坏、不重复响应、pending 有界释放 | 已覆盖但 flaky，拆成独立参数用例 |
 | N16 | DataChannel 背压与恢复 | T2/T3 | outstanding bytes 有界；false 时 fail-fast；恢复可写 | API 层已覆盖，补故障中业务层 |
@@ -557,7 +557,7 @@ cargo nextest run --workspace --all-features --no-fail-fast
 
 - T3 全网络矩阵；
 - Linux netns + `tc netem` 的 loss/delay/jitter/reorder/MTU；
-- Actrix TURN direct/relay-only/credential rotation；
+- Loran TURN direct/relay-only/credential rotation；
 - Android emulator、iOS simulator 的生命周期与公开状态 Hook；
 - 10 peer、30 分钟恢复循环；
 - 输出 flake rate、P50/P95 恢复时间、Soft→Hard 比例、资源增量。
@@ -566,7 +566,7 @@ cargo nextest run --workspace --all-features --no-fail-fast
 
 - retry=0；
 - Android/iOS 真机的 Wi-Fi/蜂窝/飞行模式；
-- 真实 NAT/公网 Actrix TURN，必要时浏览器互操作；
+- 真实 NAT/公网 Loran TURN，必要时浏览器互操作；
 - 50–100 peer 或目标产品上限的分批并发；
 - 2–8 小时 soak，故障随机种子可重放；
 - 无永久 `sendable=false`、无跨 peer 污染、无资源持续增长、无未解释 flaky。
@@ -645,7 +645,7 @@ cargo nextest run --workspace --all-features --no-fail-fast
 
 - CI 中建立 Linux network namespace 拓扑；
 - 使用 `tc netem`/nftables 注入 loss/jitter/reorder/rate/MTU/NAT；
-- 部署临时 Actrix TURN，验证 direct、relay-only、凭据轮换和失效；
+- 部署临时 Loran TURN，验证 direct、relay-only、凭据轮换和失效；
 - 采集 selected candidate pair、恢复耗时和资源指标。
 
 退出条件：N06、N11–N14 在 nightly 稳定，所有环境和随机种子可复现。

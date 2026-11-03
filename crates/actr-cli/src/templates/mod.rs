@@ -133,8 +133,8 @@ impl TemplateContext {
             actr_workload_version: DEFAULT_ACTR_WORKLOAD_VERSION.to_string(),
             actr_local_path: resolve_actr_swift_local_path(),
             realm: String::new(),
-            stun_urls: r#"["stun:actrix1.develenv.com:3478"]"#.to_string(),
-            turn_urls: r#"["turn:actrix1.develenv.com:3478"]"#.to_string(),
+            stun_urls: r#"["stun:loran.example.com:3478"]"#.to_string(),
+            turn_urls: r#"["turn:loran.example.com:3478"]"#.to_string(),
             is_service,
             is_both: false,
         }

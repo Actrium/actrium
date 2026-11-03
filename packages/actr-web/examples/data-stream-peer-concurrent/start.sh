@@ -15,8 +15,8 @@ ACTR_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
 CLIENT_DIR="$SCRIPT_DIR/client"
 SERVER_DIR="$SCRIPT_DIR/server"
 MOCK_PORT="${1:-8081}"
-ACTRIX_HTTP_URL="http://127.0.0.1:$MOCK_PORT"
-ACTRIX_SIGNALING_URL="ws://127.0.0.1:$MOCK_PORT/signaling/ws"
+LORAN_HTTP_URL="http://127.0.0.1:$MOCK_PORT"
+LORAN_SIGNALING_URL="ws://127.0.0.1:$MOCK_PORT/signaling/ws"
 
 # Color codes
 RED='\033[0;31m'
@@ -67,10 +67,10 @@ cleanup() {
         rm -f "$SCRIPT_DIR/.server.pid"
     fi
 
-    if [ -f "$SCRIPT_DIR/.mock-actrix.pid" ]; then
-        PID=$(cat "$SCRIPT_DIR/.mock-actrix.pid")
+    if [ -f "$SCRIPT_DIR/.mock-loran.pid" ]; then
+        PID=$(cat "$SCRIPT_DIR/.mock-loran.pid")
         kill -0 $PID 2>/dev/null && kill $PID 2>/dev/null || true
-        rm -f "$SCRIPT_DIR/.mock-actrix.pid"
+        rm -f "$SCRIPT_DIR/.mock-loran.pid"
     fi
 
     wait 2>/dev/null || true
@@ -101,39 +101,39 @@ check_dependencies() {
     echo ""
 }
 
-# ── mock-actrix (signaling + Issuer server) ──
+# ── mock-loran (signaling + Issuer server) ──
 
-build_or_find_mock_actrix() {
-    log_step "Checking mock-actrix (signaling + Issuer server)..."
-    MOCK_ACTRIX_CMD=""
+build_or_find_mock_loran() {
+    log_step "Checking mock-loran (signaling + Issuer server)..."
+    MOCK_LORAN_CMD=""
 
-    if [ -x "$ACTR_ROOT/target/debug/mock-actrix" ]; then
-        MOCK_ACTRIX_CMD="$ACTR_ROOT/target/debug/mock-actrix"
-        log_success "Using local mock-actrix: $MOCK_ACTRIX_CMD"
+    if [ -x "$ACTR_ROOT/target/debug/mock-loran" ]; then
+        MOCK_LORAN_CMD="$ACTR_ROOT/target/debug/mock-loran"
+        log_success "Using local mock-loran: $MOCK_LORAN_CMD"
         return 0
     fi
-    if [ -x "$ACTR_ROOT/target/release/mock-actrix" ]; then
-        MOCK_ACTRIX_CMD="$ACTR_ROOT/target/release/mock-actrix"
-        log_success "Using local mock-actrix: $MOCK_ACTRIX_CMD"
-        return 0
-    fi
-
-    log_info "Building mock-actrix..."
-    (cd "$ACTR_ROOT" && cargo build -p actr-mock-actrix --bin mock-actrix 2>&1 | tail -5)
-    if [ -x "$ACTR_ROOT/target/debug/mock-actrix" ]; then
-        MOCK_ACTRIX_CMD="$ACTR_ROOT/target/debug/mock-actrix"
-        log_success "Built mock-actrix: $MOCK_ACTRIX_CMD"
+    if [ -x "$ACTR_ROOT/target/release/mock-loran" ]; then
+        MOCK_LORAN_CMD="$ACTR_ROOT/target/release/mock-loran"
+        log_success "Using local mock-loran: $MOCK_LORAN_CMD"
         return 0
     fi
 
-    log_error "mock-actrix not found"
+    log_info "Building mock-loran..."
+    (cd "$ACTR_ROOT" && cargo build -p actr-mock-loran --bin mock-loran 2>&1 | tail -5)
+    if [ -x "$ACTR_ROOT/target/debug/mock-loran" ]; then
+        MOCK_LORAN_CMD="$ACTR_ROOT/target/debug/mock-loran"
+        log_success "Built mock-loran: $MOCK_LORAN_CMD"
+        return 0
+    fi
+
+    log_error "mock-loran not found"
     return 1
 }
 
-start_mock_actrix() {
-    log_step "Starting mock-actrix on port $MOCK_PORT..."
+start_mock_loran() {
+    log_step "Starting mock-loran on port $MOCK_PORT..."
 
-    if ! build_or_find_mock_actrix; then
+    if ! build_or_find_mock_loran; then
         exit 1
     fi
 
@@ -142,33 +142,33 @@ start_mock_actrix() {
         exit 1
     fi
 
-    "$MOCK_ACTRIX_CMD" --port "$MOCK_PORT" > "$SCRIPT_DIR/mock-actrix.log" 2>&1 &
-    MOCK_ACTRIX_PID=$!
-    echo $MOCK_ACTRIX_PID > "$SCRIPT_DIR/.mock-actrix.pid"
+    "$MOCK_LORAN_CMD" --port "$MOCK_PORT" > "$SCRIPT_DIR/mock-loran.log" 2>&1 &
+    MOCK_LORAN_PID=$!
+    echo $MOCK_LORAN_PID > "$SCRIPT_DIR/.mock-loran.pid"
 
-    log_success "mock-actrix started (PID: $MOCK_ACTRIX_PID)"
-    log_info "Waiting for mock-actrix to be ready..."
+    log_success "mock-loran started (PID: $MOCK_LORAN_PID)"
+    log_info "Waiting for mock-loran to be ready..."
 
     local ready=0
     for _ in $(seq 1 100); do
-        if ! kill -0 "$MOCK_ACTRIX_PID" 2>/dev/null; then
-            log_error "mock-actrix failed to start"
-            cat "$SCRIPT_DIR/mock-actrix.log"
+        if ! kill -0 "$MOCK_LORAN_PID" 2>/dev/null; then
+            log_error "mock-loran failed to start"
+            cat "$SCRIPT_DIR/mock-loran.log"
             exit 1
         fi
-        if curl -fsS "$ACTRIX_HTTP_URL/health" >/dev/null 2>&1; then
+        if curl -fsS "$LORAN_HTTP_URL/health" >/dev/null 2>&1; then
             ready=1
             break
         fi
         sleep 0.1
     done
     if [ "$ready" -ne 1 ]; then
-        log_error "mock-actrix did not become healthy"
-        cat "$SCRIPT_DIR/mock-actrix.log"
+        log_error "mock-loran did not become healthy"
+        cat "$SCRIPT_DIR/mock-loran.log"
         exit 1
     fi
 
-    log_success "mock-actrix is running at $ACTRIX_HTTP_URL"
+    log_success "mock-loran is running at $LORAN_HTTP_URL"
     echo ""
 }
 
@@ -181,7 +181,7 @@ setup_realm() {
     local REALM=data-stream@example.com
 
     log_info "Creating realm $REALM..."
-    curl -fsS -X POST "$ACTRIX_HTTP_URL/admin/realms" \
+    curl -fsS -X POST "$LORAN_HTTP_URL/admin/realms" \
         -H 'content-type: application/json' \
         --data "{\"realm\": \"$REALM\"}" >/dev/null
 
@@ -231,8 +231,8 @@ install_deps() {
 start_server() {
     log_step "Starting Data-Stream Server..."
     cd "$SERVER_DIR"
-    VITE_ACTRIX_HTTP_URL="$ACTRIX_HTTP_URL" \
-    VITE_ACTRIX_SIGNALING_URL="$ACTRIX_SIGNALING_URL" \
+    VITE_LORAN_HTTP_URL="$LORAN_HTTP_URL" \
+    VITE_LORAN_SIGNALING_URL="$LORAN_SIGNALING_URL" \
     pnpm dev --host 127.0.0.1 --port 4176 > "$SCRIPT_DIR/server.log" 2>&1 &
     SERVER_PID=$!
     echo $SERVER_PID > "$SCRIPT_DIR/.server.pid"
@@ -258,16 +258,16 @@ start_client() {
     cd "$CLIENT_DIR"
 
     # Client-1 on port 4175
-    VITE_ACTRIX_HTTP_URL="$ACTRIX_HTTP_URL" \
-    VITE_ACTRIX_SIGNALING_URL="$ACTRIX_SIGNALING_URL" \
+    VITE_LORAN_HTTP_URL="$LORAN_HTTP_URL" \
+    VITE_LORAN_SIGNALING_URL="$LORAN_SIGNALING_URL" \
     pnpm dev --host 127.0.0.1 --port 4175 > "$SCRIPT_DIR/client.log" 2>&1 &
     CLIENT_PID=$!
     echo $CLIENT_PID > "$SCRIPT_DIR/.client.pid"
     log_success "Client-1 dev started (PID: $CLIENT_PID, port 4175)"
 
     # Client-2 on port 4177
-    VITE_ACTRIX_HTTP_URL="$ACTRIX_HTTP_URL" \
-    VITE_ACTRIX_SIGNALING_URL="$ACTRIX_SIGNALING_URL" \
+    VITE_LORAN_HTTP_URL="$LORAN_HTTP_URL" \
+    VITE_LORAN_SIGNALING_URL="$LORAN_SIGNALING_URL" \
     pnpm dev --host 127.0.0.1 --port 4177 > "$SCRIPT_DIR/client2.log" 2>&1 &
     CLIENT2_PID=$!
     echo $CLIENT2_PID > "$SCRIPT_DIR/.client2.pid"
@@ -353,7 +353,7 @@ run_test() {
     else
         log_error "Tests FAILED (exit code: $TEST_EXIT_CODE)"
         log_info "Service logs:"
-        echo "  tail -f $SCRIPT_DIR/mock-actrix.log"
+        echo "  tail -f $SCRIPT_DIR/mock-loran.log"
         echo "  tail -f $SCRIPT_DIR/server.log"
         echo "  tail -f $SCRIPT_DIR/client.log"
         echo "  tail -f $SCRIPT_DIR/client2.log"
@@ -372,7 +372,7 @@ main() {
     echo ""
 
     check_dependencies
-    start_mock_actrix
+    start_mock_loran
     setup_realm
     build_wasm
     install_deps
@@ -382,7 +382,7 @@ main() {
     echo "╔═══════════════════════════════════════════════════════════╗"
     echo "║         ✅ Data-Stream Example Running                   ║"
     echo "╠═══════════════════════════════════════════════════════════╣"
-    printf "║  mock-actrix: %-43s ║\n" "$ACTRIX_HTTP_URL"
+    printf "║  mock-loran: %-43s ║\n" "$LORAN_HTTP_URL"
     echo "║  Server:     Data-stream at http://localhost:4176       ║"
     echo "║  Client-1:   Web UI at http://localhost:4175            ║"
     echo "║  Client-2:   Web UI at http://localhost:4177            ║"
@@ -398,7 +398,7 @@ main() {
     else
         log_error "❌ Verification failed"
         log_info "Services still running for debugging."
-        log_info "  mock-actrix: $ACTRIX_HTTP_URL"
+        log_info "  mock-loran: $LORAN_HTTP_URL"
         log_info "  Server:   http://localhost:4176"
         log_info "  Client-1: http://localhost:4175"
         log_info "  Client-2: http://localhost:4177"

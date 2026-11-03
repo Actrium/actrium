@@ -29,7 +29,7 @@ prepare_realm_scenario() {
     REALM="echo-${RUN_ID}@${REALM_DOMAIN}"
     # Authority and its signing key must be enabled; a development Realm
     # without a Profile is deliberately not this scenario.
-    PYTHONPATH="$SCRIPT_DIR/fixtures" python3 - "$ACTRIX_CONFIG_PATH" "${REALM_ICE_IP:-}" "$RUN_DIR/actrix-tls" <<'PY'
+    PYTHONPATH="$SCRIPT_DIR/fixtures" python3 - "$LORAN_CONFIG_PATH" "${REALM_ICE_IP:-}" "$RUN_DIR/loran-tls" <<'PY'
 import ipaddress, json, pathlib, re, socket, ssl, sys
 from https_documents import certificates
 path = pathlib.Path(sys.argv[1])
@@ -64,7 +64,7 @@ text = start + '[bind.ice]\n' + ice + '\n[turn]' + end
 text += '\n[realm]\nprofile_refresh_secs = 86400\n'
 path.write_text(text)
 PY
-    export SSL_CERT_FILE="$RUN_DIR/actrix-tls/trusted.pem"
+    export SSL_CERT_FILE="$RUN_DIR/loran-tls/trusted.pem"
     export CURL_CA_BUNDLE="$SSL_CERT_FILE"
     HTTP_BASE="https://127.0.0.1:${HTTP_PORT}"
     WS_BASE="wss://127.0.0.1:${HTTP_PORT}"

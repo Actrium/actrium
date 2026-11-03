@@ -52,7 +52,7 @@ targets:
       properties:
         CFBundleDisplayName: EchoApp
         UILaunchScreen: {}
-        NSLocalNetworkUsageDescription: EchoApp connects to the local actrix development server.
+        NSLocalNetworkUsageDescription: EchoApp connects to the local loran development server.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { ChevronUp, ChevronDown } from "lucide-react";
 
-const STORAGE_PREFIX = "actrix_panel_";
+const STORAGE_PREFIX = "loran_panel_";
 
 export function CollapsibleCard({
   storageKey,

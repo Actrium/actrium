@@ -5,7 +5,7 @@
 `test-auto.js` is a comprehensive Puppeteer-based test suite (26 suites, 80+ tests) covering:
 - **A-Category**: Basic RPC, page refresh, SW lifecycle, WebRTC, multi-client, concurrency
 - **B-Category**: CDP-enhanced tests (hard refresh, network emulation, WASM loading)
-- **C-Category**: Process orchestration (actrix restart, Rust server lifecycle)
+- **C-Category**: Process orchestration (loran restart, Rust server lifecycle)
 - **X-Category**: Cross-platform (Web Client ↔ Rust Server) integration
 
 ## Prerequisites
@@ -14,7 +14,7 @@
    ```bash
    mkdir -p /tmp/echo-test && cd /tmp/echo-test && npm init -y && npm i puppeteer
    ```
-2. **Actrix signaling server** running on port 8081
+2. **Loran signaling server** running on port 8081
 3. **Echo server** Vite dev server (default: `http://localhost:5174`)
 4. **Echo client** Vite dev server (default: `https://localhost:5173`)
 
@@ -68,7 +68,7 @@ node test-auto.js X    # All cross-platform suites
 | B | `CdpWasmLoading` | 18-x | WASM loading via CDP |
 | B | `CdpSignalingRecovery` | 19-x | signaling reconnect via CDP |
 | B | `CdpIdleRecovery` | 20-x | idle recovery via CDP |
-| C | `CActrixRestart` | C1-x | Actrix server lifecycle |
+| C | `CLoranRestart` | C1-x | Loran server lifecycle |
 | C | `CSignalingEdgeCases` | C2-x | signaling edge cases |
 | C | `CRustServerLifecycle` | C3-x | Rust server lifecycle |
 | X | `CrossplatformEnv` | X-0-x | cross-platform environment checks |
@@ -116,7 +116,7 @@ SLOW=1 RUN_C=1 ./test.sh Webrtc
 ### Tests timeout at 60s
 - Check services: `lsof -iTCP -sTCP:LISTEN -nP | grep -E '5173|5174|8081'`
 - Possible stale SW state; hard-refresh client in real browser or restart Vite dev servers
-- View Actrix logs: `tail -f ../../../../actrix/logs/actrix.log`
+- View Loran logs: `tail -f ../../../../loran/logs/loran.log`
 
 ### Multi-client notes
 - Multi-client routing works correctly. Each client gets its own `SwRuntime` with
@@ -138,4 +138,4 @@ SLOW=1 RUN_C=1 ./test.sh Webrtc
 ### WebRTC connection slow
 - Auto-echo in client retries up to 8 times (3s apart ~ 29s window)
 - `waitForEchoWorking()` adds another manual retry layer (up to 60s total)
-- If both fail, check ICE/TURN configuration in actrix config
+- If both fail, check ICE/TURN configuration in loran config

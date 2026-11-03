@@ -39,8 +39,8 @@ python3 scripts/actr/apply-upstream-patches.py /path/to/workspace/Cargo.toml
 
 Publishing without consumer overrides requires upstream registry releases
 containing the fixes; pinning Git revisions alone does not provide that.
-The current registry `turn` 0.17.2 also lacks APIs required by `actrix-stun`,
-so `cargo package -p actrix-stun --locked` fails during verification. The
+The current registry `turn` 0.17.2 also lacks APIs required by `loran-stun`,
+so `cargo package -p loran-stun --locked` fails during verification. The
 release train checks this package before uploading Rust crates and stops until
 compatible registry dependencies are available. Its `--dry-run` mode does not
 verify registry-resolved Rust packages.

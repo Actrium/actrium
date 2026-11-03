@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Web client -> generated Python EchoService e2e using mock-actrix.
+# Web client -> generated Python EchoService e2e using mock-loran.
 
 set -euo pipefail
 
@@ -112,12 +112,12 @@ else
     fi
 fi
 
-MOCK_BIN="$ACTR_ROOT/target/debug/mock-actrix"
+MOCK_BIN="$ACTR_ROOT/target/debug/mock-loran"
 if [[ ! -x "$MOCK_BIN" ]]; then
-    log_step "Building mock-actrix..."
-    (cd "$ACTR_ROOT" && cargo build -p actr-mock-actrix --bin mock-actrix)
+    log_step "Building mock-loran..."
+    (cd "$ACTR_ROOT" && cargo build -p actr-mock-loran --bin mock-loran)
 fi
-[[ -x "$MOCK_BIN" ]] || fail "mock-actrix not found at $MOCK_BIN"
+[[ -x "$MOCK_BIN" ]] || fail "mock-loran not found at $MOCK_BIN"
 
 command -v wasm-pack >/dev/null 2>&1 || fail "wasm-pack not found"
 
@@ -153,12 +153,12 @@ CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-unknown-unkn
         --output "$CLIENT_ACTR_PACKAGE"
 )
 
-log_step "Starting mock-actrix..."
-MOCK_LOG="$LOG_DIR/mock-actrix.log"
+log_step "Starting mock-loran..."
+MOCK_LOG="$LOG_DIR/mock-loran.log"
 : > "$MOCK_LOG"
 "$MOCK_BIN" --port "$MOCK_PORT" > "$MOCK_LOG" 2>&1 &
 MOCK_PID=$!
-wait_for_log "$MOCK_LOG" "listening on 127.0.0.1:$MOCK_PORT" "mock-actrix"
+wait_for_log "$MOCK_LOG" "listening on 127.0.0.1:$MOCK_PORT" "mock-loran"
 ENDPOINT="http://127.0.0.1:$MOCK_PORT"
 
 log_step "Registering realm, publisher, and packages..."

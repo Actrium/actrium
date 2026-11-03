@@ -9,11 +9,11 @@ use std::process::Command;
 use crate::config::InstallConfig;
 
 // Keep template and rendering logic colocated for this minimal deploy helper.
-const SYSTEMD_SERVICE_TEMPLATE: &str = r#"# actrix systemd service file template
+const SYSTEMD_SERVICE_TEMPLATE: &str = r#"# loran systemd service file template
 # This file is a template, actual deployment will generate real service file based on configured paths
 
 [Unit]
-Description=Actrix Auxiliary Servers
+Description=Loran Auxiliary Servers
 Documentation=https://github.com/Actrium/actrium
 After=network.target
 
@@ -22,13 +22,13 @@ Type=simple
 User={{SERVICE_USER}}
 Group={{SERVICE_GROUP}}
 WorkingDirectory={{WORKING_DIRECTORY}}
-ExecStart={{INSTALL_DIR}}/bin/actrix --config {{CONFIG_PATH}}
+ExecStart={{INSTALL_DIR}}/bin/loran --config {{CONFIG_PATH}}
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=actrix
+SyslogIdentifier=loran
 {{CAPABILITY_BLOCK}}
 
 # Security settings
@@ -609,16 +609,16 @@ mod tests {
 
     #[test]
     fn read_write_paths_include_default_pid_logs_dir() {
-        let install_dir = PathBuf::from("/opt/actrix-test");
-        let working_directory = PathBuf::from("/opt/actr-project/actrix");
+        let install_dir = PathBuf::from("/opt/loran-test");
+        let working_directory = PathBuf::from("/opt/actr-project/loran");
         let template = SystemdServiceTemplate::new(
             InstallConfig {
                 install_dir,
-                binary_name: "actrix".to_string(),
+                binary_name: "loran".to_string(),
                 add_to_path: false,
             },
             PathBuf::from("/no/such/config.toml"),
-            "actrix-test".to_string(),
+            "loran-test".to_string(),
             working_directory.clone(),
         );
 
@@ -635,7 +635,7 @@ mod tests {
             .unwrap()
             .join("target")
             .join(format!(
-                "actrix-deploy-systemd-path-test-{}-{unique}",
+                "loran-deploy-systemd-path-test-{}-{unique}",
                 std::process::id(),
             ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -646,11 +646,11 @@ mod tests {
         let template = SystemdServiceTemplate::new(
             InstallConfig {
                 install_dir: dir.join("install"),
-                binary_name: "actrix".to_string(),
+                binary_name: "loran".to_string(),
                 add_to_path: false,
             },
             config_path,
-            "actrix-test".to_string(),
+            "loran-test".to_string(),
             dir.join("work"),
         );
         (template, dir)
@@ -661,7 +661,7 @@ mod tests {
         let (template, dir) = template_with_config(
             r#"
 sqlite_path = "database"
-pid = "logs/actrix.pid"
+pid = "logs/loran.pid"
 
 [services.signer.storage.sqlite]
 path = "database/signer.db"

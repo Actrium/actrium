@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for shell-actr-echo example - Using actrix as signaling server
+# Test script for shell-actr-echo example - Using loran as signaling server
 # Tests the full Shell → Workload RPC flow via ActrRef
 #
 # Usage:
@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🧪 Testing shell-actr-echo (Shell ↔ Workload via ActrRef)"
-echo "    Using Actrix as signaling server"
+echo "    Using Loran as signaling server"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Determine paths and switch to workspace root
@@ -25,11 +25,11 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # SCRIPT_DIR       = .../Actrium/actrium/examples/actr/rust/shell-actr-echo
 # WORKSPACE_ROOT   = .../Actrium/actr/examples/rust  (the Cargo workspace)
-# ACTOR_RTC_DIR    = .../Actrium                     (repo root, parent of both actr/ and actrix/)
+# ACTOR_RTC_DIR    = .../Actrium                     (repo root, parent of both actr/ and loran/)
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTRIX_DIR="$ACTOR_RTC_DIR"
-ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
+LORAN_DIR="$ACTOR_RTC_DIR"
+LORAN_CONFIG="$WORKSPACE_ROOT/loran-config.toml"
 ECHO_SERVER_DIR="$SCRIPT_DIR/server"
 ECHO_CLIENT_DIR="$SCRIPT_DIR/client"
 PROTO_DIR="$SCRIPT_DIR/proto"
@@ -54,20 +54,20 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 ensure_actr_toml "$ECHO_SERVER_DIR"
 ensure_actr_toml "$ECHO_CLIENT_DIR"
 
-# Ensure actrix-config.toml exists
-# Priority: WORKSPACE_ROOT/actrix-config.toml > WORKSPACE_ROOT/actrix-config.example.toml > ACTRIX_DIR/config.example.toml
-if [ ! -f "$ACTRIX_CONFIG" ]; then
-    if [ -f "$WORKSPACE_ROOT/actrix-config.example.toml" ]; then
-        echo "📋 Copying $WORKSPACE_ROOT/actrix-config.example.toml to $ACTRIX_CONFIG"
-        cp "$WORKSPACE_ROOT/actrix-config.example.toml" "$ACTRIX_CONFIG"
-    elif [ -f "$ACTRIX_DIR/loran/config/actrix.example.toml" ]; then
-        echo "📋 Copying $ACTRIX_DIR/loran/config/actrix.example.toml to $ACTRIX_CONFIG"
-        cp "$ACTRIX_DIR/loran/config/actrix.example.toml" "$ACTRIX_CONFIG"
+# Ensure loran-config.toml exists
+# Priority: WORKSPACE_ROOT/loran-config.toml > WORKSPACE_ROOT/loran-config.example.toml > LORAN_DIR/config.example.toml
+if [ ! -f "$LORAN_CONFIG" ]; then
+    if [ -f "$WORKSPACE_ROOT/loran-config.example.toml" ]; then
+        echo "📋 Copying $WORKSPACE_ROOT/loran-config.example.toml to $LORAN_CONFIG"
+        cp "$WORKSPACE_ROOT/loran-config.example.toml" "$LORAN_CONFIG"
+    elif [ -f "$LORAN_DIR/loran/config/loran.example.toml" ]; then
+        echo "📋 Copying $LORAN_DIR/loran/config/loran.example.toml to $LORAN_CONFIG"
+        cp "$LORAN_DIR/loran/config/loran.example.toml" "$LORAN_CONFIG"
     else
-        echo -e "${RED}❌ No actrix config found. Tried:${NC}"
-        echo "   $WORKSPACE_ROOT/actrix-config.toml"
-        echo "   $WORKSPACE_ROOT/actrix-config.example.toml"
-        echo "   $ACTRIX_DIR/loran/config/actrix.example.toml"
+        echo -e "${RED}❌ No loran config found. Tried:${NC}"
+        echo "   $WORKSPACE_ROOT/loran-config.toml"
+        echo "   $WORKSPACE_ROOT/loran-config.example.toml"
+        echo "   $LORAN_DIR/loran/config/loran.example.toml"
         exit 1
     fi
 fi
@@ -84,10 +84,10 @@ cleanup() {
     echo ""
     echo "🧹 Cleaning up..."
 
-    # Kill actrix
-    if [ ! -z "$ACTRIX_PID" ]; then
-        echo "Stopping actrix (PID: $ACTRIX_PID)"
-        kill $ACTRIX_PID 2>/dev/null || true
+    # Kill loran
+    if [ ! -z "$LORAN_PID" ]; then
+        echo "Stopping loran (PID: $LORAN_PID)"
+        kill $LORAN_PID 2>/dev/null || true
     fi
 
     # Kill echo server
@@ -129,7 +129,7 @@ if [ ! -d "$PROTO_DIR" ]; then
     exit 1
 fi
 
-# Step 0: Generate server code first (no dependencies, can proceed without actrix)
+# Step 0: Generate server code first (no dependencies, can proceed without loran)
 echo ""
 echo "🛠️ Generating server code..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -149,72 +149,72 @@ $ACTR_GEN_CMD gen --input="$PROTO_DIR" --output=src/generated --clean > "$OUTPUT
 cd "$WORKSPACE_ROOT"
 echo -e "${GREEN}✅ Server code generated${NC}"
 
-# Step 1: Build and install actrix
+# Step 1: Build and install loran
 echo ""
-echo "📦 Building and installing actrix..."
+echo "📦 Building and installing loran..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Check if actrix directory exists
-if [ ! -d "$ACTRIX_DIR" ]; then
-    echo -e "${RED}❌ Cannot find actrix directory at $ACTRIX_DIR${NC}"
-    echo "Please ensure actrix project exists at: $ACTRIX_DIR"
+# Check if loran directory exists
+if [ ! -d "$LORAN_DIR" ]; then
+    echo -e "${RED}❌ Cannot find loran directory at $LORAN_DIR${NC}"
+    echo "Please ensure loran project exists at: $LORAN_DIR"
     exit 1
 fi
 
-# Build actrix with opentelemetry feature
-echo "Building actrix from source (with opentelemetry feature)..."
-cd "$ACTRIX_DIR"
-cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" --features opentelemetry 2>&1
+# Build loran with opentelemetry feature
+echo "Building loran from source (with opentelemetry feature)..."
+cd "$LORAN_DIR"
+cargo build --manifest-path "$LORAN_DIR/crates/loran-server/Cargo.toml" --features opentelemetry 2>&1
 
 # Check if build was successful
-if [ ! -f "$ACTRIX_DIR/target/debug/actrix" ]; then
-    echo -e "${RED}❌ Failed to build actrix${NC}"
+if [ ! -f "$LORAN_DIR/target/debug/loran" ]; then
+    echo -e "${RED}❌ Failed to build loran${NC}"
     exit 1
 fi
 
 # Copy to ~/.cargo/bin
-echo "Installing actrix to ~/.cargo/bin..."
+echo "Installing loran to ~/.cargo/bin..."
 mkdir -p ~/.cargo/bin
-cp "$ACTRIX_DIR/target/debug/actrix" ~/.cargo/bin/actrix
-chmod +x ~/.cargo/bin/actrix
+cp "$LORAN_DIR/target/debug/loran" ~/.cargo/bin/loran
+chmod +x ~/.cargo/bin/loran
 
 # Return to workspace root
 cd "$WORKSPACE_ROOT"
 
-# Verify actrix is available in PATH
-if ! command -v actrix > /dev/null 2>&1; then
-    echo -e "${RED}❌ actrix command not found in PATH after installation${NC}"
+# Verify loran is available in PATH
+if ! command -v loran > /dev/null 2>&1; then
+    echo -e "${RED}❌ loran command not found in PATH after installation${NC}"
     echo "Please ensure ~/.cargo/bin is in your PATH"
     exit 1
 fi
 
-ACTRIX_CMD="actrix"
-echo -e "${GREEN}✅ Actrix built and installed: $(which actrix)${NC}"
+LORAN_CMD="loran"
+echo -e "${GREEN}✅ Loran built and installed: $(which loran)${NC}"
 
-# Step 2: Start actrix
+# Step 2: Start loran
 echo ""
-echo "🚀 Starting actrix (signaling server)..."
+echo "🚀 Starting loran (signaling server)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-$ACTRIX_CMD --config "$ACTRIX_CONFIG" > "$LOG_DIR/actrix.log" 2>&1 &
-ACTRIX_PID=$!
+$LORAN_CMD --config "$LORAN_CONFIG" > "$LOG_DIR/loran.log" 2>&1 &
+LORAN_PID=$!
 
-echo "Actrix started (PID: $ACTRIX_PID)"
-echo "Waiting for actrix to be ready..."
+echo "Loran started (PID: $LORAN_PID)"
+echo "Waiting for loran to be ready..."
 
-# Wait for actrix to start and verify it's listening on port 8081
+# Wait for loran to start and verify it's listening on port 8081
 MAX_WAIT=10
 COUNTER=0
 while [ $COUNTER -lt $MAX_WAIT ]; do
-    if ! kill -0 $ACTRIX_PID 2>/dev/null; then
-        echo -e "${RED}❌ Actrix failed to start${NC}"
-        cat "$LOG_DIR/actrix.log"
+    if ! kill -0 $LORAN_PID 2>/dev/null; then
+        echo -e "${RED}❌ Loran failed to start${NC}"
+        cat "$LOG_DIR/loran.log"
         exit 1
     fi
 
-    # Check if port 8081 is listening (actrix WebSocket server)
+    # Check if port 8081 is listening (loran WebSocket server)
     if lsof -i:8081 > /dev/null 2>&1 || nc -z localhost 8081 2>/dev/null; then
-        echo -e "${GREEN}✅ Actrix is running and listening on port 8081${NC}"
+        echo -e "${GREEN}✅ Loran is running and listening on port 8081${NC}"
         break
     fi
 
@@ -223,34 +223,34 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
 done
 
 if [ $COUNTER -eq $MAX_WAIT ]; then
-    echo -e "${RED}❌ Actrix not listening on port 8081 after ${MAX_WAIT} seconds${NC}"
-    cat "$LOG_DIR/actrix.log"
+    echo -e "${RED}❌ Loran not listening on port 8081 after ${MAX_WAIT} seconds${NC}"
+    cat "$LOG_DIR/loran.log"
     exit 1
 fi
 
-# Step 2.5a: Setup realms in actrix database directly via sqlite3
+# Step 2.5a: Setup realms in loran database directly via sqlite3
 echo ""
-echo "🔑 Setting up realms in actrix (sqlite3)..."
+echo "🔑 Setting up realms in loran (sqlite3)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Wait for actrix to initialize its database
+# Wait for loran to initialize its database
 sleep 2
 
-# Parse sqlite_path from actrix config (relative paths are relative to WORKSPACE_ROOT)
-SQLITE_PATH=$(grep -E '^sqlite_path' "$ACTRIX_CONFIG" | sed 's/.*= *"\(.*\)".*/\1/' | head -1)
+# Parse sqlite_path from loran config (relative paths are relative to WORKSPACE_ROOT)
+SQLITE_PATH=$(grep -E '^sqlite_path' "$LORAN_CONFIG" | sed 's/.*= *"\(.*\)".*/\1/' | head -1)
 if [ -z "$SQLITE_PATH" ]; then
     SQLITE_PATH="database"
 fi
 # Resolve relative path
 case "$SQLITE_PATH" in
-    /*) ACTRIX_DB="$SQLITE_PATH/actrix.db" ;;
-    *)  ACTRIX_DB="$WORKSPACE_ROOT/$SQLITE_PATH/actrix.db" ;;
+    /*) LORAN_DB="$SQLITE_PATH/loran.db" ;;
+    *)  LORAN_DB="$WORKSPACE_ROOT/$SQLITE_PATH/loran.db" ;;
 esac
 
-if [ ! -f "$ACTRIX_DB" ]; then
-    echo -e "${RED}❌ Actrix database not found at $ACTRIX_DB${NC}"
-    echo "   Actrix may not have started correctly"
-    cat "$LOG_DIR/actrix.log" | tail -20
+if [ ! -f "$LORAN_DB" ]; then
+    echo -e "${RED}❌ Loran database not found at $LORAN_DB${NC}"
+    echo "   Loran may not have started correctly"
+    cat "$LOG_DIR/loran.log" | tail -20
     exit 1
 fi
 
@@ -267,13 +267,13 @@ echo "   realm        = $REALM"
 
 
 # Insert realm record (OR IGNORE to avoid duplicates)
-sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));"
+sqlite3 "$LORAN_DB" "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));"
 
 # Parse ACL rules from actr.toml files and insert into actoracl table
 # Server allows: acme/echo-client-app@1.0.0
 # Client allows: acme/EchoService@1.0.0
 # Note: access=1 means allow
-sqlite3 "$ACTRIX_DB" <<EOF
+sqlite3 "$LORAN_DB" <<EOF
 INSERT OR IGNORE INTO actoracl (realm, from_type, to_type, access)
 VALUES ('$REALM', 'acme/EchoService@1.0.0', 'acme/echo-client-app@1.0.0', 1);
 INSERT OR IGNORE INTO actoracl (realm, from_type, to_type, access)
@@ -284,7 +284,7 @@ echo -e "${GREEN}✅ Realm and ACL setup completed (via sqlite3)${NC}"
 
 # Join the Realm: each actr.toml names its key file (`realm_client_key`).
 ACTR_CMD="${ACTR_GEN_CMD:-actr}" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
-    "$ACTRIX_DB" "$REALM" "http://localhost:8081/issuer" \
+    "$LORAN_DB" "$REALM" "http://localhost:8081/issuer" \
     "$ECHO_SERVER_DIR/realm-client.json" "$ECHO_CLIENT_DIR/realm-client.json"
 echo -e "${GREEN}✅ Joined Realm $REALM${NC}"
 
@@ -431,7 +431,7 @@ if grep -q "\[Received reply\].*Echo: $TEST_INPUT" "$LOG_DIR/shell-actr-echo-cli
     echo "✅ Validated:"
     echo "   • Shell → Workload RPC via ActrRef"
     echo "   • Real distributed Actor communication"
-    echo "   • Using actrix as signaling server"
+    echo "   • Using loran as signaling server"
     echo ""
     echo "Client app output:"
     cat "$LOG_DIR/shell-actr-echo-client.log" | grep "Received reply" || true
@@ -439,7 +439,7 @@ if grep -q "\[Received reply\].*Echo: $TEST_INPUT" "$LOG_DIR/shell-actr-echo-cli
     echo "📖 View full logs:"
     echo "   cat $LOG_DIR/shell-actr-echo-client.log  # Client logs"
     echo "   cat $LOG_DIR/shell-actr-echo-server.log  # Server logs"
-    echo "   tail -f $LOG_DIR/actrix.log              # Actrix logs"
+    echo "   tail -f $LOG_DIR/loran.log              # Loran logs"
     echo ""
     exit 0
 else
@@ -452,7 +452,7 @@ else
     echo "Server output:"
     cat "$LOG_DIR/shell-actr-echo-server.log" | tail -20
     echo ""
-    echo "Actrix output:"
-    tail -30 "$LOG_DIR/actrix.log"
+    echo "Loran output:"
+    tail -30 "$LOG_DIR/loran.log"
     exit 1
 fi

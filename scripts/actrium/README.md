@@ -5,9 +5,10 @@ Repository automation lives here.
 Keep platform-specific scripts close to the app or package that owns them unless
 the script is used across multiple top-level areas.
 
-- `check-product-names.py` prevents retired product names from returning in
-  tracked and non-ignored source files, symlink targets, and paths. Binary file
-  contents and the historical source archive checklist are excluded. The
+- `check-product-names.py` prevents retired product and service names from
+  returning in tracked and non-ignored source files, symlink targets, and paths.
+  Binary file contents are excluded. The completed Loran service migration has
+  no name exceptions, including in the historical source archive checklist. The
   `product-name-allowlist.json` inventory temporarily permits exact identifiers
   in specific files, with fixed occurrence counts, while PR #288 completes the
   application identity, storage, URL, endpoint, and runtime contract cutover.

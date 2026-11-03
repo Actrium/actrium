@@ -1,7 +1,7 @@
 # Kotlin EchoApp E2E
 
 Kotlin/Android nightly e2e, the mirror of [`swift-echo-app`](../swift-echo-app). A Rust
-`EchoService` is scaffolded, built, published to a local actrix and run; a Kotlin Android
+`EchoService` is scaffolded, built, published to a local loran and run; a Kotlin Android
 client (linked mode) calls `echo.EchoService.Echo` on it; the instrumentation test asserts the
 reply equals `Echo: <message>`.
 
@@ -12,7 +12,7 @@ reply equals `Echo: <message>`.
    └─ KotlinEchoApp (linked ActrNode, scaffolded via `actr init -l kotlin --template echo`)
         │  reads actr.toml (10.0.2.2 → host) + manifest.toml
         │  UnifiedWorkload discovers the remote EchoService
-        └─ echo.EchoService.Echo  ──▶  actrix (host, 127.0.0.1)  ──▶  Rust EchoService (`actr run`)
+        └─ echo.EchoService.Echo  ──▶  loran (host, 127.0.0.1)  ──▶  Rust EchoService (`actr run`)
 ```
 
 Verification builds the app + androidTest APKs, installs them on the target emulator
@@ -24,7 +24,7 @@ emulator. Set `ANDROID_SERIAL` when more than one device is attached.
 
 ## Shared helpers
 
-All actrix/server-lifecycle + Kotlin-app-scaffolding logic is factored into
+All loran/server-lifecycle + Kotlin-app-scaffolding logic is factored into
 [`../kotlin-lib/`](../kotlin-lib) and reused by the (planned) `kotlin-datastream-app` and
 `kotlin-ts-workload` suites.
 
@@ -54,7 +54,7 @@ ACTR_ANDROID_TARGETS=aarch64-linux-android bash packages/actr-kotlin/build-andro
 bash tests/e2e/actr/kotlin-echo-app/run.sh
 ```
 
-A green run prints `actrix is healthy` → `EchoService readiness check complete` →
+A green run prints `loran is healthy` → `EchoService readiness check complete` →
 `OK (1 test)` from `am instrument` (the echo round-trip assertion passed).
 
 ## Status / approach
@@ -67,7 +67,7 @@ round-trip is needed** for codegen.
 
 **Validated on CI (green):** the `kotlin-echo-app-e2e` job passes end-to-end on
 ubuntu x86_64 + KVM + `reactivecircus/android-emulator-runner` — native `.so` + AAR build,
-actrix + EchoService bootstrap, Kotlin scaffold + codegen, APK build/install, emulator boot,
+loran + EchoService bootstrap, Kotlin scaffold + codegen, APK build/install, emulator boot,
 and the `am instrument` echo round-trip all succeed.
 
 Local macOS (Apple Silicon arm64 emulator) hits a WebRTC relay instability that does **not**
@@ -76,9 +76,9 @@ through, and retries time out. So local macOS is not a reliable reproducer for t
 CI is the source of truth.
 
 Two config notes (both handled by `run.sh`, flagged as repo-level debt):
-- The shared actrix template's `enable = 25` = SIGNALING|Issuer|SIGNER — the STUN(2)/TURN(4) bits
-  are unset, so actrix ships with STUN/TURN disabled. This suite needs TURN (the emulator can't
+- The shared loran template's `enable = 25` = SIGNALING|Issuer|SIGNER — the STUN(2)/TURN(4) bits
+  are unset, so loran ships with STUN/TURN disabled. This suite needs TURN (the emulator can't
   do direct ICE to the host), so `run.sh` bumps it to `enable = 31`. Cleaner: parameterize the
   shared template instead of the in-place `perl` rewrite (review finding #1, follow-up).
-- actrix binds ICE on `0.0.0.0` and advertises the host LAN IP so the emulator can reach
+- loran binds ICE on `0.0.0.0` and advertises the host LAN IP so the emulator can reach
   STUN/TURN (the emulator can't use 127.0.0.1).

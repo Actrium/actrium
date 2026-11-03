@@ -18,7 +18,7 @@ use webrtc::peer_connection::{
 };
 
 const TURN_REALM: &str = "actr.test";
-const TURN_SHARED_TEST_KEY: &str = "actrix-turn-rotation-integration-test-key";
+const TURN_SHARED_TEST_KEY: &str = "loran-turn-rotation-integration-test-key";
 const WAIT: Duration = Duration::from_secs(60);
 
 #[path = "turn_credential_rotation/issue_248.rs"]
@@ -153,7 +153,7 @@ async fn start_turn(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_turn() {
+async fn turn_credential_rotation_propagates_new_relay_credentials_to_loran_turn() {
     install_test_crypto_provider();
     let authenticator = Arc::new(
         turn::Authenticator::new(

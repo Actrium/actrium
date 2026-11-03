@@ -98,7 +98,7 @@ pub struct ServiceInfo {
     #[serde(default)]
     pub ws_address: Option<String>,
 
-    /// Whether this entry was restored from SQLite persistence (loaded via restore_from_storage on actrix restart).
+    /// Whether this entry was restored from SQLite persistence (loaded via restore_from_storage on loran restart).
     ///
     /// When marked as true, this entry is a "preliminary candidate": it waits for the service process
     /// to re-establish a WebSocket connection and call `register_service_full()` to complete confirmation.
@@ -1204,12 +1204,12 @@ mod tests {
             // concurrently deleted and rewritten; suffix with the PID to isolate
             // each process's test database.
             let db_dir = std::env::temp_dir().join(format!(
-                "actrix_signaling_registry_test_db_{}",
+                "loran_signaling_registry_test_db_{}",
                 std::process::id()
             ));
             std::fs::create_dir_all(&db_dir).expect("Failed to create signaling test db dir");
 
-            let db_file = db_dir.join("actrix.db");
+            let db_file = db_dir.join("loran.db");
             if db_file.exists() {
                 let _ = std::fs::remove_file(&db_file);
             }
@@ -1973,7 +1973,7 @@ mod tests {
 
     /// Reproduce Ghost Candidates Bug:
     ///
-    /// Real scenario: after actrix restart, restore_from_storage() loads ActorId A (serial=xxx1)
+    /// Real scenario: after loran restart, restore_from_storage() loads ActorId A (serial=xxx1)
     /// into memory. Then a new service process starts, Issuer assigns a new ActorId B (serial=xxx2),
     /// and calls register_service_full(). Without deduplication, both A (ghost) and B (real)
     /// coexist in memory under the same service_name.
@@ -1990,13 +1990,13 @@ mod tests {
             version: "0.0.1".to_string(),
         };
 
-        // ActorId A: from SQLite restore (loaded by restore_from_storage during actrix restart)
+        // ActorId A: from SQLite restore (loaded by restore_from_storage during loran restart)
         let actor_id_a = create_test_actor_id(11111); // old serial
 
         // ActorId B: new service process registration, new serial assigned by Issuer
         let actor_id_b = create_test_actor_id(22222); // new serial, different from A
 
-        // First registration: simulate actrix restart loading ActorId A via restore_from_storage()
+        // First registration: simulate loran restart loading ActorId A via restore_from_storage()
         // Immediately mark as storage-restored (matching the real restore_from_storage behavior)
         registry
             .register_service_full(

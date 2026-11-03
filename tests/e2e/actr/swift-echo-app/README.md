@@ -1,6 +1,6 @@
 # Swift EchoApp E2E
 
-End-to-end test that verifies an iOS app (EchoApp, linked runtime) can discover and call a remote EchoService through actrix signaling + WebRTC — all running locally on CI.
+End-to-end test that verifies an iOS app (EchoApp, linked runtime) can discover and call a remote EchoService through loran signaling + WebRTC — all running locally on CI.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ graph LR
         LES[LocalEchoService<br/>swift-local:msg → remote]
     end
 
-    subgraph actrix
+    subgraph loran
         WS[WebSocket Signaling]
         Issuer[Issuer Registration]
         REG[Publisher Package Registry]
@@ -36,12 +36,12 @@ graph LR
 ```mermaid
 sequenceDiagram
     participant CI as run.sh
-    participant AX as actrix
+    participant AX as loran
     participant CLI as actr CLI
     participant ES as EchoService host
     participant SIM as iOS Simulator
 
-    CI->>AX: start actrix
+    CI->>AX: start loran
     CI->>AX: health check
     CI->>AX: admin login
     CI->>AX: create realm → realm + owner invite (actr realm join)
@@ -51,7 +51,7 @@ sequenceDiagram
     CLI-->>CI: scaffold echo-service
     CI->>CLI: actr deps install && actr gen
     CI->>CLI: actr build → .actr package
-    CI->>CLI: actr registry publish → actrix
+    CI->>CLI: actr registry publish → loran
 
     CI->>CI: prepare temporary EchoApp workspace
     CI->>CI: render actr.toml from template
@@ -102,7 +102,7 @@ tests/e2e/actr/swift-echo-app/
 
 EchoApp runs with `ACTR_ECHOAPP_AUTO_SEND=1` and `ACTR_ECHOAPP_TEST_INPUT=<message>` passed by `run.sh` through `SIMCTL_CHILD_*` launch environment variables. This triggers:
 
-1. `ActrService.startIfNeeded()` — connects to actrix, discovers EchoService
+1. `ActrService.startIfNeeded()` — connects to loran, discovers EchoService
 2. `ContentView.sendEcho("<message>")` — RPC call through LocalEchoService → EchoService
 3. `print("ACTR_E2E_RESULT:\(output)")` — stdout marker captured by `run.sh`
 
@@ -128,7 +128,7 @@ CAPTURE_DIAGNOSTICS_ON_SUCCESS=1 bash tests/e2e/actr/swift-echo-app/run.sh
 
 On failure (or when `CAPTURE_DIAGNOSTICS_ON_SUCCESS=1`), `run.sh` captures:
 
-- Process status (actrix, EchoService)
+- Process status (loran, EchoService)
 - Signaling health endpoint response
 - `signaling_cache.db` service registrations and status
 - Filtered logs: heartbeat, disconnect, cleanup, ghost, ACL, errors

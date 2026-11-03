@@ -2148,7 +2148,7 @@ crate in actr-hyper; `rtc = "=0.20.0"` is a pinned production dependency
 (the outbound media path names `rtc::rtp` / `rtc::media_stream` /
 `rtc::peer_connection::configuration::media_engine` types that `webrtc`
 0.20 does not re-export). The 0.14 line remains only as `webrtc014` for
-actrix's TURN/STUN server crates. Long-term callback adapters keeping the
+loran's TURN/STUN server crates. Long-term callback adapters keeping the
 old Coordinator functional on v0.20 are not allowed.
 
 ### Stage 1: Introduce and validate webrtc-rs v0.20

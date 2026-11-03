@@ -79,71 +79,71 @@ prepend_path_once() {
     esac
 }
 
-resolve_actrix_bin() {
-    if [ -n "${ACTRIX_BIN:-}" ]; then
-        if command -v "$ACTRIX_BIN" >/dev/null 2>&1; then
-            command -v "$ACTRIX_BIN"
+resolve_loran_bin() {
+    if [ -n "${LORAN_BIN:-}" ]; then
+        if command -v "$LORAN_BIN" >/dev/null 2>&1; then
+            command -v "$LORAN_BIN"
             return 0
         fi
-        if [ -x "$ACTRIX_BIN" ]; then
-            absolute_path "$ACTRIX_BIN"
+        if [ -x "$LORAN_BIN" ]; then
+            absolute_path "$LORAN_BIN"
             return 0
         fi
-        fail "ACTRIX_BIN is set but not executable: $ACTRIX_BIN"
+        fail "LORAN_BIN is set but not executable: $LORAN_BIN"
     fi
 
-    if command -v actrix >/dev/null 2>&1; then
-        command -v actrix
+    if command -v loran >/dev/null 2>&1; then
+        command -v loran
         return 0
     fi
 
     return 1
 }
 
-ensure_actrix_available() {
+ensure_loran_available() {
     local repo_root="$1"
-    local actrix_crate_dir="$repo_root/crates/loran-server"
-    local actrix_manifest_path="$actrix_crate_dir/Cargo.toml"
+    local loran_crate_dir="$repo_root/crates/loran-server"
+    local loran_manifest_path="$loran_crate_dir/Cargo.toml"
     local cargo_bin
     cargo_bin="$(cargo_bin_dir)"
     local resolved=""
 
-    if resolved="$(resolve_actrix_bin)"; then
-        ACTRIX_BIN="$resolved"
-        export ACTRIX_BIN
+    if resolved="$(resolve_loran_bin)"; then
+        LORAN_BIN="$resolved"
+        export LORAN_BIN
         return 0
     fi
 
     prepend_path_once "$cargo_bin"
-    if resolved="$(resolve_actrix_bin)"; then
-        ACTRIX_BIN="$resolved"
-        export ACTRIX_BIN
+    if resolved="$(resolve_loran_bin)"; then
+        LORAN_BIN="$resolved"
+        export LORAN_BIN
         return 0
     fi
 
     require_cmd cargo
-    [ -f "$actrix_manifest_path" ] || fail "Expected actrix crate manifest is missing: $actrix_manifest_path"
+    [ -f "$loran_manifest_path" ] || fail "Expected loran crate manifest is missing: $loran_manifest_path"
 
-    section "🔨 Installing actrix into cargo user bin"
-    cargo install --path "$actrix_crate_dir" --force
+    section "🔨 Installing loran into cargo user bin"
+    cargo install --path "$loran_crate_dir" --force
 
     prepend_path_once "$cargo_bin"
-    if resolved="$(resolve_actrix_bin)"; then
-        ACTRIX_BIN="$resolved"
-        export ACTRIX_BIN
-        success "actrix is ready: $ACTRIX_BIN"
+    if resolved="$(resolve_loran_bin)"; then
+        LORAN_BIN="$resolved"
+        export LORAN_BIN
+        success "loran is ready: $LORAN_BIN"
         return 0
     fi
 
-    local installed_bin="$cargo_bin/actrix"
+    local installed_bin="$cargo_bin/loran"
     if [ -x "$installed_bin" ]; then
-        ACTRIX_BIN="$(absolute_path "$installed_bin")"
-        export ACTRIX_BIN
-        success "actrix is ready: $ACTRIX_BIN"
+        LORAN_BIN="$(absolute_path "$installed_bin")"
+        export LORAN_BIN
+        success "loran is ready: $LORAN_BIN"
         return 0
     fi
 
-    fail "actrix installation completed but binary was not found in PATH or $cargo_bin"
+    fail "loran installation completed but binary was not found in PATH or $cargo_bin"
 }
 
 kill_listener() {
@@ -219,7 +219,7 @@ json_field() {
 # disposable per-run SQLite database.
 provision_e2e_publisher() {
     section "🏷️  Provisioning local E2E publisher fixture"
-    local db_path="$SQLITE_DIR/actrix.db"
+    local db_path="$SQLITE_DIR/loran.db"
 
     run_actr pkg keygen --output "$PROVISIONED_KEYCHAIN" --force >/dev/null
     chmod 600 "$PROVISIONED_KEYCHAIN" 2>/dev/null || true
@@ -267,29 +267,29 @@ PY
 }
 
 render_runtime_configs() {
-    [ -n "${ACTRIX_CONFIG_TEMPLATE:-}" ] || fail "ACTRIX_CONFIG_TEMPLATE is not set"
+    [ -n "${LORAN_CONFIG_TEMPLATE:-}" ] || fail "LORAN_CONFIG_TEMPLATE is not set"
 
     render_template \
-        "$ACTRIX_CONFIG_TEMPLATE" \
-        "$ACTRIX_CONFIG_PATH" \
+        "$LORAN_CONFIG_TEMPLATE" \
+        "$LORAN_CONFIG_PATH" \
         "__SQLITE_DIR__=$SQLITE_DIR" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT"
 }
 
-start_actrix() {
-    section "🚀 Starting local actrix"
+start_loran() {
+    section "🚀 Starting local loran"
     kill_listener tcp "$HTTP_PORT"
     kill_listener udp "$ICE_PORT"
 
-    "$ACTRIX_BIN" --config "$ACTRIX_CONFIG_PATH" >"$LOG_DIR/actrix.log" 2>&1 &
-    ACTRIX_PID=$!
+    "$LORAN_BIN" --config "$LORAN_CONFIG_PATH" >"$LOG_DIR/loran.log" 2>&1 &
+    LORAN_PID=$!
 
     if ! wait_for_http_ok "http://127.0.0.1:${HTTP_PORT}/signaling/health" 120; then
-        cat "$LOG_DIR/actrix.log" >&2 || true
-        fail "actrix did not become healthy on port $HTTP_PORT"
+        cat "$LOG_DIR/loran.log" >&2 || true
+        fail "loran did not become healthy on port $HTTP_PORT"
     fi
-    success "actrix is healthy on http://127.0.0.1:${HTTP_PORT}"
+    success "loran is healthy on http://127.0.0.1:${HTTP_PORT}"
 }
 
 login_admin() {

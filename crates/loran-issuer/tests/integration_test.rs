@@ -231,7 +231,7 @@ async fn start_embedded_signer_at(
     for _ in 0..40 {
         let cfg = GrpcClientConfig {
             endpoint: endpoint.clone(),
-            actrix_shared_key: shared_key.to_string(),
+            loran_shared_key: shared_key.to_string(),
             timeout_seconds: 2,
             enable_tls: false,
             tls_domain: None,
@@ -1828,7 +1828,7 @@ async fn test_published_package_retired_key_survives_until_explicit_revocation()
 
     let new_key = SigningKey::generate(&mut OsRng);
     let new_key_id =
-        actrix_publisher_registry::crypto::compute_key_id(&new_key.verifying_key().to_bytes());
+        loran_publisher_registry::crypto::compute_key_id(&new_key.verifying_key().to_bytes());
     let new_public_key =
         base64::prelude::BASE64_STANDARD.encode(new_key.verifying_key().to_bytes());
     sqlx::query("UPDATE publisher SET public_key = ?, key_id = ? WHERE id = ?")
@@ -2270,7 +2270,7 @@ fn build_signed_manifest(
     use ed25519_dalek::Signer;
 
     let key_id =
-        actrix_publisher_registry::crypto::compute_key_id(&signing_key.verifying_key().to_bytes());
+        loran_publisher_registry::crypto::compute_key_id(&signing_key.verifying_key().to_bytes());
     let manifest = format!(
         r#"publisher = "{publisher}"
 name = "{name}"
@@ -2303,7 +2303,7 @@ async fn seed_publisher_with_key(
 ) -> (i64, String) {
     let pub_b64 = base64::prelude::BASE64_STANDARD.encode(signing_key.verifying_key().to_bytes());
     let key_id =
-        actrix_publisher_registry::crypto::compute_key_id(&signing_key.verifying_key().to_bytes());
+        loran_publisher_registry::crypto::compute_key_id(&signing_key.verifying_key().to_bytes());
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -2552,7 +2552,7 @@ async fn test_manifest_without_binary_target_is_rejected() {
     let (_publisher_id, _key_id) = seed_publisher_with_key(pool, "notargetpublisher", &key).await;
 
     // Validly signed manifest that omits [binary].target.
-    let key_id = actrix_publisher_registry::crypto::compute_key_id(&key.verifying_key().to_bytes());
+    let key_id = loran_publisher_registry::crypto::compute_key_id(&key.verifying_key().to_bytes());
     let manifest = format!(
         r#"publisher = "notargetpublisher"
 name = "NoTargetService"
@@ -2679,7 +2679,7 @@ async fn test_retired_publisher_key_still_verifies() {
 
     let key_a_pub_b64 = base64::prelude::BASE64_STANDARD.encode(key_a.verifying_key().to_bytes());
     let key_a_id =
-        actrix_publisher_registry::crypto::compute_key_id(&key_a.verifying_key().to_bytes());
+        loran_publisher_registry::crypto::compute_key_id(&key_a.verifying_key().to_bytes());
 
     // Seed Publisher Registry with Key B as current
     let (publisher_id, _key_b_id) = seed_publisher_with_key(pool, "histpublisher", &key_b).await;
@@ -2776,7 +2776,7 @@ async fn test_revoked_publisher_key_is_rejected() {
     let revoked_pub_b64 =
         base64::prelude::BASE64_STANDARD.encode(key_revoked.verifying_key().to_bytes());
     let revoked_key_id =
-        actrix_publisher_registry::crypto::compute_key_id(&key_revoked.verifying_key().to_bytes());
+        loran_publisher_registry::crypto::compute_key_id(&key_revoked.verifying_key().to_bytes());
 
     // Seed Publisher Registry with current key
     let (publisher_id, _) = seed_publisher_with_key(pool, "revpublisher", &key_current).await;
@@ -4829,7 +4829,7 @@ async fn register_publisher_from_profile(domain: &str, profile: &serde_json::Val
         .verify(domain, chrono::Utc::now())
         .expect("verify Publisher Profile");
     let pool = platform::storage::db::get_database().get_pool().clone();
-    actrix_publisher_registry::PublisherRegistryManager::new(pool)
+    loran_publisher_registry::PublisherRegistryManager::new(pool)
         .register_publisher(domain, &profile, &keys)
         .await
         .expect("register publisher");
@@ -4837,7 +4837,7 @@ async fn register_publisher_from_profile(domain: &str, profile: &serde_json::Val
 
 /// The registry row's `actr-pub-…` id of `package`.
 fn package_key_id_of(package: &ed25519_dalek::SigningKey) -> String {
-    actrix_publisher_registry::crypto::compute_key_id(&package.verifying_key().to_bytes())
+    loran_publisher_registry::crypto::compute_key_id(&package.verifying_key().to_bytes())
 }
 
 /// The registry still lists the key when the registration arrives; the
@@ -4846,8 +4846,8 @@ fn package_key_id_of(package: &ed25519_dalek::SigningKey) -> String {
 #[tokio::test]
 #[serial]
 async fn test_key_removed_by_the_domain_is_rejected_at_registration() {
-    use actrix_publisher_registry::manager::PackageSigningKey;
     use ed25519_dalek::SigningKey;
+    use loran_publisher_registry::manager::PackageSigningKey;
     use rand::rngs::OsRng;
 
     let env = setup_test_environment().await;
@@ -4863,7 +4863,7 @@ async fn test_key_removed_by_the_domain_is_rejected_at_registration() {
     let baseline = signed_publisher_profile(domain, 1, &root, &[(&package, "active")]);
     register_publisher_from_profile(domain, &baseline).await;
     let key_id = package_key_id_of(&package);
-    let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool.clone());
+    let manager = loran_publisher_registry::PublisherRegistryManager::new(pool.clone());
     assert!(
         matches!(
             manager.package_signing_key(domain, &key_id).await.unwrap(),
@@ -5010,8 +5010,8 @@ async fn test_unreachable_publisher_domain_fails_closed_and_throttles() {
 #[tokio::test]
 #[serial]
 async fn test_rolled_back_profile_is_rejected() {
-    use actrix_publisher_registry::manager::PackageSigningKey;
     use ed25519_dalek::SigningKey;
+    use loran_publisher_registry::manager::PackageSigningKey;
     use rand::rngs::OsRng;
 
     let env = setup_test_environment().await;
@@ -5049,7 +5049,7 @@ async fn test_rolled_back_profile_is_rejected() {
         "a rolled-back Profile must not be accepted: {response:?}"
     );
 
-    let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool);
+    let manager = loran_publisher_registry::PublisherRegistryManager::new(pool);
     assert!(
         matches!(
             manager
@@ -5225,7 +5225,7 @@ async fn test_new_domain_key_refreshes_before_registration() {
             other => panic!("new key must register, cached={cached}: {other:?}"),
         }
         assert_eq!(fetcher.calls(), if cached { 2 } else { 1 });
-        let manager = actrix_publisher_registry::PublisherRegistryManager::new(
+        let manager = loran_publisher_registry::PublisherRegistryManager::new(
             platform::storage::db::get_database().get_pool().clone(),
         );
         assert!(matches!(
@@ -5233,7 +5233,7 @@ async fn test_new_domain_key_refreshes_before_registration() {
                 .package_signing_key(domain, &package_key_id_of(&new))
                 .await
                 .unwrap(),
-            actrix_publisher_registry::manager::PackageSigningKey::Trusted(_)
+            loran_publisher_registry::manager::PackageSigningKey::Trusted(_)
         ));
         env.shutdown_signer().await;
     }

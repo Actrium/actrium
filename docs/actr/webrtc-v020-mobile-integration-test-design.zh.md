@@ -1,6 +1,6 @@
 # Actr 移动端双端 WebRTC 连接、生命周期与网络恢复测试方案
 
-> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../GLOSSARY.zh.md)「历史名称对照」。
+> 历史文档：沿用撰写时的名称（如 Loran、AIS、manufacturer），现行名称见[术语表](../GLOSSARY.zh.md)「历史名称对照」。
 
 状态：Rust 阶段 A–D 已实现并完成严格补强，等待 CI 运行时验证；阶段 E/F 仍属于
 真机、系统网络与长稳门禁
@@ -53,8 +53,8 @@ Rust T3/T5 证据与仍需外部设备/系统环境完成的门禁，不能把�
    Controller、PeerConnection、状态存储或故障开关。
 3. 初连时只允许一个端点调用 Connect，但 Connect 只是发起角色仲裁，不能把调用方
    直接视为 offerer：
-   - offerer/answerer 以 Actrix 返回给两端的 `RoleAssignment` 为准；
-   - 无显式角色偏好时，Actrix 按
+   - offerer/answerer 以 Loran 返回给两端的 `RoleAssignment` 为准；
+   - 无显式角色偏好时，Loran 按
      `(realm, serial_number)` 的逆序确定 offerer；
    - 角色定向用例必须通过测试 `ActrId` 或 `webrtc_role=answer` 偏好得到目标角色，
      不能在测试端伪造 `RoleAssignment`；
@@ -67,11 +67,11 @@ Rust T3/T5 证据与仍需外部设备/系统环境完成的门禁，不能把�
 7. A、B 的 `pc_generation` 是两个本地单调序列，禁止比较原始数值是否相等。
 8. 业务端只依赖本地公开的 `sendable` 判断能否向对应 peer 发送；测试框架才同时
    观察两端状态并形成 pair 级判定。
-9. 测试集中凡需要信令、STUN 或 TURN 服务的用例，服务端都必须由 Actrix 提供：
-   信令使用 Actrix Signaling，STUN 使用 Actrix STUN，TURN 使用 Actrix TURN；禁止
+9. 测试集中凡需要信令、STUN 或 TURN 服务的用例，服务端都必须由 Loran 提供：
+   信令使用 Loran Signaling，STUN 使用 Loran STUN，TURN 使用 Loran TURN；禁止
    用手写 mock、独立测试服务器或 Coturn 代替后，将结果作为 Actr 集成/E2E 验收
-   证据。定向故障可以通过 Actrix 的测试控制面或其外部 fault proxy 注入，但不能
-   替换 Actrix 本身的协议和认证实现。
+   证据。定向故障可以通过 Loran 的测试控制面或其外部 fault proxy 注入，但不能
+   替换 Loran 本身的协议和认证实现。
 10. T3/T5 移动生命周期用例必须走生产的 v0.20 recovery feed：
     `NetworkEventHandle → gated reconciler → publish_v020_network_fact →
     manager.supervisor() → RtcPeerController`。禁止用测试 processor 手工发布
@@ -134,7 +134,7 @@ Rust 测试不能替代以下行为：
 
 ### 2.2 初连角色与连接建立方式
 
-| 用例配置 | 唯一 Connect 调用 | Actrix 仲裁结果 | 期望信令方向 |
+| 用例配置 | 唯一 Connect 调用 | Loran 仲裁结果 | 期望信令方向 |
 | --- | --- | --- | --- |
 | A 被配置为 offerer | `A.connect(B)` | A=offerer，B=answerer | A offer → B answer |
 | A 被配置为 answerer | `B.connect(A)` | A=answerer，B=offerer | B offer → A answer |
@@ -144,7 +144,7 @@ Rust 测试不能替代以下行为：
 普通用例禁止先 `A.connect(B)`，再调用 `B.connect(A)` 来“补双向”。连接建立后，
 两端都应能在同一条 DataChannel/peer session 上发送 RPC 或 DataChunk。
 
-测试必须从实际 Actrix 信令记录和两端状态确认 offerer/answerer，不能根据“谁调用了
+测试必须从实际 Loran 信令记录和两端状态确认 offerer/answerer，不能根据“谁调用了
 Connect”或“移动端一般是 client”推断。测试 fixture 当前不声明角色偏好，因此角色
 定向场景通过上述 ActorId 逆序规则选择 A/B 标识。
 
@@ -329,16 +329,16 @@ Recovery 策略选择，不能证明 v0.20 ICE restart 实际重新 bind/gather 
 ```mermaid
 flowchart LR
     ME["A 平台事件驱动"] --> EA["Endpoint A<br/>完整 Actr + v0.20"]
-    EA <-->|"真实 WebSocket 信令"| SR["Actrix Signaling"]
+    EA <-->|"真实 WebSocket 信令"| SR["Loran Signaling"]
     SR <-->|"真实 WebSocket 信令"| EB["Endpoint B<br/>完整 Actr + v0.20"]
-    ICE["Actrix STUN / TURN"] <-->|"ICE candidate / relay"| EA
+    ICE["Loran STUN / TURN"] <-->|"ICE candidate / relay"| EA
     ICE <-->|"ICE candidate / relay"| EB
     EA <-->|"真实 ICE / DTLS / SCTP / DataChannel"| EB
     EA --> OA["A Snapshot / Hook / Business"]
     EB --> OB["B Snapshot / Hook / Business"]
 ```
 
-服务侧统一启动 Actrix 提供的 Signaling、STUN 和 TURN 实现。测试可以把 Actrix
+服务侧统一启动 Loran 提供的 Signaling、STUN 和 TURN 实现。测试可以把 Loran
 作为同进程 fixture、子进程或独立测试环境运行，但不能改用自定义
 `TestSignalingServer`、mock STUN/TURN 或 Coturn 作为本层验收后端。A、B 的 RPC
 echo handler 可以保持简单，以便把失败定位到 RTC 链路而不是业务逻辑。
@@ -568,7 +568,7 @@ Handler 内发 Hook、做 offer/answer、调用 restart、等待背压 channel �
 - 只验证最终 echo，不验证故障是否命中、两端状态和恢复类型；
 - 使用固定 sleep 代替 milestone/watch 等待；
 - 通过 retry 掩盖 deterministic 场景不稳定。
-- 使用自定义测试信令服务、mock STUN/TURN 或 Coturn 代替 Actrix，并将结果计入
+- 使用自定义测试信令服务、mock STUN/TURN 或 Coturn 代替 Loran，并将结果计入
   T3/T4/T5 集成或发布门禁覆盖。
 
 ---
@@ -586,7 +586,7 @@ Handler 内发 Hook、做 offer/answer、调用 restart、等待背压 channel �
 | T2 v0.20 API | 两个真实高层 PeerConnection | 两个 v0.20 对等协议实例 | Builder、Handler、Runtime、restart、DataChannel、close |
 | T2.5 Sans-I/O | 两个 `rtc` core endpoint | 可重放的协议双端 | 精确 packet loss/reorder、ICE/SCTP 边界；可选 |
 | T3 Actr 集成 | 两个完整 Actr endpoint | 一端主动连接、另一端被动应答 | Manager/Controller/信令/业务/状态完整链路 |
-| T4 系统网络 | 两进程/netns + Actrix STUN/TURN | 两个真实 socket 网络端点 | NAT、MTU、jitter、真实 bind、relay |
+| T4 系统网络 | 两进程/netns + Loran STUN/TURN | 两个真实 socket 网络端点 | NAT、MTU、jitter、真实 bind、relay |
 | T5 移动 E2E | 手机 A + 真实远端 B | 两台设备或手机+服务端 | OS callback、radio、FFI、业务 Hook |
 | T6 Scale/Soak | A 管理多个 B/C/D | 每条仍是独立 pair | 单链路隔离、恢复风暴、资源长稳 |
 
@@ -701,20 +701,20 @@ Answerer 触发 Hard Recovery 时采用下面的生产协议闭环：
 
 ```text
 Answerer: build pending replacement
-  → Answerer → Actrix: RoleNegotiation
-  → Actrix → 两端: 重发稳定的 RoleAssignment
+  → Answerer → Loran: RoleNegotiation
+  → Loran → 两端: 重发稳定的 RoleAssignment
   → Offerer: Hard Recovery + build replacement + fresh Offer
   → Answerer: 将 fresh Offer 应用到 pending generation 并返回 Answer
   → 双方 replacement ready 后切换 active generation
 ```
 
 这里不能让 answerer 自行发送 offer，也不能只在本地 build 后等待一个不会自动出现的
-offer。`RoleNegotiation` 复用 Actrix 的生产角色仲裁，远端稳定 offerer 收到重复的
+offer。`RoleNegotiation` 复用 Loran 的生产角色仲裁，远端稳定 offerer 收到重复的
 offerer assignment 后必须把它解释为 replacement 唤醒信号。
 
 节点级 `close_all` 必须在 Manager 保留 peer 级入站准入墓碑。旧 session 触发的晚到
 普通 Offer 或 `RoleAssignment` 只能被丢弃，不能在 registry 中重新发布 Controller；
-只有本地显式 Connect 才能清除该墓碑并开始一轮新的 Actrix 角色仲裁。准入检查和
+只有本地显式 Connect 才能清除该墓碑并开始一轮新的 Loran 角色仲裁。准入检查和
 Controller publication 必须与 `close_all` 线性化，不能只在进入 router 时检查一次后
 留下 TOCTOU 窗口。
 
@@ -843,7 +843,7 @@ T1 穷举精确边界，T3 用 pairwise 组合覆盖交互，nightly/T5 补完�
 
 1. 先通过测试 ActorId/角色偏好配置本子用例要求的 A/B 角色；
 2. `initial_connect_caller=A` 时只执行 `A.connect(B)`；
-3. Actrix 向两端返回互补的 `RoleAssignment`；实际 offerer 收到 assignment 后发送
+3. Loran 向两端返回互补的 `RoleAssignment`；实际 offerer 收到 assignment 后发送
    真实 offer，actual answerer 创建/取得对应 Controller 并回复 answer；
 4. 两端分别等到 PC connected 且 `RpcReliable` lane open；
 5. A/B 各自发布 `sendable=true`；
@@ -851,7 +851,7 @@ T1 穷举精确边界，T3 用 pairwise 组合覆盖交互，nightly/T5 补完�
 7. 两端 Manager 对该 remote 各只有一个 active peer controller/session。
 
 然后交换目标角色和唯一 Connect 调用端重跑，证明 A 作为 answerer。另需保留调用方
-输掉 Actrix 仲裁、由被动端成为 offerer 的协议用例。普通业务双向测试不再调用第二次
+输掉 Loran 仲裁、由被动端成为 offerer 的协议用例。普通业务双向测试不再调用第二次
 Connect。
 
 ### 7.4 P02：A 单侧短后台，双方协作 Soft Recovery
@@ -1026,7 +1026,7 @@ Controller，但不能向 B/C/D 镜像平台事件：
 
 | 新实现 | 已覆盖 |
 | --- | --- |
-| `test_support/actrix_services.rs` | 同一 fixture 启动真实 Actrix Signaling、STUN、TURN，初始化 realm/ACL/AId 公钥缓存，并生成可被生产 Signaling 校验的短期 AId 凭据和 Actrix TURN HMAC 凭据 |
+| `test_support/loran_services.rs` | 同一 fixture 启动真实 Loran Signaling、STUN、TURN，初始化 realm/ACL/AId 公钥缓存，并生成可被生产 Signaling 校验的短期 AId 凭据和 Loran TURN HMAC 凭据 |
 | `test_support/mobile_rtc_pair.rs` | 两个独立 endpoint、单一 Connect 发起者、PairReady、双向 RPC/DataChunk、端点级移动事件与 teardown |
 | `spawn_gated_v020_network_event_supervisor()` | `NetworkEventHandle → gated reconciler → publish_v020_network_fact → manager.supervisor() → Controller` 的生产等价 feed |
 | lifecycle feed acceptance gate | 只有真正推进 policy revision 的平台事实才发布到 v0.20 feed；stale `(epoch, sequence)` 和结构重复 snapshot 只被公共入口确认，不会绕过去重再次触发 RTC recovery |
@@ -1040,7 +1040,7 @@ Controller，但不能向 B/C/D 镜像平台事件：
 | `.config/nextest.toml` | 新 pair/multi-peer 门禁 `retry=0`，不以重试掩盖竞态 |
 
 当前结论是：Rust 阶段 A–D 已经形成统一、production-equivalent 的双端 harness 和
-测试用例；新的 T3/T5 用例全部使用 Actrix Signaling/STUN/TURN，且 lifecycle 场景
+测试用例；新的 T3/T5 用例全部使用 Loran Signaling/STUN/TURN，且 lifecycle 场景
 复用了生产 v0.20 recovery feed。依赖 `TestSignalingServer` 的旧用例仍只属于兼容/
 低层机制回归，不能替代这组新证据。
 
@@ -1063,8 +1063,8 @@ netns/netem、规模和 2–8 小时长稳环境。这些必须在对应 CI/设�
 6. monolithic 大矩阵拆为独立测试名，保留 helper 和业务检查。
 7. 每个迁移用例补齐双方 snapshot、实际 role、业务两个方向和资源收敛。
 8. 在新 harness 稳定前保留兼容用例；等价证据齐备后再删除重复测试。
-9. T3/T4/T5 harness 统一启动或连接 Actrix Signaling/STUN/TURN；故障注入放在
-   Actrix 控制面或外部 proxy，不再把自定义测试服务作为验收后端。
+9. T3/T4/T5 harness 统一启动或连接 Loran Signaling/STUN/TURN；故障注入放在
+   Loran 控制面或外部 proxy，不再把自定义测试服务作为验收后端。
 10. T3 移动 lifecycle 用例使用带 v0.20 feed 的 gated helper 和无 RTC 副作用的
     `DefaultNetworkEventProcessor`；`RtcAwareNetworkEventProcessor` 仅保留给明确标注
     的兼容/低层机制测试，禁止与 recovery feed 同时使用。
@@ -1109,7 +1109,7 @@ PR 使用 pairwise role/direction，deterministic 用例 `retry=0`。每个测�
 - Offer/Answer/Candidate/Restart 消息分类故障；
 - 大 RPC、DataChunk、媒体恢复；
 - MP01–MP06 和 10 peer 恢复风暴；
-- Linux netns/netem + Actrix Signaling/STUN/TURN，覆盖 direct/relay-only；
+- Linux netns/netem + Loran Signaling/STUN/TURN，覆盖 direct/relay-only；
 - Swift simulator 与 Android emulator 生命周期；
 - 30 分钟恢复循环和资源趋势。
 
@@ -1215,7 +1215,7 @@ PR 使用 pairwise role/direction，deterministic 用例 `retry=0`。每个测�
 
 工作：
 
-- netns/netem + Actrix Signaling/STUN/TURN 验证真实 bind、NAT、MTU、
+- netns/netem + Loran Signaling/STUN/TURN 验证真实 bind、NAT、MTU、
   loss/jitter/relay；
 - 10/50/100 peer 梯度和多 link 随机故障；
 - 30 分钟 nightly、2–8 小时 release soak；
@@ -1230,7 +1230,7 @@ PR 使用 pairwise role/direction，deterministic 用例 `retry=0`。每个测�
 本方案完成时必须同时满足：
 
 - 每个 T3/T5 用例都包含两个独立、完整的 Actr 端点；
-- T3/T4/T5 所需信令、STUN、TURN 均由 Actrix 提供；
+- T3/T4/T5 所需信令、STUN、TURN 均由 Loran 提供；
 - 普通初连只有一个 Connect 发起者，另一端真实被动应答；
 - A→B、B→A 使用同一条连接并在恢复前后验证；
 - A 的平台事件不会被测试代码镜像给 B；

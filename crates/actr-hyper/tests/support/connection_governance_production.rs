@@ -1,4 +1,4 @@
-//! Production Node/Context/Mailbox/Workload/response path, real Actrix signaling.
+//! Production Node/Context/Mailbox/Workload/response path, real Loran signaling.
 use crate::connection_governance_support as support;
 
 use actr_framework::Bytes;

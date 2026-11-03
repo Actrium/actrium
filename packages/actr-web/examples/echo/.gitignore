@@ -30,6 +30,6 @@ client/.certs/
 .client.pid
 
 # Runtime artifacts
-actrix*.log
-actrix-dev-db/
-actrix-dev.toml
+loran*.log
+loran-dev-db/
+loran-dev.toml

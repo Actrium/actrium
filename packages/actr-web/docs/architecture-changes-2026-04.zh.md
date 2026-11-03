@@ -20,7 +20,7 @@
 1. **浏览器路径整体替换** —— CM (Component Model) + jco transpile 改为 Option U（WIT → wasm-bindgen 直产物）。jco / Component Model 在浏览器侧**完全删除**。原生 wasmtime 端 CM 路径**不变**。
 2. **原生宿主重构** —— `Hyper<State>` 引入 typestate，旧 `Hyper::attach` API 拆为 `Hyper` + `Node<State>` 两阶段；`PlatformProvider` 收敛为 3 个领域问题；`TrustProvider` 可插拔。
 3. **API 公共面收窄** —— `crates/actr-hyper` / `crates/actr-framework` 系统性地把内部实现降级为 `pub(crate)`，仅保留稳定的对外 API。
-4. **测试基建升级** —— `mock-actrix` 取代外部 actrix 依赖；浏览器 e2e（BasicFunction + MultiTab）`12/12` 稳过；CI 加 WIT codegen + crates/actr-cli/assets 双 drift gate。
+4. **测试基建升级** —— `mock-loran` 取代外部 loran 依赖；浏览器 e2e（BasicFunction + MultiTab）`12/12` 稳过；CI 加 WIT codegen + crates/actr-cli/assets 双 drift gate。
 5. **技术债批量结案** —— TD-001 / TD-002 / TD-003 / TD-004 / TD-005 / TD-006 全部关闭。
 
 **变更体量**：
@@ -31,7 +31,7 @@
 | 改动文件 | 531 |
 | 行净增 | +64,527 / -23,150 (净 +41,377，主要是新增 `actr-web-abi` 生成产物 + WIT 契约 + 新 codegen 工具) |
 | 删除整模块 | 5 (`webrtc_recovery`, `dom-bridge::WebRtcCoordinator`, CM browser bridge, `transpile-component.sh`, TS echo-workload polyglot demo) |
-| 新增整模块 | 4 (`tools/actr/wit-compile-web`, `actr-web-abi`, `crates/actr-framework/web/`, `mock-actrix`) |
+| 新增整模块 | 4 (`tools/actr/wit-compile-web`, `actr-web-abi`, `crates/actr-framework/web/`, `mock-loran`) |
 
 ---
 
@@ -382,15 +382,15 @@ T18 诊断 (4 轮 spike)
 
 ## 4. 测试基础设施
 
-### 4.1 mock-actrix：自包含信令 / Issuer / publisher
+### 4.1 mock-loran：自包含信令 / Issuer / publisher
 
-**Before**：浏览器 e2e 必须依赖外部 `actrix` 二进制（peer 仓库 `../../actrix`）+ `sqlite3` 种数据。CI 需要预装这俩。
+**Before**：浏览器 e2e 必须依赖外部 `loran` 二进制（peer 仓库 `../../loran`）+ `sqlite3` 种数据。CI 需要预装这俩。
 
-**After**：`crates/actr-mock-actrix` crate（commit `40309a0e testing: expand mock-signaling into full mock-actrix`），单一进程提供：
+**After**：`crates/actr-mock-loran` crate（commit `40309a0e testing: expand mock-signaling into full mock-loran`），单一进程提供：
 
 ```
    ┌─────────────────────────────────────────┐
-   │ mock-actrix (cargo run -p actr-mock-actrix)
+   │ mock-loran (cargo run -p actr-mock-loran)
    │                                         │
    │  HTTP   : :8081/admin/* (seed realm/publisher/pkg)
    │  HTTP   : :8081/issuer     (Authority Info Service)
@@ -449,9 +449,9 @@ T18 诊断 (4 轮 spike)
 | **TD-001** | dom-bridge / sw-host 5 个 zero-call DataLane setter（548ad7d9 后绕开未删） | 删除整个 setter cascade（-703 LOC）+ 后续 `WebRtcCoordinator` 整模块 + `webrtc_recovery` 整模块 | `ec6ffafd` `15fa2aa1` `67736e2d` |
 | **TD-002** | sw-host wasm 产物到 crates/actr-cli/assets 无自动同步 | `packages/actr-web/scripts/sync-cli-assets.sh` + sw-host build.sh 末尾自动调 + CI `--check` | `cd5971da` `f4986dd0` |
 | **TD-003** | `GUEST_CTX: thread_local Option<Ctx>` 单例覆盖（多 client 并发踩） | γ-unified：改 `DISPATCH_CTXS: HashMap<RequestId, Ctx>`；WIT 所有 host import 加 request_id 参数 | Phase 6 系列 |
-| **TD-004** | 同源 SW 下第二个 client 复用第一个 client 的 IndexedDB 凭据 | cred_kv_namespace 改为 `actr_credentials_{actr_type}_{client_id}`；mock-actrix 加 rebind WARN | `eb034d94` `b658d4f0` |
+| **TD-004** | 同源 SW 下第二个 client 复用第一个 client 的 IndexedDB 凭据 | cred_kv_namespace 改为 `actr_credentials_{actr_type}_{client_id}`；mock-loran 加 rebind WARN | `eb034d94` `b658d4f0` |
 | **TD-005** | "WebWorkloadAdapter Reflect.get called on non-object" | 误报：stale `target/debug/actr` binary。重 build 即过 | （无 commit，文档结案） |
-| **TD-006** | 2 client 并发 RPC 仍挂（TD-003/004 修后剩余 4 个 MultiTab 失败） | 综合修：mock-actrix relay 精确投递 + sw-host stale peer cleanup + DOM/SW client lifecycle | `301c58d6` |
+| **TD-006** | 2 client 并发 RPC 仍挂（TD-003/004 修后剩余 4 个 MultiTab 失败） | 综合修：mock-loran relay 精确投递 + sw-host stale peer cleanup + DOM/SW client lifecycle | `301c58d6` |
 
 **全部 6 个 TD 已 close**，`tech-debt.zh.md` 全部条目状态 = "已解决"。
 
@@ -648,7 +648,7 @@ b46dee70  docs(web): spec Option U Phase 6 γ-unified detailed design
 [TD-003/004 修复]
 fd3bc05c  feat(web/examples/echo): adapt wbg guests to request_id imports
 eb034d94  fix(sw-host): namespace stored credentials by client_id
-b658d4f0  chore(mock-actrix): warn on WS actor rebind
+b658d4f0  chore(mock-loran): warn on WS actor rebind
 1ac5afd4  chore(crates/actr-cli/assets): sync sw-host wasm
 
 [Phase 6c echo unification]
@@ -687,7 +687,7 @@ d1fad7f5  docs(examples/ts): clarify jco componentize vs transpile
 
 2. **TD-006 修复**（最复杂 bug）
    - 读 [td-006-multi-client-rpc-analysis.zh.md](./td-006-multi-client-rpc-analysis.zh.md) §0-§5
-   - 看 commit `301c58d6` 的 diff（横跨 mock-actrix / sw-host runtime / DOM 三层）
+   - 看 commit `301c58d6` 的 diff（横跨 mock-loran / sw-host runtime / DOM 三层）
 
 3. **原生 typestate 重构**
    - 看 commit `48ba2f42` + `e8df80ec` + `eae01427` + `fa1a0f45` 的串

@@ -10,7 +10,7 @@ import kotlin.test.assertNotNull
  * DynamicWorkloadTests.
  *
  * These tests verify that the high-level interface contract is correct and basic implementations
- * compile. Full E2E tests with mock-actrix require the native libactr.so and run via
+ * compile. Full E2E tests with mock-loran require the native libactr.so and run via
  * UnifiedIntegrationTest (androidTest).
  */
 class DynamicWorkloadTest {

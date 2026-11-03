@@ -1,8 +1,8 @@
-//! Standalone `mock-actrix` binary — starts a mock actrix server on a given
+//! Standalone `mock-loran` binary — starts a mock loran server on a given
 //! port and blocks until Ctrl+C. Used by `packages/actr-web/examples/echo`'s
-//! `start-mock.sh` to run integration e2e tests without a real actrix.
+//! `start-mock.sh` to run integration e2e tests without a real loran.
 
-use actr_mock_actrix::MockActrixServer;
+use actr_mock_loran::MockLoranServer;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -11,7 +11,7 @@ use tracing_subscriber::EnvFilter;
 #[command(
     author,
     version,
-    about = "Mock actrix server for Actor-RTC integration tests"
+    about = "Mock loran server for Actor-RTC integration tests"
 )]
 struct Args {
     /// TCP port to bind. Defaults to 8081 to match the echo e2e config.
@@ -22,8 +22,8 @@ struct Args {
     #[arg(long, default_value = "0.0.0.0")]
     bind: String,
 
-    /// Log filter (defaults to `info` for mock-actrix, `warn` elsewhere).
-    #[arg(long, default_value = "actr_mock_actrix=info,info")]
+    /// Log filter (defaults to `info` for mock-loran, `warn` elsewhere).
+    #[arg(long, default_value = "actr_mock_loran=info,info")]
     log: String,
 }
 
@@ -37,14 +37,14 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let listener = TcpListener::bind(format!("{}:{}", args.bind, args.port)).await?;
-    let server = MockActrixServer::start_with_listener(listener).await?;
+    let server = MockLoranServer::start_with_listener(listener).await?;
 
     // This log line is the readiness marker scripts grep for.
-    println!("mock-actrix listening on 127.0.0.1:{}", server.port());
+    println!("mock-loran listening on 127.0.0.1:{}", server.port());
     println!("  http: {}", server.http_url());
     println!("  ws:   {}", server.ws_url());
 
     tokio::signal::ctrl_c().await?;
-    println!("mock-actrix shutting down");
+    println!("mock-loran shutting down");
     Ok(())
 }

@@ -43,7 +43,7 @@ pub enum StorageBackend {
 /// SQLite configuration.
 ///
 /// Note: the effective database file is currently `signer_keys.db` inside the
-/// instance data directory (`ActrixConfig.sqlite_path`), supplied via the
+/// instance data directory (`LoranConfig.sqlite_path`), supplied via the
 /// `db_path` argument of `KeyStorage::from_config`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -93,8 +93,8 @@ impl Default for PostgresConfig {
         Self {
             host: "localhost".to_string(),
             port: 5432,
-            database: "actrix_signer".to_string(),
-            username: "actrix".to_string(),
+            database: "loran_signer".to_string(),
+            username: "loran".to_string(),
             password: "".to_string(),
             pool_size: default_postgres_pool_size(),
             max_lifetime_secs: default_max_lifetime_secs(),
@@ -141,8 +141,8 @@ mod tests {
             [postgres]
             host = "localhost"
             port = 5432
-            database = "actrix"
-            username = "actrix"
+            database = "loran"
+            username = "loran"
             password = "secret"
             pool_size = 30
         "#;
@@ -153,8 +153,8 @@ mod tests {
         let postgres = config.postgres.unwrap();
         assert_eq!(postgres.host, "localhost");
         assert_eq!(postgres.port, 5432);
-        assert_eq!(postgres.database, "actrix");
-        assert_eq!(postgres.username, "actrix");
+        assert_eq!(postgres.database, "loran");
+        assert_eq!(postgres.username, "loran");
         assert_eq!(postgres.password, "secret");
         assert_eq!(postgres.pool_size, 30);
     }
@@ -181,8 +181,8 @@ mod tests {
             [postgres]
             host = "localhost"
             port = 5432
-            database = "actrix"
-            username = "actrix"
+            database = "loran"
+            username = "loran"
             password = "secret"
             typo_field = 1
         "#;

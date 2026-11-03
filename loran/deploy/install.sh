@@ -1,15 +1,15 @@
 #!/bin/bash
-# Actrix Installation Script (LEGACY)
+# Loran Installation Script (LEGACY)
 #
 # ⚠️  DEPRECATED — kept for reference only. Prefer the `deploy` tool
 #     (`cargo install --path .` → `deploy service`/`deploy update`), which
 #     implements the releases/symlink model, SHA-256 verification, atomic
 #     binary swap, and systemd hardening. This legacy script does NONE of
-#     that: it uses a flat /opt/actrix/actrix layout with no checksum, no
+#     that: it uses a flat /opt/loran/loran layout with no checksum, no
 #     version pinning, and overwrites the running binary in place. Do not use
 #     it for production deployments.
 #
-# This script helps install Actrix as a systemd service
+# This script helps install Loran as a systemd service
 #
 # Usage:
 #   sudo ./install.sh [install|uninstall|update]
@@ -24,18 +24,18 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}⚠️  install.sh is LEGACY and lacks checksum verification / releases model.${NC}"
 echo -e "${YELLOW}    Use the 'deploy' tool instead: deploy service / deploy update.${NC}"
-if [ "${ACTRIX_ALLOW_LEGACY_INSTALL_SH:-}" != "1" ]; then
+if [ "${LORAN_ALLOW_LEGACY_INSTALL_SH:-}" != "1" ]; then
     echo -e "${RED}Refusing to run legacy install.sh by default.${NC}"
-    echo "Set ACTRIX_ALLOW_LEGACY_INSTALL_SH=1 only for emergency/manual legacy recovery."
+    echo "Set LORAN_ALLOW_LEGACY_INSTALL_SH=1 only for emergency/manual legacy recovery."
     exit 1
 fi
 
 # Configuration
-INSTALL_DIR="/opt/actrix"
-SERVICE_NAME="actrix"
+INSTALL_DIR="/opt/loran"
+SERVICE_NAME="loran"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-USER="actrix"
-GROUP="actrix"
+USER="loran"
+GROUP="loran"
 
 # Print colored message
 print_info() {
@@ -55,7 +55,7 @@ generate_service_file() {
     local output_file="$1"
     cat > "$output_file" <<EOF
 [Unit]
-Description=Actrix Auxiliary Services
+Description=Loran Auxiliary Services
 Documentation=https://github.com/Actrium/actrium
 After=network.target
 
@@ -67,13 +67,13 @@ Group=${GROUP}
 # Environment variables
 Environment=RUST_LOG=info
 Environment=RUST_BACKTRACE=1
-Environment=ACTRIX_PATH=${INSTALL_DIR}
+Environment=LORAN_PATH=${INSTALL_DIR}
 
 # Working directory
 WorkingDirectory=${INSTALL_DIR}
 
 # Start command
-ExecStart=${INSTALL_DIR}/actrix --config ${INSTALL_DIR}/config.toml
+ExecStart=${INSTALL_DIR}/loran --config ${INSTALL_DIR}/config.toml
 
 # Reload configuration without restart
 ExecReload=/bin/kill -HUP \$MAINPID
@@ -85,7 +85,7 @@ RestartSec=5
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=actrix
+SyslogIdentifier=loran
 
 # Security settings
 NoNewPrivileges=true
@@ -114,7 +114,7 @@ check_root() {
 
 # Check if binary exists
 check_binary() {
-    if [ ! -f "target/release/actrix" ]; then
+    if [ ! -f "target/release/loran" ]; then
         print_error "Binary not found. Please build the project first:"
         print_error "  cargo build --release"
         exit 1
@@ -131,9 +131,9 @@ create_user() {
     fi
 }
 
-# Install actrix
-install_actrix() {
-    print_info "Installing Actrix to $INSTALL_DIR..."
+# Install loran
+install_loran() {
+    print_info "Installing Loran to $INSTALL_DIR..."
 
     # Create installation directory
     mkdir -p "$INSTALL_DIR"
@@ -142,8 +142,8 @@ install_actrix() {
 
     # Copy binary
     print_info "Copying binary..."
-    cp target/release/actrix "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/actrix"
+    cp target/release/loran "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/loran"
 
     # Copy configuration
     if [ -f "config.toml" ]; then
@@ -184,9 +184,9 @@ install_actrix() {
     print_info "  6. View logs: journalctl -u $SERVICE_NAME -f"
 }
 
-# Uninstall actrix
-uninstall_actrix() {
-    print_info "Uninstalling Actrix..."
+# Uninstall loran
+uninstall_loran() {
+    print_info "Uninstalling Loran..."
 
     # Stop and disable service
     if systemctl is-active --quiet "$SERVICE_NAME"; then
@@ -227,9 +227,9 @@ uninstall_actrix() {
     print_info "Uninstallation completed!"
 }
 
-# Update actrix binary
-update_actrix() {
-    print_info "Updating Actrix..."
+# Update loran binary
+update_loran() {
+    print_info "Updating Loran..."
 
     # Check if service is running
     WAS_RUNNING=false
@@ -240,16 +240,16 @@ update_actrix() {
     fi
 
     # Backup old binary
-    if [ -f "$INSTALL_DIR/actrix" ]; then
+    if [ -f "$INSTALL_DIR/loran" ]; then
         print_info "Backing up old binary..."
-        cp "$INSTALL_DIR/actrix" "$INSTALL_DIR/actrix.backup"
+        cp "$INSTALL_DIR/loran" "$INSTALL_DIR/loran.backup"
     fi
 
     # Copy new binary
     print_info "Copying new binary..."
-    cp target/release/actrix "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/actrix"
-    chown "$USER:$GROUP" "$INSTALL_DIR/actrix"
+    cp target/release/loran "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/loran"
+    chown "$USER:$GROUP" "$INSTALL_DIR/loran"
 
     # Update service file if changed
     local service_tmp
@@ -271,7 +271,7 @@ update_actrix() {
 
     print_info "Update completed!"
     print_info "Binary version:"
-    "$INSTALL_DIR/actrix" --version || print_warn "Could not determine version"
+    "$INSTALL_DIR/loran" --version || print_warn "Could not determine version"
 }
 
 # Show usage
@@ -279,9 +279,9 @@ show_usage() {
     echo "Usage: $0 [install|uninstall|update]"
     echo ""
     echo "Commands:"
-    echo "  install     Install Actrix as a systemd service"
-    echo "  uninstall   Remove Actrix and systemd service"
-    echo "  update      Update Actrix binary (preserves config)"
+    echo "  install     Install Loran as a systemd service"
+    echo "  uninstall   Remove Loran and systemd service"
+    echo "  update      Update Loran binary (preserves config)"
     echo ""
     echo "Examples:"
     echo "  sudo ./install.sh install"
@@ -297,14 +297,14 @@ main() {
         install)
             check_binary
             create_user
-            install_actrix
+            install_loran
             ;;
         uninstall)
-            uninstall_actrix
+            uninstall_loran
             ;;
         update)
             check_binary
-            update_actrix
+            update_loran
             ;;
         *)
             show_usage

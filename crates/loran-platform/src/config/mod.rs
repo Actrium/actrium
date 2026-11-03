@@ -1,6 +1,6 @@
 //! Unified configuration management system
 //!
-//! This module is the "single source of truth" for Actrix auxiliary service configuration.
+//! This module is the "single source of truth" for Loran auxiliary service configuration.
 //! All configuration item definitions, documentation, and default values are managed here uniformly.
 
 pub mod authority;
@@ -102,11 +102,11 @@ fn validate_secret_hygiene(field: &str, secret: &str, min_len: usize, errors: &m
 /// compromises the others. Empty / unset secrets are ignored. Password *hashes*
 /// (for example `control.admin_ui.password_hash`) are intentionally excluded:
 /// they are meant to be stored and are not raw secrets.
-fn collect_present_secrets(config: &ActrixConfig) -> Vec<(&'static str, &str)> {
+fn collect_present_secrets(config: &LoranConfig) -> Vec<(&'static str, &str)> {
     let mut secrets: Vec<(&'static str, &str)> = Vec::new();
 
-    if !config.actrix_shared_key.is_empty() {
-        secrets.push(("actrix_shared_key", config.actrix_shared_key.as_str()));
+    if !config.loran_shared_key.is_empty() {
+        secrets.push(("loran_shared_key", config.loran_shared_key.as_str()));
     }
     if !config.turn.turn_secret.is_empty() {
         secrets.push(("turn.turn_secret", config.turn.turn_secret.as_str()));
@@ -138,7 +138,7 @@ fn collect_present_secrets(config: &ActrixConfig) -> Vec<(&'static str, &str)> {
 /// fields. Reuse is a hard error in production and a warning in development so
 /// local configs still boot (the runtime ignores `Warning:`-prefixed entries).
 /// The colliding field paths are named so operators can fix them.
-fn validate_secret_reuse(config: &ActrixConfig, errors: &mut Vec<String>) {
+fn validate_secret_reuse(config: &LoranConfig, errors: &mut Vec<String>) {
     let secrets = collect_present_secrets(config);
     let mut by_value: std::collections::BTreeMap<&str, Vec<&'static str>> =
         std::collections::BTreeMap::new();
@@ -210,13 +210,13 @@ fn validate_prod_endpoint_tls(
     }
 }
 
-/// Main configuration struct for Actrix auxiliary services
+/// Main configuration struct for Loran auxiliary services
 ///
 /// This is the core configuration of the system, containing all service configuration information.
 /// The configuration file uses TOML format and supports fully type-safe loading.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
-pub struct ActrixConfig {
+pub struct LoranConfig {
     /// Service enable flags (bitmask) - Primary switch for business services
     ///
     /// This is the primary control mechanism for enabling business services.
@@ -240,7 +240,7 @@ pub struct ActrixConfig {
     /// Server instance name
     ///
     /// Used to identify different server instances and distinguish nodes in cluster deployments.
-    /// A meaningful naming convention is recommended, e.g. actrix-01, actrix-prod-east-1.
+    /// A meaningful naming convention is recommended, e.g. loran-01, loran-prod-east-1.
     pub name: String,
 
     /// Runtime environment identifier
@@ -313,7 +313,7 @@ pub struct ActrixConfig {
     /// SQLite database file storage directory path
     ///
     /// Specifies the directory path used to store all SQLite database files.
-    /// The main database file is stored as `{sqlite_path}/actrix.db`.
+    /// The main database file is stored as `{sqlite_path}/loran.db`.
     /// Includes Realm info, access control lists, nonce cache, etc.
     #[serde(
         default,
@@ -322,18 +322,18 @@ pub struct ActrixConfig {
     )]
     pub sqlite_path: PathBuf,
 
-    /// Actrix internal service communication shared secret
+    /// Loran internal service communication shared secret
     ///
-    /// Used for internal communication authentication between Actrix services, such as between Issuer and Signer.
+    /// Used for internal communication authentication between Loran services, such as between Issuer and Signer.
     /// This is a system-level internal authentication key, used only for inter-service communication, not for external business.
     ///
     /// Notes:
-    /// - This key is for Actrix internal services only
+    /// - This key is for Loran internal services only
     /// - Not for Realm business or external API access
     /// - A strong random key should be used in production environments
-    /// - Field name retains actrix_shared_key for backward compatibility
+    /// - Configure it with the `loran_shared_key` field
     #[serde(default)]
-    pub actrix_shared_key: String,
+    pub loran_shared_key: String,
 
     /// Recording pipeline configuration (logs + tracing)
     ///
@@ -582,7 +582,7 @@ fn default_enable() -> u8 {
 }
 
 fn default_recording_service_name() -> String {
-    "actrix".to_string()
+    "loran".to_string()
 }
 
 fn serialize_pathbuf<S>(path: &Path, serializer: S) -> Result<S::Ok, S::Error>
@@ -600,15 +600,15 @@ where
     Ok(PathBuf::from(s))
 }
 
-impl Default for ActrixConfig {
+impl Default for LoranConfig {
     fn default() -> Self {
         Self {
             enable: default_enable(), // Default: enable STUN + TURN
-            name: "actrix-default".to_string(),
+            name: "loran-default".to_string(),
             env: "dev".to_string(),
             user: None,
             group: None,
-            pid: Some("logs/actrix.pid".to_string()),
+            pid: Some("logs/loran.pid".to_string()),
             bind: BindConfig::default(),
             authority: AuthorityConfig::default(),
             realm: RealmConfig::default(),
@@ -618,7 +618,7 @@ impl Default for ActrixConfig {
             control: ControlConfig::default(),
             services: ServicesConfig::default(),
             sqlite_path: PathBuf::from("database"),
-            actrix_shared_key: generate_ephemeral_secret(),
+            loran_shared_key: generate_ephemeral_secret(),
             recording: RecordingConfig::default(),
             monitoring: MonitoringConfig::default(),
         }
@@ -633,7 +633,7 @@ pub const ENABLE_ISSUER: u8 = 0b01000;
 pub const ENABLE_SIGNER: u8 = 0b10000;
 pub const ENABLE_RELAY: u8 = 0b100000;
 
-impl ActrixConfig {
+impl LoranConfig {
     /// HTTP business services and control endpoints require an HTTP listener.
     pub fn requires_http(&self) -> bool {
         self.is_signaling_enabled()
@@ -805,19 +805,19 @@ impl ActrixConfig {
     /// Get the PID file path, using the default value if not configured
     pub fn get_pid_path(&self) -> Option<String> {
         self.pid.clone().or_else(|| {
-            // If pid is not configured, use the default value logs/actrix.pid
-            Some("logs/actrix.pid".to_string())
+            // If pid is not configured, use the default value logs/loran.pid
+            Some("logs/loran.pid".to_string())
         })
     }
 
-    /// Get the Actrix internal service communication shared secret
+    /// Get the Loran internal service communication shared secret
     ///
-    /// This key is used for authenticated communication between Actrix internal services,
+    /// This key is used for authenticated communication between Loran internal services,
     /// such as service calls between Issuer and Signer.
     ///
     /// Note: This key is for internal service communication only and must not be used for external business.
-    pub fn get_actrix_shared_key(&self) -> &str {
-        &self.actrix_shared_key
+    pub fn get_loran_shared_key(&self) -> &str {
+        &self.loran_shared_key
     }
 
     /// Returns a reference to the recording pipeline configuration
@@ -843,7 +843,7 @@ impl ActrixConfig {
             }
         }
 
-        "info,actrix::observability=trace,actrix::audit=trace,actrix::security=trace,actrix::operations=trace".to_string()
+        "info,loran::observability=trace,loran::audit=trace,loran::security=trace,loran::operations=trace".to_string()
     }
 
     /// Load configuration from a file
@@ -866,7 +866,7 @@ impl ActrixConfig {
         let content = std::fs::read_to_string(path_ref)?;
 
         // Parse TOML content
-        let config: ActrixConfig = toml::from_str(&content)?;
+        let config: LoranConfig = toml::from_str(&content)?;
 
         Ok(config)
     }
@@ -993,12 +993,7 @@ impl ActrixConfig {
         );
 
         if self.requires_database() {
-            validate_secret_hygiene(
-                "actrix_shared_key",
-                &self.actrix_shared_key,
-                32,
-                &mut errors,
-            );
+            validate_secret_hygiene("loran_shared_key", &self.loran_shared_key, 32, &mut errors);
             if self
                 .sqlite_path
                 .to_str()
@@ -1395,14 +1390,14 @@ mod tests {
 
     #[test]
     fn standalone_relay_needs_http_but_not_business_storage() {
-        let mut config = super::ActrixConfig::from_toml(include_str!(
+        let mut config = super::LoranConfig::from_toml(include_str!(
             "../../../../loran/config/relay.example.toml"
         ))
         .unwrap();
         assert!(config.is_relay_enabled());
         assert!(config.requires_http());
         assert!(!config.requires_database());
-        assert!(config.actrix_shared_key.is_empty());
+        assert!(config.loran_shared_key.is_empty());
         assert!(config.validate().is_ok(), "{:?}", config.validate());
         let mut disabled = config.clone();
         disabled.enable = 0;
@@ -1425,7 +1420,7 @@ mod tests {
 
     #[test]
     fn relay_config_rejects_ambiguous_auth_and_insecure_advertisement() {
-        let mut config = super::ActrixConfig::from_toml(include_str!(
+        let mut config = super::LoranConfig::from_toml(include_str!(
             "../../../../loran/config/relay.example.toml"
         ))
         .unwrap();
@@ -1444,12 +1439,12 @@ mod tests {
     #[test]
     fn udp_only_configuration_needs_no_control_plane_or_storage() {
         let example = include_str!("../../../../loran/config/ice.example.toml");
-        let mut config = super::ActrixConfig::from_toml(example).unwrap();
+        let mut config = super::LoranConfig::from_toml(example).unwrap();
         for enable in [2, 4, 6] {
             config.enable = enable;
             assert!(config.bind.http.is_none());
             assert!(!config.requires_database());
-            assert!(config.actrix_shared_key.is_empty());
+            assert!(config.loran_shared_key.is_empty());
             assert!(config.sqlite_path.as_os_str().is_empty());
             let errors = config.validate().err().unwrap_or_default();
             assert!(
@@ -1461,7 +1456,7 @@ mod tests {
 
     #[test]
     fn independent_rest_turn_does_not_require_a_realm_authority() {
-        let mut config = super::ActrixConfig::from_toml(include_str!(
+        let mut config = super::LoranConfig::from_toml(include_str!(
             "../../../../loran/config/ice.example.toml"
         ))
         .unwrap();
@@ -1475,7 +1470,7 @@ mod tests {
         // credentials into Realm-scoped credentials.
         config.bind.http = Some(Default::default());
         config.sqlite_path = "database".into();
-        config.actrix_shared_key = "b2xISzUdwmiURo7wKFL6K9tbkRHhTfM2E83r".into();
+        config.loran_shared_key = "b2xISzUdwmiURo7wKFL6K9tbkRHhTfM2E83r".into();
         assert!(config.requires_database());
         assert!(!config.uses_realm_turn_auth());
         assert!(config.validate().is_ok());
@@ -1489,7 +1484,7 @@ mod tests {
     #[test]
     fn enabled_http_services_still_require_their_listener() {
         let example = include_str!("../../../../loran/config/ice.example.toml");
-        let initial = super::ActrixConfig::from_toml(example).unwrap();
+        let initial = super::LoranConfig::from_toml(example).unwrap();
         for enable in [1, 8, 16] {
             let mut config = initial.clone();
             config.enable = enable;
@@ -1529,15 +1524,15 @@ mod tests {
     #[test]
     fn example_config_loads_and_validates() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../loran/config/actrix.example.toml");
-        let cfg = ActrixConfig::from_file(&path).expect("example config should parse");
+            .join("../../loran/config/loran.example.toml");
+        let cfg = LoranConfig::from_file(&path).expect("example config should parse");
         let errors = cfg
             .validate()
             .expect_err("example must fail until operators replace secret placeholders");
         assert!(
             errors
                 .iter()
-                .any(|error| error.contains("actrix_shared_key"))
+                .any(|error| error.contains("loran_shared_key"))
         );
         assert!(
             errors
@@ -1558,11 +1553,11 @@ mod tests {
     #[test]
     fn rust_example_config_is_valid_for_local_development() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/actr/rust/actrix-config.example.toml");
-        let cfg = ActrixConfig::from_file(&path).expect("Rust example config should parse");
+            .join("../../examples/actr/rust/loran-config.example.toml");
+        let cfg = LoranConfig::from_file(&path).expect("Rust example config should parse");
         // The dev example ships low-entropy / reused placeholder secrets, which
         // now surface as `Warning:`-prefixed entries. The runtime ignores those
-        // (see actrixd main/manager), so the config still boots for local
+        // (see loran-server main/manager), so the config still boots for local
         // development: assert only that it produces no hard (non-warning) error.
         if let Err(errors) = cfg.validate() {
             let hard: Vec<&String> = errors
@@ -1580,16 +1575,16 @@ mod tests {
 
     #[test]
     fn test_default_config() {
-        let config = ActrixConfig::default();
+        let config = LoranConfig::default();
         assert_eq!(config.enable, 31); // Default: original five services enabled
-        assert_eq!(config.name, "actrix-default");
+        assert_eq!(config.name, "loran-default");
         assert_eq!(config.env, "dev");
         assert!(config.is_signaling_enabled());
         assert!(config.is_stun_enabled());
         assert!(config.is_turn_enabled());
         assert!(config.is_issuer_enabled());
         assert!(config.is_signer_enabled());
-        assert_eq!(config.recording.service_name, "actrix");
+        assert_eq!(config.recording.service_name, "loran");
         assert!(config.recording.sink.is_none());
         assert_eq!(config.recording.observability.filter, "digest");
         assert_eq!(config.recording.audit.filter, "mutations");
@@ -1599,16 +1594,16 @@ mod tests {
 
     #[test]
     fn test_recording_global_plus_spec_deserialize() {
-        let mut config = ActrixConfig::default();
-        config.recording.sink = Some("file:///tmp/actrix.log".to_string());
+        let mut config = LoranConfig::default();
+        config.recording.sink = Some("file:///tmp/loran.log".to_string());
         config.recording.audit.sink = Some("otlp+http://127.0.0.1:4318/v1/logs".to_string());
         config.recording.security.sink = Some("otlp+grpc://127.0.0.1:4317".to_string());
 
         let toml = config.to_toml().expect("config should serialize");
-        let parsed = ActrixConfig::from_toml(&toml).expect("config should deserialize");
+        let parsed = LoranConfig::from_toml(&toml).expect("config should deserialize");
         assert_eq!(
             parsed.recording.sink.as_deref(),
-            Some("file:///tmp/actrix.log")
+            Some("file:///tmp/loran.log")
         );
         assert_eq!(
             parsed.recording.audit.sink.as_deref(),
@@ -1622,7 +1617,7 @@ mod tests {
 
     #[test]
     fn test_recording_sink_validation_rejects_invalid_scheme() {
-        let mut config = ActrixConfig::default();
+        let mut config = LoranConfig::default();
         config.recording.sink = Some("http://127.0.0.1:4317".to_string());
 
         let errors = config.validate().expect_err("validation should fail");
@@ -1636,12 +1631,12 @@ mod tests {
 
     #[test]
     fn test_recording_sink_validation_accepts_supported_schemes() {
-        let mut config = ActrixConfig {
+        let mut config = LoranConfig {
             enable: 0,
             ..Default::default()
         };
         config.control.admin_ui.password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string();
-        config.recording.sink = Some("file:///tmp/actrix.log".to_string());
+        config.recording.sink = Some("file:///tmp/loran.log".to_string());
         config.recording.audit.sink = Some("otlp+http://127.0.0.1:4318/v1/logs".to_string());
         config.recording.security.sink = Some("otlp+grpc://127.0.0.1:4317".to_string());
 
@@ -1653,7 +1648,7 @@ mod tests {
 
     #[test]
     fn test_recording_sink_validation_rejects_otlp_uri_without_host() {
-        let mut config = ActrixConfig::default();
+        let mut config = LoranConfig::default();
         config.recording.sink = Some("otlp+grpc:///v1/traces".to_string());
 
         let errors = config.validate().expect_err("validation should fail");
@@ -1667,7 +1662,7 @@ mod tests {
 
     #[test]
     fn test_recording_sink_validation_rejects_invalid_file_uri() {
-        let mut config = ActrixConfig::default();
+        let mut config = LoranConfig::default();
         config.recording.sink = Some("file://relative-path.log".to_string());
 
         let errors = config.validate().expect_err("validation should fail");
@@ -1681,37 +1676,37 @@ mod tests {
 
     #[test]
     fn test_toml_serialization() {
-        let config = ActrixConfig::default();
+        let config = LoranConfig::default();
         let toml_str = config.to_toml().unwrap();
         assert!(toml_str.contains("enable = 31")); // original five services
-        assert!(toml_str.contains("name = \"actrix-default\""));
-        assert!(toml_str.contains("actrix_shared_key = \""));
+        assert!(toml_str.contains("name = \"loran-default\""));
+        assert!(toml_str.contains("loran_shared_key = \""));
 
-        let parsed_config = ActrixConfig::from_toml(&toml_str).unwrap();
+        let parsed_config = LoranConfig::from_toml(&toml_str).unwrap();
         assert_eq!(parsed_config.enable, config.enable);
         assert_eq!(parsed_config.name, config.name);
-        assert_eq!(parsed_config.actrix_shared_key, config.actrix_shared_key);
+        assert_eq!(parsed_config.loran_shared_key, config.loran_shared_key);
     }
 
     #[test]
-    fn test_actrix_shared_key() {
-        let config = ActrixConfig::default();
-        assert!(config.get_actrix_shared_key().len() >= 32);
+    fn test_loran_shared_key() {
+        let config = LoranConfig::default();
+        assert!(config.get_loran_shared_key().len() >= 32);
         assert!(!looks_like_placeholder_secret(
-            config.get_actrix_shared_key()
+            config.get_loran_shared_key()
         ));
 
         // Test custom shared key
         let mut custom_config = config;
-        custom_config.actrix_shared_key = "custom-shared-key".to_string();
-        assert_eq!(custom_config.get_actrix_shared_key(), "custom-shared-key");
+        custom_config.loran_shared_key = "custom-shared-key".to_string();
+        assert_eq!(custom_config.get_loran_shared_key(), "custom-shared-key");
     }
 
     #[test]
     fn test_service_flags() {
-        let mut config = ActrixConfig {
+        let mut config = LoranConfig {
             enable: 0,
-            ..ActrixConfig::default()
+            ..LoranConfig::default()
         };
 
         // Test Signaling service: bitmask-only control
@@ -1794,9 +1789,9 @@ mod tests {
 
     #[test]
     fn test_issuer_auto_signer_config() {
-        let mut config = ActrixConfig {
+        let mut config = LoranConfig {
             enable: ENABLE_SIGNER | ENABLE_ISSUER,
-            ..ActrixConfig::default()
+            ..LoranConfig::default()
         };
 
         // Scenario 1: Local Signer enabled, Issuer does not configure a Signer client, should auto-use local Signer
@@ -1868,9 +1863,9 @@ mod tests {
 
     #[test]
     fn test_signaling_auto_signer_config() {
-        let mut config = ActrixConfig {
+        let mut config = LoranConfig {
             enable: ENABLE_SIGNER | ENABLE_SIGNALING,
-            ..ActrixConfig::default()
+            ..LoranConfig::default()
         };
 
         // Enable local Signer and Signaling
@@ -1903,9 +1898,9 @@ mod tests {
 
     #[test]
     fn test_validate_bitmask_consistency() {
-        let mut config = ActrixConfig {
+        let mut config = LoranConfig {
             enable: ENABLE_ISSUER,
-            ..ActrixConfig::default()
+            ..LoranConfig::default()
         };
 
         // Case 1: Issuer bitmask set but services.issuer config missing - should warn
@@ -2012,9 +2007,9 @@ mod tests {
 
     #[test]
     fn test_signaling_dependencies_require_local_services_when_missing_clients() {
-        let mut config = ActrixConfig {
+        let mut config = LoranConfig {
             enable: ENABLE_SIGNALING,
-            ..ActrixConfig::default()
+            ..LoranConfig::default()
         };
         config.services.signaling = Some(SignalingConfig {
             server: signaling::SignalingServerConfig::default(),
@@ -2040,9 +2035,9 @@ mod tests {
 
     #[test]
     fn test_signaling_dependencies_accept_local_services_when_enabled() {
-        let mut config = ActrixConfig {
+        let mut config = LoranConfig {
             enable: ENABLE_SIGNALING | ENABLE_SIGNER | ENABLE_ISSUER,
-            ..ActrixConfig::default()
+            ..LoranConfig::default()
         };
         config.control.admin_ui.password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string();
         config.turn.turn_secret = "test-turn-secret-32-bytes-minimum".to_string();
@@ -2071,10 +2066,10 @@ mod tests {
 
     #[test]
     fn production_signer_requires_private_key_encryption() {
-        let mut config = ActrixConfig {
+        let mut config = LoranConfig {
             env: "prod".to_string(),
             enable: ENABLE_SIGNER,
-            ..ActrixConfig::default()
+            ..LoranConfig::default()
         };
         config.control.admin_ui.password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string();
         config.services.signer = Some(SignerServiceConfig::default());
@@ -2088,7 +2083,7 @@ mod tests {
                 .any(|error| error.contains("plaintext private-key storage is forbidden"))
         );
 
-        config.services.signer.as_mut().unwrap().kek_env = Some("ACTRIX_SIGNER_KEK".to_string());
+        config.services.signer.as_mut().unwrap().kek_env = Some("LORAN_SIGNER_KEK".to_string());
         let remaining_errors = config.validate().err().unwrap_or_default();
         assert!(
             !remaining_errors

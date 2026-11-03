@@ -15,7 +15,7 @@
 //!
 //! ## B — WebRTC / WebSocket transport (PeerGate)
 //!
-//! Two `TestPeer` nodes connect through a `TestSignalingServer` (mock-actrix).
+//! Two `TestPeer` nodes connect through a `TestSignalingServer` (mock-loran).
 //! Node A sends an `RpcEnvelope` with an injected `traceparent`.  A custom
 //! responder on Node B decodes the arriving envelope, extracts `traceparent`,
 //! and writes it verbatim into the response payload.  Node A asserts the

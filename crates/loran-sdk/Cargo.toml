@@ -1,18 +1,18 @@
 [package]
-name = "actrix-sdk"
+name = "loran-sdk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Unified public SDK facade for Actrix control-plane APIs"
+description = "Unified public SDK facade for Loran control-plane APIs"
 
 [features]
 default = []
 testing = []
 
 [dependencies]
-admin = { path = "../loran-control", package = "actrix-admin", version = "0.10.7" }
+admin = { path = "../loran-control", package = "loran-admin", version = "0.10.7" }
 
 [lints]
 workspace = true

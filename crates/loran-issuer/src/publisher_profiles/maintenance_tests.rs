@@ -1,8 +1,8 @@
 use super::*;
 use actr_protocol::realm_profile::sign_document;
-use actrix_publisher_registry::{PublisherRegistryManager, model::Publisher};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ed25519_dalek::SigningKey;
+use loran_publisher_registry::{PublisherRegistryManager, model::Publisher};
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_util::sync::CancellationToken;

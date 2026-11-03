@@ -32,7 +32,7 @@ Loran all-in-one profile 将 Issuer Signer gRPC 挂载在主 HTTP/2 监听器：
 防重放。`Sign` 的规范认证 payload 为：
 
 ```text
-actrix-signer-v1:sign:<key_id>:sha256:<message_digest>
+loran-signer-v1:sign:<key_id>:sha256:<message_digest>
 ```
 
 因此认证过的请求不能被替换成另一把 key 或另一段消息。HTTP JSON handler 仅供 crate
@@ -47,7 +47,7 @@ actrix-signer-v1:sign:<key_id>:sha256:<message_digest>
 
 ```toml
 [services.signer]
-kek_env = "ACTRIX_SIGNER_KEK"
+kek_env = "LORAN_SIGNER_KEK"
 ```
 
 也可以使用 `kek_file`；文件应只有 Loran 运行用户可读。`kek` 直接写配置只适合受控
@@ -64,7 +64,7 @@ kek_env = "ACTRIX_SIGNER_KEK"
 
 ## 运维要求
 
-- `actrix_shared_key`、KEK、TURN secret 和 renewal secret 分离；
+- `loran_shared_key`、KEK、TURN secret 和 renewal secret 分离；
 - secrets 不使用示例值，不写普通日志，不放命令行或 URL；
 - 生产使用 HTTPS/mTLS 或等价的受保护内部链路；
 - 备份 SQLite 时同时保护 KEK；只有数据库或只有 KEK 都不足以恢复签名能力；

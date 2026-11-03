@@ -9,7 +9,7 @@ url = "ws://127.0.0.1:__HTTP_PORT__/signaling/ws"
 [issuer_endpoint]
 # Mount Issuer at the `/issuer/*` prefix; the bare-root form parses with a
 # trailing slash and yields `http://host//register` once Hyper formats
-# `{endpoint}/register`. mock-actrix exposes the same routes under both
+# `{endpoint}/register`. mock-loran exposes the same routes under both
 # `/` and `/issuer/*`, so pinning the prefix here is safe.
 url = "http://127.0.0.1:__HTTP_PORT__/issuer"
 

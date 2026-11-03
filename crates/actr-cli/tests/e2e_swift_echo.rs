@@ -1,6 +1,6 @@
 //! End-to-end tests for Swift echo template.
 //!
-//! These tests run against a local Actrix instance and local Swift projects only.
+//! These tests run against a local Loran instance and local Swift projects only.
 //! Run with: `cargo test --test e2e_swift_echo -- --ignored --test-threads=1`
 
 use std::fs;
@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use actr_cli::test_support::{
-    LocalRustEchoService, MockSignaling, align_project_with_local_actrix, assert_success,
+    LocalRustEchoService, MockSignaling, align_project_with_local_loran, assert_success,
     ensure_local_swift_xcframework, pin_echo_service_dependency_version, run_actr,
 };
 use tempfile::TempDir;
@@ -282,7 +282,7 @@ fn build_cli_binary(
 fn swift_echo_e2e_service_and_app() {
     let swift_assets =
         ensure_local_swift_xcframework().expect("failed to prepare local swift xcframework");
-    let signaling = MockSignaling::start().expect("failed to start mock actrix");
+    let signaling = MockSignaling::start().expect("failed to start mock loran");
     let signaling_base = signaling_base_url(&signaling.signaling_ws_url);
     let tmp = TempDir::new().unwrap();
 
@@ -311,8 +311,8 @@ fn swift_echo_e2e_service_and_app() {
     let app_dir = tmp.path().join("e2e-swift/echo-app");
     assert!(svc_dir.exists(), "echo-service dir should exist");
     assert!(app_dir.exists(), "echo-app dir should exist");
-    align_project_with_local_actrix(&svc_dir).expect("failed to set local realm for service");
-    align_project_with_local_actrix(&app_dir).expect("failed to set local realm for app");
+    align_project_with_local_loran(&svc_dir).expect("failed to set local realm for service");
+    align_project_with_local_loran(&app_dir).expect("failed to set local realm for app");
     pin_echo_service_dependency_version(&app_dir, "acme")
         .expect("failed to pin app echo dependency version");
     pin_echo_service_dependency_to_registry_version(&app_dir);

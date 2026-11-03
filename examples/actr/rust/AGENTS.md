@@ -61,8 +61,7 @@ Each crate is a workspace member (see root `Cargo.toml`) and targets Rust editio
 ## Loran Configuration & Start Scripts
 
 - Use the Loran configuration under `../../../loran/config/`; do not add
-  per-example copies. The imported runtime still recognizes Actrix
-  compatibility names until its semantic rename is complete.
+  per-example copies. Use the `loran` executable and `loran-*` Cargo packages.
 - When modifying any `start.sh`, start the service from
   `../../../crates/loran-server/` with the shared Loran config path.
 - Distinguish the three examples in docs and scripts: `data-stream`, `shell-actr-echo`, and `media-relay` (each has its own `start.sh` entrypoint; all share the root config).

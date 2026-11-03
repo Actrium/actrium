@@ -127,13 +127,13 @@ class CiTargetsTest(unittest.TestCase):
         self.assertTrue(targets["rust_core"])
         self.assertIn(f"core_dependency:{path}", reasons)
 
-    def test_actrix_change_triggers_rust_checks(self) -> None:
+    def test_loran_change_triggers_rust_checks(self) -> None:
         path = "crates/loran-turn/src/authenticator.rs"
         targets, reasons = ci_targets.detect_targets([path], full_run=False)
 
         self.assertTrue(targets["rust_core"])
         self.assertFalse(targets["csharp_binding"])
-        self.assertIn(f"actrix_workspace:{path}", reasons)
+        self.assertIn(f"loran_workspace:{path}", reasons)
 
     def test_csharp_runtime_dependencies_trigger_csharp_checks(self) -> None:
         paths = (

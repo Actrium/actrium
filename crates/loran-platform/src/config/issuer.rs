@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Issuer service config
 ///
-/// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
+/// Service enable/disable is controlled by the bitmask in LoranConfig.enable.
 /// The ENABLE_ISSUER bit (bit 3) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
@@ -57,7 +57,7 @@ pub struct IssuerServerConfig {
     /// Renewal token secret (base64-encoded, at least 32 bytes after decoding)
     ///
     /// Used to deterministically derive the successor token (HMAC-SHA256).
-    /// Must be consistent within the same actrix cluster. Must not use `actrix_shared_key` as a fallback.
+    /// Must be consistent within the same loran cluster. Must not use `loran_shared_key` as a fallback.
     #[serde(default)]
     pub renewal_token_secret: String,
 }
@@ -117,7 +117,7 @@ impl IssuerServiceConfig {
     /// 3. Otherwise return None
     pub fn get_signer_client_config(
         &self,
-        global_config: &super::ActrixConfig,
+        global_config: &super::LoranConfig,
     ) -> Option<SignerClientConfig> {
         // Explicit configuration always wins.
         if let Some(ref signer_config) = self.dependencies.signer {

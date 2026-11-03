@@ -20,6 +20,9 @@ or a CDN without changing the Actor.
 
 `config/` and `deploy/` define how the suite is assembled and operated. The
 main daemon is under `../crates/loran-server/`; reusable services live in the
-other `../crates/loran-*` directories. Their published Rust package and binary
-names still use Actrix compatibility names until the separate semantic rename
-is completed.
+other `../crates/loran-*` directories. The server package is `loran-server`;
+its executable is `loran`. Reusable packages use the `loran-` prefix, and the
+deployment helper package is `loran-deploy`.
+
+See [the naming migration guide](../docs/migration/loran-naming.md) before
+upgrading an existing deployment.

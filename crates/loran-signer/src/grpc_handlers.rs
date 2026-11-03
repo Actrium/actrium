@@ -10,9 +10,9 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 // Import the generated protobuf code
-use actrix_proto::admin::v1::NonceCredential;
-use actrix_proto::signer::v1::signer_server::{Signer, SignerServer};
-use actrix_proto::signer::v1::*;
+use loran_proto::admin::v1::NonceCredential;
+use loran_proto::signer::v1::signer_server::{Signer, SignerServer};
+use loran_proto::signer::v1::*;
 
 /// Signer gRPC service state
 #[derive(Clone)]
