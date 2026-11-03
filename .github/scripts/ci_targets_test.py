@@ -7,6 +7,13 @@ import ci_targets
 
 
 class CiTargetsTest(unittest.TestCase):
+    def test_mobile_fixture_compile_regression_runs_the_rust_gate(self) -> None:
+        path = "scripts/actr/tests/test_mobile_fixture_cfg.py"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertIn(f"mobile_fixture_cfg:{path}", reasons)
+
     def test_committed_kotlin_binding_runs_native_checksum_and_kotlin_checks(self) -> None:
         path = "packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/actr.kt"
         targets, reasons = ci_targets.detect_targets([path], full_run=False)

@@ -6,8 +6,10 @@ import Testing
 
 @Suite(.serialized)
 struct RealmIdentityStoreTests {
-    @Test func realIssuerJoinHostRegisterAndRevoke() async throws {
-        guard let path = ProcessInfo.processInfo.environment["ACTR_MOBILE_FIXTURE"] else { return }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["ACTR_MOBILE_FIXTURE"] != nil,
+        "Requires the real Issuer fixture; run tests/e2e/actr/mobile-membership/run.sh ios"))
+    func realIssuerJoinHostRegisterAndRevoke() async throws {
+        let path = try #require(ProcessInfo.processInfo.environment["ACTR_MOBILE_FIXTURE"])
         let file = path.hasPrefix("/") ? URL(fileURLWithPath: path) :
             try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
                 appropriateFor: nil, create: true).appendingPathComponent("issuer-fixture.json")

@@ -11,6 +11,19 @@ import sys
 import zipfile
 
 
+MAX_RESOURCE_BYTES = 16 * 1024 * 1024
+# Compiled code contains protocol/parser constants, not packaged credential
+# documents. Recognize it by content so resource names/extensions cannot bypass
+# scanning, while native libraries and DEX files do not cause false positives.
+CODE_MAGIC = (
+    b"\x7fELF", b"dex\n", b"\x00asm", b"!<arch>\n",
+    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+)
+
+
 def sensitive(data):
     text = data.decode("utf-8", errors="ignore")
     if re.search(r"(?m)^\s*realm_client_key\s*=", text):
@@ -36,24 +49,44 @@ def sensitive(data):
     return walk(value)
 
 
+def check_resource(stream, label):
+    prefix = stream.read(8)
+    if prefix.startswith(CODE_MAGIC):
+        return False
+    data = prefix + stream.read(MAX_RESOURCE_BYTES + 1 - len(prefix))
+    if len(data) > MAX_RESOURCE_BYTES:
+        print(f"Unscanned mobile resource (exceeds 16 MiB): {label}", file=sys.stderr)
+        return True
+    if sensitive(data):
+        print(f"Unsafe mobile resource: {label}", file=sys.stderr)
+        return True
+    return False
+
+
 def main(paths):
     failed = False
     for name in paths:
         path = pathlib.Path(name)
-        if path.suffix.lower() in (".apk", ".ipa"):
-            with zipfile.ZipFile(path) as archive:
-                entries = ((entry.filename, archive.read(entry)) for entry in archive.infolist()
-                           if not entry.is_dir() and entry.file_size < 16 * 1024 * 1024
-                           and ("/assets/" in "/" + entry.filename or entry.filename.endswith((".json", ".toml", ".plist"))))
-                for entry, data in entries:
-                    if sensitive(data):
-                        print(f"Unsafe mobile resource: {path.name}/{entry}", file=sys.stderr)
-                        failed = True
-        else:
-            for entry in path.rglob("*"):
-                if entry.is_file() and entry.stat().st_size < 16 * 1024 * 1024 and sensitive(entry.read_bytes()):
-                    print(f"Unsafe mobile resource: {entry}", file=sys.stderr)
-                    failed = True
+        try:
+            if not path.exists():
+                raise FileNotFoundError
+            if path.suffix.lower() in (".apk", ".ipa"):
+                with zipfile.ZipFile(path) as archive:
+                    for entry in archive.infolist():
+                        if not entry.is_dir():
+                            with archive.open(entry) as stream:
+                                failed = check_resource(stream, f"{path.name}/{entry.filename}") or failed
+            else:
+                entries = [path] if path.is_file() else path.rglob("*")
+                for entry in entries:
+                    if entry.is_file():
+                        with entry.open("rb") as stream:
+                            failed = check_resource(stream, str(entry)) or failed
+        except (OSError, ValueError, RuntimeError, zipfile.BadZipFile):
+            # Archive/I/O errors must fail the gate without echoing exception
+            # details, which can contain credential data from malformed inputs.
+            print(f"Cannot inspect mobile resources: {path}", file=sys.stderr)
+            failed = True
     return int(failed)
 
 

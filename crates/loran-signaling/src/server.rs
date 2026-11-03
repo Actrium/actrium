@@ -782,9 +782,9 @@ pub(crate) async fn handle_websocket_connection_inner(
             // A delayed registration must not overwrite a replacement. Use the
             // same lock order as installation and durable unregister: clients -> registry.
             let clients = server.clients.read().await;
-            if !clients
+            if clients
                 .get(&client_id)
-                .is_some_and(|client| client.actor_id.as_ref() == Some(&actor_id_for_registry))
+                .is_none_or(|client| client.actor_id.as_ref() != Some(&actor_id_for_registry))
             {
                 return Ok(());
             }
@@ -1762,9 +1762,9 @@ async fn handle_unregister(
     // Serialize ownership and deletion with replacement installation. An old
     // handler may have passed authentication before the new connection arrived.
     let clients = server.clients.read().await;
-    if !clients
+    if clients
         .get(client_id)
-        .is_some_and(|client| client.actor_id.as_ref() == Some(&source))
+        .is_none_or(|client| client.actor_id.as_ref() != Some(&source))
     {
         return Ok(());
     }

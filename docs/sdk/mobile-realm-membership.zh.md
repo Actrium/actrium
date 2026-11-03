@@ -42,6 +42,8 @@ Kotlin Echo、Swift Echo、DataStream 和 TS workload 的运行时配置不再�
 
 `scripts/actr/check-mobile-assets.py` 检查资源目录和 APK/IPA 中的 Realm key JSON、邀请及 key-file 配置。Android demo 的 preBuild 和移动 E2E 安装步骤执行此检查。它是结构化凭据检查，不替代通用 secret scanning。
 
+扫描按资源内容进行，不依赖文件扩展名或归档中的目录，覆盖 IPA 的 `.key` / `.txt` 和 APK 的 `res/raw`。已识别的编译代码（ELF、Mach-O、DEX 等）不作为凭据文档扫描；其他单项资源超过 16 MiB、输入缺失或无法读取时检查失败，不静默跳过。回归测试 `python3 scripts/actr/tests/test_check_mobile_assets.py` 由 CI Gate 执行。
+
 ## 可重复验证
 
 先按各 SDK 的 `build-android.sh` / `build-xcframework.sh` 构建当前 checkout 的原生库及绑定。使用匹配的库和生成代码，避免 UniFFI checksum 不一致。
@@ -56,5 +58,7 @@ IOS_SIMULATOR_UDID=<booted-simulator-uuid> bash tests/e2e/actr/mobile-membership
 ```
 
 移动 harness 使用生产 Issuer、SQLite membership 事务和嵌入式 Signer。只有 signaling 使用测试服务器，并通过 heartbeat warning 触发 Host 正常续期路径；续期本身仍到真实 Issuer。两个隔离安装存储分别加入、注册、自动续期，撤销 A 后，harness 独立检查 A 的 renew 403 和 B 的 renew 200。邀请只写入 mode-0600 的临时文件，结束时删除；诊断只保留公钥 ID 与计数。
+
+普通 `swift test` 未设置 `ACTR_MOBILE_FIXTURE` 时，真实 Issuer 用例明确报告为 skipped，不计作通过；设置 fixture 后仍执行完整用例，文件丢失或损坏会失败。Unix 专用的移动 Issuer fixture 仅在 Unix 平台编译；CI 通过 `python3 scripts/actr/tests/test_mobile_fixture_cfg.py` 在非 Unix 的 `wasm32-wasip2` 目标上编译该 fixture，防止平台隔离回归（需要已安装该 Rust target）。
 
 2026-10-28 验证：Android 14 arm64 模拟器、iOS 26.5 模拟器上的上述用例均通过；每端使用两个独立安装目录。存储测试另外覆盖跨 Realm 隔离、重启恢复、显式重置、旧 handle 失效及恢复时缺少安全存储条目。Rust 集成测试覆盖重签、响应丢失重试、邀请已使用/过期/撤销/Realm 不匹配。模拟器结果不等同于物理设备硬件安全能力认证。

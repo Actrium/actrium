@@ -184,6 +184,7 @@ async fn sdk_devices_join_retry_register_renew_reissue_and_revoke() {
 
 /// Started explicitly by the mobile SDK integration harness. Secrets go only
 /// to a mode-0600 file, never HTTP helper endpoints, logs or build resources.
+#[cfg(unix)]
 #[tokio::test]
 #[serial]
 #[ignore = "requires an installed mobile SDK test runner"]
