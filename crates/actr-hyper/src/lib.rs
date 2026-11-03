@@ -1193,7 +1193,7 @@ impl Node<Attached> {
                 ),
             },
             None => RegistrationContext::Linked {
-                request: build_linked_register_request(config, service_spec)?,
+                request: build_linked_register_request(config, service_spec),
             },
         })
     }
@@ -1760,7 +1760,7 @@ async fn bootstrap_linked_credential_inner(
         issuer = issuer.with_client_key(key);
     }
 
-    let req = build_linked_register_request(config, service_spec)?;
+    let req = build_linked_register_request(config, service_spec);
     let response = issuer.register_linked(req).await?;
     match response.result {
         Some(register_response::Result::Success(ok)) => Ok(ok),
@@ -1807,26 +1807,17 @@ fn build_package_register_request(
 fn build_linked_register_request(
     config: &actr_config::RuntimeConfig,
     service_spec: Option<ServiceSpec>,
-) -> HyperResult<RegisterRequest> {
-    let security = crate::wire::websocket::security::DirectSecurity::load(config)?;
-    // An ephemeral listen_port (0) has no bindable address here: the node
-    // pre-binds the listener and advertises the actual bound port when it
-    // starts. The bootstrap registration must not advertise port zero.
-    let ws_address = match config.websocket_listen_port {
-        Some(0) => None,
-        _ => security.advertised_url(config)?,
-    };
-
-    Ok(RegisterRequest {
+) -> RegisterRequest {
+    RegisterRequest {
         actr_type: config.actr_type().clone(),
         realm: config.realm.clone(),
         service_spec,
         acl: config.acl.clone(),
         service: None,
-        ws_address,
+        ws_address: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         ..Default::default()
-    })
+    }
 }
 
 // ─── Helper functions (native-only) ──────────────────────────────────────────

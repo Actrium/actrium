@@ -115,14 +115,20 @@ jobs:
       contents: read
       actions: read
     env:
+      RUSTUP_TOOLCHAIN: 1.99.0
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          targets: wasm32-unknown-unknown
+      - name: Verify preinstalled Rust toolchain
+        run: |
+          if ! {
+            rustup run 1.99.0 rustc --version &&
+            rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-unknown-unknown;
+          }; then
+            echo "::error::Self-hosted runner image must provide Rust 1.99.0 and wasm32-unknown-unknown."
+            exit 1
+          fi
       - name: Use runner sccache
         id: runner-sccache
         run: |
@@ -161,7 +167,8 @@ jobs:
               'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
               'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
               'crates/actr-framework/**', 'crates/actr-platform-traits/**',
-              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**') }}
+              'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**',
+              'crates/actr-relay-security/**') }}
       - name: Cache cold web-build dependencies
         # Output-cache hits skip both this restore and its post-job save.
         if: steps.cli-web-assets.outputs.cache-hit != 'true'
@@ -420,6 +427,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Verify upstream dependency overrides
+        run: |
+          python3 scripts/actr/check-upstream-patches.py
+          python3 scripts/actr/tests/test_apply_upstream_patches.py
       - name: Check committed Kotlin binding checksums against the native library
         # The Kotlin UniFFI bindings are committed, yet no pull-request job loads
         # a native library: the Kotlin job compiles the binding and runs
@@ -777,6 +788,12 @@ jobs:
       - name: Cargo check
         working-directory: packages/actr-typescript
         run: cargo check --locked --manifest-path Cargo.toml
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify upstream dependency overrides
+        run: python3 scripts/actr/check-upstream-patches.py --manifest packages/actr-typescript/Cargo.toml --client-only
 
   typescript_workload:
     name: TypeScript Workload

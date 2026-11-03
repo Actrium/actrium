@@ -2,6 +2,8 @@
 """Audit the checked-out tree and reachable history for retired identifiers."""
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -17,6 +19,18 @@ PATTERN = re.compile(
 )
 
 
+# Exact reviewed upstream comment lines, rather than a directory exemption.
+# A changed line or a real identifier elsewhere remains subject to the audit,
+# including historical blobs and commit messages. The retained hashes cover
+# reviewed upstream prose that remains reachable in repository history.
+PROSE_LINE_HASHES = frozenset(
+    item["line_sha256"]
+    for item in json.loads(
+        Path(__file__).with_name("retired-protocol-prose-exceptions.json").read_text()
+    )
+)
+
+
 def git(*args):
     return subprocess.check_output(["git", *args])
 
@@ -26,7 +40,7 @@ def check_text(data, location, failures):
     if b"\0" in data[:8192]:
         return
     for number, line in enumerate(data.split(b"\n"), 1):
-        if PATTERN.search(line):
+        if PATTERN.search(line) and hashlib.sha256(line.rstrip(b"\r")).hexdigest() not in PROSE_LINE_HASHES:
             # Report locations, not arbitrary historical content or secrets.
             failures.append(f"retired identifier in {location}:{number}")
 

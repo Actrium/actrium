@@ -49,6 +49,9 @@ export class ActorRef {
 
   /**  */
   private eventListeners = new Map<string, Set<(...args: any[]) => void>>();
+  private peerPaths = new Map<string, { rtc: boolean; relay: boolean }>();
+  private openRpcChannels = new Set<string>();
+  private disconnectedRtcPeers = new Set<string>();
 
   constructor(domRuntime: ActrDomRuntime) {
     this.domRuntime = domRuntime;
@@ -140,23 +143,61 @@ export class ActorRef {
           state: data.state,
           peerId: data.peerId,
         });
-        // Fail-fast: reject all pending RPCs when connection is irrecoverable
-        if (data.state === 'failed' || data.state === 'closed') {
-          this.rejectAllPending(`WebRTC connection ${data.state} (peer: ${data.peerId})`);
+        if (data.state === 'connected') {
+          this.disconnectedRtcPeers.delete(data.peerId);
+          if (this.openRpcChannels.has(data.peerId)) {
+            this.updatePeerPath(data.peerId, 'rtc', true);
+          }
+        } else if (data.state === 'disconnected') {
+          this.disconnectedRtcPeers.add(data.peerId);
+          this.updatePeerPath(data.peerId, 'rtc', false);
+        } else if (data.state === 'failed' || data.state === 'closed') {
+          this.openRpcChannels.delete(data.peerId);
+          this.disconnectedRtcPeers.delete(data.peerId);
+          this.updatePeerPath(data.peerId, 'rtc', false);
         }
         break;
 
       case 'datachannel_open':
-        this.emit('peerConnected', { peerId: data.peerId });
+        if (data.channelId === 0) {
+          this.openRpcChannels.add(data.peerId);
+          if (!this.disconnectedRtcPeers.has(data.peerId)) {
+            this.updatePeerPath(data.peerId, 'rtc', true);
+          }
+        }
         break;
 
       case 'datachannel_close':
-        this.emit('peerDisconnected', { peerId: data.peerId });
+        if (data.channelId === 0) {
+          this.openRpcChannels.delete(data.peerId);
+          this.updatePeerPath(data.peerId, 'rtc', false);
+        }
+        break;
+
+      case 'relay_state_changed':
+        this.updatePeerPath(data.peerId, 'relay', data.connected);
+        break;
+
+      case 'network_path_changed':
         break;
 
       default:
         console.log(`[ActorRef] WebRTC event: ${eventType}`, data);
     }
+  }
+
+  private updatePeerPath(peerId: string, path: 'rtc' | 'relay', connected: boolean): void {
+    const paths = this.peerPaths.get(peerId) ?? { rtc: false, relay: false };
+    const wasConnected = paths.rtc || paths.relay;
+    paths[path] = connected;
+    const isConnected = paths.rtc || paths.relay;
+    if (isConnected) this.peerPaths.set(peerId, paths);
+    else this.peerPaths.delete(peerId);
+    if (wasConnected !== isConnected) {
+      this.emit(isConnected ? 'peerConnected' : 'peerDisconnected', { peerId });
+    }
+    // An individual wire failure never rejects unrelated RPCs or bypasses
+    // their delivery/deadline handling in the Service Worker.
   }
 
   /**
@@ -340,25 +381,12 @@ export class ActorRef {
   }
 
   /**
-   * Reject all pending RPC requests immediately.
-   *
-   * Called when the WebRTC connection enters an irrecoverable state
-   * ("failed" or "closed") so callers don't wait for the 30s timeout.
-   */
-  private rejectAllPending(reason: string): void {
-    if (this.pendingRequests.size === 0) return;
-    console.warn(`[ActorRef] Rejecting ${this.pendingRequests.size} pending RPCs: ${reason}`);
-    for (const [requestId, pending] of this.pendingRequests) {
-      clearTimeout(pending.timeout);
-      pending.reject(new Error(reason));
-    }
-    this.pendingRequests.clear();
-  }
-
-  /**
    * Handle subscription data.
    */
   dispose(): void {
+    this.peerPaths.clear();
+    this.openRpcChannels.clear();
+    this.disconnectedRtcPeers.clear();
     for (const [_requestId, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(new Error('ActorRef disposed'));

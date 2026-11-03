@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for cmd in cargo curl jq sqlite3 rustc dotnet powershell.exe schtasks.exe; do
+for cmd in cargo curl jq sqlite3 python3 rustc dotnet powershell.exe schtasks.exe; do
     require_cmd "$cmd"
 done
 
@@ -423,6 +423,7 @@ scaffold_service_guest() {
         --publisher "$PUBLISHER" --realm "$REALM" "$TMP_SERVICE_DIR"
     pin_workspace_actr_dependencies "$TMP_SERVICE_DIR/Cargo.toml"
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
+    python3 "$REPO_ROOT/scripts/actr/apply-upstream-patches.py" "$TMP_SERVICE_DIR/Cargo.toml"
     mkdir -p "$(dirname "$SERVICE_KEYCHAIN")"
     cp "$PROVISIONED_KEYCHAIN" "$SERVICE_KEYCHAIN"
     cp "$PROVISIONED_PUBLIC_KEY" "$SERVICE_PUBLIC_KEY"

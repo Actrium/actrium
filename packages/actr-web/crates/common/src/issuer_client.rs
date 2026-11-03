@@ -96,6 +96,10 @@ impl WebIssuerClient {
         }
     }
 
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
     /// Public identity of the validated key used for registration and renewal.
     pub fn client_key_id(&self) -> &str {
         &self.client_key.key_id
@@ -109,7 +113,7 @@ impl WebIssuerClient {
         })
     }
 
-    fn proof_header(&self, op: ProofOp, realm: &str, body: &[u8]) -> WebResult<String> {
+    pub fn proof_header(&self, op: ProofOp, realm: &str, body: &[u8]) -> WebResult<String> {
         if realm != self.client_key.realm {
             return Err(WebError::Protocol(
                 "request Realm does not match the client key".into(),

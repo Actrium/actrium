@@ -1,0 +1,27 @@
+# Use the regular Loran executable with only UDP STUN/TURN enabled.
+# The Cargo package/executable currently retains its legacy name: actrix.
+name = "loran-turn"
+env = "prod"
+enable = 6 # STUN + TURN; use 2 for STUN only, 4 for TURN with built-in STUN.
+location_tag = "standalone"
+
+# Omit [bind.http] to run without HTTP or database initialization.
+[bind.ice]
+ip = "0.0.0.0"
+port = 3478
+advertised_ip = "203.0.113.10" # Replace with the server's reachable IP.
+
+[control.admin_ui]
+enabled = false
+
+[control.grpc_api]
+enabled = false
+
+[turn]
+realm = "turn.example.org"
+relay_port_range = "49152-65535"
+# Alternatively replace static users with a secret shared with an external issuer.
+# turn_secret = "replace-with-a-random-shared-secret"
+
+[turn.users]
+example_user = "replace-with-a-strong-password"

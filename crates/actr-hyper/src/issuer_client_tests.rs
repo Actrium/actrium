@@ -93,7 +93,12 @@ fn mobile_proofs_allow_small_positive_clock_skew_without_extending_lifetime() {
         "provider.example",
         ed25519_dalek::SigningKey::from_bytes(&[8; 32]),
     );
-    for op in [ProofOp::Register, ProofOp::Renew, ProofOp::Reissue] {
+    for op in [
+        ProofOp::Register,
+        ProofOp::Renew,
+        ProofOp::Reissue,
+        ProofOp::RelayIdentity,
+    ] {
         let proof =
             ClientProof::parse_header(&key.proof(op, "r@example.com", b"body").unwrap()).unwrap();
         proof

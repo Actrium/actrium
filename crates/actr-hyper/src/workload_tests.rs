@@ -52,7 +52,6 @@ fn test_runtime_context(serial: u64) -> RuntimeContext {
         signaling_client,
         test_credential(),
         None,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         None,
         0,
     )

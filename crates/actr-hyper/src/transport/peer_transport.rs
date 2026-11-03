@@ -11,6 +11,7 @@
 use super::Dest; // Re-exported from actr-framework
 use super::dest_transport::DestTransport;
 use super::error::{NetworkError, NetworkResult};
+use super::handover::HandoverBook;
 use super::lane::{DeliveryProgress, DeliveryProgressCell};
 use super::route_table::PayloadTypeExt;
 use super::wire_handle::{WireHandle, WireIdentity};
@@ -275,6 +276,7 @@ pub(crate) type SentTransportSlot = Arc<Mutex<Option<DestTransportRef>>>;
 ///      (multiple waiters)     (ready)
 /// ```
 pub struct PeerTransport {
+    handover: Arc<HandoverBook>,
     /// Local Actor ID
     #[allow(dead_code)]
     local_id: ActrId,
@@ -312,6 +314,18 @@ pub struct PeerTransport {
 }
 
 impl PeerTransport {
+    pub(crate) async fn adopt_relay(&self, peer: ActrId, wire: Arc<dyn WireHandle>) {
+        let transport = {
+            let states = self.transports.read().await;
+            match states.get(&Dest::Peer(peer)) {
+                Some(DestState::Connected(transport)) => Some(transport.clone()),
+                _ => None,
+            }
+        };
+        if let Some(transport) = transport {
+            transport.adopt_ready(wire).await;
+        }
+    }
     /// Subscribe to the `transports`-map revision. Every insert, commit, or
     /// removal increments it; readiness waiters use it as the wake source for
     /// destination materialization itself.
@@ -333,6 +347,7 @@ impl PeerTransport {
     /// - `conn_factory`: Wire builder, asynchronously creates Wire handle list based on Dest
     pub fn new(local_id: ActrId, conn_factory: Arc<dyn WireBuilder>) -> Self {
         Self {
+            handover: Arc::new(HandoverBook::default()),
             local_id,
             transports: Arc::new(RwLock::new(HashMap::new())),
             conn_factory,
@@ -344,6 +359,11 @@ impl PeerTransport {
             #[cfg(test)]
             final_commit_barrier: OnceLock::new(),
         }
+    }
+
+    pub(crate) fn with_handover(mut self, handover: Arc<HandoverBook>) -> Self {
+        self.handover = handover;
+        self
     }
 
     /// Subscribe to destination materialization transitions. A Connected
@@ -591,14 +611,15 @@ impl PeerTransport {
                     connections.len()
                 );
                 #[cfg(test)]
-                let transport = DestTransport::new_with_creation_barrier(
+                let mut transport = DestTransport::new_with_creation_barrier(
                     dest.clone(),
                     connections,
                     self.dest_transport_creation_barrier.get().cloned(),
                 )
                 .await?;
                 #[cfg(not(test))]
-                let transport = DestTransport::new(dest.clone(), connections).await?;
+                let mut transport = DestTransport::new(dest.clone(), connections).await?;
+                transport.set_handover(self.handover.clone());
                 let mut transport_guard =
                     CreatedDestTransportGuard::new(dest.clone(), Arc::new(transport));
 
@@ -916,14 +937,15 @@ impl PeerTransport {
             }
 
             #[cfg(test)]
-            let transport = DestTransport::new_with_creation_barrier(
+            let mut transport = DestTransport::new_with_creation_barrier(
                 dest.clone(),
                 connections,
                 self.dest_transport_creation_barrier.get().cloned(),
             )
             .await?;
             #[cfg(not(test))]
-            let transport = DestTransport::new(dest.clone(), connections).await?;
+            let mut transport = DestTransport::new(dest.clone(), connections).await?;
+            transport.set_handover(self.handover.clone());
             let mut transport_guard =
                 CreatedDestTransportGuard::new(dest.clone(), Arc::new(transport));
 

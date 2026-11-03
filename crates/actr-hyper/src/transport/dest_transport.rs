@@ -5,15 +5,20 @@
 
 use super::Dest; // Re-exported from actr-framework
 use super::error::{NetworkError, NetworkResult};
+use super::handover::HandoverBook;
 use super::lane::{
     DeliveryProgress, DeliveryProgressCell, mark_delivery_write_in_flight, record_delivery_progress,
 };
 use super::route_table::{DataLaneType, PayloadTypeExt};
 use super::wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity};
 use super::wire_pool::{ConnType, ReadySet, RetryConfig, WirePool};
-use actr_protocol::PayloadType;
+use crate::timer;
+use actr_protocol::prost::Message;
+use actr_protocol::{PayloadType, transport_control};
 use std::sync::Arc;
-use tokio::sync::watch;
+use std::time::Duration;
+use tokio::sync::{Mutex, watch};
+use tokio::time::Instant;
 
 /// DestTransport - Transport layer manager for a single destination
 ///
@@ -26,6 +31,15 @@ use tokio::sync::watch;
 pub(crate) struct DestTransport {
     /// Connection manager
     conn_mgr: Arc<WirePool>,
+    dest: Dest,
+    handover: Arc<HandoverBook>,
+    reliable: Mutex<ReliableRoute>,
+}
+
+#[derive(Default)]
+struct ReliableRoute {
+    current: Option<Arc<dyn WireHandle>>,
+    retry_at: Option<Instant>,
 }
 
 /// Result of one destination send, retaining the low-level delivery fact while
@@ -180,7 +194,83 @@ impl DestTransport {
         }
 
         creation_guard.disarm();
-        Ok(Self { conn_mgr })
+        Ok(Self {
+            conn_mgr,
+            dest,
+            handover: Arc::new(HandoverBook::default()),
+            reliable: Mutex::new(ReliableRoute::default()),
+        })
+    }
+
+    pub(crate) fn set_handover(&mut self, handover: Arc<HandoverBook>) {
+        self.handover = handover;
+    }
+
+    async fn reliable_wire(
+        &self,
+        preferred: Arc<dyn WireHandle>,
+        route: &mut ReliableRoute,
+    ) -> NetworkResult<Arc<dyn WireHandle>> {
+        let Some(previous) = route.current.clone() else {
+            return Ok(preferred);
+        };
+        if Arc::ptr_eq(&previous, &preferred) {
+            return Ok(preferred);
+        }
+        let still_current = self.conn_mgr.owns_active_wire(&previous).await;
+        if !still_current || previous.secure_channel_state().is_terminal() {
+            // Failure recovery cannot prove delivery of the failed route's
+            // buffered data. Do not replay application chunks automatically.
+            route.retry_at = None;
+            return Ok(preferred);
+        }
+        if !previous.is_connected() || !previous.secure_channel_state().is_sendable() {
+            return Err(NetworkError::SecureChannelNotReady(
+                "previous reliable route is recovering; handover is not acknowledged".into(),
+            ));
+        }
+        let lane = match previous.get_lane(PayloadType::StreamReliable).await {
+            Ok(lane) if lane.is_healthy() => lane,
+            Ok(_) => {
+                return Err(NetworkError::SecureChannelNotReady(
+                    "previous reliable lane is temporarily unavailable for handover".into(),
+                ));
+            }
+            Err(error) if error.is_closed_like() => {
+                route.retry_at = None;
+                return Ok(preferred);
+            }
+            Err(error) => return Err(error),
+        };
+        if route.retry_at.is_some_and(|retry| retry > Instant::now()) {
+            return Ok(previous);
+        }
+        let Dest::Peer(peer) = &self.dest else {
+            return Ok(preferred);
+        };
+        let Some(mut pending) = self.handover.begin(peer) else {
+            return Ok(previous);
+        };
+        // Cancellation removes the pending entry and leaves the old route in
+        // place. These control bytes never update application delivery state.
+        let barrier = transport_control::barrier(&pending.nonce).encode_to_vec();
+        let acknowledged = timer::timeout(
+            timer::ids::TRANSPORT_HANDOVER,
+            Duration::from_secs(3),
+            async {
+                lane.send(bytes::Bytes::from(barrier)).await.ok()?;
+                (&mut pending.receiver).await.ok()
+            },
+        )
+        .await
+        .is_ok_and(|result| result.is_some());
+        if acknowledged {
+            route.retry_at = None;
+            Ok(preferred)
+        } else {
+            route.retry_at = Some(Instant::now() + Duration::from_secs(30));
+            Ok(previous)
+        }
     }
 
     /// Send message and return the wire identity that accepted the payload.
@@ -223,6 +313,11 @@ impl DestTransport {
         data: &[u8],
         progress_sink: Option<&DeliveryProgressCell>,
     ) -> DestSendAttempt {
+        let mut reliable = if payload_type == PayloadType::StreamReliable {
+            Some(self.reliable.lock().await)
+        } else {
+            None
+        };
         tracing::debug!(
             "📤 Sending message: type={:?}, size={}",
             payload_type,
@@ -251,8 +346,24 @@ impl DestTransport {
                 ready.clone()
             };
 
-            // 4. Try each DataLane Type in priority order
-            for &lane_type in lane_types {
+            // Re-evaluate ICE classification for every send. An open RTC
+            // channel can still be using TURN, and ICE may later change its
+            // selected pair without replacing the wire.
+            let mut ordered_lanes = lane_types.to_vec();
+            let rtc_priority = self
+                .conn_mgr
+                .get_connection(ConnType::WebRTC)
+                .await
+                .map_or(0, |wire| wire.priority());
+            let relay_priority = self
+                .conn_mgr
+                .get_connection(ConnType::WebSocket)
+                .await
+                .map_or(0, |wire| wire.priority());
+            if relay_priority > rtc_priority {
+                ordered_lanes.sort_by_key(|lane| lane.needs_webrtc());
+            }
+            for lane_type in ordered_lanes {
                 // Determine required connection type
                 let conn_type = if lane_type.needs_webrtc() {
                     ConnType::WebRTC
@@ -268,6 +379,15 @@ impl DestTransport {
 
                 // Get connection and create/get Lane
                 if let Some(conn) = self.conn_mgr.get_connection(conn_type).await {
+                    let conn = if let Some(route) = reliable.as_deref_mut() {
+                        match self.reliable_wire(conn, route).await {
+                            Ok(conn) => conn,
+                            Err(error) => return DestSendAttempt::failed_pre_send(error),
+                        }
+                    } else {
+                        conn
+                    };
+                    let conn_type = conn.connection_type();
                     let wire_identity = conn.identity();
 
                     // Use original payload_type to create DataLane
@@ -293,6 +413,12 @@ impl DestTransport {
                                 payload_type,
                                 data.len()
                             );
+                            // Commit the ordered route only when a healthy lane
+                            // is about to receive application bytes. Merely
+                            // inspecting an unusable candidate must not pin it.
+                            if let Some(route) = reliable.as_deref_mut() {
+                                route.current = Some(conn.clone());
+                            }
                             // Convert to Bytes (zero-copy)
                             let payload = bytes::Bytes::copy_from_slice(data);
                             if let Some(cell) = progress_sink {
@@ -696,6 +822,10 @@ impl DestTransport {
     /// Subscribe to ready-set changes (used for manager-side cleanup).
     pub(crate) fn watch_ready(&self) -> watch::Receiver<ReadySet> {
         self.conn_mgr.watch_ready()
+    }
+
+    pub(crate) async fn adopt_ready(&self, connection: Arc<dyn WireHandle>) {
+        self.conn_mgr.adopt_ready(connection).await;
     }
 
     /// Whether at least one wire can still become or remain ready.

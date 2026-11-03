@@ -10,6 +10,9 @@ actr gen -l rust
 cargo run
 ```
 
+The generated Cargo workspace includes the RTC/TURN Git overrides required by
+the native runtime until compatible upstream registry releases are available.
+
 ## Files
 
 - `protos/local/local.proto` defines the local bridge service used for route forwarding.

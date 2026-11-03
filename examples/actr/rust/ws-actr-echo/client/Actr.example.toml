@@ -18,8 +18,7 @@ tracing_enabled = false
 tracing_endpoint = "http://localhost:4317"
 tracing_service_name = "ws-echo-client-app"
 
-# The client does not need websocket listen_port (it does not act as a server)
-# The server ws_address is discovered through the signaling service, and the client connects to it directly over WebSocket
+# Both peers connect outbound to the automatically discovered Loran relay.
 
 # ACL configuration - allow responses from the WsEchoService server
 

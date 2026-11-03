@@ -395,7 +395,6 @@ pub fn runtime_context_with_host_transport(
             signature: bytes::Bytes::from(vec![0; 64]),
         },
         None,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         None,
         0,
     )

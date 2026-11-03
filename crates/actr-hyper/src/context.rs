@@ -22,7 +22,6 @@ use futures_util::future::BoxFuture;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::RwLock;
 
 /// RuntimeContext - Runtime's implementation of Context trait
 ///
@@ -56,10 +55,6 @@ pub struct RuntimeContext {
     alias_map: Arc<HashMap<String, ActrType>>,
     /// Strict service fingerprints keyed by complete dependency ActrType.
     dependency_fingerprints: Arc<HashMap<ActrType, String>>,
-    /// Shared map of discovered direct-connect WebSocket URLs, keyed by ActrId.
-    /// Populated by route discovery from the signaling `ws_address_map`,
-    /// then read by `DefaultWireBuilder` when establishing outbound connections.
-    discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
     /// Session state handle — when set, outbound sends dynamically read the
     /// current credential from the snapshot (soft renew propagates automatically).
     /// `None` during transition; will become required.
@@ -116,7 +111,6 @@ impl RuntimeContext {
     /// - `signaling_client`: signaling client used for route discovery
     /// - `credential`: credentials used when calling signaling interfaces
     /// - `actr_lock`: shared packaged `manifest.lock.toml` used for fingerprint lookup (wrapped in `Arc` so context clones stay cheap)
-    /// - `discovered_ws_addresses`: shared map written by `discover_route_candidate` and read by `DefaultWireBuilder`
     #[cfg(any(test, feature = "test-utils"))]
     #[allow(clippy::too_many_arguments)] // Internal API - all parameters are required
     pub(crate) fn new(
@@ -130,7 +124,6 @@ impl RuntimeContext {
         signaling_client: Arc<dyn SignalingClient>,
         credential: AIdCredential,
         actr_lock: Option<Arc<LockFile>>,
-        discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
         session_state: Option<SessionState>,
         context_generation: u64,
     ) -> Self {
@@ -159,7 +152,6 @@ impl RuntimeContext {
             actr_lock,
             alias_map,
             dependency_fingerprints,
-            discovered_ws_addresses,
             session_state,
             context_generation,
         )
@@ -181,7 +173,6 @@ impl RuntimeContext {
         actr_lock: Option<Arc<LockFile>>,
         alias_map: Arc<HashMap<String, ActrType>>,
         dependency_fingerprints: Arc<HashMap<ActrType, String>>,
-        discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
         session_state: Option<SessionState>,
         context_generation: u64,
     ) -> Self {
@@ -198,7 +189,6 @@ impl RuntimeContext {
             actr_lock,
             alias_map,
             dependency_fingerprints,
-            discovered_ws_addresses,
             session_state,
             context_generation,
             reply_deliver: None,
@@ -673,23 +663,6 @@ impl RuntimeContext {
             result.ws_address_map.len(),
         );
 
-        // Populate the shared discovered_ws_addresses map so DefaultWireBuilder
-        // can use direct WebSocket connections instead of WebRTC for peers that
-        // advertise a ws:// address through the signaling server.
-        if !result.ws_address_map.is_empty() {
-            let mut map = self.discovered_ws_addresses.write().await;
-            for entry in result.ws_address_map {
-                if let Some(url) = entry.ws_address {
-                    tracing::debug!(
-                        actor_id = ?entry.candidate_id,
-                        ws_url = %url,
-                        "discovered direct WebSocket address",
-                    );
-                    map.insert(entry.candidate_id, url);
-                }
-            }
-        }
-
         Ok(result.candidates)
     }
 
@@ -847,9 +820,6 @@ pub(crate) struct BootstrapContextBuilder {
     actr_lock: Option<Arc<LockFile>>,
     alias_map: Arc<HashMap<String, ActrType>>,
     dependency_fingerprints: Arc<HashMap<ActrType, String>>,
-    /// Shared map populated by discover_route_candidate; forwarded into each
-    /// RuntimeContext so discovery results are visible to DefaultWireBuilder.
-    discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
     /// Session state handle — when set, built contexts will read credentials
     /// dynamically from the snapshot.
     session_state: Option<SessionState>,
@@ -872,7 +842,6 @@ impl BootstrapContextBuilder {
         actr_lock: Option<Arc<LockFile>>,
         alias_map: Arc<HashMap<String, ActrType>>,
         dependency_fingerprints: Arc<HashMap<ActrType, String>>,
-        discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
         session_state: Option<SessionState>,
         generation: u64,
     ) -> Self {
@@ -885,7 +854,6 @@ impl BootstrapContextBuilder {
             actr_lock,
             alias_map,
             dependency_fingerprints,
-            discovered_ws_addresses,
             session_state,
             generation,
         }
@@ -939,7 +907,6 @@ impl BootstrapContextBuilder {
             self.actr_lock.clone(),
             self.alias_map.clone(),
             self.dependency_fingerprints.clone(),
-            self.discovered_ws_addresses.clone(),
             self.session_state.clone(),
             generation,
         )

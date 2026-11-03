@@ -359,8 +359,8 @@
                 if (!this.swPort) return;
                 transferables && transferables.length ? this.swPort.postMessage(msg, transferables) : this.swPort.postMessage(msg);
             }
-            sendDataChannelPort(peerId, port) {
-                this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, port } }, [port]);
+            sendDataChannelPort(peerId, connectionId, port) {
+                this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, connectionId, port } }, [port]);
             }
             onMessage(handler) { this.handlers.add(handler); return () => this.handlers.delete(handler); }
             _dispatch(msg) { for (const h of this.handlers) { try { h(msg); } catch (e) { console.error('[Bridge]', e); } } }
@@ -391,6 +391,8 @@
                 this.fragmentCounters = new Map();
                 this.reassembly = new Map();
                 this.commandQueues = new Map();
+                this.connectionIdPrefix = `${Date.now()}-${Math.random()}`;
+                this.nextConnectionId = 0;
                 this.turnCred = null;
                 this.FRAGMENT_HEADER_SIZE = 8;
                 this.DC_MAX_MESSAGE_SIZE = 65535;
@@ -477,11 +479,13 @@
                     return s;
                 });
                 const pc = new RTCPeerConnection({ iceServers: servers, iceTransportPolicy: this.icePolicy });
+                const connectionId = `${this.connectionIdPrefix}-${++this.nextConnectionId}`;
                 const dcs = new Map();
                 pc.ondatachannel = e => { const lid = this.labelToId.get(e.channel.label); if (lid !== undefined) this._attach(peerId, lid, e.channel); };
                 pc.onicecandidate = e => { if (e.candidate) this._notify('ice_candidate', { peerId, candidate: e.candidate.toJSON() }); };
                 pc.onconnectionstatechange = () => {
-                    this._notify('connection_state_changed', { peerId, state: pc.connectionState });
+                    if (this.peers.get(peerId)?.connection !== pc) return;
+                    this._notify('connection_state_changed', { peerId, connectionId, state: pc.connectionState });
                     const p = this.peers.get(peerId); if (p) p.state = pc.connectionState;
                     if (pc.connectionState === 'connected') {
                         const rpc = dcs.get(0);
@@ -491,7 +495,7 @@
                         this._dropPendingPeerFrames(peerId);
                     }
                 };
-                this.peers.set(peerId, { peerId, connection: pc, dataChannels: dcs, state: pc.connectionState });
+                this.peers.set(peerId, { peerId, connectionId, connection: pc, dataChannels: dcs, state: pc.connectionState });
             }
             async _setRemote(pid, sdp) { const p = this.peers.get(pid); if (!p) throw new Error('no peer'); await p.connection.setRemoteDescription(sdp); }
             async _setLocal(pid, sdp) { const p = this.peers.get(pid); if (!p) throw new Error('no peer'); await p.connection.setLocalDescription(sdp); }
@@ -590,7 +594,7 @@
                     }
                 };
                 this.rpcPorts.set(pid, mc.port1);
-                this.bridge.sendDataChannelPort(pid, mc.port2);
+                this.bridge.sendDataChannelPort(pid, peer.connectionId, mc.port2);
                 this._flushPendingPortFrames(pid, ch);
             }
             refreshRpcPorts(reason = 'manual_refresh') {
@@ -725,6 +729,7 @@
                 this._dropRpcPort(pid);
                 this.pendingSends.delete(pid);
                 this.pendingPortFrames.delete(pid);
+                this._notify('peer_connection_closed', { peerId: pid, connectionId: p.connectionId });
             }
             _notify(eventType, data) { this.bridge.sendToSW({ type: 'webrtc_event', payload: { eventType, data } }); }
             dispose() { for (const pid of this.peers.keys()) this._close(pid); }

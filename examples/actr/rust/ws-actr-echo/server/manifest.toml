@@ -2,7 +2,7 @@
 name = "WsEchoService"
 publisher = "acme"
 version = "1.0.0"
-description = "WebSocket Echo Server - Echo service over a direct WebSocket transport"
+description = "WebSocket Echo Server - Echo service over the outbound Loran relay transport"
 authors = ["Actr Dev Team"]
 license = "Apache-2.0"
 tags = ["dev", "example", "websocket"]

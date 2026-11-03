@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// TURN service configuration
 ///
@@ -24,6 +25,10 @@ pub struct TurnConfig {
     /// Issuer uses this secret to generate TurnCredential; the TURN server uses the same secret for verification.
     #[serde(default)]
     pub turn_secret: String,
+
+    /// Static long-term credentials. When nonempty, replaces shared-secret mode.
+    #[serde(default)]
+    pub users: BTreeMap<String, String>,
 }
 
 impl Default for TurnConfig {
@@ -32,6 +37,7 @@ impl Default for TurnConfig {
             relay_port_range: "49152-65535".to_string(),
             realm: "actrix.local".to_string(),
             turn_secret: String::new(),
+            users: BTreeMap::new(),
         }
     }
 }
@@ -59,6 +65,13 @@ impl TurnConfig {
         }
 
         Ok((start, end))
+    }
+}
+
+impl TurnConfig {
+    /// Parse the inclusive relay port range before binding any sockets.
+    pub fn relay_ports(&self) -> Result<(u16, u16), String> {
+        self.relay_port_bounds()
     }
 }
 

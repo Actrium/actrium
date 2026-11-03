@@ -33,6 +33,7 @@
 use super::error::{NetworkError, NetworkResult, is_tungstenite_closed};
 use actr_protocol::PayloadType;
 use async_trait::async_trait;
+use futures_util::Sink;
 use futures_util::SinkExt;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -473,10 +474,9 @@ pub(crate) fn decode_fragment_header(
 // ── Type alias ────────────────────────────────────────────────────────────────
 
 /// Type alias for WebSocket sink (shared across all PayloadTypes)
-type WsMessageSink = Box<
-    dyn futures_util::Sink<WsMessage, Error = tokio_tungstenite::tungstenite::Error> + Send + Unpin,
->;
-pub(crate) type WsSink<S = WsMessageSink> = Arc<Mutex<Option<S>>>;
+pub(crate) type WsWrite =
+    std::pin::Pin<Box<dyn Sink<WsMessage, Error = tokio_tungstenite::tungstenite::Error> + Send>>;
+pub(crate) type WsSink<S = WsWrite> = Arc<Mutex<Option<S>>>;
 
 // ── DataLane trait ────────────────────────────────────────────────────────────
 
@@ -889,7 +889,7 @@ impl DataLane for MpscLane {
 ///
 /// All PayloadTypes share the same underlying WebSocket connection,
 /// distinguished by a message header.
-pub(crate) struct WebSocketDataLane<S = WsMessageSink> {
+pub(crate) struct WebSocketDataLane<S = WsWrite> {
     /// Shared Sink (all PayloadTypes share the same WebSocket connection)
     pub(crate) sink: WsSink<S>,
 
@@ -921,6 +921,7 @@ impl<S> std::fmt::Debug for WebSocketDataLane<S> {
 }
 
 impl<S> WebSocketDataLane<S> {
+    #[cfg(test)]
     pub(crate) fn with_session(mut self, session: super::SecureCell) -> Self {
         self.session = Some(session);
         self

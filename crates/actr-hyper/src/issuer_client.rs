@@ -215,7 +215,7 @@ impl RealmClientKey {
     }
 
     /// A freshly signed proof for `body` of an `op` request on `realm`.
-    fn proof(&self, op: ProofOp, realm: &str, body: &[u8]) -> HyperResult<String> {
+    pub(crate) fn proof(&self, op: ProofOp, realm: &str, body: &[u8]) -> HyperResult<String> {
         use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
         if realm != self.realm {
             return Err(HyperError::Config("Realm client key realm mismatch".into()));
@@ -496,6 +496,7 @@ impl IssuerClient {
             ProofOp::Register => "register",
             ProofOp::Reissue => "reissue",
             ProofOp::Renew => "renew",
+            ProofOp::RelayIdentity => "relay-identity",
         };
         let base = self.endpoint.to_string().trim_end_matches('/').to_string();
         let url = format!("{base}/{path}");

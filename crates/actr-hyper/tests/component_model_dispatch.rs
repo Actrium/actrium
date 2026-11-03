@@ -411,11 +411,23 @@ async fn component_model_cross_instance_parallelism() {
         .await
         .expect("instantiate B");
 
-    // Each instance gets a bridge that sleeps 50 ms before responding —
-    // if the two dispatches are truly concurrent the wall-clock total is
-    // ~50 ms, not ~100 ms.
-    let (bridge_a, ca) = doubling_bridge(Some(Duration::from_millis(50)));
-    let (bridge_b, cb) = doubling_bridge(Some(Duration::from_millis(50)));
+    // Both host calls must be in flight before either can complete. This
+    // checks overlap without depending on scheduler timing under CI load.
+    fn rendezvous_bridge(inner: HostAbiFn, barrier: Arc<tokio::sync::Barrier>) -> HostAbiFn {
+        Arc::new(move |operation| {
+            let inner = inner.clone();
+            let barrier = barrier.clone();
+            Box::pin(async move {
+                barrier.wait().await;
+                inner(operation).await
+            })
+        })
+    }
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let (bridge_a, ca) = doubling_bridge(None);
+    let (bridge_b, cb) = doubling_bridge(None);
+    let bridge_a = rendezvous_bridge(bridge_a, barrier.clone());
+    let bridge_b = rendezvous_bridge(bridge_b, barrier);
 
     let req_a = make_envelope("test/double", 7i32.to_le_bytes().to_vec());
     let req_b = make_envelope("test/double", 11i32.to_le_bytes().to_vec());
@@ -423,12 +435,14 @@ async fn component_model_cross_instance_parallelism() {
     let ctx_a = test_ctx();
     let ctx_b = test_ctx();
 
-    let t0 = Instant::now();
-    let (ra, rb) = tokio::join!(
-        async { wl_a.handle(&req_a, ctx_a, &bridge_a).await },
-        async { wl_b.handle(&req_b, ctx_b, &bridge_b).await },
-    );
-    let elapsed = t0.elapsed();
+    let (ra, rb) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            async { wl_a.handle(&req_a, ctx_a, &bridge_a).await },
+            async { wl_b.handle(&req_b, ctx_b, &bridge_b).await },
+        )
+    })
+    .await
+    .expect("cross-instance dispatches must reach the host concurrently");
 
     let reply_a = ra.expect("dispatch A should succeed");
     let reply_b = rb.expect("dispatch B should succeed");
@@ -440,16 +454,6 @@ async fn component_model_cross_instance_parallelism() {
 
     assert_eq!(ca.load(Ordering::SeqCst), 1, "bridge A must be called once");
     assert_eq!(cb.load(Ordering::SeqCst), 1, "bridge B must be called once");
-
-    // 50 ms sleep per bridge + overhead; serial dispatches would be ≥100 ms.
-    // Use 90 ms as a soft ceiling to tolerate scheduler jitter but still
-    // catch genuine serialization.
-    let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-    assert!(
-        elapsed_ms < 90.0,
-        "cross-instance dispatches must run concurrently; saw {elapsed_ms:.1} ms \
-         (two 50 ms host sleeps, serial would be ~100 ms)"
-    );
 }
 
 // ─── Test 4 — host executor free during guest await ─────────────────────────

@@ -372,13 +372,15 @@ impl WebContext for RuntimeContext {
             data.len()
         );
 
-        // Prefix the payload with `stream_id`.
-        // Format: [stream_id_len(4) | stream_id(N) | data(M)]
-        let stream_id_bytes = stream_id.as_bytes();
-        let mut payload = Vec::with_capacity(4 + stream_id_bytes.len() + data.len());
-        payload.extend_from_slice(&(stream_id_bytes.len() as u32).to_be_bytes());
-        payload.extend_from_slice(stream_id_bytes);
-        payload.extend_from_slice(&data);
+        // Match the native DataChunk wire format on relay and RTC alike.
+        // The historical bytes-only web API has no caller-defined sequence.
+        let payload = actr_protocol::DataChunk {
+            stream_id: stream_id.to_owned(),
+            sequence: 0,
+            payload: data,
+            ..Default::default()
+        }
+        .encode_to_vec();
 
         // Send fast-path data through the gate (defaulting to STREAM_RELIABLE).
         self.gate

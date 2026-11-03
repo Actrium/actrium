@@ -362,6 +362,42 @@ async fn close_all_interrupts_an_inflight_connection_attempt() {
 }
 
 #[tokio::test]
+async fn duplicate_candidate_does_not_replace_an_inflight_wire() {
+    let pool = WirePool::new(fast_retry());
+    let first = Arc::new(CommitRaceWire {
+        started: tokio::sync::Notify::new(),
+        release_connect: tokio::sync::Barrier::new(2),
+        close_calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    pool.add_connection(first.clone()).await;
+    tokio::time::timeout(Duration::from_secs(1), first.started.notified())
+        .await
+        .expect("first connection attempt should start");
+
+    let duplicate = Arc::new(CountingFailWire {
+        attempts: std::sync::atomic::AtomicUsize::new(0),
+        changed: tokio::sync::Notify::new(),
+    });
+    pool.add_connection(duplicate.clone()).await;
+    first.release_connect.wait().await;
+    let expected: Arc<dyn WireHandle> = first.clone();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let Some(current) = pool.get_connection(ConnType::WebSocket).await {
+                assert!(Arc::ptr_eq(&current, &expected));
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("original wire should become ready");
+    assert_eq!(duplicate.attempts.load(Ordering::SeqCst), 0);
+    pool.close_all().await;
+    assert_eq!(first.close_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn close_all_wins_compare_and_commit_after_connect_succeeds() {
     let pool = Arc::new(WirePool::new(RetryConfig::default()));
     let wire = Arc::new(CommitRaceWire {

@@ -1138,7 +1138,6 @@ impl TestPeer {
             self.signaling_client.clone(),
             self.credential.clone(),
             None,
-            Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             None,
             0,
         )
@@ -1658,8 +1657,6 @@ impl TestHarness {
             std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
         let wire_config = DefaultWireBuilderConfig {
             enable_websocket: false,
-            pending_requests: Some(pending.clone()),
-            ..Default::default()
         };
         let wire_builder = DefaultWireBuilder::new(wire_config).with_rtc_manager(manager.clone());
         let transport_manager = Arc::new(PeerTransport::new(id.clone(), Arc::new(wire_builder)));
