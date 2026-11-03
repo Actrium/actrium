@@ -2186,9 +2186,14 @@ impl WebSocketSignalingClient {
             self.clear_idempotent_retryable();
         }
 
-        {
+        // Retire the old socket's availability before dropping reply waiters.
+        // A dropped idempotent waiter can run immediately on another worker;
+        // it must wait for the replacement instead of seeing the old socket
+        // as connected and spending its only retry during teardown.
+        let was_connected = {
             let _commit_guard = self.lock_connection_commit();
-            if self.connected.load(Ordering::Acquire) {
+            let was_connected = self.connected.swap(false, Ordering::AcqRel);
+            if was_connected {
                 *self
                     .socket_state
                     .lock()
@@ -2197,13 +2202,13 @@ impl WebSocketSignalingClient {
                         generation: generation_before,
                     };
             }
-        }
+            was_connected
+        };
 
         self.drop_pending_replies("signaling disconnect").await;
         self.drop_pending_pongs("signaling disconnect").await;
-        let was_connected = {
+        {
             let _commit_guard = self.lock_connection_commit();
-            let was_connected = self.connected.swap(false, Ordering::AcqRel);
             *self
                 .socket_state
                 .lock()
@@ -2211,8 +2216,7 @@ impl WebSocketSignalingClient {
                 SignalingSocketState::Disconnected {
                     last_generation: was_connected.then_some(generation_before),
                 };
-            was_connected
-        };
+        }
 
         // Stop background tasks before taking the WebSocket sink/stream locks.
         // A ping or receiver task can be inside a socket operation while holding

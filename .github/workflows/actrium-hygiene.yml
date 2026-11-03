@@ -16,6 +16,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Test product-name policy
+        run: python3 .github/scripts/check_product_names_test.py
+
       - name: Prevent retired product names from returning
         run: python3 scripts/actrium/check-product-names.py
 

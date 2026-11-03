@@ -62,7 +62,7 @@ The terms below have one fixed meaning in this RFC:
 | **Peer wiring** | Runtime establishment and teardown of Peer edges by the SoakController through the peer-management API; the wired graph is recorded in `plan.json`. |
 | **Lease** | The exclusive assignment of a pool subset to one run; disjoint leases MAY run concurrently. |
 | **ActrNode** | The production Actr node hosted inside an Actr Soak Endpoint. |
-| **Loran** | The current name in this repository for the signaling/STUN/TURN/AIS service suite historically called Loran in related actr issues; it is not an endpoint or test controller. |
+| **Loran** | The current name in this repository for the signaling/STUN/TURN/AIS service suite historically called Actrix in related actr issues; it is not an endpoint or test controller. |
 | **Soak Dashboard** | The UI/API and persistent run store. It owns manual test runs and embeds the SoakController. |
 | **SoakController** | The deterministic planner/executor that expands a seed into actions, calls endpoints, collects evidence, and invokes the Result Evaluator. |
 | **Endpoint Control API** | Test-namespace HTTP adapter exposed by each Actr Soak Endpoint. It accepts only predefined, authenticated actions and observations. |

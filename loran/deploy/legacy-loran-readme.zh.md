@@ -205,7 +205,7 @@ TODO: GitHub Release downloads currently verify SHA-256 integrity only. They do 
 | 变量 | 作用 |
 |------|------|
 | `GITHUB_TOKEN` | 私有仓库下载用，仅需 Contents Read 权限。 |
-| `LORAN_REPOSITORY` | GitHub owner/repo，默认 `Actrium/actr`。 |
+| `LORAN_REPOSITORY` | GitHub owner/repo，默认 `Actrium/actrium`。 |
 | `LORAN_HEALTH_URL` | `update`/`rollback` 重启后的 HTTP readiness 探测地址，可用 `--health-url` 覆盖。 |
 | `LORAN_HEALTH_WAIT_SECONDS` | `update`/`rollback` 重启后等待 ready 的秒数，默认 5，最大 300。 |
 | `LORAN_ALLOW_LEGACY_INSTALL_SH` | 设为 `1` 才允许执行 legacy `install.sh`。默认拒绝运行。 |
