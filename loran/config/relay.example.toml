@@ -1,0 +1,51 @@
+# Standalone relay using the regular Loran executable (legacy binary: actrix).
+# Local development uses WS. For production use env="prod", cert/key and WSS.
+name = "loran-relay"
+env = "dev"
+enable = 32 # Relay only. Use 38 to also run UDP STUN/TURN.
+location_tag = "standalone"
+
+[bind.http]
+ip = "127.0.0.1"
+port = 8080
+domain_name = "localhost"
+advertised_ip = "127.0.0.1"
+# cert = "/etc/loran/tls/fullchain.pem"
+# key = "/etc/loran/tls/privkey.pem"
+
+[control.admin_ui]
+enabled = false
+
+[control.grpc_api]
+enabled = false
+
+[relay]
+auth = "static"
+# Omit public_url for same-origin /relay/ws. Set this on the trusted signaling
+# deployment to advertise a separate relay host (even with its bit 32 disabled).
+# public_url = "wss://relay.example.org/relay/ws"
+
+# Provision different random tokens externally. These example values are public.
+[[relay.static_credentials]]
+endpoint = "endpoint-a"
+namespace = "example"
+token = "replace-with-a-random-token-for-endpoint-a"
+
+[[relay.static_credentials]]
+endpoint = "endpoint-b"
+namespace = "example"
+token = "replace-with-a-different-token-for-endpoint-b"
+
+[relay.limits]
+max_connections = 8192
+max_channels_per_endpoint = 256
+max_frame_bytes = 8388672
+queue_messages = 256
+queue_bytes = 16777216
+authentication_timeout_secs = 10
+connect_timeout_secs = 10
+write_timeout_secs = 5
+heartbeat_interval_secs = 20
+heartbeat_timeout_secs = 60
+# Optional browser Origin allowlist. Native clients may omit Origin.
+# allowed_origins = ["https://app.example.org"]

@@ -5,9 +5,6 @@
 //! ~750-line async runtime bring-up). Existing integration tests bypass Node
 //! and construct coordinators directly, so `start` was previously uncovered.
 
-#[path = "support/direct_websocket.rs"]
-mod direct_websocket;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -122,9 +119,6 @@ fn runtime_config_with_type(
         mailbox_path: None,
         scripts: HashMap::new(),
         webrtc: actr_config::WebRtcConfig::default(),
-        websocket_listen_port: None,
-        websocket_security: direct_websocket::tls_options(),
-        websocket_advertised_host: None,
         observability: actr_config::ObservabilityConfig {
             filter_level: "warn".to_string(),
             tracing_enabled: false,
@@ -237,9 +231,8 @@ async fn attached_node_exposes_gated_network_event_constructor() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn linked_node_advertises_websocket_listen_port() {
-    // Setting websocket_listen_port makes `start` build a wss:// address and
-    // register it with the signaling server, and binds a WebSocketServer.
+async fn linked_node_starts_without_peer_listener_configuration() {
+    // Peer data channels require only outbound connections.
     let mut server = TestSignalingServer::start().await.expect("server start");
     let dir = TempDir::new().unwrap();
 
@@ -250,10 +243,7 @@ async fn linked_node_advertises_websocket_listen_port() {
     .await
     .unwrap();
 
-    let mut cfg = runtime_config(&dir, &server, "WsAdvertised");
-    // Advertise a concrete port, as required by the direct WebSocket policy.
-    cfg.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
-    cfg.websocket_advertised_host = Some("127.0.0.1".to_string());
+    let cfg = runtime_config(&dir, &server, "OutboundOnly");
 
     let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let registered = Node::from_hyper(hyper, cfg)
@@ -442,9 +432,7 @@ async fn two_nodes_connect_and_exchange_rpc() {
     ))
     .await
     .unwrap();
-    let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
-    cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
+    let cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
     let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(EchoWorkload)
@@ -512,9 +500,7 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
     ))
     .await
     .unwrap();
-    let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
-    cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
+    let cfg_b = runtime_config_with_type(&dir_b, &server, "EchoNode", echo_type.clone());
     let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(EchoWorkload)
@@ -579,10 +565,8 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_nodes_connect_over_webrtc() {
-    // Without a WebSocket listen port advertised by the echo node, the caller
-    // must establish the connection over WebRTC — drives the coordinator's
-    // WebRTC connection-creation path (offer/answer/ICE) rather than the
-    // WebSocket direct-connect fast path.
+    // This fixture has no relay service, so the caller must use WebRTC.
+    // Exercise the coordinator's offer/answer/ICE connection path.
     let mut server = TestSignalingServer::start().await.expect("server start");
     let dir_a = TempDir::new().unwrap();
     let dir_b = TempDir::new().unwrap();
@@ -593,7 +577,7 @@ async fn two_nodes_connect_over_webrtc() {
         version: "1.0.0".to_string(),
     };
 
-    // Echo node with NO websocket_listen_port → forces WebRTC.
+    // Echo node on a WebRTC-only fixture.
     let hyper_b = Hyper::new(HyperConfig::new(
         dir_b.path(),
         Arc::new(StaticTrust::dev_only()),
@@ -1045,9 +1029,7 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
     ))
     .await
     .unwrap();
-    let mut cfg_b = runtime_config_with_type(&dir_b, &server, "EchoDiscNode", echo_type.clone());
-    cfg_b.websocket_listen_port = Some(0) /* ephemeral: the bound port is advertised */;
-    cfg_b.websocket_advertised_host = Some("127.0.0.1".to_string());
+    let cfg_b = runtime_config_with_type(&dir_b, &server, "EchoDiscNode", echo_type.clone());
     let issuer = format!("http://127.0.0.1:{}/issuer", server.port());
     let echo_actr = Node::from_hyper(hyper_b, cfg_b)
         .link(EchoWorkload)
@@ -1131,5 +1113,331 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
 
     caller_actr.shutdown();
     caller_actr.wait_for_shutdown().await;
+    server.shutdown().await;
+}
+
+struct RelayObserver(tokio::sync::mpsc::UnboundedSender<ActrId>);
+struct RelayObserverDispatcher;
+
+#[async_trait]
+impl Workload for RelayObserver {
+    type Dispatcher = RelayObserverDispatcher;
+    async fn on_websocket_connected<C: Context>(
+        &self,
+        _ctx: &C,
+        event: &actr_framework::PeerEvent,
+    ) {
+        let _ = self.0.send(event.peer.clone());
+    }
+}
+#[async_trait]
+impl MessageDispatcher for RelayObserverDispatcher {
+    type Workload = RelayObserver;
+    async fn dispatch<C: Context>(
+        _workload: &RelayObserver,
+        _envelope: RpcEnvelope,
+        _ctx: &C,
+    ) -> actr_protocol::ActorResult<Bytes> {
+        Ok(Bytes::new())
+    }
+}
+
+async fn relay_node(
+    dir: &TempDir,
+    server: &TestSignalingServer,
+    name: &str,
+    ready: tokio::sync::mpsc::UnboundedSender<ActrId>,
+) -> ActrRef {
+    let hyper = Hyper::new(HyperConfig::new(
+        dir.path(),
+        Arc::new(StaticTrust::dev_only()),
+    ))
+    .await
+    .unwrap();
+    Node::from_hyper(hyper, runtime_config(dir, server, name))
+        .link(EchoWorkload)
+        .await
+        .unwrap()
+        .with_hook_observer(RelayObserver(ready))
+        .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
+        .await
+        .unwrap()
+        .start()
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relay_only_rpc_streams_and_warm_reconnection_need_no_peer_listener() {
+    let mut server = TestSignalingServer::start_with_relay().await.unwrap();
+    // Registration and pings continue, but no offer/answer/ICE can reach a peer.
+    server.pause_forwarding();
+    let dir_a = TempDir::new().unwrap();
+    let dir_b = TempDir::new().unwrap();
+    let (ready_a, mut events_a) = tokio::sync::mpsc::unbounded_channel();
+    let (ready_b, mut events_b) = tokio::sync::mpsc::unbounded_channel();
+    let a = relay_node(&dir_a, &server, "RelayA", ready_a).await;
+    let wait = std::time::Duration::from_secs(15);
+    tokio::time::timeout(wait, async {
+        while server.relay_connection_count() != 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("first relay socket authenticates");
+    // The second certificate must expire later than the first node's cached
+    // issuer key lease, as happens when peers start at different times.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let b = relay_node(&dir_b, &server, "RelayB", ready_b).await;
+    tokio::time::timeout(wait, async {
+        while server.relay_connection_count() != 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("both outbound relay sockets authenticate");
+    assert_echo_rpc(&a, b.actor_id(), b"relay request and response").await;
+    assert_echo_rpc(&b, a.actor_id(), b"reverse RPC").await;
+    assert_eq!(
+        tokio::time::timeout(wait, events_a.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        b.actor_id()
+    );
+    assert_eq!(
+        tokio::time::timeout(wait, events_b.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        a.actor_id()
+    );
+
+    let ctx_a = a.app_context().await;
+    let ctx_b = b.app_context().await;
+    let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
+    for ctx in [&ctx_a, &ctx_b] {
+        let chunks = chunks.clone();
+        ctx.register_stream("relay-stream".into(), move |chunk, peer| {
+            let chunks = chunks.clone();
+            Box::pin(async move {
+                chunks.send((chunk, peer)).unwrap();
+                Ok(())
+            })
+        })
+        .await
+        .unwrap();
+    }
+    for (ctx, target, source) in [
+        (&ctx_a, b.actor_id(), a.actor_id()),
+        (&ctx_b, a.actor_id(), b.actor_id()),
+    ] {
+        for (sequence, lane) in [
+            (1, PayloadType::StreamReliable),
+            (2, PayloadType::StreamLatencyFirst),
+        ] {
+            let payload = Bytes::from(vec![sequence as u8; 64 * 1024]);
+            ctx.send_data_chunk(
+                &Dest::Peer(target.clone()),
+                actr_protocol::DataChunk {
+                    stream_id: "relay-stream".into(),
+                    sequence,
+                    payload: payload.clone(),
+                    ..Default::default()
+                },
+                lane,
+            )
+            .await
+            .unwrap();
+            let (chunk, sender) = tokio::time::timeout(wait, received.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(sender, source);
+            assert_eq!(chunk.payload, payload);
+            assert_eq!(chunk.sequence, sequence);
+        }
+    }
+
+    // Unexpired certified keys survive a transient AIS outage. Reconnection
+    // still uses new Noise ephemeral keys and requires mutual confirmation.
+    server.pause_relay_enrollment();
+    server.disconnect_relay_connections();
+    // Wait for actual peer-acknowledged replacement sessions, not socket OPEN.
+    tokio::time::timeout(wait, events_a.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(wait, events_b.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_echo_rpc(&a, b.actor_id(), b"after relay reconnect").await;
+    assert_echo_rpc(&b, a.actor_id(), b"reverse after reconnect").await;
+    for node in [&a, &b] {
+        node.shutdown();
+        tokio::time::timeout(wait, node.wait_for_shutdown())
+            .await
+            .unwrap();
+    }
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relay_discovery_recovers_after_being_enabled_without_restarting_nodes() {
+    let mut server = TestSignalingServer::start_with_relay().await.unwrap();
+    server.set_relay_discovery_enabled(false);
+    server.pause_forwarding();
+    let dir_a = TempDir::new().unwrap();
+    let dir_b = TempDir::new().unwrap();
+    let (ready_a, _) = tokio::sync::mpsc::unbounded_channel();
+    let (ready_b, _) = tokio::sync::mpsc::unbounded_channel();
+    let a = relay_node(&dir_a, &server, "DiscoveryA", ready_a).await;
+    let b = relay_node(&dir_b, &server, "DiscoveryB", ready_b).await;
+    let deadline = std::time::Duration::from_secs(15);
+    tokio::time::timeout(deadline, async {
+        while server.relay_discovery_requests() < 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("both nodes must discover the disabled relay");
+    assert_eq!(server.relay_connection_count(), 0);
+    server.set_relay_discovery_enabled(true);
+    tokio::time::timeout(deadline, async {
+        while server.relay_connection_count() != 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("both nodes must reconnect after the relay is enabled");
+    assert_echo_rpc(&a, b.actor_id(), b"relay became available").await;
+
+    let requests = server.relay_discovery_requests();
+    server.set_relay_discovery_enabled(false);
+    server.disconnect_relay_connections();
+    tokio::time::timeout(deadline, async {
+        while server.relay_connection_count() != 0
+            || server.relay_discovery_requests() < requests + 2
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("nodes must observe the disabled relay after disconnecting");
+    server.set_relay_discovery_enabled(true);
+    tokio::time::timeout(deadline, async {
+        while server.relay_connection_count() != 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("nodes must rediscover the re-enabled relay");
+    assert_echo_rpc(&b, a.actor_id(), b"relay available again").await;
+    for node in [&a, &b] {
+        node.shutdown();
+        tokio::time::timeout(deadline, node.wait_for_shutdown())
+            .await
+            .unwrap();
+    }
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relay_upgrades_to_real_direct_rtc_with_ordered_streams_and_survives_relay_loss() {
+    let mut server = TestSignalingServer::start_with_relay().await.unwrap();
+    server.delay_ice_candidates_for(std::time::Duration::from_secs(2));
+    let dir_a = TempDir::new().unwrap();
+    let dir_b = TempDir::new().unwrap();
+    let (ready_a, _events_a) = tokio::sync::mpsc::unbounded_channel();
+    let (ready_b, _events_b) = tokio::sync::mpsc::unbounded_channel();
+    let a = relay_node(&dir_a, &server, "UpgradeA", ready_a).await;
+    let b = relay_node(&dir_b, &server, "UpgradeB", ready_b).await;
+    let deadline = std::time::Duration::from_secs(15);
+    tokio::time::timeout(deadline, async {
+        while server.relay_connection_count() != 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let before = server.relay_frame_count();
+    assert_echo_rpc(&a, b.actor_id(), b"relay wins while ICE is delayed").await;
+    assert!(server.relay_frame_count() > before);
+    let ctx = a.app_context().await;
+    let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
+    b.app_context()
+        .await
+        .register_stream("upgrade-stream".into(), move |chunk, _| {
+            let chunks = chunks.clone();
+            Box::pin(async move {
+                chunks.send(chunk.sequence).unwrap();
+                Ok(())
+            })
+        })
+        .await
+        .unwrap();
+    ctx.send_data_chunk(
+        &Dest::Peer(b.actor_id()),
+        actr_protocol::DataChunk {
+            stream_id: "upgrade-stream".into(),
+            sequence: 0,
+            payload: Bytes::from_static(b"old relay route"),
+            ..Default::default()
+        },
+        PayloadType::StreamReliable,
+    )
+    .await
+    .unwrap();
+    tokio::time::timeout(deadline, async {
+        for (node, peer) in [(&a, b.actor_id()), (&b, a.actor_id())] {
+            loop {
+                if node.get_rtc_peer_status(&peer).await.is_some_and(|state| {
+                    state.sendable
+                        && state.network_path == actr_framework::WebRtcNetworkPath::Direct
+                }) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }
+    })
+    .await
+    .expect("both real RTC selected pairs become direct");
+    for sequence in 1..32 {
+        ctx.send_data_chunk(
+            &Dest::Peer(b.actor_id()),
+            actr_protocol::DataChunk {
+                stream_id: "upgrade-stream".into(),
+                sequence,
+                payload: Bytes::from(vec![sequence as u8; 64 * 1024]),
+                ..Default::default()
+            },
+            PayloadType::StreamReliable,
+        )
+        .await
+        .unwrap();
+    }
+    for sequence in 0..32 {
+        assert_eq!(
+            tokio::time::timeout(deadline, received.recv())
+                .await
+                .unwrap(),
+            Some(sequence)
+        );
+    }
+    // Count actual server frames to prove established RPCs use direct RTC.
+    let frames = server.relay_frame_count();
+    assert_echo_rpc(&a, b.actor_id(), b"direct RPC").await;
+    assert_echo_rpc(&b, a.actor_id(), b"reverse direct RPC").await;
+    assert_eq!(server.relay_frame_count(), frames);
+    server.disconnect_relay_connections();
+    assert_echo_rpc(&a, b.actor_id(), b"direct survives relay loss").await;
+    for node in [&a, &b] {
+        node.shutdown();
+        tokio::time::timeout(deadline, node.wait_for_shutdown())
+            .await
+            .unwrap();
+    }
     server.shutdown().await;
 }

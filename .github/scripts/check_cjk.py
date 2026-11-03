@@ -80,7 +80,7 @@ def _non_english_characters(text: str) -> list[str]:
     symbols.
     """
     emoji_format_characters = {"\u2139", "\ufe0e", "\ufe0f", "\u20e3"}
-    mathematical_letter_symbols = {"\u00b5", "\u0192"}
+    mathematical_letter_symbols = {"\u00b5", "\u0192", "\u03bc"}
     allowed_non_language_characters = emoji_format_characters | mathematical_letter_symbols
     return [
         char

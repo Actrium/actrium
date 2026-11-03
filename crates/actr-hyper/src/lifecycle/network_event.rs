@@ -2199,6 +2199,7 @@ pub async fn run_network_event_reconciler_with_status(
 /// input channel (see [`supervisor_internal_channel`]) so a [`SupervisorFactSink`]
 /// over the same sender can feed normalized signaling and session facts into the
 /// supervisor's policy-ordered input queue.
+#[cfg(any(test, feature = "test-utils"))]
 pub(crate) async fn run_network_event_reconciler_with_channel(
     event_rx: mpsc::Receiver<NetworkEventRequest>,
     channel: SupervisorInternalChannel,

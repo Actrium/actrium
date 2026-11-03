@@ -219,7 +219,7 @@ impl ApplicationLauncher {
         process::ProcessManager::tighten_umask();
 
         // ensure sqlite_path directory exists
-        if !config.sqlite_path.exists() {
+        if config.requires_database() && !config.sqlite_path.exists() {
             std::fs::create_dir_all(&config.sqlite_path).with_context(|| {
                 format!(
                     "Failed to create SQLite data directory: {}",
@@ -252,12 +252,13 @@ impl ApplicationLauncher {
     ) -> Result<()> {
         platform::recording::info!("Starting WebRTC auxiliary server cluster");
 
-        // First initialize the database,
-        // ensure it is ready before any service that may access it starts
-        platform::storage::db::set_db_path(&config.sqlite_path)
-            .await
-            .map_err(|e| Error::custom(format!("Database initialization failed: {e}")))?;
-        platform::recording::info!("Database initialization complete");
+        // Initialize persistence only when the configured service stack uses it.
+        if config.requires_database() {
+            platform::storage::db::set_db_path(&config.sqlite_path)
+                .await
+                .map_err(|e| Error::custom(format!("Database initialization failed: {e}")))?;
+            platform::recording::info!("Database initialization complete");
+        }
 
         // Initialize the global shutdown channel (shared by all services)
         let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(10);
@@ -278,15 +279,17 @@ impl ApplicationLauncher {
         // Hand the data directory to the target user (and tighten modes) BEFORE
         // dropping privileges: files created as root would otherwise be
         // unreadable to the dropped-to user, and any left world-readable.
-        process::ProcessManager::secure_data_dir(
-            &config.sqlite_path,
-            user.as_deref(),
-            group.as_deref(),
-        )
-        .map_err(|error| {
-            platform::recording::error!("Failed to secure data directory: {}", error);
-            anyhow::anyhow!("refusing to continue after data-dir hardening failed: {error}")
-        })?;
+        if config.requires_database() {
+            process::ProcessManager::secure_data_dir(
+                &config.sqlite_path,
+                user.as_deref(),
+                group.as_deref(),
+            )
+            .map_err(|error| {
+                platform::recording::error!("Failed to secure data directory: {}", error);
+                anyhow::anyhow!("refusing to continue after data-dir hardening failed: {error}")
+            })?;
+        }
 
         // Switch user/group after ports are bound.
         platform::recording::info!("Services started; preparing to drop privileges...");
@@ -470,14 +473,26 @@ impl ApplicationLauncher {
     }
 }
 
-/// Set up the Ctrl-C signal handler
+/// Set up graceful process shutdown signals.
 async fn setup_ctrl_c_handler(shutdown_tx: tokio::sync::broadcast::Sender<()>) {
     tokio::spawn(async move {
-        if let Err(e) = tokio::signal::ctrl_c().await {
-            platform::recording::error!("Failed to listen for Ctrl-C signal: {}", e);
+        #[cfg(unix)]
+        let result = async {
+            let mut terminate =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+            tokio::select! {
+                result = tokio::signal::ctrl_c() => result,
+                _ = terminate.recv() => Ok(()),
+            }
+        }
+        .await;
+        #[cfg(not(unix))]
+        let result = tokio::signal::ctrl_c().await;
+        if let Err(e) = result {
+            platform::recording::error!("Failed to listen for shutdown signal: {}", e);
             return;
         }
-        platform::recording::info!("Received Ctrl-C signal, starting graceful shutdown...");
+        platform::recording::info!("Shutdown signal received, starting graceful shutdown...");
         let _ = shutdown_tx.send(());
     });
 }

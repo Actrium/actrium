@@ -12,7 +12,11 @@ name = "mock-actrix"
 path = "src/bin/mock_actrix.rs"
 
 [dependencies]
+actr-relay-security = { path = "../actr-relay-security", version = "0.10.5" }
 actr-protocol = { workspace = true }
+loran-relay = { path = "../loran-relay", version = "0.10.7" }
+loran-relay-protocol = { path = "../loran-relay-protocol", version = "0.10.7" }
+async-trait.workspace = true
 
 tokio = { workspace = true }
 tokio-util = { version = "0.7", features = ["rt"] }

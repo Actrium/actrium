@@ -64,8 +64,9 @@ def test_unmarked_non_ascii_latin_text_is_rejected() -> None:
 
 
 def test_emoji_and_unit_symbols_are_not_languages() -> None:
-    content = "# Status\n\nInformation \u2139\ufe0f, key 1\ufe0f\u20e3, 50 \u00b5s\n"
+    content = "# Status\n\nInformation \u2139\ufe0f, key 1\ufe0f\u20e3, 50 \u00b5s, G.711 \u03bc-law\n"
     assert not _files(_check({"README.md": content}))
+    assert _files(_check({"README.md": "\u03bc\u03bf\u03bd\u03ac\u03b4\u03b1"}))
 
 
 def test_zh_markdown_is_localized() -> None:

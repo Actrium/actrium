@@ -25,3 +25,15 @@ prost-types = "0.14"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
+
+# Cargo applies overrides only from the consumer's workspace root.
+[workspace]
+
+[patch.crates-io]
+webrtc = { git = "https://github.com/webrtc-rs/webrtc", rev = "8ea6e2a69b0c4c97f38b0e81e5a77e1c066f3757" }
+rtc = { git = "https://github.com/webrtc-rs/webrtc", rev = "8ea6e2a69b0c4c97f38b0e81e5a77e1c066f3757" }
+rtc-turn = { git = "https://github.com/webrtc-rs/webrtc", rev = "8ea6e2a69b0c4c97f38b0e81e5a77e1c066f3757" }
+rtc-rtp = { git = "https://github.com/webrtc-rs/webrtc", rev = "8ea6e2a69b0c4c97f38b0e81e5a77e1c066f3757" }
+turn = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }
+webrtc-util = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }
+stun = { git = "https://github.com/webrtc-rs/webrtc", rev = "c229349e67cc235e6737bbf92bd7dd48fdc135fa" }

@@ -29,6 +29,7 @@ enum ResourceType {
   ISSUER = 4;
   SIGNER = 5;
   PUBLISHER_REGISTRY = 6;
+  RELAY = 7;
 }
 
 // ============================================================================

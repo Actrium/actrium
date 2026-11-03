@@ -21,6 +21,35 @@ fn test_template_context() {
 }
 
 #[test]
+fn rust_app_template_uses_the_workspace_upstream_overrides() {
+    let temp_dir = TempDir::new().unwrap();
+    let template = ProjectTemplate::new(ProjectTemplateName::Echo, SupportedLanguage::Rust);
+    let context = TemplateContext::new("demo", "ws://localhost:8080", "acme", "echo", false);
+    template.generate(temp_dir.path(), &context).unwrap();
+
+    let generated: toml::Value =
+        toml::from_str(&std::fs::read_to_string(temp_dir.path().join("Cargo.toml")).unwrap())
+            .unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
+    let workspace: toml::Value = toml::from_str(&std::fs::read_to_string(root).unwrap()).unwrap();
+    assert!(generated.get("workspace").is_some());
+    let overrides = &generated["patch"]["crates-io"];
+    let dependencies = &workspace["workspace"]["dependencies"];
+    for (package, dependency) in [
+        ("webrtc", "webrtc"),
+        ("rtc", "rtc"),
+        ("rtc-turn", "rtc"),
+        ("rtc-rtp", "rtc-rtp"),
+        ("turn", "turn_crate"),
+        ("stun", "webrtc-stun"),
+        ("webrtc-util", "webrtc-util"),
+    ] {
+        assert_eq!(overrides[package]["git"], dependencies[dependency]["git"]);
+        assert_eq!(overrides[package]["rev"], dependencies[dependency]["rev"]);
+    }
+}
+
+#[test]
 fn test_rust_cargo_templates_use_cli_version() {
     fn render_cargo_toml(template_name: ProjectTemplateName, is_service: bool) -> String {
         let temp_dir = TempDir::new().unwrap();

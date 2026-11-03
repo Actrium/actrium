@@ -19,11 +19,13 @@ on:
       - ".github/workflows/release-actrsharp.yml"
       - "scripts/actr/release-actr-cli.sh"
       - "scripts/actr/release-train.sh"
+      - "scripts/actr/package-release-crates.py"
       - "scripts/actr/generate-changelog.py"
       - "scripts/actr/merge-release-pr.py"
       - "scripts/actr/tests/test_merge_release_pr.py"
       - "scripts/actr/tests/test_generate_changelog.py"
       - "scripts/actr/tests/test_release_notes_publish.py"
+      - "scripts/actr/tests/test_package_release_crates.py"
       - "scripts/actr/detect-pre-release-label.sh"
       - "scripts/actr/tests/release-asset-validation.sh"
       - "scripts/actr/tests/release-train-*.sh"
@@ -61,11 +63,13 @@ on:
       - ".github/workflows/release-actrsharp.yml"
       - "scripts/actr/release-actr-cli.sh"
       - "scripts/actr/release-train.sh"
+      - "scripts/actr/package-release-crates.py"
       - "scripts/actr/generate-changelog.py"
       - "scripts/actr/merge-release-pr.py"
       - "scripts/actr/tests/test_merge_release_pr.py"
       - "scripts/actr/tests/test_generate_changelog.py"
       - "scripts/actr/tests/test_release_notes_publish.py"
+      - "scripts/actr/tests/test_package_release_crates.py"
       - "scripts/actr/detect-pre-release-label.sh"
       - "scripts/actr/tests/release-asset-validation.sh"
       - "scripts/actr/tests/release-train-*.sh"
@@ -161,9 +165,11 @@ jobs:
           python3 scripts/actr/tests/test_generate_changelog.py
           python3 scripts/actr/tests/test_release_notes_publish.py
           python3 scripts/actr/tests/test_merge_release_pr.py
+          python3 scripts/actr/tests/test_package_release_crates.py
           bash scripts/actr/tests/release-asset-validation.sh
           bash scripts/actr/tests/release-train-package-sync.sh
           bash scripts/actr/tests/release-train-modes.sh
+          bash scripts/actr/tests/release-train-relay-dependencies.sh
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

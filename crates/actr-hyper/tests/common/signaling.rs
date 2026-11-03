@@ -25,6 +25,34 @@ impl TestSignalingServer {
         })
     }
 
+    pub async fn start_with_relay() -> anyhow::Result<Self> {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        Ok(Self {
+            inner: Some(MockActrixServer::start_with_relay().await?),
+            external_url: None,
+        })
+    }
+
+    pub fn relay_connection_count(&self) -> usize {
+        self.controlled().relay_connection_count()
+    }
+
+    pub fn set_relay_discovery_enabled(&self, enabled: bool) {
+        self.controlled().set_relay_discovery_enabled(enabled);
+    }
+
+    pub fn relay_discovery_requests(&self) -> u32 {
+        self.controlled().relay_discovery_requests()
+    }
+
+    pub fn disconnect_relay_connections(&self) {
+        self.controlled().disconnect_relay_connections();
+    }
+
+    pub fn pause_relay_enrollment(&self) {
+        self.controlled().pause_relay_enrollment();
+    }
+
     /// Start the test server on the specified port.
     pub async fn start_on_port(port: u16) -> anyhow::Result<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -76,6 +104,10 @@ impl TestSignalingServer {
 
     pub fn pause_forwarding(&self) {
         self.controlled().pause_forwarding();
+    }
+
+    pub fn relay_frame_count(&self) -> u32 {
+        self.controlled().relay_frame_count()
     }
 
     pub fn resume_forwarding(&self) {

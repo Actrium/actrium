@@ -1,0 +1,52 @@
+[
+  {
+    "source": "vendor/rtc-turn/src/client/client_test.rs",
+    "line_sha256": "bb4ead0e6cafad457127d1060cc47db09707938bfd837e48d3c4390567d2b909",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/rtc-turn/src/client/client_test.rs",
+    "line_sha256": "3196d3f4568f8994b4d5478880d714d8248b3e885844ccec953f003cbb1fb60b",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/rtc-turn/src/client/relay.rs",
+    "line_sha256": "21bf8bb63dd654f839de9328a5305471004cd26006d8841022cdd67f6240e328",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/rtc/src/peer_connection/configuration/interceptor_registry.rs",
+    "line_sha256": "616a0067f4ad2877dc00be105bb28e410ec3a06e4d3468a2a45cac724649b451",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/rtc/src/peer_connection/handler/dtls.rs",
+    "line_sha256": "c76afc716a17fb44ab3dec1b220dcd3769c048244174d24d637c72cfdeaea17e",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/rtc/src/peer_connection/handler/sctp.rs",
+    "line_sha256": "1143788cbfddf6ec63239b498da7b942833ab5e32c40cff832aac135864f76e7",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/rtc/src/peer_connection/handler/sctp.rs",
+    "line_sha256": "ef4b80c8c4989997c48030f3601a6f08d54fb4cb843bc8202b77140482e4ad2f",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/rtc/src/peer_connection/message/mod.rs",
+    "line_sha256": "696cfad536ceb4244847b00c8aef242bf019e6644b311acdfe84932ee9e45fbc",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/webrtc/src/peer_connection/driver.rs",
+    "line_sha256": "3ef7a158932ebd44b0a046609bb8e5bb68a8ee5a14a17bb0f85a7356caf4e786",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  },
+  {
+    "source": "vendor/webrtc/src/runtime/mod.rs",
+    "line_sha256": "cceec98301726485edfbdbae5bbf0f7634d98e22bfa39f3852765553ce08962c",
+    "reason": "Unmodified RTC/WebRTC 0.21.1 English comment uses a verb, not a package protocol identifier."
+  }
+]

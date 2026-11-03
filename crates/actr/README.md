@@ -32,6 +32,14 @@ The lock stores each dependency's alias and canonical
 `publisher/program@version` ActrType; v1 locks must be migrated by the CLI and
 are not accepted by the runtime.
 
+### Native Cargo dependencies
+
+Git/path consumers inherit the SDK and TURN/STUN server Git dependencies without
+workspace overrides. The CLI's generated Rust apps include the overrides needed
+when consuming registry packages until upstream publishes the required fixes.
+Other registry consumers must add those overrides to their own workspace root.
+See the [upstream dependency notes](https://github.com/Actrium/actrium/blob/main/docs/actr/upstream-patches.md).
+
 ---
 
 ## 📚 Documentation

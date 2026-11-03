@@ -13,6 +13,14 @@ use stun;
 use tokio::net::UdpSocket;
 use url::Url;
 
+struct StunCounters(Arc<ServiceCounters>);
+#[async_trait]
+impl stun::RequestObserver for StunCounters {
+    async fn on_request(&self, success: bool) {
+        self.0.record_request(success, 0.0).await;
+    }
+}
+
 /// STUN service implementation
 #[derive(Debug)]
 pub struct StunService {
@@ -88,7 +96,7 @@ impl IceService for StunService {
         self.socket = Some(socket.clone());
 
         // Set running status
-        let url = Url::parse(&format!("stun:{}:{}", ice_bind.ip, ice_bind.port))?;
+        let url = Url::parse(&format!("stun:{addr}"))?;
         self.info.set_running(url);
         if let Some(ref ctr) = self.counters {
             self.info.set_counters(ctr.clone());
@@ -102,7 +110,9 @@ impl IceService for StunService {
         if let Err(e) = stun::create_stun_server_with_shutdown_and_counters(
             socket.clone(),
             shutdown_rx,
-            self.counters.clone(),
+            self.counters
+                .clone()
+                .map(|counters| Arc::new(StunCounters(counters)) as Arc<dyn stun::RequestObserver>),
         )
         .await
         {

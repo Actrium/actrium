@@ -21,6 +21,10 @@
 //!   -> RPC request: `Mailbox` -> `MailboxProcessor` -> actor handling
 //! ```
 
+#[path = "relay_security.rs"]
+mod relay_security;
+pub use relay_security::{handle_relay_record, prepare_relay_connection, start_relay_handshake};
+
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -594,6 +598,8 @@ struct SwRuntime {
     ice_restart_attempts: HashMap<String, u32>,
     /// ICE restart: tracks the connection state for each peer
     peer_connection_states: HashMap<String, String>,
+    /// The DOM connection whose state was most recently observed for each peer.
+    peer_connection_ids: HashMap<String, String>,
 }
 
 impl SwRuntime {
@@ -692,6 +698,7 @@ impl SwRuntime {
             ice_restart_inflight: HashMap::new(),
             ice_restart_attempts: HashMap::new(),
             peer_connection_states: HashMap::new(),
+            peer_connection_ids: HashMap::new(),
         })
     }
 
@@ -1824,6 +1831,7 @@ impl SwRuntime {
     async fn ensure_peer(&mut self) -> Result<String, JsValue> {
         let target = self.discover_target().await?;
         let peer_id = target.to_string_repr();
+        request_relay_peer(&self.client_id, &target);
 
         if self.peer_requires_reconnect(&peer_id) {
             log::warn!(
@@ -2498,6 +2506,8 @@ impl SwRuntime {
                 struct ConnectionStateEvent {
                     #[serde(rename = "peerId")]
                     peer_id: String,
+                    #[serde(rename = "connectionId")]
+                    connection_id: String,
                     state: String,
                 }
                 let data: ConnectionStateEvent = serde_json::from_value(event.data)
@@ -2511,6 +2521,8 @@ impl SwRuntime {
 
                 self.peer_connection_states
                     .insert(data.peer_id.clone(), data.state.clone());
+                self.peer_connection_ids
+                    .insert(data.peer_id.clone(), data.connection_id);
 
                 match data.state.as_str() {
                     "disconnected" => {
@@ -2526,7 +2538,7 @@ impl SwRuntime {
                             CLIENTS.with(|cell| cell.borrow().get(&self.client_id).map(Rc::clone))
                         {
                             let dest = actr_web_common::Dest::Peer(data.peer_id.clone());
-                            if let Err(e) = ctx.transport_manager.close_transport(&dest).await {
+                            if let Err(e) = retire_rtc_path(&ctx, &dest, true).await {
                                 log::warn!(
                                     "[SW] disconnected: failed to close transport for peer={} error={}",
                                     data.peer_id,
@@ -2562,7 +2574,7 @@ impl SwRuntime {
                             CLIENTS.with(|cell| cell.borrow().get(&self.client_id).map(Rc::clone))
                         {
                             let dest = actr_web_common::Dest::Peer(data.peer_id.clone());
-                            if let Err(e) = ctx.transport_manager.close_transport(&dest).await {
+                            if let Err(e) = retire_rtc_path(&ctx, &dest, false).await {
                                 log::warn!(
                                     "[SW] failed: failed to close transport for peer={} error={}",
                                     data.peer_id,
@@ -2585,10 +2597,18 @@ impl SwRuntime {
                         // to this peer, so the next outbound RPC runs a fresh Issuer
                         // discovery instead of re-using a broken ActrId.
                         self.invalidate_discovered_target(&data.peer_id);
-                        // Notify DOM about connection failure so pending RPCs can fail fast
-                        self.notify_connection_failure(&data.peer_id)?;
+                        // Pending RPCs keep their own deadlines while relay may still connect.
                     }
                     "connected" => {
+                        if let Some(ctx) =
+                            CLIENTS.with(|cell| cell.borrow().get(&self.client_id).map(Rc::clone))
+                        {
+                            let dest = actr_web_common::Dest::Peer(data.peer_id.clone());
+                            if let Some(transport) = ctx.transport_manager.existing_transport(&dest)
+                            {
+                                transport.rtc_connected();
+                            }
+                        }
                         // Connection recovered, clear any restart state
                         if self.ice_restart_inflight.get(&data.peer_id) == Some(&true) {
                             log::info!(
@@ -2606,7 +2626,7 @@ impl SwRuntime {
                             CLIENTS.with(|cell| cell.borrow().get(&self.client_id).map(Rc::clone))
                         {
                             let dest = actr_web_common::Dest::Peer(data.peer_id.clone());
-                            if let Err(e) = ctx.transport_manager.close_transport(&dest).await {
+                            if let Err(e) = retire_rtc_path(&ctx, &dest, false).await {
                                 log::warn!(
                                     "[SW] closed: failed to close transport for peer={} error={}",
                                     data.peer_id,
@@ -2628,6 +2648,31 @@ impl SwRuntime {
                         self.invalidate_discovered_target(&data.peer_id);
                     }
                     _ => {}
+                }
+            }
+            "peer_connection_closed" => {
+                #[derive(Deserialize)]
+                struct PeerClosedEvent {
+                    #[serde(rename = "peerId")]
+                    peer_id: String,
+                    #[serde(rename = "connectionId")]
+                    connection_id: String,
+                }
+                let data: PeerClosedEvent = serde_json::from_value(event.data)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                if self.peer_connection_ids.get(&data.peer_id) == Some(&data.connection_id) {
+                    self.peer_connection_ids.remove(&data.peer_id);
+                    if let Some(ctx) =
+                        CLIENTS.with(|cell| cell.borrow().get(&self.client_id).map(Rc::clone))
+                    {
+                        let dest = actr_web_common::Dest::Peer(data.peer_id);
+                        if let Some(transport) = ctx.transport_manager.existing_transport(&dest) {
+                            transport
+                                .rtc_physical_closed(&data.connection_id)
+                                .await
+                                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                        }
+                    }
                 }
             }
             "ice_restart_local_description" => {
@@ -2711,6 +2756,20 @@ impl SwRuntime {
         let envelope = RpcEnvelope::decode(&payload.data[..])
             .map_err(|e| JsValue::from_str(&format!("Failed to decode RpcEnvelope: {e}")))?;
 
+        if channel_id == 1
+            && let Some(nonce) = actr_protocol::transport_control::acknowledgement_nonce(&envelope)
+        {
+            CLIENTS.with(|cell| {
+                if let Some(context) = cell.borrow().get(&self.client_id) {
+                    context
+                        .transport_manager
+                        .handover
+                        .acknowledge(&peer_id, nonce);
+                }
+            });
+            return Ok(());
+        }
+
         let Some(direction) =
             direction_for_routing(&envelope, &peer_id, channel_id, &payload.stream_id)
         else {
@@ -2763,6 +2822,31 @@ impl SwRuntime {
     }
 
     fn handle_data_chunk(&mut self, payload: FastPathPayload) -> Result<(), JsValue> {
+        let (peer, channel) = parse_peer_and_channel(&payload.stream_id);
+        if channel == 2
+            && let Ok(chunk) = actr_protocol::DataChunk::decode(payload.data.as_slice())
+            && let Some(nonce) = actr_protocol::transport_control::barrier_nonce(&chunk)
+        {
+            let context = CLIENTS.with(|cell| cell.borrow().get(&self.client_id).map(Rc::clone));
+            if let Some(context) = context {
+                // Earlier synchronous stream callbacks have returned before
+                // this ordered pump observes the barrier. Never hold the
+                // runtime lock while awaiting acknowledgement submission.
+                let bytes =
+                    actr_protocol::transport_control::acknowledgement(nonce).encode_to_vec();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let dest = actr_web_common::Dest::Peer(peer);
+                    if let Some(transport) = context.transport_manager.existing_transport(&dest) {
+                        let _ = futures::future::select(
+                            Box::pin(transport.send(PayloadType::RpcSignal, &bytes)),
+                            Box::pin(gloo_timers::future::TimeoutFuture::new(1000)),
+                        )
+                        .await;
+                    }
+                });
+            }
+            return Ok(());
+        }
         let (logical_stream_id, data) = decode_stream_payload(&payload.data)?;
 
         let handler = CLIENTS.with(|cell| {
@@ -2843,7 +2927,7 @@ impl SwRuntime {
 
         if let Some(ctx) = CLIENTS.with(|cell| cell.borrow().get(&self.client_id).map(Rc::clone)) {
             let dest = actr_web_common::Dest::Peer(peer_id.to_string());
-            if let Err(e) = ctx.transport_manager.close_transport(&dest).await {
+            if let Err(e) = retire_rtc_path(&ctx, &dest, false).await {
                 log::warn!(
                     "[SW] stale peer cleanup: failed to close transport for peer={} error={}",
                     peer_id,
@@ -2854,7 +2938,6 @@ impl SwRuntime {
 
         self.reset_peer_for_reconnect(peer_id);
         self.invalidate_discovered_target(peer_id);
-        self.notify_connection_failure(peer_id)?;
         Ok(())
     }
 
@@ -2905,65 +2988,6 @@ impl SwRuntime {
         self.send_webrtc_command("send_data", peer_id, payload_js)
     }
 
-    /// Notify DOM about a connection failure so pending RPCs can fail fast.
-    ///
-    /// Sends error responses for all pending RPCs and a connection_failed
-    /// event to the DOM, allowing the JS layer to immediately reject
-    /// outstanding promises instead of waiting for the 30s timeout.
-    fn notify_connection_failure(&mut self, peer_id: &str) -> Result<(), JsValue> {
-        // 1. Fail all pending RPCs with a connection error
-        let pending_entries: Vec<(String, PendingRpcTarget)> = self.pending_rpcs.drain().collect();
-        let count = pending_entries.len();
-        for (request_id, target) in &pending_entries {
-            match target {
-                PendingRpcTarget::Dom => {
-                    let response = SwMessage {
-                        msg_type: "control_response",
-                        payload: RpcResponsePayload {
-                            request_id: request_id.clone(),
-                            data: JsValue::NULL,
-                            error: Some(RpcError {
-                                code: 503,
-                                message: format!(
-                                    "WebRTC connection failed for peer {}, request cancelled",
-                                    peer_id
-                                ),
-                            }),
-                        },
-                    };
-                    let msg_js_value = serde_wasm_bindgen::to_value(&response).map_err(|e| {
-                        JsValue::from_str(&format!("Failed to serialize error response: {}", e))
-                    })?;
-                    let _ = self.send_dom_message(&msg_js_value);
-                }
-                PendingRpcTarget::Internal => {
-                    // Internal RPCs use HostGate oneshots under workload dispatch.
-                    // Reject the sender so ctx.call_raw() fails fast.
-                    CLIENTS.with(|cell| {
-                        if let Some(ctx) = cell.borrow().get(&self.client_id) {
-                            ctx.system.host_gate().reject_request(request_id);
-                        } else {
-                            log::warn!(
-                                "[SW] notify_connection_failure: client context missing for client_id={}",
-                                self.client_id
-                            );
-                        }
-                    });
-                }
-            }
-        }
-
-        if count > 0 {
-            log::info!(
-                "[SW] notify_connection_failure: rejected {} pending RPCs for peer={}",
-                count,
-                peer_id
-            );
-        }
-
-        Ok(())
-    }
-
     /// Trigger an ICE restart for the given peer.
     ///
     /// Only the offerer side should call this. Implements deduplication:
@@ -3003,8 +3027,7 @@ impl SwRuntime {
             self.pending_remote_sdp_exchanges.remove(peer_id);
             // Force re-discovery on next outbound RPC targeting this peer.
             self.invalidate_discovered_target(peer_id);
-            // Fail-fast: reject all pending RPCs immediately
-            self.notify_connection_failure(peer_id)?;
+            // A failed RTC path does not decide the outcome of a concurrent relay dial.
             return Ok(());
         }
 
@@ -3105,6 +3128,9 @@ struct ClientContext {
     transport_manager: Arc<crate::transport::PeerTransport>,
     /// `DataChunk` callback registry, isolated per browser tab.
     stream_handlers: Rc<RefCell<HashMap<String, StreamHandler>>>,
+    relay_channels: RefCell<HashMap<String, String>>,
+    relay_security: relay_security::Manager,
+    rtc_paths: RefCell<HashMap<String, Option<bool>>>,
 }
 
 /// `SwRuntimeBridge`, the `RuntimeBridge` implementation.
@@ -3146,12 +3172,36 @@ impl RuntimeBridge for SwRuntimeBridge {
     }
 
     async fn ensure_connection(&self, target_id: &ActrId) -> actr_protocol::ActorResult<()> {
-        let mut rt = self.runtime.lock().await;
-        let peer_id = rt.ensure_peer_with_retry().await.map_err(|e| {
-            actr_protocol::ActrError::Unavailable(format!("Failed to ensure peer: {:?}", e))
-        })?;
-        self.peer_gate
-            .register_actor(target_id.clone(), actr_web_common::Dest::Peer(peer_id));
+        let peer_id = target_id.to_string_repr();
+        request_relay_peer(&self.client_id, target_id);
+        self.peer_gate.register_actor(
+            target_id.clone(),
+            actr_web_common::Dest::Peer(peer_id.clone()),
+        );
+        let runtime = self.runtime.clone();
+        let target = target_id.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let mut runtime = runtime.lock().await;
+            if runtime.peer_requires_reconnect(&peer_id) {
+                runtime.reset_peer_for_reconnect(&peer_id);
+            }
+            if !runtime.known_peers.contains(&peer_id) {
+                if runtime
+                    .send_webrtc_command("create_peer", &peer_id, JsValue::NULL)
+                    .is_ok()
+                {
+                    runtime.known_peers.insert(peer_id.clone());
+                }
+            }
+            if !runtime.role_negotiated.contains(&peer_id) {
+                match runtime.send_role_negotiation(&target).await {
+                    Ok(()) => {
+                        runtime.role_negotiated.insert(peer_id);
+                    }
+                    Err(error) => log::debug!("[SW] WebRTC negotiation pending: {:?}", error),
+                }
+            }
+        });
         Ok(())
     }
 
@@ -3264,6 +3314,12 @@ fn direction_for_routing(
 }
 
 fn decode_stream_payload(data: &[u8]) -> Result<(String, Bytes), JsValue> {
+    if let Ok(chunk) = actr_protocol::DataChunk::decode(data) {
+        if !chunk.stream_id.is_empty() {
+            return Ok((chunk.stream_id, chunk.payload));
+        }
+    }
+    // Receive compatibility for the earlier browser-only prefix format.
     if data.len() < 4 {
         return Err(JsValue::from_str(
             "Invalid DataChunk payload: missing stream_id length",
@@ -3271,18 +3327,17 @@ fn decode_stream_payload(data: &[u8]) -> Result<(String, Bytes), JsValue> {
     }
 
     let stream_id_len = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
-    if data.len() < 4 + stream_id_len {
-        return Err(JsValue::from_str(
-            "Invalid DataChunk payload: truncated stream_id",
-        ));
-    }
+    let payload_start = 4usize
+        .checked_add(stream_id_len)
+        .filter(|offset| *offset <= data.len())
+        .ok_or_else(|| JsValue::from_str("Invalid DataChunk payload: truncated stream_id"))?;
 
-    let logical_stream_id = String::from_utf8(data[4..4 + stream_id_len].to_vec())
+    let logical_stream_id = String::from_utf8(data[4..payload_start].to_vec())
         .map_err(|e| JsValue::from_str(&format!("Invalid DataChunk stream_id: {}", e)))?;
 
     Ok((
         logical_stream_id,
-        Bytes::copy_from_slice(&data[4 + stream_id_len..]),
+        Bytes::copy_from_slice(&data[payload_start..]),
     ))
 }
 
@@ -3604,14 +3659,14 @@ pub async fn register_client(
                         data.len()
                     );
 
-                    // Send the response back to the remote peer through `SwRuntime`.
-                    let rt = runtime.lock().await;
-                    if let Err(e) = rt.send_channel_data(&peer_id, channel_id, &data) {
-                        log::error!(
-                            "[Scheduler] Failed to send RPC response: request_id={} error={:?}",
-                            request_id,
-                            e
-                        );
+                    // Use the same ready-path selection as requests. Keep both
+                    // receive paths alive while direct connectivity is promoted.
+                    let context = CLIENTS.with(|cell| cell.borrow().get(&client_id).map(Rc::clone));
+                    if let Some(context) = context {
+                        let payload_type = if channel_id == 1 { PayloadType::RpcSignal } else { PayloadType::RpcReliable };
+                        if let Err(error) = context.transport_manager.send(&actr_web_common::Dest::Peer(peer_id), payload_type, &data).await {
+                            log::error!("[Scheduler] RPC response send failed: request_id={} error={}", request_id, error);
+                        }
                     }
                 }
             } else {
@@ -3677,6 +3732,9 @@ pub async fn register_client(
         peer_gate: Arc::clone(&peer_gate),
         transport_manager: Arc::clone(&transport_manager),
         stream_handlers: Rc::new(RefCell::new(HashMap::new())),
+        relay_channels: RefCell::new(HashMap::new()),
+        relay_security: relay_security::Manager::default(),
+        rtc_paths: RefCell::new(HashMap::new()),
     });
 
     CLIENTS.with(|cell| {
@@ -3820,6 +3878,13 @@ pub async fn register_client(
 /// when the signaling connection drops.
 #[wasm_bindgen]
 pub async fn unregister_client(client_id: String) {
+    if let Ok(function) =
+        js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__actrRelayStop"))
+    {
+        if let Some(function) = function.dyn_ref::<js_sys::Function>() {
+            let _ = function.call1(&JsValue::NULL, &JsValue::from_str(&client_id));
+        }
+    }
     log::info!("[SW] unregister_client: client_id={}", client_id);
     let ctx = CLIENTS.with(|cell| cell.borrow_mut().remove(&client_id));
     if let Some(ctx) = ctx {
@@ -4020,6 +4085,7 @@ pub async fn handle_dom_control(client_id: String, payload: JsValue) -> Result<(
 
         wasm_bindgen_futures::spawn_local({
             let request_id = request_id.clone();
+            let runtime = Rc::clone(runtime);
             async move {
                 match host_gate.send_request(&target_id, envelope).await {
                     Ok(_response) => {
@@ -4030,6 +4096,23 @@ pub async fn handle_dom_control(client_id: String, payload: JsValue) -> Result<(
                     }
                     Err(e) => {
                         log::error!("[SW] HostGate send_request failed: {:?}", e);
+                        let mut runtime = runtime.lock().await;
+                        if runtime.pending_rpcs.remove(&request_id).is_some() {
+                            let response = SwMessage {
+                                msg_type: "control_response",
+                                payload: RpcResponsePayload {
+                                    request_id,
+                                    data: JsValue::NULL,
+                                    error: Some(RpcError {
+                                        code: 503,
+                                        message: e.to_string(),
+                                    }),
+                                },
+                            };
+                            if let Ok(message) = serde_wasm_bindgen::to_value(&response) {
+                                let _ = runtime.send_dom_message(&message);
+                            }
+                        }
                     }
                 }
             }
@@ -4042,6 +4125,32 @@ pub async fn handle_dom_control(client_id: String, payload: JsValue) -> Result<(
 #[wasm_bindgen]
 pub async fn handle_dom_webrtc_event(client_id: String, payload: JsValue) -> Result<(), JsValue> {
     let event: DomWebRtcEvent = serde_wasm_bindgen::from_value(payload)?;
+    if event.event_type == "network_path_changed" {
+        let context = CLIENTS.with(|cell| cell.borrow().get(&client_id).map(Rc::clone));
+        if let Some(context) = context {
+            if let Some(peer) = event.data.get("peerId").and_then(|value| value.as_str()) {
+                let relayed = event.data.get("relayed").and_then(|value| value.as_bool());
+                context
+                    .rtc_paths
+                    .borrow_mut()
+                    .insert(peer.to_owned(), relayed);
+                let dest = actr_web_common::Dest::Peer(peer.to_owned());
+                if let Some(transport) = context.transport_manager.existing_transport(&dest) {
+                    if let Some(handle) = transport
+                        .wire_pool()
+                        .get_connection(actr_web_common::ConnType::WebRTC)
+                        .await
+                    {
+                        if let Some(rtc) = handle.as_webrtc() {
+                            rtc.set_network_path(relayed);
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
     let runtime = CLIENTS.with(|cell| {
         cell.borrow()
             .get(&client_id)
@@ -4074,6 +4183,7 @@ pub async fn handle_dom_webrtc_event(client_id: String, payload: JsValue) -> Res
 pub async fn register_datachannel_port(
     client_id: String,
     peer_id: String,
+    connection_id: String,
     port: MessagePort,
 ) -> Result<(), JsValue> {
     log::info!(
@@ -4094,6 +4204,8 @@ pub async fn register_datachannel_port(
 
     // Create the `WebRtcConnection` and attach the `MessagePort`.
     let mut rtc_conn = crate::transport::WebRtcConnection::new(peer_id.clone());
+    rtc_conn.set_connection_id(connection_id);
+    rtc_conn.set_network_path(ctx.rtc_paths.borrow().get(&peer_id).copied().flatten());
     rtc_conn.set_datachannel_port(port);
 
     let wire_handle = crate::transport::WireHandle::WebRTC(rtc_conn);
@@ -4136,6 +4248,194 @@ pub fn handle_dom_fast_path(client_id: String, payload: JsValue) -> Result<(), J
             "[SW] handle_dom_fast_path: client not found client_id={}",
             client_id
         );
+    }
+    Ok(())
+}
+
+fn request_relay_peer(client_id: &str, peer: &ActrId) {
+    if let Ok(function) =
+        js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__actrRelayEnsure"))
+    {
+        if let Some(function) = function.dyn_ref::<js_sys::Function>() {
+            let _ = function.call2(
+                &JsValue::NULL,
+                &JsValue::from_str(client_id),
+                &JsValue::from_str(&peer.to_string_repr()),
+            );
+        }
+    }
+}
+
+/// Await mailbox admission before releasing the JS relay receive budget.
+/// Responses and streams retain the existing fast dispatch path.
+#[wasm_bindgen]
+pub async fn handle_relay_data(client_id: String, payload: JsValue) -> Result<(), JsValue> {
+    let payload: FastPathPayload = serde_wasm_bindgen::from_value(payload)?;
+    let ctx = CLIENTS
+        .with(|cell| cell.borrow().get(&client_id).map(Rc::clone))
+        .ok_or_else(|| JsValue::from_str("Client not registered"))?;
+    let (peer, lane) = parse_peer_and_channel(&payload.stream_id);
+    if !matches!(lane, 2 | 3) {
+        let envelope = RpcEnvelope::decode(payload.data.as_slice())
+            .map_err(|_| JsValue::from_str("Invalid relay RPC envelope"))?;
+        if lane == 1 && actr_protocol::transport_control::acknowledgement_nonce(&envelope).is_some()
+        {
+            return ctx.runtime.lock().await.handle_fast_path(payload);
+        }
+        let direction = direction_for_routing(&envelope, &peer, lane, &payload.stream_id);
+        if matches!(direction, Some(Direction::Request | Direction::Tell)) {
+            let payload_type = if lane == 1 {
+                PayloadType::RpcSignal
+            } else {
+                PayloadType::RpcReliable
+            };
+            return ctx
+                .dispatcher
+                .dispatch(
+                    payload.stream_id.as_bytes().to_vec(),
+                    MessageFormat::new(payload_type, Bytes::from(payload.data)),
+                )
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()));
+        }
+    }
+    ctx.runtime.lock().await.handle_fast_path(payload)
+}
+
+async fn retire_rtc_path(
+    ctx: &ClientContext,
+    dest: &actr_web_common::Dest,
+    recoverable: bool,
+) -> actr_web_common::WebResult<()> {
+    if let Some(transport) = ctx.transport_manager.existing_transport(dest) {
+        if recoverable {
+            transport.rtc_disconnected().await?;
+        } else {
+            transport.rtc_terminated().await?;
+        }
+    }
+    Ok(())
+}
+
+/// Internal worker-only bootstrap. Credentials stay in the worker and are
+/// never posted to the DOM or appended to the relay URL.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RelayConnectionInfo {
+    endpoint: String,
+    token: String,
+    signaling_url: String,
+    expires_at: f64,
+    security_epoch: String,
+}
+
+#[wasm_bindgen]
+pub async fn relay_connection_info(client_id: String) -> Result<JsValue, JsValue> {
+    let ctx = CLIENTS
+        .with(|cell| cell.borrow().get(&client_id).map(Rc::clone))
+        .ok_or_else(|| JsValue::from_str("Client not registered"))?;
+    let (secure_expiry, security_epoch) = relay_security::ensure_identity(&ctx).await?;
+    let rt = ctx.runtime.lock().await;
+    let identity = rt
+        .actor_id
+        .as_ref()
+        .ok_or_else(|| JsValue::from_str("Client identity not ready"))?;
+    let credential = rt
+        .credential
+        .as_ref()
+        .ok_or_else(|| JsValue::from_str("Client credential not ready"))?;
+    let claims = actr_protocol::IdentityClaims::decode(credential.claims.as_ref())
+        .map_err(|_| JsValue::from_str("Invalid credential claims"))?;
+    serde_wasm_bindgen::to_value(&RelayConnectionInfo {
+        endpoint: identity.to_string_repr(),
+        token: relay_security::access_token(&ctx)?,
+        signaling_url: rt.signaling_url.clone(),
+        expires_at: (claims.expires_at.min(secure_expiry) as f64) * 1000.0,
+        security_epoch,
+    })
+    .map_err(JsValue::from)
+}
+
+#[wasm_bindgen]
+pub async fn relay_peer_identity(client_id: String, endpoint: String) -> Result<String, JsValue> {
+    let peer = ActrId::from_string_repr(&endpoint)
+        .map_err(|_| JsValue::from_str("Invalid relay endpoint"))?;
+    if peer.to_string_repr() != endpoint {
+        return Err(JsValue::from_str("Noncanonical relay endpoint"));
+    }
+    let ctx = CLIENTS
+        .with(|cell| cell.borrow().get(&client_id).map(Rc::clone))
+        .ok_or_else(|| JsValue::from_str("Client not registered"))?;
+    let rt = ctx.runtime.lock().await;
+    if rt
+        .actor_id
+        .as_ref()
+        .is_none_or(|local| local.realm != peer.realm)
+    {
+        return Err(JsValue::from_str("Relay peer realm mismatch"));
+    }
+    Ok(peer.to_string_repr())
+}
+
+#[wasm_bindgen]
+pub async fn register_relay_connection(
+    client_id: String,
+    endpoint: String,
+    channel: String,
+    send: js_sys::Function,
+) -> Result<String, JsValue> {
+    let peer = relay_peer_identity(client_id.clone(), endpoint).await?;
+    let ctx = CLIENTS
+        .with(|cell| cell.borrow().get(&client_id).map(Rc::clone))
+        .ok_or_else(|| JsValue::from_str("Client not registered"))?;
+    if !relay_security::authenticated(&ctx, &channel, &peer) {
+        return Err(JsValue::from_str(
+            "Relay channel is not mutually authenticated",
+        ));
+    }
+    let connection = crate::transport::RelayConnection::new(send);
+    ctx.relay_channels
+        .borrow_mut()
+        .insert(peer.clone(), channel);
+    ctx.transport_manager
+        .inject_connection(
+            &actr_web_common::Dest::Peer(peer.clone()),
+            crate::transport::WireHandle::Relay(connection),
+        )
+        .await
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(peer)
+}
+
+#[wasm_bindgen]
+pub async fn relay_channel_closed(
+    client_id: String,
+    peer: String,
+    channel: String,
+) -> Result<(), JsValue> {
+    let ctx = CLIENTS.with(|cell| cell.borrow().get(&client_id).map(Rc::clone));
+    if let Some(ctx) = ctx {
+        relay_security::remove(&ctx, &channel);
+        let current = ctx.relay_channels.borrow().get(&peer) == Some(&channel);
+        if current {
+            ctx.relay_channels.borrow_mut().remove(&peer);
+            if let Some(transport) = ctx
+                .transport_manager
+                .existing_transport(&actr_web_common::Dest::Peer(peer))
+            {
+                let pool = transport.wire_pool();
+                if let Some(connection) = pool
+                    .get_connection(actr_web_common::ConnType::WebSocket)
+                    .await
+                {
+                    connection
+                        .close()
+                        .await
+                        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                }
+                pool.mark_connection_failed(actr_web_common::ConnType::WebSocket);
+            }
+        }
     }
     Ok(())
 }
@@ -4273,5 +4573,28 @@ mod cred_ns_tests {
         assert_ne!(a, b);
         let a2 = SwRuntime::build_cred_kv_namespace(&ty("acme", "Echo", "1.0.0"), "tab1");
         assert_eq!(a, a2);
+    }
+}
+
+#[cfg(test)]
+mod stream_codec_tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn native_data_chunk_wire_vector_delivers_the_same_payload() {
+        // DataChunk { stream_id: "s", sequence: 7, payload: [0, 255, 42] }.
+        let encoded = [0x0a, 1, b's', 0x10, 7, 0x1a, 3, 0, 255, 42];
+        let (stream, payload) = decode_stream_payload(&encoded).unwrap();
+        assert_eq!(stream, "s");
+        assert_eq!(payload.as_ref(), &[0, 255, 42]);
+    }
+
+    #[wasm_bindgen_test]
+    fn legacy_browser_stream_prefix_remains_receivable() {
+        let encoded = [0, 0, 0, 1, b's', 0, 255, 42];
+        let (stream, payload) = decode_stream_payload(&encoded).unwrap();
+        assert_eq!(stream, "s");
+        assert_eq!(payload.as_ref(), &[0, 255, 42]);
     }
 }

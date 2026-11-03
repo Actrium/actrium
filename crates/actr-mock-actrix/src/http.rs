@@ -437,3 +437,83 @@ impl IntoResponse for ApiError {
         (self.status, Json(body)).into_response()
     }
 }
+
+pub async fn relay_identity_handler(
+    State(state): State<Arc<MockState>>,
+    Json(request): Json<actr_relay_security::IdentityRequest>,
+) -> Result<Json<actr_relay_security::IssuedIdentity>, StatusCode> {
+    if state
+        .relay_enrollment_unavailable
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    use actr_relay_security::*;
+    use ed25519_dalek::Signer;
+    let actor = actr_protocol::ActrId::from_string_repr(&request.endpoint)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    if actor.to_string_repr() != request.endpoint
+        || request.public_key == [0; 32]
+        || request.admission_commitment == [0; 32]
+        || request.renewal_token != signaling::mock_renewal_token(actor.serial_number)
+    {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let actor_type = state
+        .registry
+        .read()
+        .await
+        .iter()
+        .find(|entry| entry.actr_id == actor)
+        .map(|entry| entry.actr_type.to_string_repr())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let claims = serde_json::to_vec(&IdentityClaims {
+        domain: CERTIFICATE_DOMAIN.into(),
+        endpoint: request.endpoint,
+        actor_type,
+        client_key: "mock-client-key".into(),
+        public_key: request.public_key,
+        admission_commitment: request.admission_commitment,
+        expires_at: now + CERTIFICATE_TTL,
+    })
+    .unwrap();
+    let signature = state
+        .issuer_signing_key()
+        .sign(&signing_bytes(&claims))
+        .to_bytes()
+        .to_vec();
+    Ok(Json(IssuedIdentity {
+        certificate: Certificate {
+            key_id: state.issuer_signing_key_id(),
+            claims,
+            signature,
+        },
+        issuer: IssuerKey {
+            key_id: state.issuer_signing_key_id(),
+            public_key: *state.issuer_signing_key().verifying_key().as_bytes(),
+            expires_at: now + CERTIFICATE_TTL,
+        },
+    }))
+}
+
+pub async fn relay_key_handler(
+    State(state): State<Arc<MockState>>,
+    Path((_realm, key_id)): Path<(String, u32)>,
+) -> Result<Json<actr_relay_security::IssuerKey>, StatusCode> {
+    if key_id != state.issuer_signing_key_id() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    Ok(Json(actr_relay_security::IssuerKey {
+        key_id,
+        public_key: *state.issuer_signing_key().verifying_key().as_bytes(),
+        expires_at: now + actr_relay_security::CERTIFICATE_TTL,
+    }))
+}

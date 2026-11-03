@@ -469,6 +469,8 @@ pub(crate) mod test_support {
         pub(crate) try_sent: std::sync::Mutex<Vec<BytesMut>>,
         pub(crate) fail_try_send: AtomicBool,
         pub(crate) fail_send: AtomicBool,
+        pub(crate) fail_outstanding: AtomicBool,
+        pub(crate) buffer_full_after: std::sync::atomic::AtomicUsize,
         pub(crate) outstanding: std::sync::atomic::AtomicUsize,
         pub(crate) close_calls: std::sync::atomic::AtomicUsize,
     }
@@ -488,6 +490,8 @@ pub(crate) mod test_support {
                 try_sent: std::sync::Mutex::new(Vec::new()),
                 fail_try_send: AtomicBool::new(false),
                 fail_send: AtomicBool::new(false),
+                fail_outstanding: AtomicBool::new(false),
+                buffer_full_after: std::sync::atomic::AtomicUsize::new(usize::MAX),
                 outstanding: std::sync::atomic::AtomicUsize::new(0),
                 close_calls: std::sync::atomic::AtomicUsize::new(0),
             }
@@ -533,13 +537,20 @@ pub(crate) mod test_support {
             Ok(())
         }
         async fn outstanding_bytes(&self) -> Result<usize, RtcError> {
+            if self.fail_outstanding.load(Ordering::SeqCst) {
+                return Err(RtcError::Other("outstanding byte count unavailable".into()));
+            }
             Ok(self.outstanding.load(Ordering::SeqCst))
         }
         async fn send(&self, data: BytesMut) -> Result<(), RtcError> {
             if self.fail_send.load(Ordering::SeqCst) || self.closed.load(Ordering::SeqCst) {
                 return Err(RtcError::ErrDataChannelClosed);
             }
-            self.sent.lock().expect("record lock").push(data);
+            let mut sent = self.sent.lock().expect("record lock");
+            if sent.len() >= self.buffer_full_after.load(Ordering::SeqCst) {
+                return Err(RtcError::ErrSendBufferFull);
+            }
+            sent.push(data);
             Ok(())
         }
         async fn send_text(&self, text: &str) -> Result<(), RtcError> {
@@ -552,7 +563,11 @@ pub(crate) mod test_support {
             if self.closed.load(Ordering::SeqCst) {
                 return Err(RtcError::ErrDataChannelClosed);
             }
-            self.try_sent.lock().expect("record lock").push(data);
+            let mut sent = self.try_sent.lock().expect("record lock");
+            if sent.len() >= self.buffer_full_after.load(Ordering::SeqCst) {
+                return Err(RtcError::ErrSendBufferFull);
+            }
+            sent.push(data);
             Ok(())
         }
         async fn poll(&self) -> Option<DataChannelEvent> {

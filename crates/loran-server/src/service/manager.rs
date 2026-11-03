@@ -25,6 +25,7 @@ mod resource_type {
     pub const ISSUER: i32 = 4;
     pub const SIGNER: i32 = 5;
     pub const PUBLISHER_REGISTRY: i32 = 6;
+    pub const RELAY: i32 = 7;
 
     /// Map a ServiceType to its proto ResourceType integer.
     pub fn from_service_type(st: &super::ServiceType) -> i32 {
@@ -35,6 +36,7 @@ mod resource_type {
             super::ServiceType::Issuer => ISSUER,
             super::ServiceType::Signer => SIGNER,
             super::ServiceType::PublisherRegistry => PUBLISHER_REGISTRY,
+            super::ServiceType::Relay => RELAY,
         }
     }
 }
@@ -53,10 +55,8 @@ use url::Url;
 
 /// Swappable make service for hot-reloading the Router.
 ///
-/// Each new TCP connection clones the current Router from the watch channel.
-/// SIGHUP triggers a new Router to be sent through the channel, so new
-/// connections immediately use the updated routes while existing connections
-/// continue with their previously obtained Router.
+/// Each HTTP request uses the current router, including requests on existing
+/// keep-alive connections. Upgraded WebSocket sessions keep their own state.
 #[derive(Clone)]
 struct SwappableMakeService {
     router_rx: watch::Receiver<Router>,
@@ -69,19 +69,44 @@ impl SwappableMakeService {
 }
 
 impl Service<SocketAddr> for SwappableMakeService {
-    type Response = Router;
+    type Response = SwappableService;
     type Error = Infallible;
-    type Future = Ready<Result<Router, Infallible>>;
+    type Future = Ready<Result<SwappableService, Infallible>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, target: SocketAddr) -> Self::Future {
-        let router = self.router_rx.borrow().clone();
-        // Inject ConnectInfo<SocketAddr> so handlers (e.g. signaling WS) can extract it.
-        let router = router.layer(axum::Extension(ConnectInfo(target)));
-        ready(Ok(router))
+        ready(Ok(SwappableService {
+            router_rx: self.router_rx.clone(),
+            target,
+        }))
+    }
+}
+
+#[derive(Clone)]
+struct SwappableService {
+    router_rx: watch::Receiver<Router>,
+    target: SocketAddr,
+}
+
+impl<B> Service<axum::http::Request<B>> for SwappableService
+where
+    Router:
+        Service<axum::http::Request<B>, Response = axum::response::Response, Error = Infallible>,
+{
+    type Response = axum::response::Response;
+    type Error = Infallible;
+    type Future = <Router as Service<axum::http::Request<B>>>::Future;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, mut request: axum::http::Request<B>) -> Self::Future {
+        request.extensions_mut().insert(ConnectInfo(self.target));
+        self.router_rx.borrow().clone().call(request)
     }
 }
 
@@ -109,7 +134,7 @@ pub struct ServiceManager {
     /// SQLite-backed config override store, reused across reloads.
     config_store: Option<Arc<ConfigOverrideStore>>,
     /// Cancellation token for background tasks spawned during router build.
-    /// Cancelled on reload to stop old tasks before spawning new ones.
+    /// Cancelled only after a replacement router has been built successfully.
     bg_cancel: Option<tokio_util::sync::CancellationToken>,
     /// Cancellation token for the dedicated Signer listener's background
     /// cleanup tasks (SGN-04/07). Independent of `bg_cancel` so those tasks
@@ -164,6 +189,7 @@ impl ServiceManager {
         map.insert(resource_type::SIGNALING, Arc::new(ServiceCounters::new()));
         map.insert(resource_type::ISSUER, Arc::new(ServiceCounters::new()));
         map.insert(resource_type::SIGNER, Arc::new(ServiceCounters::new()));
+        map.insert(resource_type::RELAY, Arc::new(ServiceCounters::new()));
         Arc::new(map)
     }
 
@@ -205,6 +231,11 @@ impl ServiceManager {
                 ServiceType::Signer,
                 self.config.is_signer_enabled(),
             ),
+            (
+                "WebSocket Relay Service",
+                ServiceType::Relay,
+                self.config.is_relay_enabled(),
+            ),
         ];
 
         for (name, svc_type, enabled) in &svc_types {
@@ -231,24 +262,46 @@ impl ServiceManager {
     /// service instances, builds their routers, merges the control router,
     /// adds /metrics, and applies global middleware layers.
     async fn build_router_from_config(&mut self) -> Result<Router> {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let failed_build = cancel.clone().drop_guard();
+        let previous_config = self.config.clone();
+        let previous_secret = self.jwt_secret.clone();
+        let previous_store = self.config_store.clone();
+        match self.build_router_with_cancellation(cancel.clone()).await {
+            Ok(router) => {
+                if let Some(old_cancel) = self.bg_cancel.replace(cancel) {
+                    old_cancel.cancel();
+                }
+                failed_build.disarm();
+                Ok(router)
+            }
+            Err(error) => {
+                self.config = previous_config;
+                self.jwt_secret = previous_secret;
+                self.config_store = previous_store;
+                // Dropping failed_build stops only the candidate's background tasks.
+                Err(error)
+            }
+        }
+    }
+
+    async fn build_router_with_cancellation(
+        &mut self,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<Router> {
         use crate::service::trace::http_trace_layer;
 
-        // Cancel any previously spawned background tasks (cleanup loops, key refresh)
-        if let Some(old_cancel) = self.bg_cancel.take() {
-            old_cancel.cancel();
+        if self.config.requires_database() && !platform::storage::db::is_database_initialized() {
+            anyhow::bail!("Enabling database-backed services requires a process restart");
         }
-        let cancel = tokio_util::sync::CancellationToken::new();
-        self.bg_cancel = Some(cancel.clone());
 
         let mut app = Router::new();
 
-        // Refresh ServiceCollector to reflect currently enabled services.
-        // This ensures the admin dashboard shows accurate service status after reload.
-        self.refresh_service_collector().await;
-
         // Initialize or reuse the ConfigOverrideStore across reloads.
-        let config_store = if let Some(ref store) = self.config_store {
-            store.clone()
+        let config_store = if !self.config.requires_database() {
+            None
+        } else if let Some(ref store) = self.config_store {
+            Some(store.clone())
         } else {
             let pool = platform::storage::db::get_database().get_pool().clone();
             let store = Arc::new(
@@ -257,11 +310,15 @@ impl ServiceManager {
                     .map_err(|e| anyhow::anyhow!("Failed to create config override store: {e}"))?,
             );
             self.config_store = Some(store.clone());
-            store
+            Some(store)
         };
 
         // Apply L2 overrides to the running config
-        let overrides = config_store.list_all().await.unwrap_or_default();
+        let overrides = if let Some(store) = &config_store {
+            store.list_all().await.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         if !overrides.is_empty() {
             let toml_content = std::fs::read_to_string(&self.config_path).unwrap_or_default();
             match platform::config::resolver::apply_overrides(&toml_content, &overrides) {
@@ -374,25 +431,29 @@ impl ServiceManager {
 
         // Control plane always present.
         // Pass existing JWT secret so admin sessions survive reloads.
-        let (control_router, jwt_secret) = build_control_router(
-            &self.config,
-            self.service_collector.clone(),
-            self.shutdown_tx.clone(),
-            self.config_path.clone(),
-            self.jwt_secret.clone(),
-            config_store,
-            self.metrics_store.clone(),
-            issuer_state.as_ref().map(|state| state.issuer.clone()),
-            realm_profiles.clone(),
-        )
-        .await?;
-        self.jwt_secret = Some(jwt_secret);
-        platform::recording::info!(
-            "Adding control routes: admin_ui={}, grpc_api={}",
-            self.config.admin_ui_enabled(),
-            self.config.grpc_api_enabled()
-        );
-        app = app.merge(control_router);
+        if self.config.admin_ui_enabled() || self.config.grpc_api_enabled() {
+            let (control_router, jwt_secret) = build_control_router(
+                &self.config,
+                self.service_collector.clone(),
+                self.shutdown_tx.clone(),
+                self.config_path.clone(),
+                self.jwt_secret.clone(),
+                config_store.clone().ok_or_else(|| {
+                    anyhow::anyhow!("Control endpoints require persistent storage")
+                })?,
+                self.metrics_store.clone(),
+                issuer_state.as_ref().map(|state| state.issuer.clone()),
+                realm_profiles.clone(),
+            )
+            .await?;
+            self.jwt_secret = Some(jwt_secret);
+            platform::recording::info!(
+                "Adding control routes: admin_ui={}, grpc_api={}",
+                self.config.admin_ui_enabled(),
+                self.config.grpc_api_enabled()
+            );
+            app = app.merge(control_router);
+        }
 
         // Public authority bootstrap is an instance-level concern. It stays
         // separate from the individual signaling, identity, and package roles
@@ -402,6 +463,35 @@ impl ServiceManager {
         app = app.merge(
             crate::service::http::build_authority_router(&self.config, realm_profiles).await?,
         );
+        app = app.nest(
+            "/relay",
+            crate::service::http::build_relay_router(
+                &self.config,
+                cancel.clone(),
+                self.service_counters.get(&resource_type::RELAY).cloned(),
+            )
+            .await?,
+        );
+        let relay_url = if self.config.is_relay_enabled() {
+            self.config
+                .bind
+                .http
+                .as_ref()
+                .map(|http| {
+                    let url = self.config.relay.public_url.clone().unwrap_or_else(|| {
+                        format!(
+                            "{}://{}:{}/relay/ws",
+                            http.ws_scheme(),
+                            http.domain_name,
+                            http.effective_advertised_port()
+                        )
+                    });
+                    url::Url::parse(&url)
+                })
+                .transpose()?
+        } else {
+            None
+        };
 
         // Business services based on enable bitmask
         if self.config.is_signaling_enabled() {
@@ -461,8 +551,8 @@ impl ServiceManager {
         // shared listener. It is served on its own dedicated listener (loopback
         // by default, mTLS when configured) started via `start_signer_service`.
 
-        // Publisher Registry service - always mounted (no config gate yet)
-        {
+        // Storage-free relay deployments do not mount the Publisher Registry.
+        if self.config.requires_database() {
             let mut svc = PublisherRegistryService::new(self.config.clone());
             match svc.build_router().await {
                 Ok(router) => {
@@ -505,6 +595,16 @@ impl ServiceManager {
         // Global middleware layers
         app = app.layer(http_trace_layer()); // HTTP tracing (with OpenTelemetry context propagation)
 
+        // Publish collector changes only after every fallible build step succeeds.
+        self.refresh_service_collector().await;
+        if let Some(url) = relay_url
+            && let Some(mut info) = self.service_collector.get("WebSocket Relay Service").await
+        {
+            info.set_running(url);
+            self.service_collector
+                .insert("WebSocket Relay Service".into(), info)
+                .await;
+        }
         Ok(app)
     }
 
@@ -558,16 +658,14 @@ impl ServiceManager {
         let notify_clone = notify.clone();
         let mut handle_futs = Vec::new();
 
-        // Start HTTP server (control plane /admin always on)
-        let handle = self
-            .start_http_services(http_service_containers, notify_clone)
-            .await?;
-        handle_futs.push(handle);
-        notify.notified().await;
+        if self.config.bind.http.is_some() {
+            let handle = self
+                .start_http_services(http_service_containers, notify_clone)
+                .await?;
+            handle_futs.push(handle);
+            notify.notified().await;
+        }
 
-        // Start the dedicated Signer gRPC listener (SGN-02), separate from the
-        // shared HTTP listener so the signing oracle is not exposed on the
-        // public port. Loopback-only by default; mTLS when configured.
         if self.config.is_signer_enabled() {
             let handle = self.start_signer_service(notify.clone()).await?;
             handle_futs.push(handle);
@@ -1010,6 +1108,15 @@ impl ServiceManager {
         reasons
     }
 
+    fn turn_auth_changed(old: &ActrixConfig, new: &ActrixConfig) -> bool {
+        let old_realm_auth = old.uses_realm_turn_auth();
+        let new_realm_auth = new.uses_realm_turn_auth();
+        old_realm_auth != new_realm_auth
+            || (old_realm_auth
+                && new_realm_auth
+                && old.authority.provider_id().ok() != new.authority.provider_id().ok())
+    }
+
     fn signer_restart_required(old: &ActrixConfig, new: &ActrixConfig) -> bool {
         old.is_signer_enabled() != new.is_signer_enabled()
             || ((old.is_signer_enabled() || new.is_signer_enabled())
@@ -1166,23 +1273,41 @@ impl ServiceManager {
             }
         }
 
-        // 3. Build new Router
-        match self.build_router_from_config().await {
-            Ok(new_router) => {
-                if let Some(ref tx) = self.router_tx {
-                    let _ = tx.send(new_router);
-                    platform::recording::info!(
-                        "Router hot-swapped successfully. New connections will use updated routes."
-                    );
-                }
-            }
-            Err(e) => {
-                platform::recording::error!(
-                    "Failed to build new router: {}. Keeping old router.",
-                    e
-                );
+        // Reverting immutable fields must not leave HTTP services enabled without
+        // their listener (or try to access an uninitialized database on UDP nodes).
+        if let Err(errors) = self.config.validate() {
+            let errors: Vec<_> = errors
+                .into_iter()
+                .filter(|e| !e.starts_with("Warning:"))
+                .collect();
+            if !errors.is_empty() {
                 self.config = old_config;
-                return Err(e);
+                return Err(anyhow::anyhow!(
+                    "Reload requires a process restart: {}",
+                    errors.join("; ")
+                ));
+            }
+        }
+
+        // 3. Rebuild HTTP routes only for processes that have an HTTP listener.
+        if self.config.bind.http.is_some() {
+            match self.build_router_from_config().await {
+                Ok(new_router) => {
+                    if let Some(ref tx) = self.router_tx {
+                        let _ = tx.send(new_router);
+                        platform::recording::info!(
+                            "Router hot-swapped successfully. New requests will use updated routes."
+                        );
+                    }
+                }
+                Err(e) => {
+                    platform::recording::error!(
+                        "Failed to build new router: {}. Keeping old router.",
+                        e
+                    );
+                    self.config = old_config;
+                    return Err(e);
+                }
             }
         }
 
@@ -1209,7 +1334,8 @@ impl ServiceManager {
             || old_config.turn != self.config.turn
             || old_config.is_ice_enabled() != self.config.is_ice_enabled()
             || old_config.is_stun_enabled() != self.config.is_stun_enabled()
-            || old_config.is_turn_enabled() != self.config.is_turn_enabled();
+            || old_config.is_turn_enabled() != self.config.is_turn_enabled()
+            || Self::turn_auth_changed(&old_config, &self.config);
 
         if ice_changed {
             platform::recording::info!("ICE configuration changed, restarting ICE services...");
@@ -1400,7 +1526,7 @@ impl SignerRateLimiter {
 /// Wrap the Signer gRPC router with a per-source-IP token-bucket rate limit.
 ///
 /// The source IP is read from the `ConnectInfo<SocketAddr>` extension injected
-/// per-connection in [`SwappableMakeService::call`]. If it is unavailable the
+/// per-request in [`SwappableService::call`]. If it is unavailable the
 /// request is allowed through (fail-open) rather than dropped. Over-limit
 /// requests get HTTP 429, which gRPC clients surface as an `UNAVAILABLE`
 /// transport error.
@@ -1436,6 +1562,67 @@ fn parse_bind_socket_addr(field_name: &str, ip: &str, port: u16) -> Result<Socke
         .parse::<IpAddr>()
         .map_err(|e| anyhow::anyhow!("Invalid {field_name} '{ip}': {e}"))?;
     Ok(SocketAddr::new(parsed_ip, port))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failed_router_build_keeps_running_tasks_and_collector_until_successful_swap() {
+        let config =
+            ActrixConfig::from_toml(include_str!("../../../../loran/config/relay.example.toml"))
+                .unwrap();
+        let (shutdown, _) = tokio::sync::broadcast::channel(1);
+        let mut manager = ServiceManager::new(config, shutdown, PathBuf::new());
+        let _router = manager.build_router_from_config().await.unwrap();
+        let original = manager.bg_cancel.as_ref().unwrap().clone();
+
+        // Exercise a build failure directly, even when config validation would reject it.
+        manager.config.relay.limits.queue_messages = tokio::sync::Semaphore::MAX_PERMITS + 1;
+        assert!(manager.build_router_from_config().await.is_err());
+        assert!(!original.is_cancelled());
+        assert!(
+            manager
+                .service_collector
+                .get("WebSocket Relay Service")
+                .await
+                .is_some()
+        );
+
+        manager.config.relay.limits = Default::default();
+        let _replacement = manager.build_router_from_config().await.unwrap();
+        assert!(original.is_cancelled());
+        assert!(!manager.bg_cancel.as_ref().unwrap().is_cancelled());
+        manager.bg_cancel.take().unwrap().cancel();
+    }
+}
+
+#[cfg(test)]
+mod turn_reload_tests {
+    use super::*;
+
+    #[test]
+    fn changing_turn_auth_mode_or_provider_requires_ice_restart() {
+        let mut rest = ActrixConfig {
+            enable: platform::config::ENABLE_TURN,
+            ..Default::default()
+        };
+        rest.turn.users.clear();
+        rest.authority.uri = None;
+        assert!(!rest.uses_realm_turn_auth());
+        let mut realm = rest.clone();
+        realm.authority.uri = Some("actr://provider.example".into());
+        assert!(realm.uses_realm_turn_auth());
+        assert!(ServiceManager::turn_auth_changed(&rest, &realm));
+        let mut replacement = realm.clone();
+        replacement.authority.uri = Some("actr://other.example".into());
+        assert!(ServiceManager::turn_auth_changed(&realm, &replacement));
+        assert!(!ServiceManager::turn_auth_changed(&realm, &realm));
+        realm.turn.users.insert("user".into(), "password".into());
+        replacement.turn.users = realm.turn.users.clone();
+        assert!(!ServiceManager::turn_auth_changed(&realm, &replacement));
+    }
 }
 
 #[cfg(test)]

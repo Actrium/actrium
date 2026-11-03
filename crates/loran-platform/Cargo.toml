@@ -36,6 +36,7 @@ sha2 = { workspace = true }
 url = { version = "2", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 actr-protocol = { workspace = true }
+loran-relay-protocol = { path = "../loran-relay-protocol", version = "0.10.7" }
 prost = { workspace = true }
 prost-types = { workspace = true }
 pwrzv = { version = "0.7.0" }

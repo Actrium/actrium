@@ -111,13 +111,20 @@ async fn soft_recover(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_unknown_answerer_session_rejects_restart_and_rebuilds_autonomously() {
     install_test_crypto_provider();
-    let harness = connected(901, 902).await;
+    let mut harness = TestHarness::with_vnet().await;
+    harness.add_peer(901).await;
+    harness.add_peer(902).await;
+    harness.connect(901, 902).await;
     let offerer_id = harness.peer(901).id.clone();
     let answerer_id = harness.peer(902).id.clone();
     let old_offerer = harness.peer(901).rtc.state(&answerer_id).await.unwrap();
     let old_answerer = harness.peer(902).rtc.state(&offerer_id).await.unwrap();
 
+    // Lose the old endpoint silently. If its close notifications arrive, the
+    // Offerer may skip ICE restart and correctly rebuild the PC immediately.
+    harness.vnet.as_ref().unwrap().block_network();
     assert!(harness.peer(902).rtc.close_peer(&offerer_id).await);
+    harness.vnet.as_ref().unwrap().unblock_network();
     assert_eq!(harness.peer(902).rtc.peer_count().await, 0);
 
     // Exercise the rejection branch with a known correlated wire message.

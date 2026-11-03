@@ -37,7 +37,6 @@ test-utils = [
   "dep:axum",
   "dep:hmac",
   "dep:platform",
-  "dep:rustls",
   "dep:sha1",
   "dep:turn_crate",
   "dep:webrtc-util",
@@ -126,6 +125,8 @@ rustls-native-certs = "0.8"
 webpki-roots = "1.0.10"
 # Keep Reqwest on Rustls 0.23 so the verifier security floor above applies.
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls-native-roots", "rustls-tls-webpki-roots", "json"] }
+loran-relay-protocol = { path = "../loran-relay-protocol", version = "0.10.7" }
+actr-relay-security = { path = "../actr-relay-security", version = "0.10.5" }
 url.workspace = true
 
 # Utilities (native-only)
@@ -137,13 +138,13 @@ dashmap.workspace = true
 dotenvy = "0.15"
 num_cpus = "1.17"
 actr-mock-actrix = { workspace = true, optional = true }
-actrix-signaling-service = { package = "actrix-signaling", path = "../loran-signaling", optional = true }
-actrix-stun-service = { package = "actrix-stun", path = "../loran-stun", optional = true }
-actrix-turn = { path = "../loran-turn", optional = true }
+actrix-signaling-service = { package = "actrix-signaling", path = "../loran-signaling", version = "0.10.7", optional = true }
+actrix-stun-service = { package = "actrix-stun", path = "../loran-stun", version = "0.10.7", optional = true }
+actrix-turn = { path = "../loran-turn", version = "0.10.7", optional = true }
 axum = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true }
-platform = { package = "actrix-platform", path = "../loran-platform", optional = true }
-rustls = { workspace = true, optional = true }
+platform = { package = "actrix-platform", path = "../loran-platform", version = "0.10.7", optional = true }
+rustls.workspace = true
 sha1 = { version = "0.10", optional = true }
 turn_crate = { workspace = true, optional = true }
 webrtc-util = { workspace = true, optional = true }
