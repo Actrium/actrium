@@ -33,7 +33,7 @@ fn init_kotlin_echo(parent: &std::path::Path, project_name: &str) -> std::path::
             "--template",
             "echo",
             "--signaling",
-            "wss://loran1.actrium-dev.example",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             project_name,
@@ -105,7 +105,7 @@ fn kotlin_echo_manifest_has_signaling_url() {
 
     // Kotlin template stores the signaling URL as-is (without /signaling/ws suffix)
     assert!(
-        manifest.contains("wss://loran1.actrium-dev.example"),
+        manifest.contains("wss://loran.example.com"),
         "manifest.toml should contain the signaling URL, got:\n{manifest}"
     );
 }
@@ -126,7 +126,7 @@ fn kotlin_echo_init_fails_if_directory_exists() {
             "--template",
             "echo",
             "--signaling",
-            "wss://loran1.actrium-dev.example",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             "DuplicateKtApp",

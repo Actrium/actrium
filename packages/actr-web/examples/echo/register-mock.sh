@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # register-mock.sh — Seed realm + publisher + publish web echo .actr packages
-#                    against a running `mock-actrix` instance.
+#                    against a running `mock-loran` instance.
 #
 # Unlike register.sh, this does NOT touch SQLite. It drives the mock's
 # `/admin/*` HTTP endpoints instead, which is closer to how a production-grade
-# actrix would expose management APIs and decouples the e2e flow from actrix's
+# loran would expose management APIs and decouples the e2e flow from loran's
 # sqlite schema.
 #
 # Usage: ./register-mock.sh [--endpoint URL]
@@ -60,7 +60,7 @@ sed_inplace() {
 }
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  actr register-mock — Web Echo via mock-actrix"
+echo "  actr register-mock — Web Echo via mock-loran"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Endpoint: $ENDPOINT"
 echo "  actr:     $ACTR_CMD"
@@ -141,7 +141,7 @@ echo -e "${GREEN}publisher pubkey injected${NC}"
 # --- Step 5: Sanity-check state ---
 
 echo ""
-echo "Step 5: mock-actrix state snapshot:"
+echo "Step 5: mock-loran state snapshot:"
 curl -fsS "$ENDPOINT/admin/state" | (jq . 2>/dev/null || cat)
 
 echo ""

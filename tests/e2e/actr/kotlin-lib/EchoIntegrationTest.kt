@@ -33,7 +33,7 @@ import java.io.File
  * UnifiedLifecycleAdapter (from `actr gen -l kotlin`).
  *
  * Run via `./gradlew connectedDebugAndroidTest` against a booted emulator, with
- * an actrix + EchoService host reachable at 10.0.2.2 from the emulator.
+ * an loran + EchoService host reachable at 10.0.2.2 from the emulator.
  */
 @RunWith(AndroidJUnit4::class)
 class EchoIntegrationTest {

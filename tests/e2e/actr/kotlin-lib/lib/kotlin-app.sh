@@ -2,7 +2,7 @@
 #
 # kotlin-app.sh — shared helpers for the Kotlin Android e2e suites.
 #
-# The actrix/Rust lifecycle helpers are ported from tests/e2e/actr/swift-echo-app/run.sh and
+# The loran/Rust lifecycle helpers are ported from tests/e2e/actr/swift-echo-app/run.sh and
 # tests/e2e/actr/swift-datastream-app/run.sh; the Kotlin-specific helpers (AAR substitution,
 # linked-mode app config, gradle connectedAndroidTest) are new.
 #
@@ -14,7 +14,7 @@
 #   REPO_ROOT, SCRIPT_DIR, RUN_DIR, SQLITE_DIR, LOG_DIR, DIST_DIR
 #   HTTP_PORT, ICE_PORT, ADMIN_PASSWORD, PUBLISHER, ADMIN_TOKEN
 #   ACTR_CLI_MANIFEST, ACTR_TARGET_DIR, TEMP_SERVICE_TARGET_DIR
-#   ACTRIX_CONFIG_TEMPLATE, ACTRIX_CONFIG_PATH, SERVER_RUNTIME_PATH
+#   LORAN_CONFIG_TEMPLATE, LORAN_CONFIG_PATH, SERVER_RUNTIME_PATH
 #   SERVICE_KEYCHAIN, SERVICE_PUBLIC_KEY, PROVISIONED_KEYCHAIN, PROVISIONED_PUBLIC_KEY
 #   HOST_TARGET, ACTR_KOTLIN_VERSION (default "0.0.0-dev")
 
@@ -57,21 +57,21 @@ build_local_actr_cli() {
     success "actr CLI ready: $ACTR_CLI_BIN"
 }
 
-# Build actrix from source into the e2e cache and export ACTRIX_BIN.
+# Build loran from source into the e2e cache and export LORAN_BIN.
 # Source dir defaults to the monorepo's Loran server crate; override with
-# ACTRIX_SOURCE_DIR when validating another compatible server implementation.
-# Always building from source avoids picking up an unrelated `actrix` on PATH
+# LORAN_SOURCE_DIR when validating another compatible server implementation.
+# Always building from source avoids picking up an unrelated `loran` on PATH
 # and guarantees control over which implementation is exercised.
-build_local_actrix() {
-    section "🔨 Building local actrix from source"
-    local actrix_src="${ACTRIX_SOURCE_DIR:-$REPO_ROOT/crates/loran-server}"
-    local actrix_manifest="$actrix_src/Cargo.toml"
-    [ -f "$actrix_manifest" ] || fail "actrix manifest not found: $actrix_manifest"
-    CARGO_TARGET_DIR="$ACTR_TARGET_DIR" cargo build --manifest-path "$actrix_manifest" --bin actrix >/dev/null
-    ACTRIX_BIN="$ACTR_TARGET_DIR/debug/actrix"
-    [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
-    export ACTRIX_BIN
-    success "actrix ready (from $actrix_src): $ACTRIX_BIN"
+build_local_loran() {
+    section "🔨 Building local loran from source"
+    local loran_src="${LORAN_SOURCE_DIR:-$REPO_ROOT/crates/loran-server}"
+    local loran_manifest="$loran_src/Cargo.toml"
+    [ -f "$loran_manifest" ] || fail "loran manifest not found: $loran_manifest"
+    CARGO_TARGET_DIR="$ACTR_TARGET_DIR" cargo build --manifest-path "$loran_manifest" --bin loran >/dev/null
+    LORAN_BIN="$ACTR_TARGET_DIR/debug/loran"
+    [ -x "$LORAN_BIN" ] || fail "loran binary missing at $LORAN_BIN"
+    export LORAN_BIN
+    success "loran ready (from $loran_src): $LORAN_BIN"
 }
 
 # ──── Rust service packaging (ported from swift-echo-app) ────
@@ -164,7 +164,7 @@ build_and_publish_service() {
 }
 
 # Publish a no-compile identity-marker package for a linked client actor type
-# (actrix versions that require the actor type to be package-registered).
+# (loran versions that require the actor type to be package-registered).
 # Args: <app_actor_name> <app_version>.
 publish_app_package_identity() {
     local app_actor="$1"
@@ -515,8 +515,8 @@ capture_kotlin_diagnostics() {
     mkdir -p "$diag_dir"
     {
         echo "=== Process Status ==="
-        echo "ACTRIX_PID=${ACTRIX_PID:-none} SERVER_PID=${SERVER_PID:-none}"
-        [ -n "${ACTRIX_PID:-}" ] && kill -0 "$ACTRIX_PID" 2>/dev/null && echo "actrix: RUNNING" || echo "actrix: NOT RUNNING"
+        echo "LORAN_PID=${LORAN_PID:-none} SERVER_PID=${SERVER_PID:-none}"
+        [ -n "${LORAN_PID:-}" ] && kill -0 "$LORAN_PID" 2>/dev/null && echo "loran: RUNNING" || echo "loran: NOT RUNNING"
         [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" 2>/dev/null && echo "server: RUNNING" || echo "server: NOT RUNNING"
     } >"$diag_dir/process-status.txt" 2>/dev/null || true
 
@@ -568,7 +568,7 @@ kotlin_cleanup() {
         capture_kotlin_diagnostics || true
     fi
     sanitize_and_stage_logs || true
-    for pid in "${SERVER_PID:-}" "${ACTRIX_PID:-}"; do
+    for pid in "${SERVER_PID:-}" "${LORAN_PID:-}"; do
         [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
     done
     wait 2>/dev/null || true

@@ -874,7 +874,7 @@ impl MessageDispatcher for RuntimeObserverDispatcher {
 mod tests {
     use super::*;
     use actr_framework::{ErrorCategory, ErrorEvent, Workload};
-    use actr_mock_actrix::MockActrixServer;
+    use actr_mock_loran::MockLoranServer;
     use parking_lot::Mutex;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -969,9 +969,9 @@ mod tests {
 
     #[tokio::test]
     async fn linked_workload_forwards_lifecycle_callbacks() {
-        let mut server = MockActrixServer::start()
+        let mut server = MockLoranServer::start()
             .await
-            .expect("mock actrix server should start");
+            .expect("mock loran server should start");
         let temp = tempdir().expect("temp dir");
         let config_path = temp.path().join("actr.toml");
         let data_dir = temp.path().display().to_string().replace('\\', "/");
@@ -1043,9 +1043,9 @@ mod tests {
 
     #[tokio::test]
     async fn linked_workload_dispatches_local_call_to_foreign_lifecycle_bridge() {
-        let mut server = MockActrixServer::start()
+        let mut server = MockLoranServer::start()
             .await
-            .expect("mock actrix server should start");
+            .expect("mock loran server should start");
         let temp = tempdir().expect("temp dir");
         let config_path = write_test_config(temp.path(), &server);
 
@@ -1107,9 +1107,9 @@ mod tests {
 
     #[tokio::test]
     async fn linked_workload_propagates_foreign_dispatch_errors() {
-        let mut server = MockActrixServer::start()
+        let mut server = MockLoranServer::start()
             .await
-            .expect("mock actrix server should start");
+            .expect("mock loran server should start");
         let temp = tempdir().expect("temp dir");
         let config_path = write_test_config(temp.path(), &server);
 
@@ -1163,7 +1163,7 @@ mod tests {
         .unwrap_or_else(|_| panic!("{label} callback was not observed"));
     }
 
-    fn write_test_config(dir: &std::path::Path, server: &MockActrixServer) -> std::path::PathBuf {
+    fn write_test_config(dir: &std::path::Path, server: &MockLoranServer) -> std::path::PathBuf {
         let config_path = dir.join("actr.toml");
         let data_dir = dir.display().to_string().replace('\\', "/");
         std::fs::write(

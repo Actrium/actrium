@@ -647,7 +647,7 @@ mod tests {
     use super::*;
     use crate::context::ContextBridge;
     use crate::workload::{ErrorEventBridge, RpcEnvelopeBridge, WorkloadLifecycleBridge};
-    use actr_mock_actrix::MockActrixServer;
+    use actr_mock_loran::MockLoranServer;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::tempdir;
 
@@ -695,7 +695,7 @@ mod tests {
         })
     }
 
-    fn write_test_config(dir: &std::path::Path, server: &MockActrixServer) -> std::path::PathBuf {
+    fn write_test_config(dir: &std::path::Path, server: &MockLoranServer) -> std::path::PathBuf {
         let config_path = dir.join("actr.toml");
         let data_dir = dir.display().to_string().replace('\\', "/");
         std::fs::write(
@@ -742,9 +742,9 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
 
     #[tokio::test]
     async fn linked_manifest_constructor_enforces_manifest_identity() {
-        let mut server = MockActrixServer::start()
+        let mut server = MockLoranServer::start()
             .await
-            .expect("mock actrix server should start");
+            .expect("mock loran server should start");
         let temp = tempdir().expect("temp dir");
         write_test_config(temp.path(), &server);
         let manifest_path = write_test_manifest(temp.path());
@@ -864,9 +864,9 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_create_network_event_handle_and_start_is_bounded() {
-        let mut server = MockActrixServer::start()
+        let mut server = MockLoranServer::start()
             .await
-            .expect("mock actrix server should start");
+            .expect("mock loran server should start");
         let temp = tempdir().expect("temp dir");
         let config_path = write_test_config(temp.path(), &server);
         let node = linked_node_for_test(&config_path)
@@ -908,9 +908,9 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn repeated_create_network_event_handle_reuses_channel_with_fresh_incarnations() {
-        let mut server = MockActrixServer::start()
+        let mut server = MockLoranServer::start()
             .await
-            .expect("mock actrix server should start");
+            .expect("mock loran server should start");
         let temp = tempdir().expect("temp dir");
         let config_path = write_test_config(temp.path(), &server);
         let node = linked_node_for_test(&config_path)

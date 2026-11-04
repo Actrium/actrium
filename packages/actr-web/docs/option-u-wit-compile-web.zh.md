@@ -18,8 +18,8 @@
 | **6c echo 一份化** | ✓ | 3 commits 合入 main（`87b3401d` / `a4ec581b` / `cff7f71a`），`*-guest-wbg` 已删，`*-guest` 单 crate 跨 target |
 | **TD-002 sync-cli-assets** | ✓ | `packages/actr-web/scripts/sync-cli-assets.sh` + sw-host build.sh 末尾自动触发 |
 | **TD-003 γ HashMap** | ✓ | `guest_bridge.rs::DISPATCH_CTXS: HashMap<RequestId, Ctx>` |
-| **TD-004 α'** | ✓ | cred namespace 按 client_id；mock-actrix rebind WARN |
-| **TD-006 multi-client RPC** | ✓ | mock-actrix relay 精确投递 + sw-host stale peer cleanup + DOM/SW client lifecycle 修复（commit `301c58d6`） |
+| **TD-004 α'** | ✓ | cred namespace 按 client_id；mock-loran rebind WARN |
+| **TD-006 multi-client RPC** | ✓ | mock-loran relay 精确投递 + sw-host stale peer cleanup + DOM/SW client lifecycle 修复（commit `301c58d6`） |
 | **Phase 7 data-stream 迁移** | 待完成 | `data-stream-peer-concurrent` 仍由自定义 Service Worker 直接执行松散、未验证的 wasm-bindgen JS/WASM；已降级为默认拒绝启动的 legacy 示例，迁入 signed `.actr` canonical loader 后才能恢复为当前示例 |
 | **Phase 8 CM 路径删除** | ✓ | 删除 `packages/actr-web/packages/web-sdk/src/actor.sw.js`（CM 旧版）+ `crates/actr-cli/assets/web-runtime/actor.sw.js`（同步副本）+ `packages/actr-web/scripts/transpile-component.sh`；将 `actor-wbg.sw.js` → `actor.sw.js`、`start-mock-wbg.sh` → `start-mock.sh`；`register_component_workload` → `register_guest_workload`；移除 `cli` 内 `ACTR_WEB_GUEST_MODE` env 选择器；保留 `host_*_async` 等 host imports（WBG 路径仍用） |
 

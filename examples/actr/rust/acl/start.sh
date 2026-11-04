@@ -11,19 +11,19 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTRIX_DIR="$ACTOR_RTC_DIR"
+LORAN_DIR="$ACTOR_RTC_DIR"
 # Try multiple config locations
-ACTRIX_CONFIG=""
-for candidate in "$SCRIPT_DIR/actrix-config.toml" "$WORKSPACE_ROOT/actrix-config.toml" "$ACTRIX_DIR/loran/config/actrix.example.toml"; do
+LORAN_CONFIG=""
+for candidate in "$SCRIPT_DIR/loran-config.toml" "$WORKSPACE_ROOT/loran-config.toml" "$LORAN_DIR/loran/config/loran.example.toml"; do
     if [ -f "$candidate" ]; then
-        ACTRIX_CONFIG="$candidate"
+        LORAN_CONFIG="$candidate"
         break
     fi
 done
-if [ -z "$ACTRIX_CONFIG" ]; then
-    if [ -f "$ACTRIX_DIR/loran/config/actrix.example.toml" ]; then
-        ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
-        cp "$ACTRIX_DIR/loran/config/actrix.example.toml" "$ACTRIX_CONFIG"
+if [ -z "$LORAN_CONFIG" ]; then
+    if [ -f "$LORAN_DIR/loran/config/loran.example.toml" ]; then
+        LORAN_CONFIG="$WORKSPACE_ROOT/loran-config.toml"
+        cp "$LORAN_DIR/loran/config/loran.example.toml" "$LORAN_CONFIG"
     fi
 fi
 ACL_DEMO_DIR="$WORKSPACE_ROOT/acl"
@@ -46,7 +46,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 ensure_actr_toml "$SERVER_DIR"
 ensure_actr_toml "$ALLOWED_CLIENT_DIR"
 ensure_actr_toml "$BLOCKED_CLIENT_DIR"
-ensure_actrix_config "$WORKSPACE_ROOT"
+ensure_loran_config "$WORKSPACE_ROOT"
 
 echo ""
 echo "🧰 Checking required CLI tools..."
@@ -54,51 +54,51 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 ensure_cargo_bin "protoc-gen-prost" "protoc-gen-prost" "$LOG_DIR"
 ensure_cargo_bin "protoc-gen-tonic" "protoc-gen-tonic" "$LOG_DIR"
 
-# Step 1: Build and start actrix
+# Step 1: Build and start loran
 echo ""
-echo "🚀 Step 1: Building and starting actrix (signaling server)..."
+echo "🚀 Step 1: Building and starting loran (signaling server)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Check if actrix directory exists
-if [ ! -d "$ACTRIX_DIR" ]; then
-    echo -e "${RED}❌ Cannot find actrix directory at $ACTRIX_DIR${NC}"
+# Check if loran directory exists
+if [ ! -d "$LORAN_DIR" ]; then
+    echo -e "${RED}❌ Cannot find loran directory at $LORAN_DIR${NC}"
     exit 1
 fi
 
-# Build actrix
-echo "Building actrix from source..."
-cd "$ACTRIX_DIR"
-if ! cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" 2>&1 | tee "$LOG_DIR/actrix-build.log" | tail -5; then
-    echo -e "${RED}❌ Failed to build actrix${NC}"
+# Build loran
+echo "Building loran from source..."
+cd "$LORAN_DIR"
+if ! cargo build --manifest-path "$LORAN_DIR/crates/loran-server/Cargo.toml" 2>&1 | tee "$LOG_DIR/loran-build.log" | tail -5; then
+    echo -e "${RED}❌ Failed to build loran${NC}"
     exit 1
 fi
 
 # Check if build was successful
-if [ ! -f "$ACTRIX_DIR/target/debug/actrix" ]; then
-    echo -e "${RED}❌ Failed to build actrix${NC}"
+if [ ! -f "$LORAN_DIR/target/debug/loran" ]; then
+    echo -e "${RED}❌ Failed to build loran${NC}"
     exit 1
 fi
 
 cd "$WORKSPACE_ROOT"
-echo -e "${GREEN}✅ Actrix built successfully${NC}"
+echo -e "${GREEN}✅ Loran built successfully${NC}"
 
-# Start actrix
-echo "Starting actrix..."
-"$ACTRIX_DIR/target/debug/actrix" --config "$ACTRIX_CONFIG" > "$LOG_DIR/actrix.log" 2>&1 &
-ACTRIX_PID=$!
-echo "Actrix started (PID: $ACTRIX_PID)"
+# Start loran
+echo "Starting loran..."
+"$LORAN_DIR/target/debug/loran" --config "$LORAN_CONFIG" > "$LOG_DIR/loran.log" 2>&1 &
+LORAN_PID=$!
+echo "Loran started (PID: $LORAN_PID)"
 
-# Wait for actrix to be ready
+# Wait for loran to be ready
 MAX_WAIT=10
 COUNTER=0
 while [ $COUNTER -lt $MAX_WAIT ]; do
-    if ! kill -0 $ACTRIX_PID 2>/dev/null; then
-        echo -e "${RED}❌ Actrix failed to start${NC}"
-        cat "$LOG_DIR/actrix.log"
+    if ! kill -0 $LORAN_PID 2>/dev/null; then
+        echo -e "${RED}❌ Loran failed to start${NC}"
+        cat "$LOG_DIR/loran.log"
         exit 1
     fi
     if curl -s http://127.0.0.1:7000/health > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Actrix is running${NC}"
+        echo -e "${GREEN}✅ Loran is running${NC}"
         break
     fi
     sleep 1
@@ -106,7 +106,7 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
 done
 
 if [ $COUNTER -eq $MAX_WAIT ]; then
-    echo -e "${YELLOW}⚠️  Actrix health check timeout, proceeding anyway...${NC}"
+    echo -e "${YELLOW}⚠️  Loran health check timeout, proceeding anyway...${NC}"
 fi
 
 function cleanup {
@@ -115,26 +115,26 @@ function cleanup {
     [ -n "${SERVER_PID:-}" ] && kill $SERVER_PID 2>/dev/null || true
     [ -n "${ALLOWED_CLIENT_PID:-}" ] && kill $ALLOWED_CLIENT_PID 2>/dev/null || true
     [ -n "${BLOCKED_CLIENT_PID:-}" ] && kill $BLOCKED_CLIENT_PID 2>/dev/null || true
-    [ -n "${ACTRIX_PID:-}" ] && kill $ACTRIX_PID 2>/dev/null || true
+    [ -n "${LORAN_PID:-}" ] && kill $LORAN_PID 2>/dev/null || true
 }
 trap cleanup EXIT
 
-# Step 1.5: Setup realms in actrix (sqlite3)
+# Step 1.5: Setup realms in loran (sqlite3)
 echo ""
-echo "🔑 Setting up realms in actrix (sqlite3)..."
+echo "🔑 Setting up realms in loran (sqlite3)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 sleep 2
 
-SQLITE_PATH=$(grep -E '^sqlite_path' "$ACTRIX_CONFIG" | sed 's/.*= *"\(.*\)".*/\1/' | head -1 || true)
+SQLITE_PATH=$(grep -E '^sqlite_path' "$LORAN_CONFIG" | sed 's/.*= *"\(.*\)".*/\1/' | head -1 || true)
 if [ -z "$SQLITE_PATH" ]; then SQLITE_PATH="database"; fi
 case "$SQLITE_PATH" in
-    /*) ACTRIX_DB="$SQLITE_PATH/actrix.db" ;;
-    *)  ACTRIX_DB="$WORKSPACE_ROOT/$SQLITE_PATH/actrix.db" ;;
+    /*) LORAN_DB="$SQLITE_PATH/loran.db" ;;
+    *)  LORAN_DB="$WORKSPACE_ROOT/$SQLITE_PATH/loran.db" ;;
 esac
 
-if [ ! -f "$ACTRIX_DB" ]; then
-    echo -e "${RED}❌ Actrix database not found at $ACTRIX_DB${NC}"
+if [ ! -f "$LORAN_DB" ]; then
+    echo -e "${RED}❌ Loran database not found at $LORAN_DB${NC}"
     exit 1
 fi
 
@@ -142,7 +142,7 @@ REALM=$(grep -E '^\s*realm\s*=' "$SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr 
 if [ -z "$REALM" ]; then REALM=acl-demo@example.com; fi
 
 
-sqlite3 "$ACTRIX_DB" <<EOF
+sqlite3 "$LORAN_DB" <<EOF
 INSERT OR REPLACE INTO publisher (name, public_key, status, created_at, verified_at) VALUES ('acme', '', 'verified', strftime('%s','now'), strftime('%s','now'));
 INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
   SELECT id, 'acme', 'greeter.GreeterService', '1.0.0', 'acme/greeter.GreeterService@1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
@@ -165,7 +165,7 @@ echo -e "${GREEN}✅ Realm and ACL setup completed${NC}"
 
 # Join the Realm: each actr.toml names its key file (`realm_client_key`).
 ACTR_CMD="${ACTR_GEN_CMD:-actr}" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
-    "$ACTRIX_DB" "$REALM" "http://localhost:8081/issuer" \
+    "$LORAN_DB" "$REALM" "http://localhost:8081/issuer" \
     "$SERVER_DIR/realm-client.json" "$ALLOWED_CLIENT_DIR/realm-client.json" "$BLOCKED_CLIENT_DIR/realm-client.json"
 echo -e "${GREEN}✅ Joined Realm $REALM${NC}"
 
@@ -247,7 +247,7 @@ done
 
 sleep 2
 
-# Step 4.5: Install client dependencies (resolve from actrix registry)
+# Step 4.5: Install client dependencies (resolve from loran registry)
 echo ""
 echo "📦 Installing client dependencies (actr deps install)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -354,7 +354,7 @@ echo "📖 View full logs:"
 echo "   cat $LOG_DIR/acl-server.log         # Server logs"
 echo "   cat $LOG_DIR/allowed-client.log     # Allowed client logs"
 echo "   cat $LOG_DIR/blocked-client.log     # Blocked client logs"
-echo "   tail -f $LOG_DIR/actrix.log         # Actrix logs"
+echo "   tail -f $LOG_DIR/loran.log         # Loran logs"
 echo ""
 
 if [ "$ALLOWED_SUCCESS" = true ] && [ "$BLOCKED_FAILED" = true ]; then

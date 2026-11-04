@@ -53,7 +53,7 @@ fn cellular() -> NetworkTransportFlags {
 /// restart Offers own the visible retry cadence.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn recovery_attempt_timer_restarts_after_offer_before_rtc_readiness() {
-    // A's lower ActorId makes A the Answerer under the production Actrix role
+    // A's lower ActorId makes A the Answerer under the production Loran role
     // fallback. B is the endpoint that creates the restart offer.
     let mut pair = MobileRtcPairHarness::new(51_181, 51_182).await;
     pair.establish(ConnectionInitiator::B).await;
@@ -253,7 +253,7 @@ async fn address_change_rebinds_wildcards_before_attempt_deadline_and_restores_e
         return;
     };
 
-    // A's higher ActorId makes it the Offerer under Actrix arbitration. That
+    // A's higher ActorId makes it the Offerer under Loran arbitration. That
     // lets the test observe A's first restart Offer/Answer before delivering
     // the address-change edge to the same active recovery attempt.
     let mut pair = MobileRtcPairHarness::new_with_wildcard_rebind(51_201, 51_200).await;

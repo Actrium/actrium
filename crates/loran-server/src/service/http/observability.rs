@@ -13,7 +13,7 @@ use axum::{
     routing::get,
 };
 use base64::Engine;
-use platform::{ServiceCollector, config::ActrixConfig};
+use platform::{ServiceCollector, config::LoranConfig};
 use serde_json::{Value, json};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -34,7 +34,7 @@ const KNOWN_SERVICES: &[&str] = &[
 /// Shared state for observability endpoints.
 pub struct ObservabilityState {
     pub collector: ServiceCollector,
-    pub config: ActrixConfig,
+    pub config: LoranConfig,
     pub version: String,
 }
 
@@ -191,7 +191,7 @@ async fn monitoring_auth(
     if !htpasswd_file.is_empty() {
         response.headers_mut().insert(
             header::WWW_AUTHENTICATE,
-            "Basic realm=\"actrix-monitoring\"".parse().unwrap(),
+            "Basic realm=\"loran-monitoring\"".parse().unwrap(),
         );
     }
     response

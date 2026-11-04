@@ -45,9 +45,9 @@ impl HandoverBook {
                 .pending
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            if !pending
+            if pending
                 .get(nonce)
-                .is_some_and(|(expected, _)| expected == peer)
+                .is_none_or(|(expected, _)| expected != peer)
             {
                 return;
             }

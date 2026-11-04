@@ -949,7 +949,7 @@ mod management {
             json!({ "publisher": "acme.com", "status": "active", "sequence": 1 })
         );
         let pool = platform::storage::db::get_database().get_pool().clone();
-        let registered = actrix_publisher_registry::PublisherRegistryManager::new(pool)
+        let registered = loran_publisher_registry::PublisherRegistryManager::new(pool)
             .resolve_by_name("acme.com")
             .await
             .unwrap();
@@ -1328,7 +1328,7 @@ mod management {
             .unwrap();
         let keys = profile.verify("acme.com", chrono::Utc::now()).unwrap();
         let pool = platform::storage::db::get_database().get_pool().clone();
-        actrix_publisher_registry::PublisherRegistryManager::new(pool)
+        loran_publisher_registry::PublisherRegistryManager::new(pool)
             .register_publisher("acme.com", &profile, &keys)
             .await
             .unwrap();

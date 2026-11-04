@@ -13,9 +13,9 @@ ICE_PORT=3478
 REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="${PUBLISHER:-e2e.actrium.example}"
-ACTRIX_BIN="${ACTRIX_BIN:-}"
+LORAN_BIN="${LORAN_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
-ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/actrix.toml"
+LORAN_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/loran.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/swift-ts-workload"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
 REALM_NAME_PREFIX="swift-ts-workload"
@@ -23,7 +23,7 @@ REALM_NAME_PREFIX="swift-ts-workload"
 for cmd in cargo curl jq sqlite3 python3 perl rustc lsof; do
     require_cmd "$cmd"
 done
-ensure_actrix_available "$REPO_ROOT"
+ensure_loran_available "$REPO_ROOT"
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$RANDOM"
 RUN_DIR="$SCRIPT_DIR/.tmp/run-$RUN_ID"
@@ -34,13 +34,13 @@ DIST_DIR="$RUN_DIR/dist"
 TMP_SERVICE_ROOT="$RUN_DIR/workspace"
 TMP_SERVICE_DIR="$TMP_SERVICE_ROOT/swift-ts-workload-actr-$RANDOM"
 TMP_APP_DIR="$TMP_SERVICE_ROOT/swift-ts-workload-app-$RANDOM"
-ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
+LORAN_CONFIG_PATH="$RUN_DIR/loran.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
 SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
 PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
 PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
-SWIFTTSAPP_ACTRIX_CONFIG="$TMP_APP_DIR/actr.toml"
+SWIFTTSAPP_LORAN_CONFIG="$TMP_APP_DIR/actr.toml"
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 SWIFTTSAPP_PACKAGE_MANIFEST="$RUN_DIR/swift_ts_workload_app-package-manifest.toml"
 SWIFTTSAPP_MARKER_BINARY="$RUN_DIR/swift_ts_workload_app-linked-identity.bin"
@@ -56,7 +56,7 @@ SYMBOL_DIR="$RUN_DIR/symbols"
 mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT" "$DIAGNOSTIC_DIR" "$SANITIZED_LOG_DIR"
 rm -rf "$SCRIPT_DIR/.tmp/symbols"
 
-ACTRIX_PID=""
+LORAN_PID=""
 SERVER_PID=""
 APP_PID=""
 APP_DSYM=""
@@ -228,13 +228,13 @@ capture_diagnostics() {
     # Process status
     {
         echo "=== Process Status ==="
-        echo "ACTRIX_PID=${ACTRIX_PID:-none}"
+        echo "LORAN_PID=${LORAN_PID:-none}"
         echo "SERVER_PID=${SERVER_PID:-none}"
         echo "APP_PID=${APP_PID:-none}"
-        if [ -n "${ACTRIX_PID:-}" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
-            echo "actrix: RUNNING"
+        if [ -n "${LORAN_PID:-}" ] && kill -0 "$LORAN_PID" 2>/dev/null; then
+            echo "loran: RUNNING"
         else
-            echo "actrix: NOT RUNNING"
+            echo "loran: NOT RUNNING"
         fi
         if [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
             echo "server: RUNNING"
@@ -270,9 +270,9 @@ capture_diagnostics() {
         } >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
 
-    # Ghost candidates and ACL filtering from actrix log
-    if [ -f "$LOG_DIR/actrix.log" ]; then
-        grep -iE "heartbeat|disconnect|cleanup|ghost|candidate|acl|filter" "$LOG_DIR/actrix.log" >"$diag_dir/actrix-filtered.log" 2>/dev/null || true
+    # Ghost candidates and ACL filtering from loran log
+    if [ -f "$LOG_DIR/loran.log" ]; then
+        grep -iE "heartbeat|disconnect|cleanup|ghost|candidate|acl|filter" "$LOG_DIR/loran.log" >"$diag_dir/loran-filtered.log" 2>/dev/null || true
     fi
 
     # Server log heartbeat/disconnect/registry events
@@ -369,8 +369,8 @@ cleanup() {
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null || true
     fi
-    if [ -n "$ACTRIX_PID" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
-        kill "$ACTRIX_PID" 2>/dev/null || true
+    if [ -n "$LORAN_PID" ] && kill -0 "$LORAN_PID" 2>/dev/null; then
+        kill "$LORAN_PID" 2>/dev/null || true
     fi
     wait 2>/dev/null || true
 
@@ -411,7 +411,7 @@ run_actr() {
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" "$ACTR_CLI_BIN" "$@"
 }
 
-# ──── Rust / actrix lifecycle (reused from package-runtime-echo) ────
+# ──── Rust / loran lifecycle (reused from package-runtime-echo) ────
 
 build_local_actr_cli() {
     section "🔧 Building local actr CLI"
@@ -597,7 +597,7 @@ publish_swift_ts_workload_app_package_identity() {
     section "📦 Publishing SwiftTsWorkloadApp package identity"
 
     # Linked SwiftTsWorkloadApp does not load this package. It is a registry marker for
-    # actrix versions that still require the actor type to be package-registered.
+    # loran versions that still require the actor type to be package-registered.
     printf 'linked SwiftTsWorkloadApp identity marker\n' >"$SWIFTTSAPP_MARKER_BINARY"
     cat >"$SWIFTTSAPP_PACKAGE_MANIFEST" <<EOF
 edition = 1
@@ -634,7 +634,7 @@ render_swift_ts_workload_app_config() {
     section "📝 Rendering SwiftTsWorkloadApp runtime config"
     render_template \
         "$SCRIPT_DIR/actr.toml.tpl" \
-        "$SWIFTTSAPP_ACTRIX_CONFIG" \
+        "$SWIFTTSAPP_LORAN_CONFIG" \
         "__HOST__=127.0.0.1" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
@@ -696,7 +696,7 @@ targets:
       properties:
         CFBundleDisplayName: SwiftTsWorkloadApp
         UILaunchScreen: {}
-        NSLocalNetworkUsageDescription: SwiftTsWorkloadApp connects to the local actrix development server.
+        NSLocalNetworkUsageDescription: SwiftTsWorkloadApp connects to the local loran development server.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:
@@ -1060,13 +1060,13 @@ wait_for_swift_ts_workload_result() {
 
 section "🧪 Swift SwiftTsWorkloadApp E2E"
 echo "Run directory: $RUN_DIR"
-echo "Actrix binary: $ACTRIX_BIN"
+echo "Loran binary: $LORAN_BIN"
 echo "Host target:   $HOST_TARGET"
 
-# Phase 1: Prepare actrix infrastructure
+# Phase 1: Prepare loran infrastructure
 render_runtime_configs
 build_local_actr_cli
-start_actrix
+start_loran
 login_admin
 wait_for_signer
 ensure_realm

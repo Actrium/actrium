@@ -59,7 +59,7 @@ pub use verify::{
 ///
 /// Algorithm: `"actr-pub-" + hex(sha256(public_key_bytes))[..16]`
 ///
-/// This MUST match the server-side implementation in `actrix-publisher-registry::crypto::compute_key_id`.
+/// This MUST match the server-side implementation in `loran-publisher-registry::crypto::compute_key_id`.
 pub fn compute_key_id(public_key_bytes: &[u8]) -> String {
     let hex_str = util::sha256_hex(public_key_bytes);
     format!("actr-pub-{}", &hex_str[..16])

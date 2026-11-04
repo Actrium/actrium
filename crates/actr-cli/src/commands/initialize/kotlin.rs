@@ -297,7 +297,7 @@ impl KotlinInitializer {
 
 /// Extract host from signaling URL
 /// e.g., "ws://localhost:8081/signaling/ws" -> "localhost"
-/// or "wss://loran1.actrium-dev.example/signaling/ws" -> "loran1.actrium-dev.example"
+/// or "wss://loran.example.com/signaling/ws" -> "loran.example.com"
 fn extract_signaling_host(signaling_url: &str) -> String {
     signaling_url
         .trim_start_matches("ws://")

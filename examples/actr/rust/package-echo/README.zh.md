@@ -11,7 +11,7 @@ This example demonstrates:
 3. **Verify**: Validate package signature with `actr pkg verify`
 4. **Publish**: Register package with Publisher Registry via `actr pkg publish`
 5. **Run**: Host server loads the package and exposes the echo service
-6. **Discover**: Client discovers the service via Actrix signaling server
+6. **Discover**: Client discovers the service via Loran signaling server
 7. **Connect**: Establish WebRTC connection and exchange messages
 
 ## Architecture
@@ -30,7 +30,7 @@ This example demonstrates:
          │ published to
          ▼
 ┌─────────────────┐       ┌──────────────────┐
-│     Actrix      │◄─────►│ package-echo     │
+│     Loran      │◄─────►│ package-echo     │
 │  (signaling +   │       │    server        │
 │   publisher + Issuer)    │       │  (loads .actr)   │
 └────────┬────────┘       └──────────────────┘
@@ -212,7 +212,7 @@ cd examples/actr/rust/package-echo
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🧪 Testing package-echo (backend: wasm)
-    Using Actrix as signaling server
+    Using Loran as signaling server
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✅ jq found: jq-1.8.1
 📦 Step 0: Building echo-actr (wasm)...
@@ -269,7 +269,7 @@ When using `start_tmp_echo_actr.sh`, the same flow runs against its isolated `tm
 
 ### Step 5: Run Client
 - Builds package-echo-client binary
-- Discovers echo service via Actrix
+- Discovers echo service via Loran
 - Establishes WebRTC connection
 - Sends test message and verifies echo response
 
@@ -283,20 +283,20 @@ All logs are stored in `logs/` directory:
 
 ```bash
 # View logs
-cat logs/actrix.log              # Actrix signaling server
+cat logs/loran.log              # Loran signaling server
 cat logs/package-echo-server.log # Echo server
 cat logs/package-echo-client.log # Echo client
 
 # Follow logs in real-time
-tail -f logs/actrix.log
+tail -f logs/loran.log
 ```
 
 ## Network Ports
 
 | Port | Protocol | Service | Purpose |
 |------|----------|---------|---------|
-| 8081 | TCP | Actrix HTTP | Signaling, Issuer, publisher |
-| 3478 | UDP | Actrix ICE/TURN | WebRTC connectivity |
+| 8081 | TCP | Loran HTTP | Signaling, Issuer, publisher |
+| 3478 | UDP | Loran ICE/TURN | WebRTC connectivity |
 | 49152-65535 | UDP | TURN relay | WebRTC data channels |
 
 ### WSL 2 Network Notes
@@ -338,12 +338,12 @@ jq --version
 ls -la ../echo-actr/public-key.json
 ```
 
-### "Actrix not available"
+### "Loran not available"
 
-Build actrix manually:
+Build loran manually:
 
 ```bash
-cd ../../../actrix  # Navigate to actrix directory
+cd ../../../loran  # Navigate to loran directory
 cargo build
 ```
 
@@ -383,7 +383,7 @@ Check UDP port 3478 is available:
 
 ```bash
 lsof -iUDP:3478
-# Should show actrix listening
+# Should show loran listening
 ```
 
 ## Using `actr run` Directly
@@ -391,9 +391,9 @@ lsof -iUDP:3478
 Instead of the full test script, you can run components individually:
 
 ```bash
-# Start actrix manually
-cd ../../../actrix
-cargo run -- --config examples/actr/rust/package-echo/actrix-config.toml
+# Start loran manually
+cd ../../../loran
+cargo run -- --config examples/actr/rust/package-echo/loran-config.toml
 
 # Run the server with actr run after start.sh has generated ../logs/server-actr.toml
 cd examples/actr/rust/package-echo
@@ -415,7 +415,7 @@ cd examples/actr/rust/package-echo
 bash manual-runtime-lifecycle.sh
 ```
 
-The script derives an isolated config from `server-actr.toml`, starts actrix, publishes the local package, and verifies:
+The script derives an isolated config from `server-actr.toml`, starts loran, publishes the local package, and verifies:
 
 - `actr run -d` prints the WID plus the `actr logs <wid> -f` follow hint.
 - `actr ps` shows `WID`, `ACTR_ID`, `PID`, `STATUS`, and `STARTED_AT`.
@@ -431,7 +431,7 @@ package-echo/
 ├── README.md              # This file
 ├── manual-runtime-lifecycle.sh # Detached runtime lifecycle verification
 ├── start.sh               # End-to-end test script
-├── actrix-config.toml     # Actrix server configuration
+├── loran-config.toml     # Loran server configuration
 ├── dev-key.json           # Development signing key
 ├── server-actr.toml       # Default server runtime config template
 ├── tmp_server-actr.toml   # Temporary-workload runtime config template (overwritten by start_tmp_echo_actr.sh)
@@ -444,7 +444,7 @@ package-echo/
 │   ├── actr.toml
 │   └── manifest.toml
 └── logs/                  # Generated logs (gitignored)
-    ├── actrix.log
+    ├── loran.log
     ├── package-echo-server.log
     └── package-echo-client.log
 ```

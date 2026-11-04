@@ -1,6 +1,6 @@
 //! Unified error handling model
 //!
-//! Provides the top-level error type for the main actrix application, aggregating errors from all sub-modules and dependency crates.
+//! Provides the top-level error type for the main loran application, aggregating errors from all sub-modules and dependency crates.
 
 use thiserror::Error;
 

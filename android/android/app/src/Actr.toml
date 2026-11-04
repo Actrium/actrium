@@ -16,7 +16,7 @@ name = "actro"
 bot = { actr_type = "actro+app_server" }
 
 [system.signaling]
-url = "wss://loran1.actrium.example:443/signaling/ws"
+url = "wss://loran.example.com:443/signaling/ws"
 
 [system.deployment]
 realm = "actro@example.com"
@@ -32,8 +32,8 @@ tracing_service_name = "actrium"
 
 [system.webrtc]
 force_relay = false
-stun_urls = ["stun:loran1.actrium.example:3479"]
-turn_urls = ["turn:loran1.actrium.example:3479"]
+stun_urls = ["stun:loran.example.com:3479"]
+turn_urls = ["turn:loran.example.com:3479"]
 
 [scripts]
 dev = "xcodegen generate"

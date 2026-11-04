@@ -19,11 +19,11 @@ set -e
 set -o pipefail
 
 # ── Shared ports & defaults (single source of truth for this example) ────
-ACTRIX_HTTP_PORT=${ACTRIX_HTTP_PORT:-8081}
-ACTRIX_ICE_PORT=${ACTRIX_ICE_PORT:-13478}
-ACTRIX_HTTP_URL="http://localhost:${ACTRIX_HTTP_PORT}"
-ACTRIX_WS_URL="ws://localhost:${ACTRIX_HTTP_PORT}"
-ACTRIX_ADMIN_PASSWORD=${ACTRIX_ADMIN_PASSWORD:-testpassword123}
+LORAN_HTTP_PORT=${LORAN_HTTP_PORT:-8081}
+LORAN_ICE_PORT=${LORAN_ICE_PORT:-13478}
+LORAN_HTTP_URL="http://localhost:${LORAN_HTTP_PORT}"
+LORAN_WS_URL="ws://localhost:${LORAN_HTTP_PORT}"
+LORAN_ADMIN_PASSWORD=${LORAN_ADMIN_PASSWORD:-testpassword123}
 
 # Colors for output
 RED='\033[0;31m'
@@ -81,7 +81,7 @@ WORKSPACE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Repo root is 3 levels up from WORKSPACE_ROOT (examples/actr/rust).
 ACTR_REPO_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
 
-resolve_actrix_dir() {
+resolve_loran_dir() {
     local repo_dir="$1"
     local candidate=""
 
@@ -90,20 +90,20 @@ resolve_actrix_dir() {
         return 0
     fi
 
-    if [ -n "${ACTRIX_DIR:-}" ] && [ -d "${ACTRIX_DIR}" ]; then
-        printf '%s\n' "${ACTRIX_DIR}"
+    if [ -n "${LORAN_DIR:-}" ] && [ -d "${LORAN_DIR}" ]; then
+        printf '%s\n' "${LORAN_DIR}"
         return 0
     fi
 
-    candidate="$(cd "$repo_dir/.." && pwd)/actrix"
+    candidate="$(cd "$repo_dir/.." && pwd)/loran"
     if [ -d "$candidate" ]; then
         printf '%s\n' "$candidate"
         return 0
     fi
 
     while IFS= read -r candidate; do
-        if [ -n "$candidate" ] && [ "$candidate" != "$repo_dir" ] && [ -d "$(cd "$candidate/.." && pwd)/actrix" ]; then
-            printf '%s\n' "$(cd "$candidate/.." && pwd)/actrix"
+        if [ -n "$candidate" ] && [ "$candidate" != "$repo_dir" ] && [ -d "$(cd "$candidate/.." && pwd)/loran" ]; then
+            printf '%s\n' "$(cd "$candidate/.." && pwd)/loran"
             return 0
         fi
     done <<EOF
@@ -113,9 +113,9 @@ EOF
     return 1
 }
 
-ACTRIX_DIR="$(resolve_actrix_dir "$ACTR_REPO_DIR" || true)"
+LORAN_DIR="$(resolve_loran_dir "$ACTR_REPO_DIR" || true)"
 ACTR_CLI_MANIFEST="$ACTR_REPO_DIR/crates/actr-cli/Cargo.toml"
-ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
+LORAN_CONFIG="$WORKSPACE_ROOT/loran-config.toml"
 PACKAGE_ECHO_DIR="$WORKSPACE_ROOT/package-echo"
 CLIENT_DIR="$PACKAGE_ECHO_DIR/client"
 CLIENT_GUEST_DIR="$PACKAGE_ECHO_DIR/client-guest"
@@ -211,7 +211,7 @@ resolve_codegen_input_dir() {
 }
 
 # ── Clean stale database and config files ────────────────────────────────
-# Remove DB files from previous runs so actrix starts with fresh keys.
+# Remove DB files from previous runs so loran starts with fresh keys.
 # Without this, expired signing keys cause "Invalid credential format" errors.
 echo ""
 echo "🗑️  Cleaning stale database files..."
@@ -231,13 +231,13 @@ ensure_actr_toml "$CLIENT_GUEST_DIR"
 echo -e "${GREEN}✅ Synchronized actr.toml from Actr.example.toml${NC}"
 
 # Keep the disposable Loran config synchronized with the tracked template.
-cp "$WORKSPACE_ROOT/actrix-config.example.toml" "$ACTRIX_CONFIG"
-ensure_actrix_config "$WORKSPACE_ROOT"
+cp "$WORKSPACE_ROOT/loran-config.example.toml" "$LORAN_CONFIG"
+ensure_loran_config "$WORKSPACE_ROOT"
 
 # Keep every disposable runtime config on this demo's ports.  The non-standard
 # TURN port deliberately avoids colliding with a machine-wide TURN service.
-python3 - "$ACTRIX_CONFIG" "$CLIENT_DIR/actr.toml" "$CLIENT_GUEST_DIR/actr.toml" \
-    "$ACTRIX_HTTP_PORT" "$ACTRIX_ICE_PORT" <<'PY'
+python3 - "$LORAN_CONFIG" "$CLIENT_DIR/actr.toml" "$CLIENT_GUEST_DIR/actr.toml" \
+    "$LORAN_HTTP_PORT" "$LORAN_ICE_PORT" <<'PY'
 from pathlib import Path
 import sys
 
@@ -260,7 +260,7 @@ PY
 
 # ── Cleanup ──────────────────────────────────────────────────────────────
 
-ACTRIX_PID=""
+LORAN_PID=""
 SERVER_PID=""
 CLIENT_PID=""
 
@@ -278,9 +278,9 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null || true
     fi
 
-    if [ -n "$ACTRIX_PID" ]; then
-        echo "Stopping Loran (PID: $ACTRIX_PID)"
-        kill "$ACTRIX_PID" 2>/dev/null || true
+    if [ -n "$LORAN_PID" ]; then
+        echo "Stopping Loran (PID: $LORAN_PID)"
+        kill "$LORAN_PID" 2>/dev/null || true
     fi
 
     wait 2>/dev/null || true
@@ -530,76 +530,76 @@ cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine
 
 echo -e "${GREEN}✅ client-guest package verified${NC}"
 
-# ── Step 1: Ensure actrix is available ──────────────────────────────────
+# ── Step 1: Ensure loran is available ──────────────────────────────────
 
 echo ""
 echo "📦 Checking Loran availability..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-ACTRIX_CMD=""
-# Always build from source when ACTRIX_DIR is available to ensure latest migrations
-if [ -n "$ACTRIX_DIR" ] && [ -d "$ACTRIX_DIR" ]; then
-    echo -e "${BLUE}🔧 Building Loran from source ($ACTRIX_DIR)...${NC}"
-    CARGO_TARGET_DIR="$ACTRIX_DIR/target" cargo build --manifest-path "$ACTRIX_DIR/Cargo.toml" --bin actrix 2>&1 | tail -5
-    if [ -x "$ACTRIX_DIR/target/debug/actrix" ]; then
-        ACTRIX_CMD="$ACTRIX_DIR/target/debug/actrix"
-        echo -e "${GREEN}✅ Loran built from source: $ACTRIX_CMD${NC}"
+LORAN_CMD=""
+# Always build from source when LORAN_DIR is available to ensure latest migrations
+if [ -n "$LORAN_DIR" ] && [ -d "$LORAN_DIR" ]; then
+    echo -e "${BLUE}🔧 Building Loran from source ($LORAN_DIR)...${NC}"
+    CARGO_TARGET_DIR="$LORAN_DIR/target" cargo build --manifest-path "$LORAN_DIR/Cargo.toml" --bin loran 2>&1 | tail -5
+    if [ -x "$LORAN_DIR/target/debug/loran" ]; then
+        LORAN_CMD="$LORAN_DIR/target/debug/loran"
+        echo -e "${GREEN}✅ Loran built from source: $LORAN_CMD${NC}"
     else
         echo -e "${RED}❌ Failed to build Loran from source${NC}"
         exit 1
     fi
-elif command -v actrix > /dev/null 2>&1; then
-    ACTRIX_CMD="actrix"
-    echo -e "${GREEN}✅ Using Loran from PATH: $(which actrix)${NC}"
+elif command -v loran > /dev/null 2>&1; then
+    LORAN_CMD="loran"
+    echo -e "${GREEN}✅ Using Loran from PATH: $(which loran)${NC}"
 else
-    echo -e "${RED}❌ Loran not available. Set ACTRIX_DIR to this monorepo or install its server binary${NC}"
+    echo -e "${RED}❌ Loran not available. Set LORAN_DIR to this monorepo or install its server binary${NC}"
     exit 1
 fi
 
-# ── Step 2: Start actrix ────────────────────────────────────────────────
+# ── Step 2: Start loran ────────────────────────────────────────────────
 
 echo ""
 echo "🚀 Starting Loran (Actor infrastructure server)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Never stop an unrelated service. Use ACTRIX_HTTP_PORT/ACTRIX_ICE_PORT to
+# Never stop an unrelated service. Use LORAN_HTTP_PORT/LORAN_ICE_PORT to
 # select another pair when either requested port is occupied.
-if lsof -tiTCP:${ACTRIX_HTTP_PORT} -sTCP:LISTEN >/dev/null 2>&1; then
-    echo -e "${RED}❌ ${ACTRIX_HTTP_PORT}/tcp is already in use; set ACTRIX_HTTP_PORT to a free port${NC}"
+if lsof -tiTCP:${LORAN_HTTP_PORT} -sTCP:LISTEN >/dev/null 2>&1; then
+    echo -e "${RED}❌ ${LORAN_HTTP_PORT}/tcp is already in use; set LORAN_HTTP_PORT to a free port${NC}"
     exit 1
 fi
-if lsof -tiUDP:${ACTRIX_ICE_PORT} >/dev/null 2>&1; then
-    echo -e "${RED}❌ ${ACTRIX_ICE_PORT}/udp is already in use; set ACTRIX_ICE_PORT to a free port${NC}"
+if lsof -tiUDP:${LORAN_ICE_PORT} >/dev/null 2>&1; then
+    echo -e "${RED}❌ ${LORAN_ICE_PORT}/udp is already in use; set LORAN_ICE_PORT to a free port${NC}"
     exit 1
 fi
 
-$ACTRIX_CMD --config "$ACTRIX_CONFIG" > "$LOG_DIR/actrix.log" 2>&1 &
-ACTRIX_PID=$!
+$LORAN_CMD --config "$LORAN_CONFIG" > "$LOG_DIR/loran.log" 2>&1 &
+LORAN_PID=$!
 
-echo "Loran started (PID: $ACTRIX_PID)"
+echo "Loran started (PID: $LORAN_PID)"
 echo "Waiting for Loran to be ready..."
 
-actrix_http_ready() {
-    lsof -nP -iTCP:${ACTRIX_HTTP_PORT} -sTCP:LISTEN > /dev/null 2>&1 \
-        || nc -z localhost ${ACTRIX_HTTP_PORT} 2>/dev/null
+loran_http_ready() {
+    lsof -nP -iTCP:${LORAN_HTTP_PORT} -sTCP:LISTEN > /dev/null 2>&1 \
+        || nc -z localhost ${LORAN_HTTP_PORT} 2>/dev/null
 }
 
-actrix_ice_ready() {
-    lsof -nP -iUDP:${ACTRIX_ICE_PORT} > /dev/null 2>&1
+loran_ice_ready() {
+    lsof -nP -iUDP:${LORAN_ICE_PORT} > /dev/null 2>&1
 }
 
 # Wait for HTTP first (hard requirement)
 MAX_WAIT=20
 COUNTER=0
 while [ $COUNTER -lt $MAX_WAIT ]; do
-    if ! kill -0 $ACTRIX_PID 2>/dev/null; then
+    if ! kill -0 $LORAN_PID 2>/dev/null; then
         echo -e "${RED}❌ Loran failed to start${NC}"
-        cat "$LOG_DIR/actrix.log"
+        cat "$LOG_DIR/loran.log"
         exit 1
     fi
 
-    if actrix_http_ready; then
-        echo -e "${GREEN}✅ Loran HTTP is ready on port ${ACTRIX_HTTP_PORT}/tcp${NC}"
+    if loran_http_ready; then
+        echo -e "${GREEN}✅ Loran HTTP is ready on port ${LORAN_HTTP_PORT}/tcp${NC}"
         break
     fi
 
@@ -608,41 +608,41 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
 done
 
 if [ $COUNTER -eq $MAX_WAIT ]; then
-    echo -e "${RED}❌ Loran not listening on ${ACTRIX_HTTP_PORT}/tcp after ${MAX_WAIT} seconds${NC}"
-    cat "$LOG_DIR/actrix.log"
+    echo -e "${RED}❌ Loran not listening on ${LORAN_HTTP_PORT}/tcp after ${MAX_WAIT} seconds${NC}"
+    cat "$LOG_DIR/loran.log"
     exit 1
 fi
 
 # Wait for ICE/TURN (soft check — give it up to 5 more seconds)
 ICE_COUNTER=0
 while [ $ICE_COUNTER -lt 5 ]; do
-    if actrix_ice_ready 2>/dev/null; then
-        echo -e "${GREEN}✅ Loran ICE/TURN ready on ${ACTRIX_ICE_PORT}/udp${NC}"
+    if loran_ice_ready 2>/dev/null; then
+        echo -e "${GREEN}✅ Loran ICE/TURN ready on ${LORAN_ICE_PORT}/udp${NC}"
         break
     fi
     sleep 1 || true
     ICE_COUNTER=$((ICE_COUNTER + 1))
 done
 if [ $ICE_COUNTER -eq 5 ]; then
-    echo -e "${YELLOW}⚠️  ${ACTRIX_ICE_PORT}/udp not detected (may be using host ICE); continuing...${NC}" || true
+    echo -e "${YELLOW}⚠️  ${LORAN_ICE_PORT}/udp not detected (may be using host ICE); continuing...${NC}" || true
 fi
 
 # ── Step 2.5: Setup realms ──────────────────────────────────────────────
 
 echo ""
-echo "🔑 Setting up realms in actrix..."
+echo "🔑 Setting up realms in loran..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Poll until the Issuer reaches the Signer, which signs every credential with
 # the Realm's issuer key. The signer gRPC service may take a few seconds to
-# initialize after actrix starts.
+# initialize after loran starts.
 MAX_SIGNER_WAIT=60
 SIGNER_COUNTER=0
-echo "Waiting for the actrix Signer (up to ${MAX_SIGNER_WAIT}s)..."
+echo "Waiting for the loran Signer (up to ${MAX_SIGNER_WAIT}s)..."
 while [ $SIGNER_COUNTER -lt $MAX_SIGNER_WAIT ]; do
-    HEALTH_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/issuer/health" 2>/dev/null || true)
+    HEALTH_JSON=$(curl -sf "${LORAN_HTTP_URL}/issuer/health" 2>/dev/null || true)
     if [ "$(echo "$HEALTH_JSON" | jq -r '.signer_service // "missing"' 2>/dev/null)" = "ok" ]; then
-        echo -e "${GREEN}✅ Actrix Signer ready${NC}"
+        echo -e "${GREEN}✅ Loran Signer ready${NC}"
         break
     fi
     sleep 1
@@ -650,7 +650,7 @@ while [ $SIGNER_COUNTER -lt $MAX_SIGNER_WAIT ]; do
 done
 if [ $SIGNER_COUNTER -eq $MAX_SIGNER_WAIT ]; then
     echo -e "${RED}❌ Signer not ready after ${MAX_SIGNER_WAIT}s${NC}"
-    grep -aEn "Signer|Authentication failed" "$LOG_DIR/actrix.log" || true
+    grep -aEn "Signer|Authentication failed" "$LOG_DIR/loran.log" || true
     exit 1
 fi
 
@@ -658,18 +658,18 @@ fi
 SERVER_REALM=package-echo@example.com
 CLIENT_REALM=$(grep -E '^\s*realm\s*=' "$CLIENT_DIR/actr.toml" | head -1 | sed 's/.*=\s*//' | tr -d ' "')
 
-# Insert realms directly into SQLite (same approach as actrix fullstack tests)
-ACTRIX_DB="$WORKSPACE_ROOT/database/actrix.db"
+# Insert realms directly into SQLite (same approach as loran fullstack tests)
+LORAN_DB="$WORKSPACE_ROOT/database/loran.db"
 
-if [ ! -f "$ACTRIX_DB" ]; then
-    echo -e "${RED}❌ Actrix database not found at $ACTRIX_DB${NC}"
-    echo "Actrix may not have started properly."
+if [ ! -f "$LORAN_DB" ]; then
+    echo -e "${RED}❌ Loran database not found at $LORAN_DB${NC}"
+    echo "Loran may not have started properly."
     exit 1
 fi
 
 for REALM in $SERVER_REALM $CLIENT_REALM; do
     echo "  Creating realm $REALM..."
-    sqlite3 "$ACTRIX_DB" \
+    sqlite3 "$LORAN_DB" \
         "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));"
 done
 
@@ -684,7 +684,7 @@ if [ ! -x "$ACTR_CLI_BIN" ]; then
 fi
 SERVER_REALM_CLIENT_KEY="$LOG_DIR/server-realm-client.json"
 ACTR_CMD="$ACTR_CLI_BIN" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
-    "$ACTRIX_DB" "$SERVER_REALM" "${ACTRIX_HTTP_URL}/issuer" "$SERVER_REALM_CLIENT_KEY" \
+    "$LORAN_DB" "$SERVER_REALM" "${LORAN_HTTP_URL}/issuer" "$SERVER_REALM_CLIENT_KEY" \
     "$CLIENT_DIR/realm-client.json" "$CLIENT_GUEST_DIR/realm-client.json"
 echo -e "${GREEN}✅ Joined Realm $SERVER_REALM${NC}"
 
@@ -710,7 +710,7 @@ if [ -z "$PUBLISHER_KEY_ID" ]; then
     exit 1
 fi
 
-sqlite3 "$ACTRIX_DB" << SQL
+sqlite3 "$LORAN_DB" << SQL
 INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
 VALUES ('actrium', '$PUBLISHER_PUBKEY', '$PUBLISHER_KEY_ID', 'examples@actrium.local', 'active',
@@ -738,12 +738,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- registry publish \
     --package "$ACTR_PACKAGE" \
     --keychain "$SIGNING_KEY" \
-    --endpoint "${ACTRIX_HTTP_URL}"
+    --endpoint "${LORAN_HTTP_URL}"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ actr registry publish failed${NC}"
-    echo "Actrix logs (last 20 lines):"
-    tail -20 "$LOG_DIR/actrix.log"
+    echo "Loran logs (last 20 lines):"
+    tail -20 "$LOG_DIR/loran.log"
     exit 1
 fi
 
@@ -760,7 +760,7 @@ CLIENT_NAME="package-echo-client-app"
 CLIENT_VERSION="0.1.0"
 CLIENT_TYPE_STR="$CLIENT_PUBLISHER/$CLIENT_NAME@$CLIENT_VERSION"
 
-sqlite3 "$ACTRIX_DB" << SQL
+sqlite3 "$LORAN_DB" << SQL
 INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at)
 VALUES ('$CLIENT_PUBLISHER', '', '', 'examples@actrium.local', 'active', $NOW, $NOW, $NOW);
@@ -781,7 +781,7 @@ echo "🏷️  Seeding client-guest publisher package metadata..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 python3 - \
-    "$ACTRIX_DB" \
+    "$LORAN_DB" \
     "$CLIENT_GUEST_PACKAGE" \
     "$CLIENT_GUEST_PUBLIC_KEY" \
     "$CLIENT_GUEST_PUBLISHER" \
@@ -903,10 +903,10 @@ edition = 1
 path = "$ACTR_PACKAGE"
 
 [signaling]
-url = "${ACTRIX_WS_URL}/signaling/ws"
+url = "${LORAN_WS_URL}/signaling/ws"
 
 [issuer_endpoint]
-url = "${ACTRIX_HTTP_URL}/issuer"
+url = "${LORAN_HTTP_URL}/issuer"
 
 [deployment]
 realm = "package-echo@example.com"
@@ -914,7 +914,7 @@ realm_client_key = "$SERVER_REALM_CLIENT_KEY"
 
 [[trust]]
 kind = "registry"
-endpoint = "${ACTRIX_HTTP_URL}/issuer"
+endpoint = "${LORAN_HTTP_URL}/issuer"
 
 [discovery]
 visible = true
@@ -927,8 +927,8 @@ tracing_service_name = "package-echo-server"
 
 [webrtc]
 force_relay = false
-stun_urls = ["stun:localhost:${ACTRIX_ICE_PORT}"]
-turn_urls = ["turn:localhost:${ACTRIX_ICE_PORT}"]
+stun_urls = ["stun:localhost:${LORAN_ICE_PORT}"]
+turn_urls = ["turn:localhost:${LORAN_ICE_PORT}"]
 
 [acl]
 
@@ -1173,7 +1173,7 @@ if { [ "$CLIENT_MODE" = "http" ] && { [ "$RECEIVED_REPLY" = "Echo: $TEST_INPUT" 
     echo "📖 View full logs:"
     echo "   cat $LOG_DIR/package-echo-client.log  # Client logs"
     echo "   cat $LOG_DIR/package-echo-server.log  # Server logs"
-    echo "   tail -f $LOG_DIR/actrix.log           # Loran logs"
+    echo "   tail -f $LOG_DIR/loran.log           # Loran logs"
     echo ""
     if [ "$CLIENT_MODE" = "http" ]; then
         echo "Gateway response: $RECEIVED_REPLY"
@@ -1181,7 +1181,7 @@ if { [ "$CLIENT_MODE" = "http" ] && { [ "$RECEIVED_REPLY" = "Echo: $TEST_INPUT" 
             echo ""
             echo -e "${GREEN}✅ Echo stack is ready for Actrium at $GATEWAY_URL${NC}"
             echo "Press Ctrl-C to stop Loran, the echo server, and the client Host."
-            while kill -0 "$ACTRIX_PID" 2>/dev/null \
+            while kill -0 "$LORAN_PID" 2>/dev/null \
                 && kill -0 "$SERVER_PID" 2>/dev/null \
                 && kill -0 "$CLIENT_PID" 2>/dev/null; do
                 sleep 1
@@ -1203,6 +1203,6 @@ else
     tail -30 "$LOG_DIR/package-echo-server.log"
     echo ""
     echo "Loran output (last 30 lines):"
-    tail -30 "$LOG_DIR/actrix.log"
+    tail -30 "$LOG_DIR/loran.log"
     exit 1
 fi

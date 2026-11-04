@@ -139,11 +139,11 @@ fn is_retryable_transport_error(error: &signer::SignerError) -> bool {
 /// Create a Signer client wrapper from configuration
 pub async fn create_signer_client(
     config: &platform::config::signer::SignerClientConfig,
-    actrix_shared_key: &str,
+    loran_shared_key: &str,
 ) -> Result<SignerClientWrapper, AidError> {
     let grpc_config = signer::GrpcClientConfig {
         endpoint: config.endpoint.clone(),
-        actrix_shared_key: actrix_shared_key.to_string(),
+        loran_shared_key: loran_shared_key.to_string(),
         timeout_seconds: config.timeout_seconds,
         enable_tls: config.enable_tls,
         tls_domain: config.tls_domain.clone(),

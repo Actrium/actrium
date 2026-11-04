@@ -27,7 +27,7 @@ futures-util = { workspace = true }
 [dev-dependencies]
 actr-framework = { workspace = true }
 actr-protocol = { workspace = true }
-actr-mock-actrix = { workspace = true }
+actr-mock-loran = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }

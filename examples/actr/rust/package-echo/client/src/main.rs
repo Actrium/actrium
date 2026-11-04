@@ -324,8 +324,8 @@ async fn main() -> Result<()> {
         .map(|v| v == "production")
         .unwrap_or(false)
     {
-        let issuer_endpoint =
-            env::var("ISSUER_ENDPOINT").unwrap_or_else(|_| "http://localhost:8081/issuer".to_string());
+        let issuer_endpoint = env::var("ISSUER_ENDPOINT")
+            .unwrap_or_else(|_| "http://localhost:8081/issuer".to_string());
         let base_endpoint = issuer_endpoint.trim_end_matches("/issuer").to_string();
         info!("🔐 Using RegistryTrust (base endpoint: {})", base_endpoint);
         Arc::new(RegistryTrust::new(base_endpoint))

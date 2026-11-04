@@ -5,9 +5,9 @@ use std::path::PathBuf;
 /// Installation configuration for binary files only
 #[derive(Debug, Clone)]
 pub struct InstallConfig {
-    /// Installation directory (default: /opt/actrix)
+    /// Installation directory (default: /opt/loran)
     pub install_dir: PathBuf,
-    /// Binary name (default: actrix)
+    /// Binary name (default: loran)
     pub binary_name: String,
     /// Whether to create symlink in /usr/local/bin
     pub add_to_path: bool,
@@ -16,8 +16,8 @@ pub struct InstallConfig {
 impl Default for InstallConfig {
     fn default() -> Self {
         Self {
-            install_dir: PathBuf::from("/opt/actrix"),
-            binary_name: "actrix".to_string(),
+            install_dir: PathBuf::from("/opt/loran"),
+            binary_name: "loran".to_string(),
             add_to_path: true,
         }
     }

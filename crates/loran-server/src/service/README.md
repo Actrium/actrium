@@ -1,4 +1,4 @@
-# actrixd service composition
+# loran-server service composition
 
 `ServiceManager` is the composition root for Realm v1:
 
@@ -9,7 +9,7 @@
 - Router/certificate reload with bounded shutdown.
 
 Public names are uniformly Signer and Publisher Registry. Internal file names `publisher.rs`, crate
-`actrix-publisher-registry` are historical implementation names only and should not appear in new configuration,
+`loran-publisher-registry` are historical implementation names only and should not appear in new configuration,
 JSON, or documentation.
 
 See architecture and lifecycle in

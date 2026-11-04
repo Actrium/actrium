@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Basic release train for the monorepo-managed foundations, tools, SDKs, CLI,
-# and Actrix server crates.
+# and Loran server crates.
 # Supports staged execution via --stage for parallel CI jobs.
 
 readonly FINAL_TAG_PREFIX="v"
@@ -26,13 +26,13 @@ readonly FOUNDATION_CRATES=(
   "actr-platform-traits"
   "actr-pack"
   # Optional native test-utils dependencies still need registry versions at publish time.
-  "actrix-proto"
-  "actrix-signer"
-  "actrix-platform"
-  "actrix-signaling"
-  "actrix-stun"
-  "actrix-turn"
-  "actr-mock-actrix"
+  "loran-proto"
+  "loran-signer"
+  "loran-platform"
+  "loran-signaling"
+  "loran-stun"
+  "loran-turn"
+  "actr-mock-loran"
   "actr-hyper"
   "actr-platform-native"
 )
@@ -50,15 +50,15 @@ readonly CLI_CRATES=(
   "actr-cli"
 )
 
-# Actrix crates in dependency order. Keep the server package last so every
-# registry dependency is visible before `actrix` is published.
-readonly ACTRIX_CRATES=(
+# Loran crates in dependency order. Keep the server package last so every
+# registry dependency is visible before `loran-server` is published.
+readonly LORAN_CRATES=(
   "loran-packages"
-  "actrix-publisher-registry"
-  "actrix-issuer"
-  "actrix-admin"
-  "actrix-sdk"
-  "actrix"
+  "loran-publisher-registry"
+  "loran-issuer"
+  "loran-admin"
+  "loran-sdk"
+  "loran-server"
 )
 
 # GitHub Release binary matrix for the `actr` CLI.
@@ -1055,7 +1055,7 @@ package_files = [
     repo / "crates/actr-pack/Cargo.toml",
     repo / "crates/actr-hyper/Cargo.toml",
     repo / "crates/actr-platform-native/Cargo.toml",
-    repo / "crates/actr-mock-actrix/Cargo.toml",
+    repo / "crates/actr-mock-loran/Cargo.toml",
     repo / "tools/actr/protoc-gen/rust/Cargo.toml",
     repo / "tools/actr/protoc-gen/web/Cargo.toml",
     repo / "crates/actr-cli/Cargo.toml",
@@ -1087,7 +1087,7 @@ cli_dependency_names = {
     "actr-hyper",
     "actr-pack",
     "actr-platform-native",
-    "actr-mock-actrix",
+    "actr-mock-loran",
     "actr-config",
     "actr-protocol",
     "actr-service-compat",
@@ -1101,9 +1101,9 @@ dependency_version_names = {
     "actr-relay-security",
     "loran-relay",
     "loran-relay-protocol",
-    "actrix-signaling-service",
-    "actrix-stun-service",
-    "actrix-turn",
+    "loran-signaling-service",
+    "loran-stun-service",
+    "loran-turn",
     "platform",
 }
 
@@ -1119,7 +1119,7 @@ workspace_dependency_names = {
     "actr-pack",
     "actr-hyper",
     "actr-platform-native",
-    "actr-mock-actrix",
+    "actr-mock-loran",
 }
 
 def replace_first_version(lines: list[str]) -> list[str]:
@@ -1307,7 +1307,7 @@ all_publishable_crates() {
     "${PROTOC_CRATES[@]}" \
     "${SDK_CRATES[@]}" \
     "${CLI_CRATES[@]}" \
-    "${ACTRIX_CRATES[@]}"
+    "${LORAN_CRATES[@]}"
 }
 
 package_workspace_dir() {
@@ -1327,9 +1327,9 @@ validate_registry_dependencies() {
   log_info "Checking the registry-resolved TURN dependencies"
   if ! (
     cd "$WORK_REPO_ROOT"
-    cargo package -p actrix-stun --locked --allow-dirty
+    cargo package -p loran-stun --locked --allow-dirty
   ); then
-    fail "Could not verify actrix-stun with published registry dependencies; resolve the Cargo error before publishing"
+    fail "Could not verify loran-stun with published registry dependencies; resolve the Cargo error before publishing"
     return 1
   fi
 }
@@ -1864,7 +1864,7 @@ stage_release_version_files() {
     crates/actr-pack/Cargo.toml \
     crates/actr-hyper/Cargo.toml \
     crates/actr-platform-native/Cargo.toml \
-    crates/actr-mock-actrix/Cargo.toml \
+    crates/actr-mock-loran/Cargo.toml \
     tools/actr/protoc-gen/rust/Cargo.toml \
     tools/actr/protoc-gen/web/Cargo.toml \
     crates/loran-proto/Cargo.toml \
@@ -2207,8 +2207,8 @@ stage_publish_rust() {
     publish_rust_package "$package" "cli"
   done
 
-  for package in "${ACTRIX_CRATES[@]}"; do
-    publish_rust_package "$package" "actrix"
+  for package in "${LORAN_CRATES[@]}"; do
+    publish_rust_package "$package" "loran"
   done
 
   log_info "Stage publish-rust complete"
@@ -2547,8 +2547,8 @@ run_release_train() {
     publish_rust_package "$package" "cli"
   done
 
-  for package in "${ACTRIX_CRATES[@]}"; do
-    publish_rust_package "$package" "actrix"
+  for package in "${LORAN_CRATES[@]}"; do
+    publish_rust_package "$package" "loran"
   done
 
   create_final_tag

@@ -1,4 +1,4 @@
-//! Multi-peer isolation over real Actrix services, production mobile recovery
+//! Multi-peer isolation over real Loran services, production mobile recovery
 //! feed, and independent RTC controllers.
 
 use std::collections::HashMap;
@@ -7,14 +7,14 @@ use std::time::Duration;
 use actr_framework::WebRtcUnavailableReason;
 use actr_hyper::lifecycle::{NetworkAvailability, NetworkTransportFlags};
 use actr_hyper::test_support::{
-    ActrixTestServices, LinkDirection, MobileEventDriver, PacketRule, SignalingFaultRule,
+    LinkDirection, LoranTestServices, MobileEventDriver, PacketRule, SignalingFaultRule,
     SignalingMessageClass, TestEvidenceFailureGuard, TestHarness, bindable_non_loopback_ipv4,
     make_actor_id,
 };
 use actr_protocol::RpcEnvelope;
 
 const WAIT: Duration = Duration::from_secs(30);
-// Production Actrix assigns the offerer by reverse ActorId order when neither
+// Production Loran assigns the offerer by reverse ActorId order when neither
 // endpoint declares an answer preference. Keep hub A above all remotes so the
 // MP matrix's A-originated restart-offer assertions exercise the intended side.
 const A: u64 = 52_010;
@@ -82,7 +82,7 @@ async fn pair_rpc(harness: &TestHarness, a: u64, b: u64, label: &str) {
 }
 
 struct MultiPeerTopology {
-    services: ActrixTestServices,
+    services: LoranTestServices,
     harness: TestHarness,
     a_mobile: MobileEventDriver,
     _failure_evidence: TestEvidenceFailureGuard,
@@ -90,9 +90,9 @@ struct MultiPeerTopology {
 
 impl MultiPeerTopology {
     async fn new() -> Self {
-        let services = ActrixTestServices::start()
+        let services = LoranTestServices::start()
             .await
-            .expect("Actrix services start");
+            .expect("Loran services start");
         let mut harness = TestHarness::with_external_signaling(services.signaling_url()).await;
         for serial in [A, B, C, D] {
             harness

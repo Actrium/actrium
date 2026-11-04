@@ -9,7 +9,7 @@
 
 ## §0 TL;DR
 
-TD-006 已经收敛并修复。最后落地的是一组组合修复，而不是单点：`mock-actrix` 不再把 role-negotiation / relay 错发给旁观连接，`RouteCandidates` 优先最新 live actor；`sw-host` 在 stale peer、disconnected/failed/closed、以及 DOM `command_error` 时会真正清 transport、失效 discovered target 并拒绝 pending RPC；DOM/SW 侧补了 `CLIENT_UNREGISTER`、按浏览器窗口 remap 清理旧 client、串行处理同一 `MessagePort`、lane-0 `bindRpcPort` 重绑与 stale peer 替换。修复后验证结果是 `SUITES='BasicFunction MultiTab' bash start-mock.sh` `12/12` 全过，`SUITES=BasicFunction` 复跑 `6/6` 也全过，所以此前剩下的 `1-0 Basic Echo Connectivity` 也一并不再复现。
+TD-006 已经收敛并修复。最后落地的是一组组合修复，而不是单点：`mock-loran` 不再把 role-negotiation / relay 错发给旁观连接，`RouteCandidates` 优先最新 live actor；`sw-host` 在 stale peer、disconnected/failed/closed、以及 DOM `command_error` 时会真正清 transport、失效 discovered target 并拒绝 pending RPC；DOM/SW 侧补了 `CLIENT_UNREGISTER`、按浏览器窗口 remap 清理旧 client、串行处理同一 `MessagePort`、lane-0 `bindRpcPort` 重绑与 stale peer 替换。修复后验证结果是 `SUITES='BasicFunction MultiTab' bash start-mock.sh` `12/12` 全过，`SUITES=BasicFunction` 复跑 `6/6` 也全过，所以此前剩下的 `1-0 Basic Echo Connectivity` 也一并不再复现。
 
 ---
 
@@ -80,10 +80,10 @@ browser.createBrowserContext()          // 全新 incognito
 T0  server ready
 T1  client1 opened
 T2  client1 registers in SW, actor_id=4@.../echo-client-app
-T3  mock-actrix: client1 WS bound, serial=4
+T3  mock-loran: client1 WS bound, serial=4
 T4  client2 opened
 T5  client2 registers, actor_id=5@.../echo-client-app
-T6  mock-actrix: client2 WS bound, serial=5
+T6  mock-loran: client2 WS bound, serial=5
 T7  waitForEchoWorking(client1)
     -> DOM 显示 📤 Sending
     -> button ~60ms 后 re-enable
@@ -91,13 +91,13 @@ T7  waitForEchoWorking(client1)
 T8  timeout: Echo not working within 60000ms
 ```
 
-期间 mock-actrix 常能看到：
+期间 mock-loran 常能看到：
 
 ```text
 route candidates response count=1 target_type=acme.EchoService
 ```
 
-这只说明 **discover 已成功**，不能说明后续 RPC 包已经穿过 WebRTC，也不能说明 server 端 handler 一定收到了请求。mock-actrix 看到的是信令流量，不是 DataChannel payload。
+这只说明 **discover 已成功**，不能说明后续 RPC 包已经穿过 WebRTC，也不能说明 server 端 handler 一定收到了请求。mock-loran 看到的是信令流量，不是 DataChannel payload。
 
 ### 1.4 TD-004 诊断里的“次要发现”
 
@@ -132,7 +132,7 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 
 - `SwRuntime::new` 现在按 `client_id` 分区 credential namespace。
 - 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:558-560`。
-- 实测证据：mock-actrix 日志能看到两个 client 独立 serial（4 和 5），且 `WS actor rebound` WARN 不再 fire。
+- 实测证据：mock-loran 日志能看到两个 client 独立 serial（4 和 5），且 `WS actor rebound` WARN 不再 fire。
 - 所以 TD-004 的根因链已经断开，不再是 TD-006 的解释。
 
 ### 2.3 `CLIENTS` / `ClientContext` 单例
@@ -305,10 +305,10 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 
 **这里有一个额外的测试基架红旗**：
 
-- `crates/actr-mock-actrix/src/signaling.rs:557-611` 对 `RoleNegotiation` 的处理不是“发给 sender + target”，而是：
+- `crates/actr-mock-loran/src/signaling.rs:557-611` 对 `RoleNegotiation` 的处理不是“发给 sender + target”，而是：
   - `envelope_for_from` 发给 sender。
   - `envelope_for_to` 发给所有其他连接。
-- 代码位置：`crates/actr-mock-actrix/src/signaling.rs:601-609`。
+- 代码位置：`crates/actr-mock-loran/src/signaling.rs:601-609`。
 - 在拓扑 `server + client1 + client2` 下，这意味着 client2 可能收到本应只属于 `client1 <-> server` 那一对的 `RoleAssignment`，然后误执行 `create_peer(client1)`。
 - sw-host 收到这类误投递时，确实会把它当真：
   - `handle_actr_relay` 在 `RoleAssignment` 分支里按 `remote_peer_id` 建立 peer 并可能 `create_offer`。
@@ -323,7 +323,7 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 
 - 同时抓三页 console：server、client1、client2。
 - 如果 client2 收到了与自己无关的 `role_assignment` / `create_peer` / `create_offer`，E 基本坐实。
-- 一旦坐实，应该先修 mock-actrix 的 pairwise routing，再继续判断生产 runtime 是否还有独立问题。
+- 一旦坐实，应该先修 mock-loran 的 pairwise routing，再继续判断生产 runtime 是否还有独立问题。
 
 ### F. DOM 侧 `WebRtcCoordinator` 单实例（TD-001 遗留）
 
@@ -471,7 +471,7 @@ await page.evaluateOnNewDocument(() => {
 
 这次最终落地的是组合修复：
 
-- `crates/actr-mock-actrix/src/signaling.rs`
+- `crates/actr-mock-loran/src/signaling.rs`
   - `RoleNegotiation` 改成只投递给 `from/to` 两端，不再把 target 侧 `RoleAssignment` 广播给所有非 sender 连接。
   - 普通 relay 在 target 未绑定时改为 `warn + drop`，不再走“发给所有其他连接”的旧兼容分支。
   - `RouteCandidatesRequest` 改成只收集有活跃 WS 绑定的 actor，并优先最新 live registration。
@@ -525,24 +525,24 @@ await page.evaluateOnNewDocument(() => {
 - `0550af5d`：WBG `actrHost*` 注入 `request_id`
 - `61dbbfa7`：TD-004 根因文档（credential namespace）
 - `eb034d94`：按 `client_id` 分区 credential namespace
-- `b658d4f0`：mock-actrix 对 WS rebind 发 WARN
+- `b658d4f0`：mock-loran 对 WS rebind 发 WARN
 - `1ac5afd4`：同步 `crates/actr-cli/assets/web-runtime/` 产物
 - `cb45a98d`：记录 TD-004 部分生效、TD-005/TD-006 继续追
 - `eda786ed`：Phase 6 收尾与 TD-006 初始登记
 - `6593fc6a`：TD-006 首版长分析文档
 - `301c58d6`：multi-client RPC recovery 修复收敛；`BasicFunction + MultiTab` 12/12 全过
 
-### 7.2 mock-actrix 日志证据
+### 7.2 mock-loran 日志证据
 
 **TD-004 已经被修掉** 的直接证据：
 
 ```text
-mock-actrix: registered actor (http) serial=3 name="EchoService"
-mock-actrix: WS bound to HTTP-registered actor actor_id=3@.../EchoService
-mock-actrix: registered actor (http) serial=4 name="echo-client-app"
-mock-actrix: WS bound to HTTP-registered actor actor_id=4@.../echo-client-app
-mock-actrix: registered actor (http) serial=5 name="echo-client-app"
-mock-actrix: WS bound to HTTP-registered actor actor_id=5@.../echo-client-app
+mock-loran: registered actor (http) serial=3 name="EchoService"
+mock-loran: WS bound to HTTP-registered actor actor_id=3@.../EchoService
+mock-loran: registered actor (http) serial=4 name="echo-client-app"
+mock-loran: WS bound to HTTP-registered actor actor_id=4@.../echo-client-app
+mock-loran: registered actor (http) serial=5 name="echo-client-app"
+mock-loran: WS bound to HTTP-registered actor actor_id=5@.../echo-client-app
 ```
 
 同时：
@@ -573,8 +573,8 @@ mock-actrix: WS bound to HTTP-registered actor actor_id=5@.../echo-client-app
 | `packages/actr-web/packages/actr-dom/src/webrtc-coordinator.ts` | `28`、`74-78`、`151-158`、`445-503` | DOM peer map、create_peer、DataChannel open/close |
 | `packages/actr-web/packages/web-sdk/src/actor.sw.js` | `105-106`、`521-586` | `clientPorts` + per-`clientId` 路由 |
 | `packages/actr-web/examples/echo/test-auto.js` | `855-903` | 6-2 测试实现 |
-| `crates/actr-mock-actrix/src/signaling.rs` | `557-611` | `RoleNegotiation` 回包当前会对所有非 sender 连接扇出 |
-| `crates/actr-mock-actrix/src/signaling.rs` | `614-631` | 普通 relay 则是按 target 精确转发 |
+| `crates/actr-mock-loran/src/signaling.rs` | `557-611` | `RoleNegotiation` 回包当前会对所有非 sender 连接扇出 |
+| `crates/actr-mock-loran/src/signaling.rs` | `614-631` | 普通 relay 则是按 target 精确转发 |
 
 ### 7.4 复现环境
 
@@ -597,7 +597,7 @@ NODE_PATH=/home/l/.local/n/lib/node_modules \
 
 - `page.on('console')` 只能天然抓 page console，抓不到 SW console；不过当前 `actor.sw.js` 已经会把 SW log 转发回页面，所以新增 Rust `log::info!` 是能被现有测试看到的。
 - 改 `sw-host` 代码后如果忘了同步 `crates/actr-cli/assets/web-runtime/` 并重建 `actr`，很容易拿旧 wasm 做新诊断。
-- **不要过早把 mock 多 client 失败等同于生产 runtime 根因**：`mock-actrix` 的 `RoleNegotiation` 扇出语义本身就可能放大或制造 multi-client 异常。
+- **不要过早把 mock 多 client 失败等同于生产 runtime 根因**：`mock-loran` 的 `RoleNegotiation` 扇出语义本身就可能放大或制造 multi-client 异常。
 
 ---
 
@@ -609,4 +609,4 @@ NODE_PATH=/home/l/.local/n/lib/node_modules \
 
 1. 把本页前半部分标注为“修复前历史分析”的结构再做一次轻量整理。
 2. 视需要把本页结案摘要同步回 `tech-debt.zh.md` / Phase 6 文档。
-3. 如果后续再出现 multi-client 回归，优先先查 `mock-actrix` 信令日志和 SW stale-peer cleanup 路径。
+3. 如果后续再出现 multi-client 回归，优先先查 `mock-loran` 信令日志和 SW stale-peer cleanup 路径。

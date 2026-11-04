@@ -1648,7 +1648,7 @@ EOF
     crates/actr-pack/Cargo.toml \
     crates/actr-hyper/Cargo.toml \
     crates/actr-platform-native/Cargo.toml \
-    crates/actr-mock-actrix/Cargo.toml \
+    crates/actr-mock-loran/Cargo.toml \
     tools/actr/protoc-gen/rust/Cargo.toml \
     tools/actr/protoc-gen/web/Cargo.toml \
     crates/actr-cli/Cargo.toml \
@@ -1681,7 +1681,7 @@ EOF
 version.workspace = true
 
 [dependencies]
-signer = { path = "../loran-signer", package = "actrix-signer", version = "0.2.0" }
+signer = { path = "../loran-signer", package = "loran-signer", version = "0.2.0" }
 EOF
 
   # Create web packages.
@@ -1758,9 +1758,9 @@ EOF
     "$(cat "$temp_dir/tools/actr/protoc-gen/kotlin/build.gradle.kts")" \
     "Kotlin protoc plugin Gradle version"
   assert_eq \
-    'signer = { path = "../loran-signer", package = "actrix-signer", version = "0.3.0" }' \
+    'signer = { path = "../loran-signer", package = "loran-signer", version = "0.3.0" }' \
     "$(tail -n 1 "$temp_dir/crates/loran-platform/Cargo.toml")" \
-    "Actrix path dependency version"
+    "Loran path dependency version"
   if grep -q '0\.2\.0' "$temp_dir/tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt"; then
     printf 'Kotlin protoc plugin output versions were not synchronized\n' >&2
     rm -rf "$temp_dir"
@@ -1804,7 +1804,7 @@ test_update_versions_rewrites_prerelease_embedded_versions() {
     crates/actr-pack/Cargo.toml \
     crates/actr-hyper/Cargo.toml \
     crates/actr-platform-native/Cargo.toml \
-    crates/actr-mock-actrix/Cargo.toml \
+    crates/actr-mock-loran/Cargo.toml \
     tools/actr/protoc-gen/rust/Cargo.toml \
     tools/actr/protoc-gen/web/Cargo.toml \
     crates/actr-cli/Cargo.toml \
@@ -2306,28 +2306,28 @@ test_release_train_delegates_cli_release_operations() {
   fi
 }
 
-test_actrix_crates_publish_in_dependency_order() {
+test_loran_crates_publish_in_dependency_order() {
   local expected actual dependency
   expected=$(cat <<'EOF'
 loran-packages
-actrix-publisher-registry
-actrix-issuer
-actrix-admin
-actrix-sdk
-actrix
+loran-publisher-registry
+loran-issuer
+loran-admin
+loran-sdk
+loran-server
 EOF
 )
-  actual=$(printf '%s\n' "${ACTRIX_CRATES[@]}")
-  assert_eq "$expected" "$actual" "Actrix publish order"
+  actual=$(printf '%s\n' "${LORAN_CRATES[@]}")
+  assert_eq "$expected" "$actual" "Loran publish order"
 
   if grep -Rq '^publish = false$' crates/loran-* --include Cargo.toml; then
-    printf 'Actrix crates must be publishable\n' >&2
+    printf 'Loran crates must be publishable\n' >&2
     exit 1
   fi
 
   while IFS= read -r dependency; do
     if [[ "$dependency" != *'version = '* ]]; then
-      printf 'Actrix path dependency must declare a registry version: %s\n' "$dependency" >&2
+      printf 'Loran path dependency must declare a registry version: %s\n' "$dependency" >&2
       exit 1
     fi
   done < <(grep -Rh 'path = "../loran-' crates/loran-* --include Cargo.toml)
@@ -2373,7 +2373,7 @@ test_registry_validation_packages_without_skipping_verification() {
     printf 'registry validation must fail when cargo package fails\n' >&2
     exit 1
   fi
-  assert_eq "package -p actrix-stun --locked --allow-dirty" "$(cat "$cargo_log")" "verified registry package"
+  assert_eq "package -p loran-stun --locked --allow-dirty" "$(cat "$cargo_log")" "verified registry package"
   unset -f cargo
   rm -f "$cargo_log"
 }
@@ -2553,8 +2553,8 @@ test_release_train_publishes_release_assets_in_parallel() {
     printf 'release train must publish CLI assets\n' >&2
     exit 1
   }
-  grep -q '^  publish-actrix:' "$workflow" || {
-    printf 'release train must publish actrix assets\n' >&2
+  grep -q '^  publish-loran:' "$workflow" || {
+    printf 'release train must publish loran assets\n' >&2
     exit 1
   }
   grep -q '^  publish-protoc-plugins:' "$workflow" || {
@@ -2577,8 +2577,8 @@ test_release_train_publishes_release_assets_in_parallel() {
     printf 'CLI assets must build from release_sha during release train dry-run\n' >&2
     exit 1
   fi
-  if ! sed -n '/^  publish-actrix:/,/^    secrets: inherit/p' "$workflow" | grep -Fq "source_ref: \${{ fromJSON(needs.context.outputs.dry_run) && needs.context.outputs.release_sha || format('v{0}', needs.context.outputs.version) }}"; then
-    printf 'actrix assets must build from release_sha during release train dry-run\n' >&2
+  if ! sed -n '/^  publish-loran:/,/^    secrets: inherit/p' "$workflow" | grep -Fq "source_ref: \${{ fromJSON(needs.context.outputs.dry_run) && needs.context.outputs.release_sha || format('v{0}', needs.context.outputs.version) }}"; then
+    printf 'loran assets must build from release_sha during release train dry-run\n' >&2
     exit 1
   fi
   if ! sed -n '/^  publish-protoc-plugins:/,/^    secrets: inherit/p' "$workflow" | grep -Fq "source_ref: \${{ fromJSON(needs.context.outputs.dry_run) && needs.context.outputs.release_sha || format('v{0}', needs.context.outputs.version) }}"; then
@@ -2601,18 +2601,18 @@ test_release_train_publishes_release_assets_in_parallel() {
   done
 }
 
-test_actrix_release_stages_binaries_with_bash() {
+test_loran_release_stages_binaries_with_bash() {
   local workflow=.github/workflows/_loran-release.yml
   if ! sed -n '/name: Stage binary/,/name: Upload artifacts/p' "$workflow" | grep -q 'shell: bash'; then
-    printf 'actrix release Stage binary step must use bash for Windows runner compatibility\n' >&2
+    printf 'loran release Stage binary step must use bash for Windows runner compatibility\n' >&2
     exit 1
   fi
-  if grep -Fq 'name: actrix-${{ matrix.target.asset }}' "$workflow"; then
-    printf 'actrix release workflow must not double-prefix e2e artifact names\n' >&2
+  if grep -Fq 'name: loran-${{ matrix.target.asset }}' "$workflow"; then
+    printf 'loran release workflow must not double-prefix e2e artifact names\n' >&2
     exit 1
   fi
   if ! grep -Fq 'name: ${{ matrix.target.asset }}' "$workflow"; then
-    printf 'actrix release workflow must publish artifact names consumed by e2e\n' >&2
+    printf 'loran release workflow must publish artifact names consumed by e2e\n' >&2
     exit 1
   fi
 }
@@ -2681,14 +2681,14 @@ test_cli_validation_tag_requires_strict_semver
 test_protoc_plugin_release_workflow_is_reusable
 test_actrsharp_release_workflow_supports_manual_recovery
 test_release_train_publishes_release_assets_in_parallel
-test_actrix_release_stages_binaries_with_bash
+test_loran_release_stages_binaries_with_bash
 test_publish_web_workflow_has_timeout
 test_release_prepare_workflow_rejects_stale_runs
 test_release_prepare_workflow_closes_superseded_prs
 test_typescript_dry_run_uses_pack_without_registry_publish
 test_cli_has_no_unused_git2_dependency
 test_release_train_delegates_cli_release_operations
-test_actrix_crates_publish_in_dependency_order
+test_loran_crates_publish_in_dependency_order
 test_publish_rust_stage_publishes_packages
 test_publish_rust_stage_stops_when_registry_validation_fails
 test_registry_validation_packages_without_skipping_verification

@@ -59,7 +59,7 @@ SQLite 持久化：
 
 - Realm：多个 Realm 及其 Realm 名、Realm Profile 与状态；成员、Realm 客户端 key 与邀请（邀请只存
   secret 的哈希）；
-- Issuer Signer key material（生产时由 KEK 加密，`ACTRIX_SIGNER_KEK`）；
+- Issuer Signer key material（生产时由 KEK 加密，`LORAN_SIGNER_KEK`）；
 - 已签发 Actor 身份登记与 renewal 状态；
 - 连接 ACL、Publisher Profile/key/package metadata；
 - 配置 override 与审计需要的 nonce。
@@ -148,7 +148,7 @@ relay port range。端口可配置，descriptor 发布实际 endpoint。公网�
 历史名清理分支 `refactor/historical-name-cleanup-hardening` 已把代码中的历史名统一为
 publisher、Publisher Registry、Issuer、Issuer Signer、Actor Registry（proto 字段编号不变，
 包清单升为 `actr-package/2` 且不接受旧键，SQLite 表原地迁移），不使用 serde alias 或双轨
-解析。仍沿用旧名的只有 `actrix*` 包名/二进制名，旧→新对照见[术语表](../../docs/GLOSSARY.zh.md)
+解析。仍沿用旧名的只有 `loran*` 包名/二进制名，旧→新对照见[术语表](../../docs/GLOSSARY.zh.md)
 「历史名称对照」。
 
 安全假设、P0/P1 和发布门槛见

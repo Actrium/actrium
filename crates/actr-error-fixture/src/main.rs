@@ -1,6 +1,6 @@
 //! Error-fixture server for binding error-mapping integration tests.
 //!
-//! Starts mock-actrix + a minimal echo service in-process, then writes
+//! Starts mock-loran + a minimal echo service in-process, then writes
 //! a single JSON line to stdout:
 //!
 //! ```json
@@ -22,7 +22,7 @@ use std::io::BufRead;
 use actr_config::ConfigParser;
 use actr_framework::{Bytes, Context as RtContext, MessageDispatcher, Workload as RtWorkload};
 use actr_hyper::Node;
-use actr_mock_actrix::MockActrixServer;
+use actr_mock_loran::MockLoranServer;
 use actr_protocol::{ActorResult, ActrError, DataChunk, PayloadType, RpcEnvelope};
 use async_trait::async_trait;
 use base64::Engine;
@@ -124,8 +124,8 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    // ── 1. Start mock-actrix with the shared outbound relay ──────────────────
-    let mock = MockActrixServer::start_with_relay().await?;
+    // ── 1. Start mock-loran with the shared outbound relay ──────────────────
+    let mock = MockLoranServer::start_with_relay().await?;
     if args.pause_rtc {
         mock.pause_forwarding();
     }
@@ -134,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
     let publisher_pubkey_b64 =
         base64::engine::general_purpose::STANDARD.encode(publisher_key.verifying_key().as_bytes());
 
-    info!(port, "mock-actrix ready");
+    info!(port, "mock-loran ready");
 
     // ── 2. Write a temp manifest + runtime config ────────────────────────────
     let tmp = tempfile::tempdir()?;

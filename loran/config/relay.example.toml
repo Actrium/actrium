@@ -1,4 +1,4 @@
-# Standalone relay using the regular Loran executable (legacy binary: actrix).
+# Standalone relay using the regular Loran executable: loran.
 # Local development uses WS. For production use env="prod", cert/key and WSS.
 name = "loran-relay"
 env = "dev"

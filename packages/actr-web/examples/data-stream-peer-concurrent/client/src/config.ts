@@ -1,17 +1,17 @@
 import type { ActorConfig, SwRuntimeConfig } from '@actrium/actr-web';
 
-const actrixHttpUrl = (
-    import.meta.env.VITE_ACTRIX_HTTP_URL || 'http://localhost:8081'
+const loranHttpUrl = (
+    import.meta.env.VITE_LORAN_HTTP_URL || 'http://localhost:8081'
 ).replace(/\/+$/, '');
-const iceServers = import.meta.env.VITE_ACTRIX_STUN_URL
-    ? [{ urls: import.meta.env.VITE_ACTRIX_STUN_URL }]
+const iceServers = import.meta.env.VITE_LORAN_STUN_URL
+    ? [{ urls: import.meta.env.VITE_LORAN_STUN_URL }]
     : [];
 
 export const runtimeConfig: SwRuntimeConfig = {
-    issuer_endpoint: `${actrixHttpUrl}/issuer`,
+    issuer_endpoint: `${loranHttpUrl}/issuer`,
     signaling_url:
-        import.meta.env.VITE_ACTRIX_SIGNALING_URL ||
-        `${actrixHttpUrl.replace(/^http/, 'ws')}/signaling/ws`,
+        import.meta.env.VITE_LORAN_SIGNALING_URL ||
+        `${loranHttpUrl.replace(/^http/, 'ws')}/signaling/ws`,
     realm: 'data-stream@example.com',
     client_actr_type: 'acme/DataStreamPeerConcurrentClient@0.1.0',
     target_actr_type: 'acme/DataStreamPeerConcurrentServer@0.1.0',

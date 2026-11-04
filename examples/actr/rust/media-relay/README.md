@@ -13,12 +13,12 @@ This example demonstrates **real Actor-RTC distributed communication** using:
 ### Prerequisites
 
 - `actr` CLI available (`actr` in PATH or built at `../actr/target/{debug,release}/actr`)
-- `actrix` source available at `../actrix` (or `actrix` already installed); `start.sh` will start it automatically
+- `loran` source available at `../loran` (or `loran` already installed); `start.sh` will start it automatically
 
 ### Run the Demo
 
 ```bash
-./start.sh   # auto-runs actr gen for actr-a/actr-b and starts actrix
+./start.sh   # auto-runs actr gen for actr-a/actr-b and starts loran
 ```
 
 Notes:

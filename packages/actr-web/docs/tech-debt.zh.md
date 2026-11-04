@@ -288,14 +288,14 @@ echo client 的 dispatch 实现恰好是 `discover(...).await → call_raw(...).
 
 ### 诊断结果（2026-04-24 完成）
 
-经 TD-004 diagnostic agent 通过 mock-actrix 端 trace 锁定根因：
+经 TD-004 diagnostic agent 通过 mock-loran 端 trace 锁定根因：
 
 | 假说 | 验证 |
 |------|------|
 | 1 Issuer 注册冲突 | **半证实的变体**：不是"两次 register 撞车"，而是"第 2 个 client **根本没重新 register**，从 IndexedDB 恢复了第 1 个 client 的 credential" |
 | 2 sw-host 单 client | **证伪**：`CLIENTS: HashMap<client_id, Rc<ClientContext>>` 已是 per-client，`SwRuntime` 每 tab 独立 |
 | 3 旧 `actor-wbg.sw.js` port 管理 | **证伪**：`clientPorts: Map<clientId, port>` 每 tab 独立 |
-| 4 ws 会话冲突 | **证实为下游症状**：因假说 1 导致两 ws 同 actor_id，mock-actrix 的 rebind 语义覆盖前者 |
+| 4 ws 会话冲突 | **证实为下游症状**：因假说 1 导致两 ws 同 actor_id，mock-loran 的 rebind 语义覆盖前者 |
 
 ### 真正的根因
 
@@ -304,11 +304,11 @@ echo client 的 dispatch 实现恰好是 `discover(...).await → call_raw(...).
 - `packages/actr-web/crates/sw-host/src/runtime.rs:1001-1006` 的 `cred_kv_namespace` 只按 `client_actr_type` 命名
 - `runtime.rs:646-657` 的 `obtain_credential_from_issuer` 里 `try_restore_credential_static` 命中即 return，跳过重新 Issuer 注册
 - 第 2 个 client 页加载时，从 IndexedDB 恢复到第 1 个 client 的 `actor_id/credential`
-- 两个 ws 会话在 mock-actrix 注册成**同一 actor_id**
-- `crates/actr-mock-actrix/src/signaling.rs:78-107` 的 `handle_connection` 用 `entry.client_id = new` 无条件覆盖
+- 两个 ws 会话在 mock-loran 注册成**同一 actor_id**
+- `crates/actr-mock-loran/src/signaling.rs:78-107` 的 `handle_connection` 用 `entry.client_id = new` 无条件覆盖
 - 后连的 ws 抢走 registry binding，第 1 个 client 失去所有回程 relay
 
-### 时间线证据（mock-actrix.log）
+### 时间线证据（mock-loran.log）
 
 ```
 09:40:36  build_register_ok acme:EchoService     serial=1  (server, HTTP register)
@@ -323,11 +323,11 @@ echo client 的 dispatch 实现恰好是 `discover(...).await → call_raw(...).
 ### 历史修复选项
 
 - **α'（推荐）**：`cred_kv_namespace` 改为 `actr_credentials_{client_actr_type}_{client_id}`。简单、彻底，副作用是每 tab 一条 cred 持久条目（可接受）。echo/multi-tab 场景立即通
-- **β' Issuer 协议层支持"同 type 多实例"**：真 Issuer gate + mock-actrix 改协议。跨层工作量大
+- **β' Issuer 协议层支持"同 type 多实例"**：真 Issuer gate + mock-loran 改协议。跨层工作量大
 - **γ' 接受"1 SW 1 client"**：MultiTab 6-2/6-3/6-4/6-6 正式 skip。与多 tab 观察同 actor 的 UX 冲突，不推荐
-- **额外防御补丁**：mock-actrix `handle_connection` 的 rebind 至少 WARN（agent 已验证本次 rebind WARN 能 fire），甚至拒绝 rebind 返 conflict
+- **额外防御补丁**：mock-loran `handle_connection` 的 rebind 至少 WARN（agent 已验证本次 rebind WARN 能 fire），甚至拒绝 rebind 返 conflict
 
-**推荐路径：α' 为主 + mock-actrix WARN 作为长期防御**。α' 是一处 `runtime.rs` 改动，与 TD-003 的 γ request-id threading 正交。
+**推荐路径：α' 为主 + mock-loran WARN 作为长期防御**。α' 是一处 `runtime.rs` 改动，与 TD-003 的 γ request-id threading 正交。
 
 ### 次要发现（独立 TD 候选）
 
@@ -343,7 +343,7 @@ client1 warmup 在 **client2 还没出现前就已经失败**（30s 无 `📥`�
 
 - `CAPTURE_SW_CONSOLE=1` 必须开（`feedback_puppeteer_sw_console.md`）
 - puppeteer `browser.on('targetcreated')` 在 incognito 下可能不触发 SW target；用 CDP `Target.setDiscoverTargets` + 手动 attach
-- 2 client 同时跑时，mock-actrix log 里 client_id / 注册序列是关键
+- 2 client 同时跑时，mock-loran log 里 client_id / 注册序列是关键
 - sw-host `runtime.rs::register_client` + `InboundPacketDispatcher` + client_id 路由是嫌疑区
 
 ### 历史修复选项（占位）
@@ -356,12 +356,12 @@ client1 warmup 在 **client2 还没出现前就已经失败**（30s 无 `📥`�
 
 **已应用**（commits `eb034d94`、`b658d4f0`、`1ac5afd4`）：
 - `cred_kv_namespace` 改为 `actr_credentials_{actr_type}_{client_id}`
-- mock-actrix `handle_connection` 加 rebind WARN
+- mock-loran `handle_connection` 加 rebind WARN
 
 **实测效果**：
 - BasicFunction 6/6 ✓（单 client 无回归）
 - MultiTab 6-1 Two Client Tabs ✓
-- mock-actrix log 确认两 client 现在拿**独立** serial（4 和 5）；`WS actor rebound` WARN 未 fire（表明原 bug 路径不复现）
+- mock-loran log 确认两 client 现在拿**独立** serial（4 和 5）；`WS actor rebound` WARN 未 fire（表明原 bug 路径不复现）
 
 **历史后续**：TD-004 α' 后 MultiTab 6-2/6-3 仍 FAIL，当时说明 TD-004 不是唯一 blocker。该残留问题后来进入 TD-006，并已由组合修复关闭。
 
@@ -384,7 +384,7 @@ Phase 6c 的 3 commits（`87b3401d` / `a4ec581b` / `cff7f71a`）已合入 main�
 
 ## TD-006（**已解决**）：MultiTab 6-2/6-3/6-4/6-5 在 TD-004 α' + Phase 6c 之后仍 FAIL
 
-**状态**：已解决（2026-04-25，commit `301c58d6`）。详见 [TD-006 深度分析](./td-006-multi-client-rpc-analysis.zh.md)，最终不是单点修复，而是 mock-actrix relay 精确投递、stale peer cleanup、DOM/SW client lifecycle、MessagePort 串行化、lane-0 重绑和 pending RPC reject 等组合修复。验证结果：`SUITES='BasicFunction MultiTab' bash start-mock.sh` 12/12 全过，`SUITES=BasicFunction` 6/6 全过。
+**状态**：已解决（2026-04-25，commit `301c58d6`）。详见 [TD-006 深度分析](./td-006-multi-client-rpc-analysis.zh.md)，最终不是单点修复，而是 mock-loran relay 精确投递、stale peer cleanup、DOM/SW client lifecycle、MessagePort 串行化、lane-0 重绑和 pending RPC reject 等组合修复。验证结果：`SUITES='BasicFunction MultiTab' bash start-mock.sh` 12/12 全过，`SUITES=BasicFunction` 6/6 全过。
 
 ### 历史描述（保留作为上下文）
 
@@ -407,7 +407,7 @@ Phase 6 主体完成后 MultiTab 最终结果 **8/12 PASS**：
 
 ### 定位
 
-- TD-004 α' 确认有效：mock-actrix log 显示每个 client 独立 serial，`WS actor rebound` WARN 不再 fire
+- TD-004 α' 确认有效：mock-loran log 显示每个 client 独立 serial，`WS actor rebound` WARN 不再 fire
 - γ 并发隔离架构（HashMap<RequestId, Ctx>）已落地
 - **但 2 clients 并发 / 生命周期场景下首个 RPC 仍挂 60s**
 
@@ -432,7 +432,7 @@ Phase 6 主体完成后 MultiTab 最终结果 **8/12 PASS**：
 - `SUITES=MultiTab CAPTURE_SW_CONSOLE=1 bash start-mock.sh` 复现
 - 对比 6-1（过）和 6-2（挂）的差异：前者不做 RPC round-trip，后者做；所以挂在 RPC 路径
 - 重点嫌疑：`sw-host/src/wire/` 下的 WebRTC coordinator / signaling 的 per-client state 隔离
-- `mock-actrix.log` 观察 `handle_actr_relay` 是否正确分发到两个 client 的 ws
+- `mock-loran.log` 观察 `handle_actr_relay` 是否正确分发到两个 client 的 ws
 
 ### 历史修复选项（占位）
 

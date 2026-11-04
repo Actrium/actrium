@@ -1,8 +1,10 @@
 use crate::error::Result as AdminResult;
 use crate::metrics::collect_system_metrics;
 use crate::realm::realm_to_proto;
-use actrix_proto::NodeAdminService;
-use actrix_proto::{
+use chrono::Utc;
+use issuer::realm_profile::{ProfileChange, ProfileError, RealmProfiles};
+use loran_proto::NodeAdminService;
+use loran_proto::{
     ConfigOverrideEntry as ProtoConfigOverrideEntry, ConfigType, CreateRealmRequest,
     CreateRealmResponse, DeleteConfigOverrideRequest, DeleteConfigOverrideResponse,
     GetConfigRequest, GetConfigResponse, GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest,
@@ -12,10 +14,8 @@ use actrix_proto::{
     SystemMetrics, UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest,
     UpdateRealmResponse,
 };
-use chrono::Utc;
-use issuer::realm_profile::{ProfileChange, ProfileError, RealmProfiles};
 use platform::ServiceCollector;
-use platform::config::ActrixConfig;
+use platform::config::LoranConfig;
 use platform::config::config_store::{ConfigOverride, ConfigOverrideStore};
 use platform::config::registry;
 use platform::config::resolver::{self, ResolvedField};
@@ -77,7 +77,7 @@ pub struct AdminApiService {
     service_collector: ServiceCollector,
     started_at: Instant,
     /// Runtime config snapshot (set in AdminUi head mode).
-    running_config: Option<ActrixConfig>,
+    running_config: Option<LoranConfig>,
     /// Raw TOML content for L1 detection (resolver).
     toml_content: Option<String>,
     /// Path to config.toml on disk.
@@ -165,7 +165,7 @@ impl AdminApiService {
     }
 
     /// Attach the runtime config snapshot (AdminUi head mode).
-    pub fn with_running_config(mut self, config: ActrixConfig) -> Self {
+    pub fn with_running_config(mut self, config: LoranConfig) -> Self {
         self.running_config = Some(config);
         self
     }
@@ -250,7 +250,7 @@ impl AdminApiService {
         self.toml_content.as_deref().unwrap_or("")
     }
 
-    fn require_running_config(&self) -> GrpcResult<&ActrixConfig> {
+    fn require_running_config(&self) -> GrpcResult<&LoranConfig> {
         self.running_config
             .as_ref()
             .ok_or_else(|| Status::failed_precondition("Running config not available"))
@@ -542,7 +542,7 @@ impl AdminApiService {
         let content = restore_masked_secrets(content, &original);
 
         // Parse as TOML to validate syntax
-        let new_config = ActrixConfig::from_toml(&content)
+        let new_config = LoranConfig::from_toml(&content)
             .map_err(|e| Status::invalid_argument(format!("Invalid TOML: {e}")))?;
 
         // Supervisor-managed: the control plane is off-limits to the local Admin
@@ -1232,7 +1232,7 @@ fn toml_section_of(trimmed_line: &str) -> String {
 /// must be masked in the raw config.toml.
 fn is_secret_field(section: &str, key: &str) -> bool {
     match key {
-        "actrix_shared_key" | "turn_secret" | "renewal_token_secret" => true,
+        "loran_shared_key" | "turn_secret" | "renewal_token_secret" => true,
         "shared_secret" | "password_hash" => section.contains("control"),
         "kek" => section.contains("signer"),
         other => other.starts_with("kek_") && section.contains("signer"),
@@ -1245,7 +1245,7 @@ fn is_secret_config_key(key: &str) -> bool {
     let last = key.rsplit(['.', '/']).next().unwrap_or(key);
     matches!(
         last,
-        "actrix_shared_key"
+        "loran_shared_key"
             | "shared_secret"
             | "password_hash"
             | "turn_secret"
@@ -1355,8 +1355,8 @@ fn restore_masked_secrets(new_content: &str, original_content: &str) -> String {
 
 /// Compare the `control.*` section of a parsed config against the original
 /// on-disk content. Returns true if it changed (or cannot be verified).
-fn control_section_changed(new_config: &ActrixConfig, original_content: &str) -> bool {
-    let old_config = match ActrixConfig::from_toml(original_content) {
+fn control_section_changed(new_config: &LoranConfig, original_content: &str) -> bool {
+    let old_config = match LoranConfig::from_toml(original_content) {
         Ok(cfg) => cfg,
         // Cannot parse the previous file: fail safe by treating it as a change.
         Err(_) => return true,

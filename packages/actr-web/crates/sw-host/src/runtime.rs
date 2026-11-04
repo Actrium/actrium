@@ -618,7 +618,7 @@ impl SwRuntime {
                     Ok(AclRule {
                         permission: acl_rule::Permission::Allow as i32,
                         from_type: actr_type,
-                        // Actrix's DB-backed ACL lookup currently matches on an explicit
+                        // Loran's DB-backed ACL lookup currently matches on an explicit
                         // `source_realm` equality. Using `any_realm` would not match and
                         // would default-deny discovery.
                         source_realm: Some(acl_rule::SourceRealm::Realm(config.realm.clone())),
@@ -1317,7 +1317,7 @@ impl SwRuntime {
     /// share the SW instance. If the namespace only included `actr_type`, a
     /// second client page would restore the first client's credential from
     /// IndexedDB, both WS sessions would land on the same `actor_id`, and the
-    /// mock-actrix registry rebind would steal the relay binding from the
+    /// mock-loran registry rebind would steal the relay binding from the
     /// original client. Partitioning by `client_id` guarantees every client
     /// page performs its own Issuer registration and persists its own credential.
     fn cred_kv_namespace(&self) -> StorageNamespace {

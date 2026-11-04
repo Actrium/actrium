@@ -4,9 +4,9 @@ This repository collects ready-to-run ACTR examples and is now organized as a si
 
 For the cross-language audio capture demo, use the dedicated guide at `../audio-capture/README.md`.
 
-## Actrix Configuration
+## Loran Configuration
 
-All examples share the workspace-root `actrix-config.toml`. Do not keep or add per-example copies; start scripts launch actrix from the repository root using this config.
+All examples share the workspace-root `loran-config.toml`. Do not keep or add per-example copies; start scripts launch loran from the repository root using this config.
 
 ## Actr Configuration
 
@@ -45,12 +45,12 @@ The `start.sh` scripts run a preflight check and will auto-install/update these 
 
 Run workspace commands from the repository root. Examples:
 
-- `bash data-stream/start.sh` – spin up actrix (root config), receiver, and sender.
-- `bash shell-actr-echo/start.sh` – run the echo host and shell caller against the root actrix config.
-- `bash package-echo/start.sh` – run the signed package echo host/client demo against the root actrix config.
+- `bash data-stream/start.sh` – spin up loran (root config), receiver, and sender.
+- `bash shell-actr-echo/start.sh` – run the echo host and shell caller against the root loran config.
+- `bash package-echo/start.sh` – run the signed package echo host/client demo against the root loran config.
 - `bash package-echo/start_tmp_echo_actr.sh` – generate a temporary `echo-actr-xx` service via `actr init/install/gen` and run the package echo demo against it.
 - `bash package-echo/manual-runtime-lifecycle.sh` – verify detached runtime lifecycle commands against the package-backed server config.
-- `bash media-relay/start.sh` – launch the relay demo; actrix starts from the workspace root config.
+- `bash media-relay/start.sh` – launch the relay demo; loran starts from the workspace root config.
 - `../audio-capture/README.md` – run the Swift sender plus Rust receiver audio capture demo.
 
 ### Running Individual Examples
@@ -81,14 +81,14 @@ Both `--bin` and `-p` work identically in a workspace context.
 
 - **Data Stream** – file transfer between `receiver` and `sender`.
   - Start: `bash data-stream/start.sh`
-  - Behavior: boots actrix (root config) → receiver example → sender example; verifies chunk reception.
+  - Behavior: boots loran (root config) → receiver example → sender example; verifies chunk reception.
 - **Shell Actr Echo** – echo RPC between shell client and workload server.
   - Start: `bash shell-actr-echo/start.sh`
   - Codegen: runs `actr gen --input=proto --output=src/generated` in `shell-actr-echo/server` and `actr gen --input=proto --output=src/generated --no-scaffold` in `shell-actr-echo/client` before launching.
-  - Behavior: boots actrix (root config) → server example → client example; asserts echo reply contains server response.
+  - Behavior: boots loran (root config) → server example → client example; asserts echo reply contains server response.
 - **Media Relay** – media frames relayed from `actr-a` to `actr-b`.
   - Start: `bash media-relay/start.sh`
-  - Behavior: boots actrix (root config) → `actr-b` example → `actr-a` example; checks frame reception; exits automatically on success.
+  - Behavior: boots loran (root config) → `actr-b` example → `actr-a` example; checks frame reception; exits automatically on success.
 - **Package Echo** – echo RPC against a host that loads a signed `.actr` package built locally.
   - Start: `bash package-echo/start.sh`
   - Behavior: boots Loran (root config) → builds and signs the local `echo-actr` package → generates `logs/server-actr.toml` → runs the package with `actr run` → launches the client example; asserts the echo reply contains the packaged service response.

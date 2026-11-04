@@ -1,6 +1,6 @@
 # Swift DataStreamApp E2E
 
-End-to-end test that verifies an iOS linked-runtime app can send three WebRTC datastream messages to a package-backed Rust `DuplexStreamService` and receive the matching echo stream replies through local actrix signaling.
+End-to-end test that verifies an iOS linked-runtime app can send three WebRTC datastream messages to a package-backed Rust `DuplexStreamService` and receive the matching echo stream replies through local loran signaling.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ graph LR
         DS[DataStreamApp<br/>ActrNode.linked<br/>e2e.actrium.example/DataStreamApp@0.1.0]
     end
 
-    subgraph actrix
+    subgraph loran
         WS[WebSocket Signaling]
         Issuer[Issuer Registration]
         REG[Publisher Package Registry]
@@ -33,7 +33,7 @@ graph LR
 
 `run.sh` dynamically builds both sides from the empty template:
 
-1. Start local actrix, create a realm, and provision an E2E publisher keychain.
+1. Start local loran, create a realm, and provision an E2E publisher keychain.
 2. Initialize a temporary Rust service with `actr init --template empty`, then write the E2E `duplex_stream.proto`, manifest exports, Cargo files, and Rust handler.
 3. Run `actr deps install`, `actr gen -l rust`, `actr build`, and publish `e2e.actrium.example/DuplexStreamService@1.0.0`.
 4. Publish a linked-runtime identity marker for `e2e.actrium.example/DataStreamApp@0.1.0`.
@@ -98,7 +98,7 @@ CAPTURE_DIAGNOSTICS_ON_SUCCESS=1 bash tests/e2e/actr/swift-datastream-app/run.sh
 
 ## Diagnostics
 
-On failure, `run.sh` captures process status, signaling health, service registration rows from `signaling_cache.db`, filtered actrix/server logs, and app stdout/stderr. Sensitive values are redacted before sanitized logs are moved to `.tmp/sanitized-logs`.
+On failure, `run.sh` captures process status, signaling health, service registration rows from `signaling_cache.db`, filtered loran/server logs, and app stdout/stderr. Sensitive values are redacted before sanitized logs are moved to `.tmp/sanitized-logs`.
 
 ## CI
 

@@ -16,7 +16,7 @@ use actr_protocol::{AIdCredential, ActrId};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
-mod actrix_services;
+mod loran_services;
 mod mobile_rtc_pair;
 mod rtc_harness;
 #[path = "../../tests/common/signaling.rs"]
@@ -40,7 +40,7 @@ pub use crate::wire::webrtc::test_runtime::{
     DirectedRtcFaultHandle, DirectedRtcFaultMetrics, DirectedRtcFaultRegistry, LinkDirection,
     PacketRule, TestFaultRegistries,
 };
-pub use actrix_services::ActrixTestServices;
+pub use loran_services::LoranTestServices;
 pub use mobile_rtc_pair::{
     ConnectionInitiator, MobileEventDriver, MobileRtcPairHarness, PairEndpoint, PairSnapshot,
 };

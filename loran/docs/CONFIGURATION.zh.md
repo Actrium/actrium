@@ -2,14 +2,14 @@
 
 本文描述当前实现的单节点、SQLite profile：一个实例承载多个 Realm。尚未实现的部分见
 [架构契约](REALM_V1_ARCHITECTURE.zh.md)第 9 节。字段的可运行模板以
-[`actrix.example.toml`](../config/actrix.example.toml)为准；配置结构使用
+[`loran.example.toml`](../config/loran.example.toml)为准；配置结构使用
 `deny_unknown_fields`，旧字段或拼错字段会导致启动失败。
 
 ## 验证与启动
 
 ```bash
-actrix test /etc/actrix/config.toml
-actrix --config /etc/actrix/config.toml
+loran test /etc/loran/config.toml
+loran --config /etc/loran/config.toml
 ```
 
 示例中的 secret 均为故意不可用的 placeholder。生产配置若仍含
@@ -18,12 +18,12 @@ actrix --config /etc/actrix/config.toml
 ## 实例
 
 ```toml
-name = "actrix-realm-01"
+name = "loran-realm-01"
 env = "prod"
 enable = 31
-sqlite_path = "/var/lib/actrix"
+sqlite_path = "/var/lib/loran"
 location_tag = "single-node"
-actrix_shared_key = "<generate-with-openssl-rand-hex-32>"
+loran_shared_key = "<generate-with-openssl-rand-hex-32>"
 ```
 
 `enable` 是业务服务位掩码：
@@ -51,8 +51,8 @@ domain_name = "realm.example.com"
 advertised_ip = "203.0.113.10"
 ip = "::"
 port = 443
-cert = "/etc/actrix/tls/fullchain.pem"
-key = "/etc/actrix/tls/privkey.pem"
+cert = "/etc/loran/tls/fullchain.pem"
+key = "/etc/loran/tls/privkey.pem"
 
 [bind.ice]
 ip = "0.0.0.0"
@@ -88,7 +88,7 @@ coturn 无法直接使用主密钥验证。直接替换会使尚未过期的 TUR
 
 ```toml
 [services.signer]
-kek_env = "ACTRIX_SIGNER_KEK"
+kek_env = "LORAN_SIGNER_KEK"
 
 [services.signer.storage]
 backend = "sqlite"

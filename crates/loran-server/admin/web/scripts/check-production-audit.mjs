@@ -24,7 +24,7 @@ const appSource = readFileSync(
 );
 
 // The only temporary exception is an upstream advisory for React Router's
-// server-side RSC mode. Actrix Admin is a static Vite SPA. Fail closed if the
+// server-side RSC mode. Loran Admin is a static Vite SPA. Fail closed if the
 // dependency version or that architectural invariant changes.
 const allDependencies = {
   ...packageJson.dependencies,

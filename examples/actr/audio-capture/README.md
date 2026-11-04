@@ -19,7 +19,7 @@ audio-capture/
 └── rust-receiver/
 ```
 
-The shared actrix config stays at `../actrix-config.toml`.
+The shared loran config stays at `../loran-config.toml`.
 
 ## One-Time Setup
 
@@ -33,7 +33,7 @@ Initialize the realm and ACL entries before the first run:
 
 ```bash
 cargo run --manifest-path ../rust/Cargo.toml -p realm-setup -- \
-  -c ../actrix-config.toml \
+  -c ../loran-config.toml \
   -a rust-receiver/Actr.example.toml \
   -a AudioCaptureApp/AudioCaptureApp/actr.toml
 ```
@@ -42,10 +42,10 @@ cargo run --manifest-path ../rust/Cargo.toml -p realm-setup -- \
 
 Run these commands in separate terminals from `actr/examples/audio-capture`:
 
-1. Start actrix:
+1. Start loran:
 
 ```bash
-cargo run --manifest-path ../../../actrix/Cargo.toml -- --config ../actrix-config.toml
+cargo run --manifest-path ../../../loran/Cargo.toml -- --config ../loran-config.toml
 ```
 
 2. Start the Rust receiver:

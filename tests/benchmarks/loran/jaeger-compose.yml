@@ -13,8 +13,8 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
     restart: unless-stopped
     networks:
-      - actrix-network
+      - loran-network
 
 networks:
-  actrix-network:
+  loran-network:
     driver: bridge

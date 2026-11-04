@@ -9,7 +9,7 @@ pub const CLIENT_ACTR_PUBLISHER: &str = "actro";
 pub const CLIENT_ACTR_NAME: &str = "actro";
 pub const DEPENDENCY_NAME: &str = "bid-service";
 
-pub const DEFAULT_SIGNALING_URL: &str = "wss://loran1.actrium-dev.example/signaling/ws";
+pub const DEFAULT_SIGNALING_URL: &str = "wss://loran.example.com/signaling/ws";
 pub const SIGNALING_PATH: &str = "/signaling/ws";
 pub const OBSERVABILITY_FILTER_LEVEL: &str = "debug";
 pub const OBSERVABILITY_TRACING_ENDPOINT: &str = "http://127.0.0.1:4317";
@@ -218,20 +218,20 @@ mod tests {
     fn normalizes_actr_service_urls_like_runtime_typescript() {
         assert_eq!(normalize_signaling_url(None), DEFAULT_SIGNALING_URL);
         assert_eq!(
-            normalize_signaling_url(Some(&endpoint("loran1.actrium.example", Some("443")))),
-            "wss://loran1.actrium.example:443/signaling/ws"
+            normalize_signaling_url(Some(&endpoint("loran.example.com", Some("443")))),
+            "wss://loran.example.com:443/signaling/ws"
         );
         assert_eq!(
             normalize_signaling_url(Some(&endpoint("ws://local.test", None))),
             "ws://local.test/signaling/ws"
         );
         assert_eq!(
-            normalize_stun_url(&endpoint("loran1.actrium.example", Some("3478"))),
-            "stun:loran1.actrium.example:3478"
+            normalize_stun_url(&endpoint("loran.example.com", Some("3478"))),
+            "stun:loran.example.com:3478"
         );
         assert_eq!(
-            normalize_turn_url(&endpoint("turn:loran1.actrium.example", Some("3478"))),
-            "turn:loran1.actrium.example:3478"
+            normalize_turn_url(&endpoint("turn:loran.example.com", Some("3478"))),
+            "turn:loran.example.com:3478"
         );
     }
 
@@ -242,19 +242,19 @@ mod tests {
             name: "AskService".to_string(),
             version: "1.0.0".to_string(),
             realm: "k7m2q9xh@example.com".to_string(),
-            signaling_services: vec![endpoint("loran1.actrium.example", Some("443"))],
-            stun_services: vec![endpoint("loran1.actrium.example", Some("3478"))],
-            turn_services: vec![endpoint("loran1.actrium.example", Some("3478"))],
+            signaling_services: vec![endpoint("loran.example.com", Some("443"))],
+            stun_services: vec![endpoint("loran.example.com", Some("3478"))],
+            turn_services: vec![endpoint("loran.example.com", Some("3478"))],
         });
 
         assert!(toml.contains("name = \"actrium\""));
         assert!(toml.contains("tracing_service_name = \"actrium\""));
         assert!(toml.contains("bid-service = { actr_type = \"acmeopenclaw/AskService@1.0.0\" }"));
-        assert!(toml.contains("url = \"wss://loran1.actrium.example:443/signaling/ws\""));
+        assert!(toml.contains("url = \"wss://loran.example.com:443/signaling/ws\""));
         assert!(toml.contains("realm = \"k7m2q9xh@example.com\""));
         assert!(toml.contains("types = [\"acmeopenclaw/AskService@1.0.0\"]"));
-        assert!(toml.contains("stun_urls = [\"stun:loran1.actrium.example:3478\"]"));
-        assert!(toml.contains("turn_urls = [\"turn:loran1.actrium.example:3478\"]"));
+        assert!(toml.contains("stun_urls = [\"stun:loran.example.com:3478\"]"));
+        assert!(toml.contains("turn_urls = [\"turn:loran.example.com:3478\"]"));
         assert!(toml.ends_with('\n'));
     }
 

@@ -88,4 +88,4 @@ Known risks / assumptions (see also the commit message):
 | `WinUiEchoApp/App.xaml`(+`.cs`) | WinUI entry point |
 | `WinUiEchoApp/WinUiEchoApp.csproj` | net8.0-windows, Windows App SDK, unpackaged |
 | `manifest.toml`, `actr.toml.tpl`, `actr.lock.toml` | Package + runtime config (mirror swift-echo-app) |
-| `run.sh` | E2E driver (build → start actrix → service → app → verify) |
+| `run.sh` | E2E driver (build → start loran → service → app → verify) |

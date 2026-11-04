@@ -1,4 +1,4 @@
-use actrix_proto::RealmInfo;
+use loran_proto::RealmInfo;
 use platform::realm::Realm;
 
 /// Convert a Realm record into proto RealmInfo

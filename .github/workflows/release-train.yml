@@ -814,7 +814,7 @@ jobs:
     secrets: inherit
 
   # ── Publish Loran server binaries ───────────────────────────────────────
-  publish-actrix:
+  publish-loran:
     name: Publish Loran server binaries
     needs:
       - context
@@ -859,7 +859,7 @@ jobs:
       - publish-typescript
       - publish-actrsharp
       - publish-cli
-      - publish-actrix
+      - publish-loran
       - publish-protoc-plugins
     runs-on: ubuntu-latest
     steps:

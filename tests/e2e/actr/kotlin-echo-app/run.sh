@@ -3,7 +3,7 @@
 # kotlin-echo-app/run.sh — Kotlin Android nightly e2e (echo scenario).
 #
 # Mirrors tests/e2e/actr/swift-echo-app: a Rust EchoService is scaffolded, built, published
-# to local actrix and run; a Kotlin Android client (linked mode, scaffolded via
+# to local loran and run; a Kotlin Android client (linked mode, scaffolded via
 # `actr init -l kotlin --template echo`) calls echo.EchoService.Echo on it; the
 # EchoIntegrationTest asserts the reply. Verification is `./gradlew
 # connectedDebugAndroidTest` on an already-booted Android emulator (CI: booted by
@@ -25,7 +25,7 @@ ICE_PORT=3478
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="e2e.actrium.example"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
-ACTRIX_CONFIG_TEMPLATE="$REPO_ROOT/tests/e2e/actr/package-runtime-echo/config/actrix.toml"
+LORAN_CONFIG_TEMPLATE="$REPO_ROOT/tests/e2e/actr/package-runtime-echo/config/loran.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/kotlin-echo-app"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
 TEMP_SERVICE_TARGET_DIR="$E2E_TARGET_ROOT/temp-service"
@@ -51,7 +51,7 @@ DIST_DIR="$RUN_DIR/dist"
 TMP_SERVICE_ROOT="$RUN_DIR/workspace"
 TMP_SERVICE_DIR="$TMP_SERVICE_ROOT/echo-actr-$RANDOM"
 TMP_APP_DIR="$RUN_DIR/app"
-ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
+LORAN_CONFIG_PATH="$RUN_DIR/loran.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
 SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
@@ -60,10 +60,10 @@ PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
 
 mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$TMP_APP_DIR" "$E2E_TARGET_ROOT"
 
-ACTRIX_PID=""
+LORAN_PID=""
 SERVER_PID=""
 ACTR_CLI_BIN=""
-ACTRIX_BIN=""
+LORAN_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
@@ -171,7 +171,7 @@ section "🧪 Kotlin EchoApp E2E"
 echo "Run directory:  $RUN_DIR"
 echo "Service actor:  ${PUBLISHER}:${SERVICE_ACTOR}"
 echo "App actor:      ${PUBLISHER}/${APP_ACTOR}@${APP_VERSION}"
-echo "Actrix binary:  $ACTRIX_BIN"
+echo "Loran binary:  $LORAN_BIN"
 echo "Host target:    $HOST_TARGET"
 
 # Phase 0: native lib + local AAR (before any emulator dependence).
@@ -183,25 +183,25 @@ else
     success "SKIP_AAR_BUILD=1 — assuming io.actrium:actr:${ACTR_KOTLIN_VERSION} is already in mavenLocal"
 fi
 
-# Phase 1: actrix infrastructure.
+# Phase 1: loran infrastructure.
 HOST_IP="$(detect_host_lan_ip)"
 export HOST_IP
 section "🌐 Host LAN IP for emulator connectivity: $HOST_IP"
 render_runtime_configs
 # The shared template's enable=25 = SIGNALING|Issuer|SIGNER (STUN/TURN bits NOT set),
-# so actrix logs "ICE service (STUN/TURN) is disabled" and never starts the STUN/TURN server.
+# so loran logs "ICE service (STUN/TURN) is disabled" and never starts the STUN/TURN server.
 # The Android emulator needs STUN+TURN (direct ICE can't cross the QEMU NAT), so
 # add ENABLE_STUN(2) + ENABLE_TURN(4) → enable=31.
-perl -0pi -e 's/^enable = 25$/enable = 31/m' "$ACTRIX_CONFIG_PATH"
+perl -0pi -e 's/^enable = 25$/enable = 31/m' "$LORAN_CONFIG_PATH"
 # Bind ICE (and HTTP) on all interfaces and advertise the host LAN IP so the
 # Android emulator can reach STUN/TURN. Patterns are line-anchored (^) so the
 # `ip = ` rewrite doesn't also clobber `advertised_ip`.
-perl -0pi -e 's/^(ip) = "127\.0\.0\.1"/${1} = "0.0.0.0"/mg' "$ACTRIX_CONFIG_PATH"
-perl -0pi -e "s/^advertised_ip = \"127\\.0\\.0\\.1\"/advertised_ip = \"${HOST_IP}\"/mg" "$ACTRIX_CONFIG_PATH"
-rm -f "${ACTRIX_CONFIG_PATH}.bak"
+perl -0pi -e 's/^(ip) = "127\.0\.0\.1"/${1} = "0.0.0.0"/mg' "$LORAN_CONFIG_PATH"
+perl -0pi -e "s/^advertised_ip = \"127\\.0\\.0\\.1\"/advertised_ip = \"${HOST_IP}\"/mg" "$LORAN_CONFIG_PATH"
+rm -f "${LORAN_CONFIG_PATH}.bak"
 build_local_actr_cli
-build_local_actrix
-start_actrix
+build_local_loran
+start_loran
 login_admin
 wait_for_signer
 ensure_realm

@@ -49,7 +49,7 @@ use super::session_state::{SessionPhase, SessionSnapshot, SessionState};
 /// It is deliberately distinct from the realm-denial `403` so this recoverable
 /// per-actor identity-loss condition is not mistaken for a terminal realm
 /// denial. Must stay in lockstep with
-/// `actrix_issuer::issuer::REISSUE_POSSESSION_NOT_PROVEN_CODE`.
+/// `loran_issuer::issuer::REISSUE_POSSESSION_NOT_PROVEN_CODE`.
 const REISSUE_POSSESSION_NOT_PROVEN_CODE: u32 = 422;
 
 // ---- Re-acquire outcome (membership controller path) -----------------------

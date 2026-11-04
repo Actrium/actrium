@@ -126,13 +126,13 @@ fn resolve_field(
     }
 }
 
-/// Apply L2 overrides onto a TOML value tree, then deserialize to `ActrixConfig`.
+/// Apply L2 overrides onto a TOML value tree, then deserialize to `LoranConfig`.
 ///
 /// This is used during reload to merge dynamic overrides into the config.
 pub fn apply_overrides(
     toml_content: &str,
     overrides: &[ConfigOverride],
-) -> Result<super::ActrixConfig, String> {
+) -> Result<super::LoranConfig, String> {
     let mut tree: toml::Value =
         toml::from_str(toml_content).map_err(|e| format!("TOML parse error: {e}"))?;
 
@@ -149,7 +149,7 @@ pub fn apply_overrides(
             .map_err(|e| format!("Failed to apply override '{}': {e}", ov.key_path))?;
     }
 
-    // Deserialize back to ActrixConfig
+    // Deserialize back to LoranConfig
     tree.try_into()
         .map_err(|e| format!("Config deserialization error after applying overrides: {e}"))
 }
@@ -218,7 +218,7 @@ mod tests {
         assert!(!fields.is_empty());
 
         let realm = fields.iter().find(|f| f.key == "turn.realm").unwrap();
-        assert_eq!(realm.effective_value, "actrix.local");
+        assert_eq!(realm.effective_value, "loran.local");
         assert_eq!(realm.source, "default");
         assert!(realm.config_file_value.is_none());
         assert!(realm.override_value.is_none());
@@ -273,7 +273,7 @@ realm = "production.example.com"
 name = "test"
 env = "dev"
 location_tag = "test"
-actrix_shared_key = "XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg="
+loran_shared_key = "XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg="
 sqlite_path = "database"
 
 [bind.ice]

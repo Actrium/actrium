@@ -65,13 +65,13 @@ android/android/app/src/main/assets/model/asr/
 *.db-shm
 *.db-wal
 
-# Loran runtime configuration, including the imported Actrix compatibility
+# Loran runtime configuration, including the imported Loran compatibility
 # names. Checked-in examples remain explicitly allowed.
 loran-*.toml
-actrix-*.toml
-!**/actrix-config.example.toml
+loran-*.toml
+!**/loran-config.example.toml
 loran-*.db*
-actrix-*.db*
+loran-*.db*
 
 # Generated Actor package locks
 **/manifest.lock.toml

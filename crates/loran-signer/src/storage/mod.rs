@@ -54,7 +54,7 @@ impl KeyStorage {
     /// # Arguments
     /// * `config` - storage config
     /// * `encryptor` - key encryptor
-    /// * `db_path` - directory path for the database file (required when backend = "sqlite", from ActrixConfig.sqlite_path)
+    /// * `db_path` - directory path for the database file (required when backend = "sqlite", from LoranConfig.sqlite_path)
     ///
     /// # Returns
     /// The initialized storage instance

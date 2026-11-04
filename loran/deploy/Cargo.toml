@@ -1,12 +1,12 @@
 [package]
-name = "actrix-deploy"
+name = "loran-deploy"
 version = "0.4.0"
 publish = false
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Actrium/actrium"
-description = "Bootstrap deployment helper for actrix WebRTC services"
+description = "Bootstrap deployment helper for loran WebRTC services"
 
 [[bin]]
 name = "deploy"

@@ -20,35 +20,35 @@ lazy_static! {
 
     /// Total number of registered actors (grouped by realm)
     pub static ref ACTORS_TOTAL: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("actrix_actors_total", "Total number of registered actors")
-            .namespace("actrix"),
+        Opts::new("loran_actors_total", "Total number of registered actors")
+            .namespace("loran"),
         &["realm", "service"]
     ).unwrap();
 
     /// Total number of registered services
     pub static ref SERVICES_TOTAL: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("actrix_services_total", "Total number of registered services")
-            .namespace("actrix"),
+        Opts::new("loran_services_total", "Total number of registered services")
+            .namespace("loran"),
         &["service_name"]
     ).unwrap();
 
     /// Number of WebSocket connections
     pub static ref WEBSOCKET_CONNECTIONS: IntGauge = IntGauge::new(
-        "actrix_websocket_connections",
+        "loran_websocket_connections",
         "Number of active WebSocket connections"
     ).unwrap();
 
     /// Token issuance count (Issuer)
     pub static ref TOKENS_ISSUED: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_tokens_issued_total", "Total number of tokens issued")
-            .namespace("actrix"),
+        Opts::new("loran_tokens_issued_total", "Total number of tokens issued")
+            .namespace("loran"),
         &["realm", "status"]
     ).unwrap();
 
     /// Token validation count (Signaling/TURN)
     pub static ref TOKENS_VALIDATED: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_tokens_validated_total", "Total number of tokens validated")
-            .namespace("actrix"),
+        Opts::new("loran_tokens_validated_total", "Total number of tokens validated")
+            .namespace("loran"),
         &["service", "status"]
     ).unwrap();
 
@@ -56,23 +56,23 @@ lazy_static! {
 
     /// HTTP request duration (seconds)
     pub static ref REQUEST_DURATION: HistogramVec = HistogramVec::new(
-        HistogramOpts::new("actrix_request_duration_seconds", "HTTP request duration in seconds")
-            .namespace("actrix")
+        HistogramOpts::new("loran_request_duration_seconds", "HTTP request duration in seconds")
+            .namespace("loran")
             .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]),
         &["service", "method", "path", "status"]
     ).unwrap();
 
     /// Total number of HTTP requests
     pub static ref REQUESTS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_requests_total", "Total number of HTTP requests")
-            .namespace("actrix"),
+        Opts::new("loran_requests_total", "Total number of HTTP requests")
+            .namespace("loran"),
         &["service", "method", "path", "status"]
     ).unwrap();
 
     /// Error count
     pub static ref ERRORS_TOTAL: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_errors_total", "Total number of errors")
-            .namespace("actrix"),
+        Opts::new("loran_errors_total", "Total number of errors")
+            .namespace("loran"),
         &["service", "error_type"]
     ).unwrap();
 
@@ -80,22 +80,22 @@ lazy_static! {
 
     /// Cache hit count
     pub static ref CACHE_HITS: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_cache_hits_total", "Total number of cache hits")
-            .namespace("actrix"),
+        Opts::new("loran_cache_hits_total", "Total number of cache hits")
+            .namespace("loran"),
         &["cache_type"]
     ).unwrap();
 
     /// Cache miss count
     pub static ref CACHE_MISSES: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_cache_misses_total", "Total number of cache misses")
-            .namespace("actrix"),
+        Opts::new("loran_cache_misses_total", "Total number of cache misses")
+            .namespace("loran"),
         &["cache_type"]
     ).unwrap();
 
     /// Database connection pool status
     pub static ref DB_CONNECTIONS: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("actrix_db_connections", "Number of database connections")
-            .namespace("actrix"),
+        Opts::new("loran_db_connections", "Number of database connections")
+            .namespace("loran"),
         &["pool", "state"]
     ).unwrap();
 
@@ -103,22 +103,22 @@ lazy_static! {
 
     /// Rate limit trigger count
     pub static ref RATE_LIMIT_EXCEEDED: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_rate_limit_exceeded_total", "Total number of rate limit violations")
-            .namespace("actrix"),
+        Opts::new("loran_rate_limit_exceeded_total", "Total number of rate limit violations")
+            .namespace("loran"),
         &["service", "limiter_type"]
     ).unwrap();
 
     /// Authentication failure count
     pub static ref AUTH_FAILURES: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_auth_failures_total", "Total number of authentication failures")
-            .namespace("actrix"),
+        Opts::new("loran_auth_failures_total", "Total number of authentication failures")
+            .namespace("loran"),
         &["service", "reason"]
     ).unwrap();
 
     /// Invalid request count
     pub static ref INVALID_REQUESTS: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_invalid_requests_total", "Total number of invalid requests")
-            .namespace("actrix"),
+        Opts::new("loran_invalid_requests_total", "Total number of invalid requests")
+            .namespace("loran"),
         &["service", "reason"]
     ).unwrap();
 
@@ -126,15 +126,15 @@ lazy_static! {
 
     /// Key generation count
     pub static ref KEYS_GENERATED: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_keys_generated_total", "Total number of keys generated")
-            .namespace("actrix"),
+        Opts::new("loran_keys_generated_total", "Total number of keys generated")
+            .namespace("loran"),
         &["key_type"]
     ).unwrap();
 
     /// Key rotation count
     pub static ref KEY_ROTATIONS: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_key_rotations_total", "Total number of key rotations")
-            .namespace("actrix"),
+        Opts::new("loran_key_rotations_total", "Total number of key rotations")
+            .namespace("loran"),
         &["reason"]
     ).unwrap();
 
@@ -142,21 +142,21 @@ lazy_static! {
 
     /// TURN allocation requests
     pub static ref TURN_ALLOCATIONS: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_turn_allocations_total", "Total number of TURN allocations")
-            .namespace("actrix"),
+        Opts::new("loran_turn_allocations_total", "Total number of TURN allocations")
+            .namespace("loran"),
         &["status"]
     ).unwrap();
 
     /// TURN active session count
     pub static ref TURN_ACTIVE_SESSIONS: IntGauge = IntGauge::new(
-        "actrix_turn_active_sessions",
+        "loran_turn_active_sessions",
         "Number of active TURN sessions"
     ).unwrap();
 
     /// TURN traffic statistics (bytes)
     pub static ref TURN_BYTES_RELAYED: IntCounterVec = IntCounterVec::new(
-        Opts::new("actrix_turn_bytes_relayed_total", "Total bytes relayed by TURN")
-            .namespace("actrix"),
+        Opts::new("loran_turn_bytes_relayed_total", "Total bytes relayed by TURN")
+            .namespace("loran"),
         &["direction"]
     ).unwrap();
 }
@@ -373,7 +373,7 @@ mod tests {
         let output = export_metrics();
         // Check for the metric name (may appear with or without namespace prefix)
         assert!(
-            output.contains("actrix_websocket_connections")
+            output.contains("loran_websocket_connections")
                 || output.contains("websocket_connections"),
             "Output should contain websocket_connections metric. Output: {output}"
         );

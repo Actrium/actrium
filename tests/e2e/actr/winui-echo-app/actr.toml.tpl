@@ -21,7 +21,7 @@ realm_client_key = "__REALM_CLIENT_KEY__"
 visible = true
 
 [hyper.trust]
-# This runner publishes packages to the local E2E Actrix instance only.
+# This runner publishes packages to the local E2E Loran instance only.
 kind = "dev_only"
 
 [observability]

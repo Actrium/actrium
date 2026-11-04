@@ -3,16 +3,10 @@
   "pending_cutover": "https://github.com/Actrium/actrium/pull/288",
   "references": {
     "android/android/app/Actr.toml": {
-      "actro": 2,
-      "stun:loran1.actrium.example:3479": 1,
-      "turn:loran1.actrium.example:3479": 1,
-      "wss://loran1.actrium.example:443/signaling/ws": 1
+      "actro": 2
     },
     "android/android/app/Actr_2.toml": {
-      "actro": 2,
-      "stun:loran1.actrium.example:3479": 1,
-      "turn:loran1.actrium.example:3479": 1,
-      "wss://loran1.actrium.example:443/signaling/ws": 1
+      "actro": 2
     },
     "android/android/app/build.gradle": {
       "io.actrium.actro": 1
@@ -23,10 +17,7 @@
     "android/android/app/src/Actr.toml": {
       "actro": 2,
       "actro+app_server": 2,
-      "actro@example.com": 1,
-      "stun:loran1.actrium.example:3479": 1,
-      "turn:loran1.actrium.example:3479": 1,
-      "wss://loran1.actrium.example:443/signaling/ws": 1
+      "actro@example.com": 1
     },
     "android/android/app/src/androidTest/java/io/actrium/app/data/database/BrowserStorageDatabaseInstrumentedTest.kt": {
       "Actro/BrowserSync": 1,
@@ -65,15 +56,7 @@
       "https://app.actrium.example/chat/123": 1
     },
     "crates/actrium-core/src/actr_config.rs": {
-      "loran1.actrium.example": 5,
-      "actro": 2,
-      "stun:loran1.actrium.example:3478": 1,
-      "stun:loran1.actrium.example:3478\\": 1,
-      "turn:loran1.actrium.example": 1,
-      "turn:loran1.actrium.example:3478": 1,
-      "turn:loran1.actrium.example:3478\\": 1,
-      "wss://loran1.actrium.example:443/signaling/ws": 1,
-      "wss://loran1.actrium.example:443/signaling/ws\\": 1
+      "actro": 2
     },
     "crates/actrium-core/src/auth.rs": {
       ".actrium.example": 1,

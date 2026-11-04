@@ -26,7 +26,7 @@ tracing_enabled = false
 
 [webrtc]
 # force_relay=true: the Android emulator can't do direct ICE to the host (QEMU
-# NAT), so both peers relay through actrix's TURN (enabled via the actrix config
+# NAT), so both peers relay through loran's TURN (enabled via the loran config
 # enable bitmask, advertised at the host LAN IP __HOST__). TURN credentials are
 # provisioned by actr from the registration response.
 force_relay = true

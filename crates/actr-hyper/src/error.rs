@@ -19,7 +19,7 @@ pub enum HyperError {
     #[error("signature verification failed: {0}")]
     SignatureVerificationFailed(String),
 
-    /// publisher certificate is untrusted (not registered with actrix or revoked)
+    /// publisher certificate is untrusted (not registered with loran or revoked)
     #[error("untrusted publisher: {0}")]
     UntrustedPublisher(String),
 

@@ -1,11 +1,11 @@
 [package]
-name = "actrix-stun"
+name = "loran-stun"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "WebRTC STUN service implementation, as a component of aux-servers"
+description = "WebRTC STUN service implementation for Loran"
 
 [dependencies]
 turn_crate = { workspace = true }

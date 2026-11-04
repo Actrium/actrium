@@ -1,9 +1,9 @@
 [package]
-name = "actrix-platform"
+name = "loran-platform"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
-description = "Actrix platform core infrastructure components"
+description = "Loran platform core infrastructure components"
 license.workspace = true
 rust-version.workspace = true
 
@@ -47,10 +47,10 @@ sqlx = { workspace = true }
 tokio-tungstenite = { workspace = true }
 toml = { version = "0.8" }
 once_cell = "1.19"
-signer = { path = "../loran-signer", package = "actrix-signer", version = "0.10.7" }
+signer = { path = "../loran-signer", package = "loran-signer", version = "0.10.7" }
 prometheus = "0.14"
 lazy_static = "1.4"
-actrix-proto = { path = "../loran-proto", version = "0.10.7" }
+loran-proto = { path = "../loran-proto", version = "0.10.7" }
 strum = { version = "0.27.2", features = ["derive"] }
 
 [dev-dependencies]

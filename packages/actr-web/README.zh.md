@@ -18,7 +18,7 @@ cd packages/actr-web
 pnpm install
 ```
 
-运行基于仓库内 mock actrix 的 Echo 示例：
+运行基于仓库内 mock loran 的 Echo 示例：
 
 ```bash
 cd packages/actr-web/examples/echo

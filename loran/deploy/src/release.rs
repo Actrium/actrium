@@ -1,7 +1,7 @@
 //! GitHub Release asset discovery and download.
 //!
 //! Queries the GitHub Releases API for a given repo + tag (or latest), selects
-//! the architecture-appropriate `actrix-linux-*` asset plus optional checksum
+//! the architecture-appropriate `loran-linux-*` asset plus optional checksum
 //! metadata, and downloads them via `curl`. A `GITHUB_TOKEN` (Contents: Read)
 //! is used for private repositories and is forwarded as a Bearer header.
 
@@ -34,11 +34,11 @@ impl AssetKind {
         }
     }
 
-    /// The binary asset name, e.g. `actrix-linux-x86_64`.
+    /// The binary asset name, e.g. `loran-linux-x86_64`.
     pub fn asset_name(&self) -> &'static str {
         match self {
-            Self::LinuxX86_64 => "actrix-linux-x86_64",
-            Self::LinuxArm64 => "actrix-linux-arm64",
+            Self::LinuxX86_64 => "loran-linux-x86_64",
+            Self::LinuxArm64 => "loran-linux-arm64",
         }
     }
 
@@ -203,7 +203,7 @@ fn curl_args(
 ) -> (Vec<String>, Option<String>) {
     let mut args: Vec<String> = vec!["-sSLf".into(), "--retry".into(), "3".into()];
     args.push("-H".into());
-    args.push("User-Agent: actrix-deploy".into());
+    args.push("User-Agent: loran-deploy".into());
     if let Some(accept) = accept {
         args.push("-H".into());
         args.push(format!("Accept: {accept}"));
@@ -238,7 +238,7 @@ fn curl_download_args(
         "3".into(),
     ];
     args.push("-H".into());
-    args.push("User-Agent: actrix-deploy".into());
+    args.push("User-Agent: loran-deploy".into());
     if let Some(accept) = accept {
         args.push("-H".into());
         args.push(format!("Accept: {accept}"));
@@ -262,11 +262,11 @@ mod tests {
 
     #[test]
     fn arch_maps_to_asset_names() {
-        assert_eq!(AssetKind::LinuxX86_64.asset_name(), "actrix-linux-x86_64");
-        assert_eq!(AssetKind::LinuxArm64.asset_name(), "actrix-linux-arm64");
+        assert_eq!(AssetKind::LinuxX86_64.asset_name(), "loran-linux-x86_64");
+        assert_eq!(AssetKind::LinuxArm64.asset_name(), "loran-linux-arm64");
         assert_eq!(
             AssetKind::LinuxX86_64.sha256_asset_name(),
-            "actrix-linux-x86_64.sha256"
+            "loran-linux-x86_64.sha256"
         );
     }
 
@@ -276,7 +276,7 @@ mod tests {
             tag_name: "v0.4.3".into(),
             assets: vec![
                 ReleaseAsset {
-                    name: "actrix-linux-x86_64".into(),
+                    name: "loran-linux-x86_64".into(),
                     url: "u1".into(),
                     browser_download_url: "b1".into(),
                     digest: Some(
@@ -285,15 +285,15 @@ mod tests {
                     ),
                 },
                 ReleaseAsset {
-                    name: "actrix-linux-x86_64.sha256".into(),
+                    name: "loran-linux-x86_64.sha256".into(),
                     url: "u2".into(),
                     browser_download_url: "b2".into(),
                     digest: None,
                 },
             ],
         };
-        assert!(info.find_asset("actrix-linux-x86_64").is_some());
-        assert!(info.find_asset("actrix-linux-x86_64.sha256").is_some());
+        assert!(info.find_asset("loran-linux-x86_64").is_some());
+        assert!(info.find_asset("loran-linux-x86_64.sha256").is_some());
         assert!(info.find_asset("missing").is_none());
     }
 
@@ -303,7 +303,7 @@ mod tests {
             "tag_name": "v0.4.3",
             "assets": [
                 {
-                    "name": "actrix-linux-x86_64",
+                    "name": "loran-linux-x86_64",
                     "url": "https://api",
                     "browser_download_url": "https://b",
                     "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn text_exec_captures_stdout() {
         let path = std::env::temp_dir().join(format!(
-            "actrix-deploy-curl-text-test-{}.json",
+            "loran-deploy-curl-text-test-{}.json",
             std::process::id()
         ));
         std::fs::write(&path, r#"{"ok":true}"#).unwrap();

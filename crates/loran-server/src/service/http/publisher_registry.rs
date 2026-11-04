@@ -3,14 +3,14 @@
 //! Provides HTTP API service for Publisher domain verification, Actor package publishing and querying
 
 use crate::service::HttpRouterService;
-use actrix_publisher_registry::{
-    PublisherRegistryManager,
-    handlers::{PublisherRegistryState, create_public_router},
-};
 use anyhow::Result;
 use async_trait::async_trait;
 use axum::Router;
-use platform::config::ActrixConfig;
+use loran_publisher_registry::{
+    PublisherRegistryManager,
+    handlers::{PublisherRegistryState, create_public_router},
+};
+use platform::config::LoranConfig;
 use platform::{ServiceInfo, ServiceType};
 use std::sync::Arc;
 
@@ -19,11 +19,11 @@ use std::sync::Arc;
 pub struct PublisherRegistryService {
     info: ServiceInfo,
     #[allow(dead_code)]
-    config: ActrixConfig,
+    config: LoranConfig,
 }
 
 impl PublisherRegistryService {
-    pub fn new(config: ActrixConfig) -> Self {
+    pub fn new(config: LoranConfig) -> Self {
         Self {
             info: ServiceInfo::new(
                 "Publisher Registry",

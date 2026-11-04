@@ -1,7 +1,7 @@
 //! Exercise UDP-only deployment through the regular service launcher.
-use actrix::service::{IceService, TurnService};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
+use loran_server::service::{IceService, TurnService};
 use sha1::Sha1;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -58,9 +58,10 @@ fn choose_port() -> u16 {
 }
 
 fn write_config(directory: &Path, enable: u8, port: u16) -> PathBuf {
-    let mut config =
-        actrix::ActrixConfig::from_toml(include_str!("../../../loran/config/ice.example.toml"))
-            .unwrap();
+    let mut config = loran_server::LoranConfig::from_toml(include_str!(
+        "../../../loran/config/ice.example.toml"
+    ))
+    .unwrap();
     config.enable = enable;
     config.env = "prod".into();
     config.bind.ice.ip = "127.0.0.1".into();
@@ -175,7 +176,7 @@ async fn allocate(socket: &UdpSocket) {
 }
 
 async fn start_turn_service(
-    config: actrix::ActrixConfig,
+    config: loran_server::LoranConfig,
 ) -> (
     UdpSocket,
     tokio::sync::broadcast::Sender<()>,
@@ -199,10 +200,11 @@ async fn start_turn_service(
     (client, shutdown, task)
 }
 
-fn test_turn_config() -> actrix::ActrixConfig {
-    let mut config =
-        actrix::ActrixConfig::from_toml(include_str!("../../../loran/config/ice.example.toml"))
-            .unwrap();
+fn test_turn_config() -> loran_server::LoranConfig {
+    let mut config = loran_server::LoranConfig::from_toml(include_str!(
+        "../../../loran/config/ice.example.toml"
+    ))
+    .unwrap();
     config.env = "dev".into();
     config.enable = 4;
     config.bind.ice.ip = "127.0.0.1".into();
@@ -244,7 +246,7 @@ async fn turn_auth_mode_reload_replaces_the_old_rest_authenticator() {
     config.turn.users.clear();
     config.turn.turn_secret = secret.into();
     config.sqlite_path = directory.path().join("database");
-    config.actrix_shared_key = "b2xISzUdwmiURo7wKFL6K9tbkRHhTfM2E83r".into();
+    config.loran_shared_key = "b2xISzUdwmiURo7wKFL6K9tbkRHhTfM2E83r".into();
     let http = platform::config::bind::HttpBindConfig {
         ip: "127.0.0.1".into(),
         port: std::net::TcpListener::bind("127.0.0.1:0")
@@ -261,7 +263,7 @@ async fn turn_auth_mode_reload_replaces_the_old_rest_authenticator() {
     let log = directory.path().join("server.log");
     std::fs::write(&path, config.to_toml().unwrap()).unwrap();
     let output = std::fs::File::create(&log).unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_actrix"))
+    let child = Command::new(env!("CARGO_BIN_EXE_loran"))
         .arg("--config")
         .arg(&path)
         .current_dir(directory.path())
@@ -351,7 +353,7 @@ async fn regular_launcher_runs_udp_only_without_http_or_database() {
         std::fs::write(&storage, b"untouched").unwrap();
         let port = choose_port();
         let config = write_config(directory.path(), enable, port);
-        let validation = Command::new(env!("CARGO_BIN_EXE_actrix"))
+        let validation = Command::new(env!("CARGO_BIN_EXE_loran"))
             .arg("test")
             .arg(&config)
             .output()
@@ -363,7 +365,7 @@ async fn regular_launcher_runs_udp_only_without_http_or_database() {
         );
         let log = directory.path().join("server.log");
         let output = std::fs::File::create(&log).unwrap();
-        let child = Command::new(env!("CARGO_BIN_EXE_actrix"))
+        let child = Command::new(env!("CARGO_BIN_EXE_loran"))
             .arg("--config")
             .arg(&config)
             .current_dir(directory.path())
@@ -406,7 +408,7 @@ async fn regular_launcher_runs_udp_only_without_http_or_database() {
         }
         assert_eq!(std::fs::read(&storage).unwrap(), b"untouched");
         assert!(!directory.path().join("database").exists());
-        assert!(!directory.path().join("actrix.db").exists());
+        assert!(!directory.path().join("loran.db").exists());
         let logs = process.logs();
         assert!(!logs.contains("Database initialization complete"), "{logs}");
         assert!(!logs.contains("Starting HTTP server"), "{logs}");

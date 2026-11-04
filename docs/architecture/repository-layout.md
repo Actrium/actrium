@@ -59,7 +59,7 @@ platform projects follow their native ecosystem's conventional layouts.
 - **actr/bindings → packages/actr-*** (and `crates/actr-*` for Rust-facing
   bindings). **actr/cli → crates/actr-cli**; generators and developer-only
   tools move under **tools/actr/**.
-- **actr/actrix → loran/** plus **crates/loran-***: `loran/` owns the deployable
+- **Service suite → loran/** plus **crates/loran-***: `loran/` owns the deployable
   service suite; its daemon and reusable signaling, STUN/TURN, signer, control,
   discovery, and SDK units remain normal crates.
 - **actrium/apps/{android,ios,macos,windows} → android/, ios/, macos/, windows/**:

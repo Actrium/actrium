@@ -1,4 +1,4 @@
-//! Actrix auxiliary server main entry point
+//! Loran auxiliary server main entry point
 //!
 //! Starts and manages WebRTC-related auxiliary services, including signaling, STUN, TURN, etc.
 #![deny(clippy::disallowed_macros)]
@@ -13,7 +13,7 @@ mod service;
 use anyhow::Context;
 use clap::Parser;
 use futures::stream::{FuturesUnordered, StreamExt};
-use platform::config::ActrixConfig;
+use platform::config::LoranConfig;
 use recording_pipeline::init_recording_pipeline;
 use service::{
     IssuerService, ServiceContainer, ServiceManager, SignalingService, StunService, TurnService,
@@ -100,7 +100,7 @@ impl ApplicationLauncher {
             // 1. Current working directory
             PathBuf::from("config.toml"),
             // 2. System config directory
-            PathBuf::from("/etc/actrix/config.toml"),
+            PathBuf::from("/etc/loran/config.toml"),
         ];
 
         bootstrap_info!("Searching for config file in default locations...");
@@ -120,7 +120,7 @@ impl ApplicationLauncher {
         for (i, path) in fallback_paths.iter().enumerate() {
             bootstrap_error!("  {}. {:?}", i + 1, path);
         }
-        bootstrap_error!("Or specify a custom path with: actrix --config <path>");
+        bootstrap_error!("Or specify a custom path with: loran --config <path>");
 
         Err(Error::custom(
             "No configuration file found. Please create one or specify path with --config",
@@ -135,7 +135,7 @@ impl ApplicationLauncher {
             .init();
 
         let config_path = config_file.as_ref().unwrap_or(default_config);
-        match ActrixConfig::from_file(config_path) {
+        match LoranConfig::from_file(config_path) {
             Ok(config) => {
                 platform::recording::info!("Config file parsed successfully: {:?}", config_path);
 
@@ -181,7 +181,7 @@ impl ApplicationLauncher {
         bootstrap_info!("Loading config file: {:?}", config_path);
 
         // Load the configuration file
-        let config = match ActrixConfig::from_file(config_path) {
+        let config = match LoranConfig::from_file(config_path) {
             Ok(config) => {
                 bootstrap_info!("Config loaded successfully");
 
@@ -245,7 +245,7 @@ impl ApplicationLauncher {
 
     /// Run services and drop privileges at the appropriate time
     async fn run_services_with_privilege_drop(
-        config: ActrixConfig,
+        config: LoranConfig,
         user: Option<String>,
         group: Option<String>,
         config_path: PathBuf,
@@ -347,7 +347,7 @@ impl ApplicationLauncher {
 
     /// Create the service manager
     async fn create_service_manager(
-        config: ActrixConfig,
+        config: LoranConfig,
         shutdown_tx: tokio::sync::broadcast::Sender<()>,
         config_path: PathBuf,
     ) -> Result<ServiceManager> {
@@ -421,7 +421,7 @@ impl ApplicationLauncher {
     }
 
     /// Display service info
-    fn display_service_info(config: &ActrixConfig) {
+    fn display_service_info(config: &LoranConfig) {
         // Determine which URLs are available
         let mut urls = Vec::new();
 

@@ -8,7 +8,7 @@ use prost::Message as _;
 use tokio::sync::watch;
 
 use super::{
-    ActrixTestServices, DirectedRtcFaultMetrics, DirectedSignalingFaultMetrics, LinkDirection,
+    DirectedRtcFaultMetrics, DirectedSignalingFaultMetrics, LinkDirection, LoranTestServices,
     PacketRule, SignalingFaultRule, SignalingMessageClass, SignalingTraceEvent,
     TestEvidenceFailureGuard, TestEvidenceTimeline, TestHarness, TestRtcRole, make_actor_id,
 };
@@ -201,10 +201,10 @@ impl MobileEventDriver {
     }
 }
 
-/// Two independent Actr endpoints connected through production Actrix
+/// Two independent Actr endpoints connected through production Loran
 /// Signaling/STUN/TURN and real webrtc-rs PeerConnections.
 pub struct MobileRtcPairHarness {
-    services: ActrixTestServices,
+    services: LoranTestServices,
     harness: TestHarness,
     a_serial: u64,
     b_serial: u64,
@@ -234,9 +234,9 @@ impl MobileRtcPairHarness {
             a_serial, b_serial,
             "pair endpoints require distinct identities"
         );
-        let services = ActrixTestServices::start()
+        let services = LoranTestServices::start()
             .await
-            .expect("Actrix Signaling/STUN/TURN services must start");
+            .expect("Loran Signaling/STUN/TURN services must start");
         let mut harness = if wildcard_rebind_addresses {
             TestHarness::with_external_signaling_and_wildcard_rebind(services.signaling_url()).await
         } else {
@@ -259,7 +259,7 @@ impl MobileRtcPairHarness {
             )
             .await;
         // `connect_to_with_identity()` returns after the WebSocket handshake,
-        // but the Actrix upgrade task registers the actor asynchronously.
+        // but the Loran upgrade task registers the actor asynchronously.
         // Wait for both Ping/Pong barriers before any RoleNegotiation can
         // address the peer through actor_id_index.
         harness
@@ -290,7 +290,7 @@ impl MobileRtcPairHarness {
         pair
     }
 
-    pub fn services(&self) -> &ActrixTestServices {
+    pub fn services(&self) -> &LoranTestServices {
         &self.services
     }
 
@@ -317,7 +317,7 @@ impl MobileRtcPairHarness {
         .expect("mobile event driver already stopped")
     }
 
-    /// Submit exactly one Connect from the selected endpoint. Actrix remains
+    /// Submit exactly one Connect from the selected endpoint. Loran remains
     /// authoritative for the final offerer/answerer assignment; the Connect
     /// caller can therefore become the answerer while the passive endpoint is
     /// assigned offerer and produces the first SDP offer.
@@ -332,7 +332,7 @@ impl MobileRtcPairHarness {
         let a_key = (a.realm.as_str(), a.serial_number);
         let b_key = (b.realm.as_str(), b.serial_number);
         // The fixture registers no explicit `webrtc_role=answer` preference,
-        // so production Actrix falls back to its reverse ActorId ordering.
+        // so production Loran falls back to its reverse ActorId ordering.
         let expected = if a_key > b_key {
             (TestRtcRole::Offerer, TestRtcRole::Answerer)
         } else {
@@ -1038,7 +1038,7 @@ impl MobileRtcPairHarness {
     }
 
     /// Destroy one complete endpoint and create a fresh node with the same
-    /// ActrId against the still-running Actrix services. The returned handle is
+    /// ActrId against the still-running Loran services. The returned handle is
     /// a new monitor incarnation owned by the new process model.
     pub async fn restart_endpoint(&mut self, endpoint: PairEndpoint) {
         let serial = self.serial(endpoint);

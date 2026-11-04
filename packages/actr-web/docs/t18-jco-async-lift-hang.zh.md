@@ -91,7 +91,7 @@ guest 侧 `wit-bindgen` 用 `async: true`，生成的 core wasm 里出现 `conte
                                        │ WebSocket (WS)
                                        ▼
                         ┌─────────────────────────────┐
-                        │ mock-actrix / real actrix    │
+                        │ mock-loran / real loran    │
                         │ (signaling + Issuer + publisher)      │
                         └─────────────────────────────┘
 ```
@@ -119,7 +119,7 @@ SW: port.onmessage
  │
  ▼  [6] guest 调用 host import（e.g. host_discover_async → host_call_raw_async）
  │
- ▼  [7] host 通过 WebSocket → mock-actrix → peer → 返回
+ ▼  [7] host 通过 WebSocket → mock-loran → peer → 返回
  │
  ▼  [8] host 把结果 resolve 给 guest 的 Promise
  │
@@ -142,7 +142,7 @@ SW: port.onmessage
  ─────────────────────────────────
 [5] guest core.wasm 执行     ✗  ← HANG HERE
 [6] host import 被调用       ✗  ← 从未触达
-[7] WebSocket → mock-actrix  ✗  (mock 只收到心跳，零 relay)
+[7] WebSocket → mock-loran  ✗  (mock 只收到心跳，零 relay)
 ```
 
 **H_Y 证据链**（第 4 轮 spike）：
@@ -165,7 +165,7 @@ SW: port.onmessage
 ```
 Spike 1：e2e 跑不通 → 定位 "WebRTC 建不起来"
          ╳ 错判：WebRTC 是更下游的问题，根本没走到那
-Spike 2：mock-actrix 无 SDP 转发 → 定位 "signaling 层 blocker"
+Spike 2：mock-loran 无 SDP 转发 → 定位 "signaling 层 blocker"
          ╳ 错判：client 根本没发 SDP
 Spike 3：handle_dom_control 日志缺席 → 定位 "DOM→SW port 坏了"
          ╳ 错判：日志在 SW console 里，只是 puppeteer 看不见

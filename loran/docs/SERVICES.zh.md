@@ -57,7 +57,7 @@ HTTP router、证书和部分配置支持 reload，但以下变更不应无停�
 - Realm 创建、退役与状态变更；
 - SQLite schema；
 - `worker_id`；
-- TURN、renewal、Realm、Issuer Signer KEK（`ACTRIX_SIGNER_KEK`）等 secret；
+- TURN、renewal、Realm、Issuer Signer KEK（`LORAN_SIGNER_KEK`）等 secret；
 - relay port range 与公网网络拓扑。
 
 这些变更需要维护窗口、备份、显式迁移/轮换和回滚验证。热重载不得让旧 router 的

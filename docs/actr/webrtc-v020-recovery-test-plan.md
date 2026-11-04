@@ -21,7 +21,7 @@ TURN, system-network, browser, or Android/iOS environments.
 | `DeterministicNetwork` (S5-10) | Deterministic signaling loss/delay/duplicate/partition rules | `fault.rs`, wraps any `SignalingTransport` |
 | `RtcRecoverySupervisor` (S5-1) | Network/app-lifecycle fact injection (network down/up, address change, background/foreground, force-reconnect) | `RtcConnectionManager::supervisor().publish(..)` |
 | Unified observation (S5-11) | Per-peer snapshot + outstanding bytes + lane count + convergence; node totals | `RtcConnectionManager::observe()` |
-| System harness | Real-link faults: Linux netns/`tc`, Actrix TURN, browser | release/CI environment outside the unit-test process |
+| System harness | Real-link faults: Linux netns/`tc`, Loran TURN, browser | release/CI environment outside the unit-test process |
 | Platform harness | Android/iOS device network + app lifecycle | L5 mobile E2E harness |
 
 ## 2. Use-case transfer matrix
@@ -31,7 +31,7 @@ TURN, system-network, browser, or Android/iOS environments.
 | 1 | Wi-Fi ↔ cellular switch (address change → Soft Recovery) | Platform harness (Android/iOS) primary; reducer tests cover the policy (`LocalAddressChanged` starts same-generation ICE recovery) | Platform: drive `LocalAddressProvider` override + supervisor publish; assert `observe()` preserves `pc_generation`, advances `ice_generation`, the Runtime socket observation sees the changed address, and the peer is re-`sendable`; failed restart may escalate to Hard |
 | 2 | Offline → online recovery (soft ICE restart first) | T2 contract fixture: `DeterministicNetwork` partition/heal on the signaling link + supervisor `NetworkUnavailable`/`Available` | Assert Soft first (ice_generation+1, same pc_generation), escalation to Hard on restart failure; reducer tests cover the decision tree (S5-2/S5-3) |
 | 3 | UDP blackhole mid-session (media path dead, signaling alive) | T2 contract fixture: `RuntimeFaultProbe.set_blackhole_udp` on one PC's socket | Assert: sends stop erroring immediately (channel accepts), recovery triggers via PC disconnected events; observation shows `Recovering` |
-| 4 | TURN credential refresh (`set_configuration`) | System harness with Actrix TURN (real TURN server) | Rejected `set_configuration` → Hard Recovery is reducer-tested (S5-6); live TURN expiry uses Actrix TURN |
+| 4 | TURN credential refresh (`set_configuration`) | System harness with Loran TURN (real TURN server) | Rejected `set_configuration` → Hard Recovery is reducer-tested (S5-6); live TURN expiry uses Loran TURN |
 | 5 | NAT rebinding / mapping timeout | System harness (netns + `tc` + NAT device/VM) | Cannot be emulated at the Actr seam (RFC §"Runtime and network-test APIs") |
 | 6 | App background → foreground (mobile) | Platform harness (Android/iOS) | Policy reducer-tested (S5-5); platform drives `AppBackground`/`AppForeground` via supervisor |
 | 7 | Fleet recovery isolation (N peers recover at once) | T2 contract fixture: N controller pairs + supervisor broadcast; builds/restarts remain peer-owned | Assert a stalled peer does not block other peers and every controller converges within the shared test deadline |

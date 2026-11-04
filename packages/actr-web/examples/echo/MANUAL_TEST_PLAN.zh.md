@@ -1,7 +1,7 @@
 # Echo Example - 手动测试计划
 
 > 适用于 `actr-web/examples/echo` 项目（含 server + client 两个浏览器端应用）  
-> 测试前确保 Actrix Signaling Server 已启动并可访问
+> 测试前确保 Loran Signaling Server 已启动并可访问
 
 ---
 
@@ -9,7 +9,7 @@
 
 | # | 检查项 | 操作 | 预期 |
 |---|--------|------|------|
-| 0-1 | Actrix 运行 | 确认 signaling server 在 `wss://<host>:8081/signaling/ws` 可达 | WebSocket 握手成功 |
+| 0-1 | Loran 运行 | 确认 signaling server 在 `wss://<host>:8081/signaling/ws` 可达 | WebSocket 握手成功 |
 | 0-2 | Server 页面 | 浏览器打开 Echo Server 页面 | 状态显示"✅ 服务器运行中"，日志显示 echo_service_registered |
 | 0-3 | Client 页面 | 浏览器打开 Echo Client 页面 | 状态显示"✅ 已连接"，5 秒后自动发送一条测试消息并收到回复 |
 | 0-4 | DevTools | 打开 chrome://serviceworker-internals 或 Application → Service Workers | 确认 server 和 client 的 SW 均为 `activated and is running` |
@@ -66,7 +66,7 @@
 | 4-5 | 断网时发消息 | 断网状态下在 client 点击发送 | 发送失败，显示错误信息（如 RPC 超时 30s 或 WebSocket closed），不崩溃 | ☐ |
 | 4-6 | 网络切换 (WiFi→有线) | 在真实设备上切换网络接口 | IP 变化导致所有连接重建，signaling 重连 + 新 WebRTC 连接建立 | ☐ |
 | 4-7 | 弱网模拟 | DevTools → Network → Slow 3G | 消息可送达但延迟高，UI 不卡死。WebRTC STREAM_LATENCY_FIRST 通道可能丢包 | ☐ |
-| 4-8 | Signaling 服务器重启 | 正常通信后重启 Actrix 进程 | 双端 WebSocket 断开 → 心跳失败 → 自动重连 → 重新注册 → client 重新发现 server | ☐ |
+| 4-8 | Signaling 服务器重启 | 正常通信后重启 Loran 进程 | 双端 WebSocket 断开 → 心跳失败 → 自动重连 → 重新注册 → client 重新发现 server | ☐ |
 
 ---
 
@@ -196,7 +196,7 @@
 ## 十四、跨端测试：Web Client + Rust Server
 
 > **场景说明**：Client 运行在浏览器（actr-web），Server 运行为原生 Rust 进程（actr-examples/shell-actr-echo/server）。  
-> 两端通过同一 Actrix Signaling Server 发现彼此，经由 WebRTC DataChannel 通信。  
+> 两端通过同一 Loran Signaling Server 发现彼此，经由 WebRTC DataChannel 通信。
 >  
 > **前置条件**：  
 > - 确保 Web Client 与 Rust Server 使用**相同的 `realm`**（Realm 名）和**同一 signaling server URL**
@@ -209,7 +209,7 @@
 
 | # | 检查项 | 操作 | 预期 |
 |---|--------|------|------|
-| 14-0-1 | Actrix 运行 | 确认 signaling server 在双端可达的地址上运行 | WebSocket 握手成功 |
+| 14-0-1 | Loran 运行 | 确认 signaling server 在双端可达的地址上运行 | WebSocket 握手成功 |
 | 14-0-2 | Realm 对齐 | 确认 Rust Server 与 Web Client 配置的 `realm` 相同 | 配置值相同 |
 | 14-0-3 | signaling URL 对齐 | 确保两端指向同一 signaling server（注意 `ws://` vs `wss://`） | 双端能连到同一 server |
 | 14-0-4 | TURN/STUN 环境 | 如 Rust Server `force_relay=true`，确保 TURN server 运行；或改为 `false` 并确保两端网络可达 | ICE 候选能匹配 |
@@ -263,7 +263,7 @@
 |---|--------|---------|---------|------|
 | 14-5-1 | Web Client 断网 | DevTools → Offline，保持 10s，再恢复 | Client signaling 重连 → 重新 register → discover → 新 WebRTC 连接到 Rust Server | ☐ |
 | 14-5-2 | Rust Server 断网 | 拔网线或 `ifconfig down`，10s 后恢复 | Server signaling 重连（actr-runtime 自带），重新注册。Web Client 旧 peer failed → 重新 discover | ☐ |
-| 14-5-3 | Signaling 重启 | 双端正常通信时重启 Actrix | 双端各自重连 signaling → 重新注册 → Client 重新 discover Server → 新 WebRTC 连接 | ☐ |
+| 14-5-3 | Signaling 重启 | 双端正常通信时重启 Loran | 双端各自重连 signaling → 重新注册 → Client 重新 discover Server → 新 WebRTC 连接 | ☐ |
 | 14-5-4 | Client 弱网 | Slow 3G 模拟 | DataChannel 数据可达但延迟高，Rust Server 正常处理 | ☐ |
 | 14-5-5 | 跨网段通信 | Web Client 和 Rust Server 在不同子网 | 需要 TURN 中继或公网 STUN 穿透，检查 ICE 候选类型 | ☐ |
 

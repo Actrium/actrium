@@ -834,7 +834,7 @@ impl RtcConnectionManager {
                 .is_ok()
     }
 
-    /// Apply an Actrix point-in-time fact that the exact target endpoint had no
+    /// Apply an Loran point-in-time fact that the exact target endpoint had no
     /// usable signaling session. The echoed identity fences delayed results
     /// from older Controller lifetimes and transport/PC attempts; the
     /// Controller keeps a matching attempt under its existing bounded deadline

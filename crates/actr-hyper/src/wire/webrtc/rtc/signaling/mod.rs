@@ -14,7 +14,7 @@ pub(crate) mod router;
 pub(crate) mod ws_transport;
 
 /// Exact sender-side RTC identity attached to a recovery/negotiation-critical
-/// relay. Actrix echoes it without interpretation so a delayed negative
+/// relay. Loran echoes it without interpretation so a delayed negative
 /// delivery result cannot affect a newer Controller or transport attempt.
 /// `negotiation_epoch` discriminates generation-0 role probes: the signaling
 /// gate-opening edge re-drives a probe while one is still in flight, and each

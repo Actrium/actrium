@@ -529,28 +529,28 @@ mod tests {
         let source = "127.0.0.1:3478".parse().unwrap();
         let old = username(2_000_000_060);
         let old_integrity = auth
-            .auth_handle_at(&old, "actrix.local", source, 2_000_000_000)
+            .auth_handle_at(&old, "loran.local", source, 2_000_000_000)
             .unwrap();
         auth.inactive_realms.insert_actor(actor);
         assert!(
-            auth.auth_handle_at(&old, "actrix.local", source, 2_000_000_000)
+            auth.auth_handle_at(&old, "loran.local", source, 2_000_000_000)
                 .is_err()
         );
         auth.inactive_realms.bind_actor(actor, "bbbbbbbbbbbbbbbb");
         auth.inactive_realms.actors_for_test_resume(actor);
         // The old integrity key is still cached, but its binding is refused.
         assert!(
-            auth.auth_handle_at(&old, "actrix.local", source, 2_000_000_000)
+            auth.auth_handle_at(&old, "loran.local", source, 2_000_000_000)
                 .is_err()
         );
         auth.clear_cache();
         assert!(
-            auth.auth_handle_at(&old, "actrix.local", source, 2_000_000_000)
+            auth.auth_handle_at(&old, "loran.local", source, 2_000_000_000)
                 .is_err()
         );
         let new = old.replace("aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
         let new_integrity = auth
-            .auth_handle_at(&new, "actrix.local", source, 2_000_000_000)
+            .auth_handle_at(&new, "loran.local", source, 2_000_000_000)
             .unwrap();
         assert_ne!(
             new_integrity, old_integrity,
@@ -558,7 +558,7 @@ mod tests {
         );
         let legacy = old.replace(":client_key=aaaaaaaaaaaaaaaa", "");
         assert!(
-            auth.auth_handle_at(&legacy, "actrix.local", source, 2_000_000_000)
+            auth.auth_handle_at(&legacy, "loran.local", source, 2_000_000_000)
                 .is_err()
         );
     }
@@ -601,7 +601,7 @@ mod tests {
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
 
         let err = auth
-            .auth_handle("invalid-no-colon", "actrix.local", src_addr)
+            .auth_handle("invalid-no-colon", "loran.local", src_addr)
             .expect_err("invalid username should be rejected");
 
         assert!(
@@ -618,7 +618,7 @@ mod tests {
         // Expired username (expires_at is in the past)
         let username = username(1_000_000_000);
         let err = auth
-            .auth_handle(&username, "actrix.local", src_addr)
+            .auth_handle(&username, "loran.local", src_addr)
             .expect_err("expired credential should be rejected");
 
         assert!(
@@ -640,7 +640,7 @@ mod tests {
         let expires_at = now + 3600;
         let username = username(expires_at);
 
-        let result = auth.auth_handle(&username, "actrix.local", src_addr);
+        let result = auth.auth_handle(&username, "loran.local", src_addr);
         assert!(result.is_ok(), "valid credential should succeed");
         assert_eq!(result.unwrap().len(), 16, "should return 16-byte MD5 key");
     }
@@ -652,11 +652,11 @@ mod tests {
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
         let username = username(2_000_000_060);
 
-        auth.auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+        auth.auth_handle_at(&username, "loran.local", src_addr, 2_000_000_000)
             .expect("active Realm authenticates");
         inactive.insert("k7m2q9xh@example.com");
         let error = auth
-            .auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .auth_handle_at(&username, "loran.local", src_addr, 2_000_000_000)
             .expect_err("inactive Realm is refused");
         assert!(error.to_string().contains("not active"), "{error}");
     }
@@ -669,11 +669,11 @@ mod tests {
         let username = username(2_000_000_060);
         let actor = username.split_once(":actor=").unwrap().1.to_string();
 
-        auth.auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+        auth.auth_handle_at(&username, "loran.local", src_addr, 2_000_000_000)
             .expect("enabled Actor authenticates");
         inactive.insert_actor(&actor);
         let error = auth
-            .auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .auth_handle_at(&username, "loran.local", src_addr, 2_000_000_000)
             .expect_err("disabled Actor is refused");
         assert!(error.to_string().contains("disabled"), "{error}");
     }
@@ -691,7 +691,7 @@ mod tests {
             base.replace("actor=1.k7m2q9xh@", "actor=1.other@"),
         ] {
             let error = auth
-                .auth_handle_at(&invalid, "actrix.local", src_addr, 2_000_000_000)
+                .auth_handle_at(&invalid, "loran.local", src_addr, 2_000_000_000)
                 .expect_err("mismatched credential scope must be rejected");
             assert!(error.to_string().contains("scope"));
         }
@@ -702,7 +702,7 @@ mod tests {
         let auth = make_auth();
         let now = 2_000_000_000;
         let username = username(2_000_000_060);
-        let server_realm = "actrix.local";
+        let server_realm = "loran.local";
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
         let expected_key = vec![0xAB; 16];
 
@@ -732,7 +732,7 @@ mod tests {
     fn test_cached_auth_key_never_extends_credential_lifetime() {
         let auth = make_auth();
         let username = username(2_000_000_001);
-        let server_realm = "actrix.local";
+        let server_realm = "loran.local";
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
 
         auth.auth_handle_at(&username, server_realm, src_addr, 2_000_000_000)
@@ -755,10 +755,10 @@ mod tests {
         let b = a.replace("k7m2q9xh@example.com", "p3n8w2rt@example.com");
 
         let a_key = auth
-            .auth_handle_at(&a, "actrix.local", src_addr, 2_000_000_000)
+            .auth_handle_at(&a, "loran.local", src_addr, 2_000_000_000)
             .unwrap();
         let b_key = auth
-            .auth_handle_at(&b, "actrix.local", src_addr, 2_000_000_000)
+            .auth_handle_at(&b, "loran.local", src_addr, 2_000_000_000)
             .unwrap();
         assert_ne!(a_key, b_key);
 
@@ -784,7 +784,7 @@ mod tests {
         .unwrap()
         .with_inactive_realms(active_bindings());
         let username = username(2_000_000_060);
-        let server_realm = "actrix.local";
+        let server_realm = "loran.local";
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
 
         let first_key = first
@@ -803,7 +803,7 @@ mod tests {
     fn auth_cache_stays_bounded_under_unique_valid_credentials() {
         let auth = make_auth();
         let now = 2_000_000_000;
-        let server_realm = "actrix.local";
+        let server_realm = "loran.local";
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
 
         for serial in 1..=(AUTH_CACHE_CAPACITY + 64) {
@@ -945,7 +945,7 @@ mod tests {
             .as_secs();
         let username = username(now + 3600);
 
-        let result = auth.auth_handle(&username, "actrix.local", src_addr);
+        let result = auth.auth_handle(&username, "loran.local", src_addr);
         assert!(result.is_ok(), "single normal request must be admitted");
     }
 }

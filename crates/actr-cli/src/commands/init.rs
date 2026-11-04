@@ -487,7 +487,7 @@ impl InitCommand {
                 println!("│     wss://example.com/?token=${{TOKEN}}   (with auth)    │");
                 println!("│                                                          │");
                 println!("└──────────────────────────────────────────────────────────┘");
-                print!("🎯 Enter signaling server URL [wss://loran1.actrium-dev.example]: ");
+                print!("🎯 Enter signaling server URL [wss://loran.example.com]: ");
             }
             _ => {
                 print!("🎯 Enter {field_name}: ");
@@ -508,7 +508,7 @@ impl InitCommand {
             // Provide sensible defaults
             let default = match field_name {
                 "project name" => "my-actor-project",
-                "signaling server URL" => "wss://loran1.actrium-dev.example/signaling/ws",
+                "signaling server URL" => "wss://loran.example.com/signaling/ws",
                 _ => {
                     return Err(ActrCliError::InvalidProject(format!(
                         "{field_name} cannot be empty"

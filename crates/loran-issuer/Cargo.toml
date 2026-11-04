@@ -1,5 +1,5 @@
 [package]
-name = "actrix-issuer"
+name = "loran-issuer"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -51,12 +51,12 @@ governor = "0.10"
 
 
 # Internal dependencies
-platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.7" }
-signer = { path = "../loran-signer", package = "actrix-signer", version = "0.10.7" }
-actrix-publisher-registry = { path = "../loran-publisher-registry", version = "0.10.7" }
+platform = { path = "../loran-platform", package = "loran-platform", version = "0.10.7" }
+signer = { path = "../loran-signer", package = "loran-signer", version = "0.10.7" }
+loran-publisher-registry = { path = "../loran-publisher-registry", version = "0.10.7" }
 
 [dev-dependencies]
-turn = { path = "../loran-turn", package = "actrix-turn", version = "0.10.7" }
+turn = { path = "../loran-turn", package = "loran-turn", version = "0.10.7" }
 turn_crate = { workspace = true }
 tempfile = { workspace = true }
 nonce-auth = { workspace = true }

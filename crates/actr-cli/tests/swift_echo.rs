@@ -31,7 +31,7 @@ fn init_swift_echo(parent: &std::path::Path, project_name: &str) -> std::path::P
             "--template",
             "echo",
             "--signaling",
-            "wss://loran1.actrium-dev.example",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             project_name,
@@ -150,7 +150,7 @@ fn swift_echo_actr_toml_has_signaling_url() {
 
     // The template always appends /signaling/ws; input is normalized.
     assert!(
-        actr_toml.contains("wss://loran1.actrium-dev.example/signaling/ws"),
+        actr_toml.contains("wss://loran.example.com/signaling/ws"),
         "actr.toml should contain the full signaling URL with /signaling/ws path, got:\n{actr_toml}"
     );
 }
@@ -172,7 +172,7 @@ fn swift_echo_init_fails_if_directory_exists() {
             "--template",
             "echo",
             "--signaling",
-            "wss://loran1.actrium-dev.example",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             "DuplicateApp",

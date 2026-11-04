@@ -32,7 +32,7 @@ class PackageReleaseCratesTests(unittest.TestCase):
             (crate / "src/lib.rs").write_text("pub fn example() {}\n")
             (abi / "Cargo.toml").write_text('[package]\nname = "actr-web-abi"\nversion.workspace = true\nauthors.workspace = true\n')
             (abi.parents[1] / "Cargo.toml").write_text('[workspace.package]\nversion = "0.10.5"\nauthors = ["Browser Author"]\n[workspace.dependencies]\nwasm-bindgen = "0.2"\nwasm-bindgen-futures = "0.4"\njs-sys = "0.3"\nserde-wasm-bindgen = "0.6"\n')
-            groups = ["FOUNDATION_CRATES", "PROTOC_CRATES", "SDK_CRATES", "CLI_CRATES", "ACTRIX_CRATES"]
+            groups = ["FOUNDATION_CRATES", "PROTOC_CRATES", "SDK_CRATES", "CLI_CRATES", "LORAN_CRATES"]
             (repo / "scripts/actr/release-train.sh").write_text("".join(f'readonly {group}=(\n' + ('  "example"\n' if index == 0 else "") + ")\n" for index, group in enumerate(groups)))
             stale = repo / "target/package/example-0.10.5.crate"
             stale.parent.mkdir(parents=True)

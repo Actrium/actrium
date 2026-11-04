@@ -2,8 +2,8 @@
 # setup.sh — shared bootstrap for the polyglot-echo scenario.
 #
 # Sourced by run.sh after argument parsing. Drives:
-#   1. Build local actr CLI + mock-actrix.
-#   2. Start mock-actrix on $HTTP_PORT.
+#   1. Build local actr CLI + mock-loran.
+#   2. Start mock-loran on $HTTP_PORT.
 #   3. Generate a fresh publisher keypair and seed it via /admin/publisher.
 #   4. Seed the realm via /admin/realms.
 #   5. Scaffold a Rust echo service (cdylib) via `actr init`, build, publish.
@@ -17,15 +17,15 @@
 #
 # After setup.sh completes the following globals are exported:
 #   ACTR_CLI_BIN     — path to the locally built actr binary
-#   MOCK_ACTRIX_BIN  — path to the locally built mock-actrix binary
-#   PUBLISHER_PUBKEY       — base64 ed25519 verifying key (seeded into mock-actrix)
+#   MOCK_LORAN_BIN  — path to the locally built mock-loran binary
+#   PUBLISHER_PUBKEY       — base64 ed25519 verifying key (seeded into mock-loran)
 #   SERVICE_VERSION  — version field from the scaffolded service manifest
 #   SERVICE_PACKAGE  — path to the signed `.actr` server package
 #   SERVER_RUNTIME   — path to the rendered server-runtime.toml
 #   CLIENT_RUNTIME   — path to the rendered client-runtime.toml (per-client
 #                       subdirs reuse this template)
 #   SERVICE_TYPE     — `polyglot/EchoService@<version>` (for client ACL pin)
-#   MOCK_PID         — pid of the running mock-actrix process
+#   MOCK_PID         — pid of the running mock-loran process
 #   SERVER_PID       — pid of the running `actr run` server process
 
 set -euo pipefail
@@ -39,13 +39,13 @@ set -euo pipefail
 # Cache directories live under target/ so cargo-cache picks them up.
 : "${E2E_CACHE_ROOT:=$REPO_ROOT/target/e2e-cache/polyglot-echo}"
 : "${ACTR_CLI_TARGET_DIR:=$E2E_CACHE_ROOT/actr-cli}"
-: "${MOCK_TARGET_DIR:=$E2E_CACHE_ROOT/mock-actrix}"
+: "${MOCK_TARGET_DIR:=$E2E_CACHE_ROOT/mock-loran}"
 : "${SERVICE_TARGET_DIR:=$E2E_CACHE_ROOT/service-build}"
 
 mkdir -p "$LOG_DIR" "$DIST_DIR" "$STATE_DIR" "$E2E_CACHE_ROOT"
 
 ACTR_CLI_BIN=""
-MOCK_ACTRIX_BIN=""
+MOCK_LORAN_BIN=""
 PUBLISHER_PUBKEY=""
 PUBLISHER_KEY_FILE="$RUN_DIR/dev-key.json"
 SERVICE_VERSION=""
@@ -79,31 +79,31 @@ build_actr_cli() {
     success "actr CLI ready: $ACTR_CLI_BIN"
 }
 
-build_mock_actrix() {
-    section "🔧 Building local mock-actrix"
+build_mock_loran() {
+    section "🔧 Building local mock-loran"
     CARGO_TARGET_DIR="$MOCK_TARGET_DIR" cargo build \
-        --manifest-path "$REPO_ROOT/Cargo.toml" -p actr-mock-actrix --bin mock-actrix >/dev/null
-    MOCK_ACTRIX_BIN="$MOCK_TARGET_DIR/debug/mock-actrix"
-    [ -x "$MOCK_ACTRIX_BIN" ] || fail "mock-actrix binary missing at $MOCK_ACTRIX_BIN"
-    success "mock-actrix ready: $MOCK_ACTRIX_BIN"
+        --manifest-path "$REPO_ROOT/Cargo.toml" -p actr-mock-loran --bin mock-loran >/dev/null
+    MOCK_LORAN_BIN="$MOCK_TARGET_DIR/debug/mock-loran"
+    [ -x "$MOCK_LORAN_BIN" ] || fail "mock-loran binary missing at $MOCK_LORAN_BIN"
+    success "mock-loran ready: $MOCK_LORAN_BIN"
 }
 
-start_mock_actrix() {
-    section "🚀 Starting mock-actrix"
-    # Reap orphaned servers from a prior run BEFORE the fresh mock-actrix
+start_mock_loran() {
+    section "🚀 Starting mock-loran"
+    # Reap orphaned servers from a prior run BEFORE the fresh mock-loran
     # comes up, so a stale `actr run` cannot re-register under an old ACL.
     reap_stale_polyglot_servers
     kill_listener tcp "$HTTP_PORT"
 
-    "$MOCK_ACTRIX_BIN" --port "$HTTP_PORT" \
-        >"$LOG_DIR/mock-actrix.log" 2>&1 &
+    "$MOCK_LORAN_BIN" --port "$HTTP_PORT" \
+        >"$LOG_DIR/mock-loran.log" 2>&1 &
     MOCK_PID=$!
 
     if ! wait_for_http_ok "http://127.0.0.1:${HTTP_PORT}/signaling/health" 30; then
-        cat "$LOG_DIR/mock-actrix.log" >&2 || true
-        fail "mock-actrix did not become healthy on port $HTTP_PORT"
+        cat "$LOG_DIR/mock-loran.log" >&2 || true
+        fail "mock-loran did not become healthy on port $HTTP_PORT"
     fi
-    success "mock-actrix is healthy on http://127.0.0.1:${HTTP_PORT}"
+    success "mock-loran is healthy on http://127.0.0.1:${HTTP_PORT}"
 }
 
 generate_publisher_key() {
@@ -115,7 +115,7 @@ generate_publisher_key() {
 }
 
 seed_realm_and_publisher() {
-    section "🪪 Seeding realm + publisher via mock-actrix admin"
+    section "🪪 Seeding realm + publisher via mock-loran admin"
     curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/realms" \
         -H 'content-type: application/json' \
         --data "{\"realm\": \"${REALM}\"}" >/dev/null
@@ -248,8 +248,8 @@ setup_polyglot_echo() {
     require_cmd rustc
 
     build_actr_cli
-    build_mock_actrix
-    start_mock_actrix
+    build_mock_loran
+    start_mock_loran
     generate_publisher_key
     seed_realm_and_publisher
     scaffold_service
@@ -257,7 +257,7 @@ setup_polyglot_echo() {
     render_runtime_configs
     start_server
 
-    export ACTR_CLI_BIN MOCK_ACTRIX_BIN PUBLISHER_PUBKEY SERVICE_VERSION
+    export ACTR_CLI_BIN MOCK_LORAN_BIN PUBLISHER_PUBKEY SERVICE_VERSION
     export SERVICE_PACKAGE SERVER_RUNTIME CLIENT_RUNTIME SERVICE_TYPE
     export MOCK_PID SERVER_PID
 }
@@ -265,7 +265,7 @@ setup_polyglot_echo() {
 # ── Common pre-server bootstrap (shared by all --server forms) ──────────────
 #
 # All non-cdylib server forms (linked-*, wasm-*) need the same prelude:
-#   mock-actrix up + publisher seeded + client-runtime config rendered.
+#   mock-loran up + publisher seeded + client-runtime config rendered.
 # They differ only in how the EchoService workload itself is brought up
 # (linked binary vs cdylib package vs wasm component).
 #
@@ -280,8 +280,8 @@ setup_common_prelude() {
     require_cmd rustc
 
     build_actr_cli
-    build_mock_actrix
-    start_mock_actrix
+    build_mock_loran
+    start_mock_loran
     generate_publisher_key
     seed_realm_and_publisher
     SERVICE_VERSION="1.0.0"
@@ -294,7 +294,7 @@ setup_common_prelude() {
 
     render_client_runtime_config
 
-    export ACTR_CLI_BIN MOCK_ACTRIX_BIN PUBLISHER_PUBKEY SERVICE_VERSION
+    export ACTR_CLI_BIN MOCK_LORAN_BIN PUBLISHER_PUBKEY SERVICE_VERSION
     export CLIENT_RUNTIME SERVICE_TYPE MOCK_PID SERVICE_KEYCHAIN
 }
 
@@ -516,11 +516,11 @@ start_wasm_rust_server() {
 # Builds and starts the in-tree streaming server binary
 # (tests/e2e/actr/polyglot-echo/server/).  The streaming server runs as a *linked
 # workload* (not a cdylib package) so that RuntimeContext's DataChunk APIs
-# are available.  It registers directly with mock-actrix under
+# are available.  It registers directly with mock-loran under
 # polyglot/EchoStreamService@1.0.0 without going through `actr build` /
 # `actr run`.
 #
-# Prerequisites: setup_polyglot_echo must have run first (mock-actrix up,
+# Prerequisites: setup_polyglot_echo must have run first (mock-loran up,
 # publisher seeded, issuer_endpoint available in CLIENT_RUNTIME template).
 #
 # Exports after completion:

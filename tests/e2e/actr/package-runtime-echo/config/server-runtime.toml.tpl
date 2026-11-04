@@ -15,7 +15,7 @@ realm_client_key = "__REALM_CLIENT_KEY__"
 
 [[trust]]
 # RegistryTrust fetches publisher pubkeys at {endpoint}/registry/publishers/{name}/verifying-key,
-# which lives at the actrix base, not under /issuer.
+# which lives at the loran base, not under /issuer.
 # [issuer_endpoint] above keeps the /issuer suffix because /register is mounted there.
 kind = "registry"
 endpoint = "__HTTP_BASE__"

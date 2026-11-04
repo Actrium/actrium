@@ -131,7 +131,7 @@ write_jobs = {
     "rust-package-assets",
     "npm-package-assets",
     "cli-assets",
-    "actrix-assets",
+    "loran-assets",
     "protoc-plugin-assets",
     "swift-package",
     "kotlin-package",
@@ -292,7 +292,7 @@ for name, document in reusable_workflows.items():
 
 for caller, reusable_name in (
     ("cli-assets", "_actr-cli-release.yml"),
-    ("actrix-assets", "_loran-release.yml"),
+    ("loran-assets", "_loran-release.yml"),
     ("protoc-plugin-assets", "_protoc-plugins-release.yml"),
 ):
     caller_job = job_block(caller)
@@ -345,7 +345,7 @@ asset_jobs = {
     "typescript-native-assets",
     "npm-package-assets",
     "cli-assets",
-    "actrix-assets",
+    "loran-assets",
     "protoc-plugin-assets",
     "swift-package",
     "kotlin-package",

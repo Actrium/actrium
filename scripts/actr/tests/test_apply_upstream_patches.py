@@ -34,8 +34,8 @@ edition = "2024"
 
 [dependencies]
 actr-hyper = {{ path = {json.dumps((module.REPO / 'crates/actr-hyper').as_posix())}, features = ["test-utils"] }}
-actrix-stun = {{ path = {json.dumps((module.REPO / 'crates/loran-stun').as_posix())} }}
-actrix-turn = {{ path = {json.dumps((module.REPO / 'crates/loran-turn').as_posix())} }}
+loran-stun = {{ path = {json.dumps((module.REPO / 'crates/loran-stun').as_posix())} }}
+loran-turn = {{ path = {json.dumps((module.REPO / 'crates/loran-turn').as_posix())} }}
 ''')
             shutil.copyfile(module.REPO / "Cargo.lock", root / "Cargo.lock")
             subprocess.run(

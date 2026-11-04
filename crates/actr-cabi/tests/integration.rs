@@ -3,8 +3,8 @@
 //! Validates: (1) `export_workload!` registers a workload visible to
 //! `find_workload`, (2) `init_runtime` installs the global Tokio runtime.
 //!
-//! Full node round-trip (MockActrixServer → from_config → link → register →
-//! start → call_raw) needs a rendered actr.toml + mock actrix lifecycle and is
+//! Full node round-trip (MockLoranServer → from_config → link → register →
+//! start → call_raw) needs a rendered actr.toml + mock loran lifecycle and is
 //! added in a follow-up once the C ABI surface is wired to a Swift consumer.
 
 use actr_framework::{Context, MessageDispatcher, Workload};

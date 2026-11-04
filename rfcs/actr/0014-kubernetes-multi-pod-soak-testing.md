@@ -1206,12 +1206,12 @@ as the Endpoint Control API. Metrics requests require the Endpoint bearer
 token in Kubernetes; this deployment has no separate Endpoint metrics port.
 
 The service suite is called Loran in this RFC. The current actr-soak deployment
-retains the Kubernetes Service resource names `actrix` and `actrix-turn-relay`
+retains the Kubernetes Service resource names `loran` and `loran-turn-relay`
 for compatibility; both names route to Loran and do not identify a separate
 service. Outside these literal Kubernetes resource names, this RFC refers to
 the service suite as Loran.
-The in-cluster `actrix` Service advertises its stable ClusterIP. The deployment
-also creates an `actrix-turn-relay` ClusterIP Service with same-port UDP
+The in-cluster `loran` Service advertises its stable ClusterIP. The deployment
+also creates an `loran-turn-relay` ClusterIP Service with same-port UDP
 mappings for the configured relay allocation range (`49152-49407` in the
 current test deployment), so relay candidates are routable through kube-proxy.
 Loran configuration and Service ports MUST use the same range. External TURN

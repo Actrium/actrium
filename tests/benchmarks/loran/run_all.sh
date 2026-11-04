@@ -1,18 +1,18 @@
 #!/bin/bash
-# Actrix complete performance benchmark suite
+# Loran complete performance benchmark suite
 
 set -e
 
 RESULTS_DIR="benchmarks/results/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$RESULTS_DIR"
 
-echo "🚀 Actrix performance benchmarks"
+echo "🚀 Loran performance benchmarks"
 echo "Results directory: $RESULTS_DIR"
 echo
 
 # Check if service is running
 if ! curl -k -s https://localhost:8443/signer/health > /dev/null 2>&1; then
-    echo "❌ Service is not running, please start actrix first"
+    echo "❌ Service is not running, please start loran first"
     exit 1
 fi
 
@@ -88,7 +88,7 @@ echo
 # === 5. Generate summary report ===
 echo "5️⃣  Generating summary report..."
 cat > "$RESULTS_DIR/summary.txt" <<EOF
-Actrix performance benchmark report
+Loran performance benchmark report
 =====================
 Test time: $(date)
 Git Commit: $(git rev-parse --short HEAD 2>/dev/null || echo "N/A")

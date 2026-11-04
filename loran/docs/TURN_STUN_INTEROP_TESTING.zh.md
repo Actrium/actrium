@@ -6,8 +6,8 @@
 ## 1. 自动 UDP 协议测试
 
 ```bash
-cargo test -p actrix-turn --test udp_interop -- --nocapture --test-threads=1
-cargo test -p actrix-stun -- --nocapture --test-threads=1
+cargo test -p loran-turn --test udp_interop -- --nocapture --test-threads=1
+cargo test -p loran-stun -- --nocapture --test-threads=1
 ```
 
 TURN integration test 使用独立的 `turn` client API 连接 Loran server，覆盖：
@@ -32,7 +32,7 @@ request，要求在 2 秒总窗口内返回正确的 transaction ID 和 XOR-MAPP
 启动临时 TURN server 和只监听 loopback 的测试页面：
 
 ```bash
-cargo run -p actrix-turn --example browser_interop
+cargo run -p loran-turn --example browser_interop
 ```
 
 打开命令打印的 `ACTR_TURN_BROWSER_URL`。页面会：

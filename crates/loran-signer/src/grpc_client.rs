@@ -2,13 +2,13 @@
 
 use crate::error::SignerError;
 use crate::types::{ensure_named_key_payload, retire_named_key_payload, sign_request_payload};
-use actrix_proto::admin::v1::NonceCredential;
-use actrix_proto::signer::v1::{
+use base64::prelude::*;
+use ed25519_dalek::VerifyingKey;
+use loran_proto::admin::v1::NonceCredential;
+use loran_proto::signer::v1::{
     EnsureNamedKeyRequest, GetVerifyingKeyRequest, HealthCheckRequest, RetireNamedKeyRequest,
     SignRequest, signer_client::SignerClient,
 };
-use base64::prelude::*;
-use ed25519_dalek::VerifyingKey;
 use nonce_auth::CredentialBuilder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -22,8 +22,8 @@ pub struct GrpcClientConfig {
     /// Example: "http://127.0.0.1:8080" or "https://signer.example.com:8443"
     pub endpoint: String,
 
-    /// Actrix shared key (for authentication)
-    pub actrix_shared_key: String,
+    /// Loran shared key (for authentication)
+    pub loran_shared_key: String,
 
     /// Request timeout (seconds)
     pub timeout_seconds: u64,
@@ -47,7 +47,7 @@ pub struct GrpcClientConfig {
 /// Signer gRPC client
 pub struct GrpcClient {
     client: SignerClient<Channel>,
-    actrix_shared_key: String,
+    loran_shared_key: String,
 }
 
 impl GrpcClient {
@@ -76,7 +76,7 @@ impl GrpcClient {
 
         Ok(Self {
             client,
-            actrix_shared_key: config.actrix_shared_key.clone(),
+            loran_shared_key: config.loran_shared_key.clone(),
         })
     }
 
@@ -146,7 +146,7 @@ impl GrpcClient {
         let request_data = sign_request_payload(key_id, message);
 
         // Create nonce credential
-        let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
+        let nonce_credential = CredentialBuilder::new(self.loran_shared_key.as_bytes())
             .sign(request_data.as_bytes())?;
 
         // Convert to protobuf NonceCredential
@@ -195,7 +195,7 @@ impl GrpcClient {
     /// Returns the 32-byte Ed25519 verifying key
     pub async fn get_verifying_key(&mut self, key_id: u32) -> Result<[u8; 32], SignerError> {
         let request_data = format!("get_verifying_key:{key_id}");
-        let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
+        let nonce_credential = CredentialBuilder::new(self.loran_shared_key.as_bytes())
             .sign(request_data.as_bytes())?;
 
         let credential = NonceCredential {
@@ -233,7 +233,7 @@ impl GrpcClient {
     ///
     /// Returns (key_id, verifying_key_bytes [u8;32])
     pub async fn ensure_named_key(&mut self, name: &str) -> Result<(u32, [u8; 32]), SignerError> {
-        let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
+        let nonce_credential = CredentialBuilder::new(self.loran_shared_key.as_bytes())
             .sign(ensure_named_key_payload(name).as_bytes())?;
         let credential = NonceCredential {
             timestamp: nonce_credential.timestamp,
@@ -265,7 +265,7 @@ impl GrpcClient {
 
     /// Retire the named key so it never signs again. Returns its key id.
     pub async fn retire_named_key(&mut self, name: &str) -> Result<u32, SignerError> {
-        let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
+        let nonce_credential = CredentialBuilder::new(self.loran_shared_key.as_bytes())
             .sign(retire_named_key_payload(name).as_bytes())?;
         let credential = NonceCredential {
             timestamp: nonce_credential.timestamp,
@@ -289,7 +289,7 @@ impl GrpcClient {
     /// Health check
     pub async fn health_check(&mut self) -> Result<String, SignerError> {
         let request_data = "health_check";
-        let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
+        let nonce_credential = CredentialBuilder::new(self.loran_shared_key.as_bytes())
             .sign(request_data.as_bytes())?;
 
         let credential = NonceCredential {
@@ -319,7 +319,7 @@ mod tests {
     fn test_grpc_client_config() {
         let config = GrpcClientConfig {
             endpoint: "http://127.0.0.1:8080".to_string(),
-            actrix_shared_key: "test-key".to_string(),
+            loran_shared_key: "test-key".to_string(),
             timeout_seconds: 30,
             enable_tls: false,
             tls_domain: None,
@@ -336,7 +336,7 @@ mod tests {
     fn test_tls_config_validation() {
         let config = GrpcClientConfig {
             endpoint: "https://signer.example.com:8443".to_string(),
-            actrix_shared_key: "test-key".to_string(),
+            loran_shared_key: "test-key".to_string(),
             timeout_seconds: 30,
             enable_tls: true,
             tls_domain: None, // missing tls_domain
@@ -353,7 +353,7 @@ mod tests {
     fn test_mtls_partial_config() {
         let config = GrpcClientConfig {
             endpoint: "https://signer.example.com:8443".to_string(),
-            actrix_shared_key: "test-key".to_string(),
+            loran_shared_key: "test-key".to_string(),
             timeout_seconds: 30,
             enable_tls: true,
             tls_domain: Some("signer.example.com".to_string()),

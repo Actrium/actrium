@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Web Echo Example — mock-actrix flavored start script (Option U / wasm-bindgen).
+# Web Echo Example — mock-loran flavored start script (Option U / wasm-bindgen).
 #
 # Pipeline:
 #   - builds the unified guest crates with `wasm-pack` (`--features web
 #     --no-default-features`)
 #   - signs the wasm-bindgen binary and glue into one authenticated `.actr`
 #     package
-#   - boots the in-repo `actr-mock-actrix` (signaling WS + HTTP Issuer + publisher)
+#   - boots the in-repo `actr-mock-loran` (signaling WS + HTTP Issuer + publisher)
 #   - starts `actr run --web` for server + client
 #   - drives the Puppeteer test suite (BasicFunction by default; pass
 #     `SUITES='BasicFunction MultiTab'` for the full matrix)
@@ -25,7 +25,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo "Web Echo (mock-actrix, Option U / wasm-bindgen guest)"
+echo "Web Echo (mock-loran, Option U / wasm-bindgen guest)"
 echo "build (wasm-pack) -> sign -> register (mock) -> actr run --web (WBG mode)"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,7 +64,7 @@ sed_inplace() {
 
 echo ""
 echo "Cleaning stale data..."
-rm -f "$SCRIPT_DIR/.mock-actrix.pid" "$SCRIPT_DIR/.server.pid" "$SCRIPT_DIR/.client.pid"
+rm -f "$SCRIPT_DIR/.mock-loran.pid" "$SCRIPT_DIR/.server.pid" "$SCRIPT_DIR/.client.pid"
 
 for PORT in "$MOCK_PORT" 5173 5174; do
     PIDS=$(lsof -ti:"$PORT" 2>/dev/null || true)
@@ -93,7 +93,7 @@ cleanup() {
     if [ -n "$CLIENT_PID" ]; then kill "$CLIENT_PID" 2>/dev/null || true; fi
     if [ -n "$SERVER_PID" ]; then kill "$SERVER_PID" 2>/dev/null || true; fi
     if [ -n "$MOCK_PID" ]; then
-        echo "Stopping mock-actrix (PID: $MOCK_PID)"
+        echo "Stopping mock-loran (PID: $MOCK_PID)"
         kill "$MOCK_PID" 2>/dev/null || true
     fi
     sed_inplace \
@@ -126,13 +126,13 @@ else
 fi
 echo -e "${GREEN}actr CLI: $ACTR_CMD${NC}"
 
-MOCK_BIN="$ACTR_ROOT/target/debug/mock-actrix"
+MOCK_BIN="$ACTR_ROOT/target/debug/mock-loran"
 if [ ! -x "$MOCK_BIN" ]; then
-    echo -e "${YELLOW}mock-actrix not built, building...${NC}"
-    (cd "$ACTR_ROOT" && cargo build -p actr-mock-actrix --bin mock-actrix 2>&1 | tail -5)
+    echo -e "${YELLOW}mock-loran not built, building...${NC}"
+    (cd "$ACTR_ROOT" && cargo build -p actr-mock-loran --bin mock-loran 2>&1 | tail -5)
 fi
-[ -x "$MOCK_BIN" ] || { echo -e "${RED}mock-actrix not found at $MOCK_BIN${NC}"; exit 1; }
-echo -e "${GREEN}mock-actrix: $MOCK_BIN${NC}"
+[ -x "$MOCK_BIN" ] || { echo -e "${RED}mock-loran not found at $MOCK_BIN${NC}"; exit 1; }
+echo -e "${GREEN}mock-loran: $MOCK_BIN${NC}"
 
 if ! command -v wasm-pack >/dev/null 2>&1; then
     echo -e "${RED}wasm-pack not found (install: cargo install wasm-pack)${NC}"
@@ -204,21 +204,21 @@ CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-unknown-unkn
 
 echo -e "${GREEN}.actr packages built${NC}"
 
-# ---- Step 3: start mock-actrix ----
+# ---- Step 3: start mock-loran ----
 
 echo ""
-echo -e "${BLUE}Step 3: Starting mock-actrix on port $MOCK_PORT...${NC}"
+echo -e "${BLUE}Step 3: Starting mock-loran on port $MOCK_PORT...${NC}"
 
-MOCK_LOG="$LOG_DIR/mock-actrix.log"
+MOCK_LOG="$LOG_DIR/mock-loran.log"
 : > "$MOCK_LOG"
 "$MOCK_BIN" --port "$MOCK_PORT" > "$MOCK_LOG" 2>&1 &
 MOCK_PID=$!
-echo "  mock-actrix started (PID: $MOCK_PID)"
+echo "  mock-loran started (PID: $MOCK_PID)"
 
 READY=0
 for _ in $(seq 1 100); do
     if ! kill -0 "$MOCK_PID" 2>/dev/null; then
-        echo -e "${RED}mock-actrix exited during startup${NC}"
+        echo -e "${RED}mock-loran exited during startup${NC}"
         cat "$MOCK_LOG"; exit 1
     fi
     if grep -q "listening on 127.0.0.1:$MOCK_PORT" "$MOCK_LOG"; then
@@ -226,13 +226,13 @@ for _ in $(seq 1 100); do
     fi
     sleep 0.1
 done
-[ "$READY" -eq 1 ] || { echo -e "${RED}mock-actrix did not reach 'listening on' within 10s${NC}"; cat "$MOCK_LOG"; exit 1; }
-echo -e "${GREEN}mock-actrix ready on http://127.0.0.1:$MOCK_PORT${NC}"
+[ "$READY" -eq 1 ] || { echo -e "${RED}mock-loran did not reach 'listening on' within 10s${NC}"; cat "$MOCK_LOG"; exit 1; }
+echo -e "${GREEN}mock-loran ready on http://127.0.0.1:$MOCK_PORT${NC}"
 
 # ---- Step 4: seed realm + publisher + packages ----
 
 echo ""
-echo -e "${BLUE}Step 4: Seeding realm + publisher + packages on mock-actrix...${NC}"
+echo -e "${BLUE}Step 4: Seeding realm + publisher + packages on mock-loran...${NC}"
 
 ENDPOINT="http://127.0.0.1:$MOCK_PORT"
 bash "$SCRIPT_DIR/register-mock.sh" --endpoint "$ENDPOINT"
@@ -312,12 +312,12 @@ fi
 
 echo ""
 echo "Services:"
-echo "  mock-actrix: http://127.0.0.1:$MOCK_PORT"
+echo "  mock-loran: http://127.0.0.1:$MOCK_PORT"
 echo "  Server:      http://localhost:5174"
 echo "  Client:      http://localhost:5173"
 echo ""
 echo "Logs:"
-echo "  tail -f $LOG_DIR/mock-actrix.log"
+echo "  tail -f $LOG_DIR/mock-loran.log"
 echo "  tail -f $LOG_DIR/server.log"
 echo "  tail -f $LOG_DIR/client.log"
 

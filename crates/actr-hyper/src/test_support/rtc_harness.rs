@@ -1341,7 +1341,7 @@ pub struct TestHarness {
     pub rtc_faults: crate::wire::webrtc::test_runtime::DirectedRtcFaultRegistry,
     pub signaling_faults: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
     pub evidence: TestEvidenceTimeline,
-    // The production-Actrix pair/multi-peer matrix needs the directed RTC
+    // The production-Loran pair/multi-peer matrix needs the directed RTC
     // fault and observation seams. Keep them out of the legacy VNet harness so
     // its historical recovery cases retain their original Runtime, signaling,
     // address-provider, and scheduling path.
@@ -1404,7 +1404,7 @@ impl TestHarness {
     }
 
     /// Build a harness against an externally owned signaling service. This is
-    /// the entry used by `MobileRtcPairHarness` with real Actrix Signaling;
+    /// the entry used by `MobileRtcPairHarness` with real Loran Signaling;
     /// no compatibility mock server is started.
     pub async fn with_external_signaling(signaling_url: impl Into<String>) -> Self {
         Self::init_tracing();
@@ -1473,7 +1473,7 @@ impl TestHarness {
     }
 
     /// Add a peer authenticated by an externally owned production signaling
-    /// fixture. Mobile pair tests use Actrix-issued-equivalent credentials
+    /// fixture. Mobile pair tests use Loran-issued-equivalent credentials
     /// instead of the compatibility dummy token.
     pub async fn add_peer_with_rtc_configuration_and_credential(
         &mut self,
@@ -1826,7 +1826,7 @@ impl TestHarness {
     }
 
     /// Remove and fully shut down one independent endpoint while leaving the
-    /// other endpoints and the externally owned Actrix services alive. This is
+    /// other endpoints and the externally owned Loran services alive. This is
     /// the process-restart seam used by the mobile pair contract.
     pub async fn remove_peer(&mut self, serial: u64) -> bool {
         let Some(peer) = self.peers.remove(&serial) else {

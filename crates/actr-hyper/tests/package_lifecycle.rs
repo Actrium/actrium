@@ -118,7 +118,7 @@ async fn assert_package_on_start_failure(
 ) {
     let mut server = TestSignalingServer::start()
         .await
-        .expect("mock actrix server should start");
+        .expect("mock loran server should start");
     let dir = TempDir::new().unwrap();
     let hyper = Hyper::new(dev_config_with_key(&dir, &verifying_key))
         .await

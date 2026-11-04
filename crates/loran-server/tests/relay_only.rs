@@ -29,9 +29,10 @@ fn tcp_port() -> u16 {
 
 #[test]
 fn loran_frame_limit_fits_the_largest_sdk_record() {
-    let mut config =
-        actrix::ActrixConfig::from_toml(include_str!("../../../loran/config/relay.example.toml"))
-            .unwrap();
+    let mut config = loran_server::LoranConfig::from_toml(include_str!(
+        "../../../loran/config/relay.example.toml"
+    ))
+    .unwrap();
     let required = actr_relay_security::MAX_RECORD_BYTES + loran_relay_protocol::DATA_HEADER_LEN;
     config.relay.limits.max_frame_bytes = required - 1;
     assert!(config.relay.validate(true, false).is_err());
@@ -45,9 +46,10 @@ async fn static_relay_can_be_disabled_without_database_on_reload() {
     let directory = tempfile::tempdir().unwrap();
     let storage = directory.path().join("storage-must-stay-a-file");
     std::fs::write(&storage, b"untouched").unwrap();
-    let mut config =
-        actrix::ActrixConfig::from_toml(include_str!("../../../loran/config/relay.example.toml"))
-            .unwrap();
+    let mut config = loran_server::LoranConfig::from_toml(include_str!(
+        "../../../loran/config/relay.example.toml"
+    ))
+    .unwrap();
     config.sqlite_path = storage.clone();
     let port = tcp_port();
     config.bind.http.as_mut().unwrap().port = port;
@@ -56,7 +58,7 @@ async fn static_relay_can_be_disabled_without_database_on_reload() {
     let log_path = directory.path().join("server.log");
     let log = std::fs::File::create(&log_path).unwrap();
     let mut process = Process(
-        Command::new(env!("CARGO_BIN_EXE_actrix"))
+        Command::new(env!("CARGO_BIN_EXE_loran"))
             .arg("--config")
             .arg(&path)
             .current_dir(directory.path())
@@ -125,7 +127,7 @@ async fn exercise_regular_launcher() {
         let directory = tempfile::tempdir().unwrap();
         let storage = directory.path().join("storage-must-stay-a-file");
         std::fs::write(&storage, b"untouched").unwrap();
-        let mut config = actrix::ActrixConfig::from_toml(include_str!(
+        let mut config = loran_server::LoranConfig::from_toml(include_str!(
             "../../../loran/config/relay.example.toml"
         ))
         .unwrap();
@@ -147,7 +149,7 @@ async fn exercise_regular_launcher() {
             key.cert
         });
         if enable == 38 {
-            let ice = actrix::ActrixConfig::from_toml(include_str!(
+            let ice = loran_server::LoranConfig::from_toml(include_str!(
                 "../../../loran/config/ice.example.toml"
             ))
             .unwrap();
@@ -166,7 +168,7 @@ async fn exercise_regular_launcher() {
         let log_path = directory.path().join("server.log");
         let log = std::fs::File::create(&log_path).unwrap();
         let mut process = Process(
-            Command::new(env!("CARGO_BIN_EXE_actrix"))
+            Command::new(env!("CARGO_BIN_EXE_loran"))
                 .arg("--config")
                 .arg(&path)
                 .current_dir(directory.path())
@@ -354,17 +356,18 @@ async fn exercise_rejected_reloads() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("relay.toml");
     let log_path = directory.path().join("server.log");
-    let mut config =
-        actrix::ActrixConfig::from_toml(include_str!("../../../loran/config/relay.example.toml"))
-            .unwrap();
+    let mut config = loran_server::LoranConfig::from_toml(include_str!(
+        "../../../loran/config/relay.example.toml"
+    ))
+    .unwrap();
     config.sqlite_path = directory.path().join("unused-storage");
-    config.actrix_shared_key = "a-valid-preconfigured-shared-secret".into();
+    config.loran_shared_key = "a-valid-preconfigured-shared-secret".into();
     let port = tcp_port();
     config.bind.http.as_mut().unwrap().port = port;
     std::fs::write(&path, config.to_toml().unwrap()).unwrap();
     let log = std::fs::File::create(&log_path).unwrap();
     let mut process = Process(
-        Command::new(env!("CARGO_BIN_EXE_actrix"))
+        Command::new(env!("CARGO_BIN_EXE_loran"))
             .arg("--config")
             .arg(&path)
             .current_dir(directory.path())

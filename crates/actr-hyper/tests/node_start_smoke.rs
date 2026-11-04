@@ -190,7 +190,7 @@ async fn linked_node_starts_and_shuts_down_cleanly() {
         .await
         .expect("link should attach the workload");
 
-    // register hits the mock Issuer (MockActrixServer serves /issuer/register).
+    // register hits the mock Issuer (MockLoranServer serves /issuer/register).
     let mut registered = node
         .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
         .await

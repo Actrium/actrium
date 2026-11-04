@@ -1,5 +1,5 @@
 #!/bin/bash
-# Actrix data backup script
+# Loran data backup script
 
 set -e
 
@@ -7,7 +7,7 @@ BACKUP_DIR="${BACKUP_DIR:-./backup}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_PATH="$BACKUP_DIR/$TIMESTAMP"
 
-echo "🔄 Starting Actrix data backup..."
+echo "🔄 Starting Loran data backup..."
 echo "Backup directory: $BACKUP_PATH"
 echo
 

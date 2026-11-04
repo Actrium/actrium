@@ -25,9 +25,9 @@ Thumbs.db
 !rust/echo-actr/src/generated/
 !rust/echo-actr/src/generated/**
 
-# Actrix integration files
-# actrix-*.toml
-ACTRIX*.md
+# Loran integration files
+# loran-*.toml
+LORAN*.md
 
 # Misc runtime files
 .status
@@ -39,6 +39,6 @@ rust/wasm-echo/dev-key.json
 # actr.toml files (use Actr.example.toml as template)
 **/actr.toml
 
-# Actrix config file (use actrix-config.example.toml as template)
-actrix-config.toml
+# Loran config file (use loran-config.example.toml as template)
+loran-config.toml
 **/.actr/

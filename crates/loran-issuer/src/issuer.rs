@@ -791,7 +791,7 @@ impl AIdIssuer {
         // package source, and a published release is pinned to its bytes.
         let pool = platform::storage::db::get_database().get_pool().clone();
         let published =
-            actrix_publisher_registry::model::ActrPackage::get_by_type_and_target_any_status(
+            loran_publisher_registry::model::ActrPackage::get_by_type_and_target_any_status(
                 &pool, &type_str, target,
             )
             .await
@@ -799,7 +799,7 @@ impl AIdIssuer {
                 AidError::GenerationFailed(format!("Publisher Registry lookup failed: {e}"))
             })?;
         if let Some(package) = published {
-            if package.status == actrix_publisher_registry::model::PkgStatus::Revoked {
+            if package.status == loran_publisher_registry::model::PkgStatus::Revoked {
                 platform::recording::warn!(
                     "Package verification rejected: package revoked, type_str={}, target={}",
                     type_str,
@@ -817,7 +817,7 @@ impl AIdIssuer {
             }
         }
 
-        let manager = actrix_publisher_registry::PublisherRegistryManager::new(pool);
+        let manager = loran_publisher_registry::PublisherRegistryManager::new(pool);
         let (public_key, provenance) = match self
             .resolve_package_key(&manager, &actr_type.publisher, signing_key_id, &type_str)
             .await?
@@ -828,7 +828,7 @@ impl AIdIssuer {
                     .signing_public_key
                     .as_ref()
                     .filter(|key| {
-                        actrix_publisher_registry::crypto::compute_key_id(key) == signing_key_id
+                        loran_publisher_registry::crypto::compute_key_id(key) == signing_key_id
                     })
                     .ok_or_else(|| {
                         platform::recording::warn!(
@@ -842,7 +842,7 @@ impl AIdIssuer {
             }
         };
 
-        let valid = actrix_publisher_registry::crypto::verify_signature(
+        let valid = loran_publisher_registry::crypto::verify_signature(
             manifest_bytes,
             &BASE64_STANDARD.encode(signature),
             &public_key,
@@ -886,12 +886,12 @@ impl AIdIssuer {
     /// finds the key gone is a final refusal, never a downgrade.
     async fn resolve_package_key(
         &self,
-        manager: &actrix_publisher_registry::PublisherRegistryManager,
+        manager: &loran_publisher_registry::PublisherRegistryManager,
         publisher: &str,
         signing_key_id: &str,
         type_str: &str,
     ) -> Result<Option<String>, AidError> {
-        use actrix_publisher_registry::manager::PackageSigningKey;
+        use loran_publisher_registry::manager::PackageSigningKey;
 
         let resolved = manager.package_signing_key(publisher, signing_key_id).await;
         let refresh = match resolved {
@@ -902,7 +902,7 @@ impl AIdIssuer {
                 };
                 refresher.ensure_current(publisher).await
             }
-            Err(actrix_publisher_registry::PublisherRegistryError::NotFound)
+            Err(loran_publisher_registry::PublisherRegistryError::NotFound)
                 if self.publisher_profiles.is_some() =>
             {
                 // The publisher exists, but its registry projection may not
@@ -938,17 +938,17 @@ impl AIdIssuer {
     }
 
     fn map_publisher_verification_error(
-        error: actrix_publisher_registry::PublisherRegistryError,
+        error: loran_publisher_registry::PublisherRegistryError,
     ) -> AidError {
         let message = error.to_string();
         match error {
-            actrix_publisher_registry::PublisherRegistryError::NotFound
-            | actrix_publisher_registry::PublisherRegistryError::KeyRevoked(_)
-            | actrix_publisher_registry::PublisherRegistryError::InvalidStatus(_)
-            | actrix_publisher_registry::PublisherRegistryError::CertificateExpired
-            | actrix_publisher_registry::PublisherRegistryError::InvalidSignature
-            | actrix_publisher_registry::PublisherRegistryError::Unauthorized
-            | actrix_publisher_registry::PublisherRegistryError::InvalidRequest(_) => {
+            loran_publisher_registry::PublisherRegistryError::NotFound
+            | loran_publisher_registry::PublisherRegistryError::KeyRevoked(_)
+            | loran_publisher_registry::PublisherRegistryError::InvalidStatus(_)
+            | loran_publisher_registry::PublisherRegistryError::CertificateExpired
+            | loran_publisher_registry::PublisherRegistryError::InvalidSignature
+            | loran_publisher_registry::PublisherRegistryError::Unauthorized
+            | loran_publisher_registry::PublisherRegistryError::InvalidRequest(_) => {
                 platform::recording::warn!("Publisher Registry verification rejected: {}", message);
                 AidError::PublisherNotVerified
             }
@@ -1315,7 +1315,7 @@ impl AIdIssuer {
         }
 
         let publisher_name =
-            actrix_publisher_registry::reserved::canonical_publisher_domain(&actor_type.publisher)
+            loran_publisher_registry::reserved::canonical_publisher_domain(&actor_type.publisher)
                 .unwrap_or_else(|_| actor_type.publisher.to_ascii_lowercase());
         let publisher: Option<String> =
             sqlx::query_scalar("SELECT status FROM publisher WHERE name = ?")
@@ -1354,7 +1354,7 @@ impl AIdIssuer {
         match publisher {
             Some(status)
                 if status
-                    == actrix_publisher_registry::model::PublisherStatus::Active.to_string() =>
+                    == loran_publisher_registry::model::PublisherStatus::Active.to_string() =>
             {
                 Ok(issued)
             }

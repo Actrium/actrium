@@ -1,4 +1,4 @@
-use actrix_sdk::testing::{
+use loran_sdk::testing::{
     self, CreateRealmRequest, CredentialPayload, GetNodeInfoRequest, ListRealmsRequest,
     NodeAdminServiceClient, RetireRealmRequest, ShutdownRequest, UpdateRealmRequest,
 };
@@ -33,11 +33,11 @@ use {
 
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-const TEST_ACTRIX_SHARED_KEY: &str = "0123456789abcdef0123456789abcdef";
+const TEST_LORAN_SHARED_KEY: &str = "0123456789abcdef0123456789abcdef";
 const TEST_VALID_KEK_HEX: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 const TEST_CONTROL_SHARED_SECRET: &str =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const TEST_CONTROL_NODE_ID: &str = "actrix-process-node";
+const TEST_CONTROL_NODE_ID: &str = "loran-process-node";
 const TEST_TLS_CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
 MIIDCTCCAfGgAwIBAgIUEtoFL1fivjqWKHCAUVysBEESK2YwDQYJKoZIhvcNAQEL
 BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDIxODA2MjU1MFoXDTI3MDIx
@@ -92,14 +92,14 @@ MnKe1uXgE8houbMEhvDdjtQ=
 use serial_test::serial;
 
 fn choose_port() -> u16 {
-    if let Some(p) = std::env::var("ACTRIX_TEST_PORT")
+    if let Some(p) = std::env::var("LORAN_TEST_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
     {
         return p;
     }
     // The dedicated Signer listener (SGN-02) defaults to bind.http.port + 1, so
-    // each actrix process spawned here occupies two consecutive TCP ports.
+    // each loran process spawned here occupies two consecutive TCP ports.
     // Probe that the successor is also free so a parallel test's HTTP port
     // cannot deterministically collide with this process's Signer port.
     for _ in 0..256 {
@@ -131,11 +131,11 @@ fn write_minimal_config(dir: &Path, port: u16) -> PathBuf {
     writeln!(
         f,
         r#"
-name = "actrix-test"
+name = "loran-test"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
@@ -157,7 +157,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -170,7 +170,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 "#,
         sqlite = data_dir.display(),
         port = port,
-        pid = dir.join("actrix.pid").display()
+        pid = dir.join("loran.pid").display()
     )
     .expect("write config");
     config_path
@@ -185,11 +185,11 @@ fn write_minimal_config_with_recording_sink(dir: &Path, port: u16, sink: &str) -
     writeln!(
         f,
         r#"
-name = "actrix-test-otlp"
+name = "loran-test-otlp"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,otlp"
 pid = "{pid}"
 
@@ -211,7 +211,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -221,12 +221,12 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 
 [recording]
 
-service_name = "actrix-otlp-e2e"
+service_name = "loran-otlp-e2e"
 sink = "{sink}"
 "#,
         sqlite = data_dir.display(),
         port = port,
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         sink = sink
     )
     .expect("write config");
@@ -241,11 +241,11 @@ fn write_minimal_config_with_signer_kek(dir: &Path, port: u16, kek: &str) -> Pat
     writeln!(
         f,
         r#"
-name = "actrix-test-signer-kek"
+name = "loran-test-signer-kek"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,signer-kek"
 pid = "{pid}"
 
@@ -267,7 +267,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 kek = "{kek}"
@@ -280,7 +280,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 "#,
         sqlite = data_dir.display(),
         port = port,
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         kek = kek
     )
     .expect("write config");
@@ -295,11 +295,11 @@ fn write_minimal_config_with_custom_pid_path(dir: &Path, port: u16, pid_path: &s
     writeln!(
         f,
         r#"
-name = "actrix-test-custom-pid"
+name = "loran-test-custom-pid"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,custom-pid"
 pid = "{pid}"
 
@@ -321,7 +321,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -348,11 +348,11 @@ fn write_minimal_config_without_pid(dir: &Path, port: u16) -> PathBuf {
     writeln!(
         f,
         r#"
-name = "actrix-test-no-pid"
+name = "loran-test-no-pid"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,no-pid"
 
 [authority]
@@ -373,7 +373,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -411,7 +411,7 @@ fn write_minimal_config_with_file_logging_route(
     fs::create_dir_all(&log_dir).expect("create log dir");
 
     let global_sink_line = if log_route == "global" {
-        format!("sink = \"file://{}\"", log_dir.join("actrix.log").display())
+        format!("sink = \"file://{}\"", log_dir.join("loran.log").display())
     } else {
         String::new()
     };
@@ -431,10 +431,10 @@ sink = "file://{}"
 [recording.operations]
 sink = "file://{}"
 "#,
-            log_dir.join("actrix-observability.log").display(),
-            log_dir.join("actrix-audit.log").display(),
-            log_dir.join("actrix-security.log").display(),
-            log_dir.join("actrix-operations.log").display(),
+            log_dir.join("loran-observability.log").display(),
+            log_dir.join("loran-audit.log").display(),
+            log_dir.join("loran-security.log").display(),
+            log_dir.join("loran-operations.log").display(),
         )
     } else {
         String::new()
@@ -445,11 +445,11 @@ sink = "file://{}"
     writeln!(
         f,
         r#"
-name = "actrix-test"
+name = "loran-test"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
@@ -471,7 +471,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -487,7 +487,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 "#,
         sqlite = data_dir.display(),
         port = port,
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         global_sink_line = global_sink_line,
         channel_overrides = channel_overrides
     )
@@ -505,11 +505,11 @@ fn write_minimal_config_with_user_group(dir: &Path, port: u16, user: &str, group
     writeln!(
         f,
         r#"
-name = "actrix-test"
+name = "loran-test"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 user = "{user}"
@@ -533,7 +533,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -546,7 +546,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 "#,
         sqlite = data_dir.display(),
         port = port,
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         user = user,
         group = group
     )
@@ -561,11 +561,11 @@ fn write_config_with_sqlite_path(dir: &Path, port: u16, sqlite_path: &str) -> Pa
     writeln!(
         f,
         r#"
-name = "actrix-test-invalid-db"
+name = "loran-test-invalid-db"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
@@ -587,7 +587,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -600,7 +600,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 "#,
         sqlite = sqlite_path,
         port = port,
-        pid = dir.join("actrix.pid").display()
+        pid = dir.join("loran.pid").display()
     )
     .expect("write config");
     config_path
@@ -614,11 +614,11 @@ fn write_config_with_http_bind_ip(dir: &Path, port: u16, bind_ip: &str) -> PathB
     writeln!(
         f,
         r#"
-name = "actrix-test-http-bind-ip"
+name = "loran-test-http-bind-ip"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,http-bind-ip"
 pid = "{pid}"
 
@@ -640,7 +640,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -653,7 +653,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 "#,
         sqlite = data_dir.display(),
         port = port,
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         bind_ip = bind_ip
     )
     .expect("write config");
@@ -668,11 +668,11 @@ fn write_config_with_control_grpc(dir: &Path, port: u16) -> PathBuf {
     writeln!(
         f,
         r#"
-name = "actrix-test-control-grpc"
+name = "loran-test-control-grpc"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,control-grpc"
 pid = "{pid}"
 
@@ -694,7 +694,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -704,7 +704,7 @@ head = "grpc_api"
 
 [control.grpc_api]
 node_id = "{node_id}"
-node_name = "actrix-test-node"
+node_name = "loran-test-node"
 shared_secret = "{shared_secret}"
 max_clock_skew_secs = 300
 
@@ -715,7 +715,7 @@ max_clock_skew_secs = 300
         port = port,
         node_id = TEST_CONTROL_NODE_ID,
         shared_secret = TEST_CONTROL_SHARED_SECRET,
-        pid = dir.join("actrix.pid").display()
+        pid = dir.join("loran.pid").display()
     )
     .expect("write config");
     config_path
@@ -729,11 +729,11 @@ fn write_config_with_admin_and_control_grpc(dir: &Path, port: u16) -> PathBuf {
     writeln!(
         f,
         r#"
-name = "actrix-test-all-in-one"
+name = "loran-test-all-in-one"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,all-in-one"
 pid = "{pid}"
 
@@ -755,7 +755,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -767,7 +767,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 [control.grpc_api]
 enabled = true
 node_id = "{node_id}"
-node_name = "actrix-test-node"
+node_name = "loran-test-node"
 shared_secret = "{shared_secret}"
 max_clock_skew_secs = 300
 
@@ -778,7 +778,7 @@ max_clock_skew_secs = 300
         port = port,
         node_id = TEST_CONTROL_NODE_ID,
         shared_secret = TEST_CONTROL_SHARED_SECRET,
-        pid = dir.join("actrix.pid").display()
+        pid = dir.join("loran.pid").display()
     )
     .expect("write config");
     config_path
@@ -792,11 +792,11 @@ fn write_ice_only_config(dir: &Path, enable: u8, ice_port: u16, http_port: u16) 
     writeln!(
         f,
         r#"
-name = "actrix-test-ice-only"
+name = "loran-test-ice-only"
 enable = {enable}
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,ice"
 pid = "{pid}"
 
@@ -818,7 +818,7 @@ port = {ice_port}
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 turn_secret = "test-turn-secret-0123456789abcdef"
 
 [control.admin_ui]
@@ -829,7 +829,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 "#,
         enable = enable,
         sqlite = data_dir.display(),
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         ice_port = ice_port,
         http_port = http_port
     )
@@ -845,11 +845,11 @@ fn write_signer_without_http_or_https_bind_config(dir: &Path, ice_port: u16) -> 
     writeln!(
         f,
         r#"
-name = "actrix-test-signer-no-http-bind"
+name = "loran-test-signer-no-http-bind"
 enable = 16  # ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,signer-no-http-bind"
 pid = "{pid}"
 
@@ -862,7 +862,7 @@ port = {ice_port}
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 # defaults
@@ -874,7 +874,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 
 "#,
         sqlite = data_dir.display(),
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         ice_port = ice_port
     )
     .expect("write config");
@@ -889,11 +889,11 @@ fn write_prod_signer_without_https_bind_config(dir: &Path, port: u16) -> PathBuf
     writeln!(
         f,
         r#"
-name = "actrix-test-prod-no-https"
+name = "loran-test-prod-no-https"
 enable = 16  # ENABLE_SIGNER
 env = "prod"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,prod-no-https"
 pid = "{pid}"
 
@@ -915,7 +915,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -927,7 +927,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 
 "#,
         sqlite = data_dir.display(),
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         port = port
     )
     .expect("write config");
@@ -958,11 +958,11 @@ fn write_signer_https_only_config(
     writeln!(
         f,
         r#"
-name = "actrix-test-https-missing-tls"
+name = "loran-test-https-missing-tls"
 enable = 16  # ENABLE_SIGNER
 env = "{env}"
 sqlite_path = "{sqlite}"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,https-missing-tls"
 pid = "{pid}"
 
@@ -986,7 +986,7 @@ port = 0
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 
 [services.signer]
 kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -1002,7 +1002,7 @@ allowed_ips = ["127.0.0.1/32", "::1/128"]
 "#,
         env = env,
         sqlite = data_dir.display(),
-        pid = dir.join("actrix.pid").display(),
+        pid = dir.join("loran.pid").display(),
         port = port,
         cert = cert_path.display(),
         key = key_path.display()
@@ -1011,8 +1011,8 @@ allowed_ips = ["127.0.0.1/32", "::1/128"]
     config_path
 }
 
-fn spawn_actrix(config: &Path, log_path: &Path) -> Child {
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_actrix"));
+fn spawn_loran(config: &Path, log_path: &Path) -> Child {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_loran"));
     let log_file = fs::File::create(log_path).expect("create log file");
     Command::new(bin)
         .arg("--config")
@@ -1020,18 +1020,18 @@ fn spawn_actrix(config: &Path, log_path: &Path) -> Child {
         .stdout(Stdio::from(log_file.try_clone().expect("dup log")))
         .stderr(Stdio::from(log_file))
         .spawn()
-        .expect("spawn actrix")
+        .expect("spawn loran")
 }
 
-fn spawn_actrix_from_workdir(workdir: &Path, log_path: &Path) -> Child {
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_actrix"));
+fn spawn_loran_from_workdir(workdir: &Path, log_path: &Path) -> Child {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_loran"));
     let log_file = fs::File::create(log_path).expect("create log file");
     Command::new(bin)
         .current_dir(workdir)
         .stdout(Stdio::from(log_file.try_clone().expect("dup log")))
         .stderr(Stdio::from(log_file))
         .spawn()
-        .expect("spawn actrix")
+        .expect("spawn loran")
 }
 
 async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
@@ -1056,7 +1056,7 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
             let log = fs::read_to_string(log_path).unwrap_or_default();
-            panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
+            panic!("loran exited early: status={status:?}\nlogs:\n{log}");
         }
 
         if is_signer_health {
@@ -1065,7 +1065,7 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
                     .as_ref()
                     .expect("signer grpc endpoint should exist")
                     .clone(),
-                actrix_shared_key: TEST_ACTRIX_SHARED_KEY.to_string(),
+                loran_shared_key: TEST_LORAN_SHARED_KEY.to_string(),
                 timeout_seconds: 2,
                 enable_tls: false,
                 tls_domain: None,
@@ -1110,7 +1110,7 @@ async fn wait_for_health_https_insecure(url: &str, child: &mut Child, log_path: 
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
             let log = fs::read_to_string(log_path).unwrap_or_default();
-            panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
+            panic!("loran exited early: status={status:?}\nlogs:\n{log}");
         }
 
         if let Ok(resp) = client.get(&request_url).send().await
@@ -1294,7 +1294,7 @@ async fn wait_for_control_grpc(
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
             let log = fs::read_to_string(log_path).unwrap_or_default();
-            panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
+            panic!("loran exited early: status={status:?}\nlogs:\n{log}");
         }
 
         if let Ok(client) = NodeAdminServiceClient::connect(endpoint.to_string()).await {
@@ -1319,12 +1319,12 @@ async fn wait_for_signer_grpc_client(
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
             let log = fs::read_to_string(log_path).unwrap_or_default();
-            panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
+            panic!("loran exited early: status={status:?}\nlogs:\n{log}");
         }
 
         let config = GrpcClientConfig {
             endpoint: endpoint.to_string(),
-            actrix_shared_key: shared_key.to_string(),
+            loran_shared_key: shared_key.to_string(),
             timeout_seconds: 2,
             enable_tls: false,
             tls_domain: None,
@@ -1444,7 +1444,7 @@ async fn wait_for_stun_binding_success(target: &str, child: &mut Child, log_path
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
             let log = fs::read_to_string(log_path).unwrap_or_default();
-            panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
+            panic!("loran exited early: status={status:?}\nlogs:\n{log}");
         }
 
         socket
@@ -1490,24 +1490,20 @@ fn graceful_shutdown(mut child: Child) {
 
 #[tokio::test]
 #[serial]
-async fn actrix_starts_serves_health_and_shuts_down() {
+async fn loran_starts_serves_health_and_shuts_down() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
     // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
     let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
-    let mut grpc_client = wait_for_signer_grpc_client(
-        &grpc_endpoint,
-        TEST_ACTRIX_SHARED_KEY,
-        &mut child,
-        &log_path,
-    )
-    .await;
+    let mut grpc_client =
+        wait_for_signer_grpc_client(&grpc_endpoint, TEST_LORAN_SHARED_KEY, &mut child, &log_path)
+            .await;
     let grpc_health = grpc_client.health_check().await.expect("grpc health");
     assert_eq!(grpc_health, "healthy");
 
@@ -1516,25 +1512,21 @@ async fn actrix_starts_serves_health_and_shuts_down() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_signer_grpc_health_and_key_lifecycle() {
+async fn loran_signer_grpc_health_and_key_lifecycle() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-signer-grpc.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-signer-grpc.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
     // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
     let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
 
-    let mut grpc_client = wait_for_signer_grpc_client(
-        &grpc_endpoint,
-        TEST_ACTRIX_SHARED_KEY,
-        &mut child,
-        &log_path,
-    )
-    .await;
+    let mut grpc_client =
+        wait_for_signer_grpc_client(&grpc_endpoint, TEST_LORAN_SHARED_KEY, &mut child, &log_path)
+            .await;
     let grpc_health = grpc_client.health_check().await.expect("grpc health check");
     assert_eq!(grpc_health, "healthy");
 
@@ -1572,28 +1564,24 @@ async fn actrix_signer_grpc_health_and_key_lifecycle() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_signer_grpc_rejects_invalid_shared_secret() {
+async fn loran_signer_grpc_rejects_invalid_shared_secret() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-signer-grpc-bad-secret.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-signer-grpc-bad-secret.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
     // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
     let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
-    let _ready_client = wait_for_signer_grpc_client(
-        &grpc_endpoint,
-        TEST_ACTRIX_SHARED_KEY,
-        &mut child,
-        &log_path,
-    )
-    .await;
+    let _ready_client =
+        wait_for_signer_grpc_client(&grpc_endpoint, TEST_LORAN_SHARED_KEY, &mut child, &log_path)
+            .await;
 
     let bad_config = GrpcClientConfig {
         endpoint: grpc_endpoint,
-        actrix_shared_key: "wrong-shared-secret".to_string(),
+        loran_shared_key: "wrong-shared-secret".to_string(),
         timeout_seconds: 2,
         enable_tls: false,
         tls_domain: None,
@@ -1628,25 +1616,21 @@ async fn actrix_signer_grpc_rejects_invalid_shared_secret() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
+async fn loran_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_signer_kek(tmp.path(), port, TEST_VALID_KEK_HEX);
-    let log_path = tmp.path().join("actrix-signer-grpc-kek.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-signer-grpc-kek.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
     // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
     let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
 
-    let mut grpc_client = wait_for_signer_grpc_client(
-        &grpc_endpoint,
-        TEST_ACTRIX_SHARED_KEY,
-        &mut child,
-        &log_path,
-    )
-    .await;
+    let mut grpc_client =
+        wait_for_signer_grpc_client(&grpc_endpoint, TEST_LORAN_SHARED_KEY, &mut child, &log_path)
+            .await;
     let (key_id, public_key) = grpc_client
         .ensure_named_key("test")
         .await
@@ -1670,12 +1654,12 @@ async fn actrix_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_signer_kek_is_invalid() {
+async fn loran_exits_when_signer_kek_is_invalid() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_signer_kek(tmp.path(), port, "invalid-kek");
-    let log_path = tmp.path().join("actrix-invalid-kek.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-invalid-kek.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -1697,7 +1681,7 @@ async fn actrix_exits_when_signer_kek_is_invalid() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when Signer KEK is invalid");
+            panic!("loran should fail fast when Signer KEK is invalid");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -1705,12 +1689,12 @@ async fn actrix_exits_when_signer_kek_is_invalid() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_starts_with_default_config_in_working_directory() {
+async fn loran_starts_with_default_config_in_working_directory() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     write_minimal_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-default-cwd.log");
-    let mut child = spawn_actrix_from_workdir(tmp.path(), &log_path);
+    let log_path = tmp.path().join("loran-default-cwd.log");
+    let mut child = spawn_loran_from_workdir(tmp.path(), &log_path);
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -1720,18 +1704,18 @@ async fn actrix_starts_with_default_config_in_working_directory() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_starts_without_pid_file_configured() {
+async fn loran_starts_without_pid_file_configured() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_without_pid(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-no-pid.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-no-pid.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
 
     assert!(
-        !tmp.path().join("actrix.pid").exists(),
+        !tmp.path().join("loran.pid").exists(),
         "pid file should not be created when pid is not configured"
     );
 
@@ -1740,13 +1724,13 @@ async fn actrix_starts_without_pid_file_configured() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_writes_pid_file_and_cleans_on_shutdown() {
+async fn loran_writes_pid_file_and_cleans_on_shutdown() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-pid.log");
-    let pid_path = tmp.path().join("actrix.pid");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-pid.log");
+    let pid_path = tmp.path().join("loran.pid");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -1772,13 +1756,13 @@ async fn actrix_writes_pid_file_and_cleans_on_shutdown() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_shutdown_tolerates_missing_pid_file() {
+async fn loran_shutdown_tolerates_missing_pid_file() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-missing-pid.log");
-    let pid_path = tmp.path().join("actrix.pid");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-missing-pid.log");
+    let pid_path = tmp.path().join("loran.pid");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -1789,17 +1773,17 @@ async fn actrix_shutdown_tolerates_missing_pid_file() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_writes_pid_file_in_nested_directory_and_cleans_on_shutdown() {
+async fn loran_writes_pid_file_in_nested_directory_and_cleans_on_shutdown() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let pid_path = tmp.path().join("run").join("state").join("actrix.pid");
+    let pid_path = tmp.path().join("run").join("state").join("loran.pid");
     let config_path = write_minimal_config_with_custom_pid_path(
         tmp.path(),
         port,
         pid_path.to_str().expect("pid path to string"),
     );
-    let log_path = tmp.path().join("actrix-nested-pid.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-nested-pid.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -1827,12 +1811,12 @@ async fn actrix_writes_pid_file_in_nested_directory_and_cleans_on_shutdown() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exposes_prometheus_metrics_endpoint() {
+async fn loran_exposes_prometheus_metrics_endpoint() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-metrics.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-metrics.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -1842,11 +1826,11 @@ async fn actrix_exposes_prometheus_metrics_endpoint() {
     assert!(resp.status().is_success());
     let body = resp.text().await.expect("metrics text");
     assert!(
-        body.contains("actrix_websocket_connections"),
+        body.contains("loran_websocket_connections"),
         "expected websocket gauge in /metrics output"
     );
     assert!(
-        body.contains("actrix_turn_active_sessions"),
+        body.contains("loran_turn_active_sessions"),
         "expected turn session gauge in /metrics output"
     );
 
@@ -1855,13 +1839,13 @@ async fn actrix_exposes_prometheus_metrics_endpoint() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_writes_logs_to_file_when_configured() {
+async fn loran_writes_logs_to_file_when_configured() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, log_dir) = write_minimal_config_with_file_logging(tmp.path(), port, false);
-    let expected_log_file = log_dir.join("actrix.log");
-    let bootstrap_log_path = tmp.path().join("actrix-bootstrap.log");
-    let mut child = spawn_actrix(&config_path, &bootstrap_log_path);
+    let expected_log_file = log_dir.join("loran.log");
+    let bootstrap_log_path = tmp.path().join("loran-bootstrap.log");
+    let mut child = spawn_loran(&config_path, &bootstrap_log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &bootstrap_log_path).await;
@@ -1892,15 +1876,15 @@ async fn actrix_writes_logs_to_file_when_configured() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_writes_per_channel_log_file_when_configured() {
+async fn loran_writes_per_channel_log_file_when_configured() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, log_dir) =
         write_minimal_config_with_file_logging_route(tmp.path(), port, false, "per_channel");
-    let expected_observability_file = log_dir.join("actrix-observability.log");
-    let unexpected_global_file = log_dir.join("actrix.log");
-    let bootstrap_log_path = tmp.path().join("actrix-channel-bootstrap.log");
-    let mut child = spawn_actrix(&config_path, &bootstrap_log_path);
+    let expected_observability_file = log_dir.join("loran-observability.log");
+    let unexpected_global_file = log_dir.join("loran.log");
+    let bootstrap_log_path = tmp.path().join("loran-channel-bootstrap.log");
+    let mut child = spawn_loran(&config_path, &bootstrap_log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &bootstrap_log_path).await;
@@ -1914,7 +1898,7 @@ async fn actrix_writes_per_channel_log_file_when_configured() {
             if !content.trim().is_empty() {
                 assert!(
                     !unexpected_global_file.exists(),
-                    "actrix.log should not be used in per_channel log routing"
+                    "loran.log should not be used in per_channel log routing"
                 );
                 return;
             }
@@ -1935,12 +1919,12 @@ async fn actrix_writes_per_channel_log_file_when_configured() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_writes_rotated_logs_when_configured() {
+async fn loran_writes_rotated_logs_when_configured() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (config_path, log_dir) = write_minimal_config_with_file_logging(tmp.path(), port, true);
-    let bootstrap_log_path = tmp.path().join("actrix-rotate-bootstrap.log");
-    let mut child = spawn_actrix(&config_path, &bootstrap_log_path);
+    let bootstrap_log_path = tmp.path().join("loran-rotate-bootstrap.log");
+    let mut child = spawn_loran(&config_path, &bootstrap_log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &bootstrap_log_path).await;
@@ -1953,7 +1937,7 @@ async fn actrix_writes_rotated_logs_when_configured() {
             .ok()
             .into_iter()
             .flat_map(|entries| entries.filter_map(Result::ok))
-            .any(|entry| entry.file_name().to_string_lossy().contains("actrix.log"));
+            .any(|entry| entry.file_name().to_string_lossy().contains("loran.log"));
 
         if has_log_file {
             return;
@@ -1975,15 +1959,15 @@ async fn actrix_writes_rotated_logs_when_configured() {
 #[cfg(feature = "opentelemetry")]
 #[tokio::test]
 #[serial]
-async fn actrix_exports_spans_to_otlp_http_sink() {
+async fn loran_exports_spans_to_otlp_http_sink() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let service_port = choose_port();
     let collector_port = choose_port();
     let sink_uri = format!("otlp+http://127.0.0.1:{collector_port}/v1/traces");
     let config_path = write_minimal_config_with_recording_sink(tmp.path(), service_port, &sink_uri);
-    let bootstrap_log_path = tmp.path().join("actrix-otlp-http-bootstrap.log");
+    let bootstrap_log_path = tmp.path().join("loran-otlp-http-bootstrap.log");
     let collector = start_mock_otlp_http_collector(collector_port).await;
-    let mut child = spawn_actrix(&config_path, &bootstrap_log_path);
+    let mut child = spawn_loran(&config_path, &bootstrap_log_path);
 
     let health_url = format!("http://127.0.0.1:{service_port}/admin/health");
     wait_for_health(&health_url, &mut child, &bootstrap_log_path).await;
@@ -1999,15 +1983,15 @@ async fn actrix_exports_spans_to_otlp_http_sink() {
 #[cfg(feature = "opentelemetry")]
 #[tokio::test]
 #[serial]
-async fn actrix_exports_spans_to_otlp_grpc_sink() {
+async fn loran_exports_spans_to_otlp_grpc_sink() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let service_port = choose_port();
     let collector_port = choose_port();
     let sink_uri = format!("otlp+grpc://127.0.0.1:{collector_port}");
     let config_path = write_minimal_config_with_recording_sink(tmp.path(), service_port, &sink_uri);
-    let bootstrap_log_path = tmp.path().join("actrix-otlp-grpc-bootstrap.log");
+    let bootstrap_log_path = tmp.path().join("loran-otlp-grpc-bootstrap.log");
     let collector = start_mock_otlp_grpc_collector(collector_port).await;
-    let mut child = spawn_actrix(&config_path, &bootstrap_log_path);
+    let mut child = spawn_loran(&config_path, &bootstrap_log_path);
 
     let health_url = format!("http://127.0.0.1:{service_port}/admin/health");
     wait_for_health(&health_url, &mut child, &bootstrap_log_path).await;
@@ -2022,12 +2006,12 @@ async fn actrix_exports_spans_to_otlp_grpc_sink() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_privilege_drop_config_behaves_by_uid() {
+async fn loran_privilege_drop_config_behaves_by_uid() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_user_group(tmp.path(), port, "nobody", "nogroup");
-    let log_path = tmp.path().join("actrix-user-group.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-user-group.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     #[cfg(unix)]
     let is_root = unsafe { libc::geteuid() } == 0;
@@ -2059,7 +2043,7 @@ async fn actrix_privilege_drop_config_behaves_by_uid() {
             }
             if start.elapsed() > START_TIMEOUT {
                 graceful_shutdown(child);
-                panic!("actrix should fail fast when privilege drop is configured on non-root");
+                panic!("loran should fail fast when privilege drop is configured on non-root");
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -2068,13 +2052,13 @@ async fn actrix_privilege_drop_config_behaves_by_uid() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_stun_only_serves_binding_success() {
+async fn loran_stun_only_serves_binding_success() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let ice_port = choose_udp_port();
     let http_port = choose_port();
     let config_path = write_ice_only_config(tmp.path(), 2, ice_port, http_port);
-    let log_path = tmp.path().join("actrix-stun-only.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-stun-only.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     wait_for_stun_binding_success(&format!("127.0.0.1:{ice_port}"), &mut child, &log_path).await;
 
@@ -2083,13 +2067,13 @@ async fn actrix_stun_only_serves_binding_success() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_turn_only_serves_binding_success() {
+async fn loran_turn_only_serves_binding_success() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let ice_port = choose_udp_port();
     let http_port = choose_port();
     let config_path = write_ice_only_config(tmp.path(), 4, ice_port, http_port);
-    let log_path = tmp.path().join("actrix-turn-only.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-turn-only.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     wait_for_stun_binding_success(&format!("127.0.0.1:{ice_port}"), &mut child, &log_path).await;
 
@@ -2098,12 +2082,12 @@ async fn actrix_turn_only_serves_binding_success() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_database_path_is_unavailable() {
+async fn loran_exits_when_database_path_is_unavailable() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_config_with_sqlite_path(tmp.path(), port, "/proc/actrix-db-denied");
-    let log_path = tmp.path().join("actrix-invalid-db.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let config_path = write_config_with_sqlite_path(tmp.path(), port, "/proc/loran-db-denied");
+    let log_path = tmp.path().join("loran-invalid-db.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2123,7 +2107,7 @@ async fn actrix_exits_when_database_path_is_unavailable() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when database path is unavailable");
+            panic!("loran should fail fast when database path is unavailable");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2131,12 +2115,12 @@ async fn actrix_exits_when_database_path_is_unavailable() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_http_bind_ip_is_invalid() {
+async fn loran_exits_when_http_bind_ip_is_invalid() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_http_bind_ip(tmp.path(), port, "invalid-bind-ip");
-    let log_path = tmp.path().join("actrix-invalid-http-bind-ip.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-invalid-http-bind-ip.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2158,7 +2142,7 @@ async fn actrix_exits_when_http_bind_ip_is_invalid() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when HTTP bind IP is invalid");
+            panic!("loran should fail fast when HTTP bind IP is invalid");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2166,14 +2150,14 @@ async fn actrix_exits_when_http_bind_ip_is_invalid() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_http_port_is_already_in_use() {
+async fn loran_exits_when_http_port_is_already_in_use() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let occupied = std::net::TcpListener::bind(("127.0.0.1", port))
-        .expect("occupy port before starting actrix");
+        .expect("occupy port before starting loran");
     let config_path = write_minimal_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-http-port-conflict.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-http-port-conflict.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2196,7 +2180,7 @@ async fn actrix_exits_when_http_port_is_already_in_use() {
         if start.elapsed() > START_TIMEOUT {
             drop(occupied);
             graceful_shutdown(child);
-            panic!("actrix should fail fast when HTTP port is already in use");
+            panic!("loran should fail fast when HTTP port is already in use");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2204,12 +2188,12 @@ async fn actrix_exits_when_http_port_is_already_in_use() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_pid_parent_path_is_not_directory() {
+async fn loran_exits_when_pid_parent_path_is_not_directory() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let blocked_parent = tmp.path().join("pid-parent-file");
     fs::write(&blocked_parent, "not-a-directory").expect("create blocker file");
-    let bad_pid = blocked_parent.join("actrix.pid");
+    let bad_pid = blocked_parent.join("loran.pid");
     let config_path = write_minimal_config_with_custom_pid_path(
         tmp.path(),
         port,
@@ -2217,8 +2201,8 @@ async fn actrix_exits_when_pid_parent_path_is_not_directory() {
             .to_str()
             .expect("convert blocked pid path to string"),
     );
-    let log_path = tmp.path().join("actrix-invalid-pid-path.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-invalid-pid-path.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2239,7 +2223,7 @@ async fn actrix_exits_when_pid_parent_path_is_not_directory() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when pid path parent is not a directory");
+            panic!("loran should fail fast when pid path parent is not a directory");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2247,7 +2231,7 @@ async fn actrix_exits_when_pid_parent_path_is_not_directory() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_on_incompatible_existing_schema() {
+async fn loran_exits_on_incompatible_existing_schema() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let data_dir = tmp.path().join("data");
@@ -2273,8 +2257,8 @@ async fn actrix_exits_on_incompatible_existing_schema() {
 
     let config_path =
         write_config_with_sqlite_path(tmp.path(), port, &data_dir.display().to_string());
-    let log_path = tmp.path().join("actrix-incompatible-schema.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-incompatible-schema.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2296,7 +2280,7 @@ async fn actrix_exits_on_incompatible_existing_schema() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast for incompatible existing schema");
+            panic!("loran should fail fast for incompatible existing schema");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2304,7 +2288,7 @@ async fn actrix_exits_on_incompatible_existing_schema() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_control_grpc_shared_secret_is_invalid() {
+async fn loran_exits_when_control_grpc_shared_secret_is_invalid() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
@@ -2312,8 +2296,8 @@ async fn actrix_exits_when_control_grpc_shared_secret_is_invalid() {
         .expect("read config")
         .replace(TEST_CONTROL_SHARED_SECRET, "not-hex");
     fs::write(&config_path, broken_config).expect("write broken config");
-    let log_path = tmp.path().join("actrix-invalid-control-shared-secret.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-invalid-control-shared-secret.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2335,7 +2319,7 @@ async fn actrix_exits_when_control_grpc_shared_secret_is_invalid() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast on invalid control grpc shared secret");
+            panic!("loran should fail fast on invalid control grpc shared secret");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2343,12 +2327,12 @@ async fn actrix_exits_when_control_grpc_shared_secret_is_invalid() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_http_service_has_no_http_or_https_bind_config() {
+async fn loran_exits_when_http_service_has_no_http_or_https_bind_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let ice_port = choose_port();
     let config_path = write_signer_without_http_or_https_bind_config(tmp.path(), ice_port);
-    let log_path = tmp.path().join("actrix-no-http-bind.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-no-http-bind.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2369,7 +2353,7 @@ async fn actrix_exits_when_http_service_has_no_http_or_https_bind_config() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when HTTP service has no bind configuration");
+            panic!("loran should fail fast when HTTP service has no bind configuration");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2377,12 +2361,12 @@ async fn actrix_exits_when_http_service_has_no_http_or_https_bind_config() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_in_production_without_https_bind_config() {
+async fn loran_exits_in_production_without_https_bind_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_prod_signer_without_https_bind_config(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-prod-no-https.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-prod-no-https.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2403,7 +2387,7 @@ async fn actrix_exits_in_production_without_https_bind_config() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast in prod when https bind config is missing");
+            panic!("loran should fail fast in prod when https bind config is missing");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2411,13 +2395,13 @@ async fn actrix_exits_in_production_without_https_bind_config() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_dev_https_fallback_tls_files_are_missing() {
+async fn loran_exits_when_dev_https_fallback_tls_files_are_missing() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path =
         write_signer_https_only_with_missing_tls_files_config(tmp.path(), port, "dev");
-    let log_path = tmp.path().join("actrix-dev-https-missing-tls.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-dev-https-missing-tls.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2440,7 +2424,7 @@ async fn actrix_exits_when_dev_https_fallback_tls_files_are_missing() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when dev HTTPS fallback TLS files are missing");
+            panic!("loran should fail fast when dev HTTPS fallback TLS files are missing");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2448,13 +2432,13 @@ async fn actrix_exits_when_dev_https_fallback_tls_files_are_missing() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_prod_https_tls_files_are_missing() {
+async fn loran_exits_when_prod_https_tls_files_are_missing() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path =
         write_signer_https_only_with_missing_tls_files_config(tmp.path(), port, "prod");
-    let log_path = tmp.path().join("actrix-prod-https-missing-tls.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-prod-https-missing-tls.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let start = Instant::now();
     loop {
@@ -2477,7 +2461,7 @@ async fn actrix_exits_when_prod_https_tls_files_are_missing() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when prod HTTPS TLS files are missing");
+            panic!("loran should fail fast when prod HTTPS TLS files are missing");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -2485,14 +2469,14 @@ async fn actrix_exits_when_prod_https_tls_files_are_missing() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_serves_https_health_in_dev_when_only_https_bind_is_configured() {
+async fn loran_serves_https_health_in_dev_when_only_https_bind_is_configured() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (cert_path, key_path) = write_test_tls_cert_pair(tmp.path());
     let config_path =
         write_signer_https_only_config(tmp.path(), port, "dev", &cert_path, &key_path);
-    let log_path = tmp.path().join("actrix-dev-https.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-dev-https.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("https://127.0.0.1:{port}/admin/health");
     wait_for_health_https_insecure(&health_url, &mut child, &log_path).await;
@@ -2515,14 +2499,14 @@ async fn actrix_serves_https_health_in_dev_when_only_https_bind_is_configured() 
 
 #[tokio::test]
 #[serial]
-async fn actrix_serves_https_health_in_prod_with_valid_tls_config() {
+async fn loran_serves_https_health_in_prod_with_valid_tls_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (cert_path, key_path) = write_test_tls_cert_pair(tmp.path());
     let config_path =
         write_signer_https_only_config(tmp.path(), port, "prod", &cert_path, &key_path);
-    let log_path = tmp.path().join("actrix-prod-https.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-prod-https.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("https://127.0.0.1:{port}/admin/health");
     wait_for_health_https_insecure(&health_url, &mut child, &log_path).await;
@@ -2545,12 +2529,12 @@ async fn actrix_serves_https_health_in_prod_with_valid_tls_config() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_serves_node_info_and_rejects_bad_signature() {
+async fn loran_control_grpc_serves_node_info_and_rejects_bad_signature() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-control-grpc-auth.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-control-grpc-auth.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/metrics");
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -2586,12 +2570,12 @@ async fn actrix_control_grpc_serves_node_info_and_rejects_bad_signature() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_disabled() {
+async fn loran_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_disabled() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_admin_and_control_grpc(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-all-in-one-control.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-all-in-one-control.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let admin_health_url = format!("http://127.0.0.1:{port}/admin/health");
     wait_for_health(&admin_health_url, &mut child, &log_path).await;
@@ -2681,12 +2665,12 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_managed_realm_crud_by_name_and_retire() {
+async fn loran_control_grpc_managed_realm_crud_by_name_and_retire() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-control-grpc-realm-crud.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-control-grpc-realm-crud.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/metrics");
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -2800,12 +2784,12 @@ async fn actrix_control_grpc_managed_realm_crud_by_name_and_retire() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_shutdown_rpc_stops_process() {
+async fn loran_control_grpc_shutdown_rpc_stops_process() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-control-grpc-shutdown.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-control-grpc-shutdown.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/metrics");
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -2841,7 +2825,7 @@ async fn actrix_control_grpc_shutdown_rpc_stops_process() {
         if start.elapsed() > START_TIMEOUT {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             graceful_shutdown(child);
-            panic!("actrix should exit after control shutdown rpc within timeout\nlogs:\n{log}");
+            panic!("loran should exit after control shutdown rpc within timeout\nlogs:\n{log}");
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2850,12 +2834,12 @@ async fn actrix_control_grpc_shutdown_rpc_stops_process() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_rejects_bad_shutdown_signature_and_keeps_running() {
+async fn loran_control_grpc_rejects_bad_shutdown_signature_and_keeps_running() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-control-grpc-bad-shutdown.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-control-grpc-bad-shutdown.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -2890,12 +2874,12 @@ async fn actrix_control_grpc_rejects_bad_shutdown_signature_and_keeps_running() 
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_rejects_duplicate_nonce_on_node_info_and_keeps_running() {
+async fn loran_control_grpc_rejects_duplicate_nonce_on_node_info_and_keeps_running() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-control-grpc-replay.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-control-grpc-replay.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
@@ -2933,12 +2917,12 @@ async fn actrix_control_grpc_rejects_duplicate_nonce_on_node_info_and_keeps_runn
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_rejects_stale_node_info_timestamp_and_keeps_running() {
+async fn loran_control_grpc_rejects_stale_node_info_timestamp_and_keeps_running() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
-    let log_path = tmp.path().join("actrix-control-grpc-stale-ts.log");
-    let mut child = spawn_actrix(&config_path, &log_path);
+    let log_path = tmp.path().join("loran-control-grpc-stale-ts.log");
+    let mut child = spawn_loran(&config_path, &log_path);
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;

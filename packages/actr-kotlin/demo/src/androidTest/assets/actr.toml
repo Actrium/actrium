@@ -3,11 +3,11 @@
 # Package identity and dependencies are declared in manifest.toml.
 
 [system.signaling]
-url = "wss://loran1.actrium-dev.example/signaling/ws"
+url = "wss://loran.example.com/signaling/ws"
 
 [system.webrtc]
-stun_urls = ["stun:loran1.actrium-dev.example:3478"]
-turn_urls = ["turn:loran1.actrium-dev.example:3478"]
+stun_urls = ["stun:loran.example.com:3478"]
+turn_urls = ["turn:loran.example.com:3478"]
 force_relay = true
 
 [system.deployment]

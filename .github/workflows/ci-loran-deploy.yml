@@ -1,7 +1,7 @@
 name: CI (Loran deploy)
 
 # loran/deploy is a self-contained bootstrap CLI kept in its own sub-workspace
-# (excluded from the actr root workspace, no actr/actrix dependencies), so it
+# (excluded from the actr root workspace, no actr/loran dependencies), so it
 # gets its own job that only runs when deploy changes.
 on:
   push:

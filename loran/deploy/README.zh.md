@@ -20,13 +20,13 @@
 
 ## 安装
 
-作为 actrix 工作空间的一部分构建：
+从仓库根目录构建独立的 Loran 部署工作空间：
 
 ```bash
-cargo build --release -p deploy
+cargo build --release --manifest-path loran/deploy/Cargo.toml -p loran-deploy
 ```
 
-二进制文件将位于 `target/release/deploy`。
+未配置 `CARGO_TARGET_DIR` 时，二进制文件位于 `loran/deploy/target/release/deploy`。
 
 ## 使用方法
 
@@ -71,9 +71,9 @@ cargo build --release -p deploy
 ## 选项参数
 
 - `--debug`: 启用调试模式（显示将要执行的操作但不实际执行）
-- `--config <PATH>`: 指定配置文件路径（默认：`/etc/actrix/config.toml`）
-- `--install-dir <PATH>`: 设置安装目录（默认：`/opt/actrix`）
-- `--binary-name <NAME>`: 设置二进制文件名（默认：`auxes`）
+- `--config <PATH>`: 指定配置文件路径（默认：`/etc/loran/config.toml`）
+- `--install-dir <PATH>`: 设置安装目录（默认：`/opt/loran`）
+- `--binary-name <NAME>`: 设置二进制文件名（默认：`loran`）
 - `--add-to-path`: 添加二进制文件符号链接到系统 PATH
 
 ## 架构设计
@@ -133,9 +133,9 @@ cargo build --release -p deploy
 卸载向导提供对移除内容的精细控制：
 
 1. **Systemd 服务**: 停止并移除服务文件
-2. **应用程序文件**: 移除 `/opt/actrix` 目录
-3. **配置文件**: 可选移除 `/etc/actrix`（默认保留）
-4. **系统用户/组**: 可选移除 `actrix` 用户和组
+2. **应用程序文件**: 移除 `/opt/loran` 目录
+3. **配置文件**: 可选移除 `/etc/loran`（默认保留）
+4. **系统用户/组**: 可选移除 `loran` 用户和组
 
 每个组件都可以单独选择移除，允许您：
 - 保留配置同时移除二进制文件

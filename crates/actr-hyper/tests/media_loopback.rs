@@ -438,7 +438,7 @@ async fn test_registry_sender_id_forwarded() {
 // dispatches through MediaFrameRegistry → the business callback receives it.
 //
 // This test is marked #[ignore] because it requires real ICE/DTLS negotiation
-// (~3–10 s) and an in-process mock-actrix signaling server. Run it with:
+// (~3–10 s) and an in-process mock-loran signaling server. Run it with:
 //
 //   cargo test -p actr-hyper --features test-utils -- --include-ignored \
 //       test_media_rtp_audio_loopback

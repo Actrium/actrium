@@ -26,7 +26,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>EchoApp connects to the local actrix development server.</string>
+	<string>EchoApp connects to the local loran development server.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

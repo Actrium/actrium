@@ -54,7 +54,7 @@ const FIXTURE_ERROR: i32 = -50;
 
 /// Test-fixture equivalent of an explicit stream subscription. It ensures the
 /// C# consumer has selected the exact stream before the fixture emits it,
-/// while avoiding an Actrix deployment solely for package-consumption CI.
+/// while avoiding an Loran deployment solely for package-consumption CI.
 static HOST_BRIDGE_LISTENER: Mutex<Option<String>> = Mutex::new(None);
 
 /// Stateless workload. All routing lives in the dispatcher.
@@ -157,7 +157,7 @@ pub unsafe extern "C" fn actr_fixture_host_bridge_unlisten(
 /// The probe succeeds only if C# answers with the exact expected bytes.
 ///
 /// This synchronous test-only entry point owns a small current-thread runtime
-/// so an out-of-repo package consumer needs neither an Actrix service nor a
+/// so an out-of-repo package consumer needs neither an Loran service nor a
 /// synthetic managed-only callback path. The reverse-RPC callback returns to
 /// C# through the real `actr_register_reverse_rpc_sink` ABI export.
 #[no_mangle]

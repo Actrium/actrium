@@ -1,6 +1,6 @@
 //! polyglot-echo streaming server — linked workload binary.
 //!
-//! Registers as `polyglot/EchoStreamService@1.0.0` under mock-actrix and
+//! Registers as `polyglot/EchoStreamService@1.0.0` under mock-loran and
 //! serves two control RPCs:
 //!
 //! - `EchoStreamService.StartServerStream`: push N DataChunks to the

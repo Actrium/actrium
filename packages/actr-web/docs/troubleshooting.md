@@ -93,7 +93,7 @@ The browser verifier never skips package verification. Confirm the runtime confi
 
 ### Cannot connect to signaling
 
-For local example runs, prefer the mock actrix scripts:
+For local example runs, prefer the mock loran scripts:
 
 ```bash
 cd packages/actr-web/examples/echo

@@ -27,11 +27,11 @@ pub use crypto::{KekSource, KeyEncryptor};
 pub use error::SignerError;
 pub use grpc_client::{GrpcClient, GrpcClientConfig};
 pub use grpc_handlers::{SignerGrpcService, create_grpc_service};
-// Re-export proto types from actrix-proto
-pub use actrix_proto::signer::v1::signer_server::{Signer, SignerServer};
+// Re-export proto types from loran-proto
 pub use handlers::{
     SignerState, create_router, create_signer_state, get_stats, register_signer_metrics,
 };
+pub use loran_proto::signer::v1::signer_server::{Signer, SignerServer};
 pub use storage::{KeyStorage, StorageConfig};
 pub use types::{KeyPair, KeyRecord, SignRequest, SignResponse};
 
@@ -63,7 +63,7 @@ mod tests {
         let state = create_signer_state(
             &config,
             nonce_storage,
-            "test-actrix-shared-key",
+            "test-loran-shared-key",
             temp_dir.path(),
         )
         .await;

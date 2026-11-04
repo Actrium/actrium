@@ -10,7 +10,7 @@ use std::time::Duration;
 pub struct Client {
     endpoint: String,
     client: reqwest::Client,
-    actrix_shared_key: String,
+    loran_shared_key: String,
 }
 
 /// Signer client configuration
@@ -26,7 +26,7 @@ pub struct ClientConfig {
 
     /// PSK (Pre-Shared Key) - used for authentication
     ///
-    /// Shared key for internal inter-service authentication, typically obtained from the global config's `actrix_shared_key`
+    /// Shared key for internal inter-service authentication, typically obtained from the global config's `loran_shared_key`
     pub psk: String,
 
     /// Request timeout (seconds)
@@ -46,7 +46,7 @@ impl Client {
         Self {
             endpoint: config.endpoint.clone(),
             client,
-            actrix_shared_key: config.psk.clone(),
+            loran_shared_key: config.psk.clone(),
         }
     }
 
@@ -61,7 +61,7 @@ impl Client {
         let url = format!("{}/sign/{}", self.endpoint, key_id);
         let request_data = sign_request_payload(key_id, message);
 
-        let credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
+        let credential = CredentialBuilder::new(self.loran_shared_key.as_bytes())
             .sign(request_data.as_bytes())?;
 
         let request = SignRequest {

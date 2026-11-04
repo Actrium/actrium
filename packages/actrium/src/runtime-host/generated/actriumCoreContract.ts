@@ -434,7 +434,7 @@ export const ACTR_CONFIG_CONTRACT = {
     name: 'actro',
   },
   dependencyName: 'bid-service',
-  defaultSignalingUrl: 'wss://loran1.actrium-dev.example/signaling/ws',
+  defaultSignalingUrl: 'wss://loran.example.com/signaling/ws',
   signalingPath: '/signaling/ws',
   observability: {
     filterLevel: 'debug',

@@ -1,4 +1,4 @@
-//! Actrix signaling service
+//! Loran signaling service
 //!
 //! WebSocket signaling service based on the protobuf SignalingEnvelope protocol
 //!
