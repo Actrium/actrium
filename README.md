@@ -1,6 +1,6 @@
 # Actrium
 
-Actrium is the private monorepo for the Actrium browser applications, the Actr
+Actrium is the monorepo for the Actrium browser applications, the Actr
 foundation, the Keel sandbox UI framework, and Loran—the default shore-side
 service suite.
 
@@ -56,4 +56,9 @@ proposed source mapping and the reasoning behind it.
 - Supramark remains an independent project. Its implementation and dependencies
   are not part of this monorepo.
 
-No license has been selected for the combined repository yet.
+## License
+
+Unless otherwise noted, Actrium's first-party code is licensed under the
+[Apache License, Version 2.0](LICENSE). Third-party components retain their
+original licenses; see [Third-party notices](THIRD_PARTY_NOTICES.md) and the
+notices included with each component.
