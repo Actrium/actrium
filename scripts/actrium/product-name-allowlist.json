@@ -30,17 +30,10 @@
     },
     "android/android/app/src/main/AndroidManifest.xml": {
       "actro": 3,
-      "gate-actrium.actrium-beta.example": 1,
-      "gate-actrium.actrium-dev.example": 1,
-      "gate.actrium.example": 1,
-      "go-actrium.actrium-beta.example": 1,
-      "go-actrium.actrium-dev.example": 1,
-      "go.actrium.example": 1,
       "io.actrium.actro": 1
     },
     "android/android/app/src/main/java/io/actrium/app/MainActivity.kt": {
-      "actro://chat/123": 1,
-      "https://app.actrium.example/chat/123": 1
+      "actro://chat/123": 1
     },
     "android/android/app/src/main/java/io/actrium/app/data/sync/BrowserStorageSyncCredentialStore.kt": {
       "actro_browser_sync_credentials": 1
@@ -52,24 +45,10 @@
       "actro_database": 1
     },
     "android/android/app/src/main/java/io/actrium/app/tablet/TabletActivity.kt": {
-      "actro://chat/123": 1,
-      "https://app.actrium.example/chat/123": 1
+      "actro://chat/123": 1
     },
     "crates/actrium-core/src/actr_config.rs": {
       "actro": 2
-    },
-    "crates/actrium-core/src/auth.rs": {
-      ".actrium.example": 1,
-      "http://account-actrium.actrium-dev.example": 1,
-      "https://account-actrium.actrium-beta.example": 1,
-      "https://account.actrium.example": 1,
-      "https://gate-actrium.actrium-beta.example/api/access_control/app-123/user.cn": 1,
-      "https://gate-actrium.actrium-beta.example/with/app": 1,
-      "https://gate-actrium.actrium-beta.example:9443/with/app-123": 1,
-      "https://gate-actrium.actrium-dev.example": 1,
-      "https://gate-actrium.actrium-dev.example/with/app": 2,
-      "https://gate.actrium.example/with/app": 1,
-      "https://resource-uploader.actrium.example": 1
     },
     "crates/actrium-core/src/browser_data.rs": {
       "ACTRO://HOME": 2,
@@ -139,10 +118,7 @@
       "actro://history\\": 1,
       "actro://home": 1,
       "actro://home\\": 2,
-      "actro_browser.db": 1,
-      "http://account-actrium.actrium-dev.example": 1,
-      "https://account-actrium.actrium-beta.example": 1,
-      "https://account.actrium.example": 2
+      "actro_browser.db": 1
     },
     "crates/actrium-core/src/ffi.rs": {
       "ACTRO://BOOKMARKS": 1,
@@ -154,12 +130,7 @@
       "actro://history": 1,
       "actro://home": 3,
       "actro://updated": 2,
-      "actro_browser.db": 2,
-      "http://account-actrium.actrium-dev.example": 1,
-      "https://gate-actrium.actrium-beta.example/api/access_control/app-123/user.cn": 1,
-      "https://gate-actrium.actrium-beta.example:9443/with/app-123": 1,
-      "https://gate-actrium.actrium-dev.example": 2,
-      "https://gate-actrium.actrium-dev.example/with/app": 1
+      "actro_browser.db": 2
     },
     "crates/actrium-core/src/persistence.rs": {
       "actro_database": 2
@@ -193,11 +164,6 @@
     "ios/Actrium.xcodeproj/project.pbxproj": {
       "io.actrium.actro.ios": 2
     },
-    "ios/Actrium/Actrium.entitlements": {
-      "applinks:go-actrium.actrium-beta.example": 1,
-      "applinks:go-actrium.actrium-dev.example": 1,
-      "applinks:go.actrium.example": 1
-    },
     "ios/Actrium/App/BrowserDataModule.swift": {
       "io.actrium.actro.browser-data-module": 1
     },
@@ -224,49 +190,6 @@
     },
     "ios/Actrium/Manager/UserInfoManager.swift": {
       "com.actrium.actro.userInfo": 1
-    },
-    "ios/Actrium/Models/ActriumUniversalLink.swift": {
-      "go-actrium.actrium-beta.example": 1,
-      "go-actrium.actrium-dev.example": 1,
-      "go.actrium.example": 1
-    },
-    "ios/Actrium/Models/Tab.swift": {
-      "https://go.actrium.example/app/xxx": 1
-    },
-    "ios/Actrium/Resources/Localizations/en.lproj/Localizable.strings": {
-      "https://www.actrium.example/corp/en/privacy.html": 1,
-      "https://www.actrium.example/corp/en/user.html": 1
-    },
-    "ios/Actrium/Resources/Localizations/es.lproj/Localizable.strings": {
-      "https://www.actrium.example/corp/en/privacy.html": 1,
-      "https://www.actrium.example/corp/en/user.html": 1
-    },
-    "ios/Actrium/Resources/Localizations/fr.lproj/Localizable.strings": {
-      "https://www.actrium.example/corp/en/privacy.html": 1,
-      "https://www.actrium.example/corp/en/user.html": 1
-    },
-    "ios/Actrium/Resources/Localizations/ja.lproj/Localizable.strings": {
-      "https://www.actrium.example/corp/en/privacy.html": 1,
-      "https://www.actrium.example/corp/en/user.html": 1
-    },
-    "ios/Actrium/Resources/Localizations/ko.lproj/Localizable.strings": {
-      "https://www.actrium.example/corp/en/privacy.html": 1,
-      "https://www.actrium.example/corp/en/user.html": 1
-    },
-    "ios/Actrium/Resources/Localizations/ru.lproj/Localizable.strings": {
-      "https://www.actrium.example/corp/en/privacy.html": 1,
-      "https://www.actrium.example/corp/en/user.html": 1
-    },
-    "ios/Actrium/Resources/Localizations/zh-Hans.lproj/Localizable.strings": {
-      "https://www.actrium.example/corp/zh-Hans/privacy.html": 1,
-      "https://www.actrium.example/corp/zh-Hans/user.html": 1
-    },
-    "ios/Actrium/Resources/Localizations/zh-Hant.lproj/Localizable.strings": {
-      "https://www.actrium.example/corp/zh-Hans/privacy.html": 1,
-      "https://www.actrium.example/corp/zh-Hans/user.html": 1
-    },
-    "ios/Actrium/Utils/AppConstants.swift": {
-      "https://go.actrium.example/": 1
     },
     "ios/Scripts/QUICKSTART.md": {
       "com.actrium.actro": 1
@@ -557,37 +480,12 @@
     "packages/actrium-platform/apple/ActriumIPC/Tests/ActriumIPCTests/IPCSocketPathTests.swift": {
       "com.actro.openHistoryItem": 2
     },
-    "packages/actrium/keel-guest-examples/counterapp/src/pages/Stats.tsx": {
-      "support@actrium.example": 1
-    },
-    "packages/actrium/src/TabRouter.tsx": {
-      "https://gate-actrium.actrium-beta.example/with/": 1
-    },
-    "packages/actrium/src/api/app.ts": {
-      "https://console-actrium.actrium-beta.example": 1,
-      "https://console-v2.actrium.example": 1
-    },
     "packages/actrium/src/runtime-host/generated/actriumCoreContract.ts": {
-      ".actrium.example": 1,
-      "actro": 2,
-      "http://account-actrium.actrium-dev.example": 1,
-      "https://account-actrium.actrium-beta.example": 1,
-      "https://account.actrium.example": 1,
-      "https://resource-uploader.actrium.example": 1
-    },
-    "packages/actrium/src/system-apps/settings/aboutPages.ts": {
-      "https://www.actrium.example/corp/": 1
-    },
-    "packages/actrium/src/system-apps/settings/actions.ts": {
-      "mailto:support@actrium.example": 1,
-      "support@actrium.example": 1
+      "actro": 2
     },
     "scripts/actrium/check-migration-hygiene.sh": {
       "actro": 4,
-      "actro://": 1,
-      "go-actrium.actrium-beta.example": 1,
-      "go-actrium.actrium-dev.example": 1,
-      "go.actrium.example": 1
+      "actro://": 1
     },
     "scripts/actrium/check-windows-layout.sh": {
       "ACTRO_USER_DATA_ROOT": 1,
@@ -695,10 +593,7 @@
       "actro://bookmarks": 1,
       "actro://history": 1,
       "actro://home": 4,
-      "configureActroBrowserSyncRoot": 2,
-      "http://account-actrium.actrium-dev.example": 1,
-      "https://account-actrium.actrium-beta.example": 1,
-      "https://account.actrium.example": 3
+      "configureActroBrowserSyncRoot": 2
     },
     "crates/actr-protocol/src/uri.rs": {
       "actro://acme.com": 1

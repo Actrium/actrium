@@ -14,8 +14,10 @@ pub const AUTH_ACCOUNT_DEV_BASE_URL: &str = "http://account-actrium.actrium-dev.
 pub const AUTH_ACCOUNT_BETA_BASE_URL: &str = "https://account-actrium.actrium-beta.example";
 pub const AUTH_ACCOUNT_PROD_BASE_URL: &str = "https://account.actrium.example";
 
-pub const AUTH_RESOURCE_UPLOADER_DEV_BASE_URL: &str = "https://resource-uploader.actrium-dev.example";
-pub const AUTH_RESOURCE_UPLOADER_BETA_BASE_URL: &str = "https://resource-uploader.actrium-beta.example";
+pub const AUTH_RESOURCE_UPLOADER_DEV_BASE_URL: &str =
+    "https://resource-uploader.actrium-dev.example";
+pub const AUTH_RESOURCE_UPLOADER_BETA_BASE_URL: &str =
+    "https://resource-uploader.actrium-beta.example";
 pub const AUTH_RESOURCE_UPLOADER_PROD_BASE_URL: &str = "https://resource-uploader.actrium.example";
 
 pub const AUTH_CHECK_SESSION_PATH: &str = "/sso/session";

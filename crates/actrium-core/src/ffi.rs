@@ -4153,7 +4153,9 @@ mod tests {
             "prod"
         );
         assert_eq!(
-            auth_environment_from_app_url("https://gate-actrium.actrium-dev.example/with/app".to_string()),
+            auth_environment_from_app_url(
+                "https://gate-actrium.actrium-dev.example/with/app".to_string()
+            ),
             "dev"
         );
         assert_eq!(auth_environment_storage_suffix("beta".to_string()), ".beta");
