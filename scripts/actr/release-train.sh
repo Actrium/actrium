@@ -1735,6 +1735,7 @@ PY
   local missing_native_artifacts=false
   for descriptor in "${native_packages[@]}"; do
     IFS='|' read -r package dir artifact <<<"$descriptor"
+    cp "$ts_root/LICENSE" "$ts_root/npm/$dir/LICENSE"
     if [[ ! -f "$ts_root/npm/$dir/$artifact" ]]; then
       missing_native_artifacts=true
       if [[ "$DRY_RUN" != true ]]; then
