@@ -1343,6 +1343,7 @@ test_publish_typescript_package_writes_native_and_main_state() {
   temp_dir=$(mktemp -d)
   original_path=$PATH
   mkdir -p "$temp_dir/bin" "$temp_dir/packages/actr-typescript"
+  cp packages/actr-typescript/LICENSE "$temp_dir/packages/actr-typescript/LICENSE"
 
   cat >"$temp_dir/bin/npm" <<'EOF'
 #!/usr/bin/env bash

@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Actrium browser applications and shared runtime",
+  "license": "Apache-2.0",
   "scripts": {
     "check": "pnpm -r --if-present check",
     "check:language": "python3 .github/scripts/check_cjk.py",

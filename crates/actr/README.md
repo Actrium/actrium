@@ -4,7 +4,7 @@
 ![Node.js](https://img.shields.io/badge/node.js-16+-green.svg)
 ![WebRTC](https://img.shields.io/badge/webrtc-enabled-blue.svg)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Factrium.github.io%2Factr%2Fcoverage%2Fcoverage-badge.json)](https://actrium.github.io/actr/coverage/)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 
 A distributed real-time communication framework demo built on WebRTC and the Actor model.
 
@@ -201,4 +201,4 @@ line.
 
 ## 📄 License
 
-This project is released under the MIT License.
+Licensed under the [Apache License, Version 2.0](../../LICENSE).
