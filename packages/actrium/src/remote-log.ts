@@ -19,7 +19,7 @@ const LOG_PORT = Platform.OS === 'android' ? 9998 : 9999;
 
 /**
  * From Metro bundle It's... scriptURL Middle Ripper host.
- * scriptURL Like "http://10.30.3.87:8082/index.bundle?platform=ios&..."
+ * scriptURL Like "http://localhost:8082/index.bundle?platform=ios&..."
  * The real machine, simulator, any platform applies.
  */
 function resolveHost(): string {

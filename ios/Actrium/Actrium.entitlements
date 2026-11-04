@@ -8,9 +8,9 @@
 	</array>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:go.actro.chat</string>
-		<string>applinks:go-actro.betaenv.com</string>
-		<string>applinks:go-actro.develenv.com</string>
+		<string>applinks:go.actrium.example</string>
+		<string>applinks:go-actrium.actrium-beta.example</string>
+		<string>applinks:go-actrium.actrium-dev.example</string>
 		<string>applinks:help.wechat.com</string>
 		<string>webcredentials:example.com</string>
 	</array>

@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn extract_signaling_host_parses_all_variants() {
     assert_eq!(
-        extract_signaling_host("ws://10.30.3.206:8081/signaling/ws"),
-        "10.30.3.206"
+        extract_signaling_host("ws://localhost:8081/signaling/ws"),
+        "localhost"
     );
     assert_eq!(
         extract_signaling_host("wss://loran.example.com/signaling/ws"),

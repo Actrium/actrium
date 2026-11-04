@@ -203,23 +203,23 @@ impl ActrCliError {
     pub fn documentation_links(&self) -> Vec<(&str, &str)> {
         match self {
             ActrCliError::Config { .. } => vec![
-                ("Config Docs", "https://docs.actor-rtc.com/config"),
+                ("Config Docs", "https://docs.actor-rtc.example/config"),
                 (
                     "manifest.toml Reference",
-                    "https://docs.actor-rtc.com/manifest-toml",
+                    "https://docs.actor-rtc.example/manifest-toml",
                 ),
             ],
             ActrCliError::Dependency { .. } => vec![
                 (
                     "Dependency Management",
-                    "https://docs.actor-rtc.com/dependencies",
+                    "https://docs.actor-rtc.example/dependencies",
                 ),
                 (
                     "Troubleshooting",
-                    "https://docs.actor-rtc.com/troubleshooting",
+                    "https://docs.actor-rtc.example/troubleshooting",
                 ),
             ],
-            _ => vec![("User Guide", "https://docs.actor-rtc.com/guide")],
+            _ => vec![("User Guide", "https://docs.actor-rtc.example/guide")],
         }
     }
 }

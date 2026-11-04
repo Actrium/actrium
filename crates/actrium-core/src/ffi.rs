@@ -4145,25 +4145,27 @@ mod tests {
         assert_eq!(auth_environment_beta(), "beta");
         assert_eq!(auth_environment_prod(), "prod");
         assert_eq!(
-            auth_environment_from_url("https://gate-actro.develenv.com".to_string()),
+            auth_environment_from_url("https://gate-actrium.actrium-dev.example".to_string()),
             "dev"
         );
         assert_eq!(
-            auth_environment_from_app_url("https://gate-actro.develenv.com".to_string()),
+            auth_environment_from_app_url("https://gate-actrium.actrium-dev.example".to_string()),
             "prod"
         );
         assert_eq!(
-            auth_environment_from_app_url("https://gate-actro.develenv.com/with/app".to_string()),
+            auth_environment_from_app_url(
+                "https://gate-actrium.actrium-dev.example/with/app".to_string()
+            ),
             "dev"
         );
         assert_eq!(auth_environment_storage_suffix("beta".to_string()), ".beta");
         assert_eq!(
             auth_account_base_url("dev".to_string()),
-            "http://account-actro.develenv.com"
+            "http://account-actrium.actrium-dev.example"
         );
         assert_eq!(
             auth_resource_uploader_base_url("beta".to_string()),
-            "https://resource-uploader.betaenv.com"
+            "https://resource-uploader.actrium-beta.example"
         );
         assert_eq!(
             auth_access_control_path("app-123".to_string(), "user.cn".to_string()),
@@ -4176,12 +4178,12 @@ mod tests {
         assert_eq!(auth_resource_upload_token_path(), "/api/get-token");
         assert_eq!(
             auth_access_control_url_from_app_url(
-                "https://gate-actro.betaenv.com:9443/with/app-123".to_string(),
+                "https://gate-actrium.actrium-beta.example:9443/with/app-123".to_string(),
                 "app-123".to_string(),
                 "user.cn".to_string()
             )
             .as_deref(),
-            Some("https://gate-actro.betaenv.com/api/access_control/app-123/user.cn")
+            Some("https://gate-actrium.actrium-beta.example/api/access_control/app-123/user.cn")
         );
         assert_eq!(
             auth_access_control_url_from_app_url(

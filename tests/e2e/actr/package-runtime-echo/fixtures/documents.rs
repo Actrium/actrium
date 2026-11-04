@@ -5,7 +5,7 @@ pub async fn fetch(url: String) -> anyhow::Result<Vec<u8>> {
     anyhow::ensure!(
         url.starts_with("https://localhost/")
             || url.starts_with("https://tenant.realm-e2e.test/")
-            || url == "https://e2e.actrium.test/.well-known/actr",
+            || url == "https://e2e.actrium.example/.well-known/actr",
         "unexpected Realm E2E document URL: {url}"
     );
     if std::env::var_os("ACTR_REALM_E2E_HTTPS_CONFIG").is_some() {

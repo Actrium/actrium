@@ -7,10 +7,10 @@
 # Package identity and dependencies are declared in manifest.toml.
 
 [signaling]
-url = "ws://124.71.231.251:9080/signaling/ws"
+url = "ws://127.0.0.1:9080/signaling/ws"
 
 [issuer_endpoint]
-url = "http://124.71.231.251:9080/issuer"
+url = "http://127.0.0.1:9080/issuer"
 
 [deployment]
 realm = "demo@example.com"
@@ -30,8 +30,8 @@ tracing_enabled = false
 
 [webrtc]
 force_relay = true
-stun_urls = ["stun:124.71.231.251:3478"]
-turn_urls = ["turn:124.71.231.251:3478"]
+stun_urls = ["stun:127.0.0.1:3478"]
+turn_urls = ["turn:127.0.0.1:3478"]
 
 [hyper]
 data_dir = "/data/data/io.actrium.demo/files/hyper"

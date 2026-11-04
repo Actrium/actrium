@@ -3371,7 +3371,7 @@ var tests = new (string Name, Func<Task> Run)[]
             store.SaveSession("prod", " token-win-session ");
             snapshot = store.Load();
             AssertEqual("prod", snapshot?.Environment);
-            AssertEqual("https://account.actro.chat", snapshot?.BaseUrl);
+            AssertEqual("https://account.actrium.example", snapshot?.BaseUrl);
             AssertEqual("token-win-session", snapshot?.AccessToken);
             AssertEqual("default", snapshot?.Scope);
             AssertTrue((snapshot?.SavedAtUnixSeconds ?? 0) > 0);
@@ -3504,10 +3504,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("loads auth endpoint contract from core", () =>
     {
         AssertEqual("prod", ActriumCore.LoadAuthEnvironmentProd());
-        AssertEqual("https://account.actro.chat", ActriumCore.LoadAuthAccountBaseUrl("prod"));
-        AssertEqual("https://account-actro.betaenv.com", ActriumCore.LoadAuthAccountBaseUrl("beta"));
-        AssertEqual("http://account-actro.develenv.com", ActriumCore.LoadAuthAccountBaseUrl("dev"));
-        AssertEqual("https://account.actro.chat", ActriumCore.LoadAuthAccountBaseUrl("unknown"));
+        AssertEqual("https://account.actrium.example", ActriumCore.LoadAuthAccountBaseUrl("prod"));
+        AssertEqual("https://account-actrium.actrium-beta.example", ActriumCore.LoadAuthAccountBaseUrl("beta"));
+        AssertEqual("http://account-actrium.actrium-dev.example", ActriumCore.LoadAuthAccountBaseUrl("dev"));
+        AssertEqual("https://account.actrium.example", ActriumCore.LoadAuthAccountBaseUrl("unknown"));
         return Task.CompletedTask;
     }),
     ("builds safe browser history document", () =>

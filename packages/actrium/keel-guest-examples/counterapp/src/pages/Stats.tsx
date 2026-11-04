@@ -175,7 +175,7 @@ export default function Stats({}: StatsProps) {
   const handleFeedback = () => {
     sendEmail({
       requestId: 'send',
-      to: 'support@actro.chat',
+      to: 'support@actrium.example',
       subject: 'actr feedback'
     });
   };

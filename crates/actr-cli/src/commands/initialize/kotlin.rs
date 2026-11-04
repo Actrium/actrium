@@ -296,7 +296,7 @@ impl KotlinInitializer {
 }
 
 /// Extract host from signaling URL
-/// e.g., "ws://10.30.3.206:8081/signaling/ws" -> "10.30.3.206"
+/// e.g., "ws://localhost:8081/signaling/ws" -> "localhost"
 /// or "wss://loran.example.com/signaling/ws" -> "loran.example.com"
 fn extract_signaling_host(signaling_url: &str) -> String {
     signaling_url

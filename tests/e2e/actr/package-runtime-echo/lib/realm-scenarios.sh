@@ -217,7 +217,7 @@ PY
         if [ "$REALM_MODE" = external ]; then
             # The domain owner legitimately signs these higher-sequence
             # Profiles; rejection must happen at package verification.
-            jq '.package.type = "e2e.actrium.test/WrongService@1.0.0"' "$profile" >"$RUN_DIR/wrong-type-input.json"
+            jq '.package.type = "e2e.actrium.example/WrongService@1.0.0"' "$profile" >"$RUN_DIR/wrong-type-input.json"
             run_actr realm sign-profile --key "$RUN_DIR/domain-key.json" "$RUN_DIR/wrong-type-input.json" \
                 >"$RUN_DIR/wrong-type-request.json"
             jq '.profile' "$RUN_DIR/wrong-type-request.json" >"$RUN_DIR/wrong-type-profile.json"

@@ -2,7 +2,7 @@
 
 /* 隐私弹窗 */
 "privateTitle" = "欢迎使用 Actrium";
-"privateMessage" = "在您使用本应用前，请仔细阅读并充分理解[《用户协议》](https://www.actro.chat/corp/zh-Hans/user.html)和[《隐私政策》](https://www.actro.chat/corp/zh-Hans/privacy.html)。<br>
+"privateMessage" = "在您使用本应用前，请仔细阅读并充分理解[《用户协议》](https://www.actrium.example/corp/zh-Hans/user.html)和[《隐私政策》](https://www.actrium.example/corp/zh-Hans/privacy.html)。<br>
 为向您提供智能问答与相关服务，我们可能会收集和使用必要的信息。\n
 请注意：
 * 请勿在对话中共享您的个人敏感信息；

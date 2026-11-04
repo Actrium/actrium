@@ -419,7 +419,7 @@ packages/actr-dom/
 
 **用户只需要引入**：
 ```html
-<script src="https://cdn.actr.dev/actr-dom.min.js"></script>
+<script src="https://cdn.actr.example/actr-dom.min.js"></script>
 ```
 
 ### 6.2 核心实现

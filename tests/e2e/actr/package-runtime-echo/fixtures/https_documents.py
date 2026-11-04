@@ -19,7 +19,7 @@ import subprocess
 import threading
 
 
-HOSTS = ("localhost", "tenant.realm-e2e.test", "e2e.actrium.test", "packages.realm-e2e.test")
+HOSTS = ("localhost", "tenant.realm-e2e.test", "e2e.actrium.example", "packages.realm-e2e.test")
 
 
 def certificates(directory):

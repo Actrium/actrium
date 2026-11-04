@@ -117,7 +117,7 @@ const TabRouterInner: React.FC<TabRouterProps> = (props) => {
     // Avoid Visibility width/height Unnecessary trigger re-render
     const containerStyle = styles.container;
 
-    const prefix = 'https://gate-actro.betaenv.com/with/';
+    const prefix = 'https://gate-actrium.actrium-beta.example/with/';
     const appUrl =
       props.appUrl || (props.appId ? prefix + props.appId : undefined);
 

@@ -11,7 +11,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const DOMAIN: &str = "e2e.actrium.test";
+const DOMAIN: &str = "e2e.actrium.example";
 
 pub(super) fn configure(mut state: IssuerState) -> Result<IssuerState> {
     if std::env::var("ACTR_PACKAGE_RUNTIME_FIXTURE").as_deref() != Ok("1") {

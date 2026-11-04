@@ -289,9 +289,9 @@ export const AUTH_ENVIRONMENT_CONTRACT = {
     prod: 'prod',
   },
   hostSuffixes: {
-    dev: '.develenv.com',
-    beta: '.betaenv.com',
-    prod: '.actro.chat',
+    dev: '.actrium-dev.example',
+    beta: '.actrium-beta.example',
+    prod: '.actrium.example',
   },
   storageSuffixes: {
     dev: '.dev',
@@ -305,14 +305,14 @@ export type AuthEnvironment =
 
 export const AUTH_ENDPOINT_CONTRACT = {
   accountBaseUrls: {
-    dev: 'http://account-actro.develenv.com',
-    beta: 'https://account-actro.betaenv.com',
-    prod: 'https://account.actro.chat',
+    dev: 'http://account-actrium.actrium-dev.example',
+    beta: 'https://account-actrium.actrium-beta.example',
+    prod: 'https://account.actrium.example',
   },
   resourceUploaderBaseUrls: {
-    dev: 'https://resource-uploader.develenv.com',
-    beta: 'https://resource-uploader.betaenv.com',
-    prod: 'https://resource-uploader.actro.chat',
+    dev: 'https://resource-uploader.actrium-dev.example',
+    beta: 'https://resource-uploader.actrium-beta.example',
+    prod: 'https://resource-uploader.actrium.example',
   },
   paths: {
     checkSession: '/sso/session',

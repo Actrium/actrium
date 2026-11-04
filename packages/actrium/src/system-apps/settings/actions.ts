@@ -18,7 +18,7 @@ export const createFeedbackAction = ({ t }: { t: TFunction }) => {
       // If raw module is not available or equipment is not available App, and downgraded. mailto link.
       try {
         await EmailBridge.composeEmail({
-          to: ['support@actro.chat'],
+          to: ['support@actrium.example'],
           subject: subjectText,
         });
         return;
@@ -29,7 +29,7 @@ export const createFeedbackAction = ({ t }: { t: TFunction }) => {
     }
 
     const subject = encodeURIComponent(subjectText);
-    const mailto = `mailto:support@actro.chat?subject=${subject}`;
+    const mailto = `mailto:support@actrium.example?subject=${subject}`;
     await Linking.openURL(mailto);
   };
 };

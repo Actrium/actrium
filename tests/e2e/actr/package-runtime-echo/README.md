@@ -8,7 +8,7 @@ This scenario validates the local package runtime flow end-to-end:
    host as an editor (`actr realm invite --role editor`), and the client host
    joins with its own Realm client key. Each host signs its Issuer requests
    with its key (`deployment.realm_client_key`).
-3. Seed the service publisher's public package key into the disposable SQLite database. The test-only server supplies a signed Publisher Profile for `e2e.actrium.test` through the Issuer's document-fetch interface, then runs normal signature, pin and Registry acceptance checks. Production binaries have no fixture override and always fetch public HTTPS documents. The client package remains a development identity, verified by its configured public key.
+3. Seed the service publisher's public package key into the disposable SQLite database. The test-only server supplies a signed Publisher Profile for `e2e.actrium.example` through the Issuer's document-fetch interface, then runs normal signature, pin and Registry acceptance checks. Production binaries have no fixture override and always fetch public HTTPS documents. The client package remains a development identity, verified by its configured public key.
 4. Generate a temporary Rust echo service with `actr init/install/gen`.
 5. Build and verify the signed server package. The default flow does not publish
    a package record to this Loran's Registry.

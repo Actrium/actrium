@@ -13,5 +13,5 @@ const getLanguageSegment = (language: string): 'zh-Hans' | 'en' => {
 
 export const getAboutPageUrl = (page: AboutPageKey, language: string): string => {
   const languageSegment = getLanguageSegment(language);
-  return `https://www.actro.chat/corp/${languageSegment}/${ABOUT_PAGE_CONFIG[page].path}`;
+  return `https://www.actrium.example/corp/${languageSegment}/${ABOUT_PAGE_CONFIG[page].path}`;
 };

@@ -137,7 +137,7 @@ if ! rg -U -q '<key>CFBundleURLSchemes</key>[[:space:]]*<array>[[:space:]]*<stri
 "
 fi
 
-for host in go.actro.chat go-actro.betaenv.com go-actro.develenv.com; do
+for host in go.actrium.example go-actrium.actrium-beta.example go-actrium.actrium-dev.example; do
   for file in \
     ios/Actrium/Models/ActriumUniversalLink.swift \
     ios/Actrium/Actrium.entitlements

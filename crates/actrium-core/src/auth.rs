@@ -2,21 +2,23 @@ pub const AUTH_ENVIRONMENT_DEV: &str = "dev";
 pub const AUTH_ENVIRONMENT_BETA: &str = "beta";
 pub const AUTH_ENVIRONMENT_PROD: &str = "prod";
 
-pub const AUTH_ENVIRONMENT_DEV_HOST_SUFFIX: &str = ".develenv.com";
-pub const AUTH_ENVIRONMENT_BETA_HOST_SUFFIX: &str = ".betaenv.com";
-pub const AUTH_ENVIRONMENT_PROD_HOST_SUFFIX: &str = ".actro.chat";
+pub const AUTH_ENVIRONMENT_DEV_HOST_SUFFIX: &str = ".actrium-dev.example";
+pub const AUTH_ENVIRONMENT_BETA_HOST_SUFFIX: &str = ".actrium-beta.example";
+pub const AUTH_ENVIRONMENT_PROD_HOST_SUFFIX: &str = ".actrium.example";
 
 pub const AUTH_ENVIRONMENT_DEV_STORAGE_SUFFIX: &str = ".dev";
 pub const AUTH_ENVIRONMENT_BETA_STORAGE_SUFFIX: &str = ".beta";
 pub const AUTH_ENVIRONMENT_PROD_STORAGE_SUFFIX: &str = ".prod";
 
-pub const AUTH_ACCOUNT_DEV_BASE_URL: &str = "http://account-actro.develenv.com";
-pub const AUTH_ACCOUNT_BETA_BASE_URL: &str = "https://account-actro.betaenv.com";
-pub const AUTH_ACCOUNT_PROD_BASE_URL: &str = "https://account.actro.chat";
+pub const AUTH_ACCOUNT_DEV_BASE_URL: &str = "http://account-actrium.actrium-dev.example";
+pub const AUTH_ACCOUNT_BETA_BASE_URL: &str = "https://account-actrium.actrium-beta.example";
+pub const AUTH_ACCOUNT_PROD_BASE_URL: &str = "https://account.actrium.example";
 
-pub const AUTH_RESOURCE_UPLOADER_DEV_BASE_URL: &str = "https://resource-uploader.develenv.com";
-pub const AUTH_RESOURCE_UPLOADER_BETA_BASE_URL: &str = "https://resource-uploader.betaenv.com";
-pub const AUTH_RESOURCE_UPLOADER_PROD_BASE_URL: &str = "https://resource-uploader.actro.chat";
+pub const AUTH_RESOURCE_UPLOADER_DEV_BASE_URL: &str =
+    "https://resource-uploader.actrium-dev.example";
+pub const AUTH_RESOURCE_UPLOADER_BETA_BASE_URL: &str =
+    "https://resource-uploader.actrium-beta.example";
+pub const AUTH_RESOURCE_UPLOADER_PROD_BASE_URL: &str = "https://resource-uploader.actrium.example";
 
 pub const AUTH_CHECK_SESSION_PATH: &str = "/sso/session";
 pub const AUTH_USER_INFO_PATH: &str = "/protocol/userinfo";
@@ -200,15 +202,15 @@ mod tests {
     #[test]
     fn maps_auth_environment_from_url_host_suffix() {
         assert_eq!(
-            auth_environment_from_url("https://gate-actro.develenv.com/with/app"),
+            auth_environment_from_url("https://gate-actrium.actrium-dev.example/with/app"),
             AUTH_ENVIRONMENT_DEV
         );
         assert_eq!(
-            auth_environment_from_url("https://gate-actro.betaenv.com/with/app"),
+            auth_environment_from_url("https://gate-actrium.actrium-beta.example/with/app"),
             AUTH_ENVIRONMENT_BETA
         );
         assert_eq!(
-            auth_environment_from_url("https://gate.actro.chat/with/app"),
+            auth_environment_from_url("https://gate.actrium.example/with/app"),
             AUTH_ENVIRONMENT_PROD
         );
         assert_eq!(
@@ -220,11 +222,11 @@ mod tests {
     #[test]
     fn app_url_mapping_preserves_legacy_app_path_requirement() {
         assert_eq!(
-            auth_environment_from_app_url("https://gate-actro.develenv.com/with/app"),
+            auth_environment_from_app_url("https://gate-actrium.actrium-dev.example/with/app"),
             AUTH_ENVIRONMENT_DEV
         );
         assert_eq!(
-            auth_environment_from_app_url("https://gate-actro.develenv.com"),
+            auth_environment_from_app_url("https://gate-actrium.actrium-dev.example"),
             AUTH_ENVIRONMENT_PROD
         );
         assert_eq!(
@@ -291,12 +293,12 @@ mod tests {
     fn builds_access_control_url_from_app_url_like_ios_login_manager() {
         assert_eq!(
             auth_access_control_url_from_app_url(
-                "https://gate-actro.betaenv.com:9443/with/app-123",
+                "https://gate-actrium.actrium-beta.example:9443/with/app-123",
                 "app-123",
                 "user.cn"
             )
             .as_deref(),
-            Some("https://gate-actro.betaenv.com/api/access_control/app-123/user.cn")
+            Some("https://gate-actrium.actrium-beta.example/api/access_control/app-123/user.cn")
         );
         assert_eq!(
             auth_access_control_url_from_app_url("not a url", "app-123", "user.cn"),

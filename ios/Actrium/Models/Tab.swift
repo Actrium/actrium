@@ -82,7 +82,7 @@ struct Tab: Identifiable {
     /// Background color for this tab (Hex format: "#rrggbb")
     var backgroundColor: String
 
-    /// App ID parsed from URL (e.g. "xxx" from https://go.actro.chat/app/xxx)
+    /// App ID parsed from URL (e.g. "xxx" from https://go.actrium.example/app/xxx)
     var appId: String?
 
     /// Additional properties from RN (excluding tabId)

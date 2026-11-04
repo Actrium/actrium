@@ -2089,19 +2089,19 @@ mod tests {
             );
             assert_eq!(
                 CStr::from_ptr(actrium_core_auth_account_base_url(c"dev".as_ptr())).to_str(),
-                Ok("http://account-actro.develenv.com")
+                Ok("http://account-actrium.actrium-dev.example")
             );
             assert_eq!(
                 CStr::from_ptr(actrium_core_auth_account_base_url(c"beta".as_ptr())).to_str(),
-                Ok("https://account-actro.betaenv.com")
+                Ok("https://account-actrium.actrium-beta.example")
             );
             assert_eq!(
                 CStr::from_ptr(actrium_core_auth_account_base_url(c"prod".as_ptr())).to_str(),
-                Ok("https://account.actro.chat")
+                Ok("https://account.actrium.example")
             );
             assert_eq!(
                 CStr::from_ptr(actrium_core_auth_account_base_url(c"unknown".as_ptr())).to_str(),
-                Ok("https://account.actro.chat")
+                Ok("https://account.actrium.example")
             );
         }
     }

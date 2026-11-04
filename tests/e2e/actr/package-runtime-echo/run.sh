@@ -26,7 +26,7 @@ WS_BASE="ws://127.0.0.1:${HTTP_PORT}"
 ICE_PORT="${ICE_PORT:-3478}"
 REALM=""
 ADMIN_PASSWORD="e2e-test-password"
-PUBLISHER="e2e.actrium.test"
+PUBLISHER="e2e.actrium.example"
 # The client guest is a realm consumer, not a verified publisher: it keeps a
 # non-dotted publisher so its linked registrations satisfy Issuer-01, which
 # reserves DNS-style names for package identities.

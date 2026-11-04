@@ -100,7 +100,7 @@ final class ActrService: ObservableObject {
             let manifestURL = try materializeRuntimeConfig()
 
             // Read publisher domain from environment or use the local E2E identity.
-            let publisher = ProcessInfo.processInfo.environment["ACTR_PUBLISHER"] ?? "e2e.actrium.test"
+            let publisher = ProcessInfo.processInfo.environment["ACTR_PUBLISHER"] ?? "e2e.actrium.example"
             let actorType = ActrType(publisher: publisher, name: "DataStreamApp", version: "0.1.0")
 
             let handler = ProbeHandlerImpl(service: self)
@@ -161,7 +161,7 @@ final class ActrService: ObservableObject {
         req.probeName = "run-all"
 
         // Use targetType from environment or default
-        let targetType = ProcessInfo.processInfo.environment["ACTR_DATASTREAMAPP_TARGET_TYPE"] ?? "e2e.actrium.test/DuplexStreamService@1.0.0"
+        let targetType = ProcessInfo.processInfo.environment["ACTR_DATASTREAMAPP_TARGET_TYPE"] ?? "e2e.actrium.example/DuplexStreamService@1.0.0"
         req.targetType = targetType
 
         do {
@@ -201,7 +201,7 @@ final class ActrService: ObservableObject {
         req.probeName = "stream-echo:\(count)"
 
         // Use targetType from environment or default
-        let targetType = ProcessInfo.processInfo.environment["ACTR_DATASTREAMAPP_TARGET_TYPE"] ?? "e2e.actrium.test/DuplexStreamService@1.0.0"
+        let targetType = ProcessInfo.processInfo.environment["ACTR_DATASTREAMAPP_TARGET_TYPE"] ?? "e2e.actrium.example/DuplexStreamService@1.0.0"
         req.targetType = targetType
 
         do {
@@ -337,7 +337,7 @@ private final class ProbeHandlerImpl: ActrDispatchHandler, @unchecked Sendable {
         // Discover target synchronously so we can return immediately if not found
         let targetType: ActrType
         do {
-            targetType = try ActrType.fromStringRepr(req.targetType.isEmpty ? "e2e.actrium.test/DuplexStreamService@1.0.0" : req.targetType)
+            targetType = try ActrType.fromStringRepr(req.targetType.isEmpty ? "e2e.actrium.example/DuplexStreamService@1.0.0" : req.targetType)
         } catch {
             throw ActrError.Config(msg: "Invalid target type: \(error)")
         }

@@ -2,9 +2,9 @@ import Foundation
 
 enum ActriumUniversalLink {
     static let hosts: Set<String> = [
-        "go.actro.chat",
-        "go-actro.betaenv.com",
-        "go-actro.develenv.com"
+        "go.actrium.example",
+        "go-actrium.actrium-beta.example",
+        "go-actrium.actrium-dev.example"
     ]
 
     static func appId(from url: URL) -> String? {
