@@ -8,6 +8,8 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <exception>
 #include <functional>
