@@ -1,10 +1,10 @@
-//! Integration tests for `MockActrixServer`.
+//! Integration tests for `MockLoranServer`.
 //!
 //! These tests treat the mock as an opaque black box (HTTP/WS client driving
 //! it) and make sure it speaks the wire format expected by `actr-hyper`.
 
 use actr_hyper::{IssuerClient, PublisherCertCache};
-use actr_mock_actrix::MockActrixServer;
+use actr_mock_loran::MockLoranServer;
 use actr_protocol::prost::Message as _;
 use actr_protocol::{ActrType, RegisterAuthMode, RegisterRequest, register_response};
 use base64::Engine;
@@ -32,7 +32,7 @@ fn test_register_request() -> RegisterRequest {
 
 #[tokio::test]
 async fn http_register_returns_valid_protobuf() {
-    let server = MockActrixServer::start().await.unwrap();
+    let server = MockLoranServer::start().await.unwrap();
     let client = IssuerClient::new(server.http_url());
     let resp = client
         .register_with_manifest(test_register_request())
@@ -57,7 +57,7 @@ async fn http_register_returns_valid_protobuf() {
 
 #[tokio::test]
 async fn http_register_also_works_under_issuer_prefix() {
-    let server = MockActrixServer::start().await.unwrap();
+    let server = MockLoranServer::start().await.unwrap();
     // Configs in the wild use issuer_endpoint = "http://host:port/issuer" — make
     // sure IssuerClient's `{endpoint}/register` still lands on the mock.
     let client = IssuerClient::new(format!("{}/issuer", server.http_url()));
@@ -73,7 +73,7 @@ async fn http_register_also_works_under_issuer_prefix() {
 
 #[tokio::test]
 async fn publisher_verifying_key_roundtrip_via_publisher_cert_cache() {
-    let server = MockActrixServer::start().await.unwrap();
+    let server = MockLoranServer::start().await.unwrap();
 
     // Seed an Publisher Registry; the verifying key we register here is what the cache must
     // return.
@@ -95,7 +95,7 @@ async fn publisher_verifying_key_roundtrip_via_publisher_cert_cache() {
 
 #[tokio::test]
 async fn publisher_verifying_key_404_for_unregistered_publisher() {
-    let server = MockActrixServer::start().await.unwrap();
+    let server = MockLoranServer::start().await.unwrap();
 
     let url = format!(
         "{}/registry/publishers/ghost/verifying-key",
@@ -107,7 +107,7 @@ async fn publisher_verifying_key_404_for_unregistered_publisher() {
 
 #[tokio::test]
 async fn admin_publisher_seeds_verifying_key() {
-    let server = MockActrixServer::start().await.unwrap();
+    let server = MockLoranServer::start().await.unwrap();
 
     let signing_key = SigningKey::from_bytes(&[11u8; 32]);
     let pubkey_b64 =
@@ -133,7 +133,7 @@ async fn admin_publisher_seeds_verifying_key() {
 
 #[tokio::test]
 async fn admin_realm_and_state_endpoints() {
-    let server = MockActrixServer::start().await.unwrap();
+    let server = MockLoranServer::start().await.unwrap();
 
     let client = reqwest::Client::new();
     client
@@ -163,7 +163,7 @@ async fn admin_realm_and_state_endpoints() {
 
 #[tokio::test]
 async fn publish_flow_via_nonce_and_publish() {
-    let server = MockActrixServer::start().await.unwrap();
+    let server = MockLoranServer::start().await.unwrap();
 
     let client = reqwest::Client::new();
 
@@ -228,7 +228,7 @@ async fn mock_renew_allows_consecutive_soft_renewals() {
         RenewCredentialRequest, RenewCredentialResponse, renew_credential_response,
     };
 
-    let server = MockActrixServer::start().await.unwrap();
+    let server = MockLoranServer::start().await.unwrap();
     let client = IssuerClient::new(server.http_url());
     let resp = client
         .register_with_manifest(test_register_request())

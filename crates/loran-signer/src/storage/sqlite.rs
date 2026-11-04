@@ -65,7 +65,7 @@ impl SqliteBackend {
     /// # Arguments
     /// * `_config` - SQLite config (reserved, currently unused)
     /// * `encryptor` - key encryptor
-    /// * `db_path` - directory path for the database file (from ActrixConfig.sqlite_path)
+    /// * `db_path` - directory path for the database file (from LoranConfig.sqlite_path)
     pub async fn new(
         _config: &SqliteConfig,
         encryptor: KeyEncryptor,

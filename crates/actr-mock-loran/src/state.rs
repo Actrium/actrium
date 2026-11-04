@@ -1,4 +1,4 @@
-//! Shared server state for the mock actrix.
+//! Shared server state for the mock loran.
 //!
 //! State is intentionally in-memory: the mock is rebuilt every test run and
 //! persistence would only add brittleness.

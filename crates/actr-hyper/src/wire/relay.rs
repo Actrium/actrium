@@ -941,9 +941,9 @@ impl RelayClient {
             let dialing = self.peer_locks.lock().await;
             let Some(index) = desired.iter().position(|item| {
                 !active.contains_key(item)
-                    && !dialing
+                    && dialing
                         .get(item)
-                        .is_some_and(|lock| lock.strong_count() != 0)
+                        .is_none_or(|lock| lock.strong_count() == 0)
             }) else {
                 return Err(NetworkError::ConnectionError(
                     "Relay peer capacity exhausted".into(),

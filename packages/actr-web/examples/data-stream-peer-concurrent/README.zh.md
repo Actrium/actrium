@@ -32,7 +32,7 @@ data-stream-peer-concurrent/
 ## 前置要求
 
 1. 安装：Node.js 18+、pnpm、Rust 1.95+、wasm-pack
-2. `start.sh` 会自动构建并启动本仓库的 `mock-actrix`，不需要外部 `actrix` checkout、STUN/TURN 服务或手工写 SQLite
+2. `start.sh` 会自动构建并启动本仓库的 `mock-loran`，不需要外部 `loran` checkout、STUN/TURN 服务或手工写 SQLite
 
 ## Legacy 调试方式（不安全）
 
@@ -49,7 +49,7 @@ ACTR_ALLOW_UNVERIFIED_LEGACY_WBG=1 ./start.sh
 
 1. 安装测试/示例依赖
 2. 编译 sender/receiver WASM
-3. 启动 `mock-actrix` 并通过 HTTP admin API 创建测试 realm
+3. 启动 `mock-loran` 并通过 HTTP admin API 创建测试 realm
 4. 启动一个 Server Vite dev server 和两个 Client Vite dev server
 5. 运行 `test-auto.js` 做并发验证
 
@@ -67,8 +67,8 @@ pnpm install --dir server
 ./client/build.sh
 ./server/build.sh
 
-# 终端 1: mock-actrix
-../../../../target/debug/mock-actrix --port 8081
+# 终端 1: mock-loran
+../../../../target/debug/mock-loran --port 8081
 
 # 终端 2: seed realm
 curl -fsS -X POST http://127.0.0.1:8081/admin/realms \
@@ -76,13 +76,13 @@ curl -fsS -X POST http://127.0.0.1:8081/admin/realms \
   --data '{"realm":"data-stream@example.com"}'
 
 # 终端 3
-cd client && VITE_ACTRIX_HTTP_URL=http://127.0.0.1:8081 pnpm dev --host 127.0.0.1 --port 4175
+cd client && VITE_LORAN_HTTP_URL=http://127.0.0.1:8081 pnpm dev --host 127.0.0.1 --port 4175
 
 # 终端 4
-cd server && VITE_ACTRIX_HTTP_URL=http://127.0.0.1:8081 pnpm dev --host 127.0.0.1 --port 4176
+cd server && VITE_LORAN_HTTP_URL=http://127.0.0.1:8081 pnpm dev --host 127.0.0.1 --port 4176
 
 # 终端 5
-cd client && VITE_ACTRIX_HTTP_URL=http://127.0.0.1:8081 pnpm dev --host 127.0.0.1 --port 4177
+cd client && VITE_LORAN_HTTP_URL=http://127.0.0.1:8081 pnpm dev --host 127.0.0.1 --port 4177
 
 # 终端 6
 CLIENT_URLS=http://127.0.0.1:4175,http://127.0.0.1:4177 \
@@ -94,7 +94,7 @@ node test-auto.js
 
 手动打开页面也可以验证，但需要保持环境干净：
 
-1. 重启 `mock-actrix`，避免之前手动开关页面留下 unbound actor。
+1. 重启 `mock-loran`，避免之前手动开关页面留下 unbound actor。
 2. 统一使用 `127.0.0.1`，不要混用 `localhost` 和 `127.0.0.1`，否则浏览器会把它们当成不同 origin。
 3. 使用独立 Chrome profile，并关闭 WebRTC mDNS 本地地址隐藏：
 
@@ -107,7 +107,7 @@ node test-auto.js
   'http://127.0.0.1:4177/?autoStart=1&clientId=client-2&messageCount=3'
 ```
 
-如果用普通 Chrome profile 反复刷新或关闭页面，可能残留 Service Worker、IndexedDB 或旧 actor 状态；如果出现 `RPC timeout after 30000ms`，先重启 `mock-actrix` 并换一个新的 `--user-data-dir` 再试。
+如果用普通 Chrome profile 反复刷新或关闭页面，可能残留 Service Worker、IndexedDB 或旧 actor 状态；如果出现 `RPC timeout after 30000ms`，先重启 `mock-loran` 并换一个新的 `--user-data-dir` 再试。
 
 ## 验证点
 
@@ -126,7 +126,7 @@ node test-auto.js
 ## 说明
 
 - 这里的 RPC 请求体使用 JSON 编码，重点验证的是 web 侧 `register_stream()` / `send_data_chunk()` / Fast Path 分发链路，而不是 protobuf codegen。
-- 默认 ICE server 列表为空，适合本机多端口验证；如需显式 STUN/TURN，可设置 `VITE_ACTRIX_STUN_URL`。
+- 默认 ICE server 列表为空，适合本机多端口验证；如需显式 STUN/TURN，可设置 `VITE_LORAN_STUN_URL`。
 - 并发测试默认启动 2 个 Client 页面，每个页面发送 3 条消息；可通过环境变量覆盖：
   - `CLIENT_URLS`
   - `MESSAGE_COUNT`

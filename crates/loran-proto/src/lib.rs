@@ -1,6 +1,6 @@
-//! Actrix Protocol Buffer Definitions
+//! Loran Protocol Buffer Definitions
 //!
-//! This crate contains all protocol buffer definitions for Actrix services.
+//! This crate contains all protocol buffer definitions for Loran services.
 //!
 //! # Modules
 //!
@@ -12,8 +12,8 @@
 //! ## Direct module access
 //!
 //! ```ignore
-//! use actrix_proto::admin::v1::{RegisterNodeRequest, ReportRequest};
-//! use actrix_proto::signer::v1::{GenerateKeyRequest, SignerClient};
+//! use loran_proto::admin::v1::{RegisterNodeRequest, ReportRequest};
+//! use loran_proto::signer::v1::{GenerateKeyRequest, SignerClient};
 //! ```
 //!
 //! ## Convenience re-exports
@@ -21,7 +21,7 @@
 //! Common types are re-exported at the crate root for convenience:
 //!
 //! ```ignore
-//! use actrix_proto::{
+//! use loran_proto::{
 //!     NonceCredential, RealmInfo, ResourceType,
 //!     ControlServiceClient, NodeAdminServiceServer,
 //! };
@@ -33,7 +33,7 @@
 //!
 //! The `signer.v1` package imports `NonceCredential` from `admin.v1` for consistent
 //! authentication across all services. When using Signer gRPC types directly, reference
-//! the credential type via `actrix_proto::admin::v1::NonceCredential`.
+//! the credential type via `loran_proto::admin::v1::NonceCredential`.
 
 /// Admin service protocol definitions.
 ///
@@ -148,4 +148,4 @@ pub use signer::v1::{
 // Note: Signer proto message types (GenerateKeyRequest, etc.) are NOT re-exported
 // here because the signer crate defines its own native Rust types with the same
 // names for HTTP/JSON API usage. For gRPC usage, access them via:
-//   use actrix_proto::signer::v1::{GenerateKeyRequest, ...};
+//   use loran_proto::signer::v1::{GenerateKeyRequest, ...};

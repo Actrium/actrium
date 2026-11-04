@@ -2,7 +2,7 @@
 //!
 //! # Overview
 //!
-//! Issuer is the core Actrix identity service. It allocates ActrId serial numbers,
+//! Issuer is the core Loran identity service. It allocates ActrId serial numbers,
 //! issues signed AIdCredential tokens, generates time-limited TURN credentials,
 //! and returns renewal tokens for `/issuer/renew`.
 //!
@@ -38,12 +38,12 @@
 //!
 //! ```no_run
 //! use issuer::create_issuer_router;
-//! use platform::config::{IssuerServiceConfig, ActrixConfig};
+//! use platform::config::{IssuerServiceConfig, LoranConfig};
 //! use tokio_util::sync::CancellationToken;
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! // Create configuration
-//! let global_config = ActrixConfig::default();
+//! let global_config = LoranConfig::default();
 //! let issuer_config = IssuerServiceConfig::default();
 //! let cancel = CancellationToken::new();
 //!
@@ -95,7 +95,7 @@ use std::sync::Arc;
 /// Create the Issuer router, following the project's HttpRouterService architecture
 pub async fn create_issuer_router(
     config: &IssuerServiceConfig,
-    global_config: &platform::config::ActrixConfig,
+    global_config: &platform::config::LoranConfig,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<Router> {
     create_issuer_router_with_counters(config, global_config, cancel, None).await
@@ -104,7 +104,7 @@ pub async fn create_issuer_router(
 /// Create Issuer router with optional service counters for metrics collection.
 pub async fn create_issuer_router_with_counters(
     config: &IssuerServiceConfig,
-    global_config: &platform::config::ActrixConfig,
+    global_config: &platform::config::LoranConfig,
     cancel: tokio_util::sync::CancellationToken,
     counters: Option<Arc<ServiceCounters>>,
 ) -> Result<Router> {
@@ -119,7 +119,7 @@ pub async fn create_issuer_router_with_counters(
 /// `/issuer` router built from this state.
 pub async fn create_issuer_state(
     config: &IssuerServiceConfig,
-    global_config: &platform::config::ActrixConfig,
+    global_config: &platform::config::LoranConfig,
     cancel: tokio_util::sync::CancellationToken,
     counters: Option<Arc<ServiceCounters>>,
 ) -> Result<IssuerState> {
@@ -133,7 +133,7 @@ pub async fn create_issuer_state(
 
     // Create Signer gRPC client
     let signer_client =
-        create_signer_client(&signer_client_config, &global_config.actrix_shared_key)
+        create_signer_client(&signer_client_config, &global_config.loran_shared_key)
             .await
             .context("Failed to create Signer gRPC client")?;
 
@@ -236,7 +236,7 @@ mod tests {
             "issuer_keys.db",
             "issuer_keys.db-wal",
             "ais_keys.db",
-            "actrix.db",
+            "loran.db",
         ] {
             std::fs::write(dir.path().join(name), b"x").unwrap();
         }
@@ -244,7 +244,7 @@ mod tests {
         assert!(!dir.path().join("issuer_keys.db").exists());
         assert!(!dir.path().join("issuer_keys.db-wal").exists());
         assert!(!dir.path().join("ais_keys.db").exists());
-        assert!(dir.path().join("actrix.db").exists());
+        assert!(dir.path().join("loran.db").exists());
         // Nothing left to remove is fine.
         super::remove_retired_key_store(dir.path());
     }

@@ -1,22 +1,22 @@
 # Loran crate 导航
 
 Loran 位于 Actr workspace 内，crate 版本与 workspace 同步。本文只说明稳定职责，
-不复制易失真的函数签名或行号。Cargo package 名仍沿用 `actrix-` 前缀（见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）。
+不复制易失真的函数签名或行号。Cargo package 名仍沿用 `loran-` 前缀（见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）。
 
 | 目录 | package | 职责 |
 |---|---|---|
-| `crates/loran-server` | `actrix`（binary） | 读取/验证配置，组合 listener、router、ICE 服务、管理面与关闭流程 |
-| `crates/loran-platform` | `actrix-platform` | 配置、SQLite schema、Realm/连接 ACL、Actor credential validation、监控与公共基础设施 |
-| `crates/loran-issuer` | `actrix-issuer` | Issuer：Actor serial 分配、注册证明、Actor/TURN credential、renewal |
-| `crates/loran-signer` | `actrix-signer` | Issuer Signer：Realm issuer key 生命周期、KEK 加密存储、签名和验签 key 查询 |
-| `crates/loran-signaling` | `actrix-signaling` | 认证 WebSocket、presence、Actor Registry 与发现、signaling envelope 转发 |
-| `crates/loran-stun` | `actrix-stun` | RFC 5389 Binding 与 NAT 地址发现 |
-| `crates/loran-turn` | `actrix-turn` | scoped long-term credential、allocation、permission、relay 与配额 |
-| `crates/loran-publisher-registry` | `actrix-publisher-registry` | Publisher Registry：publisher 身份、Publisher 签名权限与发布审计 |
+| `crates/loran-server` | `loran`（binary） | 读取/验证配置，组合 listener、router、ICE 服务、管理面与关闭流程 |
+| `crates/loran-platform` | `loran-platform` | 配置、SQLite schema、Realm/连接 ACL、Actor credential validation、监控与公共基础设施 |
+| `crates/loran-issuer` | `loran-issuer` | Issuer：Actor serial 分配、注册证明、Actor/TURN credential、renewal |
+| `crates/loran-signer` | `loran-signer` | Issuer Signer：Realm issuer key 生命周期、KEK 加密存储、签名和验签 key 查询 |
+| `crates/loran-signaling` | `loran-signaling` | 认证 WebSocket、presence、Actor Registry 与发现、signaling envelope 转发 |
+| `crates/loran-stun` | `loran-stun` | RFC 5389 Binding 与 NAT 地址发现 |
+| `crates/loran-turn` | `loran-turn` | scoped long-term credential、allocation、permission、relay 与配额 |
+| `crates/loran-publisher-registry` | `loran-publisher-registry` | Publisher Registry：publisher 身份、Publisher 签名权限与发布审计 |
 | `crates/loran-packages` | `loran-packages` | `.actr` 包托管（Realm Profile 的 `package.href` 可指向它）：按 SHA-256 内容寻址的静态下载，不解析 Target |
-| `crates/loran-proto` | `actrix-proto` | 管理/控制面的 protobuf 契约 |
-| `crates/loran-control` | `actrix-admin` | 管理控制服务实现 |
-| `crates/loran-sdk` | `actrix-sdk` | Loran 组件的内部聚合导出 |
+| `crates/loran-proto` | `loran-proto` | 管理/控制面的 protobuf 契约 |
+| `crates/loran-control` | `loran-admin` | 管理控制服务实现 |
+| `crates/loran-sdk` | `loran-sdk` | Loran 组件的内部聚合导出 |
 
 ## 依赖方向
 
@@ -96,14 +96,14 @@ v1 公开 TOML（如 `[services.publisher_registry]`、`[services.issuer]`、
 ## 测试入口
 
 ```bash
-cargo test -p actrix-platform
-cargo test -p actrix-issuer
-cargo test -p actrix-signer
-cargo test -p actrix-signaling
-cargo test -p actrix-stun
-cargo test -p actrix-turn -- --test-threads=1
-cargo test -p actrix-publisher-registry
-cargo test -p actrix --test actrix_fullstack
+cargo test -p loran-platform
+cargo test -p loran-issuer
+cargo test -p loran-signer
+cargo test -p loran-signaling
+cargo test -p loran-stun
+cargo test -p loran-turn -- --test-threads=1
+cargo test -p loran-publisher-registry
+cargo test -p loran-server --test loran_fullstack
 ```
 
 完整 workspace 仍须执行 `cargo test --workspace -- --test-threads=1`，crate 局部测试不能

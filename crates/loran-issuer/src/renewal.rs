@@ -61,7 +61,7 @@ pub fn hash_token(token: &[u8]) -> Vec<u8> {
 /// ```text
 /// HMAC-SHA256(
 ///   renewal_token_secret,
-///   "actrix/issuer/renewal/v1" ||
+///   "loran/issuer/renewal/v1" ||
 ///   old_token ||
 ///   ActrId::to_string_repr() ||
 ///   old_expires_at_be
@@ -76,7 +76,7 @@ pub fn derive_successor_token(
     old_expires_at: i64,
 ) -> Vec<u8> {
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC-SHA256 accepts any key length");
-    mac.update(b"actrix/issuer/renewal/v1");
+    mac.update(b"loran/issuer/renewal/v1");
     mac.update(old_token);
     mac.update(actor_id.to_string_repr().as_bytes());
     mac.update(&old_expires_at.to_be_bytes());
@@ -107,7 +107,7 @@ pub fn try_now_secs() -> Result<u64, std::time::SystemTimeError> {
 
 /// Persist a renewal token hash for the given actor.
 ///
-/// Uses the shared `actrix.db` pool. Token hash uniqueness enforces that
+/// Uses the shared `loran.db` pool. Token hash uniqueness enforces that
 /// duplicate inserts are silently ignored (`INSERT OR IGNORE`).
 pub async fn insert_renewal_token(
     actor_id: &ActrId,

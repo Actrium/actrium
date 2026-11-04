@@ -12,13 +12,13 @@ use crate::checksum::sha256_of_file;
 use crate::config::InstallConfig;
 use crate::tpl::SystemdServiceTemplate;
 
-const DEFAULT_SERVICE_USER: &str = "actrix";
-const DEFAULT_SERVICE_GROUP: &str = "actrix";
+const DEFAULT_SERVICE_USER: &str = "loran";
+const DEFAULT_SERVICE_GROUP: &str = "loran";
 
-/// Install actrix from a resolved binary source.
+/// Install loran from a resolved binary source.
 ///
 /// Resolves the artifact (download + verify, or local file), writes it to
-/// `releases/<version>/actrix`, atomically switches the `bin/actrix` symlink,
+/// `releases/<version>/loran`, atomically switches the `bin/loran` symlink,
 /// and optionally adds a PATH symlink. The systemd unit is NOT touched here.
 pub fn install_from_source(
     config: &InstallConfig,
@@ -27,7 +27,7 @@ pub fn install_from_source(
     sha256_path: Option<PathBuf>,
     skip_verify: bool,
 ) -> Result<()> {
-    let repo = std::env::var("ACTRIX_REPOSITORY").unwrap_or_else(|_| "Actrium/actr".to_string());
+    let repo = std::env::var("LORAN_REPOSITORY").unwrap_or_else(|_| "Actrium/actrium".to_string());
     let token = std::env::var("GITHUB_TOKEN").ok();
 
     let artifact = resolve(
@@ -45,7 +45,7 @@ pub fn install_from_source(
     result
 }
 
-/// Install a resolved artifact into `releases/<version>/` and switch `bin/actrix`.
+/// Install a resolved artifact into `releases/<version>/` and switch `bin/loran`.
 pub fn install_release(artifact: &ResolvedArtifact, config: &InstallConfig) -> Result<()> {
     validate_supported_install_dir(&config.install_dir, "installation")?;
     validate_binary_name(&config.binary_name)?;
@@ -71,7 +71,7 @@ pub fn install_release(artifact: &ResolvedArtifact, config: &InstallConfig) -> R
             target.display()
         );
     } else {
-        println!("📦 Installing actrix {} ...", artifact.version);
+        println!("📦 Installing loran {} ...", artifact.version);
         copy_file_with_sudo(&artifact.path, &target)?;
         set_file_permissions(&target, 0o755)?;
         println!("✅ Binary installed: {}", target.display());
@@ -109,10 +109,10 @@ pub fn install_release(artifact: &ResolvedArtifact, config: &InstallConfig) -> R
     Ok(())
 }
 
-/// Upgrade actrix to a new version and restart the managed service.
+/// Upgrade loran to a new version and restart the managed service.
 ///
 /// Resolves + verifies the artifact, installs it to `releases/<version>/`,
-/// switches `bin/actrix`, restarts that service, and waits for it to become
+/// switches `bin/loran`, restarts that service, and waits for it to become
 /// active. On restart/readiness failure the active symlink is rolled back to
 /// the previous version and the old service is restarted and verified. The
 /// systemd unit is never modified.
@@ -127,13 +127,13 @@ pub fn update_service(
 ) -> Result<()> {
     let config = InstallConfig {
         install_dir: install_dir.clone(),
-        binary_name: "actrix".to_string(),
+        binary_name: "loran".to_string(),
         add_to_path: false,
     };
     validate_supported_install_dir(&config.install_dir, "update")?;
     validate_service_name(&restart_service)?;
 
-    let repo = std::env::var("ACTRIX_REPOSITORY").unwrap_or_else(|_| "Actrium/actr".to_string());
+    let repo = std::env::var("LORAN_REPOSITORY").unwrap_or_else(|_| "Actrium/actrium".to_string());
     let token = std::env::var("GITHUB_TOKEN").ok();
     let prev = super::releases::current_version(&config)?.ok_or_else(|| {
         anyhow::anyhow!(
@@ -214,7 +214,7 @@ pub fn rollback_command(
 ) -> Result<()> {
     let config = InstallConfig {
         install_dir,
-        binary_name: "actrix".to_string(),
+        binary_name: "loran".to_string(),
         add_to_path: false,
     };
     validate_supported_install_dir(&config.install_dir, "rollback")?;
@@ -239,7 +239,7 @@ fn restart_and_wait(
     super::service::assert_running_binary(service_name, expected_binary)
 }
 
-/// Resolve a readiness-probe URL from an explicit arg or `ACTRIX_HEALTH_URL`.
+/// Resolve a readiness-probe URL from an explicit arg or `LORAN_HEALTH_URL`.
 ///
 /// When set, `update`/`rollback` poll this HTTP endpoint (e.g.
 /// `http://127.0.0.1:8080/health`) instead of relying on `systemctl is-active`
@@ -248,7 +248,7 @@ fn restart_and_wait(
 fn resolve_health_url(explicit: Option<&str>) -> Option<String> {
     explicit
         .map(|s| s.to_string())
-        .or_else(|| std::env::var("ACTRIX_HEALTH_URL").ok())
+        .or_else(|| std::env::var("LORAN_HEALTH_URL").ok())
         .filter(|s| !s.trim().is_empty())
 }
 
@@ -273,9 +273,9 @@ pub(crate) fn validate_service_name(name: &str) -> Result<()> {
 }
 
 pub(crate) fn validate_binary_name(name: &str) -> Result<()> {
-    if name != "actrix" {
+    if name != "loran" {
         anyhow::bail!(
-            "unsupported binary name '{name}': actrix-deploy installs the managed binary as 'actrix'"
+            "unsupported binary name '{name}': loran-deploy installs the managed binary as 'loran'"
         );
     }
     Ok(())
@@ -306,7 +306,7 @@ pub(crate) fn validate_version_label(version: &str) -> Result<()> {
 pub fn status_command(install_dir: PathBuf, service_name: Option<String>) -> Result<()> {
     let config = InstallConfig {
         install_dir,
-        binary_name: "actrix".to_string(),
+        binary_name: "loran".to_string(),
         add_to_path: false,
     };
     if let Some(service) = service_name.as_deref() {
@@ -368,9 +368,9 @@ fn canonicalize_or_self(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Locate the local `target/release/actrix` build (dev `--from-local-build` only).
+/// Locate the local `target/release/loran` build (dev `--from-local-build` only).
 pub fn find_local_build_binary() -> Result<PathBuf> {
-    find_actrix_binary()
+    find_loran_binary()
 }
 
 /// Deploy application as systemd service
@@ -389,7 +389,7 @@ pub struct ServiceArgs {
 /// Deploy application as systemd service.
 ///
 /// Accepts optional non-interactive flags; any missing value is prompted for.
-/// The service/unit name is decoupled from the binary name (always `actrix`)
+/// The service/unit name is decoupled from the binary name (always `loran`)
 /// so multiple instances can run under distinct unit names on one host.
 pub fn install_systemd_service(args: ServiceArgs) -> Result<()> {
     match detect_service_manager() {
@@ -417,7 +417,7 @@ pub fn install_systemd_service(args: ServiceArgs) -> Result<()> {
     let (service_user, service_group) = configure_service_user(args.user, args.group)?;
 
     // WorkingDirectory defaults to the install dir; override with --working-directory
-    // when the actrix config resolves relative paths (certs/db/sqlite) elsewhere.
+    // when the loran config resolves relative paths (certs/db/sqlite) elsewhere.
     let working_directory = args
         .working_directory
         .unwrap_or_else(|| install_config.install_dir.clone());
@@ -446,7 +446,7 @@ pub fn install_systemd_service(args: ServiceArgs) -> Result<()> {
 fn configure_service_name(opt: Option<String>) -> Result<String> {
     let name = match opt {
         Some(name) => name,
-        None => prompt_text("Service name", "actrix")?,
+        None => prompt_text("Service name", "loran")?,
     };
     validate_service_name(&name)?;
     Ok(name)
@@ -463,7 +463,7 @@ fn configure_config_path(opt: Option<PathBuf>) -> Result<PathBuf> {
         Some(p) => p,
         None => PathBuf::from(prompt_text(
             "Configuration file path",
-            "/etc/actrix/config.toml",
+            "/etc/loran/config.toml",
         )?),
     };
 
@@ -507,7 +507,7 @@ fn configure_service_settings(install_dir_opt: Option<PathBuf>) -> Result<Instal
 
     println!();
 
-    // Binary name is always "actrix" (the actual binary in bin/); the unit name
+    // Binary name is always "loran" (the actual binary in bin/); the unit name
     // is configured separately via --service-name.
     Ok(InstallConfig {
         install_dir,
@@ -602,12 +602,12 @@ fn create_system_user(username: &str) -> Result<()> {
             "useradd",
             "--system",
             "--home-dir",
-            "/opt/actrix",
+            "/opt/loran",
             "--no-create-home",
             "--shell",
             "/usr/sbin/nologin",
             "--comment",
-            "actrix service user",
+            "loran service user",
             username,
         ])
         .output()?;
@@ -651,16 +651,16 @@ fn create_system_group(groupname: &str, username: &str) -> Result<()> {
     Ok(())
 }
 
-/// Find the actrix binary in the project structure
-fn find_actrix_binary() -> Result<PathBuf> {
+/// Find the loran binary in the project structure
+fn find_loran_binary() -> Result<PathBuf> {
     let search_bases = [
         std::env::current_exe()?.parent().unwrap().to_path_buf(),
         std::env::current_dir()?,
     ];
 
     let target_paths = [
-        "target/release/actrix",
-        "crates/actrixd/target/release/actrix",
+        "target/release/loran",
+        "crates/loran-server/target/release/loran",
     ];
     let max_steps_up = 4; // Maximum directory levels to go up
 
@@ -687,8 +687,8 @@ fn find_actrix_binary() -> Result<PathBuf> {
     }
 
     anyhow::bail!(
-        "Could not find actrix binary. Please ensure it's built with:\n  \
-         cargo build --release --bin actrix"
+        "Could not find loran binary. Please ensure it's built with:\n  \
+         cargo build --release --bin loran"
     )
 }
 
@@ -789,7 +789,7 @@ fn verify_deployment_files(install_config: &InstallConfig, config_path: &Path) -
 
         if !binary_path.exists() {
             println!("   • Run application installation first to copy the binary");
-            println!("   • Or build the project: cargo build --release --bin actrix");
+            println!("   • Or build the project: cargo build --release --bin loran");
         }
 
         if !config_path.exists() {
@@ -926,7 +926,7 @@ pub(crate) fn validate_supported_install_dir(install_dir: &Path, operation: &str
     if !install_dir.is_absolute() {
         anyhow::bail!(
             "Unsupported installation directory for {}: '{}'. \
-             Use an absolute path under '/opt', such as '/opt/actrix'.",
+             Use an absolute path under '/opt', such as '/opt/loran'.",
             operation,
             install_dir.display()
         );
@@ -935,7 +935,7 @@ pub(crate) fn validate_supported_install_dir(install_dir: &Path, operation: &str
     let normalized = normalize_install_dir(install_dir)?;
 
     // Reject the filesystem root and any path still containing `..` after
-    // normalization. Without this, `--install-dir /opt/actrix/../..` (which
+    // normalization. Without this, `--install-dir /opt/loran/../..` (which
     // resolves to `/`) would let a later `rm -rf` walk out of the intended
     // tree — particularly dangerous in `uninstall`.
     if normalized == Path::new("/") {
@@ -948,7 +948,7 @@ pub(crate) fn validate_supported_install_dir(install_dir: &Path, operation: &str
     if normalized == Path::new("/opt") {
         anyhow::bail!(
             "Unsupported installation directory for {}: '/opt'. \
-             Use a dedicated child directory such as '/opt/actrix'.",
+             Use a dedicated child directory such as '/opt/loran'.",
             operation
         );
     }
@@ -958,7 +958,7 @@ pub(crate) fn validate_supported_install_dir(install_dir: &Path, operation: &str
     {
         anyhow::bail!(
             "Unsupported installation directory for {}: '{}'. \
-             Paths containing '..' are rejected; use a literal path such as '/opt/actrix'.",
+             Paths containing '..' are rejected; use a literal path such as '/opt/loran'.",
             operation,
             normalized.display()
         );
@@ -968,7 +968,7 @@ pub(crate) fn validate_supported_install_dir(install_dir: &Path, operation: &str
         anyhow::bail!(
             "Unsupported installation directory for {}: '{}'. \
              Paths under '/home' are blocked for service hardening consistency. \
-             Use a root-owned path such as '/opt/actrix'.",
+             Use a root-owned path such as '/opt/loran'.",
             operation,
             normalized.display()
         );
@@ -978,7 +978,7 @@ pub(crate) fn validate_supported_install_dir(install_dir: &Path, operation: &str
         anyhow::bail!(
             "Unsupported installation directory for {}: '{}'. \
              Paths under '/tmp' are blocked for service hardening consistency. \
-             Use a persistent path such as '/opt/actrix'.",
+             Use a persistent path such as '/opt/loran'.",
             operation,
             normalized.display()
         );
@@ -987,7 +987,7 @@ pub(crate) fn validate_supported_install_dir(install_dir: &Path, operation: &str
     if !normalized.starts_with(Path::new("/opt")) {
         anyhow::bail!(
             "Unsupported installation directory for {}: '{}'. \
-             actrix-deploy only manages root-owned application trees under '/opt'.",
+             loran-deploy only manages root-owned application trees under '/opt'.",
             operation,
             normalized.display()
         );
@@ -1246,8 +1246,8 @@ mod tests {
 
     #[test]
     fn service_name_rejects_traversal_and_whitespace() {
-        assert!(validate_service_name("actrix").is_ok());
-        assert!(validate_service_name("actrix-2.f").is_ok());
+        assert!(validate_service_name("loran").is_ok());
+        assert!(validate_service_name("loran-2.f").is_ok());
         assert!(validate_service_name("../x").is_err());
         assert!(validate_service_name("a b").is_err());
         assert!(validate_service_name("a\nb").is_err());
@@ -1257,21 +1257,21 @@ mod tests {
 
     #[test]
     fn install_dir_rejects_root_and_parent_refs() {
-        assert!(validate_supported_install_dir(Path::new("/opt/actrix"), "test").is_ok());
+        assert!(validate_supported_install_dir(Path::new("/opt/loran"), "test").is_ok());
         assert!(validate_supported_install_dir(Path::new("/"), "test").is_err());
         assert!(validate_supported_install_dir(Path::new("/opt"), "test").is_err());
-        assert!(validate_supported_install_dir(Path::new("/opt/actrix/../.."), "test").is_err());
-        assert!(validate_supported_install_dir(Path::new("/home/x/actrix"), "test").is_err());
-        assert!(validate_supported_install_dir(Path::new("/tmp/actrix"), "test").is_err());
-        assert!(validate_supported_install_dir(Path::new("/etc/actrix"), "test").is_err());
-        assert!(validate_supported_install_dir(Path::new("actrix"), "test").is_err());
+        assert!(validate_supported_install_dir(Path::new("/opt/loran/../.."), "test").is_err());
+        assert!(validate_supported_install_dir(Path::new("/home/x/loran"), "test").is_err());
+        assert!(validate_supported_install_dir(Path::new("/tmp/loran"), "test").is_err());
+        assert!(validate_supported_install_dir(Path::new("/etc/loran"), "test").is_err());
+        assert!(validate_supported_install_dir(Path::new("loran"), "test").is_err());
     }
 
     #[test]
     fn validates_binary_version_and_account_names() {
-        assert!(validate_binary_name("actrix").is_ok());
-        assert!(validate_binary_name("../actrix").is_err());
-        assert!(validate_binary_name("actrix2").is_err());
+        assert!(validate_binary_name("loran").is_ok());
+        assert!(validate_binary_name("../loran").is_err());
+        assert!(validate_binary_name("loran2").is_err());
 
         assert!(validate_version_label("v0.4.3").is_ok());
         assert!(validate_version_label("v0.4.3-rc.1+build_2").is_ok());
@@ -1279,24 +1279,24 @@ mod tests {
         assert!(validate_version_label("v0..4").is_err());
         assert!(validate_version_label("v0.4.3\n").is_err());
 
-        assert!(validate_account_name("user", "actrix").is_ok());
+        assert!(validate_account_name("user", "loran").is_ok());
         assert!(validate_account_name("user", "actor-rtc").is_ok());
-        assert!(validate_account_name("user", "actrix$").is_ok());
-        assert!(validate_account_name("user", "actrix$$").is_err());
-        assert!(validate_account_name("user", "1actrix").is_err());
-        assert!(validate_account_name("user", "actrix.name").is_err());
+        assert!(validate_account_name("user", "loran$").is_ok());
+        assert!(validate_account_name("user", "loran$$").is_err());
+        assert!(validate_account_name("user", "1loran").is_err());
+        assert!(validate_account_name("user", "loran.name").is_err());
     }
 
     #[test]
     fn same_version_update_skips_identical_binary_and_rejects_different_binary() {
         let dir = std::env::temp_dir().join(format!(
-            "actrix-deploy-same-version-test-{}",
+            "loran-deploy-same-version-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         let config = InstallConfig {
             install_dir: dir.clone(),
-            binary_name: "actrix".to_string(),
+            binary_name: "loran".to_string(),
             add_to_path: false,
         };
         let installed = config.release_binary_path("v1.0.0");
@@ -1336,11 +1336,11 @@ mod tests {
     #[test]
     fn managed_directories_reject_symlink_components() {
         let dir = std::env::temp_dir().join(format!(
-            "actrix-deploy-managed-dir-symlink-test-{}",
+            "loran-deploy-managed-dir-symlink-test-{}",
             std::process::id()
         ));
         let outside = std::env::temp_dir().join(format!(
-            "actrix-deploy-managed-dir-symlink-outside-{}",
+            "loran-deploy-managed-dir-symlink-outside-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1359,17 +1359,17 @@ mod tests {
     #[test]
     fn existing_release_rejects_symlink_binary() {
         let dir = std::env::temp_dir().join(format!(
-            "actrix-deploy-release-symlink-test-{}",
+            "loran-deploy-release-symlink-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         let config = InstallConfig {
             install_dir: dir.clone(),
-            binary_name: "actrix".to_string(),
+            binary_name: "loran".to_string(),
             add_to_path: false,
         };
-        let outside = dir.join("outside-actrix");
-        let incoming = dir.join("incoming-actrix");
+        let outside = dir.join("outside-loran");
+        let incoming = dir.join("incoming-loran");
         let target = config.release_binary_path("v1.0.0");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&outside, b"same").unwrap();

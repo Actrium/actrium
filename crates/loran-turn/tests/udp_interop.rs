@@ -11,7 +11,7 @@ use turn::{Authenticator, create_turn_server, shutdown_turn_server};
 use turn_crate::client::{Client, ClientConfig};
 use webrtc_util::Conn as _;
 
-const REALM: &str = "interop.actrix.test";
+const REALM: &str = "interop.loran.test";
 const TURN_SECRET: &str = "turn-interop-secret-at-least-32-bytes";
 
 fn scoped_credential() -> (String, String) {
@@ -76,7 +76,7 @@ async fn turn_client(server_address: &str) -> anyhow::Result<Client> {
         username,
         password,
         realm: REALM.to_string(),
-        software: "actrix-turn-interop-test".to_string(),
+        software: "loran-turn-interop-test".to_string(),
         rto_in_ms: 50,
         conn: socket,
         vnet: None,

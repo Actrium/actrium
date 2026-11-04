@@ -1,7 +1,4 @@
 use actr_protocol::realm_profile::RealmPackage;
-use actrix_sdk::control::{
-    AdminApiService, ConfigType, CreateRealmRequest, NonceCredential, RealmInfo, UpdateRealmRequest,
-};
 use axum::{
     Json, Router,
     extract::{ConnectInfo, Path, Query, State},
@@ -12,6 +9,9 @@ use axum::{
 };
 use issuer::realm_profile::ProfileChange;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use loran_sdk::control::{
+    AdminApiService, ConfigType, CreateRealmRequest, NonceCredential, RealmInfo, UpdateRealmRequest,
+};
 use platform::config::AdminUiConfig;
 use platform::monitoring::MetricsStore;
 use serde::{Deserialize, Serialize};
@@ -1170,7 +1170,7 @@ fn realm_info_to_json(info: &RealmInfo) -> Value {
     })
 }
 
-fn service_status_to_json(s: &actrix_sdk::control::ServiceStatus) -> Value {
+fn service_status_to_json(s: &loran_sdk::control::ServiceStatus) -> Value {
     json!({
         "name": s.name,
         "type": s.r#type,

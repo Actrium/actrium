@@ -1,6 +1,6 @@
 // polyglot-echo — TypeScript bindings driver (CommonJS).
 //
-// Counterpart to clients/rust/src/main.rs but talks to mock-actrix through
+// Counterpart to clients/rust/src/main.rs but talks to mock-loran through
 // `packages/actr-typescript`. The script loads the napi binding directly from
 // the in-tree `dist/` output so the scenario doesn't have to npm-install
 // against a published version of @actrium/actr.

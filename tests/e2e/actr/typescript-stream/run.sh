@@ -11,7 +11,7 @@ REALM_CLIENT_KEY=""
 PUBLISHER="demo1"
 
 ACTR_BIN="${ACTR_BIN:-$REPO_ROOT/target/release/actr}"
-MOCK_ACTRIX_BIN="${MOCK_ACTRIX_BIN:-$REPO_ROOT/target/release/mock-actrix}"
+MOCK_LORAN_BIN="${MOCK_LORAN_BIN:-$REPO_ROOT/target/release/mock-loran}"
 
 MOCK_PID=""
 ECHO_PID=""
@@ -31,7 +31,7 @@ dump_log_tail() {
 
 dump_failure_logs() {
   echo "E2E failed. Logs are in: $LOG_DIR" >&2
-  dump_log_tail "$LOG_DIR/mock-actrix.log" 300
+  dump_log_tail "$LOG_DIR/mock-loran.log" 300
   dump_log_tail "$LOG_DIR/echo-run.log" 400
   dump_log_tail "$LOG_DIR/relay-run.log" 400
   dump_log_tail "$LOG_DIR/client-run.log" 400
@@ -96,10 +96,10 @@ wait_log() {
 
 wait_actor_registered() {
   local name="$1"
-  wait_log "$LOG_DIR/mock-actrix.log" "name=\"$name\""
+  wait_log "$LOG_DIR/mock-loran.log" "name=\"$name\""
 }
 
-# A Realm client key file for $REALM. mock-actrix has no membership endpoint
+# A Realm client key file for $REALM. mock-loran has no membership endpoint
 # and accepts any client proof, so the key is made locally instead of with
 # `actr realm join`.
 write_realm_client_key() {
@@ -1080,9 +1080,9 @@ if [ ! -x "$ACTR_BIN" ]; then
   cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
 fi
 
-if [ ! -x "$MOCK_ACTRIX_BIN" ]; then
-  log "Build mock-actrix"
-  cargo build --locked --release -p actr-mock-actrix --bin mock-actrix
+if [ ! -x "$MOCK_LORAN_BIN" ]; then
+  log "Build mock-loran"
+  cargo build --locked --release -p actr-mock-loran --bin mock-loran
 fi
 
 log "Build local Rust protoc plugin"
@@ -1117,8 +1117,8 @@ MOCK_HTTP="http://127.0.0.1:$MOCK_PORT"
 SIGNALING_WS="ws://127.0.0.1:$MOCK_PORT/signaling/ws"
 ISSUER_ENDPOINT="$MOCK_HTTP/issuer"
 
-log "Start mock-actrix on $MOCK_PORT"
-NO_COLOR=1 "$MOCK_ACTRIX_BIN" --port "$MOCK_PORT" >"$LOG_DIR/mock-actrix.log" 2>&1 &
+log "Start mock-loran on $MOCK_PORT"
+NO_COLOR=1 "$MOCK_LORAN_BIN" --port "$MOCK_PORT" >"$LOG_DIR/mock-loran.log" 2>&1 &
 MOCK_PID=$!
 wait_http "$MOCK_HTTP/signaling/health"
 
@@ -1188,7 +1188,7 @@ write_runtime_config "$CLIENT" "dist/app.actr" "false" "typescript-stream-client
 (cd "$CLIENT" && run_logged "client gen" "$ACTR_BIN" gen -l rust --clean)
 (cd "$CLIENT" && run_logged "client build" "$ACTR_BIN" build -k "$RUN_ROOT/dev-key.json" -o dist/app.actr)
 
-log "Run ClientApp against mock-actrix"
+log "Run ClientApp against mock-loran"
 CLIENT_OUTPUT="$LOG_DIR/client-run.log"
 (cd "$CLIENT" && ACTR_BIN="$ACTR_BIN" cargo run --locked --features host --bin client-app) 2>&1 | tee "$CLIENT_OUTPUT"
 

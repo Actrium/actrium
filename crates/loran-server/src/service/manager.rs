@@ -14,7 +14,7 @@ use axum::extract::connect_info::ConnectInfo;
 use axum_server::tls_rustls::RustlsConfig;
 use platform::{
     ServiceCollector, ServiceCounters, ServiceInfo, ServiceType, TlsConfigurer,
-    config::ActrixConfig, config::config_store::ConfigOverrideStore, monitoring::MetricsStore,
+    config::LoranConfig, config::config_store::ConfigOverrideStore, monitoring::MetricsStore,
 };
 
 /// ResourceType integer constants (from proto enum).
@@ -116,7 +116,7 @@ pub struct ServiceManager {
     services: Vec<ServiceContainer>,
     shutdown_tx: tokio::sync::broadcast::Sender<()>,
     service_collector: ServiceCollector,
-    config: ActrixConfig,
+    config: LoranConfig,
     config_path: PathBuf,
     /// Watch channel sender for hot-swapping the Router.
     router_tx: Option<watch::Sender<Router>>,
@@ -153,7 +153,7 @@ pub struct ServiceManager {
 impl ServiceManager {
     /// Create a new service manager
     pub fn new(
-        config: ActrixConfig,
+        config: LoranConfig,
         shutdown_tx: tokio::sync::broadcast::Sender<()>,
         config_path: PathBuf,
     ) -> Self {
@@ -1077,7 +1077,7 @@ impl ServiceManager {
     ///
     /// Returns a list of human-readable reasons. An empty list means
     /// hot-reload is sufficient.
-    fn check_restart_required(old: &ActrixConfig, new: &ActrixConfig) -> Vec<String> {
+    fn check_restart_required(old: &LoranConfig, new: &LoranConfig) -> Vec<String> {
         let mut reasons = Vec::new();
 
         if Self::signer_restart_required(old, new) {
@@ -1108,7 +1108,7 @@ impl ServiceManager {
         reasons
     }
 
-    fn turn_auth_changed(old: &ActrixConfig, new: &ActrixConfig) -> bool {
+    fn turn_auth_changed(old: &LoranConfig, new: &LoranConfig) -> bool {
         let old_realm_auth = old.uses_realm_turn_auth();
         let new_realm_auth = new.uses_realm_turn_auth();
         old_realm_auth != new_realm_auth
@@ -1117,16 +1117,16 @@ impl ServiceManager {
                 && old.authority.provider_id().ok() != new.authority.provider_id().ok())
     }
 
-    fn signer_restart_required(old: &ActrixConfig, new: &ActrixConfig) -> bool {
+    fn signer_restart_required(old: &LoranConfig, new: &LoranConfig) -> bool {
         old.is_signer_enabled() != new.is_signer_enabled()
             || ((old.is_signer_enabled() || new.is_signer_enabled())
                 && (old.bind.signer != new.bind.signer
-                    || old.actrix_shared_key != new.actrix_shared_key
+                    || old.loran_shared_key != new.loran_shared_key
                     || serde_json::to_value(&old.services.signer).ok()
                         != serde_json::to_value(&new.services.signer).ok()))
     }
 
-    fn signer_material_fingerprint(config: &ActrixConfig) -> Result<String> {
+    fn signer_material_fingerprint(config: &LoranConfig) -> Result<String> {
         let mut material = Vec::new();
         if let Some(signer) = &config.services.signer {
             let mut paths = Vec::new();
@@ -1171,7 +1171,7 @@ impl ServiceManager {
         platform::recording::info!("Reloading configuration from {:?}", self.config_path);
 
         // 1. Read & validate new config
-        let new_config = match ActrixConfig::from_file(&self.config_path) {
+        let new_config = match LoranConfig::from_file(&self.config_path) {
             Ok(cfg) => cfg,
             Err(e) => {
                 platform::recording::error!(
@@ -1230,7 +1230,7 @@ impl ServiceManager {
             for reason in &restart_reasons {
                 platform::recording::warn!("Config change ignored (requires restart): {}", reason);
             }
-            platform::recording::warn!("Run `systemctl restart actrix` to apply these changes.");
+            platform::recording::warn!("Run `systemctl restart loran` to apply these changes.");
             // Revert immutable fields to old values so runtime state stays consistent
             self.config.bind.http = old_config.bind.http.clone();
             self.config.sqlite_path = old_config.sqlite_path.clone();
@@ -1457,7 +1457,7 @@ struct SignerTokenBucket {
 /// Per-IP token-bucket rate limiter for the Signer gRPC routes.
 ///
 /// Deliberately dependency-free (no governor / tower rate-limit crate) so it can
-/// live entirely inside actrixd without pulling in a new dependency. The
+/// live entirely inside loran-server without pulling in a new dependency. The
 /// critical section is a short, non-async map update guarded by a std mutex.
 struct SignerRateLimiter {
     buckets: Mutex<HashMap<IpAddr, SignerTokenBucket>>,
@@ -1571,7 +1571,7 @@ mod tests {
     #[tokio::test]
     async fn failed_router_build_keeps_running_tasks_and_collector_until_successful_swap() {
         let config =
-            ActrixConfig::from_toml(include_str!("../../../../loran/config/relay.example.toml"))
+            LoranConfig::from_toml(include_str!("../../../../loran/config/relay.example.toml"))
                 .unwrap();
         let (shutdown, _) = tokio::sync::broadcast::channel(1);
         let mut manager = ServiceManager::new(config, shutdown, PathBuf::new());
@@ -1604,7 +1604,7 @@ mod turn_reload_tests {
 
     #[test]
     fn changing_turn_auth_mode_or_provider_requires_ice_restart() {
-        let mut rest = ActrixConfig {
+        let mut rest = LoranConfig {
             enable: platform::config::ENABLE_TURN,
             ..Default::default()
         };
@@ -1631,7 +1631,7 @@ mod signer_reload_tests {
 
     #[test]
     fn signer_listener_and_security_changes_require_restart() {
-        let mut old = ActrixConfig::default();
+        let mut old = LoranConfig::default();
         old.enable |= platform::config::ENABLE_SIGNER;
         old.services.signer = Some(signer::SignerServiceConfig::default());
         old.bind.signer = Some(Default::default());
@@ -1639,7 +1639,7 @@ mod signer_reload_tests {
         changed.enable &= !platform::config::ENABLE_SIGNER;
         assert!(ServiceManager::signer_restart_required(&old, &changed));
         changed = old.clone();
-        changed.actrix_shared_key.push('x');
+        changed.loran_shared_key.push('x');
         assert!(ServiceManager::signer_restart_required(&old, &changed));
         changed = old.clone();
         changed.services.signer.as_mut().unwrap().require_mtls = true;
@@ -1655,7 +1655,7 @@ mod signer_reload_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ca.pem");
         std::fs::write(&path, b"first test certificate").unwrap();
-        let mut config = ActrixConfig::default();
+        let mut config = LoranConfig::default();
         config.services.signer = Some(signer::SignerServiceConfig {
             mtls_ca_cert: Some(path.to_str().unwrap().into()),
             mtls_cert: Some(path.to_str().unwrap().into()),

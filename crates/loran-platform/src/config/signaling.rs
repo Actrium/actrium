@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Signaling service configuration
 ///
-/// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
+/// Service enable/disable is controlled by the bitmask in LoranConfig.enable.
 /// The ENABLE_SIGNALING bit (bit 0) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SignalingConfig {
@@ -266,7 +266,7 @@ impl SignalingConfig {
     /// 3. Otherwise return None (Signaling can operate without Signer)
     pub fn get_signer_client_config(
         &self,
-        global_config: &super::ActrixConfig,
+        global_config: &super::LoranConfig,
     ) -> Option<SignerClientConfig> {
         // Prefer explicit configuration
         if let Some(ref signer_config) = self.dependencies.signer {
@@ -306,7 +306,7 @@ impl SignalingConfig {
     /// 3. Otherwise return None
     pub fn get_issuer_client_config(
         &self,
-        global_config: &super::ActrixConfig,
+        global_config: &super::LoranConfig,
     ) -> Option<IssuerClientConfig> {
         // Prefer explicit configuration
         if let Some(ref issuer_config) = self.dependencies.issuer {

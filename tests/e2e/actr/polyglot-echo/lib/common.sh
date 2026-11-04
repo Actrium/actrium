@@ -2,8 +2,8 @@
 # Shared shell helpers for the polyglot-echo e2e scenario.
 #
 # This file is a slimmer cousin of `tests/e2e/actr/package-runtime-echo/lib/common.sh`:
-# the polyglot scenario runs against the in-tree `mock-actrix` binary, so the
-# `ensure_actrix_available` / admin-login / Issuer warmup machinery is dropped.
+# the polyglot scenario runs against the in-tree `mock-loran` binary, so the
+# `ensure_loran_available` / admin-login / Issuer warmup machinery is dropped.
 
 set -euo pipefail
 
@@ -71,7 +71,7 @@ kill_listener() {
 # run. They connect OUTBOUND to the signaling port (they are clients, not
 # listeners), so `kill_listener` never sees them; orphaned by a hard-killed
 # run (e.g. the EXIT trap could not fire), they keep reconnecting to the
-# fixed HTTP_PORT and re-register with the fresh mock-actrix under a stale
+# fixed HTTP_PORT and re-register with the fresh mock-loran under a stale
 # ACL — surfacing later as a baffling "ACL denied" on the new run. The match
 # is pinned to this scenario's per-run config path (`polyglot-echo/.tmp/run-`),
 # so unrelated `actr` processes elsewhere on the host are never touched.

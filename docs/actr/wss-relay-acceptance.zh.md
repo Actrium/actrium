@@ -13,7 +13,7 @@
 | 要求 | 实现与已执行验证 |
 | --- | --- |
 | 保留通用标准 UDP TURN/STUN | UDP 线协议覆盖认证、401/438、MD5/SHA-256、完整性、未知属性、重传、分配/权限/通道、IPv6 及 EVEN-PORT；当前服务端/协议组 235 项通过。coturn 独立客户端的 ChannelData、Send/Data、EVEN-PORT 三组通过 |
-| 原 Loran 入口独立部署 | 原二进制仍为 `actrix`。`ice_only` 验证 enable=2/4/6、不启动 HTTP/数据库、UDP Binding/Allocate、SIGHUP 重载及 SIGTERM 退出 |
+| 原 Loran 入口独立部署 | 原二进制仍为 `loran`。`ice_only` 验证 enable=2/4/6、不启动 HTTP/数据库、UDP Binding/Allocate、SIGHUP 重载及 SIGTERM 退出 |
 | 新增可独立部署的 WSS relay | enable=32 单独部署、enable=38 与 UDP ICE 组合部署。`relay_only` 使用真实进程与 WebSocket 验证静态认证、转发、退出和不创建数据库，并用受信任测试证书验证生产 TLS/WSS 监听 |
 | 通用核心无 Actrium 业务耦合 | `loran-relay-protocol` 和 `loran-relay` 只处理外部 Principal、namespace、endpoint、channel 与 bytes；10 项通用测试覆盖认证拒绝、隔离、接受握手、双向数据、连接替换、过期、超时及背压。静态/AId 认证位于外部 Loran 适配层 |
 | 应用无需对端 WS server | 删除原生监听器及启动路径，不公布 `ws_address`；旧 `[websocket]` 配置报告迁移提示。SDK 从既有 signaling bootstrap 自动发现 relay，不增加应用 URL、监听端口或证书配置 |
@@ -91,7 +91,7 @@
 ```bash
 eval "$(/usr/local/bin/rust-target-env)" && cargo nextest run --offline -p loran-relay-protocol -p loran-relay
 
-eval "$(/usr/local/bin/rust-target-env)" && cargo nextest run --offline -p actr-protocol -p actr-config -p actrix-platform -p actrix-stun -p actrix-turn -p actrix --lib --test relay_only --test ice_only --test udp_protocol
+eval "$(/usr/local/bin/rust-target-env)" && cargo nextest run --offline -p actr-protocol -p actr-config -p loran-platform -p loran-stun -p loran-turn -p loran-server --lib --test relay_only --test ice_only --test udp_protocol
 
 eval "$(/usr/local/bin/rust-target-env)" && cargo nextest run --offline -p actr-hyper --test node_start_smoke --test media_loopback -E 'test(relay_) or test(test_media_rtp_audio_loopback)' --run-ignored all --retries 0
 ```

@@ -75,7 +75,7 @@ pub struct MethodDefinition {
 /// Service information
 #[derive(Debug, Clone)]
 pub struct ServiceInfo {
-    /// Registry discovery key/display name. Actrix currently emits its
+    /// Registry discovery key/display name. Loran currently emits its
     /// internal `publisher:ActrTypeName` service key here.
     ///
     /// Do not persist this as a manifest service reference; use

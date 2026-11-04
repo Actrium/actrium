@@ -1,11 +1,11 @@
 [package]
-name = "actrix-admin"
+name = "loran-admin"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Admin control-plane implementation for actrix nodes"
+description = "Admin control-plane implementation for loran nodes"
 
 [dependencies]
 tonic = { workspace = true }
@@ -25,9 +25,9 @@ pwrzv = { version = "0.7.0" }
 
 sqlx = { workspace = true }
 
-platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.7" }
-actrix-proto = { path = "../loran-proto", version = "0.10.7" }
-actrix-issuer = { path = "../loran-issuer", version = "0.10.7" }
+platform = { path = "../loran-platform", package = "loran-platform", version = "0.10.7" }
+loran-proto = { path = "../loran-proto", version = "0.10.7" }
+loran-issuer = { path = "../loran-issuer", version = "0.10.7" }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", features = ["signal"] }

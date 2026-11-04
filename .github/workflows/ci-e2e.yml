@@ -70,8 +70,8 @@ jobs:
     # Server-form matrix against an in-tree EchoService: three server forms
     # (cdylib-rust / linked-rust / wasm-rust) driven by the Rust client, plus
     # the Rust server-stream + bidi DataStream scenarios. Runs entirely against
-    # the in-tree mock-actrix. One job runs the whole matrix sequentially so the
-    # slow setup (mock-actrix + actr CLI + service build) is amortised across
+    # the in-tree mock-loran. One job runs the whole matrix sequentially so the
+    # slow setup (mock-loran + actr CLI + service build) is amortised across
     # every scenario.
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 90
@@ -113,7 +113,7 @@ jobs:
           # Distinct from package-runtime-echo's cache: the polyglot scenario
           # uses its own CARGO_TARGET_DIR tree under target/e2e-cache/polyglot-echo/.
           #
-          # Only the two cross-scenario shared target trees (actr-cli, mock-actrix)
+          # Only the two cross-scenario shared target trees (actr-cli, mock-loran)
           # are cached. The per-scenario trees (service-build, driver-rust,
           # linked-rust, wasm-rust, stream-server) are cheap to rebuild and are
           # deleted by the "Clean ..." steps below as soon as no later scenario
@@ -126,7 +126,7 @@ jobs:
           save-if: ${{ github.event_name == 'schedule' || github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target/e2e-cache/polyglot-echo/actr-cli
-            . -> target/e2e-cache/polyglot-echo/mock-actrix
+            . -> target/e2e-cache/polyglot-echo/mock-loran
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Setup Node
@@ -246,10 +246,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
-      - name: Pre-build actr and mock-actrix
+      - name: Pre-build actr and mock-loran
         run: |
           cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
-          cargo build --locked --release -p actr-mock-actrix --bin mock-actrix
+          cargo build --locked --release -p actr-mock-loran --bin mock-loran
       - name: Run TypeScript stream e2e
         run: bash tests/e2e/actr/typescript-stream/run.sh
 
@@ -311,10 +311,10 @@ jobs:
           pnpm install --frozen-lockfile
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
-      - name: Pre-build actr CLI and mock-actrix
+      - name: Pre-build actr CLI and mock-loran
         run: |
           cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
-          cargo build --locked --release -p actr-mock-actrix --bin mock-actrix
+          cargo build --locked --release -p actr-mock-loran --bin mock-loran
       - name: Run web browser e2e
         env:
           ACTR_CMD: ${{ github.workspace }}/target/release/actr
@@ -671,7 +671,7 @@ jobs:
     name: Kotlin EchoApp E2E
     # Kotlin/Android mirror of swift-echo-app. Builds the native .so fresh (the
     # .so files are gitignored), publishes the AAR to mavenLocal, bootstraps a
-    # local actrix + Rust EchoService, scaffolds a Kotlin client (linked mode),
+    # local loran + Rust EchoService, scaffolds a Kotlin client (linked mode),
     # and verifies via `./gradlew connectedDebugAndroidTest` on an x86_64 emulator.
     # Hosted on purpose: connectedDebugAndroidTest needs a real x86_64
     # emulator with KVM (/dev/kvm) and udev - not available in ARC pods.

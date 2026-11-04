@@ -1,11 +1,11 @@
 [package]
-name = "actrix-proto"
+name = "loran-proto"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Protocol buffer definitions for Actrix services"
+description = "Protocol buffer definitions for Loran services"
 
 [dependencies]
 tonic = { workspace = true }

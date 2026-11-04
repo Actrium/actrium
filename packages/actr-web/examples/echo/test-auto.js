@@ -5,7 +5,7 @@
  * Covers test items from MANUAL_TEST_PLAN.zh.md:
  * - A: Direct Puppeteer page operations + console log assertions
  * - B: CDP-enhanced tests (network emulation, request interception)
- * - C: Process orchestration (actrix restart, Rust server management)
+ * - C: Process orchestration (loran restart, Rust server management)
  *
  * Usage:
  *   CLIENT_URL=https://localhost:5173 SERVER_URL=http://localhost:5174 node test-auto.js
@@ -19,7 +19,7 @@
  *   node test-auto.js B          # B-category CDP suites
  *
  * Prerequisites:
- *   - Actrix signaling server reachable (configured in actr-config.ts)
+ *   - Loran signaling server reachable (configured in actr-config.ts)
  *   - Echo server Vite dev server running
  *   - Echo client Vite dev server running
  *   - npm install puppeteer (global or local)
@@ -42,8 +42,8 @@ const TIMEOUT_ECHO = 20_000; // time to wait for echo round-trip
 
 // Paths for C-category tests
 const SCRIPT_DIR = __dirname;
-const ACTRIX_CONFIG = path.join(SCRIPT_DIR, 'actrix-dev.toml');
-const ACTRIX_DIR = process.env.ACTRIX_DIR || path.resolve(SCRIPT_DIR, '../../../../actrix');
+const LORAN_CONFIG = path.join(SCRIPT_DIR, 'loran-dev.toml');
+const LORAN_DIR = process.env.LORAN_DIR || path.resolve(SCRIPT_DIR, '../../../../loran');
 const ACTR_EXAMPLES_DIR = process.env.ACTR_EXAMPLES_DIR || path.resolve(SCRIPT_DIR, '../../../actr-examples');
 
 // ── Colours (works even without chalk) ──────────────────────────────────────
@@ -2297,33 +2297,33 @@ async function waitForPortOccupied(port, timeout = 30000) {
 }
 
 /**
- * Start actrix signaling server.
+ * Start loran signaling server.
  * Returns the child process.
  */
-async function startActrix() {
-    // Find actrix binary
-    let actrixBin = null;
+async function startLoran() {
+    // Find loran binary
+    let loranBin = null;
     const candidates = [
-        path.join(ACTRIX_DIR, 'target/release/actrix'),
-        path.join(ACTRIX_DIR, 'target/debug/actrix'),
-        'actrix', // in PATH
+        path.join(LORAN_DIR, 'target/release/loran'),
+        path.join(LORAN_DIR, 'target/debug/loran'),
+        'loran', // in PATH
     ];
     for (const c of candidates) {
         try {
-            if (c === 'actrix') {
-                execSync('which actrix', { encoding: 'utf8' });
-                actrixBin = 'actrix';
+            if (c === 'loran') {
+                execSync('which loran', { encoding: 'utf8' });
+                loranBin = 'loran';
                 break;
             } else if (fs.existsSync(c)) {
-                actrixBin = c;
+                loranBin = c;
                 break;
             }
         } catch (e) { }
     }
-    if (!actrixBin) throw new Error('actrix binary not found');
+    if (!loranBin) throw new Error('loran binary not found');
 
-    // Start actrix
-    const child = spawn(actrixBin, ['-c', ACTRIX_CONFIG], {
+    // Start loran
+    const child = spawn(loranBin, ['-c', LORAN_CONFIG], {
         cwd: SCRIPT_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
@@ -2333,16 +2333,16 @@ async function startActrix() {
     const pid = await waitForPortOccupied(8081, 15000);
     if (!pid) {
         child.kill();
-        throw new Error('actrix failed to start on port 8081');
+        throw new Error('loran failed to start on port 8081');
     }
 
     return child;
 }
 
 /**
- * Stop actrix by killing the process on port 8081.
+ * Stop loran by killing the process on port 8081.
  */
-async function stopActrix(signal = 'SIGTERM') {
+async function stopLoran(signal = 'SIGTERM') {
     const pid = findPidOnPort(8081);
     if (pid) {
         killProcess(pid, signal);
@@ -2351,12 +2351,12 @@ async function stopActrix(signal = 'SIGTERM') {
 }
 
 /**
- * Restart actrix: stop (if running) then start.
+ * Restart loran: stop (if running) then start.
  */
-async function restartActrix() {
-    await stopActrix();
+async function restartLoran() {
+    await stopLoran();
     await sleep(1000);
-    return startActrix();
+    return startLoran();
 }
 
 /**
@@ -2458,8 +2458,8 @@ function stopRustServer(rustServer, signal = 'SIGTERM') {
 
 // ── C-Category Test Suites ──────────────────────────────────────────────────
 
-async function suiteCActrixRestart(browser) {
-    console.log(C.bold('\n── C: Actrix (Signaling) Server Lifecycle Tests ──'));
+async function suiteCLoranRestart(browser) {
+    console.log(C.bold('\n── C: Loran (Signaling) Server Lifecycle Tests ──'));
 
     if (!RUN_C_TESTS) {
         skipTest('4-8', 'Signaling Server Restart', 'Requires RUN_C=1');
@@ -2469,20 +2469,20 @@ async function suiteCActrixRestart(browser) {
 
     // 4-8 Signaling Server Restart
     await runTest('4-8', 'Signaling Server Restart', async () => {
-        // This test restarts actrix and verifies both web client and server reconnect
+        // This test restarts loran and verifies both web client and server reconnect
         const serverCtx = await openServerReady(browser);
         const clientCtx = await openClientReady(browser);
         try {
             await waitForEchoWorking(clientCtx.page, TIMEOUT_LONG);
 
-            // Record actrix PID
+            // Record loran PID
             const oldPid = findPidOnPort(8081);
-            if (!oldPid) throw new Error('actrix not running on port 8081');
+            if (!oldPid) throw new Error('loran not running on port 8081');
 
-            // Restart actrix
-            await stopActrix('SIGTERM');
+            // Restart loran
+            await stopLoran('SIGTERM');
             await sleep(2000);
-            const newActrix = await startActrix();
+            const newLoran = await startLoran();
 
             // Both sides should reconnect
             await sleep(10000);
@@ -2491,9 +2491,9 @@ async function suiteCActrixRestart(browser) {
             let success = false;
             for (let i = 0; i < 5; i++) {
                 try {
-                    await sendEchoMessage(clientCtx.page, `after-actrix-restart-${i}`, TIMEOUT_ECHO);
+                    await sendEchoMessage(clientCtx.page, `after-loran-restart-${i}`, TIMEOUT_ECHO);
                     const logs = await getClientLogs(clientCtx.page);
-                    if (logs.some(l => l.includes('📥') && l.includes('after-actrix-restart'))) {
+                    if (logs.some(l => l.includes('📥') && l.includes('after-loran-restart'))) {
                         success = true;
                         break;
                     }
@@ -2501,7 +2501,7 @@ async function suiteCActrixRestart(browser) {
                     await sleep(5000);
                 }
             }
-            if (!success) throw new Error('Could not communicate after actrix restart');
+            if (!success) throw new Error('Could not communicate after loran restart');
         } finally {
             await serverCtx.page.close().catch(() => { });
             await clientCtx.page.close().catch(() => { });
@@ -2515,8 +2515,8 @@ async function suiteCActrixRestart(browser) {
         try {
             await waitForEchoWorking(clientCtx.page, TIMEOUT_LONG);
 
-            // Restart actrix
-            const actrixChild = await restartActrix();
+            // Restart loran
+            const loranChild = await restartLoran();
 
             // Wait for reconnection
             await sleep(15000);
@@ -2552,11 +2552,11 @@ async function suiteCSignalingEdgeCases(browser) {
         return;
     }
 
-    // 8-1 Unreachable Signaling URL - test with actrix stopped
+    // 8-1 Unreachable Signaling URL - test with loran stopped
     await runTest('8-1', 'Unreachable Signaling URL', async () => {
-        // Stop actrix to make signaling unreachable
+        // Stop loran to make signaling unreachable
         const originalPid = findPidOnPort(8081);
-        await stopActrix();
+        await stopLoran();
 
         try {
             const page = await browser.newPage();
@@ -2582,27 +2582,27 @@ async function suiteCSignalingEdgeCases(browser) {
             // Verify it didn't crash and showed some error indication
             // (either in logs or status)
         } finally {
-            // Restart actrix for subsequent tests
+            // Restart loran for subsequent tests
             if (originalPid) {
-                await startActrix();
+                await startLoran();
                 await sleep(3000);
             }
         }
     });
 
-    // 8-3 Signaling WS Closed by Server - simulate by briefly stopping actrix
+    // 8-3 Signaling WS Closed by Server - simulate by briefly stopping loran
     await runTest('8-3', 'Signaling WS Closed by Server', async () => {
         const serverCtx = await openServerReady(browser);
         const clientCtx = await openClientReady(browser);
         try {
             await waitForEchoWorking(clientCtx.page, TIMEOUT_LONG);
 
-            // Kill actrix abruptly (simulates WS close)
-            await stopActrix('SIGKILL');
+            // Kill loran abruptly (simulates WS close)
+            await stopLoran('SIGKILL');
             await sleep(2000);
 
-            // Restart actrix
-            await startActrix();
+            // Restart loran
+            await startLoran();
             await sleep(10000);
 
             // Client should detect close, trigger reconnection
@@ -2862,20 +2862,20 @@ async function suiteCrossplatformEnv(browser) {
     console.log(C.bold('\n── XIV.0 Cross-Platform Environment Readiness Checks ──'));
 
     if (!RUN_C_TESTS) {
-        skipTest('14-0-1', 'Actrix Availability Check', 'Requires RUN_C=1');
+        skipTest('14-0-1', 'Loran Availability Check', 'Requires RUN_C=1');
         skipTest('14-0-2', 'realm Alignment Check', 'Requires RUN_C=1');
         skipTest('14-0-3', 'signaling URL Alignment Check', 'Requires RUN_C=1');
         skipTest('14-0-6', 'Start Web Client', 'Requires RUN_C=1');
         return;
     }
 
-    // 14-0-1 Actrix Availability Check
-    await runTest('14-0-1', 'Actrix Availability Check', async () => {
+    // 14-0-1 Loran Availability Check
+    await runTest('14-0-1', 'Loran Availability Check', async () => {
         const pid = findPidOnPort(8081);
-        if (!pid) throw new Error('Actrix not running on port 8081');
+        if (!pid) throw new Error('Loran not running on port 8081');
         // Verify WebSocket handshake
         const page = await browser.newPage();
-        instrumentPage(page, 'actrix-check');
+        instrumentPage(page, 'loran-check');
         try {
             const wsOk = await page.evaluate(async () => {
                 return new Promise((resolve) => {
@@ -3659,7 +3659,7 @@ async function main() {
         { name: 'CdpSignalingRecovery', fn: suiteCdpSignalingRecovery, category: 'B' },
         { name: 'CdpIdleRecovery', fn: suiteCdpIdleRecovery, category: 'B' },
         // C-Category: Process Orchestration Suites
-        { name: 'CActrixRestart', fn: suiteCActrixRestart, category: 'C' },
+        { name: 'CLoranRestart', fn: suiteCLoranRestart, category: 'C' },
         { name: 'CSignalingEdgeCases', fn: suiteCSignalingEdgeCases, category: 'C' },
         { name: 'CRustServerLifecycle', fn: suiteCRustServerLifecycle, category: 'C' },
         // Cross-Platform Suites

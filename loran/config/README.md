@@ -11,11 +11,11 @@ control endpoints, and omits `[bind.http]`. In this configuration the process
 starts neither an HTTP listener nor a database and needs no Issuer, signaling
 service, actor identity, SQLite path, or internal service shared key.
 
-The Cargo package and executable retain their legacy name `actrix`:
+Build the `loran-server` package and run its `loran` executable:
 
 ```sh
-eval "$(/usr/local/bin/rust-target-env)" && cargo build --release -p actrix
-/build/actrium/target/release/actrix --config loran/config/ice.example.toml
+eval "$(/usr/local/bin/rust-target-env)" && cargo build --release -p loran-server
+/build/actrium/target/release/loran --config loran/config/ice.example.toml
 ```
 
 Copy the example, replace `bind.ice.advertised_ip` with a reachable relay

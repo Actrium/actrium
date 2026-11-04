@@ -1,6 +1,6 @@
-//! In-process Actrix services used by RTC integration and E2E harnesses.
+//! In-process Loran services used by RTC integration and E2E harnesses.
 //!
-//! This fixture deliberately composes the production Actrix Signaling, STUN,
+//! This fixture deliberately composes the production Loran Signaling, STUN,
 //! and TURN crates. It is not a protocol mock: only process lifecycle and
 //! deterministic test credentials live here.
 
@@ -25,7 +25,7 @@ use webrtc::peer_connection::{
 };
 
 const TURN_REALM: &str = "actr.test";
-const TURN_SHARED_TEST_KEY: &str = "actrix-rtc-integration-test-secret";
+const TURN_SHARED_TEST_KEY: &str = "loran-rtc-integration-test-secret";
 const CREDENTIAL_LIFETIME: Duration = Duration::from_secs(10 * 60);
 const AID_KEY_ID: u32 = 7;
 const AID_SIGNING_KEY_BYTES: [u8; 32] = [0x5a; 32];
@@ -43,7 +43,7 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
         .get_or_try_init(|| async {
             if !platform::storage::db::is_database_initialized() {
                 let db_dir = std::env::temp_dir().join(format!(
-                    "actrix_rtc_test_db_{}_{}",
+                    "loran_rtc_test_db_{}_{}",
                     std::process::id(),
                     uuid::Uuid::new_v4()
                 ));
@@ -52,14 +52,14 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
             }
 
             let sqlite_path = std::env::temp_dir().join(format!(
-                "actrix_rtc_signaling_{}_{}",
+                "loran_rtc_signaling_{}_{}",
                 std::process::id(),
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir_all(&sqlite_path)?;
 
             // `make_actor_id` uses `TEST_REALM`. The production signaling
-            // router validates every websocket identity against the Actrix
+            // router validates every websocket identity against the Loran
             // realm store before registering it; an empty schema is therefore
             // not a usable signaling fixture.
             platform::Realm::upsert_managed(TEST_REALM.to_string(), true, None, None).await?;
@@ -98,8 +98,8 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
     Ok(sqlite_path.clone())
 }
 
-/// Real Actrix Signaling/STUN/TURN endpoints with bounded shutdown handles.
-pub struct ActrixTestServices {
+/// Real Loran Signaling/STUN/TURN endpoints with bounded shutdown handles.
+pub struct LoranTestServices {
     signaling_addr: SocketAddr,
     stun_addr: SocketAddr,
     turn_addr: SocketAddr,
@@ -111,8 +111,8 @@ pub struct ActrixTestServices {
     turn_bindings: turn::InactiveRealms,
 }
 
-impl ActrixTestServices {
-    /// Start all three production Actrix protocol implementations on loopback
+impl LoranTestServices {
+    /// Start all three production Loran protocol implementations on loopback
     /// with ephemeral ports.
     pub async fn start() -> anyhow::Result<Self> {
         let sqlite_path = initialize_signaling_database().await?;
@@ -120,7 +120,7 @@ impl ActrixTestServices {
         let signaling_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
         let signaling_addr = signaling_listener.local_addr()?;
         let signaling_cancel = CancellationToken::new();
-        let signaling_config = platform::config::ActrixConfig {
+        let signaling_config = platform::config::LoranConfig {
             env: "test".to_string(),
             sqlite_path,
             authority: platform::config::AuthorityConfig {
@@ -129,7 +129,7 @@ impl ActrixTestServices {
             },
             ..Default::default()
         };
-        let signaling_router = actrix_signaling_service::create_signaling_router_with_config(
+        let signaling_router = loran_signaling_service::create_signaling_router_with_config(
             &signaling_config,
             signaling_cancel.clone(),
         )
@@ -144,7 +144,7 @@ impl ActrixTestServices {
             .with_graceful_shutdown(cancel.cancelled_owned())
             .await;
             if let Err(error) = result {
-                tracing::error!(%error, "Actrix signaling test service stopped unexpectedly");
+                tracing::error!(%error, "Loran signaling test service stopped unexpectedly");
             }
         });
 
@@ -153,10 +153,10 @@ impl ActrixTestServices {
         let (stun_shutdown, stun_shutdown_rx) = broadcast::channel(1);
         let stun_task = tokio::spawn(async move {
             if let Err(error) =
-                actrix_stun_service::create_stun_server_with_shutdown(stun_socket, stun_shutdown_rx)
+                loran_stun_service::create_stun_server_with_shutdown(stun_socket, stun_shutdown_rx)
                     .await
             {
-                tracing::error!(%error, "Actrix STUN test service stopped unexpectedly");
+                tracing::error!(%error, "Loran STUN test service stopped unexpectedly");
             }
         });
 
@@ -168,7 +168,7 @@ impl ActrixTestServices {
                 TURN_SHARED_TEST_KEY.to_owned(),
                 "provider.example".to_owned(),
             )
-            .map_err(|error| anyhow::anyhow!("Actrix TURN authenticator: {error}"))?
+            .map_err(|error| anyhow::anyhow!("Loran TURN authenticator: {error}"))?
             .with_inactive_realms(turn_bindings.clone()),
         );
         let turn_server = turn::create_turn_server(
@@ -180,7 +180,7 @@ impl ActrixTestServices {
             true,
         )
         .await
-        .map_err(|error| anyhow::anyhow!("Actrix TURN service: {error}"))?;
+        .map_err(|error| anyhow::anyhow!("Loran TURN service: {error}"))?;
 
         Ok(Self {
             signaling_addr,
@@ -195,7 +195,7 @@ impl ActrixTestServices {
         })
     }
 
-    /// Production Actrix Signaling WebSocket endpoint.
+    /// Production Loran Signaling WebSocket endpoint.
     pub fn signaling_url(&self) -> String {
         format!("ws://{}/signaling/ws", self.signaling_addr)
     }
@@ -212,7 +212,7 @@ impl ActrixTestServices {
         self.turn_addr
     }
 
-    /// Generate the same time-limited HMAC credential format Actrix Issuer
+    /// Generate the same time-limited HMAC credential format Loran Issuer
     /// issues to the production TURN authenticator.
     pub fn turn_credential(&self, actor_id: &ActrId) -> TurnCredential {
         let expires_at = SystemTime::now()
@@ -246,7 +246,7 @@ impl ActrixTestServices {
     }
 
     /// Produce a short-lived AId credential signed exactly as Issuer credentials
-    /// are signed. The corresponding public key is installed in Actrix's
+    /// are signed. The corresponding public key is installed in Loran's
     /// production validator during fixture startup.
     ///
     /// No Issuer runs here, so the Actor is bound to no Realm client key and
@@ -281,7 +281,7 @@ impl ActrixTestServices {
     }
 
     /// Complete ICE configuration backed only by services started by this
-    /// Actrix fixture. `relay_only` is used by T4 relay-path acceptance cases.
+    /// Loran fixture. `relay_only` is used by T4 relay-path acceptance cases.
     pub fn rtc_configuration(&self, actor_id: &ActrId, relay_only: bool) -> RTCConfiguration {
         let credential = self.turn_credential(actor_id);
         let servers = vec![
@@ -312,7 +312,7 @@ impl ActrixTestServices {
         if let Some(server) = self.turn_server.take()
             && let Err(error) = turn::shutdown_turn_server(&server).await
         {
-            tracing::warn!(%error, "Actrix TURN test shutdown failed");
+            tracing::warn!(%error, "Loran TURN test shutdown failed");
         }
         let _ = self.signaling_task.await;
         let _ = self.stun_task.await;

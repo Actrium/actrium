@@ -52,9 +52,9 @@ Receiver (datastream.Receiver)
 
 ### Prerequisites
 
-1. **Actrix (Signaling Server)** must be running. The `start.sh` script will automatically start it, or you can run it manually:
+1. **Loran (Signaling Server)** must be running. The `start.sh` script will automatically start it, or you can run it manually:
    ```bash
-   actrix --config actrix-config.toml
+   loran --config loran-config.toml
    ```
 
 2. **Code Generation**: The `start.sh` script automatically generates code using `actr gen`. The sender/receiver crates also run `actr gen` in `build.rs` during `cargo build`/`cargo run`—`actr` must be available in `PATH`; otherwise build will fail. To generate manually:
@@ -77,7 +77,7 @@ bash data-stream/start.sh
 
 This will:
 - Generate code using `actr gen`
-- Build and start actrix (signaling server)
+- Build and start loran (signaling server)
 - Build binaries
 - Start receiver and sender automatically
 

@@ -13,7 +13,19 @@ from pathlib import Path
 ALLOWLIST = "scripts/actrium/product-name-allowlist.json"
 ARCHIVE = "docs/migration/source-archive-readiness.md"
 RETIRED = re.compile(rb"act" + rb"ro|Act" + rb"ro|ACT" + rb"RO")
+HISTORICAL_SERVICE_NAME = b"Act" + b"rix"
+RETIRED_SERVICE = re.compile(HISTORICAL_SERVICE_NAME, re.IGNORECASE)
 IDENTIFIER = re.compile(rb"[A-Za-z0-9_./:@+%\\-]+")
+# Preserve the original service name only in this exact historical definition,
+# once. Other lines, runtime references and filenames remain prohibited.
+HISTORICAL_SERVICE_DEFINITIONS = {
+    "rfcs/actr/0014-kubernetes-multi-pod-soak-testing.md": (
+        b"| **Loran** | The current name in this repository for the "
+        b"signaling/STUN/TURN/AIS service suite historically called "
+        + HISTORICAL_SERVICE_NAME
+        + b" in related actr issues; it is not an endpoint or test controller. |"
+    ),
+}
 
 
 def load_allowlist(root):
@@ -49,12 +61,11 @@ def main():
     )
     failures = []
     actual = {}
+    historical_service_counts = Counter()
     for raw_path in sorted(set(listing.split(b"\0")) - {b""}):
         path = os.fsdecode(raw_path)
-        if RETIRED.search(raw_path):
+        if RETIRED.search(raw_path) or RETIRED_SERVICE.search(raw_path):
             failures.append(f"Retired product name in path: {path}")
-        if path in (ALLOWLIST, ARCHIVE):
-            continue
         file = root / path
         if file.is_symlink():
             data = os.fsencode(os.readlink(file))
@@ -65,6 +76,18 @@ def main():
                     continue
                 data = prefix + source.read()
         else:
+            continue
+
+        for number, line in enumerate(data.splitlines(), 1):
+            if RETIRED_SERVICE.search(line):
+                if (
+                    line == HISTORICAL_SERVICE_DEFINITIONS.get(path)
+                    and historical_service_counts[path] == 0
+                ):
+                    historical_service_counts[path] += 1
+                else:
+                    failures.append(f"Retired service name at {path}:{number}")
+        if path in (ALLOWLIST, ARCHIVE):
             continue
 
         counts = Counter()
@@ -83,6 +106,9 @@ def main():
         actual[path] = counts
 
     # Removed references must also lose their allowance so they cannot return.
+    for path in HISTORICAL_SERVICE_DEFINITIONS:
+        if historical_service_counts[path] != 1:
+            failures.append(f"Update the exact historical service definition allowance in {path}")
     for path, identifiers in allowances.items():
         for identifier, expected in identifiers.items():
             if actual.get(path, {}).get(identifier, 0) < expected:

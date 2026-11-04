@@ -1,4 +1,4 @@
-//! Unified SDK facade for Actrix.
+//! Unified SDK facade for Loran.
 //!
 //! This crate organizes exports into explicit layers:
 //! - `control`: stable control-plane API facade.

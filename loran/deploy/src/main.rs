@@ -1,4 +1,4 @@
-//! Deploy helper for Actrix auxiliary services
+//! Deploy helper for Loran auxiliary services
 
 use anyhow::Result;
 use clap::Parser;
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
         }) => {
             let install_config = InstallConfig {
                 install_dir,
-                binary_name: "actrix".to_string(),
+                binary_name: "loran".to_string(),
                 add_to_path: !no_path,
             };
             let source = build_install_source(tag, latest, binary_path, from_local_build)?;

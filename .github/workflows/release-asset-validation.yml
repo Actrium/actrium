@@ -676,7 +676,7 @@ jobs:
       allow_validation_tag: true
       release_version: ${{ needs.context.outputs.pre_release_version }}
 
-  actrix-assets:
+  loran-assets:
     name: Build Loran server validation assets
     needs:
       - context
@@ -1044,7 +1044,7 @@ jobs:
       - typescript-native-assets
       - npm-package-assets
       - cli-assets
-      - actrix-assets
+      - loran-assets
       - protoc-plugin-assets
       - swift-package
       - kotlin-package
@@ -1321,7 +1321,7 @@ jobs:
       - typescript-native-assets
       - npm-package-assets
       - cli-assets
-      - actrix-assets
+      - loran-assets
       - protoc-plugin-assets
       - swift-package
       - kotlin-package
@@ -1518,7 +1518,7 @@ jobs:
       - typescript-native-assets
       - npm-package-assets
       - cli-assets
-      - actrix-assets
+      - loran-assets
       - protoc-plugin-assets
       - swift-package
       - kotlin-package

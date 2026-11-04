@@ -32,11 +32,11 @@ PUBLISHER="e2e.actrium.test"
 # reserves DNS-style names for package identities.
 CLIENT_PUBLISHER="e2e-actrium-local"
 CLIENT_GUEST_VERSION="0.1.0"
-ACTRIX_BIN="${ACTRIX_BIN:-}"
+LORAN_BIN="${LORAN_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/package-runtime-echo"
 ACTR_TARGET_DIR="${ACTR_TARGET_DIR:-$E2E_TARGET_ROOT/actr-cli}"
-ACTRIX_TARGET_DIR="${ACTRIX_TARGET_DIR:-$E2E_TARGET_ROOT/actrix-bin}"
+LORAN_TARGET_DIR="${LORAN_TARGET_DIR:-$E2E_TARGET_ROOT/loran-bin}"
 WORKSPACE_TARGET_DIR="${WORKSPACE_TARGET_DIR:-$E2E_TARGET_ROOT/workspace}"
 TEMP_SERVICE_TARGET_DIR="${TEMP_SERVICE_TARGET_DIR:-$E2E_TARGET_ROOT/temp-service}"
 DEFAULT_MESSAGE="TmpFlow"
@@ -98,10 +98,10 @@ LOG_DIR="$RUN_DIR/logs"
 DIST_DIR="$RUN_DIR/dist"
 TMP_SERVICE_ROOT="$RUN_DIR/workspace"
 TMP_SERVICE_DIR="$TMP_SERVICE_ROOT/echo-actr-$RANDOM"
-ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
+LORAN_CONFIG_PATH="$RUN_DIR/loran.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
 CLIENT_RUNTIME_PATH="$RUN_DIR/client-runtime.toml"
-ACTRIX_DB="$SQLITE_DIR/actrix.db"
+LORAN_DB="$SQLITE_DIR/loran.db"
 PUBLISHER_PRIVATE_DIR="$RUN_DIR/publisher-private"
 BUILDER_HOME="$RUN_DIR/home-builder"
 BUILDER_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
@@ -117,7 +117,7 @@ umask 077
 mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT" "$PUBLISHER_PRIVATE_DIR" "$BUILDER_HOME"
 RUNTIME_LAUNCHER=(python3 "$SCRIPT_DIR/lib/runtime-isolation.py" --private-dir "$PUBLISHER_PRIVATE_DIR" --)
 
-ACTRIX_PID=""
+LORAN_PID=""
 HTTPS_PID=""
 SERVER_PID=""
 CLIENT_PID=""
@@ -140,8 +140,8 @@ cleanup() {
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null || true
     fi
-    if [ -n "$ACTRIX_PID" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
-        kill "$ACTRIX_PID" 2>/dev/null || true
+    if [ -n "$LORAN_PID" ] && kill -0 "$LORAN_PID" 2>/dev/null; then
+        kill "$LORAN_PID" 2>/dev/null || true
     fi
     if [ -n "$HTTPS_PID" ] && kill -0 "$HTTPS_PID" 2>/dev/null; then
         kill "$HTTPS_PID" 2>/dev/null || true
@@ -177,50 +177,50 @@ build_local_actr_cli() {
 # Build a test-only server whose injected transport serves the disposable
 # publisher's signed Profile. The production executable retains public HTTPS
 # discovery and has no fixture override, including in all-features builds.
-build_local_actrix() {
-    if [ -n "${ACTRIX_BIN:-}" ] && [ -x "$ACTRIX_BIN" ]; then
-        "$ACTRIX_BIN" --list | grep -q '^package_runtime_fixture: test$' ||
-            fail "ACTRIX_BIN must be the actrix test binary containing package_runtime_fixture"
-        success "Using caller-provided actrix test fixture: $ACTRIX_BIN"
+build_local_loran() {
+    if [ -n "${LORAN_BIN:-}" ] && [ -x "$LORAN_BIN" ]; then
+        "$LORAN_BIN" --list | grep -q '^package_runtime_fixture: test$' ||
+            fail "LORAN_BIN must be the loran test binary containing package_runtime_fixture"
+        success "Using caller-provided loran test fixture: $LORAN_BIN"
         return 0
     fi
-    section "🔧 Building local actrix from source"
-    CARGO_TARGET_DIR="$ACTRIX_TARGET_DIR" cargo test --no-run --message-format=json \
+    section "🔧 Building local loran from source"
+    CARGO_TARGET_DIR="$LORAN_TARGET_DIR" cargo test --no-run --message-format=json \
         --manifest-path "$REPO_ROOT/crates/loran-server/Cargo.toml" \
-        --bin actrix >"$RUN_DIR/actrix-fixture-build.jsonl"
-    ACTRIX_BIN="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "actrix" and .profile.test == true and .executable != null) | .executable' "$RUN_DIR/actrix-fixture-build.jsonl" | tail -1)"
-    [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
-    export ACTRIX_BIN
-    success "actrix ready: $ACTRIX_BIN"
+        --bin loran >"$RUN_DIR/loran-fixture-build.jsonl"
+    LORAN_BIN="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "loran" and .profile.test == true and .executable != null) | .executable' "$RUN_DIR/loran-fixture-build.jsonl" | tail -1)"
+    [ -x "$LORAN_BIN" ] || fail "loran binary missing at $LORAN_BIN"
+    export LORAN_BIN
+    success "loran ready: $LORAN_BIN"
 }
 
 render_runtime_configs() {
     render_template \
-        "$SCRIPT_DIR/config/actrix.toml" \
-        "$ACTRIX_CONFIG_PATH" \
+        "$SCRIPT_DIR/config/loran.toml" \
+        "$LORAN_CONFIG_PATH" \
         "__SQLITE_DIR__=$SQLITE_DIR" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT"
 }
 
-start_actrix() {
-    section "🚀 Starting local actrix"
+start_loran() {
+    section "🚀 Starting local loran"
     if lsof -tiTCP:"$HTTP_PORT" -sTCP:LISTEN >/dev/null 2>&1 \
         || lsof -tiUDP:"$ICE_PORT" >/dev/null 2>&1; then
         fail "Realm E2E ports are occupied; set HTTP_PORT and ICE_PORT to unused ports"
     fi
 
-    # ACTRIX_RUST_LOG lets modes capture the debug provenance marker.
-    RUST_LOG="${ACTRIX_RUST_LOG:-${RUST_LOG:-info}}" \
-        ACTR_PACKAGE_RUNTIME_FIXTURE=1 ACTR_PACKAGE_RUNTIME_CONFIG="$ACTRIX_CONFIG_PATH" \
-        "$ACTRIX_BIN" package_runtime_fixture --exact --ignored --nocapture >"$LOG_DIR/actrix.log" 2>&1 &
-    ACTRIX_PID=$!
+    # LORAN_RUST_LOG lets modes capture the debug provenance marker.
+    RUST_LOG="${LORAN_RUST_LOG:-${RUST_LOG:-info}}" \
+        ACTR_PACKAGE_RUNTIME_FIXTURE=1 ACTR_PACKAGE_RUNTIME_CONFIG="$LORAN_CONFIG_PATH" \
+        "$LORAN_BIN" package_runtime_fixture --exact --ignored --nocapture >"$LOG_DIR/loran.log" 2>&1 &
+    LORAN_PID=$!
 
     if ! wait_for_http_ok "${HTTP_BASE}/signaling/health" 120; then
-        cat "$LOG_DIR/actrix.log" >&2 || true
-        fail "actrix did not become healthy on port $HTTP_PORT"
+        cat "$LOG_DIR/loran.log" >&2 || true
+        fail "loran did not become healthy on port $HTTP_PORT"
     fi
-    success "actrix is healthy on ${HTTP_BASE}"
+    success "loran is healthy on ${HTTP_BASE}"
 }
 
 login_admin() {
@@ -495,8 +495,8 @@ run_client_and_assert() {
     echo "Server log:"
     cat "$LOG_DIR/server.log" || true
     echo ""
-    echo "Actrix log:"
-    cat "$LOG_DIR/actrix.log" || true
+    echo "Loran log:"
+    cat "$LOG_DIR/loran.log" || true
     fail "Expected echo reply not found"
 }
 
@@ -553,7 +553,7 @@ assert_no_package_record() {
     local type_str="$1"
     local target="$2"
     local count
-    count="$(python3 - "$ACTRIX_DB" "$type_str" "$target" <<'PY'
+    count="$(python3 - "$LORAN_DB" "$type_str" "$target" <<'PY'
 import sqlite3, sys
 with sqlite3.connect(sys.argv[1]) as connection:
     print(connection.execute(
@@ -661,21 +661,21 @@ stop_server() {
     SERVER_PID=""
 }
 
-# Assert actrix.log shows the package verified with its Publisher identity
+# Assert loran.log shows the package verified with its Publisher identity
 # (not as a development identity).
 assert_publisher_provenance() {
-    if ! grep -q "Package provenance verified.*provenance=Publisher" "$LOG_DIR/actrix.log" 2>/dev/null; then
-        fail "Publisher provenance marker not found in actrix.log"
+    if ! grep -q "Package provenance verified.*provenance=Publisher" "$LOG_DIR/loran.log" 2>/dev/null; then
+        fail "Publisher provenance marker not found in loran.log"
     fi
     success "Confirmed registration kept the Publisher identity"
 }
 
-stop_actrix() {
-    if [ -n "$ACTRIX_PID" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
-        kill "$ACTRIX_PID" 2>/dev/null || true
-        wait "$ACTRIX_PID" 2>/dev/null || true
+stop_loran() {
+    if [ -n "$LORAN_PID" ] && kill -0 "$LORAN_PID" 2>/dev/null; then
+        kill "$LORAN_PID" 2>/dev/null || true
+        wait "$LORAN_PID" 2>/dev/null || true
     fi
-    ACTRIX_PID=""
+    LORAN_PID=""
 }
 
 # ============================================================================
@@ -728,14 +728,14 @@ PY
 
     # Look up the publisher fixture row.
     local publisher_id
-    publisher_id="$(sqlite3 "$ACTRIX_DB" "SELECT id FROM publisher WHERE name='${PUBLISHER}';")"
+    publisher_id="$(sqlite3 "$LORAN_DB" "SELECT id FROM publisher WHERE name='${PUBLISHER}';")"
     [ -n "$publisher_id" ] || fail "Could not resolve publisher_id for ${PUBLISHER}"
 
     # --- Phase 1: rotate A→B (A archived as retired); the package signed by A still runs. ---
     section "🔄 Phase 1: rotate key (A → retired), expect success"
     local rotation_keychain="$PUBLISHER_PRIVATE_DIR/rotation-b.keychain.json"
     run_actr pkg keygen --output "$rotation_keychain" --force >/dev/null
-    python3 - "$ACTRIX_DB" "$PUBLISHER" "$rotation_keychain" <<'PY'
+    python3 - "$LORAN_DB" "$PUBLISHER" "$rotation_keychain" <<'PY'
 import base64
 import hashlib
 import json
@@ -789,7 +789,7 @@ PY
     # --- Phase 2: revoke key A by history_id (matched by signing_key_id, not array order). ---
     section "🚫 Phase 2: revoke retired key A, expect rejection"
     local revoked_rows
-    revoked_rows="$(sqlite3 "$ACTRIX_DB" \
+    revoked_rows="$(sqlite3 "$LORAN_DB" \
         "UPDATE publisher_key_history SET status='revoked' WHERE publisher_id=${publisher_id} AND key_id='${signing_key_id}'; SELECT changes();")"
     [ "$revoked_rows" = "1" ] || fail "Could not revoke historical key ${signing_key_id}"
 
@@ -813,17 +813,17 @@ section "🧪 Package Runtime Echo E2E (MODE=${MODE}, REALM_MODE=${REALM_MODE})"
 echo "Run directory: $RUN_DIR"
 echo "Backend:       $BACKEND"
 echo "Message:       $TEST_INPUT"
-echo "Actrix binary: $ACTRIX_BIN"
+echo "Loran binary: $LORAN_BIN"
 
 python3 "$SCRIPT_DIR/test_runtime_isolation.py"
 render_runtime_configs
 build_local_actr_cli
-build_local_actrix
+build_local_loran
 if [ "$REALM_MODE" != legacy ]; then prepare_realm_scenario; fi
 # Modes that assert the provenance need the debug-level "Package provenance
-# verified" marker in actrix.log.
-export ACTRIX_RUST_LOG="info,actrix::observability=debug"
-start_actrix
+# verified" marker in loran.log.
+export LORAN_RUST_LOG="info,loran::observability=debug"
+start_loran
 login_admin
 wait_for_signer
 if [ "$REALM_MODE" = legacy ]; then ensure_realm; fi

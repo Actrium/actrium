@@ -26,7 +26,7 @@ pub enum SignerExpose {
 
 /// Signer service configuration.
 ///
-/// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
+/// Service enable/disable is controlled by the bitmask in LoranConfig.enable.
 /// The ENABLE_SIGNER bit (bit 4) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
@@ -49,7 +49,7 @@ pub struct SignerServiceConfig {
     /// KEK environment variable name.
     ///
     /// Reads the KEK from the named environment variable, which is safer than
-    /// an inline value. For example: kek_env = "ACTRIX_SIGNER_KEK".
+    /// an inline value. For example: kek_env = "LORAN_SIGNER_KEK".
     #[serde(default)]
     pub kek_env: Option<String>,
 
@@ -101,7 +101,7 @@ impl SignerServiceConfig {
     ///
     /// `env` is the top-level deployment environment (for example `"prod"`); it
     /// is not part of this local config, so the top-level
-    /// `ActrixConfig::validate` owns the value and threads it through.
+    /// `LoranConfig::validate` owns the value and threads it through.
     ///
     /// Rule (SGN-02): exposing the Signer gRPC surface to the public internet in
     /// `prod` without mTLS is rejected (fail-closed).

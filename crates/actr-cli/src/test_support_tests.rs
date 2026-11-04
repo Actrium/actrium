@@ -2,11 +2,11 @@ use super::*;
 use base64::Engine as _;
 
 #[test]
-fn local_actrix_config_includes_valid_renewal_token_secret() {
+fn local_loran_config_includes_valid_renewal_token_secret() {
     let state_dir = TempDir::new().expect("temp state dir");
-    let config_path = state_dir.path().join("actrix-e2e.toml");
+    let config_path = state_dir.path().join("loran-e2e.toml");
 
-    write_actrix_config(&config_path, state_dir.path(), 18_080, 13_478)
+    write_loran_config(&config_path, state_dir.path(), 18_080, 13_478)
         .expect("config should be written");
 
     let content = fs::read_to_string(&config_path).expect("config should be readable");

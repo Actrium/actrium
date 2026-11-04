@@ -504,7 +504,7 @@ async fn run_loop_preserves_attempt_after_target_unavailable() {
     });
 
     // A connected controller dispatches its tracked role probe through the
-    // loop; the captured identity is exactly what Actrix would echo back.
+    // loop; the captured identity is exactly what Loran would echo back.
     let peer = test_actor_id(42);
     manager.connect(peer.clone()).await;
     let dispatch = wait_within(std::time::Duration::from_secs(5), captured_rx.recv())

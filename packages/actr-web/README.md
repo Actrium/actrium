@@ -20,7 +20,7 @@ cd packages/actr-web
 pnpm install
 ```
 
-Run the browser echo example against the in-repo mock actrix service:
+Run the browser echo example against the in-repo mock loran service:
 
 ```bash
 cd packages/actr-web/examples/echo

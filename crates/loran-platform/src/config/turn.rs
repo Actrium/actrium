@@ -35,7 +35,7 @@ impl Default for TurnConfig {
     fn default() -> Self {
         Self {
             relay_port_range: "49152-65535".to_string(),
-            realm: "actrix.local".to_string(),
+            realm: "loran.local".to_string(),
             turn_secret: String::new(),
             users: BTreeMap::new(),
         }

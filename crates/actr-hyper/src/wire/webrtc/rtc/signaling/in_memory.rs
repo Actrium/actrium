@@ -5,7 +5,7 @@
 //! This is a *test* transport only. It proves the router + controllers +
 //! real-PeerConnection flow end to end (offer/answer/candidate/role) without a
 //! WebSocket server; the production transport binds the WebSocket signaling client.
-//! Role arbitration mirrors the mock actrix rule (`from.serial_number <
+//! Role arbitration mirrors the mock loran rule (`from.serial_number <
 //! to.serial_number` → `from` is the offerer), which is deterministic and
 //! symmetric, so a simultaneous connect on both ends converges to one offerer.
 
@@ -87,7 +87,7 @@ async fn run_hub(
     while let Some((from, to, message)) = hub_rx.recv().await {
         match message {
             SignalingMessage::RoleNegotiation => {
-                // Deterministic, symmetric arbitration (mirrors the mock actrix):
+                // Deterministic, symmetric arbitration (mirrors the mock loran):
                 // `from` is the offerer iff `from.serial_number < to.serial_number`.
                 // Tell the *sender* its role (from = the remote peer), and the
                 // *target* its role, so both ends agree on exactly one offerer.

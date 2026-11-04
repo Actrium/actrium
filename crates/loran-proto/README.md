@@ -1,6 +1,6 @@
-# Actrix control contracts
+# Loran control contracts
 
-This crate generates protobuf types for the Actrix management/control plane. Realm v1 uses
+This crate generates protobuf types for the Loran management/control plane. Realm v1 uses
 `SIGNER` and `PUBLISHER_REGISTRY` as external terminology; enum values are part of the protocol,
 renaming does not change existing tags.
 

@@ -96,8 +96,8 @@ message SignalingToActr {
   }
 }
 
-// Opaque RTC attempt identity supplied by the sender and echoed by Actrix.
-// Actrix does not interpret these values; the originating runtime uses them
+// Opaque RTC attempt identity supplied by the sender and echoed by Loran.
+// Loran does not interpret these values; the originating runtime uses them
 // to reject a delayed delivery result from an older Controller/transport/PC
 // (and, for generation-0 role probes, from an earlier probe of the same
 // transport attempt).

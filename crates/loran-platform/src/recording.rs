@@ -515,7 +515,7 @@ fn sanitize_string(value: String) -> Option<String> {
 }
 
 fn detect_source_service(callsite: &Callsite) -> Option<String> {
-    let source_service = std::env::var("ACTRIX_SOURCE_SERVICE")
+    let source_service = std::env::var("LORAN_SOURCE_SERVICE")
         .ok()
         .and_then(sanitize_string);
     if source_service.is_some() {
@@ -534,7 +534,7 @@ fn detect_source_service(callsite: &Callsite) -> Option<String> {
 }
 
 fn detect_source_node() -> Option<String> {
-    std::env::var("ACTRIX_SOURCE_NODE")
+    std::env::var("LORAN_SOURCE_NODE")
         .ok()
         .and_then(sanitize_string)
         .or_else(|| std::env::var("HOSTNAME").ok().and_then(sanitize_string))
@@ -782,70 +782,70 @@ fn emit_channel(level: RecordLevel, channel: Channel, record: &Value) {
     match channel {
         Channel::Observability => match level {
             RecordLevel::Trace => {
-                tracing::event!(target: "actrix::observability", tracing::Level::TRACE, recording = %record)
+                tracing::event!(target: "loran::observability", tracing::Level::TRACE, recording = %record)
             }
             RecordLevel::Debug => {
-                tracing::event!(target: "actrix::observability", tracing::Level::DEBUG, recording = %record)
+                tracing::event!(target: "loran::observability", tracing::Level::DEBUG, recording = %record)
             }
             RecordLevel::Info => {
-                tracing::event!(target: "actrix::observability", tracing::Level::INFO, recording = %record)
+                tracing::event!(target: "loran::observability", tracing::Level::INFO, recording = %record)
             }
             RecordLevel::Warn => {
-                tracing::event!(target: "actrix::observability", tracing::Level::WARN, recording = %record)
+                tracing::event!(target: "loran::observability", tracing::Level::WARN, recording = %record)
             }
             RecordLevel::Error => {
-                tracing::event!(target: "actrix::observability", tracing::Level::ERROR, recording = %record)
+                tracing::event!(target: "loran::observability", tracing::Level::ERROR, recording = %record)
             }
         },
         Channel::Audit => match level {
             RecordLevel::Trace => {
-                tracing::event!(target: "actrix::audit", tracing::Level::TRACE, recording = %record)
+                tracing::event!(target: "loran::audit", tracing::Level::TRACE, recording = %record)
             }
             RecordLevel::Debug => {
-                tracing::event!(target: "actrix::audit", tracing::Level::DEBUG, recording = %record)
+                tracing::event!(target: "loran::audit", tracing::Level::DEBUG, recording = %record)
             }
             RecordLevel::Info => {
-                tracing::event!(target: "actrix::audit", tracing::Level::INFO, recording = %record)
+                tracing::event!(target: "loran::audit", tracing::Level::INFO, recording = %record)
             }
             RecordLevel::Warn => {
-                tracing::event!(target: "actrix::audit", tracing::Level::WARN, recording = %record)
+                tracing::event!(target: "loran::audit", tracing::Level::WARN, recording = %record)
             }
             RecordLevel::Error => {
-                tracing::event!(target: "actrix::audit", tracing::Level::ERROR, recording = %record)
+                tracing::event!(target: "loran::audit", tracing::Level::ERROR, recording = %record)
             }
         },
         Channel::Security => match level {
             RecordLevel::Trace => {
-                tracing::event!(target: "actrix::security", tracing::Level::TRACE, recording = %record)
+                tracing::event!(target: "loran::security", tracing::Level::TRACE, recording = %record)
             }
             RecordLevel::Debug => {
-                tracing::event!(target: "actrix::security", tracing::Level::DEBUG, recording = %record)
+                tracing::event!(target: "loran::security", tracing::Level::DEBUG, recording = %record)
             }
             RecordLevel::Info => {
-                tracing::event!(target: "actrix::security", tracing::Level::INFO, recording = %record)
+                tracing::event!(target: "loran::security", tracing::Level::INFO, recording = %record)
             }
             RecordLevel::Warn => {
-                tracing::event!(target: "actrix::security", tracing::Level::WARN, recording = %record)
+                tracing::event!(target: "loran::security", tracing::Level::WARN, recording = %record)
             }
             RecordLevel::Error => {
-                tracing::event!(target: "actrix::security", tracing::Level::ERROR, recording = %record)
+                tracing::event!(target: "loran::security", tracing::Level::ERROR, recording = %record)
             }
         },
         Channel::Operations => match level {
             RecordLevel::Trace => {
-                tracing::event!(target: "actrix::operations", tracing::Level::TRACE, recording = %record)
+                tracing::event!(target: "loran::operations", tracing::Level::TRACE, recording = %record)
             }
             RecordLevel::Debug => {
-                tracing::event!(target: "actrix::operations", tracing::Level::DEBUG, recording = %record)
+                tracing::event!(target: "loran::operations", tracing::Level::DEBUG, recording = %record)
             }
             RecordLevel::Info => {
-                tracing::event!(target: "actrix::operations", tracing::Level::INFO, recording = %record)
+                tracing::event!(target: "loran::operations", tracing::Level::INFO, recording = %record)
             }
             RecordLevel::Warn => {
-                tracing::event!(target: "actrix::operations", tracing::Level::WARN, recording = %record)
+                tracing::event!(target: "loran::operations", tracing::Level::WARN, recording = %record)
             }
             RecordLevel::Error => {
-                tracing::event!(target: "actrix::operations", tracing::Level::ERROR, recording = %record)
+                tracing::event!(target: "loran::operations", tracing::Level::ERROR, recording = %record)
             }
         },
     }
@@ -1061,7 +1061,7 @@ mod tests {
             source_node: Some("node-explicit".to_string()),
         };
 
-        let enriched = enrich_common(common, &make_callsite("actrix::service::manager"));
+        let enriched = enrich_common(common, &make_callsite("loran::service::manager"));
 
         assert_eq!(enriched.actor.as_deref(), Some("actor:1"));
         assert_eq!(enriched.trace_id.as_deref(), Some("trace-explicit"));
@@ -1074,9 +1074,9 @@ mod tests {
     #[test]
     fn enrich_common_should_fill_source_service_from_module_path() {
         let common = Common::default();
-        let enriched = enrich_common(common, &make_callsite("actrix::service::manager"));
+        let enriched = enrich_common(common, &make_callsite("loran::service::manager"));
 
-        assert_eq!(enriched.source_service.as_deref(), Some("actrix"));
+        assert_eq!(enriched.source_service.as_deref(), Some("loran"));
     }
 
     #[test]
@@ -1087,9 +1087,9 @@ mod tests {
             ..Default::default()
         };
 
-        let enriched = enrich_common(common, &make_callsite("actrix::service::manager"));
+        let enriched = enrich_common(common, &make_callsite("loran::service::manager"));
 
-        assert_eq!(enriched.source_service.as_deref(), Some("actrix"));
+        assert_eq!(enriched.source_service.as_deref(), Some("loran"));
         assert!(enriched.request_id.is_none());
     }
 

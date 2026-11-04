@@ -388,7 +388,7 @@ impl SignalingTransport for RtcSignalingTransport {
                                     target = "v020-signaling",
                                     peer = %result.target.to_string_repr(),
                                     raw_status = %unknown,
-                                    "unknown relay delivery status from Actrix; treating as rejected"
+                                    "unknown relay delivery status from Loran; treating as rejected"
                                 );
                                 RelayDeliveryStatus::RelayDeliveryRejected
                             }
@@ -417,7 +417,7 @@ impl SignalingTransport for RtcSignalingTransport {
                             RelayDeliveryStatus::RelayDeliveryRejected => tracing::warn!(
                                 target = "v020-signaling",
                                 peer = %result.target.to_string_repr(),
-                                "Actrix rejected RTC signaling relay without declaring the target unavailable"
+                                "Loran rejected RTC signaling relay without declaring the target unavailable"
                             ),
                             RelayDeliveryStatus::RelayDeliveryAccepted => {}
                         }

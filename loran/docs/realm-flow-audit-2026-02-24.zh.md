@@ -1,6 +1,6 @@
 # Realm 全流程梳理与补漏记录（2026-02-24）
 
-> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。文中 `realm_id`、`source_realm_id` 等为 2026-02 时的列名，现为 `realm`、`source_realm`（Realm 名）。
+> 历史文档：沿用撰写时的名称（如 Loran、AIS、manufacturer），现行名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。文中 `realm_id`、`source_realm_id` 等为 2026-02 时的列名，现为 `realm`、`source_realm`（Realm 名）。
 
 ## 1. 目标与范围
 
@@ -43,7 +43,7 @@
 - admin rotate realm secret：
   - 立即切换新 secret，并保留旧 secret 兼容窗口（默认 36h）。
 - signaling：
-  - 从 WebSocket query 读取 `realm_secret`，透传到 AIS 请求头 `x-actrix-realm-secret`。
+  - 从 WebSocket query 读取 `realm_secret`，透传到 AIS 请求头 `x-loran-realm-secret`。
 - AIS：
   - 注册前先校验 realm 生命周期（存在/状态/过期）。
   - 再校验 realm secret（未配置兼容、配置后强制校验）。
@@ -77,14 +77,14 @@
   - 未指定则按同 realm 写入（安全默认）
 - 注册前清理同目标类型旧 ACL，避免脏规则累积。
 
-### 5.3 realm secret 全链路补齐（platform/control/actrixd/ais/signaling/admin-web）
+### 5.3 realm secret 全链路补齐（platform/control/loran-server/ais/signaling/admin-web）
 
 - `platform`：
   - 新增 `realm::secret` 模块（分配/轮转/校验/哈希/常量头名）。
 - `control`：
   - `create_realm_with_secret_direct`：创建时返回一次性明文 secret。
   - `rotate_realm_secret_direct`：轮转并返回新 secret + 旧 secret 有效期。
-- `actrixd admin_api`：
+- `loran-server admin_api`：
   - `POST /admin/api/realms` 响应新增 `realm_secret`。
   - `POST /admin/api/realms/{id}/secret/rotate` 新增轮转接口。
 - `admin web`：
@@ -103,9 +103,9 @@
 - `signaling::service_registry::tests::test_check_discovery_acl_cross_realm_and_full_type`
 - `platform::realm::secret::tests::test_allocate_and_verify_secret`
 - `platform::realm::secret::tests::test_rotate_secret_keeps_previous_temporarily_valid`
-- `actrix_fullstack::signaling_register_enforces_realm_secret_when_configured`
-- `actrix_fullstack::signaling_discovery_cross_realm_acl_allow`
-- `actrix_fullstack::signaling_route_candidates_cross_realm_acl_allow`
+- `loran_fullstack::signaling_register_enforces_realm_secret_when_configured`
+- `loran_fullstack::signaling_discovery_cross_realm_acl_allow`
+- `loran_fullstack::signaling_route_candidates_cross_realm_acl_allow`
 
 ### 6.2 执行记录
 
@@ -119,9 +119,9 @@
   - doctest：`2 passed, 0 failed`
 - `cargo test -p admin --lib -- --nocapture`
   - 结果：`15 passed, 0 failed`
-- `cargo test -p actrix --tests -- --nocapture`
-  - 结果：`actrix_fullstack 42 passed, actrix_process 34 passed, actrix_cli 11 passed`
-- `npm run build`（`crates/actrixd/admin/web`）
+- `cargo test -p loran-server --tests -- --nocapture`
+  - 结果：`loran_fullstack 42 passed, loran_process 34 passed, loran_cli 11 passed`
+- `npm run build`（`crates/loran-server/admin/web`）
   - 结果：TypeScript + Vite 构建成功
 
 ## 7. 复盘

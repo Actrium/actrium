@@ -12,7 +12,7 @@ allocation-close observations through the same production server configuration.
 - Server: `turn`, `stun`, and `webrtc-util` **0.17.2**, all pinned to
   `https://github.com/webrtc-rs/webrtc` revision
   `ae66ebd503f013a1f7360a3fd45a8cf83993ee2b` in the unchanged root lockfile.
-- Application crates: `actr-hyper` and `actrix-turn` **0.10.7**.
+- Application crates: `actr-hyper` and `loran-turn` **0.10.7**.
 - Environment: Debian 13, Linux x86_64; Rust **1.95.0**
   (`59807616e 2026-04-14`), protoc **29.3**.
 
@@ -62,7 +62,7 @@ cargo +1.95.0 test --locked -p actr-hyper --features test-utils \
   --test turn_credential_rotation -- --nocapture --test-threads=1
 # 6 passed, 0 failed, 0 ignored, including deterministic five-tuple reuse.
 
-cargo +1.95.0 test --locked -p actrix-turn --lib --test udp_interop \
+cargo +1.95.0 test --locked -p loran-turn --lib --test udp_interop \
   -- --nocapture --test-threads=1
 # 30 unit tests and 3 real UDP interop tests passed; none ignored.
 

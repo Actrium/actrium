@@ -14,7 +14,7 @@ url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
 url = "http://__HOST__:__HTTP_PORT__/issuer"
 
 [deployment]
-# Replace this with the Realm name created via the actrix Admin UI.
+# Replace this with the Realm name created via the loran Admin UI.
 realm = "__REALM__"
 realm_client_key = "__REALM_CLIENT_KEY__"
 

@@ -108,7 +108,7 @@ version = "0.10.7"
 dependencies = [
  "actr-config",
  "actr-framework",
- "actr-mock-actrix",
+ "actr-mock-loran",
  "actr-pack",
  "actr-platform-traits",
  "actr-protocol",
@@ -116,10 +116,10 @@ dependencies = [
  "actr-runtime",
  "actr-runtime-mailbox",
  "actr-service-compat",
- "actrix-platform",
- "actrix-signaling",
- "actrix-stun",
- "actrix-turn",
+ "loran-platform",
+ "loran-signaling",
+ "loran-stun",
+ "loran-turn",
  "anyhow",
  "async-trait",
  "axum",
@@ -182,7 +182,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "actr-mock-actrix"
+name = "actr-mock-loran"
 version = "0.10.7"
 dependencies = [
  "actr-protocol",
@@ -335,12 +335,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "actrix-platform"
+name = "loran-platform"
 version = "0.10.7"
 dependencies = [
  "actr-protocol",
- "actrix-proto",
- "actrix-signer",
+ "loran-proto",
+ "loran-signer",
  "anyhow",
  "argon2",
  "async-trait",
@@ -382,7 +382,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "actrix-proto"
+name = "loran-proto"
 version = "0.10.7"
 dependencies = [
  "prost",
@@ -393,11 +393,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "actrix-signaling"
+name = "loran-signaling"
 version = "0.10.7"
 dependencies = [
  "actr-protocol",
- "actrix-platform",
+ "loran-platform",
  "anyhow",
  "axum",
  "base64",
@@ -417,10 +417,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "actrix-signer"
+name = "loran-signer"
 version = "0.10.7"
 dependencies = [
- "actrix-proto",
+ "loran-proto",
  "aes-gcm",
  "anyhow",
  "async-trait",
@@ -450,7 +450,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "actrix-stun"
+name = "loran-stun"
 version = "0.10.7"
 dependencies = [
  "anyhow",
@@ -463,11 +463,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "actrix-turn"
+name = "loran-turn"
 version = "0.10.7"
 dependencies = [
  "actr-protocol",
- "actrix-platform",
+ "loran-platform",
  "anyhow",
  "async-trait",
  "base64",

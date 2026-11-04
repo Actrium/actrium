@@ -368,6 +368,43 @@ async fn disconnect_lock_waits_share_one_absolute_deadline() {
         .expect("disconnect should continue after its shared teardown deadline");
 }
 
+#[tokio::test]
+async fn recovery_disconnect_marks_unavailable_before_reply_waiters_wake() {
+    let client = make_ws_client(make_config());
+    publish_connected_socket_state(&client);
+    let (reply_tx, reply_rx) = oneshot::channel();
+    client
+        .pending_replies
+        .lock()
+        .await
+        .insert("pending-read".to_string(), reply_tx);
+
+    // Hold the next cleanup lock so a dropped reply waiter runs while
+    // disconnect is still tearing down the old socket. This deterministically
+    // exposes the retry-before-disconnect race seen under concurrent CI load.
+    let pong_guard = client.pending_pongs.lock().await;
+    let disconnect_client = Arc::clone(&client);
+    let disconnect = tokio::spawn(async move { disconnect_client.disconnect_for_recovery().await });
+
+    tokio::time::timeout(Duration::from_secs(2), reply_rx)
+        .await
+        .expect("disconnect should retire the pending reply promptly")
+        .expect_err("the old socket can no longer deliver this reply");
+    assert!(client.idempotent_retry_allowed());
+    assert!(
+        !client.is_connected(),
+        "a dropped reply waiter must not retry on the socket being disconnected"
+    );
+
+    drop(pong_guard);
+    tokio::time::timeout(Duration::from_secs(2), disconnect)
+        .await
+        .expect("disconnect should finish after cleanup is released")
+        .expect("disconnect task should not panic")
+        .expect("recovery disconnect should succeed");
+    assert_eq!(client.get_stats().disconnections, 1);
+}
+
 #[tokio::test(start_paused = true)]
 async fn send_envelope_times_out_while_waiting_for_sink_lock() {
     let client = make_ws_client(make_config());

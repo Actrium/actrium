@@ -83,7 +83,7 @@ pub fn assert_running_binary(service: &str, expected_binary: &Path) -> Result<()
 
     if actual != expected {
         bail!(
-            "service '{service}' is running {}, expected {}. Check that ExecStart points at the managed bin/actrix path and restart the service again.",
+            "service '{service}' is running {}, expected {}. Check that ExecStart points at the managed bin/loran path and restart the service again.",
             actual.display(),
             expected.display()
         );
@@ -148,11 +148,11 @@ fn http_ok(url: &str) -> Result<bool> {
     Ok(out.status.success())
 }
 
-/// Health-check wait window, overridable via `ACTRIX_HEALTH_WAIT_SECONDS`.
+/// Health-check wait window, overridable via `LORAN_HEALTH_WAIT_SECONDS`.
 pub fn health_wait_seconds() -> u32 {
     const DEFAULT: u32 = 5;
     const MAX: u32 = 300;
-    std::env::var("ACTRIX_HEALTH_WAIT_SECONDS")
+    std::env::var("LORAN_HEALTH_WAIT_SECONDS")
         .ok()
         .and_then(|s| s.parse().ok())
         .map(|n: u32| n.min(MAX))
@@ -165,18 +165,18 @@ mod tests {
 
     #[test]
     fn parses_main_pid() {
-        assert_eq!(parse_main_pid(b"1234\n", "actrix").unwrap(), 1234);
+        assert_eq!(parse_main_pid(b"1234\n", "loran").unwrap(), 1234);
     }
 
     #[test]
     fn rejects_zero_main_pid() {
-        let err = parse_main_pid(b"0\n", "actrix").unwrap_err();
+        let err = parse_main_pid(b"0\n", "loran").unwrap_err();
         assert!(err.to_string().contains("no running MainPID"));
     }
 
     #[test]
     fn rejects_invalid_main_pid() {
-        let err = parse_main_pid(b"abc\n", "actrix").unwrap_err();
+        let err = parse_main_pid(b"abc\n", "loran").unwrap_err();
         assert!(err.to_string().contains("invalid MainPID"));
     }
 }

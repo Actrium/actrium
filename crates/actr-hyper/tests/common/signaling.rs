@@ -1,17 +1,17 @@
 //! WebSocket-based test signaling server
 //!
-//! Thin wrapper around `actr_mock_actrix::MockActrixServer` with
+//! Thin wrapper around `actr_mock_loran::MockLoranServer` with
 //! backward-compatible API for existing integration tests.
 
-pub use actr_mock_actrix::MockActrixServer;
+pub use actr_mock_loran::MockLoranServer;
 
 /// Controllable test signaling server with real WebSocket.
 ///
-/// This is a compatibility wrapper around [`MockActrixServer`] that
+/// This is a compatibility wrapper around [`MockLoranServer`] that
 /// preserves the original `TestSignalingServer` API used by hyper integration
 /// tests.
 pub struct TestSignalingServer {
-    inner: Option<MockActrixServer>,
+    inner: Option<MockLoranServer>,
     external_url: Option<String>,
 }
 
@@ -20,7 +20,7 @@ impl TestSignalingServer {
     pub async fn start() -> anyhow::Result<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         Ok(Self {
-            inner: Some(MockActrixServer::start().await?),
+            inner: Some(MockLoranServer::start().await?),
             external_url: None,
         })
     }
@@ -28,7 +28,7 @@ impl TestSignalingServer {
     pub async fn start_with_relay() -> anyhow::Result<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         Ok(Self {
-            inner: Some(MockActrixServer::start_with_relay().await?),
+            inner: Some(MockLoranServer::start_with_relay().await?),
             external_url: None,
         })
     }
@@ -57,13 +57,13 @@ impl TestSignalingServer {
     pub async fn start_on_port(port: u16) -> anyhow::Result<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         Ok(Self {
-            inner: Some(MockActrixServer::start_on_port(port).await?),
+            inner: Some(MockLoranServer::start_on_port(port).await?),
             external_url: None,
         })
     }
 
     /// Represent a signaling endpoint owned by another fixture (for example
-    /// [`crate::test_support::ActrixTestServices`]). No mock server is started;
+    /// [`crate::test_support::LoranTestServices`]). No mock server is started;
     /// protocol-specific controls are intentionally unavailable.
     pub fn external(url: impl Into<String>) -> Self {
         Self {
@@ -72,7 +72,7 @@ impl TestSignalingServer {
         }
     }
 
-    fn controlled(&self) -> &MockActrixServer {
+    fn controlled(&self) -> &MockLoranServer {
         self.inner
             .as_ref()
             .expect("signaling fault control requires the compatibility mock backend")
@@ -92,7 +92,7 @@ impl TestSignalingServer {
                     .port_or_known_default()
                     .expect("external signaling URL has a port")
             },
-            MockActrixServer::port,
+            MockLoranServer::port,
         )
     }
 
@@ -176,6 +176,6 @@ impl TestSignalingServer {
     }
 
     pub fn is_running(&self) -> bool {
-        self.inner.as_ref().is_none_or(MockActrixServer::is_running)
+        self.inner.as_ref().is_none_or(MockLoranServer::is_running)
     }
 }

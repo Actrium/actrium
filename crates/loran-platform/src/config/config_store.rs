@@ -1,7 +1,7 @@
 //! SQLite-backed config override store
 //!
 //! Persists dynamic configuration overrides (L2) in the `config_overrides` table
-//! within `actrix.db`. Validates against the config registry before writing.
+//! within `loran.db`. Validates against the config registry before writing.
 
 use super::registry;
 use anyhow::{Result, bail};

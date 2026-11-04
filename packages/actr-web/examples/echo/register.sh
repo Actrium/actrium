@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # register.sh — Seed realm + publisher and publish web echo .actr packages
-#               to a running actrix instance.
+#               to a running loran instance.
 # Usage: ./register.sh [--db <path>] [--endpoint <url>]
 #
 # Prerequisites:
-#   1. actrix running (signaling + Issuer + publisher) on port 8081
+#   1. loran running (signaling + Issuer + publisher) on port 8081
 #   2. .actr packages already built in release/ (via start.sh Steps 1–2)
 #   3. publisher signing key at release/dev-key.json (generated during build)
 
@@ -18,11 +18,11 @@ ACTR_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
-_detect_actrix_db() {
+_detect_loran_db() {
     # First: ask the live process
     if command -v lsof >/dev/null 2>&1; then
         local live_db
-        live_db=$(lsof -c actrix 2>/dev/null | awk '/actrix\.db$/ {print $NF; exit}')
+        live_db=$(lsof -c loran 2>/dev/null | awk '/loran\.db$/ {print $NF; exit}')
         if [ -n "$live_db" ] && [ -f "$live_db" ]; then
             echo "$live_db"
             return
@@ -31,9 +31,9 @@ _detect_actrix_db() {
 
     # Fallback: check local dev db first, then candidates
     local candidates=(
-        "$SCRIPT_DIR/actrix-dev-db/actrix.db"
-        "$(cd "$ACTR_ROOT/.." && pwd)/actrix/database/actrix.db"
-        "$(cd "$ACTR_ROOT/.." && pwd)/actrix/actrix-dev-db/actrix.db"
+        "$SCRIPT_DIR/loran-dev-db/loran.db"
+        "$(cd "$ACTR_ROOT/.." && pwd)/loran/database/loran.db"
+        "$(cd "$ACTR_ROOT/.." && pwd)/loran/loran-dev-db/loran.db"
     )
     local best="" best_mtime=0
     for db in "${candidates[@]}"; do
@@ -46,10 +46,10 @@ _detect_actrix_db() {
             fi
         fi
     done
-    echo "${best:-$SCRIPT_DIR/actrix-dev-db/actrix.db}"
+    echo "${best:-$SCRIPT_DIR/loran-dev-db/loran.db}"
 }
 
-ACTRIX_DB="${ACTRIX_DB:-$(_detect_actrix_db)}"
+LORAN_DB="${LORAN_DB:-$(_detect_loran_db)}"
 ENDPOINT="${ENDPOINT:-http://localhost:8081}"
 RELEASE_DIR="$SCRIPT_DIR/release"
 PUBLISHER_KEY_FILE="$RELEASE_DIR/dev-key.json"
@@ -80,7 +80,7 @@ fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --db)       ACTRIX_DB="$2";  shift 2 ;;
+        --db)       LORAN_DB="$2";  shift 2 ;;
         --endpoint) ENDPOINT="$2";   shift 2 ;;
         *) echo -e "${RED}Unknown argument: $1${NC}"; exit 1 ;;
     esac
@@ -89,16 +89,16 @@ done
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  actr register — Web Echo publisher setup"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  DB:       $ACTRIX_DB"
+echo "  DB:       $LORAN_DB"
 echo "  Endpoint: $ENDPOINT"
 echo "  actr:     $ACTR_CMD"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ── Preflight checks ──────────────────────────────────────────────────────────
 
-if [ ! -f "$ACTRIX_DB" ]; then
-    echo -e "${RED}❌ Actrix database not found: $ACTRIX_DB${NC}"
-    echo "   Make sure actrix is running and has created its database."
+if [ ! -f "$LORAN_DB" ]; then
+    echo -e "${RED}❌ Loran database not found: $LORAN_DB${NC}"
+    echo "   Make sure loran is running and has created its database."
     exit 1
 fi
 
@@ -146,7 +146,7 @@ CLIENT_REALM=$(grep -E '^\s*realm\s*=' "$CLIENT_ACTR_TOML" | head -1 | sed 's/.*
 NOW=$(date +%s)
 
 for REALM in $SERVER_REALM $CLIENT_REALM; do
-    sqlite3 "$ACTRIX_DB" \
+    sqlite3 "$LORAN_DB" \
         "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) \
          VALUES ('$REALM', 'active', 1, $NOW);"
 done
@@ -160,7 +160,7 @@ echo "🏷️  Step 2: Registering publisher '$PUBLISHER_NAME'..."
 
 EXPIRES_AT=$((NOW + 86400 * 365))
 
-sqlite3 "$ACTRIX_DB" << SQL
+sqlite3 "$LORAN_DB" << SQL
 INSERT OR IGNORE INTO publisher
     (name, public_key, contact, status, created_at, verified_at, key_expires_at)
 VALUES ('$PUBLISHER_NAME', '$PUBLISHER_PUBKEY', 'dev@example.com', 'active',

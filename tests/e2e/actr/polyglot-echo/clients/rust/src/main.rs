@@ -2,7 +2,7 @@
 //!
 //! Mirrors the bindings/* link-only registration shape (no client-guest
 //! package): construct a `Node<Init>` from a runtime config, attach a no-op
-//! workload, register with mock-actrix's Issuer, then drive a single typed
+//! workload, register with mock-loran's Issuer, then drive a single typed
 //! `EchoService.Echo` round-trip.
 //!
 //! Read by `run.sh --client rust`. Inputs:

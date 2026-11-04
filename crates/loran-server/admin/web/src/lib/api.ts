@@ -1,5 +1,5 @@
 const BASE = "/admin/api";
-const TOKEN_KEY = "actrix_admin_token";
+const TOKEN_KEY = "loran_admin_token";
 
 async function request<T>(
   path: string,

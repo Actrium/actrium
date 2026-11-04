@@ -1,7 +1,7 @@
 //! System metrics collection using pwrzv
 
 use crate::error::{AdminError, Result};
-use actrix_proto::{ServiceStatus, SystemMetrics};
+use loran_proto::{ServiceStatus, SystemMetrics};
 use std::sync::Arc;
 
 /// Collect system metrics.

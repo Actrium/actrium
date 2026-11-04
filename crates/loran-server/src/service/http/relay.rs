@@ -9,7 +9,7 @@ use loran_relay::{AuthError, Authenticator, Observer, Principal, Relay};
 use loran_relay_protocol::RelayDiscovery;
 use platform::{
     aid::credential::AIdCredentialValidator,
-    config::{ActrixConfig, RelayAuthMode, relay::RelayStaticCredential},
+    config::{LoranConfig, RelayAuthMode, relay::RelayStaticCredential},
     monitoring::ServiceCounters,
 };
 use std::sync::atomic::Ordering;
@@ -160,7 +160,7 @@ impl Authenticator for StaticAuth {
 }
 
 pub async fn build_relay_router(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     cancel: CancellationToken,
     counters: Option<Arc<ServiceCounters>>,
 ) -> anyhow::Result<Router> {

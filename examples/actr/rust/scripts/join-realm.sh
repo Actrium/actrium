@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Seed a local Realm in the actrix database and join it.
+# Seed a local Realm in the loran database and join it.
 #
-# Usage: join-realm.sh <actrix.db> <realm> <issuer_url> <owner_key> [client_key...]
+# Usage: join-realm.sh <loran.db> <realm> <issuer_url> <owner_key> [client_key...]
 #
 # Inserts the Realm (if missing) and an operator owner invite, then
 # `actr realm join` writes the owner's Realm client key to <owner_key>; the

@@ -127,7 +127,7 @@ Contributions of all kinds are welcome.
 ## Release Train (Maintainers)
 
 Use the `Release Train (Staged)` workflow for the monorepo-managed
-foundation crates, protoc tools, supported SDK crates, `actr-cli`, and Actrix
+foundation crates, protoc tools, supported SDK crates, `actr-cli`, and Loran
 server crates with one shared stable version.
 
 - Workflow file: `.github/workflows/release-train.yml`
@@ -150,7 +150,7 @@ server crates with one shared stable version.
 
 The release train publishes all components in a single run:
   1. Foundation crates → protoc-gen crates → Python (optional) → SDK → CLI →
-     Actrix crates
+     Loran crates
   2. Final Git tag created (`vX.Y.Z`)
   3. Swift package-sync dispatched (`Actrium/actr-swift-package-sync`)
   4. Kotlin package-sync dispatched (`Actrium/actr-kotlin-package-sync`)

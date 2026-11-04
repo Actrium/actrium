@@ -138,7 +138,7 @@ static REGISTRY: &[ConfigFieldDef] = &[
         key: "name",
         toml_path: "name",
         value_type: ConfigValueType::String,
-        default_value: "actrix-default",
+        default_value: "loran-default",
         dynamic: false,
         reloadable: false,
         description: "Server instance name",
@@ -270,7 +270,7 @@ static REGISTRY: &[ConfigFieldDef] = &[
         key: "recording.service_name",
         toml_path: "recording.service_name",
         value_type: ConfigValueType::String,
-        default_value: "actrix",
+        default_value: "loran",
         dynamic: false,
         reloadable: false,
         description: "OTLP service name",
@@ -473,7 +473,7 @@ static REGISTRY: &[ConfigFieldDef] = &[
         key: "turn.realm",
         toml_path: "turn.realm",
         value_type: ConfigValueType::Domain,
-        default_value: "actrix.local",
+        default_value: "loran.local",
         dynamic: true,
         reloadable: true,
         description: "Credential scope for long-term authentication (RFC 8489)",
@@ -631,7 +631,7 @@ mod tests {
         assert_eq!(field.service, "turn");
         assert!(field.dynamic);
         assert!(field.reloadable);
-        assert_eq!(field.default_value, "actrix.local");
+        assert_eq!(field.default_value, "loran.local");
     }
 
     #[test]
@@ -676,13 +676,13 @@ mod tests {
         assert!(!ConfigValueType::Ip.validate_str("999.999.999.999"));
 
         // Fpath
-        assert!(ConfigValueType::Fpath.validate_str("/etc/actrix/config.toml"));
+        assert!(ConfigValueType::Fpath.validate_str("/etc/loran/config.toml"));
         assert!(ConfigValueType::Fpath.validate_str("relative/path"));
 
         // Domain
         assert!(ConfigValueType::Domain.validate_str("localhost"));
-        assert!(ConfigValueType::Domain.validate_str("actrix.example.com"));
-        assert!(ConfigValueType::Domain.validate_str("actrix.local"));
+        assert!(ConfigValueType::Domain.validate_str("loran.example.com"));
+        assert!(ConfigValueType::Domain.validate_str("loran.local"));
         assert!(!ConfigValueType::Domain.validate_str(""));
         assert!(!ConfigValueType::Domain.validate_str("bad domain.com")); // space
 

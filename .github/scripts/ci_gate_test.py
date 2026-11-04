@@ -501,44 +501,44 @@ def test_swift_echoapp_e2e_job_present() -> None:
     assert "bash tests/e2e/actr/swift-echo-app/run.sh" in swift_job
 
 
-def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
+def test_e2e_loran_uses_in_tree_install_instead_of_artifact_download() -> None:
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     pkg_job = _job(workflow, "package-runtime-echo-e2e", "typescript-e2e")
     swift_job = _job(workflow, "swift-echo-app-e2e", "python-web-e2e")
 
-    assert "download-actrix-artifact.sh" not in workflow
-    assert "ACTR_E2E_ACTRIX_ARTIFACT" not in workflow
-    assert "ACTRIX_READ_TOKEN" not in workflow
-    assert "Actrium/actrix" not in workflow
+    assert "download-loran-artifact.sh" not in workflow
+    assert "ACTR_E2E_LORAN_ARTIFACT" not in workflow
+    assert "LORAN_READ_TOKEN" not in workflow
+    assert "Actrium/loran" not in workflow
     assert "actions: read" not in workflow
 
     assert "runs-on: [self-hosted, Linux, X64]" in pkg_job
     assert "runs-on: macos-arm64-larger" in swift_job
 
 
-def test_e2e_no_private_actrix_checkout() -> None:
+def test_e2e_no_private_loran_checkout() -> None:
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     common = (ROOT / "tests/e2e/actr/package-runtime-echo/lib/common.sh").read_text(encoding="utf-8")
     cli_support = CLI_TEST_SUPPORT.read_text(encoding="utf-8")
 
-    # No private Actrix checkout git config in any job
+    # No private Loran checkout git config in any job
     assert "insteadOf" not in workflow
     assert "x-access-token" not in workflow
-    assert "Configure git for private Actrix checkout" not in workflow
-    assert "Actrium/actrix" not in common
+    assert "Configure git for private Loran checkout" not in workflow
+    assert "Actrium/loran" not in common
     assert "git clone" not in common
-    assert 'actrix_crate_dir="$repo_root/crates/loran-server"' in common
-    assert "Actrium/actrix" not in cli_support
-    assert "DEFAULT_ACTRIX_REPO" not in cli_support
-    assert "ACTR_E2E_ACTRIX_REPO" not in cli_support
-    assert "ACTR_E2E_ACTRIX_REV" not in cli_support
-    assert "ACTR_E2E_ACTRIX_BIN" not in cli_support
-    assert "git clone actrix" not in cli_support
-    assert "ACTR_E2E_ACTRIX_ARTIFACT" not in cli_support
-    assert "DEFAULT_ACTRIX_ARTIFACT" not in cli_support
-    assert "latest_successful_actrix_run" not in cli_support
-    assert "try_ensure_actrix_artifact_binary" not in cli_support
-    assert 'std::env::var("ACTRIX_BIN")' in cli_support
+    assert 'loran_crate_dir="$repo_root/crates/loran-server"' in common
+    assert "Actrium/loran" not in cli_support
+    assert "DEFAULT_LORAN_REPO" not in cli_support
+    assert "ACTR_E2E_LORAN_REPO" not in cli_support
+    assert "ACTR_E2E_LORAN_REV" not in cli_support
+    assert "ACTR_E2E_LORAN_BIN" not in cli_support
+    assert "git clone loran" not in cli_support
+    assert "ACTR_E2E_LORAN_ARTIFACT" not in cli_support
+    assert "DEFAULT_LORAN_ARTIFACT" not in cli_support
+    assert "latest_successful_loran_run" not in cli_support
+    assert "try_ensure_loran_artifact_binary" not in cli_support
+    assert 'std::env::var("LORAN_BIN")' in cli_support
     assert 'workspace_root().join("crates/loran-server/Cargo.toml")' in cli_support
 
 
@@ -553,7 +553,7 @@ def test_e2e_linux_deps_do_not_include_unused_unzip() -> None:
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     pkg_job = _job(workflow, "package-runtime-echo-e2e", "typescript-e2e")
 
-    # actrix is installed from the in-tree source path; no artifact unzip is needed.
+    # loran is installed from the in-tree source path; no artifact unzip is needed.
     assert "unzip" not in pkg_job
 
 
@@ -575,7 +575,7 @@ def test_e2e_workspace_prebuilds_use_locked_cargo_resolution() -> None:
         "cargo build --locked --release -p actr-cli --bin actr --features wasm-engine"
     ) == 3
     assert workflow.count(
-        "cargo build --locked --release -p actr-mock-actrix --bin mock-actrix"
+        "cargo build --locked --release -p actr-mock-loran --bin mock-loran"
     ) == 2
     assert "cargo build --locked -p actr-framework-protoc-codegen" in ts_stream
     assert 'cp "$REPO_ROOT/Cargo.lock" "$project/Cargo.lock"' in ts_stream
@@ -738,8 +738,8 @@ def test_e2e_no_call_remote_in_ffi() -> None:
     assert "callRemote" not in swift_actr_ref
 
 
-def test_no_actrix_release_train_artifact_download_script() -> None:
-    assert not (ROOT / ".github/scripts/download-actrix-artifact.sh").exists()
+def test_no_loran_release_train_artifact_download_script() -> None:
+    assert not (ROOT / ".github/scripts/download-loran-artifact.sh").exists()
 
 
 def test_run_sh_uses_correct_signaling_cache_table() -> None:
@@ -863,11 +863,11 @@ def test_swift_datastream_job_runs_on_macos() -> None:
     assert "runs-on: macos-arm64-larger" in ds_job
 
 
-def test_swift_datastream_job_does_not_download_actrix_artifact() -> None:
-    """Verify the datastream job builds actrix from the in-tree source path."""
+def test_swift_datastream_job_does_not_download_loran_artifact() -> None:
+    """Verify the datastream job builds loran from the in-tree source path."""
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     ds_job = _job(workflow, "swift-datastream-app-e2e", "python-web-e2e")
-    assert "download-actrix-artifact.sh" not in ds_job
+    assert "download-loran-artifact.sh" not in ds_job
 
 
 def test_swift_datastream_job_builds_xcframework() -> None:
@@ -1008,8 +1008,8 @@ if __name__ == "__main__":
     test_release_train_forwards_release_context()
     test_release_train_supports_generic_maintenance_branches()
     test_swift_echoapp_e2e_job_present()
-    test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download()
-    test_e2e_no_private_actrix_checkout()
+    test_e2e_loran_uses_in_tree_install_instead_of_artifact_download()
+    test_e2e_no_private_loran_checkout()
     test_e2e_no_inline_archive_download_url()
     test_e2e_linux_deps_do_not_include_unused_unzip()
     test_e2e_linux_job_has_no_ios_rust_targets()
@@ -1018,7 +1018,7 @@ if __name__ == "__main__":
     test_swift_e2e_scripts_capture_app_diagnostics()
     test_swift_e2e_uploads_debug_symbols_separately()
     test_e2e_no_call_remote_in_ffi()
-    test_no_actrix_release_train_artifact_download_script()
+    test_no_loran_release_train_artifact_download_script()
     test_run_sh_uses_correct_signaling_cache_table()
     test_swift_e2e_only_shuts_down_its_selected_simulator()
     test_swift_e2e_covers_short_and_long_background_recovery()
@@ -1027,7 +1027,7 @@ if __name__ == "__main__":
     test_service_readiness_waits_for_exact_registration()
     test_nightly_e2e_includes_swift_datastream()
     test_swift_datastream_job_runs_on_macos()
-    test_swift_datastream_job_does_not_download_actrix_artifact()
+    test_swift_datastream_job_does_not_download_loran_artifact()
     test_swift_datastream_job_builds_xcframework()
     test_swift_datastream_timeout_not_less_than_240()
     test_swift_datastream_job_not_in_pr_gate()

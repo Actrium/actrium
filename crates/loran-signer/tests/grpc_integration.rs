@@ -1,10 +1,10 @@
-use actrix_proto::{
+use base64::Engine as _;
+use loran_proto::{
     admin::v1::NonceCredential,
     signer::v1::{
         EnsureNamedKeyRequest, HealthCheckRequest, SignRequest, signer_client::SignerClient,
     },
 };
-use base64::Engine as _;
 use nonce_auth::{CredentialBuilder, storage::MemoryStorage};
 use signer::{
     GrpcClient, GrpcClientConfig, KeyEncryptor, KeyStorage, SignerError, SignerServiceConfig,
@@ -301,7 +301,7 @@ async fn test_signer_grpc_client_end_to_end() {
 
     let mut client = GrpcClient::new(&GrpcClientConfig {
         endpoint: server.endpoint.clone(),
-        actrix_shared_key: psk.to_string(),
+        loran_shared_key: psk.to_string(),
         timeout_seconds: 5,
         enable_tls: false,
         tls_domain: None,
@@ -350,7 +350,7 @@ async fn test_signer_grpc_client_rejects_wrong_shared_secret() {
 
     let mut client = GrpcClient::new(&GrpcClientConfig {
         endpoint: server.endpoint.clone(),
-        actrix_shared_key: "wrong-secret".to_string(),
+        loran_shared_key: "wrong-secret".to_string(),
         timeout_seconds: 5,
         enable_tls: false,
         tls_domain: None,
@@ -381,7 +381,7 @@ async fn test_signer_grpc_client_rejects_wrong_shared_secret() {
 async fn test_signer_grpc_client_rejects_invalid_endpoint() {
     let result = GrpcClient::new(&GrpcClientConfig {
         endpoint: "not-a-valid-endpoint".to_string(),
-        actrix_shared_key: "test-signer-grpc-psk".to_string(),
+        loran_shared_key: "test-signer-grpc-psk".to_string(),
         timeout_seconds: 1,
         enable_tls: false,
         tls_domain: None,
@@ -412,7 +412,7 @@ async fn test_signer_grpc_client_fails_when_server_unreachable() {
 
     let result = GrpcClient::new(&GrpcClientConfig {
         endpoint: format!("http://{addr}"),
-        actrix_shared_key: "test-signer-grpc-psk".to_string(),
+        loran_shared_key: "test-signer-grpc-psk".to_string(),
         timeout_seconds: 1,
         enable_tls: false,
         tls_domain: None,

@@ -7,7 +7,7 @@ export default defineConfig({
   base: "/admin/",
   server: {
     host: "::",
-    allowedHosts: ["actrix.s15.kookyleo.space"],
+    allowedHosts: ["loran.example.com"],
     proxy: {
       "/admin/api": "http://localhost:80",
       "/admin/health": "http://localhost:80",

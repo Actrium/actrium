@@ -1,8 +1,8 @@
-name = "actrix-example-local"
+name = "loran-example-local"
 enable = 31
 env = "dev"
 sqlite_path = "database"
-actrix_shared_key = "0123456789abcdef0123456789abcdef"
+loran_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,dev,examples"
 
 [authority]
@@ -23,7 +23,7 @@ port = 3478
 
 [turn]
 relay_port_range = "49152-65535"
-realm = "actrix.local"
+realm = "loran.local"
 turn_secret = "0123456789abcdef0123456789abcdef"
 
 [services.signer]

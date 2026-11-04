@@ -14,9 +14,9 @@ use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
 use actr_protocol::realm_profile::{RealmPackage, RealmProfile, RealmStatus as ProfileStatus};
 use actr_protocol::uri::ActrUri;
 use actr_protocol::{AuthorityDescriptor, PublisherProfile};
-use actrix_publisher_registry::{PublisherRegistryError, PublisherRegistryManager};
 use axum::http::StatusCode;
 use chrono::Utc;
+use loran_publisher_registry::{PublisherRegistryError, PublisherRegistryManager};
 use platform::config::RealmConfig;
 use platform::net::FetchError;
 use platform::realm::domain::member_from_descriptor;
@@ -244,7 +244,7 @@ where
     Fut: Future<Output = Result<Arc<[u8]>, FetchError>>,
 {
     let domain = request.publisher.as_str();
-    let normalized = actrix_publisher_registry::reserved::canonical_publisher_domain(domain)
+    let normalized = loran_publisher_registry::reserved::canonical_publisher_domain(domain)
         .map_err(|error| ManagementError::Invalid(format!("publisher: {error}")))?;
     if normalized != domain || !request.realm.is_empty() {
         return Err(ManagementError::Invalid(

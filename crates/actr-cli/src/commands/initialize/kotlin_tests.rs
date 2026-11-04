@@ -7,8 +7,8 @@ fn extract_signaling_host_parses_all_variants() {
         "10.30.3.206"
     );
     assert_eq!(
-        extract_signaling_host("wss://actrix1.develenv.com/signaling/ws"),
-        "actrix1.develenv.com"
+        extract_signaling_host("wss://loran.example.com/signaling/ws"),
+        "loran.example.com"
     );
     assert_eq!(extract_signaling_host("ws://localhost:8080"), "localhost");
     // Empty string falls through splits and returns the empty string itself.

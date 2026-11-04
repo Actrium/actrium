@@ -1,15 +1,15 @@
 [package]
-name = "actr-mock-actrix"
+name = "actr-mock-loran"
 version = "0.10.7"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Mock actrix server (WS signaling + HTTP Issuer + Publisher Registry) for Actor-RTC integration tests"
+description = "Mock loran server (WS signaling + HTTP Issuer + Publisher Registry) for Actor-RTC integration tests"
 
 [[bin]]
-name = "mock-actrix"
-path = "src/bin/mock_actrix.rs"
+name = "mock-loran"
+path = "src/bin/mock_loran.rs"
 
 [dependencies]
 actr-relay-security = { path = "../actr-relay-security", version = "0.10.5" }

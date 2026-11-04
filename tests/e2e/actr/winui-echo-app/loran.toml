@@ -1,15 +1,15 @@
-enable = 25
-name = "package-runtime-echo-e2e"
+enable = 29
+name = "winui-echo-app-e2e"
 env = "dev"
 sqlite_path = "__SQLITE_DIR__"
-location_tag = "local,e2e,package-runtime-echo"
-actrix_shared_key = "actrix-e2e-shared-key-0123456789abcdef"
+location_tag = "local,e2e,winui-echo-app"
+loran_shared_key = "loran-e2e-shared-key-0123456789abcdef"
 
 [control]
 head = "admin_ui"
 
 [control.admin_ui]
-password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$8nOhATnOX20U5/QzsPGZsLp2B0FT2+4V2Jj7YfrKQVo"
+password = "e2e-test-password"
 
 [authority]
 uri = "actr://localhost"
@@ -21,15 +21,17 @@ ip = "127.0.0.1"
 port = __HTTP_PORT__
 
 [bind.ice]
-ip = "127.0.0.1"
+domain_name = "__ICE_HOST__"
+ip = "__ICE_HOST__"
 port = __ICE_PORT__
-advertised_ip = "127.0.0.1"
+advertised_ip = "__ICE_HOST__"
 advertised_port = __ICE_PORT__
 
 [turn]
+advertised_ip = "__ICE_HOST__"
+advertised_port = __ICE_PORT__
 relay_port_range = "49152-49200"
-realm = "local.actrix"
-turn_secret = "e2e-turn-secret-0123456789abcdef"
+realm = "local.loran"
 
 [services.signer]
 
@@ -37,7 +39,6 @@ turn_secret = "e2e-turn-secret-0123456789abcdef"
 
 [services.issuer.server]
 renewal_token_secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-worker_id = 0
 
 [services.signaling]
 

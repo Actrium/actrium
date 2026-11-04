@@ -2,15 +2,15 @@
 
 # WinUI EchoApp E2E — Windows mirror of tests/e2e/actr/swift-echo-app/run.sh.
 #
-# Flow: build actrix + actr CLI + EchoService (Rust) + the cabi.EchoApp
-# workload dll + the WinUI app; start actrix; provision realm/publisher keychain;
+# Flow: build loran + actr CLI + EchoService (Rust) + the cabi.EchoApp
+# workload dll + the WinUI app; start loran; provision realm/publisher keychain;
 # start the EchoService; render the app's actr.toml; launch the WinUI app
 # with ACTR_ECHOAPP_AUTO_SEND=1; wait for the ACTR_E2E_RESULT marker on
 # stderr and verify the echo reply. The SSH service runs in Session 0, where
 # WinUI cannot initialize, so the app itself is started through an interactive
 # Task Scheduler task in the logged-in desktop session.
 #
-# Reuses tests/e2e/actr/package-runtime-echo/lib/common.sh for the actrix / realm /
+# Reuses tests/e2e/actr/package-runtime-echo/lib/common.sh for the loran / realm /
 # keychain / service-package lifecycle. Windows-specific: port cleanup
 # (netstat+taskkill instead of lsof), dotnet build for the app, no simulator.
 #
@@ -30,20 +30,20 @@ ICE_PORT=3478
 REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="actrium"
-ACTRIX_BIN="${ACTRIX_BIN:-}"
+LORAN_BIN="${LORAN_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
-ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/actrix.toml"
+LORAN_CONFIG_TEMPLATE="$SCRIPT_DIR/loran.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/winui-echo-app"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
 TEMP_SERVICE_TARGET_DIR="$E2E_TARGET_ROOT/temp-service"
 DEFAULT_MESSAGE="e2e-test-message"
 REALM_NAME_PREFIX="winui-echo-app"
 TEST_INPUT="$DEFAULT_MESSAGE"
-ICE_HOST="${ACTRIX_ICE_HOST:-}"
+ICE_HOST="${LORAN_ICE_HOST:-}"
 
 # The cabi workload crate is a standalone workspace; build-actr-cabi-dll.sh
 # expects the cdylib under ${WORKSPACE_ROOT}/target, so force that target dir
-# for the dll build (actr CLI / actrix builds below override it inline).
+# for the dll build (actr CLI / loran builds below override it inline).
 export CARGO_TARGET_DIR="$REPO_ROOT/target"
 
 while [[ $# -gt 0 ]]; do
@@ -69,9 +69,9 @@ SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
 PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
 PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
-ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
+LORAN_CONFIG_PATH="$RUN_DIR/loran.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
-ECHOAPP_ACTRIX_CONFIG="$RUN_DIR/echoapp-actr.toml"
+ECHOAPP_LORAN_CONFIG="$RUN_DIR/echoapp-actr.toml"
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 ECHOAPP_PACKAGE_MANIFEST="$RUN_DIR/echoapp-package-manifest.toml"
 ECHOAPP_MARKER_BINARY="$RUN_DIR/echoapp-linked-identity.bin"
@@ -87,7 +87,7 @@ APP_TASK_LAUNCHER=""
 
 mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT"
 
-ACTRIX_PID=""
+LORAN_PID=""
 SERVER_PID=""
 ACTR_CLI_BIN=""
 ADMIN_TOKEN=""
@@ -135,19 +135,19 @@ run_actr() {
 }
 
 render_runtime_configs() {
-    [ -n "${ACTRIX_CONFIG_TEMPLATE:-}" ] || fail "ACTRIX_CONFIG_TEMPLATE is not set"
+    [ -n "${LORAN_CONFIG_TEMPLATE:-}" ] || fail "LORAN_CONFIG_TEMPLATE is not set"
     if [ -z "$ICE_HOST" ]; then
         ICE_HOST="$(detect_ice_host)"
     fi
 
-    # Actrix parses this value as a native Windows path. Keep SQLITE_DIR in
+    # Loran parses this value as a native Windows path. Keep SQLITE_DIR in
     # POSIX form for shell checks, but render a drive-qualified path in TOML.
-    local actrix_sqlite_dir
-    actrix_sqlite_dir="$(cargo_path "$SQLITE_DIR")"
+    local loran_sqlite_dir
+    loran_sqlite_dir="$(cargo_path "$SQLITE_DIR")"
     render_template \
-        "$ACTRIX_CONFIG_TEMPLATE" \
-        "$ACTRIX_CONFIG_PATH" \
-        "__SQLITE_DIR__=$actrix_sqlite_dir" \
+        "$LORAN_CONFIG_TEMPLATE" \
+        "$LORAN_CONFIG_PATH" \
+        "__SQLITE_DIR__=$loran_sqlite_dir" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__ICE_HOST__=$ICE_HOST"
@@ -176,7 +176,7 @@ cargo_path() {
 detect_ice_host() {
     local ice_host
     ice_host="$(powershell.exe -NoProfile -Command '$route = Get-NetRoute -DestinationPrefix "0.0.0.0/0" | Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1; if ($null -ne $route) { Get-NetIPAddress -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "169.254.*" } | Select-Object -First 1 -ExpandProperty IPAddress }' | tr -d '\r')"
-    [ -n "$ice_host" ] || fail "Unable to detect the Windows default-route IPv4 address; set ACTRIX_ICE_HOST"
+    [ -n "$ice_host" ] || fail "Unable to detect the Windows default-route IPv4 address; set LORAN_ICE_HOST"
     printf '%s\n' "$ice_host"
 }
 
@@ -205,8 +205,8 @@ cleanup() {
             } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
             >/dev/null 2>&1 || true
     fi
-    if [ -n "${ACTRIX_PID:-}" ] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
-        kill "$ACTRIX_PID" 2>/dev/null || true
+    if [ -n "${LORAN_PID:-}" ] && kill -0 "$LORAN_PID" 2>/dev/null; then
+        kill "$LORAN_PID" 2>/dev/null || true
     fi
     if [ -n "${APP_TASK_NAME:-}" ]; then
         MSYS_NO_PATHCONV=1 schtasks.exe /End /TN "$APP_TASK_NAME" >/dev/null 2>&1 || true
@@ -214,7 +214,7 @@ cleanup() {
     fi
     MSYS_NO_PATHCONV=1 taskkill.exe /F /IM "${APP_PROCESS_NAME}.exe" 2>/dev/null || true
     wait 2>/dev/null || true
-    rm -f "$ECHOAPP_ACTRIX_CONFIG"
+    rm -f "$ECHOAPP_LORAN_CONFIG"
     if [ $status -eq 0 ] && [ "${KEEP_TMP:-0}" != "1" ]; then
         rm -rf "$RUN_DIR"
     else
@@ -224,7 +224,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# ──── Rust / actrix / actr-CLI build (reused from swift-echo-app) ────
+# ──── Rust / loran / actr-CLI build (reused from swift-echo-app) ────
 
 build_local_actr_cli() {
     section "🔧 Building local actr CLI"
@@ -234,24 +234,24 @@ build_local_actr_cli() {
     success "actr CLI ready: $ACTR_CLI_BIN"
 }
 
-build_local_actrix() {
-    if [ -n "${ACTRIX_BIN:-}" ]; then
+build_local_loran() {
+    if [ -n "${LORAN_BIN:-}" ]; then
         local resolved
-        resolved="$(command -v "$ACTRIX_BIN" 2>/dev/null || true)"
-        [ -n "$resolved" ] || [ -x "$ACTRIX_BIN" ] || fail "ACTRIX_BIN set but not executable: $ACTRIX_BIN"
-        ACTRIX_BIN="${resolved:-$ACTRIX_BIN}"
-        export ACTRIX_BIN
-        success "Using caller-provided actrix: $ACTRIX_BIN"
+        resolved="$(command -v "$LORAN_BIN" 2>/dev/null || true)"
+        [ -n "$resolved" ] || [ -x "$LORAN_BIN" ] || fail "LORAN_BIN set but not executable: $LORAN_BIN"
+        LORAN_BIN="${resolved:-$LORAN_BIN}"
+        export LORAN_BIN
+        success "Using caller-provided loran: $LORAN_BIN"
         return 0
     fi
-    section "🔨 Building local actrix from source"
+    section "🔨 Building local loran from source"
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" cargo build \
         --manifest-path "$REPO_ROOT/crates/loran-server/Cargo.toml" \
-        --bin actrix >/dev/null
-    ACTRIX_BIN="$ACTR_TARGET_DIR/debug/actrix"
-    [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
-    export ACTRIX_BIN
-    success "actrix ready: $ACTRIX_BIN"
+        --bin loran >/dev/null
+    LORAN_BIN="$ACTR_TARGET_DIR/debug/loran"
+    [ -x "$LORAN_BIN" ] || fail "loran binary missing at $LORAN_BIN"
+    export LORAN_BIN
+    success "loran ready: $LORAN_BIN"
 }
 
 # ──── cabi.EchoApp workload dll ────
@@ -401,7 +401,7 @@ provision_publisher_keychain() {
         --arg created_at "$now" \
         '{
           created_at: $created_at,
-          note: "E2E publisher signing key issued by local actrix admin API",
+          note: "E2E publisher signing key issued by local loran admin API",
           private_key: $private_key,
           public_key: $public_key
         }' \
@@ -488,7 +488,7 @@ EOF
 
 render_echoapp_config() {
     section "📝 Rendering EchoApp runtime config"
-    render_template "$SCRIPT_DIR/actr.toml.tpl" "$ECHOAPP_ACTRIX_CONFIG" \
+    render_template "$SCRIPT_DIR/actr.toml.tpl" "$ECHOAPP_LORAN_CONFIG" \
         "__HOST__=127.0.0.1" \
         "__ICE_HOST__=$ICE_HOST" \
         "__HTTP_PORT__=$HTTP_PORT" \
@@ -585,7 +585,7 @@ write_app_task_launcher() {
 
     local app_exe_win config_win stdout_win stderr_win runtime_log_win
     app_exe_win="$(windows_path "$APP_EXE")"
-    config_win="$(windows_path "$ECHOAPP_ACTRIX_CONFIG")"
+    config_win="$(windows_path "$ECHOAPP_LORAN_CONFIG")"
     stdout_win="$(windows_path "$APP_STDOUT_LOG")"
     stderr_win="$(windows_path "$APP_STDERR_LOG")"
     runtime_log_win="$(windows_path "$APP_RUNTIME_LOG")"
@@ -655,15 +655,15 @@ wait_for_echo_result() {
 section "🧪 WinUI EchoApp E2E"
 echo "Run directory: $RUN_DIR"
 echo "Message:       $TEST_INPUT"
-echo "Actrix binary: ${ACTRIX_BIN:-workspace source (built below)}"
+echo "Loran binary: ${LORAN_BIN:-workspace source (built below)}"
 echo "Host target:   $HOST_TARGET"
 
 render_runtime_configs
 build_local_actr_cli
-build_local_actrix
+build_local_loran
 build_workload_dll
 build_winui_app
-start_actrix
+start_loran
 login_admin
 wait_for_signer
 ensure_realm

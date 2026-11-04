@@ -306,7 +306,7 @@ filter = '''
 package(actr-hyper) and binary(mobile_rtc_pair_contract) and (
     test(/^p00_a_is_only_connect_initiator_and_pair_is_bidirectionally_usable$/) |
     test(/^p00_b_is_only_connect_initiator_and_a_is_real_answerer$/) |
-    test(/^p00_connect_initiator_can_be_answerer_under_actrix_arbitration$/) |
+    test(/^p00_connect_initiator_can_be_answerer_under_loran_arbitration$/) |
     test(/^p01_a_only_short_background_uses_production_feed_and_soft_recovers$/) |
     test(/^p02_a_only_lifecycle_with_bidirectional_link_blackhole_soft_recovers$/) |
     test(/^p03_a_only_long_background_preserves_duration_and_hard_rebuilds_pair$/) |

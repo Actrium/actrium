@@ -23,7 +23,7 @@ include = [
 
 [features]
 default = ["dynclib-engine", "opentelemetry"]
-test-utils = ["dep:actr-mock-actrix", "dep:rusqlite"]
+test-utils = ["dep:actr-mock-loran", "dep:rusqlite"]
 wasm-engine = ["actr-hyper/wasm-engine"]
 dynclib-engine = ["actr-hyper/dynclib-engine"]
 opentelemetry = ["actr-hyper/opentelemetry", "actr-config/opentelemetry"]
@@ -135,7 +135,7 @@ rustls.workspace = true
 futures-util = "0.3"
 uuid = { version = "1.19.0", features = ["v4"] }
 rust-embed = "8.11.0"
-actr-mock-actrix = { workspace = true, optional = true }
+actr-mock-loran = { workspace = true, optional = true }
 
 # Web server for `actr run --web`
 axum = "0.8"

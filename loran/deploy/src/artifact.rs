@@ -13,7 +13,7 @@ use std::process::Command;
 use crate::checksum::{parse_sha256_sum, verify_file};
 use crate::release::{AssetKind, ReleaseAsset, TagTarget, download_asset, fetch_release};
 
-/// Where the actrix binary comes from.
+/// Where the loran binary comes from.
 #[derive(Debug, Clone)]
 pub enum Source {
     /// A specific GitHub Release tag, e.g. `v0.4.3`.
@@ -189,7 +189,7 @@ fn secure_temp_dir(version: &str) -> Result<PathBuf> {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect::<String>();
-    let template = format!("actrix-deploy-{sanitized}.XXXXXX");
+    let template = format!("loran-deploy-{sanitized}.XXXXXX");
     let out = Command::new("mktemp")
         .args(["-d", "-t", &template])
         .output()
@@ -211,20 +211,20 @@ mod tests {
     #[test]
     fn resolves_local_binary_with_checksum() {
         let dir = std::env::temp_dir();
-        let bin = dir.join("actrix-deploy-artifact-test.bin");
-        let sha = dir.join("actrix-deploy-artifact-test.bin.sha256");
+        let bin = dir.join("loran-deploy-artifact-test.bin");
+        let sha = dir.join("loran-deploy-artifact-test.bin.sha256");
         std::fs::write(&bin, b"hello world").unwrap();
         // sha256sum of "hello world" (no trailing newline)
         let digest = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
         let mut f = std::fs::File::create(&sha).unwrap();
-        writeln!(f, "{digest}  actrix-deploy-artifact-test.bin").unwrap();
+        writeln!(f, "{digest}  loran-deploy-artifact-test.bin").unwrap();
 
         let art = resolve(
             &Source::BinaryPath(bin.clone()),
             Some("v9.9.9"),
             Some(&sha),
             false,
-            "Actrium/actr",
+            "Actrium/actrium",
             None,
         )
         .unwrap();
@@ -239,14 +239,14 @@ mod tests {
     #[test]
     fn local_binary_requires_version() {
         let dir = std::env::temp_dir();
-        let bin = dir.join("actrix-deploy-artifact-test2.bin");
+        let bin = dir.join("loran-deploy-artifact-test2.bin");
         std::fs::write(&bin, b"x").unwrap();
         let err = resolve(
             &Source::BinaryPath(bin.clone()),
             None,
             None,
             true,
-            "Actrium/actr",
+            "Actrium/actrium",
             None,
         )
         .unwrap_err();
@@ -257,14 +257,14 @@ mod tests {
     #[test]
     fn local_binary_requires_sha256_without_skip() {
         let dir = std::env::temp_dir();
-        let bin = dir.join("actrix-deploy-artifact-test3.bin");
+        let bin = dir.join("loran-deploy-artifact-test3.bin");
         std::fs::write(&bin, b"x").unwrap();
         let err = resolve(
             &Source::BinaryPath(bin.clone()),
             Some("v1.0.0"),
             None,
             false,
-            "Actrium/actr",
+            "Actrium/actrium",
             None,
         )
         .unwrap_err();
@@ -279,7 +279,7 @@ mod tests {
             None,
             None,
             true,
-            "Actrium/actr",
+            "Actrium/actrium",
             None,
         )
         .unwrap_err();
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn release_asset_digest_accepts_github_sha256() {
         let asset = ReleaseAsset {
-            name: "actrix-linux-x86_64".into(),
+            name: "loran-linux-x86_64".into(),
             url: "https://api".into(),
             browser_download_url: "https://download".into(),
             digest: Some(
@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn release_asset_digest_allows_missing_digest() {
         let asset = ReleaseAsset {
-            name: "actrix-linux-x86_64".into(),
+            name: "loran-linux-x86_64".into(),
             url: "https://api".into(),
             browser_download_url: "https://download".into(),
             digest: None,
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn release_asset_digest_rejects_unsupported_or_invalid_digest() {
         let unsupported = ReleaseAsset {
-            name: "actrix-linux-x86_64".into(),
+            name: "loran-linux-x86_64".into(),
             url: "https://api".into(),
             browser_download_url: "https://download".into(),
             digest: Some("sha512:abc".into()),
@@ -326,7 +326,7 @@ mod tests {
         assert!(release_asset_sha256_digest(&unsupported).is_err());
 
         let invalid = ReleaseAsset {
-            name: "actrix-linux-x86_64".into(),
+            name: "loran-linux-x86_64".into(),
             url: "https://api".into(),
             browser_download_url: "https://download".into(),
             digest: Some("sha256:abc".into()),

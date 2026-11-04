@@ -2,7 +2,7 @@
 
 This scenario validates the local package runtime flow end-to-end:
 
-1. Start the in-tree `actrix` test fixture from the scenario config.
+1. Start the in-tree `loran` test fixture from the scenario config.
 2. Use the Admin API to create a dedicated realm and capture its owner invite;
    the server host joins as the owner (`actr realm join`), invites the client
    host as an editor (`actr realm invite --role editor`), and the client host
@@ -34,7 +34,7 @@ retire the Realm and require the resolver to refuse it.
   to create mount/PID namespaces.
 - macOS: the system `sandbox-exec` command.
 
-`actrix` does not need to be preinstalled. The scenario builds its test binary with `cargo test --no-run --bin actrix` and starts only the ignored `package_runtime_fixture` entry point. This avoids depending on public DNS for the virtual publisher domain while exercising the complete server and package runtime. An explicit `ACTRIX_BIN` must name that test binary.
+`loran` does not need to be preinstalled. The scenario builds its test binary with `cargo test --no-run --bin loran` and starts only the ignored `package_runtime_fixture` entry point. This avoids depending on public DNS for the virtual publisher domain while exercising the complete server and package runtime. An explicit `LORAN_BIN` must name that test binary.
 
 ## Run
 
@@ -92,7 +92,7 @@ its separate dynamic signed-document fixture (`MODE=rotation` defaults to
 Every formal Realm scenario, including the map-only diagnostic mode, runs its
 Issuer and signaling endpoints over HTTPS/WSS to satisfy the signed Realm
 Profile contract. Each run generates a separate disposable server certificate
-and CA under `actrix-tls/`. `SSL_CERT_FILE` adds that CA to a copy of the system
+and CA under `loran-tls/`. `SSL_CERT_FILE` adds that CA to a copy of the system
 roots for the CLI and isolated Host processes; `CURL_CA_BUNDLE` configures curl.
 Certificate and hostname verification remain enabled, and system trust is not
 modified. Legacy scenarios without a Realm Profile retain HTTP/WS.
@@ -193,9 +193,9 @@ contains generated private keys and invites: do not upload the whole directory.
 
 Useful environment variables:
 
-- `ACTRIX_BIN` supplies an already-built `actrix` test binary containing `package_runtime_fixture`.
+- `LORAN_BIN` supplies an already-built `loran` test binary containing `package_runtime_fixture`.
 - `HTTP_PORT` and `ICE_PORT` override the default ports 8081 and 3478.
-- `ACTR_TARGET_DIR`, `ACTRIX_TARGET_DIR`, `WORKSPACE_TARGET_DIR` and `TEMP_SERVICE_TARGET_DIR` allow build-cache reuse.
+- `ACTR_TARGET_DIR`, `LORAN_TARGET_DIR`, `WORKSPACE_TARGET_DIR` and `TEMP_SERVICE_TARGET_DIR` allow build-cache reuse.
 - `KEEP_TMP=1` keeps the `.tmp/run-*` directory after the run.
 - `CLIENT_TIMEOUT_SECONDS` changes the client wait timeout.
 - `RUST_LOG` forwards the log level to the host processes.

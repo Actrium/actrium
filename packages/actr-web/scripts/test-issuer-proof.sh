@@ -16,7 +16,7 @@ cleanup() {
 }
 trap cleanup EXIT
 cd "$repo_dir"
-cargo test -p actrix-issuer --test integration_test --no-run --locked --message-format=json > "$test_dir/build.json"
+cargo test -p loran-issuer --test integration_test --no-run --locked --message-format=json > "$test_dir/build.json"
 fixture_bin="$(python3 - "$test_dir/build.json" <<'PY'
 import json,sys
 for line in open(sys.argv[1]):

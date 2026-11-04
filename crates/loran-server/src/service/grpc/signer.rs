@@ -6,7 +6,7 @@
 use anyhow::Result;
 use axum::Router;
 use platform::{
-    config::ActrixConfig, monitoring::ServiceCounters, storage::nonce::SqliteNonceStorage,
+    config::LoranConfig, monitoring::ServiceCounters, storage::nonce::SqliteNonceStorage,
 };
 use signer::{KeyEncryptor, KeyStorage, create_grpc_service};
 use std::sync::Arc;
@@ -19,7 +19,7 @@ use std::sync::Arc;
 /// When `counters` is provided, an axum middleware layer records every
 /// request into the shared `ServiceCounters`.
 pub async fn build_signer_grpc_router(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     counters: Option<Arc<ServiceCounters>>,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<Router> {
@@ -67,8 +67,7 @@ pub async fn build_signer_grpc_router(
     ));
 
     // Create the gRPC service (this moves the stores).
-    let grpc_service =
-        create_grpc_service(storage, nonce_storage, config.actrix_shared_key.clone());
+    let grpc_service = create_grpc_service(storage, nonce_storage, config.loran_shared_key.clone());
 
     platform::recording::info!("Signer gRPC service router built for the dedicated listener");
 

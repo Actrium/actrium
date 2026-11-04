@@ -45,7 +45,7 @@ android_logger = "0.14"
 log = "0.4"
 
 [dev-dependencies]
-actr-mock-actrix = { workspace = true }
+actr-mock-loran = { workspace = true }
 tempfile.workspace = true
 
 [features]

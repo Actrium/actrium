@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-Actr, Actrium, Keel, and the service currently called Actrix live in separate
+Actr, Actrium, Keel, and the service currently called Loran live in separate
 repositories, although the browser increasingly composes the first three as
 one product. A merged repository needs to show those relationships without
 erasing the boundaries or conflicting with native-platform conventions.

@@ -82,7 +82,7 @@ fn write_exported_proto(output_dir: &Path, name: &str, content: &str) -> Result<
     Examples:\n  \
     # Discover services using the local project's actr.toml config\n  \
     actr registry discover --list-only\n\n  \
-    # Discover services on a remote actrix server (standalone, no local project needed)\n  \
+    # Discover services on a remote loran server (standalone, no local project needed)\n  \
     actr registry discover --list-only \\\n    \
     --endpoint http://124.71.231.251:9080/issuer \\\n    \
     --realm dev@example.com \\\n    \
@@ -105,7 +105,7 @@ pub struct DiscoveryCommand {
     #[arg(long)]
     pub list_only: bool,
 
-    /// Standalone mode: actrix Issuer endpoint URL (e.g. http://124.71.231.251:9080/issuer)
+    /// Standalone mode: loran Issuer endpoint URL (e.g. http://124.71.231.251:9080/issuer)
     ///
     /// When specified together with --realm and --realm-client-key, runs in standalone
     /// mode that doesn't require a local project's manifest.toml / actr.toml.

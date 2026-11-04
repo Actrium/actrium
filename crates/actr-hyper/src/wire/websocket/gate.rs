@@ -9,7 +9,7 @@
 //! | Concern | RTC inbound dispatch | WebSocketGate |
 //! |---------|-----------|---------------|
 //! | Transport | WebRTC DataChannel | WebSocket (TCP) |
-//! | Sender auth | actrix signaling verifies credential | Local Ed25519 verification (IssuerKeyCache) |
+//! | Sender auth | loran signaling verifies credential | Local Ed25519 verification (IssuerKeyCache) |
 //! | Message aggregation | Session lane pumps → `InboundRouter` | Per-connection `DataLane` reading |
 
 use super::connection::WebSocketConnection;

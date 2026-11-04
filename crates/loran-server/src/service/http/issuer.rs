@@ -7,7 +7,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use axum::Router;
 use issuer::handlers::IssuerState;
-use platform::config::ActrixConfig;
+use platform::config::LoranConfig;
 use platform::monitoring::ServiceCounters;
 use platform::{ServiceInfo, ServiceType};
 use std::sync::Arc;
@@ -35,7 +35,7 @@ impl std::fmt::Debug for IssuerService {
 
 impl IssuerService {
     /// Display-only instance for the service collector.
-    pub fn new(config: &ActrixConfig) -> Self {
+    pub fn new(config: &LoranConfig) -> Self {
         Self {
             info: ServiceInfo::new(
                 "Issuer Service",
@@ -51,7 +51,7 @@ impl IssuerService {
     }
 
     /// Serving instance around a shared Issuer state.
-    pub fn with_state(config: &ActrixConfig, state: IssuerState) -> Self {
+    pub fn with_state(config: &LoranConfig, state: IssuerState) -> Self {
         let mut svc = Self::new(config);
         svc.state = Some(state);
         svc

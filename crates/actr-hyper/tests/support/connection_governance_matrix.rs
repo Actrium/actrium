@@ -148,14 +148,13 @@ async fn mobile_answerer_same_id_restart_bounds_old_call_then_new_operation_reco
 async fn mixed_role_mobile_keeps_healthy_peer_rpc_and_stream_during_other_link_fault() {
     use actr_hyper::lifecycle::{NetworkAvailability, NetworkTransportFlags};
     use actr_hyper::test_support::{
-        ActrixTestServices, LinkDirection, MobileEventDriver, PacketRule, TestHarness,
-        make_actor_id,
+        LinkDirection, LoranTestServices, MobileEventDriver, PacketRule, TestHarness, make_actor_id,
     };
     use actr_protocol::{DataChunk, PayloadType, prost::Message};
     const A: u64 = 67_002;
     const B: u64 = 67_001;
     const C: u64 = 67_003;
-    let services = ActrixTestServices::start().await.unwrap();
+    let services = LoranTestServices::start().await.unwrap();
     let mut h = TestHarness::with_external_signaling(services.signaling_url()).await;
     for serial in [A, B, C] {
         let id = make_actor_id(serial);
@@ -437,7 +436,7 @@ fn live_lanes(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn answerer_parked_open_lane_rejoins_without_manual_reconnect() {
-    // The lower serial is the Answerer under the test Actrix role tie-break.
+    // The lower serial is the Answerer under the test Loran role tie-break.
     let mut pair = MobileRtcPairHarness::new(52_001, 52_002).await;
     pair.establish(ConnectionInitiator::A).await;
     let initial = pair.wait_pair_ready(READY_WAIT).await;

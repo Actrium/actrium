@@ -149,17 +149,17 @@ async fn handle_connection(
                     actor_id = %actor_id_str,
                     old_ws = %old_ws,
                     new_ws = %client_id,
-                    "mock-actrix: WS actor rebound — previous session loses this binding"
+                    "mock-loran: WS actor rebound — previous session loses this binding"
                 );
             } else if found {
                 tracing::info!(
                     actor_id = %actor_id_str,
-                    "mock-actrix: WS bound to HTTP-registered actor"
+                    "mock-loran: WS bound to HTTP-registered actor"
                 );
             } else {
                 tracing::debug!(
                     actor_id = %actor_id_str,
-                    "mock-actrix: WS bound to lazily-created registry entry (no prior HTTP register)"
+                    "mock-loran: WS bound to lazily-created registry entry (no prior HTTP register)"
                 );
             }
         }
@@ -197,7 +197,7 @@ async fn handle_connection(
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(err)) => {
-                        tracing::debug!(%err, "mock-actrix: ws recv error");
+                        tracing::debug!(%err, "mock-loran: ws recv error");
                         break;
                     }
                     _ => {}
@@ -301,7 +301,7 @@ async fn handle_peer_to_server(
                 serial = register_ok.actr_id.serial_number,
                 publisher = req.actr_type.publisher,
                 name = req.actr_type.name,
-                "mock-actrix: registered actor (ws)"
+                "mock-loran: registered actor (ws)"
             );
         }
     }
@@ -382,7 +382,7 @@ pub(crate) fn mock_renewal_token(serial: u64) -> Vec<u8> {
     use sha2::{Digest as _, Sha256};
 
     let mut hasher = Sha256::new();
-    hasher.update(b"actr-mock-actrix-renewal-token-v1");
+    hasher.update(b"actr-mock-loran-renewal-token-v1");
     hasher.update(serial.to_be_bytes());
     hasher.finalize().to_vec()
 }
@@ -433,7 +433,7 @@ async fn handle_actr_to_server(
                 count = candidates.len(),
                 skipped_unbound,
                 target_type = format!("{}.{}", req.target_type.publisher, req.target_type.name),
-                "mock-actrix: route candidates response"
+                "mock-loran: route candidates response"
             );
 
             let ok = route_candidates_response::RouteCandidatesOk {
@@ -594,7 +594,7 @@ async fn handle_actr_to_server(
         }
 
         _ => {
-            tracing::debug!("mock-actrix: ignoring ActrToSignaling payload");
+            tracing::debug!("mock-loran: ignoring ActrToSignaling payload");
         }
     }
 }
@@ -747,7 +747,7 @@ async fn handle_actr_relay(
             to_actor = %role_neg.to.to_string_repr(),
             from_client_id = ?from_client_id,
             to_client_id = ?to_client_id,
-            "mock-actrix: role negotiation routed pairwise"
+            "mock-loran: role negotiation routed pairwise"
         );
 
         if let Some(target_client_id) = to_client_id.as_deref() {
@@ -772,7 +772,7 @@ async fn handle_actr_relay(
             tracing::warn!(
                 from_actor = %role_neg.from.to_string_repr(),
                 to_actor = %role_neg.to.to_string_repr(),
-                "mock-actrix: role negotiation target has no bound websocket"
+                "mock-loran: role negotiation target has no bound websocket"
             );
             send_relay_delivery_result(
                 sender_id,
@@ -792,7 +792,7 @@ async fn handle_actr_relay(
 
 /// Egress disposition of one relay in the mock, mirroring production's
 /// queue-rejection vs target-unavailable split so delivery results stay
-/// faithful to Actrix.
+/// faithful to Loran.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MockRelayEgress {
     Delivered,
@@ -854,7 +854,7 @@ async fn forward_relay_to_target(
                         source = %relay.source.to_string_repr(),
                         target = %relay.target.to_string_repr(),
                         target_client_id = %target_cid,
-                        "mock-actrix: relay target websocket sender closed"
+                        "mock-loran: relay target websocket sender closed"
                     );
                     MockRelayEgress::Rejected
                 }
@@ -864,7 +864,7 @@ async fn forward_relay_to_target(
             source = %relay.source.to_string_repr(),
             target = %relay.target.to_string_repr(),
             target_client_id = %target_cid,
-            "mock-actrix: relay target client missing websocket sender"
+            "mock-loran: relay target client missing websocket sender"
         );
         MockRelayEgress::TargetUnavailable
     } else {
@@ -872,7 +872,7 @@ async fn forward_relay_to_target(
             source = %relay.source.to_string_repr(),
             target = %relay.target.to_string_repr(),
             sender_id = %sender_id,
-            "mock-actrix: dropping relay for unbound target instead of broadcasting"
+            "mock-loran: dropping relay for unbound target instead of broadcasting"
         );
         MockRelayEgress::TargetUnavailable
     }
@@ -928,7 +928,7 @@ async fn send_response(
 }
 
 /// Whether one egress send reached its client's WS channel. Production
-/// Actrix reports a full/closed target queue as `Rejected`, distinct from an
+/// Loran reports a full/closed target queue as `Rejected`, distinct from an
 /// exact `ActrId` with no bound session (`TargetUnavailable`); the mock
 /// mirrors that split so e2e recovery tests stay faithful.
 async fn send_to_client(

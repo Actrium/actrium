@@ -25,7 +25,7 @@ import {
 import { cn } from "../../lib/utils";
 import { api } from "../../lib/api";
 
-const SIDEBAR_COLLAPSED_KEY = "actrix_admin_sidebar_collapsed";
+const SIDEBAR_COLLAPSED_KEY = "loran_admin_sidebar_collapsed";
 
 interface NavItem {
   to: string;
@@ -207,7 +207,7 @@ export function Sidebar() {
                 </span>
               ) : (
                 <span className="text-lg font-bold tracking-tight text-gray-900">
-                  Actrix
+                  Loran
                 </span>
               )}
               {!collapsed && (

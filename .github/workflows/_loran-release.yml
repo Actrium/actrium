@@ -83,15 +83,15 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { os: ubuntu-latest, asset: actrix-linux-x86_64, exe_ext: "" }
-          - { os: ubuntu-24.04-arm, asset: actrix-linux-arm64, exe_ext: "" }
-          - { os: macos-14, asset: actrix-macos-arm64, exe_ext: "" }
-          # Windows actrix build temporarily skipped: the opentelemetry feature
+          - { os: ubuntu-latest, asset: loran-linux-x86_64, exe_ext: "" }
+          - { os: ubuntu-24.04-arm, asset: loran-linux-arm64, exe_ext: "" }
+          - { os: macos-14, asset: loran-macos-arm64, exe_ext: "" }
+          # Windows loran build temporarily skipped: the opentelemetry feature
           # (#486) pushes the Windows release build past the 30m timeout on a
-          # cold cache, cancelling the job and skipping Upload actrix assets
-          # (so NO actrix binaries publish at all). Re-enable once a Windows
+          # cold cache, cancelling the job and skipping Upload loran assets
+          # (so NO loran binaries publish at all). Re-enable once a Windows
           # larger runner is provisioned or the timeout is raised.
-          # - { os: windows-latest, asset: actrix-windows-x86_64, exe_ext: ".exe" }
+          # - { os: windows-latest, asset: loran-windows-x86_64, exe_ext: ".exe" }
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
     steps:
@@ -166,15 +166,15 @@ jobs:
           pnpm --ignore-workspace install --frozen-lockfile
           pnpm run build
 
-      - name: Build actrix (release)
-        run: cargo build --release -p actrix --features opentelemetry
+      - name: Build loran (release)
+        run: cargo build --release -p loran-server --features opentelemetry
         working-directory: source
 
       - name: Stage binary
         shell: bash
         run: |
           mkdir -p dist
-          cp "source/target/release/actrix${{ matrix.target.exe_ext }}" "dist/${{ matrix.target.asset }}"
+          cp "source/target/release/loran${{ matrix.target.exe_ext }}" "dist/${{ matrix.target.asset }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -184,7 +184,7 @@ jobs:
           if-no-files-found: error
 
   build-deploy:
-    name: actrix-deploy-linux-${{ matrix.arch }}
+    name: loran-deploy-linux-${{ matrix.arch }}
     needs: validate
     strategy:
       fail-fast: false
@@ -205,23 +205,23 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: source/loran/deploy
-      - name: Build actrix-deploy (release)
+      - name: Build loran-deploy (release)
         working-directory: source/loran/deploy
         run: cargo build --release
       - name: Stage binary
         shell: bash
         run: |
           mkdir -p dist
-          cp "source/loran/deploy/target/release/deploy" "dist/actrix-deploy-linux-${{ matrix.arch }}"
+          cp "source/loran/deploy/target/release/deploy" "dist/loran-deploy-linux-${{ matrix.arch }}"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: actrix-deploy-linux-${{ matrix.arch }}
-          path: dist/actrix-deploy-linux-${{ matrix.arch }}
+          name: loran-deploy-linux-${{ matrix.arch }}
+          path: dist/loran-deploy-linux-${{ matrix.arch }}
           if-no-files-found: error
 
   publish:
-    name: Upload actrix assets
+    name: Upload loran assets
     if: inputs.publish
     needs: [validate, build, build-deploy]
     runs-on: ubuntu-latest
@@ -230,14 +230,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: actrix-*
+          pattern: loran-*
           path: dist
           merge-multiple: true
 
       - name: Verify complete asset set
         env:
-          # actrix-windows-x86_64 omitted: Windows build skipped per #489 (30m timeout).
-          ASSETS: actrix-linux-x86_64 actrix-linux-arm64 actrix-macos-arm64 actrix-deploy-linux-x86_64 actrix-deploy-linux-arm64
+          # loran-windows-x86_64 omitted: Windows build skipped per #489 (30m timeout).
+          ASSETS: loran-linux-x86_64 loran-linux-arm64 loran-macos-arm64 loran-deploy-linux-x86_64 loran-deploy-linux-arm64
         run: |
           set -euo pipefail
           for asset in $ASSETS; do
@@ -248,7 +248,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          for asset in actrix-*; do
+          for asset in loran-*; do
             [[ "$asset" == *.sha256 ]] && continue
             sha256sum "$asset" > "$asset.sha256"
             echo "Generated $asset.sha256"

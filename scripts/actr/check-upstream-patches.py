@@ -60,7 +60,7 @@ def main():
     if submodule_rev != RTC_SUBMODULE_REV:
         raise SystemExit(f"RTC submodule is {submodule_rev}, expected {RTC_SUBMODULE_REV}")
 
-    consumers = ("actr-hyper",) if args.client_only else ("actr-hyper", "actrix-turn")
+    consumers = ("actr-hyper",) if args.client_only else ("actr-hyper", "loran-turn")
     for name in consumers:
         matching = [package for package in packages.values() if package["name"] == name and package["id"] in nodes]
         if len(matching) != 1:
@@ -77,8 +77,8 @@ def main():
     ]
     if not args.client_only:
         edges += [
-            ("actrix-turn", "turn"),
-            ("actrix-turn", "webrtc-util"),
+            ("loran-turn", "turn"),
+            ("loran-turn", "webrtc-util"),
             ("turn", "stun"),
             ("turn", "webrtc-util"),
         ]

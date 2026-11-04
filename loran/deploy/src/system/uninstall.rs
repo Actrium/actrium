@@ -3,7 +3,7 @@
 //! Removal is split into separately-confirmed groups so operators can remove
 //! the service/binaries while preserving runtime data (db/logs/shared) and
 //! configuration. Defaults preserve config and data; only the systemd unit,
-//! the `releases/` binaries, and the `bin/actrix` symlink are removed by
+//! the `releases/` binaries, and the `bin/loran` symlink are removed by
 //! default.
 
 use anyhow::Result;
@@ -13,7 +13,7 @@ use std::process::Command;
 
 use crate::config::InstallConfig;
 
-const DEFAULT_SYSTEM_ACCOUNT: &str = "actrix";
+const DEFAULT_SYSTEM_ACCOUNT: &str = "loran";
 
 /// Optional flags for `deploy uninstall`.
 #[derive(Debug, Clone)]
@@ -25,7 +25,7 @@ pub struct UninstallArgs {
 impl Default for UninstallArgs {
     fn default() -> Self {
         Self {
-            install_dir: PathBuf::from("/opt/actrix"),
+            install_dir: PathBuf::from("/opt/loran"),
             service_name: None,
         }
     }
@@ -43,11 +43,11 @@ pub fn uninstall_application(args: UninstallArgs) -> Result<()> {
         .unwrap_or_else(|| DEFAULT_SYSTEM_ACCOUNT.to_string());
     super::install::validate_service_name(&service_name)?;
     let service_file = format!("/etc/systemd/system/{service_name}.service");
-    let config_dir = "/etc/actrix";
+    let config_dir = "/etc/loran";
 
     let config = InstallConfig {
         install_dir: args.install_dir.clone(),
-        binary_name: "actrix".to_string(),
+        binary_name: "loran".to_string(),
         add_to_path: false,
     };
     let releases_dir = config.releases_dir();
@@ -71,15 +71,15 @@ pub fn uninstall_application(args: UninstallArgs) -> Result<()> {
     #[cfg(unix)]
     {
         if user_exists(DEFAULT_SYSTEM_ACCOUNT) {
-            components_found.push("System user (actrix)");
+            components_found.push("System user (loran)");
         }
         if group_exists(DEFAULT_SYSTEM_ACCOUNT) {
-            components_found.push("System group (actrix)");
+            components_found.push("System group (loran)");
         }
     }
 
     if components_found.is_empty() {
-        println!("✅ No actrix components found on this system.");
+        println!("✅ No loran components found on this system.");
         return Ok(());
     }
 
@@ -106,7 +106,7 @@ pub fn uninstall_application(args: UninstallArgs) -> Result<()> {
         }
     }
 
-    // 2. Remove binaries: releases/ + bin/actrix symlink (default yes)
+    // 2. Remove binaries: releases/ + bin/loran symlink (default yes)
     let has_binaries = releases_dir.exists() || bin_link.exists();
     if has_binaries
         && prompt_confirm(
@@ -153,7 +153,7 @@ pub fn uninstall_application(args: UninstallArgs) -> Result<()> {
 
     // 4. Remove configuration files (default NO — preserve)
     if std::path::Path::new(config_dir).exists() {
-        if prompt_confirm("Remove configuration files? (/etc/actrix)", false)? {
+        if prompt_confirm("Remove configuration files? (/etc/loran)", false)? {
             if let Err(e) = remove_path(&PathBuf::from(config_dir)) {
                 println!("⚠️  Failed to remove configuration files: {}", e);
             } else {

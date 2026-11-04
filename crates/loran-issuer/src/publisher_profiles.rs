@@ -273,7 +273,7 @@ impl PublisherProfileRefresher {
                 message: error.to_string(),
             })?
             .with_timezone(&chrono::Utc);
-        actrix_publisher_registry::PublisherRegistryManager::new(self.pool.clone())
+        loran_publisher_registry::PublisherRegistryManager::new(self.pool.clone())
             .refresh_publisher(domain, &profile, &keys)
             .await
             .map(|_| expires_at)

@@ -1,6 +1,6 @@
 # Loran 开发指南
 
-> 下文命令与目录树中的 `actrix` 为代码中沿用的历史名（Cargo package、二进制、目录），
+> 下文命令与目录树中的 `loran` 为代码中沿用的历史名（Cargo package、二进制、目录），
 > 见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」；现行 crate 布局以 [CRATES](CRATES.zh.md) 为准。
 
 ## 快速开始
@@ -17,16 +17,16 @@
 ```bash
 # 克隆仓库(包含子项目)
 git clone https://github.com/Actrium/actrium.git
-cd actrix
+cd actrium
 
 # 开发构建
-cargo build
+cargo build -p loran-server
 
 # 发布构建
-cargo build --release
+cargo build --release -p loran-server
 
 # 带 OpenTelemetry 支持
-cargo build --release --features opentelemetry
+cargo build --release -p loran-server --features opentelemetry
 ```
 
 ### 运行测试
@@ -36,7 +36,7 @@ cargo build --release --features opentelemetry
 cargo test
 
 # 特定 crate
-cargo test -p actrix-signer
+cargo test -p loran-signer
 cargo test -p turn
 
 # 带日志
@@ -49,9 +49,9 @@ make all  # fmt, clippy, test, build, coverage
 ## 项目结构
 
 ```
-actrix/
+loran/
 ├── crates/
-│   ├── actrixd/                # 主程序 crate
+│   ├── loran-server/                # 主程序 crate
 │   │   ├── src/
 │   │   │   ├── main.rs         # 入口点、可观测性初始化
 │   │   │   ├── cli.rs          # 命令行参数
@@ -62,13 +62,13 @@ actrix/
 │   │   │   │   └── container.rs
 │   │   │   └── error.rs        # 错误类型
 │   │   └── tests/
-│   ├── contracts/              # gRPC 协议与消息定义（package: actrix-proto）
+│   ├── contracts/              # gRPC 协议与消息定义（package: loran-proto）
 │   ├── platform/               # 共享基础库（lifecycle/cfg/state/auth/events）
 │   │   ├── config/             # 配置系统
 │   │   ├── storage/            # SQLite 抽象
 │   │   └── aid/                # ActorId 相关
 │   ├── control/                # 控制面协议实现（package: admin）
-│   ├── sdk/                    # 统一导出门面（package: actrix-sdk）
+│   ├── sdk/                    # 统一导出门面（package: loran-sdk）
 │   └── services/               # 业务服务集合
 │       ├── issuer/             # Issuer（现 crates/loran-issuer）
 │       ├── signer/             # Issuer Signer（现 crates/loran-signer）
@@ -101,7 +101,7 @@ cargo clippy -- -D warnings
 cargo test
 
 # 本地运行
-cargo run -p actrix -- --config config.example.toml
+cargo run -p loran-server -- --config config.example.toml
 ```
 
 ### 3. 提交代码
@@ -130,7 +130,7 @@ make all
 cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
-cargo build
+cargo build -p loran-server
 ```
 
 ## 添加新服务
@@ -146,7 +146,7 @@ cargo new --lib crates/myservice
 ```toml
 [workspace]
 members = [
-    "crates/actrixd",
+    "crates/loran-server",
     "crates/myservice",
     # ...
 ]
@@ -178,7 +178,7 @@ impl MyService {
 ### 4. 添加到 ServiceContainer
 
 ```rust
-// crates/actrixd/src/service/container.rs
+// crates/loran-server/src/service/container.rs
 pub enum ServiceContainer {
     // 现有服务...
     MyService(MyService),
@@ -198,7 +198,7 @@ impl ServiceContainer {
 ### 5. 添加到 ServiceManager
 
 ```rust
-// crates/actrixd/src/service/manager.rs
+// crates/loran-server/src/service/manager.rs
 impl ServiceManager {
     pub async fn start_myservice(&mut self) -> Result<()> {
         let service = MyService::new(/* config */)?;
@@ -214,7 +214,7 @@ impl ServiceManager {
 // crates/platform/src/config/mod.rs
 pub const ENABLE_MYSERVICE: u8 = 0b100000;  // 新位
 
-impl ActrixConfig {
+impl LoranConfig {
     pub fn is_myservice_enabled(&self) -> bool {
         self.enable & ENABLE_MYSERVICE != 0
     }
@@ -227,33 +227,33 @@ impl ActrixConfig {
 
 ```bash
 # 全局 debug
-RUST_LOG=debug cargo run -p actrix
+RUST_LOG=debug cargo run -p loran-server
 
 # 特定模块
-RUST_LOG=actrix::service=debug,actrix_signer=trace cargo run -p actrix
+RUST_LOG=loran::service=debug,loran_signer=trace cargo run -p loran-server
 
 # 仅错误
-RUST_LOG=error cargo run -p actrix
+RUST_LOG=error cargo run -p loran-server
 ```
 
 ### 使用 GDB/LLDB
 
 ```bash
 # 构建 debug 版本
-cargo build
+cargo build -p loran-server
 
 # GDB
-rust-gdb target/debug/actrix
+rust-gdb target/debug/loran
 
 # LLDB
-rust-lldb target/debug/actrix
+rust-lldb target/debug/loran
 ```
 
 ### Flamegraph 性能分析
 
 ```bash
 cargo install flamegraph
-sudo cargo flamegraph --bin actrix
+sudo cargo flamegraph --bin loran
 ```
 
 ## 常见问题
@@ -316,10 +316,10 @@ git diff Cargo.lock
 
 ```bash
 # CPU 性能分析
-cargo flamegraph --bin actrix
+cargo flamegraph --bin loran
 
 # 内存分析
-valgrind --tool=massif target/release/actrix
+valgrind --tool=massif target/release/loran
 ```
 
 ### 基准测试
@@ -368,8 +368,8 @@ git push origin v0.2.0
 ### 4. 构建发布版
 
 ```bash
-cargo build --release
-strip target/release/actrix  # 减小二进制大小
+cargo build --release -p loran-server
+strip target/release/loran  # 减小二进制大小
 ```
 
 ## 贡献指南

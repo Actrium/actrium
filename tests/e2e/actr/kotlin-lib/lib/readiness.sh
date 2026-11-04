@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# readiness.sh — poll actrix actor_registry until a service registers.
+# readiness.sh — poll loran actor_registry until a service registers.
 # Language-agnostic (pure sqlite). Shared by the Kotlin e2e suites.
 # Sourced alongside package-runtime-echo/lib/common.sh.
 

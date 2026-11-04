@@ -1,8 +1,8 @@
-//! Versioned release switching for the `releases/<version>/actrix` +
-//! `bin/actrix` symlink model.
+//! Versioned release switching for the `releases/<version>/loran` +
+//! `bin/loran` symlink model.
 //!
 //! Owns the atomic active-symlink switch, version queries, and rollback.
-//! The systemd unit (`ExecStart=.../bin/actrix`) is never touched here.
+//! The systemd unit (`ExecStart=.../bin/loran`) is never touched here.
 
 use anyhow::{Context, Result, bail};
 use std::path::{Component, Path, PathBuf};
@@ -10,7 +10,7 @@ use std::process::Command;
 
 use crate::config::InstallConfig;
 
-/// Atomically switch `<install-dir>/bin/actrix` to point at `target`.
+/// Atomically switch `<install-dir>/bin/loran` to point at `target`.
 ///
 /// Uses a temp symlink + `mv -Tf` so the active path is never missing and
 /// concurrent readers see either the old or new version, never a gap.
@@ -61,7 +61,7 @@ pub fn switch_active_symlink(config: &InstallConfig, target: &Path) -> Result<()
     Ok(())
 }
 
-/// Read the current `bin/actrix` symlink target, if any.
+/// Read the current `bin/loran` symlink target, if any.
 pub fn current_target(config: &InstallConfig) -> Result<Option<PathBuf>> {
     match std::fs::read_link(config.binary_path()) {
         Ok(target) => {
@@ -86,9 +86,9 @@ pub fn current_target(config: &InstallConfig) -> Result<Option<PathBuf>> {
     }
 }
 
-/// Derive the currently active version from the `bin/actrix` symlink target.
+/// Derive the currently active version from the `bin/loran` symlink target.
 ///
-/// Target shape: `<install-dir>/releases/<version>/actrix` -> `<version>`.
+/// Target shape: `<install-dir>/releases/<version>/loran` -> `<version>`.
 pub fn current_version(config: &InstallConfig) -> Result<Option<String>> {
     let Some(target) = current_target(config)? else {
         return Ok(None);
@@ -254,16 +254,16 @@ mod tests {
     fn cfg(dir: &Path) -> InstallConfig {
         InstallConfig {
             install_dir: dir.to_path_buf(),
-            binary_name: "actrix".to_string(),
+            binary_name: "loran".to_string(),
             add_to_path: false,
         }
     }
 
     #[test]
     fn lists_and_detects_versions() {
-        let dir = std::env::temp_dir().join("actrix-deploy-releases-test");
+        let dir = std::env::temp_dir().join("loran-deploy-releases-test");
         let _ = std::fs::remove_dir_all(&dir);
-        // Create version dirs each with the actrix binary inside.
+        // Create version dirs each with the loran binary inside.
         for v in ["v0.4.3", "v0.4.4"] {
             let c = cfg(&dir);
             std::fs::create_dir_all(c.release_binary_path(v).parent().unwrap()).unwrap();
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn derives_current_version_from_valid_symlink() {
         let dir = std::env::temp_dir().join(format!(
-            "actrix-deploy-current-version-test-{}",
+            "loran-deploy-current-version-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -308,13 +308,13 @@ mod tests {
     #[test]
     fn rejects_current_symlink_outside_releases() {
         let dir = std::env::temp_dir().join(format!(
-            "actrix-deploy-current-version-invalid-test-{}",
+            "loran-deploy-current-version-invalid-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         let c = cfg(&dir);
         std::fs::create_dir_all(c.bin_dir()).unwrap();
-        let outside = dir.join("outside/actrix");
+        let outside = dir.join("outside/loran");
         std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
         std::fs::write(&outside, b"binary").unwrap();
         symlink(outside, c.binary_path()).unwrap();
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn rejects_broken_current_symlink() {
         let dir = std::env::temp_dir().join(format!(
-            "actrix-deploy-current-version-broken-test-{}",
+            "loran-deploy-current-version-broken-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -345,13 +345,13 @@ mod tests {
     #[test]
     fn switch_rejects_symlink_release_binary() {
         let dir = std::env::temp_dir().join(format!(
-            "actrix-deploy-switch-symlink-release-test-{}",
+            "loran-deploy-switch-symlink-release-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         let c = cfg(&dir);
         let target = c.release_binary_path("v1.2.3");
-        let outside = dir.join("outside-actrix");
+        let outside = dir.join("outside-loran");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::create_dir_all(c.bin_dir()).unwrap();
         std::fs::write(&outside, b"binary").unwrap();
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn current_version_is_none_without_active_symlink() {
         let dir = std::env::temp_dir().join(format!(
-            "actrix-deploy-current-version-missing-test-{}",
+            "loran-deploy-current-version-missing-test-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);

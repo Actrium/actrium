@@ -20,9 +20,9 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTR_REPO_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTRIX_DIR="$ACTR_REPO_DIR"
+LORAN_DIR="$ACTR_REPO_DIR"
 ECHO_ACTR_DIR="$WORKSPACE_ROOT/echo-actr"
-ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
+LORAN_CONFIG="$WORKSPACE_ROOT/loran-config.toml"
 ACTR_CLI_MANIFEST="$ACTR_REPO_DIR/crates/actr-cli/Cargo.toml"
 SERVER_TEMPLATE_CONFIG="$SCRIPT_DIR/server-actr.toml"
 ARTIFACT_DIR="$SCRIPT_DIR/logs/manual-runtime-lifecycle"
@@ -30,18 +30,18 @@ COMMAND_DIR="$ARTIFACT_DIR/commands"
 FOLLOW_CAPTURE="$ARTIFACT_DIR/logs-follow.txt"
 TEST_CONFIG="$ARTIFACT_DIR/server-actr.lifecycle.toml"
 TEST_HYPER_DIR="$ARTIFACT_DIR/hyper"
-ACTRIX_LOG="$ARTIFACT_DIR/actrix.log"
+LORAN_LOG="$ARTIFACT_DIR/loran.log"
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 
-ACTRIX_CMD=""
-ACTRIX_PID=""
+LORAN_CMD=""
+LORAN_PID=""
 LOGS_FOLLOW_PID=""
 RUNTIME_PID=""
 ACTR_PACKAGE=""
 SIGNING_KEY=""
 PUBLIC_KEY_PATH=""
 ACTR_CLI_BIN=""
-ACTRIX_DB=""
+LORAN_DB=""
 PACKAGE_BUILD_CONFIG=""
 
 section() {
@@ -89,10 +89,10 @@ require_cmd() {
     command -v "$cmd" >/dev/null 2>&1 || fail "Required command not found: $cmd"
 }
 
-detect_actrix_db() {
-    if [[ -n "$ACTRIX_PID" ]]; then
+detect_loran_db() {
+    if [[ -n "$LORAN_PID" ]]; then
         local live_db
-        live_db="$(lsof -p "$ACTRIX_PID" 2>/dev/null | awk '/actrix\.db$/ {print $NF; exit}')"
+        live_db="$(lsof -p "$LORAN_PID" 2>/dev/null | awk '/loran\.db$/ {print $NF; exit}')"
         if [[ -n "$live_db" && -f "$live_db" ]]; then
             printf '%s\n' "$live_db"
             return 0
@@ -101,9 +101,9 @@ detect_actrix_db() {
 
     local candidate
     for candidate in \
-        "$WORKSPACE_ROOT/database/actrix.db" \
-        "$ACTR_REPO_DIR/database/actrix.db" \
-        "$ACTRIUM_DIR/actrix/database/actrix.db"; do
+        "$WORKSPACE_ROOT/database/loran.db" \
+        "$ACTR_REPO_DIR/database/loran.db" \
+        "$ACTRIUM_DIR/loran/database/loran.db"; do
         if [[ -f "$candidate" ]]; then
             printf '%s\n' "$candidate"
             return 0
@@ -211,9 +211,9 @@ cleanup() {
         wait "$RUNTIME_PID" 2>/dev/null || true
     fi
 
-    if [[ -n "$ACTRIX_PID" ]] && kill -0 "$ACTRIX_PID" 2>/dev/null; then
-        kill "$ACTRIX_PID" 2>/dev/null || true
-        wait "$ACTRIX_PID" 2>/dev/null || true
+    if [[ -n "$LORAN_PID" ]] && kill -0 "$LORAN_PID" 2>/dev/null; then
+        kill "$LORAN_PID" 2>/dev/null || true
+        wait "$LORAN_PID" 2>/dev/null || true
     fi
 }
 
@@ -230,7 +230,7 @@ require_cmd curl
 require_cmd lsof
 require_cmd openssl
 source "$WORKSPACE_ROOT/scripts/ensure-config-toml.sh"
-ensure_actrix_config "$WORKSPACE_ROOT"
+ensure_loran_config "$WORKSPACE_ROOT"
 
 section "📦 Build Package"
 
@@ -325,19 +325,19 @@ ACTR_CLI_BIN="$ACTR_CLI_TARGET_DIR/debug/actr"
 cargo build --manifest-path "$ACTR_CLI_MANIFEST" --bin actr
 [[ -x "$ACTR_CLI_BIN" ]] || fail "actr CLI not found at $ACTR_CLI_BIN"
 
-if [[ -x "$ACTRIX_DIR/target/debug/actrix" ]]; then
-    ACTRIX_CMD="$ACTRIX_DIR/target/debug/actrix"
-elif [[ -x "$ACTRIX_DIR/target/release/actrix" ]]; then
-    ACTRIX_CMD="$ACTRIX_DIR/target/release/actrix"
-elif command -v actrix >/dev/null 2>&1; then
-    ACTRIX_CMD="$(command -v actrix)"
+if [[ -x "$LORAN_DIR/target/debug/loran" ]]; then
+    LORAN_CMD="$LORAN_DIR/target/debug/loran"
+elif [[ -x "$LORAN_DIR/target/release/loran" ]]; then
+    LORAN_CMD="$LORAN_DIR/target/release/loran"
+elif command -v loran >/dev/null 2>&1; then
+    LORAN_CMD="$(command -v loran)"
 else
-    cargo build --manifest-path "$ACTRIX_DIR/Cargo.toml" --bin actrix
-    ACTRIX_CMD="$ACTRIX_DIR/target/debug/actrix"
+    cargo build --manifest-path "$LORAN_DIR/Cargo.toml" --bin loran
+    LORAN_CMD="$LORAN_DIR/target/debug/loran"
 fi
-[[ -x "$ACTRIX_CMD" ]] || fail "actrix binary not found"
+[[ -x "$LORAN_CMD" ]] || fail "loran binary not found"
 
-section "🚀 Start Actrix"
+section "🚀 Start Loran"
 
 if lsof -tiTCP:8081 -sTCP:LISTEN >/dev/null 2>&1; then
     STALE_TCP_PIDS="$(lsof -tiTCP:8081 -sTCP:LISTEN)"
@@ -350,25 +350,25 @@ if lsof -tiUDP:3478 >/dev/null 2>&1; then
     sleep 1
 fi
 
-(cd "$WORKSPACE_ROOT" && "$ACTRIX_CMD" --config "$ACTRIX_CONFIG" > "$ACTRIX_LOG" 2>&1) &
-ACTRIX_PID=$!
+(cd "$WORKSPACE_ROOT" && "$LORAN_CMD" --config "$LORAN_CONFIG" > "$LORAN_LOG" 2>&1) &
+LORAN_PID=$!
 
-ACTRIX_READY=0
+LORAN_READY=0
 for _ in $(seq 1 30); do
-    if ! kill -0 "$ACTRIX_PID" 2>/dev/null; then
-        cat "$ACTRIX_LOG" >&2 || true
-        fail "actrix exited before becoming ready"
+    if ! kill -0 "$LORAN_PID" 2>/dev/null; then
+        cat "$LORAN_LOG" >&2 || true
+        fail "loran exited before becoming ready"
     fi
     if lsof -nP -iTCP:8081 -sTCP:LISTEN >/dev/null 2>&1; then
-        ACTRIX_READY=1
+        LORAN_READY=1
         break
     fi
     sleep 1
 done
-[[ "$ACTRIX_READY" -eq 1 ]] || fail "actrix did not listen on 8081 in time"
+[[ "$LORAN_READY" -eq 1 ]] || fail "loran did not listen on 8081 in time"
 
-ACTRIX_DB="$(detect_actrix_db || true)"
-[[ -n "$ACTRIX_DB" && -f "$ACTRIX_DB" ]] || fail "Actrix database not found after startup"
+LORAN_DB="$(detect_loran_db || true)"
+[[ -n "$LORAN_DB" && -f "$LORAN_DB" ]] || fail "Loran database not found after startup"
 
 section "🔑 Wait For Signer"
 
@@ -416,7 +416,7 @@ PY
 NOW="$(date +%s)"
 EXPIRES_AT="$((NOW + 86400 * 365))"
 
-sqlite3 "$ACTRIX_DB" <<SQL
+sqlite3 "$LORAN_DB" <<SQL
 INSERT OR IGNORE INTO realm
     (name, status, enabled, created_at)
 VALUES ('package-echo@example.com', 'active', 1, strftime('%s','now'));
@@ -440,7 +440,7 @@ SQL
 
 # Join the Realm as its owner; the config names the key file next to it.
 ACTR_CMD="$ACTR_CLI_BIN" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
-    "$ACTRIX_DB" "package-echo@example.com" "http://localhost:8081/issuer" \
+    "$LORAN_DB" "package-echo@example.com" "http://localhost:8081/issuer" \
     "$ARTIFACT_DIR/realm-client.json"
 
 "$ACTR_CLI_BIN" pkg publish \

@@ -115,11 +115,11 @@ pub struct ControlConfig {
 }
 
 fn default_grpc_node_id() -> String {
-    "actrix-node".to_string()
+    "loran-node".to_string()
 }
 
 fn default_grpc_node_name() -> String {
-    "actrix-node".to_string()
+    "loran-node".to_string()
 }
 
 fn default_max_clock_skew_secs() -> u64 {

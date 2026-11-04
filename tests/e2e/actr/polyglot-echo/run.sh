@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # polyglot-echo end-to-end runner.
 #
-# Spins up a fresh mock-actrix + EchoService instance (chosen server form),
+# Spins up a fresh mock-loran + EchoService instance (chosen server form),
 # then drives a single Echo round-trip (or streaming scenario) with the
 # Rust client driver.
 #
@@ -16,7 +16,7 @@
 #   bash tests/e2e/actr/polyglot-echo/run.sh --client rust hello        # custom message
 #
 # Honoured environment variables:
-#   HTTP_PORT    Override mock-actrix port (default 18181).
+#   HTTP_PORT    Override mock-loran port (default 18181).
 #   ICE_PORT     Override STUN/TURN port advertised in configs (default 13478).
 #   REALM        Override the seeded Realm name (default polyglot-echo@e2e.test).
 #   KEEP_TMP=1   Preserve $RUN_DIR (mock + server logs, runtime configs).
@@ -146,7 +146,7 @@ echo "Server:      $SERVER"
 echo "Scenario:    $SCENARIO"
 
 # Dispatch to the chosen server form.  Each setup_server_<form> function is
-# expected to bring up mock-actrix + an EchoService instance reachable under
+# expected to bring up mock-loran + an EchoService instance reachable under
 # SERVICE_TYPE, exporting MOCK_PID, SERVER_PID (or its form-specific kin),
 # CLIENT_RUNTIME, SERVICE_TYPE for the client driver to pick up.
 case "$SERVER" in

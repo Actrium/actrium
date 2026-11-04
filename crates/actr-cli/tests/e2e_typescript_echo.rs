@@ -1,6 +1,6 @@
 //! End-to-end tests for TypeScript echo template.
 //!
-//! These tests run against local Actrix and local echo services only.
+//! These tests run against local Loran and local echo services only.
 //! Run with: `cargo test --test e2e_typescript_echo -- --ignored --test-threads=1`
 
 use std::ffi::OsString;
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use actr_cli::test_support as e2e_support;
 use actr_cli::test_support::{
-    LocalActrix, LoggedProcess, align_project_with_local_actrix, assert_success,
+    LocalLoran, LoggedProcess, align_project_with_local_loran, assert_success,
     pin_echo_service_dependency_version, random_publisher,
 };
 use tempfile::TempDir;
@@ -116,7 +116,7 @@ fn typescript_echo_e2e_service_and_app() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let actrix = LocalActrix::start().expect("failed to start local actrix");
+    let loran = LocalLoran::start().expect("failed to start local loran");
     let tmp = TempDir::new().unwrap();
     let publisher = random_publisher();
 
@@ -130,7 +130,7 @@ fn typescript_echo_e2e_service_and_app() {
             "--role",
             "both",
             "--signaling",
-            &actrix.signaling_ws_url,
+            &loran.signaling_ws_url,
             "--realm",
             "dev@example.com",
             "--publisher",
@@ -145,8 +145,8 @@ fn typescript_echo_e2e_service_and_app() {
     let app_dir = tmp.path().join("e2e-ts/echo-app");
     assert!(svc_dir.exists(), "echo-service dir should exist");
     assert!(app_dir.exists(), "echo-app dir should exist");
-    align_project_with_local_actrix(&svc_dir).expect("failed to set local realm for service");
-    align_project_with_local_actrix(&app_dir).expect("failed to set local realm for app");
+    align_project_with_local_loran(&svc_dir).expect("failed to set local realm for service");
+    align_project_with_local_loran(&app_dir).expect("failed to set local realm for app");
     pin_echo_service_dependency_version(&app_dir, &publisher)
         .expect("failed to pin app echo dependency version");
     assert_generated_actr_dependency(&svc_dir);

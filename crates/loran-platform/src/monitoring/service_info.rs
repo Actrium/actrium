@@ -2,9 +2,9 @@
 //!
 //! Defines the basic information structure for services
 
-use crate::config::ActrixConfig;
+use crate::config::LoranConfig;
 use crate::monitoring::{ServiceCounters, ServiceState, service_type::ServiceType};
-use actrix_proto::{ResourceType, ServiceStatus as ProtoServiceStatus};
+use loran_proto::{ResourceType, ServiceStatus as ProtoServiceStatus};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use url::Url;
@@ -65,7 +65,7 @@ impl ServiceInfo {
         name: impl Into<String>,
         service_type: ServiceType,
         description: Option<String>,
-        config: &ActrixConfig,
+        config: &LoranConfig,
     ) -> Self {
         let (port_info, domain_name) = match service_type {
             ServiceType::Signaling | ServiceType::Relay => {
@@ -210,8 +210,8 @@ impl From<ServiceInfo> for ProtoServiceStatus {
 mod tests {
     use super::*;
 
-    fn config_with_ice(advertised_ip: &str, port: u16) -> ActrixConfig {
-        let mut config = ActrixConfig::default();
+    fn config_with_ice(advertised_ip: &str, port: u16) -> LoranConfig {
+        let mut config = LoranConfig::default();
         config.bind.ice.advertised_ip = advertised_ip.to_string();
         config.bind.ice.port = port;
         config

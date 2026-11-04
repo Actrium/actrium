@@ -8,7 +8,7 @@ use std::path::PathBuf;
 pub enum Commands {
     /// Check system dependencies
     Deps,
-    /// Install actrix from a GitHub Release tag, the latest release, or a local binary
+    /// Install loran from a GitHub Release tag, the latest release, or a local binary
     Install {
         /// GitHub Release tag, e.g. v0.4.3
         #[arg(long)]
@@ -28,11 +28,11 @@ pub enum Commands {
         /// Skip SHA-256 verification (not safe for production)
         #[arg(long)]
         skip_verify: bool,
-        /// Dev only: use the local target/release/actrix build
+        /// Dev only: use the local target/release/loran build
         #[arg(long)]
         from_local_build: bool,
         /// Installation directory
-        #[arg(long, default_value = "/opt/actrix")]
+        #[arg(long, default_value = "/opt/loran")]
         install_dir: PathBuf,
         /// Skip creating symlink in /usr/local/bin
         #[arg(long)]
@@ -40,7 +40,7 @@ pub enum Commands {
     },
     /// Deploy systemd service (flags optional; prompts for missing values)
     Service {
-        /// Service/unit name (default: actrix)
+        /// Service/unit name (default: loran)
         #[arg(long)]
         service_name: Option<String>,
         /// Installation directory
@@ -60,15 +60,15 @@ pub enum Commands {
         force_overwrite_unit: bool,
         /// WorkingDirectory for the unit (default: install-dir).
         ///
-        /// Set this when the actrix config uses relative paths (certs, db,
+        /// Set this when the loran config uses relative paths (certs, db,
         /// sqlite) that resolve against a directory other than the install
-        /// dir, e.g. `--working-directory /opt/actr-project/actrix`. Relative
+        /// dir, e.g. `--working-directory /opt/actr-project/loran`. Relative
         /// runtime paths from the config are resolved against this directory
         /// and added to ReadWritePaths.
         #[arg(long)]
         working_directory: Option<PathBuf>,
     },
-    /// Upgrade actrix to a new version (Release or local binary)
+    /// Upgrade loran to a new version (Release or local binary)
     Update {
         /// GitHub Release tag, e.g. v0.4.4
         #[arg(long)]
@@ -89,7 +89,7 @@ pub enum Commands {
         #[arg(long)]
         skip_verify: bool,
         /// Installation directory
-        #[arg(long, default_value = "/opt/actrix")]
+        #[arg(long, default_value = "/opt/loran")]
         install_dir: PathBuf,
         /// Service to restart after switching. Required so the running process
         /// and the active symlink cannot drift apart.
@@ -97,17 +97,17 @@ pub enum Commands {
         restart_service: String,
         /// HTTP readiness endpoint to poll after restart, e.g.
         /// `http://127.0.0.1:8080/health`. Falls back to `systemctl is-active`
-        /// (liveness only) when unset. Also set via `ACTRIX_HEALTH_URL`.
+        /// (liveness only) when unset. Also set via `LORAN_HEALTH_URL`.
         #[arg(long)]
         health_url: Option<String>,
     },
-    /// Roll bin/actrix back to a previously installed version
+    /// Roll bin/loran back to a previously installed version
     Rollback {
         /// Version to roll back to (e.g. v0.4.3)
         #[arg(long)]
         to: String,
         /// Installation directory
-        #[arg(long, default_value = "/opt/actrix")]
+        #[arg(long, default_value = "/opt/loran")]
         install_dir: PathBuf,
         /// Service to restart after rolling back
         #[arg(long)]
@@ -119,7 +119,7 @@ pub enum Commands {
     /// Show the active version, symlink target, and installed versions
     Status {
         /// Installation directory
-        #[arg(long, default_value = "/opt/actrix")]
+        #[arg(long, default_value = "/opt/loran")]
         install_dir: PathBuf,
         /// Service to inspect for the actually running binary/version
         #[arg(long)]
@@ -128,9 +128,9 @@ pub enum Commands {
     /// Uninstall the application (selective; preserves data/config by default)
     Uninstall {
         /// Installation directory
-        #[arg(long, default_value = "/opt/actrix")]
+        #[arg(long, default_value = "/opt/loran")]
         install_dir: PathBuf,
-        /// Service/unit name (default: actrix)
+        /// Service/unit name (default: loran)
         #[arg(long)]
         service_name: Option<String>,
     },

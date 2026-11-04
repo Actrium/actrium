@@ -14,7 +14,7 @@ fn e2e_lock() -> &'static Mutex<()> {
 }
 
 #[test]
-#[ignore] // Slow e2e; builds Python wasm, web guests, mock-actrix, and browser client.
+#[ignore] // Slow e2e; builds Python wasm, web guests, mock-loran, and browser client.
 fn python_generated_echo_workload_receives_actr_web_request() {
     let _guard = e2e_lock()
         .lock()

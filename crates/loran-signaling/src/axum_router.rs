@@ -19,7 +19,7 @@ use axum::{
 };
 use base64::Engine as _;
 use platform::aid::credential::validator::AIdCredentialValidator;
-use platform::config::ActrixConfig;
+use platform::config::LoranConfig;
 use platform::monitoring::ServiceCounters;
 use platform::realm::Realm as RealmEntity;
 use prost::Message as _;
@@ -64,7 +64,7 @@ pub async fn create_signaling_router() -> Result<Router> {
 ///
 /// Initializes AIdCredentialValidator and returns a mountable Router
 pub async fn create_signaling_router_with_config(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<Router> {
     create_signaling_router_with_config_and_counters(config, cancel, None).await
@@ -72,7 +72,7 @@ pub async fn create_signaling_router_with_config(
 
 /// Create a Signaling Axum Router with config and optional service counters.
 pub async fn create_signaling_router_with_config_and_counters(
-    config: &ActrixConfig,
+    config: &LoranConfig,
     cancel: tokio_util::sync::CancellationToken,
     counters: Option<Arc<ServiceCounters>>,
 ) -> Result<Router> {

@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn parses_sha256sum_format() {
-        let text = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  actrix-linux-x86_64\n";
+        let text = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  loran-linux-x86_64\n";
         assert_eq!(
             parse_sha256_sum(text).unwrap(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn verifies_known_file() {
         let dir = std::env::temp_dir();
-        let path = dir.join("actrix-deploy-checksum-test.bin");
+        let path = dir.join("loran-deploy-checksum-test.bin");
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(b"hello world").unwrap();
         // sha256sum of "hello world" (no trailing newline)

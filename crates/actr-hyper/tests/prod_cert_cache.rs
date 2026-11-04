@@ -65,7 +65,7 @@ fn make_signed_package(
     actr_pack::pack(&opts).unwrap()
 }
 
-/// Build actrix Publisher Registry verifying_key response body
+/// Build loran Publisher Registry verifying_key response body
 fn verifying_key_response(verifying_key: &ed25519_dalek::VerifyingKey) -> String {
     let key_b64 = base64::engine::general_purpose::STANDARD.encode(verifying_key.to_bytes());
     format!(r#"{{"public_key":"{key_b64}"}}"#)

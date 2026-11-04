@@ -479,7 +479,7 @@ pub enum SignalingFaultRule {
 }
 
 /// Ordered signaling evidence recorded before the external fault rule is
-/// applied. Actrix remains the actual signaling server and transport peer.
+/// applied. Loran remains the actual signaling server and transport peer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalingTraceEvent {
     pub from: ActrId,
@@ -596,7 +596,7 @@ impl Default for DirectedSignalingFaultState {
 }
 
 /// Shared dynamic fault policy around the production WebSocket signaling
-/// adapter. Actrix remains the signaling server; this decorator is the RFC's
+/// adapter. Loran remains the signaling server; this decorator is the RFC's
 /// permitted external fault proxy at the Actr transport boundary.
 #[derive(Debug, Clone, Default)]
 pub struct DirectedSignalingFaultRegistry {

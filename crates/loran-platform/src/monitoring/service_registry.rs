@@ -1,7 +1,7 @@
 //! Service registry for managing service statuses
 
 use super::ServiceInfo;
-use actrix_proto::ServiceStatus;
+use loran_proto::ServiceStatus;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

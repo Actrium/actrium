@@ -18,14 +18,13 @@ pub mod utils {
             // concurrently deleted and rewritten (SQLITE_IOERR 1802). Suffix the
             // path with the PID so each process gets an isolated database; under
             // libtest the path stays shared within the single process, unchanged.
-            let db_dir =
-                std::env::temp_dir().join(format!("actrix_test_db_{}", std::process::id()));
+            let db_dir = std::env::temp_dir().join(format!("loran_test_db_{}", std::process::id()));
 
             // Ensure directory exists
             std::fs::create_dir_all(&db_dir).expect("Failed to create test database directory");
 
             // Remove existing database file if it exists
-            let db_file = db_dir.join("actrix.db");
+            let db_file = db_dir.join("loran.db");
             if db_file.exists() {
                 let _ = std::fs::remove_file(&db_file);
             }

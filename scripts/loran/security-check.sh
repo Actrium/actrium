@@ -1,9 +1,9 @@
 #!/bin/bash
-# Actrix security check script
+# Loran security check script
 
 set -e
 
-echo "🔍 Actrix security check..."
+echo "🔍 Loran security check..."
 echo
 
 # Check database file permissions
@@ -29,9 +29,9 @@ fi
 
 # Check key length
 echo
-echo "3. Checking actrix_shared_key length..."
+echo "3. Checking loran_shared_key length..."
 if [ -f "config.toml" ]; then
-    key=$(grep "actrix_shared_key" config.toml | cut -d'"' -f2)
+    key=$(grep "loran_shared_key" config.toml | cut -d'"' -f2)
     if [ ${#key} -lt 16 ]; then
         echo "  ⚠️  Key length ${#key}, recommend at least 16 characters"
     else

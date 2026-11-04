@@ -8,7 +8,7 @@ use std::time::Duration;
 use actr_framework::{Bytes, Context, MessageDispatcher, Workload};
 use actr_hyper::lifecycle::{AppLifecycleState, NetworkEventHandle};
 use actr_hyper::test_support::{
-    ActrixTestServices, TestRtcControl, TestRtcRole, make_actor_id, make_actor_type,
+    LoranTestServices, TestRtcControl, TestRtcRole, make_actor_id, make_actor_type,
 };
 use actr_hyper::{ActrRef, Attached, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{ActorResult, DataChunk, PayloadType, RpcEnvelope, register_response};
@@ -154,7 +154,7 @@ pub struct Nodes {
     pub events: [NetworkEventHandle; 2],
     pub rtc: [TestRtcControl; 2],
     pub journals: [Arc<Journal>; 2],
-    pub services: ActrixTestServices,
+    pub services: LoranTestServices,
     _dirs: [TempDir; 2],
 }
 
@@ -167,7 +167,7 @@ impl Nodes {
             )
             .with_test_writer()
             .try_init();
-        let services = ActrixTestServices::start().await.unwrap();
+        let services = LoranTestServices::start().await.unwrap();
         let dirs = [TempDir::new().unwrap(), TempDir::new().unwrap()];
         let journals = [Arc::new(Journal::default()), Arc::new(Journal::default())];
         let serials = match mobile_role {

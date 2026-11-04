@@ -77,7 +77,7 @@ fn init_rust_echo_app(parent: &std::path::Path, name: &str) -> std::path::PathBu
             "--role",
             "app",
             "--signaling",
-            "wss://actrix1.develenv.com",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             "--publisher",
@@ -101,7 +101,7 @@ fn init_rust_echo_service(parent: &std::path::Path, name: &str) -> std::path::Pa
             "--role",
             "service",
             "--signaling",
-            "wss://actrix1.develenv.com",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             "--publisher",
@@ -125,7 +125,7 @@ fn init_rust_empty_service(parent: &std::path::Path, name: &str) -> std::path::P
             "--role",
             "service",
             "--signaling",
-            "wss://actrix1.develenv.com",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             "--publisher",
@@ -149,7 +149,7 @@ fn init_rust_echo_both(parent: &std::path::Path, name: &str) -> std::path::PathB
             "--role",
             "both",
             "--signaling",
-            "wss://actrix1.develenv.com",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             "--publisher",
@@ -217,7 +217,7 @@ fn rust_echo_app_scaffold() {
     // -- actr.toml --
     let runtime = std::fs::read_to_string(dir.join("actr.toml")).unwrap();
     assert!(
-        runtime.contains("wss://actrix1.develenv.com/signaling/ws"),
+        runtime.contains("wss://loran.example.com/signaling/ws"),
         "runtime config should contain signaling URL"
     );
     assert!(
@@ -439,7 +439,7 @@ fn rust_echo_init_fails_if_directory_exists() {
             "--role",
             "app",
             "--signaling",
-            "wss://actrix1.develenv.com",
+            "wss://loran.example.com",
             "--realm",
             "dev@example.com",
             "duplicate-svc",

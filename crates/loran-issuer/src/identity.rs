@@ -7,11 +7,11 @@
 //! may take the new ones as the baseline. Nothing here runs on its own.
 
 use actr_protocol::{KeyPinOutcome, KeyPins, PinnedStatus, PublisherProfile, RealmSigningKeys};
-use actrix_publisher_registry::PublisherRegistryManager;
-use actrix_publisher_registry::model::Publisher;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::Utc;
+use loran_publisher_registry::PublisherRegistryManager;
+use loran_publisher_registry::model::Publisher;
 use platform::net::FetchError;
 use platform::realm::RealmDomain;
 use platform::realm::domain::member_from_descriptor;

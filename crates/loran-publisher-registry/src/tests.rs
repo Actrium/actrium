@@ -739,7 +739,7 @@ async fn test_lookup_package_no_reserved_shortcut() {
             .unwrap()
     );
     assert!(
-        !lookup_package(&pool, "actrix/core@1.0.0", None, None)
+        !lookup_package(&pool, "loran/core@1.0.0", None, None)
             .await
             .unwrap()
     );

@@ -1,14 +1,14 @@
 # AGENTS.md - AI 开发助手指南
 
-> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../../GLOSSARY.zh.md)「历史名称对照」。
+> 历史文档：沿用撰写时的名称（如 Loran、AIS、manufacturer），现行名称见[术语表](../../GLOSSARY.zh.md)「历史名称对照」。
 
 本文档专为 AI 代码助手（如 Claude Code、GitHub Copilot、Cursor 等）设计，提供项目的开发规范和最佳实践。
 
 ## 项目概览
 
-**Actrix** 是 Actor-RTC 生态系统的 WebRTC 辅助服务集合，提供 STUN、TURN、身份认证等核心服务。
+**Loran** 是 Actor-RTC 生态系统的 WebRTC 辅助服务集合，提供 STUN、TURN、身份认证等核心服务。
 
-- **代码库**: https://github.com/Actrium/actrix
+- **代码库**: https://github.com/Actrium/actrium
 - **许可证**: Apache 2.0
 - **Rust 版本**: 1.83+ (Edition 2024)
 - **架构**: Workspace 多 crate 架构
@@ -253,7 +253,7 @@ from 10,000 req/s to 14,000 req/s (+40%).
 ```
 1. config.toml           - 生产配置（不提交到 git）
 2. config.example.toml   - 配置模板（提交到 git）
-3. ActrixConfig::default() - 代码默认值（开发环境）
+3. LoranConfig::default() - 代码默认值（开发环境）
 ```
 
 ### 添加新配置项
@@ -261,7 +261,7 @@ from 10,000 req/s to 14,000 req/s (+40%).
 ```rust
 // 1. 在 crates/base/src/config/mod.rs 中添加字段
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ActrixConfig {
+pub struct LoranConfig {
     // 现有字段...
 
     /// 新配置项说明
@@ -285,7 +285,7 @@ fn default_new_field() -> String {
 new_field = "default_value"
 
 // 3. 更新 Default 实现
-impl Default for ActrixConfig {
+impl Default for LoranConfig {
     fn default() -> Self {
         Self {
             // ...
@@ -299,7 +299,7 @@ impl Default for ActrixConfig {
 mod tests {
     #[test]
     fn test_new_field_default() {
-        let config = ActrixConfig::default();
+        let config = LoranConfig::default();
         assert_eq!(config.new_field, "default_value");
     }
 
@@ -312,7 +312,7 @@ mod tests {
             # ... 其他必需字段 ...
             new_field = "custom_value"
         "#;
-        let config = ActrixConfig::from_toml(toml).unwrap();
+        let config = LoranConfig::from_toml(toml).unwrap();
         assert_eq!(config.new_field, "custom_value");
     }
 }
@@ -324,7 +324,7 @@ mod tests {
 
 ```rust
 // 1. 加载配置
-let config = ActrixConfig::from_file("config.toml")?;
+let config = LoranConfig::from_file("config.toml")?;
 
 // 2. 初始化可观测性（日志 + 追踪）
 let _guard = init_observability(&config)?;
@@ -561,7 +561,7 @@ cargo build --features opentelemetry
 # config.toml:
 [tracing]
 enable = true
-service_name = "actrix"
+service_name = "loran"
 endpoint = "http://127.0.0.1:4317"
 
 # 4. 访问 Jaeger UI

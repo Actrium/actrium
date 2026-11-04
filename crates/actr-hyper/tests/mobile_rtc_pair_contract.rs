@@ -1,4 +1,4 @@
-//! PR-gate pair contract for mobile recovery through real Actrix services and
+//! PR-gate pair contract for mobile recovery through real Loran services and
 //! the production RTC lifecycle feed.
 
 use std::collections::HashSet;
@@ -114,7 +114,7 @@ fn assert_bind_ip(addresses: &[std::net::SocketAddr], expected: Ipv4Addr) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p00_a_is_only_connect_initiator_and_pair_is_bidirectionally_usable() {
-    // Production Actrix uses reverse ActorId ordering for the stable role
+    // Production Loran uses reverse ActorId ordering for the stable role
     // tie-break. Keep A above B when this scenario requires A to offer.
     let mut pair = MobileRtcPairHarness::new(51_002, 51_001).await;
     pair.establish(ConnectionInitiator::A).await;
@@ -177,7 +177,7 @@ async fn p00_b_is_only_connect_initiator_and_a_is_real_answerer() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p00_connect_initiator_can_be_answerer_under_actrix_arbitration() {
+async fn p00_connect_initiator_can_be_answerer_under_loran_arbitration() {
     let mut pair = MobileRtcPairHarness::new(51_013, 51_014).await;
     pair.establish(ConnectionInitiator::A).await;
     let snapshot = pair.wait_pair_ready(WAIT).await;
@@ -190,7 +190,7 @@ async fn p00_connect_initiator_can_be_answerer_under_actrix_arbitration() {
                 && event.to == pair.id(PairEndpoint::A)
                 && event.class == SignalingMessageClass::Offer
         }),
-        "the passive B endpoint must offer after A loses Actrix arbitration"
+        "the passive B endpoint must offer after A loses Loran arbitration"
     );
     pair.assert_rpc_both_directions("p00_initiator_is_answerer")
         .await;
