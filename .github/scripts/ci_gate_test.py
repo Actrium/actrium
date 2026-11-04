@@ -4,6 +4,7 @@ import re
 import sqlite3
 import subprocess
 import tempfile
+from textwrap import dedent
 from pathlib import Path
 
 
@@ -64,7 +65,8 @@ def test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     rust_job = _job(workflow, "rust", "test")
 
-    assert "rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-wasip2" in rust_job
+    assert "dtolnay/rust-toolchain@1.99.0" in rust_job
+    assert "targets: wasm32-wasip2,wasm32-unknown-unknown" in rust_job
     assert 'ACTR_REQUIRE_WASM_FIXTURE: "1"' in rust_job
     assert "- name: Run tests" not in rust_job
     assert "cargo test --workspace" not in rust_job
@@ -121,13 +123,74 @@ def test_pr_gate_excludes_heavy_root_e2e_jobs() -> None:
     assert "web_browser_e2e" not in workflow
 
 
-def test_cli_web_assets_uses_preinstalled_wasm_toolchain() -> None:
+def test_gha_cache_consumers_always_initialize_credentials() -> None:
+    workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    for name, next_name in [
+        ("cli_web_assets", "e2e_rust"),
+        ("rust", "test"),
+        ("test", "rust_msrv"),
+        ("rust_msrv", "typescript"),
+    ]:
+        job = _job(workflow, name, next_name)
+        setup = re.search(
+            r"(?ms)^      - name: Run sccache-cache\n(.*?)(?=^      - |\Z)", job
+        )
+        assert setup is not None, name
+        assert "mozilla-actions/sccache-action@v0.0.9" in setup[1], name
+        assert "version: v0.18.0" in setup[1], name
+        conditions = re.findall(r"^        if: (.+)$", setup[1], re.M)
+        expected = (
+            ["steps.web-runtime.outputs.ready != 'true'"]
+            if name == "cli_web_assets" else []
+        )
+        assert conditions == expected, name
+
+
+def test_cli_web_runtime_cache_requires_complete_build_output() -> None:
+    job = _job(CI_GATE_WORKFLOW.read_text(), "cli_web_assets", "e2e_rust")
+    probe = re.search(
+        r"(?ms)^      - name: Check cached Web runtime\n.*?^        run: \|\n(.*?)(?=^      - )", job
+    )
+    assert probe is not None
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        dist = root / "packages/actr-web/dist/sw"
+        dist.mkdir(parents=True)
+        files = [dist / name for name in (
+            "actr_sw_host_bg.wasm", "actr_sw_host.js", "actr_sw_host.d.ts", "package.json"
+        )]
+        for file in files:
+            file.write_bytes(b"built")
+
+        def ready(hit: str) -> bool:
+            output = root / "output"
+            output.write_text("")
+            subprocess.run(
+                ["bash", "-eu", "-c", dedent(probe[1])], cwd=root, check=True,
+                env={"CACHE_HIT": hit, "GITHUB_OUTPUT": str(output)},
+            )
+            result = output.read_text().strip()
+            assert result in {"ready=true", "ready=false"}
+            return result == "ready=true"
+
+        assert ready("true")
+        assert not ready("false")
+        for file in files:
+            file.unlink()
+            assert not ready("true"), file
+            file.touch()
+            assert not ready("true"), file
+            file.write_bytes(b"built")
+
+
+def test_cli_web_assets_installs_pinned_wasm_toolchain() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     job = _job(workflow, "cli_web_assets", "e2e_rust")
-    assert "runs-on: [self-hosted, Linux, X64]" in job
+    assert "runs-on: ubuntu-24.04" in job
     assert "RUSTUP_TOOLCHAIN: 1.99.0" in job
-    assert "rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-unknown-unknown" in job
-    assert "dtolnay/rust-toolchain" not in job
+    assert "targets: wasm32-unknown-unknown" in job
+    assert "dtolnay/rust-toolchain@1.99.0" in job
+    assert "arduino/setup-protoc@v3" in job
 
 
 def test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile() -> None:
@@ -138,11 +201,12 @@ def test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile() -> None:
     assert "needs.determine.outputs.e2e_rust == 'true'" in e2e_job
     normalized = " ".join(e2e_job.split())
     assert "cargo metadata" in normalized
-    assert "--manifest-path tests/e2e/actr/Cargo.toml" in normalized
+    assert e2e_job.count("working-directory: tests/e2e/actr\n") == 2
+    assert "workspaces: tests/e2e/actr -> ../target/e2e" in e2e_job
     assert "--format-version 1" in normalized
     assert "--locked" in normalized
-    # e2e_rust runs on the self-hosted image which preinstalls protoc, so
-    # no arduino/setup-protoc step is expected here.
+    assert "dtolnay/rust-toolchain@1.99.0" in e2e_job
+    assert "arduino/setup-protoc@v3" in e2e_job
     assert "libopus-dev" in e2e_job
     assert "cargo check" in e2e_job
     assert "--workspace" in normalized
@@ -497,7 +561,7 @@ def test_swift_echoapp_e2e_job_present() -> None:
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     swift_job = _job(workflow, "swift-echo-app-e2e", "python-web-e2e")
 
-    assert "runs-on: macos-arm64-larger" in swift_job
+    assert "runs-on: macos-15" in swift_job
     assert "bash tests/e2e/actr/swift-echo-app/run.sh" in swift_job
 
 
@@ -512,8 +576,8 @@ def test_e2e_loran_uses_in_tree_install_instead_of_artifact_download() -> None:
     assert "Actrium/loran" not in workflow
     assert "actions: read" not in workflow
 
-    assert "runs-on: [self-hosted, Linux, X64]" in pkg_job
-    assert "runs-on: macos-arm64-larger" in swift_job
+    assert "runs-on: ubuntu-24.04" in pkg_job
+    assert "runs-on: macos-15" in swift_job
 
 
 def test_e2e_no_private_loran_checkout() -> None:
@@ -857,10 +921,10 @@ def test_nightly_e2e_includes_swift_datastream() -> None:
 
 
 def test_swift_datastream_job_runs_on_macos() -> None:
-    """Verify the datastream job uses runs-on: macos-arm64-larger."""
+    """Verify the datastream job uses runs-on: macos-15."""
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     ds_job = _job(workflow, "swift-datastream-app-e2e", "python-web-e2e")
-    assert "runs-on: macos-arm64-larger" in ds_job
+    assert "runs-on: macos-15" in ds_job
 
 
 def test_swift_datastream_job_does_not_download_loran_artifact() -> None:
@@ -990,7 +1054,9 @@ if __name__ == "__main__":
     test_rust_test_gate_restores_cache_before_installing_tools()
     test_msrv_gate_builds_full_workspace_on_pinned_toolchain()
     test_pr_gate_excludes_heavy_root_e2e_jobs()
-    test_cli_web_assets_uses_preinstalled_wasm_toolchain()
+    test_gha_cache_consumers_always_initialize_credentials()
+    test_cli_web_runtime_cache_requires_complete_build_output()
+    test_cli_web_assets_installs_pinned_wasm_toolchain()
     test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile()
     test_pr_gate_runs_package_runtime_scenario_when_targeted()
     test_native_workload_gate_builds_c_and_go_with_pinned_tools()

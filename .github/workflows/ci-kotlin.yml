@@ -16,7 +16,7 @@ permissions:
 jobs:
   script-check:
     name: Kotlin Android Script Check
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - name: Test SDK error message generation
@@ -41,7 +41,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Build both Android ABIs from source
         env:
           ACTR_BUILD_HOST_LIBRARY: "false"
@@ -64,29 +64,19 @@ jobs:
 
   test:
     name: Kotlin Binding Test
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      # JDK resolves from the runner image's tool-cache in seconds; do NOT
-      # re-add `cache: gradle` — on self-hosted runners it downloads/uploads a
-      # ~464 MB Gradle cache from the GitHub cache service every run and
-      # saturated the pod's egress (~20 min in, ~3 min out). The Gradle
-      # distribution and KtLint dependencies are pre-seeded in the image
-      # instead.
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           java-version: "17"
           distribution: "temurin"
-      # The SDK (platforms;android-34 + build-tools;34.0.0) is preinstalled in
-      # the runner image at $ANDROID_SDK_ROOT with the matching cmdline-tools
-      # version, so this only verifies presence — no download.
+          cache: gradle
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
           packages: "platforms;android-34 build-tools;34.0.0"
-      - name: Reuse image Gradle distribution
-        run: python3 tools/ci/runner/prepare-gradle-cache.py --wrapper-properties packages/actr-kotlin/gradle/wrapper/gradle-wrapper.properties
       - name: Kotlin lint (ktlint)
         working-directory: packages/actr-kotlin
         run: ./gradlew ktlintCheck --no-daemon
@@ -141,54 +131,38 @@ jobs:
 
   gen-test:
     name: Kotlin Codegen Test
-    # Reuse the image's pinned Gradle distribution and compile Rust + Kotlin
-    # in parallel. Keep default mirror-first dependency repositories to avoid
-    # the self-hosted pool's known AGP download failures. Do not force
-    # ACTR_GRADLE_REPOSITORIES=canonical here.
-    runs-on: [self-hosted, Linux, X64]
-    env:
-      # Use settings.gradle.kts's mirror-first repositories on this pool,
-      # consistently with the binding test job; canonical Google egress fails.
-      # rustc-level compilation cache (in-cluster MinIO backend) instead of
-      # Swatinem/rust-cache: on ephemeral ARC pods the rust-cache post-job
-      # upload to the GitHub Actions cache blob store goes over the slow
-      # public egress (5-10 min per run) while sccache hits the local
-      # backend over the cluster network.
-      RUSTC_WRAPPER: sccache
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Verify preinstalled Rust
-        run: |
-          rustup run 1.99.0 rustc --version
-          rustup target list --toolchain 1.99.0 --installed |
-            grep -Fxq wasm32-unknown-unknown
-          echo "RUSTUP_TOOLCHAIN=1.99.0" >> "$GITHUB_ENV"
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           java-version: "17"
           distribution: "temurin"
-          # No `cache: gradle`: the ~/.gradle cache archive lives in the
-          # GitHub Actions cache blob store; restoring it over the ARC public
-          # egress times out past the blob SAS validity (~20 min, then fails —
-          # observed 2026-09-08). JDK comes from the image toolcache instantly,
-          # the Gradle distribution is pre-seeded in the image, and incremental
-          # build state is covered by the targeted `Cache Gradle build outputs`
-          # step below.
+          cache: gradle
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-34 build-tools;34.0.0"
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Cache wasm-pack binary
-        # Preserve the fleet image binaries and avoid restoring stale archives.
-        if: runner.environment != 'self-hosted' && inputs.cli_web_runtime_artifact == ''
+        if: inputs.cli_web_runtime_artifact == ''
         id: wasm-pack-cache
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/wasm-pack
           key: wasm-pack-binary-v2-${{ runner.os }}-0.15.0
       - name: Install wasm-pack
+        if: inputs.cli_web_runtime_artifact == ''
         run: |
           if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
             cargo install wasm-pack --version 0.15.0 --locked --force
@@ -209,10 +183,6 @@ jobs:
       - name: Generate CLI web runtime assets
         if: inputs.cli_web_runtime_artifact == ''
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
-      - name: Reuse image Gradle distributions
-        run: |
-          python3 tools/ci/runner/prepare-gradle-cache.py --wrapper-properties packages/actr-kotlin/gradle/wrapper/gradle-wrapper.properties
-          python3 tools/ci/runner/prepare-gradle-cache.py --wrapper-properties tools/actr/protoc-gen/kotlin/gradle/wrapper/gradle-wrapper.properties
       - name: Cache Gradle build outputs
         uses: actions/cache@v4
         with:

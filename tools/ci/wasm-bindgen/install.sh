@@ -3,13 +3,13 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-. "$script_dir/versions/wasm.env"
-. "$script_dir/runner-install-lib.sh"
+. "$script_dir/versions.env"
+. "$script_dir/download.sh"
 version="$WASM_BINDGEN_VERSION"
 sha256="$WASM_BINDGEN_SHA256"
 install_dir=${WASM_BINDGEN_INSTALL_DIR:-${CARGO_HOME:-$HOME/.cargo}/bin}
 
-# Image builds use the pinned default; jobs also check it against their source.
+# Validate the pinned archive version against the calling workspace lockfile.
 if [ "$#" -gt 0 ]; then
     locked_version=$(python3 - "$1" <<'PY'
 import sys
@@ -44,10 +44,7 @@ esac
 
 download_dir=$(mktemp -d)
 trap 'rm -rf "$download_dir"' EXIT
-url="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${version}/wasm-bindgen-${version}-${target}.tar.gz"
-if [ -n "${GITHUB_PROXY:-}" ]; then
-    url="${GITHUB_PROXY%/}/${url}"
-fi
+url=$(github_url "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${version}/wasm-bindgen-${version}-${target}.tar.gz")
 download_artifact "$url" "$sha256" "$download_dir/archive.tar.gz"
 tar -xzf "$download_dir/archive.tar.gz" --strip-components=1 -C "$download_dir"
 mkdir -p "$install_dir"

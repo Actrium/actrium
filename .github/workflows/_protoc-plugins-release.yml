@@ -19,7 +19,7 @@ env:
 jobs:
   validate:
     name: Validate protoc plugins release tag
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag_sha: ${{ steps.release.outputs.tag_sha }}
@@ -94,9 +94,9 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Build
-        run: cargo build --release -p actr-framework-protoc-codegen --bin protoc-gen-actrframework --target aarch64-apple-darwin --locked
+        run: cargo build --release --target-dir target -p actr-framework-protoc-codegen --bin protoc-gen-actrframework --target aarch64-apple-darwin --locked
       - name: Package
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
@@ -172,7 +172,7 @@ jobs:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --release -p actr-web-protoc-codegen --bin protoc-gen-actr-web --target aarch64-apple-darwin --locked
+        run: cargo build --release --target-dir target -p actr-web-protoc-codegen --bin protoc-gen-actr-web --target aarch64-apple-darwin --locked
       - name: Package
         run: |
           set -euo pipefail

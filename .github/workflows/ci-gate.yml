@@ -23,7 +23,7 @@ concurrency:
 jobs:
   identity:
     name: Commit Identity Privacy
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -47,7 +47,7 @@ jobs:
 
   determine:
     name: Determine Affected Targets
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     outputs:
       mode: ${{ steps.targets.outputs.mode }}
       changed_files_json: ${{ steps.targets.outputs.changed_files_json }}
@@ -82,6 +82,11 @@ jobs:
           fi
       - name: Test SDK error message generation
         run: python3 scripts/actr/tests/test_patch_error_messages.py
+      - name: Validate GitHub-hosted runner policy
+        run: |
+          python -m pip install --disable-pip-version-check -r .github/scripts/runner-policy-requirements.txt
+          python .github/scripts/check_workflow_runners_test.py
+          python .github/scripts/check_workflow_runners.py
       - name: Test target detection
         run: python .github/scripts/ci_targets_test.py
       - name: Test CI configuration
@@ -107,7 +112,7 @@ jobs:
     name: Prepare CLI Web Runtime
     needs: determine
     if: needs.determine.outputs.rust_core == 'true' || needs.determine.outputs.e2e_package_runtime == 'true' || needs.determine.outputs.web_binding == 'true' || needs.determine.outputs.kotlin_binding == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -118,77 +123,84 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
-      - name: Verify preinstalled Rust toolchain
-        run: |
-          if ! {
-            rustup run 1.99.0 rustc --version &&
-            rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-unknown-unknown;
-          }; then
-            echo "::error::Self-hosted runner image must provide Rust 1.99.0 and wasm32-unknown-unknown."
-            exit 1
-          fi
-      - name: Use runner sccache
-        id: runner-sccache
-        run: |
-          # The runner image already pins this version. Avoid a release API
-          # request before every build when that supported binary is present.
-          if command -v sccache >/dev/null 2>&1 &&
-             [ "$(sccache --version)" = "sccache 0.18.0" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Run sccache-cache
-        if: steps.runner-sccache.outputs.ready != 'true'
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: v0.18.0
-      - name: Install wasm-pack
-        run: |
-          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
-            cargo install wasm-pack --version 0.15.0 --locked --force
-          fi
-          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
       - name: Cache CLI web runtime assets
         # One fixed toolchain produces assets for every consumer, including MSRV.
         # Keep the generated files separate from source-controlled HTML and JS.
         id: cli-web-assets
         uses: actions/cache@v4
         with:
-          path: |
-            crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
-            crates/actr-cli/assets/web-runtime/actr_sw_host.js
-            packages/actr-web/dist/sw
+          path: packages/actr-web/dist/sw
           key: >-
-            cli-web-runtime-v4-rust1.99.0-wp0.15.0-wb0.2.126-${{ hashFiles(
+            cli-web-runtime-v5-rust1.99.0-wp0.15.0-pc${{ vars.PROTOC_VERSION || '29.3' }}-${{ hashFiles(
               'Cargo.toml', 'Cargo.lock', 'rust-toolchain*', '.cargo/config.toml',
               'packages/actr-web/Cargo.toml', 'packages/actr-web/Cargo.lock',
               'packages/actr-web/.cargo/config.toml', 'packages/actr-web/rust-toolchain*',
               'packages/actr-web/packages/**', 'packages/actr-web/crates/**',
-              'packages/actr-web/scripts/**', 'crates/actr-protocol/**',
+              'packages/actr-web/scripts/**', 'tools/ci/wasm-bindgen/**', 'crates/actr-protocol/**',
               'crates/actr-framework/**', 'crates/actr-platform-traits/**',
               'crates/actr-pack/**', 'crates/actr-runtime-mailbox/**',
               'crates/actr-relay-security/**') }}
+      - name: Check cached Web runtime
+        id: web-runtime
+        env:
+          CACHE_HIT: ${{ steps.cli-web-assets.outputs.cache-hit }}
+        run: |
+          dist=packages/actr-web/dist/sw
+          ready=false
+          if [[ "$CACHE_HIT" == true && -s "$dist/actr_sw_host_bg.wasm" &&
+                -s "$dist/actr_sw_host.js" && -s "$dist/actr_sw_host.d.ts" &&
+                -s "$dist/package.json" ]]; then
+            ready=true
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+      - name: Prepare Linux build space
+        if: steps.web-runtime.outputs.ready != 'true'
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        if: steps.web-runtime.outputs.ready != 'true'
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install protoc
+        if: steps.web-runtime.outputs.ready != 'true'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      # Every build initializes cache credentials, including when sccache is preinstalled.
+      - name: Run sccache-cache
+        if: steps.web-runtime.outputs.ready != 'true'
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.18.0
       - name: Cache cold web-build dependencies
         # Output-cache hits skip both this restore and its post-job save.
-        if: steps.cli-web-assets.outputs.cache-hit != 'true'
+        if: steps.web-runtime.outputs.ready != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages/actr-web -> ../../target/bindings-web
           cache-bin: false
           shared-key: cli-web-assets
-      - name: Ensure wasm-bindgen CLI
-        if: steps.cli-web-assets.outputs.cache-hit != 'true'
-        run: bash tools/ci/runner/install-wasm-bindgen.sh packages/actr-web/Cargo.lock
-      - name: Generate CLI web runtime assets
+      - name: Install wasm-pack
+        if: steps.web-runtime.outputs.ready != 'true'
         run: |
-          if [ "${{ steps.cli-web-assets.outputs.cache-hit }}" = "true" ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ] &&
-             [ -s crates/actr-cli/assets/web-runtime/actr_sw_host.js ] &&
-             [ -s packages/actr-web/dist/sw/actr_sw_host.d.ts ] &&
-             [ -s packages/actr-web/dist/sw/package.json ]; then
-            bash packages/actr-web/scripts/sync-cli-assets.sh
-          else
-            bash packages/actr-web/scripts/sync-cli-assets.sh --build
+          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
           fi
+          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
+      - name: Build CLI web runtime assets
+        if: steps.web-runtime.outputs.ready != 'true'
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
+      - name: Sync cached CLI web runtime assets
+        if: steps.web-runtime.outputs.ready == 'true'
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh
+
+      - name: Verify Web runtime before uploading
+        run: |
+          for file in actr_sw_host_bg.wasm actr_sw_host.js actr_sw_host.d.ts package.json; do
+            test -s "packages/actr-web/dist/sw/$file" || { echo "Missing Web runtime output: $file" >&2; exit 1; }
+          done
+          bash packages/actr-web/scripts/sync-cli-assets.sh --check
       - name: Upload CLI web runtime assets
         uses: actions/upload-artifact@v4
         with:
@@ -211,19 +223,33 @@ jobs:
     name: Rust E2E Compile
     needs: determine
     if: needs.determine.outputs.e2e_rust == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tests/e2e/actr -> ../target/e2e
       - name: Install native dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libopus-dev
       - name: Resolve e2e workspace with the committed lockfile
+        working-directory: tests/e2e/actr
         run: |
           cargo metadata \
-            --manifest-path tests/e2e/actr/Cargo.toml \
             --format-version 1 \
             --locked \
             > "$RUNNER_TEMP/e2e-metadata.json"
@@ -245,18 +271,21 @@ jobs:
               )
           PY
       - name: Compile the Rust E2E workspace
-        run: cargo check --manifest-path tests/e2e/actr/Cargo.toml --workspace --locked
+        working-directory: tests/e2e/actr
+        run: cargo check --workspace --locked
 
   e2e_package_runtime:
     name: E2E Package Runtime
     needs: [determine, cli_web_assets]
     if: needs.determine.outputs.e2e_package_runtime == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -266,14 +295,11 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update
           sudo apt-get install -y jq sqlite3 lsof perl bubblewrap openssl
-      # protoc 29.3 ships in the self-hosted runner image; skip the
-      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
-        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Install wasm-pack
         run: |
           if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
@@ -310,7 +336,7 @@ jobs:
     name: Dependency Audit
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -326,7 +352,7 @@ jobs:
     name: Rust
     needs: [determine, cli_web_assets]
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -343,20 +369,22 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
-      - name: Verify preinstalled Rust toolchain
-        run: |
-          # The self-hosted image owns toolchain installation; never download here.
-          if ! {
-            rustup run 1.99.0 rustc --version &&
-            rustup run 1.99.0 rustfmt --version &&
-            rustup run 1.99.0 cargo-clippy --version &&
-            rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-wasip2;
-          }; then
-            echo "::error::Self-hosted runner image must provide Rust 1.99.0, rustfmt, Clippy, and wasm32-wasip2."
-            exit 1
-          fi
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt,clippy
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.18.0
       - name: OTel payload-logging guard
         # Anti-regression guard for issue #484: the OTel tracing bridge exports
         # every tracing event that passes the filter to vector → VictoriaLogs
@@ -376,9 +404,6 @@ jobs:
         run: |
           cmp crates/actr-framework/wit-v2/actr-workload.wit crates/actr-hyper/wit-v2/actr-workload.wit
       - name: Cache cargo-installed tools
-        # The fleet image already supplies the pinned tools. Restoring an old
-        # binary archive can overwrite them and force minutes of recompilation.
-        if: runner.environment != 'self-hosted'
         id: cargo-tools
         uses: actions/cache@v4
         with:
@@ -453,7 +478,7 @@ jobs:
     name: Test (Rust, ${{ matrix.shard }})
     needs: [determine, cli_web_assets]
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -516,20 +541,20 @@ jobs:
         | binary(mock_loran_integration)
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
           # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile the
           # wasm_actor_fixture Component under --all-features (wasm-engine).
+          components: rust-src
           targets: wasm32-wasip2,wasm32-unknown-unknown
-      # protoc 29.3 ships in the self-hosted runner image; skip the
-      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
-        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Verify actr-hyper WIT drift
         # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
         # without the sibling framework crate. Fail fast if the copy drifts.
@@ -545,6 +570,8 @@ jobs:
         # The workspace's full test-target set exceeds what rust-cache can
         # store on the runner disk; sccache keeps only a working set locally.
         uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.18.0
       - name: Install prebuilt WebAssembly tools
         env:
           WASM_PACK_SHA256: c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a
@@ -595,18 +622,6 @@ jobs:
           test -s crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
           test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
           bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
-      - name: Free disk space
-        # `cargo nextest run --workspace --all-features` builds every test
-        # target into a cold target/ (cache-targets: false), which can exceed
-        # the runner's ~14 GB SSD (`No space left on device`). Reclaim space
-        # held by preinstalled software the Rust build does not need.
-        run: |
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/share/boost || true
-          sudo docker system prune --all --force || true
-          df -h /
       - name: Install cargo-nextest
         # Prebuilt binary. Pin to a fixed release for reproducibility if
         # desired via `taiki-e/install-action@v2` with `tool: cargo-nextest@<ver>`.
@@ -672,7 +687,7 @@ jobs:
     name: Rust MSRV (1.95)
     needs: [determine, cli_web_assets]
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -689,8 +704,17 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.18.0
       - name: Setup Rust (MSRV)
         uses: dtolnay/rust-toolchain@1.95.0
         with:
@@ -704,9 +728,6 @@ jobs:
             sudo apt-get install -y pkg-config libssl-dev cmake
           fi
       - name: Cache cargo-installed tools
-        # The fleet image already supplies the pinned tools. Restoring an old
-        # binary archive can overwrite them and force minutes of recompilation.
-        if: runner.environment != 'self-hosted'
         id: cargo-tools
         uses: actions/cache@v4
         with:
@@ -748,11 +769,21 @@ jobs:
     name: TypeScript
     needs: determine
     if: needs.determine.outputs.ts_binding == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-typescript -> ../../target/bindings-typescript
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -795,13 +826,11 @@ jobs:
     name: TypeScript Workload
     needs: determine
     if: needs.determine.outputs.ts_workload == 'true'
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - name: Set up light runner
-        uses: ./.github/actions/setup-light-runner
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -835,7 +864,7 @@ jobs:
     name: Python Codegen
     needs: determine
     if: needs.determine.outputs.python_codegen == 'true'
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     defaults:
@@ -843,8 +872,11 @@ jobs:
         working-directory: tools/actr/protoc-gen/python
     steps:
       - uses: actions/checkout@v5
-      - name: Set up light runner
-        uses: ./.github/actions/setup-light-runner
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -931,11 +963,23 @@ jobs:
     name: Python Workload
     needs: determine
     if: needs.determine.outputs.python_workload == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -948,9 +992,6 @@ jobs:
         run: |
           cmp crates/actr-framework/wit-v2/actr-workload.wit crates/actr-hyper/wit-v2/actr-workload.wit
       - name: Cache cargo-installed tools
-        # The fleet image already supplies the pinned tools. Restoring an old
-        # binary archive can overwrite them and force minutes of recompilation.
-        if: runner.environment != 'self-hosted'
         id: cargo-tools
         uses: actions/cache@v4
         with:
@@ -1023,7 +1064,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - name: Cache uniffi-bindgen binary
         id: cache-uniffi
         uses: actions/cache@v4
@@ -1110,7 +1151,7 @@ jobs:
     name: Web
     needs: [determine, cli_web_assets]
     if: needs.determine.outputs.web_binding == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     env:
@@ -1118,6 +1159,21 @@ jobs:
       RUST_BACKTRACE: 1
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-web -> ../../target/bindings-web
       - name: Check formatting
         working-directory: packages/actr-web
         run: cargo fmt --all -- --check
@@ -1163,11 +1219,23 @@ jobs:
     name: C and Go Workloads
     needs: determine
     if: needs.determine.outputs.c_go_workloads == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
       - name: Install native build dependencies
         run: |
           if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists openssl || ! command -v cmake >/dev/null 2>&1; then
@@ -1259,7 +1327,7 @@ jobs:
     name: WebRTC
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     env:
@@ -1268,31 +1336,31 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.99.0
     steps:
       - uses: actions/checkout@v5
-      - name: Verify preinstalled Rust toolchain
-        run: |
-          # The self-hosted image owns toolchain installation; never download here.
-          if ! {
-            rustup run 1.99.0 rustc --version &&
-            rustup run 1.99.0 cargo-clippy --version &&
-            rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-wasip2 &&
-            rustup target list --toolchain 1.99.0 --installed | grep -Fxq wasm32-unknown-unknown;
-          }; then
-            echo "::error::Self-hosted runner image must provide Rust 1.99.0, Clippy, and wasm32-wasip2, wasm32-unknown-unknown."
-            exit 1
-          fi
-      # protoc 29.3 ships in the self-hosted runner image; skip the
-      # download (and its proxy-tunnel flakiness) there.
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: clippy
+          targets: wasm32-wasip2,wasm32-unknown-unknown
       - name: Install protoc
-        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
       - uses: Swatinem/rust-cache@v2
         with:
-          # The high ARC fleet uses the in-cluster sccache/MinIO backend.
-          # GitHub cache save never restores on this fleet and costs >2m.
-          save-if: "false"
+          cache-targets: false
+      - name: Install wasm Component Model toolchain
+        run: |
+          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
+            cargo install wasm-component-ld --version 0.5.26 --locked --force
+          fi
+          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
+          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
+          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
       # Exercise the native RTC implementation in a dedicated job.
@@ -1311,7 +1379,7 @@ jobs:
 
   cjk:
     name: Language Policy
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     if: always()
     permissions:
       contents: read
@@ -1338,7 +1406,7 @@ jobs:
 
   gate:
     name: Gate
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     if: always()
     needs:
       - identity

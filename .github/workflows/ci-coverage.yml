@@ -12,11 +12,24 @@ env:
 jobs:
   coverage-rust:
     name: Rust Coverage
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: llvm-tools-preview
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
       - name: Install wasm Component Model toolchain
         run: |
           if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
@@ -59,7 +72,7 @@ jobs:
 
   coverage-web-rust:
     name: Web Rust Host Unit Coverage
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     defaults:
@@ -67,6 +80,21 @@ jobs:
         working-directory: packages/actr-web
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: llvm-tools-preview
+          targets: wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-web -> ../../target/bindings-web
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Run coverage
@@ -108,7 +136,7 @@ jobs:
 
   coverage-web-wasm:
     name: Web Rust Wasm Coverage
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     defaults:
@@ -116,6 +144,21 @@ jobs:
         working-directory: packages/actr-web
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+          targets: wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-web -> ../../target/bindings-web
       - name: Install wasm-capable clang
         run: |
           sudo apt-get update
@@ -124,18 +167,8 @@ jobs:
           echo "TARGET_CC=$(command -v clang)" >> "$GITHUB_ENV"
           echo "CC=$(command -v clang)" >> "$GITHUB_ENV"
           clang --target=wasm32-unknown-unknown -x c -c /dev/null -o /tmp/clang-wasm-test.o
-      - name: Install wasm test tools
-        run: |
-          wasm_bindgen_version="$(
-            awk '
-              $0 == "name = \"wasm-bindgen\"" { in_pkg = 1; next }
-              in_pkg && /^version = / { gsub(/"/, "", $3); print $3; exit }
-              /^\[\[package\]\]/ { in_pkg = 0 }
-            ' Cargo.lock
-          )"
-          test -n "$wasm_bindgen_version"
-          cargo install wasm-bindgen-cli --version "$wasm_bindgen_version" --locked
-          wasm-bindgen-test-runner --version
+      - name: Install matching wasm-bindgen tools
+        run: bash ../../tools/ci/wasm-bindgen/install.sh Cargo.lock
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
       - name: Setup ChromeDriver
@@ -166,7 +199,7 @@ jobs:
 
   coverage-typescript:
     name: TypeScript Coverage
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     defaults:
@@ -174,6 +207,16 @@ jobs:
         working-directory: packages/actr-typescript
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-typescript -> ../../target/bindings-typescript
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -201,7 +244,7 @@ jobs:
 
   coverage-kotlin:
     name: Kotlin Coverage
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     defaults:
@@ -212,9 +255,13 @@ jobs:
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: "17"
+          distribution: "temurin"
           cache: gradle
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-34 build-tools;34.0.0"
       - name: Run Kover coverage
         run: ./gradlew :actr-kotlin:koverXmlReport :actr-kotlin:koverHtmlReport --no-daemon
       - name: Upload XML
@@ -232,7 +279,7 @@ jobs:
 
   coverage-summary:
     name: Coverage Summary
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     needs:
       - coverage-rust
       - coverage-web-rust
@@ -287,7 +334,7 @@ jobs:
 
   publish-pages:
     name: Publish Coverage Pages
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     needs:
       - coverage-rust
       - coverage-web-rust

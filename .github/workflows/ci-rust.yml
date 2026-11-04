@@ -13,17 +13,20 @@ env:
   ACTR_REQUIRE_WASM_FIXTURE: "1"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-rust-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   audit:
     name: Dependency Audit
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
@@ -31,12 +34,16 @@ jobs:
 
   format:
     name: Format Check
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -47,18 +54,21 @@ jobs:
   # fast-fails before the heavier build / test jobs.
   wit-lint:
     name: WIT shape consistency
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
       - name: WIT <-> DynClib ABI drift check
         run: cargo run -p wit-lint --release
 
   payload-logging:
     name: OTel payload-logging guard
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -74,12 +84,24 @@ jobs:
 
   build:
     name: Build
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
       # Component Model toolchain:
       # - wasm-component-ld >= 0.5.22 is required to link the V2 async-world
       #   guest fixture (actr:workload@0.6.0) built by crates/actr-hyper/build.rs; that
@@ -114,12 +136,25 @@ jobs:
 
   test:
     name: Test
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rust-src
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
       # Phase 1 Component Model toolchain — see `build` job for rationale.
       - name: Install wasm Component Model toolchain
         run: |
@@ -146,12 +181,24 @@ jobs:
 
   dynclib-e2e:
     name: Dynclib E2E
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
       - name: Run dynclib tests
         run: |
           set -euo pipefail

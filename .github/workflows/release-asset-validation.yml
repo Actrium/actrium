@@ -41,7 +41,7 @@ permissions:
 jobs:
   context:
     name: Resolve validation context
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
@@ -142,7 +142,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -379,7 +379,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Cache wasm-pack
         id: cache-wasm-pack
@@ -465,7 +465,7 @@ jobs:
             build_args: ""
             use_zig: false
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
             artifact: actr.darwin-arm64.node
             build_args: ""
             use_zig: false
@@ -518,7 +518,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Setup Zig
         if: matrix.use_zig
@@ -735,7 +735,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Cache UniFFI bindgen
         id: cache-uniffi
@@ -909,7 +909,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Cache UniFFI bindgen
         id: cache-uniffi

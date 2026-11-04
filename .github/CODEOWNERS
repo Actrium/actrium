@@ -3,6 +3,8 @@
 /.github/CODEOWNERS @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
 /.github/workflows/ @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
 /.github/scripts/ci_gate_test.py @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+/.github/scripts/check_workflow_runners* @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
+/.github/scripts/runner-policy-requirements.txt @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg
 
 # Release scripts execute inside workflows that can write repository contents.
 /scripts/actr/release-*.sh @g65537 @mybee @Camel9527 @alinejun @boomsi @kookyleo @kaito-harry @alpacassarg

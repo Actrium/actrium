@@ -14,7 +14,7 @@ concurrency:
 jobs:
   title:
     name: Validate PR title
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     steps:
       - name: Check conventional commit format
         env:

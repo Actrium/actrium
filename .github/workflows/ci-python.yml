@@ -8,16 +8,28 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-python-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   workload:
     name: Python Workload Authoring Check
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Prepare Linux build space
+        uses: ./.github/actions/prepare-linux-build
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,7 +37,6 @@ jobs:
           python-version: "3.13"
           cache: "pip"
           cache-dependency-path: packages/actr-python/actr-workload/pyproject.toml
-
 
       - name: Install wasm-tools
         run: |

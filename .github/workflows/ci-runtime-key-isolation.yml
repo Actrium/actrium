@@ -24,9 +24,9 @@ jobs:
       matrix:
         include:
           - platform: linux
-            runner: [self-hosted, Linux, X64]
+            runner: ubuntu-24.04
           - platform: macos
-            runner: macos-arm64-larger
+            runner: macos-15
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:

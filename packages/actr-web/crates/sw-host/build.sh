@@ -7,14 +7,9 @@ echo "Building Service Worker Host..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Use the repository's canonical target directory when the helper is installed.
-if [ -x /usr/local/bin/rust-target-env ]; then
-  eval "$(/usr/local/bin/rust-target-env)"
-fi
-
-# Avoid wasm-pack's downloader on the Linux fleet's proxied egress.
+# Install the checksum-verified CLI matching the web workspace lockfile.
 if [ "$(uname -s)/$(uname -m)" = "Linux/x86_64" ]; then
-  bash "$SCRIPT_DIR/../../../../tools/ci/runner/install-wasm-bindgen.sh" ../../Cargo.lock
+  bash "$SCRIPT_DIR/../../../../tools/ci/wasm-bindgen/install.sh" ../../Cargo.lock
 fi
 
 # Ensure a writable temp directory for wasm-bindgen install.

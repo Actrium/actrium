@@ -2,7 +2,7 @@
 # Check checksum enforcement and cache recovery without making network requests.
 set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-. "$script_dir/runner-install-lib.sh"
+. "$script_dir/download.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 printf 'trusted artifact\n' > "$work/fixture"

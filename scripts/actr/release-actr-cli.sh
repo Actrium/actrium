@@ -179,7 +179,7 @@ command_build() {
     return
   fi
 
-  local repo_root cargo_args filename binary_path
+  local repo_root cargo_args filename target_dir binary_path
   repo_root=${ACTR_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
   if [[ "${ACTR_PREBUILT_ASSETS:-}" != "1" ]]; then
     log_info "Syncing CLI web runtime assets for $TARGET"
@@ -206,7 +206,9 @@ command_build() {
     fi
   fi
 
-  binary_path="$repo_root/target/$TARGET/release/$filename"
+  target_dir=$(cd "$repo_root" && cargo metadata --format-version 1 --no-deps --locked |
+    python3 -c 'import json, sys; from pathlib import Path; sys.stdout.write(Path(json.load(sys.stdin)["target_directory"]).as_posix())')
+  binary_path="$target_dir/$TARGET/release/$filename"
   [[ -f "$binary_path" ]] || {
     append_state "actr-cli-$TARGET" failure binary_missing "$url"
     fail "Built actr-cli binary not found at $binary_path"
