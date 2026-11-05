@@ -400,6 +400,22 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -525,6 +541,139 @@ fileprivate struct FfiConverterString: FfiConverter {
         writeBytes(&buf, value.utf8)
     }
 }
+
+
+
+
+public protocol PackagePublisherProtocol: AnyObject, Sendable {
+
+    func pinsJson()  -> String
+
+    func verifyProgram(source: PackageSourceInfo, archive: [UInt8]) throws  -> VerifiedProgramInfo
+
+}
+open class PackagePublisher: PackagePublisherProtocol, @unchecked Sendable {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_actrium_core_fn_clone_packagepublisher(self.pointer, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_actrium_core_fn_free_packagepublisher(pointer, $0) }
+    }
+
+
+
+
+open func pinsJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actrium_core_fn_method_packagepublisher_pins_json(self.uniffiClonePointer(),$0
+    )
+})
+}
+
+open func verifyProgram(source: PackageSourceInfo, archive: [UInt8])throws  -> VerifiedProgramInfo  {
+    return try  FfiConverterTypeVerifiedProgramInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_method_packagepublisher_verify_program(self.uniffiClonePointer(),
+        FfiConverterTypePackageSourceInfo_lower(source),
+        FfiConverterSequenceUInt8.lower(archive),$0
+    )
+})
+}
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackagePublisher: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = PackagePublisher
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> PackagePublisher {
+        return PackagePublisher(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: PackagePublisher) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackagePublisher {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: PackagePublisher, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackagePublisher_lift(_ pointer: UnsafeMutableRawPointer) throws -> PackagePublisher {
+    return try FfiConverterTypePackagePublisher.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackagePublisher_lower(_ value: PackagePublisher) -> UnsafeMutableRawPointer {
+    return FfiConverterTypePackagePublisher.lower(value)
+}
+
+
 
 
 public struct ActiveTabInfo {
@@ -4647,6 +4796,170 @@ public func FfiConverterTypePackageIntegrityPlanInfo_lower(_ value: PackageInteg
 }
 
 
+public struct PackagePublisherInfo {
+    public var domain: String
+    public var bootstrapUrl: String
+    public var digest: String
+    public var actorType: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(domain: String, bootstrapUrl: String, digest: String, actorType: String) {
+        self.domain = domain
+        self.bootstrapUrl = bootstrapUrl
+        self.digest = digest
+        self.actorType = actorType
+    }
+}
+
+#if compiler(>=6)
+extension PackagePublisherInfo: Sendable {}
+#endif
+
+
+extension PackagePublisherInfo: Equatable, Hashable {
+    public static func ==(lhs: PackagePublisherInfo, rhs: PackagePublisherInfo) -> Bool {
+        if lhs.domain != rhs.domain {
+            return false
+        }
+        if lhs.bootstrapUrl != rhs.bootstrapUrl {
+            return false
+        }
+        if lhs.digest != rhs.digest {
+            return false
+        }
+        if lhs.actorType != rhs.actorType {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(domain)
+        hasher.combine(bootstrapUrl)
+        hasher.combine(digest)
+        hasher.combine(actorType)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackagePublisherInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackagePublisherInfo {
+        return
+            try PackagePublisherInfo(
+                domain: FfiConverterString.read(from: &buf),
+                bootstrapUrl: FfiConverterString.read(from: &buf),
+                digest: FfiConverterString.read(from: &buf),
+                actorType: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PackagePublisherInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.domain, into: &buf)
+        FfiConverterString.write(value.bootstrapUrl, into: &buf)
+        FfiConverterString.write(value.digest, into: &buf)
+        FfiConverterString.write(value.actorType, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackagePublisherInfo_lift(_ buf: RustBuffer) throws -> PackagePublisherInfo {
+    return try FfiConverterTypePackagePublisherInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackagePublisherInfo_lower(_ value: PackagePublisherInfo) -> RustBuffer {
+    return FfiConverterTypePackagePublisherInfo.lower(value)
+}
+
+
+public struct PackageSourceInfo {
+    public var href: String
+    public var expectedSha256: String?
+    public var expectedActorType: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(href: String, expectedSha256: String?, expectedActorType: String?) {
+        self.href = href
+        self.expectedSha256 = expectedSha256
+        self.expectedActorType = expectedActorType
+    }
+}
+
+#if compiler(>=6)
+extension PackageSourceInfo: Sendable {}
+#endif
+
+
+extension PackageSourceInfo: Equatable, Hashable {
+    public static func ==(lhs: PackageSourceInfo, rhs: PackageSourceInfo) -> Bool {
+        if lhs.href != rhs.href {
+            return false
+        }
+        if lhs.expectedSha256 != rhs.expectedSha256 {
+            return false
+        }
+        if lhs.expectedActorType != rhs.expectedActorType {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(href)
+        hasher.combine(expectedSha256)
+        hasher.combine(expectedActorType)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageSourceInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageSourceInfo {
+        return
+            try PackageSourceInfo(
+                href: FfiConverterString.read(from: &buf),
+                expectedSha256: FfiConverterOptionString.read(from: &buf),
+                expectedActorType: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PackageSourceInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.href, into: &buf)
+        FfiConverterOptionString.write(value.expectedSha256, into: &buf)
+        FfiConverterOptionString.write(value.expectedActorType, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageSourceInfo_lift(_ buf: RustBuffer) throws -> PackageSourceInfo {
+    return try FfiConverterTypePackageSourceInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageSourceInfo_lower(_ value: PackageSourceInfo) -> RustBuffer {
+    return FfiConverterTypePackageSourceInfo.lower(value)
+}
+
+
 public struct RuntimeContainerSizeChangeEventInfo {
     public var containerWidth: Int32
     public var containerHeight: Int32
@@ -5930,6 +6243,218 @@ public func FfiConverterTypeUserInfoBridgeContractInfo_lower(_ value: UserInfoBr
     return FfiConverterTypeUserInfoBridgeContractInfo.lower(value)
 }
 
+
+public struct VerifiedProgramFileInfo {
+    public var path: String
+    public var bytes: [UInt8]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(path: String, bytes: [UInt8]) {
+        self.path = path
+        self.bytes = bytes
+    }
+}
+
+#if compiler(>=6)
+extension VerifiedProgramFileInfo: Sendable {}
+#endif
+
+
+extension VerifiedProgramFileInfo: Equatable, Hashable {
+    public static func ==(lhs: VerifiedProgramFileInfo, rhs: VerifiedProgramFileInfo) -> Bool {
+        if lhs.path != rhs.path {
+            return false
+        }
+        if lhs.bytes != rhs.bytes {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(path)
+        hasher.combine(bytes)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVerifiedProgramFileInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VerifiedProgramFileInfo {
+        return
+            try VerifiedProgramFileInfo(
+                path: FfiConverterString.read(from: &buf),
+                bytes: FfiConverterSequenceUInt8.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VerifiedProgramFileInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.path, into: &buf)
+        FfiConverterSequenceUInt8.write(value.bytes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVerifiedProgramFileInfo_lift(_ buf: RustBuffer) throws -> VerifiedProgramFileInfo {
+    return try FfiConverterTypeVerifiedProgramFileInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVerifiedProgramFileInfo_lower(_ value: VerifiedProgramFileInfo) -> RustBuffer {
+    return FfiConverterTypeVerifiedProgramFileInfo.lower(value)
+}
+
+
+public struct VerifiedProgramInfo {
+    public var publisher: String
+    public var program: String
+    public var version: String
+    public var digest: String
+    public var signingKeyId: String
+    public var title: String
+    public var description: String?
+    public var guestCode: String
+    public var serviceBytes: [UInt8]
+    public var resources: [VerifiedProgramFileInfo]
+    public var metadataJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(publisher: String, program: String, version: String, digest: String, signingKeyId: String, title: String, description: String?, guestCode: String, serviceBytes: [UInt8], resources: [VerifiedProgramFileInfo], metadataJson: String) {
+        self.publisher = publisher
+        self.program = program
+        self.version = version
+        self.digest = digest
+        self.signingKeyId = signingKeyId
+        self.title = title
+        self.description = description
+        self.guestCode = guestCode
+        self.serviceBytes = serviceBytes
+        self.resources = resources
+        self.metadataJson = metadataJson
+    }
+}
+
+#if compiler(>=6)
+extension VerifiedProgramInfo: Sendable {}
+#endif
+
+
+extension VerifiedProgramInfo: Equatable, Hashable {
+    public static func ==(lhs: VerifiedProgramInfo, rhs: VerifiedProgramInfo) -> Bool {
+        if lhs.publisher != rhs.publisher {
+            return false
+        }
+        if lhs.program != rhs.program {
+            return false
+        }
+        if lhs.version != rhs.version {
+            return false
+        }
+        if lhs.digest != rhs.digest {
+            return false
+        }
+        if lhs.signingKeyId != rhs.signingKeyId {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        if lhs.guestCode != rhs.guestCode {
+            return false
+        }
+        if lhs.serviceBytes != rhs.serviceBytes {
+            return false
+        }
+        if lhs.resources != rhs.resources {
+            return false
+        }
+        if lhs.metadataJson != rhs.metadataJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(publisher)
+        hasher.combine(program)
+        hasher.combine(version)
+        hasher.combine(digest)
+        hasher.combine(signingKeyId)
+        hasher.combine(title)
+        hasher.combine(description)
+        hasher.combine(guestCode)
+        hasher.combine(serviceBytes)
+        hasher.combine(resources)
+        hasher.combine(metadataJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVerifiedProgramInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VerifiedProgramInfo {
+        return
+            try VerifiedProgramInfo(
+                publisher: FfiConverterString.read(from: &buf),
+                program: FfiConverterString.read(from: &buf),
+                version: FfiConverterString.read(from: &buf),
+                digest: FfiConverterString.read(from: &buf),
+                signingKeyId: FfiConverterString.read(from: &buf),
+                title: FfiConverterString.read(from: &buf),
+                description: FfiConverterOptionString.read(from: &buf),
+                guestCode: FfiConverterString.read(from: &buf),
+                serviceBytes: FfiConverterSequenceUInt8.read(from: &buf),
+                resources: FfiConverterSequenceTypeVerifiedProgramFileInfo.read(from: &buf),
+                metadataJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VerifiedProgramInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.publisher, into: &buf)
+        FfiConverterString.write(value.program, into: &buf)
+        FfiConverterString.write(value.version, into: &buf)
+        FfiConverterString.write(value.digest, into: &buf)
+        FfiConverterString.write(value.signingKeyId, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.description, into: &buf)
+        FfiConverterString.write(value.guestCode, into: &buf)
+        FfiConverterSequenceUInt8.write(value.serviceBytes, into: &buf)
+        FfiConverterSequenceTypeVerifiedProgramFileInfo.write(value.resources, into: &buf)
+        FfiConverterString.write(value.metadataJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVerifiedProgramInfo_lift(_ buf: RustBuffer) throws -> VerifiedProgramInfo {
+    return try FfiConverterTypeVerifiedProgramInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVerifiedProgramInfo_lower(_ value: VerifiedProgramInfo) -> RustBuffer {
+    return FfiConverterTypeVerifiedProgramInfo.lower(value)
+}
+
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
@@ -6012,6 +6537,8 @@ public enum CoreError: Swift.Error {
 
 
 
+    case PackageVerification(message: String)
+
     case InvalidJson(message: String)
 
     case MissingField(message: String)
@@ -6042,31 +6569,35 @@ public struct FfiConverterTypeCoreError: FfiConverterRustBuffer {
 
 
 
-        case 1: return .InvalidJson(
+        case 1: return .PackageVerification(
             message: try FfiConverterString.read(from: &buf)
         )
 
-        case 2: return .MissingField(
+        case 2: return .InvalidJson(
             message: try FfiConverterString.read(from: &buf)
         )
 
-        case 3: return .UnsupportedContract(
+        case 3: return .MissingField(
             message: try FfiConverterString.read(from: &buf)
         )
 
-        case 4: return .ContractTooNew(
+        case 4: return .UnsupportedContract(
             message: try FfiConverterString.read(from: &buf)
         )
 
-        case 5: return .UnknownSystemAppType(
+        case 5: return .ContractTooNew(
             message: try FfiConverterString.read(from: &buf)
         )
 
-        case 6: return .UnknownAppSourceType(
+        case 6: return .UnknownSystemAppType(
             message: try FfiConverterString.read(from: &buf)
         )
 
-        case 7: return .InvalidActrActorType(
+        case 7: return .UnknownAppSourceType(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 8: return .InvalidActrActorType(
             message: try FfiConverterString.read(from: &buf)
         )
 
@@ -6081,20 +6612,22 @@ public struct FfiConverterTypeCoreError: FfiConverterRustBuffer {
 
 
 
-        case .InvalidJson(_ /* message is ignored*/):
+        case .PackageVerification(_ /* message is ignored*/):
             writeInt(&buf, Int32(1))
-        case .MissingField(_ /* message is ignored*/):
+        case .InvalidJson(_ /* message is ignored*/):
             writeInt(&buf, Int32(2))
-        case .UnsupportedContract(_ /* message is ignored*/):
+        case .MissingField(_ /* message is ignored*/):
             writeInt(&buf, Int32(3))
-        case .ContractTooNew(_ /* message is ignored*/):
+        case .UnsupportedContract(_ /* message is ignored*/):
             writeInt(&buf, Int32(4))
-        case .UnknownSystemAppType(_ /* message is ignored*/):
+        case .ContractTooNew(_ /* message is ignored*/):
             writeInt(&buf, Int32(5))
-        case .UnknownAppSourceType(_ /* message is ignored*/):
+        case .UnknownSystemAppType(_ /* message is ignored*/):
             writeInt(&buf, Int32(6))
-        case .InvalidActrActorType(_ /* message is ignored*/):
+        case .UnknownAppSourceType(_ /* message is ignored*/):
             writeInt(&buf, Int32(7))
+        case .InvalidActrActorType(_ /* message is ignored*/):
+            writeInt(&buf, Int32(8))
 
 
         }
@@ -6374,6 +6907,31 @@ fileprivate struct FfiConverterOptionTypeRuntimeTabUpdateInfo: FfiConverterRustB
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceUInt8: FfiConverterRustBuffer {
+    typealias SwiftType = [UInt8]
+
+    public static func write(_ value: [UInt8], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterUInt8.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt8] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UInt8]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterUInt8.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -6594,6 +7152,44 @@ fileprivate struct FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffe
         }
         return seq
     }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeVerifiedProgramFileInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [VerifiedProgramFileInfo]
+
+    public static func write(_ value: [VerifiedProgramFileInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeVerifiedProgramFileInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VerifiedProgramFileInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [VerifiedProgramFileInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeVerifiedProgramFileInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+/**
+ * Descriptor MUST have been fetched from this Publisher's HTTPS bootstrap.
+ * Persist pins_json() even when subsequent package verification fails.
+ */
+public func acceptPackagePublisher(domain: String, descriptorJson: String, pinsJson: String?)throws  -> PackagePublisher  {
+    return try  FfiConverterTypePackagePublisher_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_accept_package_publisher(
+        FfiConverterString.lower(domain),
+        FfiConverterString.lower(descriptorJson),
+        FfiConverterOptionString.lower(pinsJson),$0
+    )
+})
 }
 /**
  * Convert a persisted active-tab row into the platform active-tab model.
@@ -8284,6 +8880,17 @@ public func extractAppIdFromUrl(url: String) -> String?  {
 })
 }
 /**
+ * Unauthenticated identity for discovering the Publisher. Never execution bytes.
+ */
+public func inspectDownloadedProgram(source: PackageSourceInfo, archive: [UInt8])throws  -> PackagePublisherInfo  {
+    return try  FfiConverterTypePackagePublisherInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_inspect_downloaded_program(
+        FfiConverterTypePackageSourceInfo_lower(source),
+        FfiConverterSequenceUInt8.lower(archive),$0
+    )
+})
+}
+/**
  * Return whether the path points to a known ACTR asset extension.
  */
 public func isAssetPath(path: String) -> Bool  {
@@ -9018,6 +9625,15 @@ public func validateActrPackageManifest(source: String)throws   {try rustCallWit
     )
 }
 }
+/**
+ * Host-selected HTTPS source, or package fields from an accepted Realm Profile.
+ */
+public func validatePackageSource(source: PackageSourceInfo)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_validate_package_source(
+        FfiConverterTypePackageSourceInfo_lower(source),$0
+    )
+}
+}
 
 private enum InitializationResult {
     case ok
@@ -9033,6 +9649,9 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_actrium_core_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_accept_package_publisher() != 15062) {
+        return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_active_tab_from_row() != 51323) {
         return InitializationResult.apiChecksumMismatch
@@ -9529,6 +10148,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actrium_core_checksum_func_extract_app_id_from_url() != 65157) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actrium_core_checksum_func_inspect_downloaded_program() != 3858) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actrium_core_checksum_func_is_asset_path() != 48112) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -9791,6 +10413,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_validate_actr_package_manifest() != 38515) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_validate_package_source() != 43725) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_packagepublisher_pins_json() != 58274) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_packagepublisher_verify_program() != 432) {
         return InitializationResult.apiChecksumMismatch
     }
 

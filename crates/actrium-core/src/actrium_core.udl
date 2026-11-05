@@ -1,4 +1,16 @@
 namespace actrium_core {
+    /// Host-selected HTTPS source, or package fields from an accepted Realm Profile.
+    [Throws=CoreError]
+    void validate_package_source(PackageSourceInfo source);
+
+    /// Unauthenticated identity for discovering the Publisher. Never execution bytes.
+    [Throws=CoreError]
+    PackagePublisherInfo inspect_downloaded_program(PackageSourceInfo source, sequence<u8> archive);
+
+    /// Descriptor MUST have been fetched from this Publisher's HTTPS bootstrap.
+    /// Persist pins_json() even when subsequent package verification fails.
+    [Throws=CoreError]
+    PackagePublisher accept_package_publisher(string domain, string descriptor_json, string? pins_json);
     /// Parse and validate an actr-package/2 TOML manifest.
     [Throws=CoreError]
     ActrPackageManifestInfo parse_actr_package_manifest(string source);
@@ -1457,8 +1469,47 @@ dictionary RuntimeSystemRootPropsInfo {
     boolean single_tab_mode;
 };
 
+dictionary PackageSourceInfo {
+    string href;
+    string? expected_sha256;
+    string? expected_actor_type;
+};
+
+dictionary PackagePublisherInfo {
+    string domain;
+    string bootstrap_url;
+    string digest;
+    string actor_type;
+};
+
+dictionary VerifiedProgramFileInfo {
+    string path;
+    sequence<u8> bytes;
+};
+
+dictionary VerifiedProgramInfo {
+    string publisher;
+    string program;
+    string version;
+    string digest;
+    string signing_key_id;
+    string title;
+    string? description;
+    string guest_code;
+    sequence<u8> service_bytes;
+    sequence<VerifiedProgramFileInfo> resources;
+    string metadata_json;
+};
+
+interface PackagePublisher {
+    string pins_json();
+    [Throws=CoreError]
+    VerifiedProgramInfo verify_program(PackageSourceInfo source, sequence<u8> archive);
+};
+
 [Error]
 enum CoreError {
+    "PackageVerification",
     "InvalidJson",
     "MissingField",
     "UnsupportedContract",

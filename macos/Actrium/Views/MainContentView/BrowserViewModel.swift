@@ -62,14 +62,22 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// History view model reference for recording ACTR app visits
     weak var historyVM: HistoryViewModel?
-    private let browserDataRepository = BrowserDataRepository.shared
+    private lazy var browserDataRepository = BrowserDataRepository.shared
+    private let persistSessionOverride: (() -> Void)?
+    private var packageNavigations: [UUID: UUID] = [:]
+    private var packageTasks: [UUID: Task<Void, Never>] = [:]
+    /// Injection point also used by the accepted Realm Profile adapter.
+    var loadTrustedProgram: (TrustedProgramSource) async throws -> VerifiedLocalProgram = {
+        try await ActriumTrustedProgramCoreBridge.load($0)
+    }
 
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }
         return tabs.first(where: { $0.id == currentTabId })
     }
 
-    init() {
+    init(persistSession: (() -> Void)? = nil) {
+        self.persistSessionOverride = persistSession
         // Initialize slot positions first
         initializeSlotPositions()
 
@@ -86,6 +94,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     private func persistBrowserPageSession() {
+        if let persistSessionOverride { persistSessionOverride(); return }
         browserDataRepository.saveSession(tabs: tabs, currentTabId: currentTabId)
     }
 
@@ -155,6 +164,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     func closeTab(id: UUID) {
+        packageTasks.removeValue(forKey: id)?.cancel()
+        packageNavigations.removeValue(forKey: id)
         // Get the slot position of the tab being closed
         guard let closedPosition = tabSlotPositions[id] else {
             logger.warning(" Cannot find tab slot position")
@@ -679,7 +690,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             return
         }
 
+        packageTasks.removeValue(forKey: currentTabId)?.cancel()
+        packageNavigations.removeValue(forKey: currentTabId)
+        tabs[index].verifiedProgram = nil
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed), url.scheme == "https", url.path.hasSuffix(".actr") {
+            openTrustedPackage(source: TrustedProgramSource(href: url.absoluteString,
+                                                        expectedSha256: nil, expectedActorType: nil),
+                               displayURL: url, tabId: currentTabId)
+            return
+        }
 
         // 1. Check for local file path
         if isLocalFilePath(trimmed) {
@@ -777,6 +797,70 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 loadActrPackageIntoCurrentTab(from: URL(fileURLWithPath: app.sourcePath), tabIndex: index)
             } else {
                 logger.warning("⚠️ [navigateCurrentTab] No applications found: \(trimmed)")
+            }
+        }
+    }
+
+    /// F02 passes an already accepted Realm package here; this method never
+    /// resolves unsigned AppInfo or turns a failed Realm into a new instance.
+    func openAcceptedRealmPackage(href: String, sha256: String, actorType: String, realmURL: URL) {
+        guard let tabId = currentTabId else { return }
+        openTrustedPackage(source: TrustedProgramSource(href: href, expectedSha256: sha256,
+                                                    expectedActorType: actorType),
+                           displayURL: realmURL, tabId: tabId)
+    }
+
+    func openTrustedPackage(source: TrustedProgramSource, displayURL: URL, tabId: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        packageTasks.removeValue(forKey: tabId)?.cancel()
+        let navigationID = UUID()
+        packageNavigations[tabId] = navigationID
+        tabs[index].url = displayURL
+        tabs[index].title = "Verifying Program"
+        tabs[index].verifiedProgram = nil
+        tabs[index].systemTabType = nil
+        tabs[index].appId = nil
+        tabs[index].unifiedScript = nil
+        tabs[index].leftPanelScript = nil
+        tabs[index].rightPanelScript = nil
+        tabs[index].guestScript = nil
+        tabs[index].htmlContent = nil
+        tabs[index].contractName = nil
+        tabs[index].contractVersion = nil
+        tabs[index].permissions = []
+        objectWillChange.send()
+        persistBrowserPageSession()
+        packageTasks[tabId] = Task { [weak self, load = loadTrustedProgram] in
+            do {
+                let program = try await load(source)
+                try Task.checkCancellation()
+                guard let self, self.packageNavigations[tabId] == navigationID,
+                      let index = self.tabs.firstIndex(where: { $0.id == tabId }),
+                      self.tabs[index].url == displayURL else { return }
+                self.tabs[index].title = program.title
+                self.tabs[index].appId = "\(program.publisher)/\(program.program)@\(program.version)"
+                self.tabs[index].unifiedScript = program.guestCode
+                self.tabs[index].verifiedProgram = program
+                self.tabs[index].contractName = "keel.guest"
+                self.tabs[index].contractVersion = 1
+                // Declared capabilities are requests, never automatic grants.
+                // Business capabilities wait for #324's authorized session.
+                self.tabs[index].permissions = []
+                self.packageNavigations.removeValue(forKey: tabId)
+                self.packageTasks.removeValue(forKey: tabId)
+                self.objectWillChange.send()
+                self.persistBrowserPageSession()
+                self.historyVM?.recordVisit(tab: self.tabs[index])
+            } catch {
+                guard let self, self.packageNavigations[tabId] == navigationID,
+                      let index = self.tabs.firstIndex(where: { $0.id == tabId }),
+                      self.tabs[index].url == displayURL else { return }
+                self.tabs[index].title = "Unable to Verify Program"
+                self.packageNavigations.removeValue(forKey: tabId)
+                self.packageTasks.removeValue(forKey: tabId)
+                logger.error("[ProgramInstaller] Verification failed: \(error.localizedDescription)")
+                self.objectWillChange.send()
+                self.persistBrowserPageSession()
             }
         }
     }

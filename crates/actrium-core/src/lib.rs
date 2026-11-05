@@ -15,11 +15,17 @@ pub mod browser_data;
 pub mod c_api;
 pub mod domain;
 mod ffi;
+pub mod package_install;
 pub mod persistence;
 pub mod runtime_persistence;
 pub mod speech;
 
 pub use ffi::*;
+pub use package_install::{
+    PackagePublisher, PackagePublisherInfo, PackageSourceInfo, VerifiedProgramFileInfo,
+    VerifiedProgramInfo, accept_package_publisher, inspect_downloaded_program,
+    validate_package_source,
+};
 
 uniffi::include_scaffolding!("actrium_core");
 
