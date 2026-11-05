@@ -33,8 +33,7 @@
 use std::rc::Rc;
 
 use actr_protocol::{
-    ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, PayloadType,
-    RpcRequest,
+    ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, PayloadType, RpcRequest,
 };
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;

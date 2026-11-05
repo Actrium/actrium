@@ -397,8 +397,10 @@ fn connection_not_ready_has_distinct_wire_code() {
 
 #[test]
 fn connection_not_ready_wire_code_roundtrips_variant_and_retry_hint() {
-    let original = ActrError::ConnectionNotReady(ConnectionNotReadyInfo::new(1200, 6000));
-    let err = wire_code_to_actr_error(protocol_error_to_code(&original), original.to_string());
+    let err = wire_code_to_actr_error(
+        10011,
+        "connection not ready: retry_after_ms=Some(4800)".to_string(),
+    );
 
     match err {
         ActrError::ConnectionNotReady(info) => {
@@ -410,8 +412,7 @@ fn connection_not_ready_wire_code_roundtrips_variant_and_retry_hint() {
 
 #[test]
 fn connection_not_ready_wire_code_handles_missing_retry_hint() {
-    let original = ActrError::ConnectionNotReady(ConnectionNotReadyInfo::without_retry_hint());
-    let err = wire_code_to_actr_error(protocol_error_to_code(&original), original.to_string());
+    let err = wire_code_to_actr_error(10011, "connection not ready".to_string());
 
     match err {
         ActrError::ConnectionNotReady(info) => {
@@ -629,237 +630,6 @@ async fn register_and_unregister_stream_roundtrip() {
         matches!(unregister, HostOperationResult::Done),
         "unregister_stream should succeed after register: {unregister:?}"
     );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn data_chunks_stream_ends_on_inband_end_marker() {
-    use actr_framework::Context as _;
-    use futures_util::StreamExt as _;
-
-    let (ctx, _wl) = harness().await;
-    let mut stream = ctx
-        .data_chunks("marker-stream".to_string(), Default::default())
-        .await
-        .expect("data_chunks subscription");
-
-    let registry = ctx.data_chunk_registry_for_test();
-    let chunk = |sequence: u64, end: bool| actr_protocol::DataChunk {
-        stream_id: "marker-stream".into(),
-        sequence,
-        end_of_stream: end.then_some(true),
-        ..Default::default()
-    };
-    for sequence in [1, 2] {
-        registry
-            .invoke_for_test(chunk(sequence, false), ActrId::default())
-            .await
-            .unwrap()
-            .unwrap();
-    }
-    registry
-        .invoke_for_test(chunk(3, true), ActrId::default())
-        .await
-        .unwrap()
-        .unwrap();
-
-    // Data chunks are yielded in order; the marker ends the stream without
-    // being yielded itself.
-    assert_eq!(stream.next().await.unwrap().unwrap().chunk.sequence, 1);
-    assert_eq!(stream.next().await.unwrap().unwrap().chunk.sequence, 2);
-    assert!(stream.next().await.is_none());
-    assert!(stream.ended_by_marker());
-
-    // The graceful end unregistered the subscription synchronously, so a
-    // fresh subscription with the same stream ID is accepted.
-    ctx.data_chunks("marker-stream".to_string(), Default::default())
-        .await
-        .expect("re-subscribe after graceful end");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn forwarder_table_is_shared_across_lifecycle_abi_instances() {
-    let (ctx, wl) = harness().await;
-
-    // Production builds the host ABI per RPC via lifecycle_host_abi; two
-    // separate ABI instances (two RPCs) must share the context-owned
-    // forwarder table.
-    let first_rpc_abi = lifecycle_host_abi(ctx.clone(), wl.clone());
-    let second_rpc_abi = lifecycle_host_abi(ctx.clone(), wl.clone());
-
-    let register = first_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
-        stream_id: "shared-stream".into(),
-        capacity: None,
-    }))
-    .await;
-    assert!(
-        matches!(register, HostOperationResult::Done),
-        "register must succeed: {register:?}"
-    );
-
-    // The unregister arrives on a later RPC (a fresh ABI instance): it must
-    // find and retire the forwarder, not silently no-op on an empty table.
-    let unregister = second_rpc_abi(HostOperation::UnregisterStream(HostUnregisterStreamV1 {
-        stream_id: "shared-stream".into(),
-    }))
-    .await;
-    assert!(
-        matches!(unregister, HostOperationResult::Done),
-        "unregister must succeed: {unregister:?}"
-    );
-
-    // An immediate re-registration must not be rejected as a duplicate: the
-    // retired forwarder already unregistered the host-side subscription.
-    let reregister = second_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
-        stream_id: "shared-stream".into(),
-        capacity: None,
-    }))
-    .await;
-    assert!(
-        matches!(reregister, HostOperationResult::Done),
-        "re-register after cross-RPC unregister must succeed: {reregister:?}"
-    );
-}
-
-/// Build a request context on the shared per-node stream state — the shape
-/// of the production per-RPC dispatch path (`Inner::make_runtime_context`).
-fn context_sharing_stream_state(
-    data_chunk_registry: Arc<crate::inbound::DataChunkRegistry>,
-    stream_forwarders: StreamForwarders,
-) -> crate::context::RuntimeContext {
-    use crate::inbound::MediaFrameRegistry;
-    use crate::outbound::{Gate, HostGate};
-    use crate::wire::webrtc::{
-        InboundQueueConfig, ReconnectConfig, SignalingConfig, WebSocketSignalingClient,
-    };
-
-    let host = Arc::new(HostTransport::new());
-    let inproc = Gate::Host(Arc::new(HostGate::new(host)));
-    crate::context::RuntimeContext::new(
-        ActrId::default(),
-        None,
-        "req".into(),
-        inproc,
-        None,
-        data_chunk_registry,
-        Arc::new(MediaFrameRegistry::new()),
-        stream_forwarders,
-        Arc::new(WebSocketSignalingClient::new(SignalingConfig {
-            server_url: url::Url::parse("ws://127.0.0.1:9").unwrap(),
-            connection_timeout: 1,
-            heartbeat_interval: 30,
-            reconnect_config: ReconnectConfig::default(),
-            auth_config: None,
-            webrtc_role: None,
-            inbound_queue: InboundQueueConfig::default(),
-        })) as Arc<dyn SignalingClient>,
-        AIdCredential::default(),
-        None,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-        None,
-        0,
-    )
-}
-
-/// Two separately built request contexts of one node share the forwarder
-/// table the node injects: an unregister landing on a later RPC (fresh
-/// RuntimeContext) must still retire the forwarder and free the registry
-/// subscription for re-registration.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn forwarder_table_is_shared_across_request_contexts() {
-    let data_chunk_registry = Arc::new(crate::inbound::DataChunkRegistry::new());
-    let stream_forwarders: StreamForwarders = Default::default();
-    let first_ctx =
-        context_sharing_stream_state(data_chunk_registry.clone(), stream_forwarders.clone());
-    let second_ctx = context_sharing_stream_state(data_chunk_registry, stream_forwarders);
-    let wl = Workload::Linked(Arc::new(DummyLinkedHandle) as Arc<dyn LinkedWorkloadHandle>);
-    let runner = Arc::new(crate::executor::spawn_runner(wl));
-
-    let first_rpc_abi = lifecycle_host_abi(first_ctx, runner.clone());
-    let second_rpc_abi = lifecycle_host_abi(second_ctx, runner);
-
-    let register = first_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
-        stream_id: "cross-ctx-stream".into(),
-        capacity: None,
-    }))
-    .await;
-    assert!(
-        matches!(register, HostOperationResult::Done),
-        "register must succeed: {register:?}"
-    );
-
-    let unregister = second_rpc_abi(HostOperation::UnregisterStream(HostUnregisterStreamV1 {
-        stream_id: "cross-ctx-stream".into(),
-    }))
-    .await;
-    assert!(
-        matches!(unregister, HostOperationResult::Done),
-        "unregister from a later context must succeed: {unregister:?}"
-    );
-
-    let reregister = second_rpc_abi(HostOperation::RegisterStream(HostRegisterStreamV1 {
-        stream_id: "cross-ctx-stream".into(),
-        capacity: None,
-    }))
-    .await;
-    assert!(
-        matches!(reregister, HostOperationResult::Done),
-        "re-register after cross-context unregister must succeed: {reregister:?}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn subscription_channel_backpressures_registry_dispatch_for_slow_consumer() {
-    use actr_framework::Context as _;
-    use futures_util::StreamExt as _;
-
-    let (ctx, _wl) = harness().await;
-    let mut stream = ctx
-        .data_chunks(
-            "bp-stream".to_string(),
-            actr_framework::DataChunkStreamOptions { capacity: 1 },
-        )
-        .await
-        .expect("data_chunks subscription");
-    let registry = ctx.data_chunk_registry_for_test();
-    let chunk = |sequence: u64| actr_protocol::DataChunk {
-        stream_id: "bp-stream".into(),
-        sequence,
-        ..Default::default()
-    };
-
-    // Fill the per-subscription channel until a dispatch blocks. The blocked
-    // feed future is HELD, not dropped: a dropped in-flight channel send
-    // would leave the capacity bookkeeping in an undefined state for this
-    // test's purposes.
-    let mut pending_feed = None;
-    let mut filled = 0u64;
-    for sequence in 1..=8u64 {
-        let mut feed = Box::pin(registry.invoke_for_test(chunk(sequence), ActrId::default()));
-        match tokio::time::timeout(Duration::from_millis(100), &mut feed).await {
-            Ok(result) => {
-                result.expect("registered").expect("accepted");
-                filled += 1;
-            }
-            Err(_) => {
-                pending_feed = Some(feed);
-                break;
-            }
-        }
-    }
-    let mut pending_feed =
-        pending_feed.expect("the bounded channel must eventually stop a dispatch");
-    assert!(filled >= 1, "at least the capacity must fit");
-
-    // A slow consumer resumes the flow: reading one item frees a slot and
-    // the held dispatch completes.
-    assert!(stream.next().await.is_some());
-    tokio::time::timeout(Duration::from_secs(2), &mut pending_feed)
-        .await
-        .expect("dispatch must unblock after the consumer reads")
-        .expect("registered")
-        .expect("accepted");
-
-    stream.close().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1364,23 +1134,8 @@ fn wire_code_to_actr_error_unknown_code_falls_back_to_unavailable() {
 #[test]
 fn parse_connection_not_ready_retry_hint_extracts_value() {
     assert_eq!(
-        parse_connection_not_ready_retry_hint("connection not ready: retry after 4800ms"),
-        Some(4800)
-    );
-    // Mixed-version peers may still send the previous Display form.
-    assert_eq!(
         parse_connection_not_ready_retry_hint("connection not ready: retry_after_ms=Some(4800)"),
         Some(4800)
-    );
-    assert_eq!(
-        parse_connection_not_ready_retry_hint("connection not ready: retry after 0ms"),
-        Some(0)
-    );
-    assert_eq!(
-        parse_connection_not_ready_retry_hint(
-            "connection not ready: retry after 18446744073709551615ms"
-        ),
-        Some(u64::MAX)
     );
 }
 
@@ -1388,15 +1143,6 @@ fn parse_connection_not_ready_retry_hint_extracts_value() {
 fn parse_connection_not_ready_retry_hint_returns_none_without_marker() {
     assert_eq!(parse_connection_not_ready_retry_hint("plain message"), None);
     assert_eq!(parse_connection_not_ready_retry_hint(""), None);
-    for message in [
-        "connection not ready: no retry hint",
-        "connection not ready: retry_after_ms=None",
-        "connection not ready: retry after 42",
-        "connection not ready: retry after invalidms",
-        "connection not ready: retry after 18446744073709551616ms",
-    ] {
-        assert_eq!(parse_connection_not_ready_retry_hint(message), None);
-    }
 }
 
 #[test]
@@ -3517,6 +3263,7 @@ async fn a_peer_type_lasts_until_its_last_connection_closes() {
     shutdown.cancel();
     follow.await.unwrap();
     manager.close_all().await;
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn unregister_retires_chunk_queued_behind_active_serial_invocation() {

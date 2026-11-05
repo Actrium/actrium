@@ -704,7 +704,8 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
             "component exports the retired actr:workload@0.7.0 world, whose Actor identity \
              record and data-chunk record (no end-of-stream marker) predate this \
              contract; rebuild the package with the current SDK, which emits \
-             actr:workload@0.8.0".to_string(),
+             actr:workload@0.8.0"
+                .to_string(),
         ));
     }
     if saw_v5 {

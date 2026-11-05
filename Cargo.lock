@@ -130,6 +130,7 @@ dependencies = [
  "base64",
  "bytes",
  "clap",
+ "futures-util",
  "serde_json",
  "tempfile",
  "tokio",

@@ -917,6 +917,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_func_actr_error_kind(
     ): Short
+    external fun uniffi_actr_checksum_func_actr_error_message(
+    ): Short
     external fun uniffi_actr_checksum_func_actr_error_requires_dlq(
     ): Short
     external fun uniffi_actr_checksum_func_actr_error_throw_for_test(
@@ -1260,6 +1262,8 @@ external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByVal
 ): Byte
 external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_actr_fn_func_actr_error_message(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_actr_fn_func_actr_error_throw_for_test(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1397,6 +1401,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_actr_error_kind() != 40651.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_func_actr_error_message() != 60098.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_func_actr_error_requires_dlq() != 62057.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1406,13 +1413,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_set_log_callback() != 22627.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency() != 20704.toShort()) {
+    if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency() != 47641.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency_alias_list() != 45756.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_resolve_manifest_package_actr_type() != 16114.toShort()) {
+    if (lib.uniffi_actr_checksum_func_resolve_manifest_package_actr_type() != 8884.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_add_media_track() != 37665.toShort()) {
@@ -1433,7 +1440,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_data_chunks() != 34463.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_discover() != 38410.toShort()) {
+    if (lib.uniffi_actr_checksum_method_contextbridge_discover() != 2735.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_log() != 34242.toShort()) {
@@ -3246,7 +3253,7 @@ public interface ContextBridgeInterface {
      * Discover an actor of the specified type
      *
      * # Arguments
-     * - `target_type`: Actor type to discover (manufacturer + name)
+     * - `target_type`: Actor type to discover (publisher + name)
      *
      * # Returns
      * The ActrId of a discovered actor
@@ -3584,7 +3591,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
      * Discover an actor of the specified type
      *
      * # Arguments
-     * - `target_type`: Actor type to discover (manufacturer + name)
+     * - `target_type`: Actor type to discover (publisher + name)
      *
      * # Returns
      * The ActrId of a discovered actor
@@ -6027,14 +6034,15 @@ public object FfiConverterTypeRuntimeObservers: FfiConverter<RuntimeObservers, L
 
 
 /**
- * Actor identifier (realm + serial_number + type)
+ * Actor identifier (Realm name + Actor serial)
  */
 data class ActrId (
-    var `realm`: Realm
+    /**
+     * Realm name, `<realm_id>@<domain>`
+     */
+    var `realm`: kotlin.String
     , 
     var `serialNumber`: kotlin.ULong
-    , 
-    var `type`: ActrType
     
 ){
     
@@ -6051,32 +6059,29 @@ data class ActrId (
 public object FfiConverterTypeActrId: FfiConverterRustBuffer<ActrId> {
     override fun read(buf: ByteBuffer): ActrId {
         return ActrId(
-            FfiConverterTypeRealm.read(buf),
+            FfiConverterString.read(buf),
             FfiConverterULong.read(buf),
-            FfiConverterTypeActrType.read(buf),
         )
     }
 
     override fun allocationSize(value: ActrId) = (
-            FfiConverterTypeRealm.allocationSize(value.`realm`) +
-            FfiConverterULong.allocationSize(value.`serialNumber`) +
-            FfiConverterTypeActrType.allocationSize(value.`type`)
+            FfiConverterString.allocationSize(value.`realm`) +
+            FfiConverterULong.allocationSize(value.`serialNumber`)
     )
 
     override fun write(value: ActrId, buf: ByteBuffer) {
-            FfiConverterTypeRealm.write(value.`realm`, buf)
+            FfiConverterString.write(value.`realm`, buf)
             FfiConverterULong.write(value.`serialNumber`, buf)
-            FfiConverterTypeActrType.write(value.`type`, buf)
     }
 }
 
 
 
 /**
- * Actor type (manufacturer + name + version)
+ * Actor type (publisher + name + version)
  */
 data class ActrType (
-    var `manufacturer`: kotlin.String
+    var `publisher`: kotlin.String
     , 
     var `name`: kotlin.String
     , 
@@ -6104,13 +6109,13 @@ public object FfiConverterTypeActrType: FfiConverterRustBuffer<ActrType> {
     }
 
     override fun allocationSize(value: ActrType) = (
-            FfiConverterString.allocationSize(value.`manufacturer`) +
+            FfiConverterString.allocationSize(value.`publisher`) +
             FfiConverterString.allocationSize(value.`name`) +
             FfiConverterString.allocationSize(value.`version`)
     )
 
     override fun write(value: ActrType, buf: ByteBuffer) {
-            FfiConverterString.write(value.`manufacturer`, buf)
+            FfiConverterString.write(value.`publisher`, buf)
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`version`, buf)
     }
@@ -6737,42 +6742,6 @@ public object FfiConverterTypePeerEventBridge: FfiConverterRustBuffer<PeerEventB
 
 
 /**
- * Security realm identifier
- */
-data class Realm (
-    var `realmId`: kotlin.UInt
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeRealm: FfiConverterRustBuffer<Realm> {
-    override fun read(buf: ByteBuffer): Realm {
-        return Realm(
-            FfiConverterUInt.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: Realm) = (
-            FfiConverterUInt.allocationSize(value.`realmId`)
-    )
-
-    override fun write(value: Realm, buf: ByteBuffer) {
-            FfiConverterUInt.write(value.`realmId`, buf)
-    }
-}
-
-
-
-/**
  * RPC Envelope exposed to FFI
  *
  * Contains the route key, payload, request ID, and request deadline for an RPC message.
@@ -6951,13 +6920,39 @@ public object FfiConverterTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebR
  * never reorder or remove an established case.
  */
 sealed class ActrException: kotlin.Exception() {
+    // Keep exception inspection safe before native loading or after linkage failure.
+    internal fun displayMessage(nativeMessage: (ActrException) -> String = ::actrErrorMessage): String {
+        try {
+            return nativeMessage(this)
+        } catch (_: LinkageError) {
+            // Includes UnsatisfiedLinkError, ExceptionInInitializerError and
+            // NoClassDefFoundError on subsequent access to a failed initializer.
+            return when (this) {
+                is Unavailable -> "unavailable: $msg"
+                is ConnectionNotReady -> "connection not ready: " +
+                    (info.retryAfterMs?.let { "retry after ${it}ms" } ?: "no retry hint")
+                is TimedOut -> "timed out"
+                is NotFound -> "not found: $msg"
+                is PermissionDenied -> "permission denied: $msg"
+                is InvalidArgument -> "invalid argument: $msg"
+                is UnknownRoute -> "unknown route: $msg"
+                is DependencyNotFound -> "dependency '$serviceName' not found: $detail"
+                is DecodeFailure -> "decode failure: $msg"
+                is NotImplemented -> "not implemented: $msg"
+                is Internal -> "internal error: $msg"
+                is Config -> "config: $msg"
+                is DeliveryUncertain -> "delivery uncertain for operation $operationId: $causeDetail"
+            }
+        }
+    }
+
     
     class Unavailable(
         
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class ConnectionNotReady(
@@ -6965,13 +6960,13 @@ sealed class ActrException: kotlin.Exception() {
         val `info`: ConnectionNotReadyInfo
         ) : ActrException() {
         override val message
-            get() = "info=${ `info` }"
+            get() = displayMessage()
     }
     
     class TimedOut(
         ) : ActrException() {
         override val message
-            get() = ""
+            get() = displayMessage()
     }
     
     class NotFound(
@@ -6979,7 +6974,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class PermissionDenied(
@@ -6987,7 +6982,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class InvalidArgument(
@@ -6995,7 +6990,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class UnknownRoute(
@@ -7003,7 +6998,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class DependencyNotFound(
@@ -7013,7 +7008,7 @@ sealed class ActrException: kotlin.Exception() {
         val `detail`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "serviceName=${ `serviceName` }, detail=${ `detail` }"
+            get() = displayMessage()
     }
     
     class DecodeFailure(
@@ -7021,7 +7016,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class NotImplemented(
@@ -7029,7 +7024,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     class Internal(
@@ -7037,7 +7032,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     /**
@@ -7052,7 +7047,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "msg=${ `msg` }"
+            get() = displayMessage()
     }
     
     /**
@@ -7075,10 +7070,10 @@ sealed class ActrException: kotlin.Exception() {
         
         val `operationId`: kotlin.String, 
         
-        val `causeDetail`: kotlin.String
+        val causeDetail: kotlin.String
         ) : ActrException() {
         override val message
-            get() = "operationId=${ `operationId` }, causeDetail=${ `causeDetail` }"
+            get() = displayMessage()
     }
     
 
@@ -7209,7 +7204,7 @@ public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> 
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.`operationId`)
-                + FfiConverterString.allocationSize(value.`causeDetail`)
+                + FfiConverterString.allocationSize(value.causeDetail)
             )
         }
     }
@@ -7279,7 +7274,7 @@ public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> 
             is ActrException.DeliveryUncertain -> {
                 buf.putInt(13)
                 FfiConverterString.write(value.`operationId`, buf)
-                FfiConverterString.write(value.`causeDetail`, buf)
+                FfiConverterString.write(value.causeDetail, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -9898,6 +9893,19 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
     
 
         /**
+         * Rust Display text for an error, shared by SDK message properties.
+         */ fun `actrErrorMessage`(`err`: ActrException): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_actr_fn_func_actr_error_message(
+    
+        FfiConverterTypeActrError.lower(`err`),_status)
+}
+    )
+    }
+    
+
+        /**
          * `true` iff the error is in the Corrupt fault domain — route to DLQ.
          */ fun `actrErrorRequiresDlq`(`err`: ActrException): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -9952,7 +9960,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * Parses the manifest, looks up the dependency by alias, and returns its
          * `actr_type` field as a structured `ActrType` record. This is the canonical
          * way for linked-runtime hosts (iOS, Android) to discover which remote actor
-         * type a dependency resolves to, without hardcoding `"manufacturer:name:version"`
+         * type a dependency resolves to, without hardcoding `"publisher/program@version"`
          * strings in application code.
          */
     @Throws(ActrException::class) fun `resolveManifestDependency`(`manifestPath`: kotlin.String, `dependencyAlias`: kotlin.String): ActrType {
@@ -9990,7 +9998,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * Parses the manifest and returns the `[package]` block's actr_type fields
          * as a structured `ActrType` record. Linked-runtime hosts (iOS, Android) use
          * this to determine their own actor type without hardcoding
-         * `"manufacturer:name:version"` strings.
+         * `"publisher/program@version"` strings.
          */
     @Throws(ActrException::class) fun `resolveManifestPackageActrType`(`manifestPath`: kotlin.String): ActrType {
             return FfiConverterTypeActrType.lift(
