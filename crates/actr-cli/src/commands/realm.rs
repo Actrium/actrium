@@ -35,6 +35,7 @@ use super::realm_members::{
     self, InviteArgs, InviteIdArgs, JoinArgs, KeyArgs, MemberArgs, RevokeClientArgs, SetRoleArgs,
     TransferOwnerArgs,
 };
+use super::realm_pins::{self, TrustArgs};
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
 
 #[derive(Args, Debug)]
@@ -85,6 +86,10 @@ pub enum RealmCommand {
     TransferOwner(TransferOwnerArgs),
     /// Leave the Realm; revokes all your clients.
     Leave(KeyArgs),
+    /// Confirm a Realm domain's pinned signing keys, accept an identity
+    /// change after verifying it out of band, or drop the pinned trust
+    /// (`--reset`). `join` pins and enforces this trust (FR-NET-015).
+    Trust(TrustArgs),
 }
 
 #[derive(Args, Debug)]
@@ -273,6 +278,7 @@ impl Command for RealmArgs {
             RealmCommand::SetRole(args) => realm_members::set_role(args).await?,
             RealmCommand::TransferOwner(args) => realm_members::transfer_owner(args).await?,
             RealmCommand::Leave(args) => realm_members::leave(args).await?,
+            RealmCommand::Trust(args) => realm_pins::trust(args).await?,
         };
         Ok(CommandResult::Success(serde_json::to_string_pretty(
             &output,
@@ -341,21 +347,27 @@ fn keygen(args: &KeygenArgs) -> Result<Value> {
     Ok(member)
 }
 
-/// Write `contents` to a file only its owner can read, from its creation on.
+/// Write `contents` atomically (same-directory temporary file + rename),
+/// readable by its owner alone.
 pub(crate) fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(path)?;
-    // An existing file keeps its mode on open.
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        temporary
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    file.write_all(contents)
+    temporary.write_all(contents)?;
+    temporary
+        .persist(path)
+        .map(|_| ())
+        .map_err(|error| error.error)
 }
 
 fn new_request(op: ManagementOp, realm: &str, provider: &str) -> ManagementRequest {

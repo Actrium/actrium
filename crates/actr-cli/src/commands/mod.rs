@@ -25,6 +25,7 @@ pub mod ps;
 pub mod publisher;
 pub mod realm;
 pub mod realm_members;
+pub mod realm_pins;
 pub mod registry;
 pub mod restart;
 pub mod rm;

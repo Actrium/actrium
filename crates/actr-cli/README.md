@@ -75,6 +75,31 @@ Select the key when opening the bundled page. Host-side
 key material is not included in `/actr-runtime-config.json` or uploaded to the
 local static server. Package verification still uses public trust anchors.
 
+### Pinned Realm trust
+
+`actr realm join` does not re-trust a domain's keys on every run. It pins the
+accepted `realm_signing_keys` and the accepted Realm Profile under
+`~/.actr/realms/<domain>.json` (owner-only, `ACTR_HOME` overrides the root).
+Acceptance is saved the moment a member verifies, so even a first join that
+never reaches a Profile leaves a pin. A later join accepts the domain's keys
+only under those pins: a sequence rollback, a same-sequence content change,
+or an un-chained signing key is refused (FR-NET-015, AC-021) — except a
+baseline whose signing key was removed, which `realm-profile.md` §6 discards
+by design. Concurrent saves compare-and-swap on the record's revision; a
+losing writer is told to re-run rather than overwrite newer pins.
+
+Confirm a key change out of band with `actr realm trust <domain>`: it prints
+the member digest and per-key SHA-256 fingerprints for comparison, and
+`--expect <digest>` refuses to pin a digest you did not see.
+`actr realm trust <domain> --show` displays the current pins;
+`--reset` drops them.
+
+Two boundaries are intentional: `--issuer` joins bypass discovery entirely
+(the operator named the issuer, so no domain pin is consulted or written),
+and post-join member commands keep using the key file's frozen issuer URL —
+they do not re-verify the domain's keys on each call (a periodic Profile
+refresh is future work).
+
 ## Organization principles
 
 These rules govern where a new command lives. Add commands that fit; if a new
