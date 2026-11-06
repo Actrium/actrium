@@ -868,6 +868,10 @@ pub(crate) struct Inner {
     /// (register_stream / send_data_chunk).
     pub(crate) data_chunk_registry: Arc<DataChunkRegistry>,
 
+    /// Guest stream forwarder tasks keyed by stream_id, shared by every
+    /// `RuntimeContext` this node materializes (see `StreamForwarders`).
+    pub(crate) stream_forwarders: StreamForwarders,
+
     /// MediaTrack callback registry shared between WebRTC media tracks and
     /// `RuntimeContext` (register_media_track / send_media_sample).
     pub(crate) media_frame_registry: Arc<MediaFrameRegistry>,
@@ -1170,18 +1174,52 @@ fn guest_rpc_payload_type(raw: i32) -> actr_protocol::PayloadType {
     }
 }
 
+/// Handle to one active guest stream forwarder task.
+///
+/// `done` flips to `true` once the forwarder has closed the stream and
+/// unregistered it from the DataChunk registry, letting unregister/re-register
+/// flows wait for actual teardown instead of racing it.
+pub(crate) struct StreamForwarder {
+    cancel: CancellationToken,
+    done: tokio::sync::watch::Receiver<bool>,
+}
+
+/// Cancellation handles of active guest stream forwarders, keyed by stream_id.
+///
+/// `RegisterStream` spawns one forwarder task per registration (bounded by
+/// the guest's registration count); `UnregisterStream` cancels it and waits
+/// for its teardown. Shared by every host-operation handler of one actor
+/// runner via the owning [`crate::context::RuntimeContext`].
+pub(crate) type StreamForwarders =
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<StreamForwarder>>>>;
+
+/// Cancel `forwarder` and wait until its task has closed the stream and
+/// unregistered it from the DataChunk registry.
+async fn retire_stream_forwarder(forwarder: &StreamForwarder) {
+    forwarder.cancel.cancel();
+    let mut done = forwarder.done.clone();
+    while !*done.borrow() {
+        // The sender is dropped if the forwarder task dies without signaling
+        // (e.g. runner abort); treat that as retired rather than hanging.
+        if done.changed().await.is_err() {
+            break;
+        }
+    }
+}
+
 /// Host operation executor - routes guest outbound calls through RuntimeContext
 ///
 /// Called by the workload dispatch path in `handle_incoming`.
 async fn host_operation_handler(
     ctx: crate::context::RuntimeContext,
     workload_dispatch: std::sync::Weak<crate::executor::ActorHandle>,
+    stream_forwarders: StreamForwarders,
     pending: crate::workload::HostOperation,
 ) -> crate::workload::HostOperationResult {
     use crate::workload::{HostOperation, HostOperationResult, decode_dest};
     use actr_framework::guest::dynclib_abi::code as abi_code;
     use actr_framework::{Context as _, Dest};
-    use actr_protocol::{DataChunk, PayloadType};
+    use actr_protocol::PayloadType;
 
     match pending {
         HostOperation::CallRaw(req) => {
@@ -1301,59 +1339,235 @@ async fn host_operation_handler(
 
         HostOperation::RegisterStream(req) => {
             let stream_id = req.stream_id;
-            let callback_ctx = ctx.clone();
-            let callback_workload_dispatch = workload_dispatch.clone();
-            match ctx
-                .register_stream(stream_id, move |chunk: DataChunk, sender| {
-                    let ctx_for_executor = callback_ctx.clone();
-                    let workload_dispatch = callback_workload_dispatch.clone();
-                    Box::pin(async move {
-                        let Some(workload_dispatch) = workload_dispatch.upgrade() else {
-                            return Err(ActrError::Unavailable(
-                                "actor runner terminated".to_string(),
-                            ));
-                        };
-                        let invocation = crate::workload::InvocationContext {
-                            self_id: actr_framework::Context::self_id(&ctx_for_executor).clone(),
-                            caller_id: Some(sender.clone()),
-                            request_id: format!(
-                                "data-chunk:{}:{}",
-                                chunk.stream_id, chunk.sequence
-                            ),
-                        };
-                        let call_executor: crate::workload::HostAbiFn =
-                            std::sync::Arc::new(move |pending| {
-                                let ctx = ctx_for_executor.clone();
-                                Box::pin(async move {
-                                    stream_callback_host_operation_handler(ctx, pending).await
-                                })
-                            });
-                        // Self-lock elimination: this callback fires later (on
-                        // chunk arrival), never during the dispatch that
-                        // registered it, so appending a DataChunk command to
-                        // the runner's channel and awaiting it cannot deadlock.
-                        workload_dispatch
-                            .dispatch_data_chunk(chunk, sender, invocation, &call_executor)
-                            .await
-                    })
+            // A stale forwarder for the same stream (guest closed its local
+            // subscription without unregistering, or rebinds the stream) must
+            // be retired first, otherwise data_chunks rejects the new
+            // subscription as a duplicate.
+            //
+            // Invariant: host operations of one actor are dispatched
+            // serially by the runner, so no concurrent RegisterStream can
+            // interleave between this lookup and the registration below. The
+            // table lock is held only for the lookup; the retire await relies
+            // on that serial dispatch, not on the lock.
+            let stale = stream_forwarders
+                .lock()
+                .expect("stream forwarders poisoned")
+                .get(&stream_id)
+                .cloned();
+            if let Some(stale) = stale {
+                retire_stream_forwarder(&stale).await;
+            }
+
+            // The guest's queue capacity becomes the host-side subscription
+            // bound, so the documented backpressure holds end to end instead
+            // of being off by the host default.
+            let stream_options = req
+                .capacity
+                .map(|capacity| actr_framework::DataChunkStreamOptions {
+                    capacity: capacity as usize,
                 })
-                .await
-            {
-                Ok(()) => HostOperationResult::Done,
+                .unwrap_or_default();
+            let mut stream = match ctx.data_chunks(stream_id.clone(), stream_options).await {
+                Ok(stream) => stream,
                 Err(e) => {
                     tracing::error!("register_stream failed: {e:?}");
-                    HostOperationResult::Error(e)
+                    return HostOperationResult::Error(e);
                 }
-            }
+            };
+
+            let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+            let entry = Arc::new(StreamForwarder {
+                cancel: CancellationToken::new(),
+                done: done_rx,
+            });
+            stream_forwarders
+                .lock()
+                .expect("stream forwarders poisoned")
+                .insert(stream_id.clone(), entry.clone());
+
+            let cancel = entry.cancel.clone();
+            let forwarders = stream_forwarders.clone();
+            let forwarder_ctx = ctx.clone();
+            let forwarder_dispatch = workload_dispatch.clone();
+            // One forwarder task per registration: pulls events from the
+            // stream and delivers each to the guest through the runner's
+            // data-chunk dispatch. Bounded by the guest's own registration
+            // count; it exits on stream end, runner termination, the guest
+            // reporting its subscription gone (NotFound), or an explicit
+            // guest unregister. Other delivery failures drop the chunk and
+            // keep the subscription alive.
+            tokio::spawn(async move {
+                use futures_util::StreamExt;
+                loop {
+                    let item = tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => break,
+                        item = stream.next() => item,
+                    };
+                    let Some(item) = item else {
+                        // Graceful end: the framework stream consumed the
+                        // peer's end-of-stream marker. Forward it so the
+                        // guest's stream completes the same way — in FIFO
+                        // order, behind every data chunk already delivered.
+                        if let Some(marker) = stream.end_marker().cloned() {
+                            if let Some(workload_dispatch) = forwarder_dispatch.upgrade() {
+                                let invocation = crate::workload::InvocationContext {
+                                    self_id: actr_framework::Context::self_id(&forwarder_ctx)
+                                        .clone(),
+                                    caller_id: Some(marker.sender.clone()),
+                                    request_id: format!(
+                                        "data-chunk:{}:{}",
+                                        marker.chunk.stream_id, marker.chunk.sequence
+                                    ),
+                                };
+                                let call_executor: crate::workload::HostAbiFn = {
+                                    let ctx = forwarder_ctx.clone();
+                                    let forwarders = forwarders.clone();
+                                    std::sync::Arc::new(move |pending| {
+                                        let ctx = ctx.clone();
+                                        let forwarders = forwarders.clone();
+                                        Box::pin(async move {
+                                            stream_callback_host_operation_handler(
+                                                ctx, forwarders, pending,
+                                            )
+                                            .await
+                                        })
+                                    })
+                                };
+                                if let Err(error) = workload_dispatch
+                                    .dispatch_data_chunk_until_cancelled(
+                                        marker.chunk,
+                                        marker.sender,
+                                        invocation,
+                                        &call_executor,
+                                        &cancel,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        stream_id = %stream_id,
+                                        "end-of-stream delivery to guest failed: {error:?}"
+                                    );
+                                }
+                            }
+                        }
+                        break;
+                    };
+                    let event = match item {
+                        Ok(event) => event,
+                        Err(error) => {
+                            tracing::warn!(
+                                stream_id = %stream_id,
+                                "stream terminated with error: {error:?}"
+                            );
+                            break;
+                        }
+                    };
+                    let chunk = event.chunk;
+                    let sender = event.sender;
+                    let Some(workload_dispatch) = forwarder_dispatch.upgrade() else {
+                        tracing::debug!(
+                            stream_id = %stream_id,
+                            "actor runner terminated; stopping stream forwarder"
+                        );
+                        break;
+                    };
+                    let invocation = crate::workload::InvocationContext {
+                        self_id: actr_framework::Context::self_id(&forwarder_ctx).clone(),
+                        caller_id: Some(sender.clone()),
+                        request_id: format!("data-chunk:{}:{}", chunk.stream_id, chunk.sequence),
+                    };
+                    let call_executor: crate::workload::HostAbiFn = {
+                        let ctx = forwarder_ctx.clone();
+                        let forwarders = forwarders.clone();
+                        std::sync::Arc::new(move |pending| {
+                            let ctx = ctx.clone();
+                            let forwarders = forwarders.clone();
+                            Box::pin(async move {
+                                stream_callback_host_operation_handler(ctx, forwarders, pending)
+                                    .await
+                            })
+                        })
+                    };
+                    // A serial invocation can unregister while this delivery
+                    // is queued behind it. Cancel only queued delivery; once
+                    // guest code starts its reply must stay alive.
+                    if let Err(error) = workload_dispatch
+                        .dispatch_data_chunk_until_cancelled(
+                            chunk,
+                            sender,
+                            invocation,
+                            &call_executor,
+                            &cancel,
+                        )
+                        .await
+                    {
+                        // Permanent "delivery can never succeed": the guest
+                        // reports its side of the subscription is gone
+                        // (NotFound — closed or dropped), or the workload can
+                        // never consume stream callbacks (NotImplemented —
+                        // linked workloads register directly on the runtime
+                        // context, so a guest forwarder has no consumer).
+                        // Retire the forwarder so the stream id is freed and
+                        // the registry entry is drained; neither case leaves a
+                        // live guest consumer behind.
+                        if matches!(error, ActrError::NotFound(_) | ActrError::NotImplemented(_)) {
+                            tracing::debug!(
+                                stream_id = %stream_id,
+                                "guest subscription is gone; retiring stream forwarder: {error:?}"
+                            );
+                            break;
+                        }
+                        // Any other failure drops this chunk but keeps the
+                        // subscription: the host→guest ABI has no stream-error
+                        // event, so a forwarder-initiated close would orphan
+                        // the guest-side stream (its sender would stay live
+                        // and next() would pend forever). Genuinely terminal
+                        // runner states surface as a failed Weak upgrade on
+                        // the next chunk (or at runner teardown), which is
+                        // where this loop is allowed to end.
+                        tracing::warn!(
+                            stream_id = %stream_id,
+                            "data chunk delivery to guest failed (dropped, stream kept): {error:?}"
+                        );
+                        continue;
+                    }
+                }
+                stream.close().await;
+                // Remove only our own entry: a re-registration may already
+                // have installed a newer forwarder for this stream.
+                {
+                    let mut guard = forwarders.lock().expect("stream forwarders poisoned");
+                    if guard
+                        .get(&stream_id)
+                        .is_some_and(|current| Arc::ptr_eq(current, &entry))
+                    {
+                        guard.remove(&stream_id);
+                    }
+                }
+                let _ = done_tx.send(true);
+            });
+
+            HostOperationResult::Done
         }
 
-        HostOperation::UnregisterStream(req) => match ctx.unregister_stream(&req.stream_id).await {
-            Ok(()) => HostOperationResult::Done,
-            Err(e) => {
-                tracing::error!("unregister_stream failed: {e:?}");
-                HostOperationResult::Error(e)
+        HostOperation::UnregisterStream(req) => {
+            let forwarder = stream_forwarders
+                .lock()
+                .expect("stream forwarders poisoned")
+                .get(&req.stream_id)
+                .cloned();
+            if let Some(forwarder) = forwarder {
+                // Wait for the forwarder to close the stream and unregister it
+                // from the DataChunk registry, so an immediate re-register of
+                // the same stream_id cannot be rejected as a duplicate.
+                retire_stream_forwarder(&forwarder).await;
             }
-        },
+            // Idempotent: unregistering a stream with no active forwarder
+            // (never registered, or already terminated) is a no-op success,
+            // matching previous semantics.
+            HostOperationResult::Done
+        }
 
         HostOperation::SendDataChunk(req) => {
             let dest = match decode_dest(&req.dest) {
@@ -1379,7 +1593,10 @@ async fn host_operation_handler(
                     return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
                 }
             };
-            match ctx.send_data_chunk(&dest, req.chunk, payload_type).await {
+            match ctx
+                .send_data_chunk_inner(&dest, req.chunk, payload_type)
+                .await
+            {
                 Ok(()) => HostOperationResult::Done,
                 Err(e) => {
                     tracing::error!("send_data_chunk failed: {e:?}");
@@ -1406,15 +1623,23 @@ pub(crate) fn lifecycle_host_abi(
     workload_dispatch: Arc<crate::executor::ActorHandle>,
 ) -> crate::workload::HostAbiFn {
     let workload_dispatch = Arc::downgrade(&workload_dispatch);
+    // Shared across every RPC of this actor: register/unregister/re-register
+    // operations from different invocations must find the same forwarder
+    // table (see the `StreamForwarders` docs).
+    let stream_forwarders = ctx.stream_forwarders();
     std::sync::Arc::new(move |pending| {
         let ctx = ctx.clone();
         let workload_dispatch = workload_dispatch.clone();
-        Box::pin(async move { host_operation_handler(ctx, workload_dispatch, pending).await })
+        let stream_forwarders = stream_forwarders.clone();
+        Box::pin(async move {
+            host_operation_handler(ctx, workload_dispatch, stream_forwarders, pending).await
+        })
     })
 }
 
 async fn stream_callback_host_operation_handler(
     ctx: crate::context::RuntimeContext,
+    stream_forwarders: StreamForwarders,
     pending: crate::workload::HostOperation,
 ) -> crate::workload::HostOperationResult {
     use crate::workload::{HostOperation, HostOperationResult, decode_dest};
@@ -1491,10 +1716,21 @@ async fn stream_callback_host_operation_handler(
             tracing::error!("register_stream from inside a stream callback is not supported");
             HostOperationResult::AbiError(abi_code::UNSUPPORTED_OP)
         }
-        HostOperation::UnregisterStream(req) => match ctx.unregister_stream(&req.stream_id).await {
-            Ok(()) => HostOperationResult::Done,
-            Err(e) => HostOperationResult::Error(e),
-        },
+        HostOperation::UnregisterStream(req) => {
+            let forwarder = stream_forwarders
+                .lock()
+                .expect("stream forwarders poisoned")
+                .get(&req.stream_id)
+                .cloned();
+            if let Some(forwarder) = forwarder {
+                // Cancel only, never await: this nested handler runs inside
+                // the forwarder's own dispatch, so waiting for its teardown
+                // would self-deadlock. The forwarder closes the stream after
+                // the current dispatch returns.
+                forwarder.cancel.cancel();
+            }
+            HostOperationResult::Done
+        }
         HostOperation::SendDataChunk(req) => {
             let dest = match decode_dest(&req.dest) {
                 Some(d) => d,
@@ -1508,7 +1744,10 @@ async fn stream_callback_host_operation_handler(
                     return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
                 }
             };
-            match ctx.send_data_chunk(&dest, req.chunk, payload_type).await {
+            match ctx
+                .send_data_chunk_inner(&dest, req.chunk, payload_type)
+                .await
+            {
                 Ok(()) => HostOperationResult::Done,
                 Err(e) => HostOperationResult::Error(e),
             }
@@ -2715,6 +2954,7 @@ impl Inner {
             outproc_gate: None, // Populated in start() once WebRTC / PeerGate is ready.
             _data_chunk_registry_cleanup: DataChunkRegistryCleanupGuard::new(&data_chunk_registry),
             data_chunk_registry,
+            stream_forwarders: Default::default(),
             media_frame_registry,
             signaling_client,
             actor_id: None,
@@ -2772,6 +3012,7 @@ impl Inner {
             self.outproc_gate.clone(),
             self.data_chunk_registry.clone(),
             self.media_frame_registry.clone(),
+            self.stream_forwarders.clone(),
             self.signaling_client.clone(),
             self.actr_lock.clone(),
             self.alias_map.clone(),
@@ -2803,6 +3044,7 @@ impl Inner {
             self.outproc_gate.clone(),
             self.data_chunk_registry.clone(),
             self.media_frame_registry.clone(),
+            self.stream_forwarders.clone(),
             self.signaling_client.clone(),
             credential.clone(),
             self.actr_lock.clone(),

@@ -105,6 +105,7 @@ fn test_runtime_context() -> RuntimeContext {
         None,
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         signaling_client,
         test_credential(),
         None,

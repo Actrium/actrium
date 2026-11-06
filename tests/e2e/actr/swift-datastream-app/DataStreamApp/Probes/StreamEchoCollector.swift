@@ -2,7 +2,8 @@ import Actr
 import Foundation
 
 /// Per-session collector for manual stream echo chunks.
-actor StreamEchoCollector: DataChunkCallback {
+/// Fed by a `DataChunkSequence` pump task.
+actor StreamEchoCollector {
     private var chunks: [UInt64: DataChunk] = [:]
     private let expectedCount: Int
     private let streamId: String
@@ -18,7 +19,7 @@ actor StreamEchoCollector: DataChunkCallback {
         self.onReceive = onReceive
     }
 
-    func onStream(chunk: DataChunk, sender: ActrId) async throws {
+    func record(chunk: DataChunk) async {
         guard chunk.streamId == streamId else { return }
         chunks[chunk.sequence] = chunk
         let payload = String(data: chunk.payload, encoding: .utf8) ?? "<\(chunk.payload.count) bytes>"

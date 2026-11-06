@@ -1,8 +1,12 @@
 // actr workload contract — Component Model WIT, lane-aware async world
 //
 // `actr:workload@0.8.0` replaces the numeric Realm and embedded Actor type
-// with a Realm name and a separately carried Publisher/program identity. These
-// record changes break 0.7.0 components; rebuild them with the current SDK.
+// with a Realm name and a separately carried Publisher/program identity, and
+// extends the 0.7.0 contract with the in-band end-of-stream marker:
+// `data-chunk` gains `end-of-stream: option<bool>` (a producer signals graceful
+// stream termination by sending a chunk whose only content is this flag).
+// These record changes break 0.7.0 components; rebuild them with the current
+// SDK, and the host rejects them at load with an actionable rebuild hint.
 //
 // `actr:workload@0.6.0` extends the 0.5.0 contract with the EXPLICIT reply
 // boundary: `invocation-ctx` carries `expects-response` / `reply-enabled`, and
@@ -125,6 +129,11 @@ interface types {
         payload: list<u8>,
         metadata: list<metadata-entry>,
         timestamp-ms: option<s64>,
+        // Graceful stream-end marker (FIN analogue): the sink sends it on
+        // close; the receiving stream yields everything before it, then ends.
+        // Never surfaced as data. Can be lost on stream-latency-first lanes,
+        // so back completion with a timeout there.
+        end-of-stream: option<bool>,
     }
 
     variant payload-type {
@@ -371,7 +380,10 @@ interface host {
     // Resolve a declared dependency alias to its canonical actor type.
     resolve-dependency: async func(ctx-token: u64, alias: string) -> result<actr-type, actr-error>;
 
-    register-stream: async func(ctx-token: u64, stream-id: string) -> result<_, actr-error>;
+    // Register one inbound data-stream subscription. `capacity` carries the
+    // guest-side queue bound so the host-side subscription applies the same
+    // backpressure; `none` selects the host default.
+    register-stream: async func(ctx-token: u64, stream-id: string, capacity: option<u32>) -> result<_, actr-error>;
 
     unregister-stream: async func(ctx-token: u64, stream-id: string) -> result<_, actr-error>;
 

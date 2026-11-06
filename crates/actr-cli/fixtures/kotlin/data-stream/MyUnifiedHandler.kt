@@ -13,11 +13,10 @@ import stream_server.StreamClientOuterClass.ClientStartStreamRequest
 import stream_server.StreamClientOuterClass.ClientStartStreamResponse
 import stream_server.StreamClientOuterClass.PrepareClientStreamRequest
 import stream_server.StreamClientOuterClass.PrepareClientStreamResponse
-import io.actrium.actr.ActrId
 import io.actrium.actr.DataChunk
-import io.actrium.actr.DataChunkCallback
 import io.actrium.actr.PayloadType
 import io.actrium.actr.dsl.ActrContext
+import io.actrium.actr.dsl.asFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -52,21 +51,21 @@ class MyUnifiedHandler : UnifiedHandler {
         Log.i(TAG, "prepare_client_stream: stream_id=$streamId, expected_count=$expectedCount")
 
         try {
-            // Register DataChunk callback to receive server's data stream
-            ctx.registerStream(
-                streamId,
-                object : DataChunkCallback {
-                    override suspend fun onStream(chunk: DataChunk, sender: ActrId) {
-                        val text = String(chunk.payload, Charsets.UTF_8)
-                        Log.i(
-                            TAG,
-                            "client received ${chunk.sequence}/$expectedCount from ${sender.serialNumber}: $text"
-                        )
-                    }
+            // Subscribe to the server's data stream; the collector coroutine
+            // closes the subscription when cancelled.
+            val stream = ctx.dataChunks(streamId, null)
+            CoroutineScope(Dispatchers.IO).launch {
+                stream.asFlow().collect { event ->
+                    val chunk = event.chunk
+                    val text = String(chunk.payload, Charsets.UTF_8)
+                    Log.i(
+                        TAG,
+                        "client received ${chunk.sequence}/$expectedCount from ${event.sender.serialNumber}: $text"
+                    )
                 }
-            )
+            }
 
-            Log.i(TAG, "✅ Registered stream handler for: $streamId")
+            Log.i(TAG, "✅ Subscribed to stream: $streamId")
             return PrepareClientStreamResponse.newBuilder()
                 .setReady(true)
                 .setMessage("client ready to receive $expectedCount messages on $streamId")
@@ -129,23 +128,29 @@ class MyUnifiedHandler : UnifiedHandler {
 
             // Spawn a coroutine to send DataChunk chunks (like tokio::spawn in Rust)
             CoroutineScope(Dispatchers.IO).launch {
-                for (i in 1..messageCount) {
-                    val message = "[client $clientId] message $i"
-                    val dataChunk = DataChunk(
-                        streamId = streamId,
-                        sequence = i.toULong(),
-                        payload = message.toByteArray(Charsets.UTF_8),
-                        metadata = emptyList(),
-                        timestampMs = System.currentTimeMillis()
-                    )
+                val sink = ctx.dataChunkSink(serverId, streamId, PayloadType.STREAM_RELIABLE)
+                try {
+                    for (i in 1..messageCount) {
+                        val message = "[client $clientId] message $i"
+                        val dataChunk = DataChunk(
+                            streamId = streamId,
+                            sequence = i.toULong(),
+                            payload = message.toByteArray(Charsets.UTF_8),
+                            metadata = emptyList(),
+                            timestampMs = System.currentTimeMillis(),
+                            endOfStream = null
+                        )
 
-                    Log.i(TAG, "client sending $i/$messageCount: $message")
-                    try {
-                        ctx.sendDataChunk(serverId, dataChunk, PayloadType.STREAM_RELIABLE)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "client send_data_chunk error: ${e.message}")
+                        Log.i(TAG, "client sending $i/$messageCount: $message")
+                        try {
+                            sink.send(dataChunk)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "client sink send error: ${e.message}")
+                        }
+                        delay(1000) // Match 1 second delay between messages
                     }
-                    delay(1000) // Match 1 second delay between messages
+                } finally {
+                    sink.closeAsync()
                 }
             }
 

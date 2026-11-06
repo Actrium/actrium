@@ -45,10 +45,6 @@ public protocol MailboxObserver: AnyObject, Sendable {
     func onBackpressure(ctx: Context, event: BackpressureEvent) async
 }
 
-public protocol DataChunkCallback: AnyObject, Sendable {
-    func onStream(chunk: DataChunk, sender: ActrId) async throws
-}
-
 public protocol MediaTrackCallback: AnyObject, Sendable {
     func onSample(sample: MediaSample, sender: ActrId) async throws
 }
@@ -305,25 +301,6 @@ final class MailboxObserverAdapter: ActrBindings.MailboxObserverBridge, @uncheck
 
     func onBackpressure(ctx: ActrBindings.ContextBridge, event: ActrBindings.BackpressureEventBridge) async {
         await observer.onBackpressure(ctx: Context(bridge: ctx), event: BackpressureEvent(bridge: event))
-    }
-}
-
-final class DataChunkCallbackAdapter: ActrBindings.DataChunkCallback, @unchecked Sendable {
-    private let callback: any DataChunkCallback
-
-    init(_ callback: any DataChunkCallback) {
-        self.callback = callback
-    }
-
-    func onStream(chunk: ActrBindings.DataChunk, sender: ActrBindings.ActrId) async throws {
-        do {
-            try await callback.onStream(
-                chunk: DataChunk(bridge: chunk),
-                sender: ActrId(bridge: sender)
-            )
-        } catch {
-            throw ActrError.bridge(from: error)
-        }
     }
 }
 

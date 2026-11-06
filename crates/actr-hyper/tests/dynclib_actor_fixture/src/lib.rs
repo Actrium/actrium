@@ -212,18 +212,23 @@ impl MessageDispatcher for DoubleDispatcher {
                 Ok(Bytes::from_static(b"spawned"))
             }
             "test/send-data-chunk-error" => {
-                let result = ctx
-                    .send_data_chunk(
+                use futures_util::SinkExt;
+                let mut sink = ctx
+                    .data_chunk_sink(
                         &Dest::Peer(ctx.self_id().clone()),
-                        DataChunk {
-                            stream_id: "test/error-stream".into(),
-                            sequence: 1,
-                            payload: Vec::new().into(),
-                            metadata: Vec::new(),
-                            timestamp_ms: None,
-                        },
+                        "test/error-stream".into(),
                         PayloadType::StreamReliable,
                     )
+                    .await?;
+                let result = sink
+                    .send(DataChunk {
+                        stream_id: "test/error-stream".into(),
+                        sequence: 1,
+                        payload: Vec::new().into(),
+                        metadata: Vec::new(),
+                        timestamp_ms: None,
+                        end_of_stream: None,
+                    })
                     .await;
                 match result {
                     Err(ActrError::ConnectionNotReady(info)) => Ok(Bytes::from(
@@ -234,7 +239,7 @@ impl MessageDispatcher for DoubleDispatcher {
                     )),
                     Err(error) => Err(error),
                     Ok(()) => Err(ActrError::Internal(
-                        "expected send_data_chunk to fail".into(),
+                        "expected sink send to fail".into(),
                     )),
                 }
             }

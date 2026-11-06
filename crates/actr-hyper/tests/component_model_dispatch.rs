@@ -27,7 +27,9 @@ use std::time::{Duration, Instant};
 
 use actr_framework::{Deliver, ReplyOutcome};
 use actr_hyper::config::WasmRuntimeLimits;
-use actr_hyper::test_support::instantiate_wasm_workload;
+use actr_hyper::test_support::{
+    instantiate_wasm_workload, invoke_registry_chunk, runtime_context_with_host_transport,
+};
 use actr_hyper::wasm::{WasmError, WasmHost};
 use actr_hyper::workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationContext};
 use actr_protocol::{ActrId, DataChunk, RpcEnvelope, prost::Message as ProstMessage};
@@ -145,6 +147,22 @@ fn stream_registration_bridge() -> HostAbiFn {
     })
 }
 
+/// Registration bridge for the eof-consumer probe stream.
+fn eof_registration_bridge() -> HostAbiFn {
+    Arc::new(|operation| {
+        Box::pin(async move {
+            match operation {
+                HostOperation::RegisterStream(request)
+                    if request.stream_id == "test/eof-stream" =>
+                {
+                    HostOperationResult::Done
+                }
+                _ => HostOperationResult::AbiError(-1),
+            }
+        })
+    })
+}
+
 fn stream_callback_bridge() -> (HostAbiFn, Arc<AtomicU64>) {
     let calls = Arc::new(AtomicU64::new(0));
     let calls_for_bridge = Arc::clone(&calls);
@@ -170,6 +188,7 @@ fn captured_context_chunk() -> DataChunk {
         payload: Vec::new().into(),
         metadata: Vec::new(),
         timestamp_ms: None,
+        end_of_stream: None,
     }
 }
 
@@ -306,8 +325,103 @@ async fn component_model_typed_call_forwards_timeout() {
     );
 }
 
+/// Differential probe for the eof-consumer route: one plain data chunk must
+/// drive the consumer exactly like the register-stream-context route does.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn serial_stream_callback_rebinds_captured_context_token() {
+async fn eof_consumer_starts_on_plain_chunk() {
+    let host = fixture_host();
+    let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
+    workload
+        .handle(
+            &make_envelope("test/eof-consumer", Vec::new()),
+            test_ctx(),
+            &eof_registration_bridge(),
+        )
+        .await
+        .expect("register eof subscription");
+    workload
+        .handle_data_chunk(
+            DataChunk {
+                stream_id: "test/eof-stream".to_string(),
+                sequence: 1,
+                ..Default::default()
+            },
+            test_actr_id(),
+            test_ctx(),
+            &unreachable_bridge(),
+        )
+        .await
+        .expect("chunk delivery")
+        .expect("guest accepted the chunk");
+
+    let stats = workload
+        .handle(
+            &make_envelope("test/eof-stats", Vec::new()),
+            test_ctx(),
+            &unreachable_bridge(),
+        )
+        .await
+        .expect("eof-stats dispatch");
+    let starts = u64::from_le_bytes(stats[0..8].try_into().unwrap());
+    let chunks = u64::from_le_bytes(stats[8..16].try_into().unwrap());
+    assert_eq!((starts, chunks), (1, 1), "consumer must start and count");
+}
+
+/// Guest-side marker semantics: the consumer loop must drain both data
+/// chunks and then terminate on the in-band end-of-stream marker.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guest_stream_ends_on_end_of_stream_marker() {
+    let host = fixture_host();
+    let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
+    workload
+        .handle(
+            &make_envelope("test/eof-consumer", Vec::new()),
+            test_ctx(),
+            &eof_registration_bridge(),
+        )
+        .await
+        .expect("register eof subscription");
+
+    // Two data chunks, then the graceful end marker.
+    for (sequence, end) in [(1u64, false), (2, false), (3, true)] {
+        workload
+            .handle_data_chunk(
+                DataChunk {
+                    stream_id: "test/eof-stream".to_string(),
+                    sequence,
+                    end_of_stream: end.then_some(true),
+                    ..Default::default()
+                },
+                test_actr_id(),
+                test_ctx(),
+                &unreachable_bridge(),
+            )
+            .await
+            .expect("chunk delivery")
+            .expect("guest accepted the chunk");
+    }
+
+    // The consumer counted both chunks and observed the stream end.
+    let stats = workload
+        .handle(
+            &make_envelope("test/eof-stats", Vec::new()),
+            test_ctx(),
+            &unreachable_bridge(),
+        )
+        .await
+        .expect("eof-stats dispatch");
+    let starts = u64::from_le_bytes(stats[0..8].try_into().unwrap());
+    let chunks = u64::from_le_bytes(stats[8..16].try_into().unwrap());
+    let ends = u64::from_le_bytes(stats[16..24].try_into().unwrap());
+    assert_eq!(
+        (starts, chunks, ends),
+        (1, 2, 1),
+        "consumer must start, see both chunks, then end on the marker"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn serial_stream_consumer_rebinds_captured_context_token() {
     let host = fixture_host();
     let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
     workload
@@ -317,8 +431,11 @@ async fn serial_stream_callback_rebinds_captured_context_token() {
             &stream_registration_bridge(),
         )
         .await
-        .expect("register stream callback");
+        .expect("register stream subscription");
 
+    // The spawned guest consumer runs during the on-data-chunk invocation
+    // and issues its host op through the captured (registration) token,
+    // which the host aliases to this invocation's live bridge.
     let (bridge, calls) = stream_callback_bridge();
     workload
         .handle_data_chunk(
@@ -328,35 +445,242 @@ async fn serial_stream_callback_rebinds_captured_context_token() {
             &bridge,
         )
         .await
-        .expect("captured context must use the DataChunk invocation's live host bridge");
+        .expect("captured context must use the DataChunk invocation's live host bridge")
+        .expect("guest accepted the captured-context chunk");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn resident_stream_callback_rebinds_captured_context_token() {
+async fn resident_stream_consumer_drains_in_later_invocation() {
     let host = fixture_host();
     let workload = instantiate_wasm_workload(host).await.expect("instantiate");
     let runner = workload.into_interleaved_runner(None);
     runner
         .dispatch(
-            &make_envelope("test/register-stream-context", Vec::new()),
+            &make_envelope("test/park-stream-context", Vec::new()),
             test_ctx(),
             &stream_registration_bridge(),
         )
         .await
-        .expect("register stream callback through resident region");
+        .expect("park stream subscription through resident region");
 
-    let (bridge, calls) = stream_callback_bridge();
+    // The resident DataChunk barrier enqueues into the parked subscription;
+    // no guest consumer is required to be live at this point.
     runner
         .data_chunk(
             captured_context_chunk(),
             test_actr_id(),
             test_ctx(),
+            &unreachable_bridge(),
+        )
+        .await
+        .expect("resident DataChunk barrier enqueues into the parked subscription");
+
+    // A later invocation drains the queue with its own live context.
+    let (bridge, calls) = stream_callback_bridge();
+    let drained = runner
+        .dispatch(
+            &make_envelope("test/drain-parked-stream", Vec::new()),
+            test_ctx(),
             &bridge,
         )
         .await
-        .expect("resident DataChunk barrier must rebind the captured context token");
+        .expect("resident drain must issue host ops through the live invocation");
+    assert_eq!(
+        drained.as_ref(),
+        &1u64.to_le_bytes(),
+        "exactly one queued chunk must be drained"
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    runner.shutdown().await;
+}
+
+/// Round-5 regression: a sink parked across the invocation boundary sends
+/// with its creating invocation's retired token; the host must route the
+/// actor-global stream send via the instance's standing ABI instead of
+/// trapping on the retired token.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parked_sink_sends_after_creating_invocation_retired() {
+    let host = fixture_host();
+    let wl = instantiate_wasm_workload(host).await.expect("instantiate");
+    let runner = wl.into_workload_runner();
+    let ctx = runtime_context_with_host_transport(
+        test_actr_id(),
+        Arc::new(actr_hyper::transport::HostTransport::new()),
+    );
+    // Record stream sends; answer them Done without touching the wire (the
+    // assertion target is the token routing, not the transport).
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let inner_abi = runner.lifecycle_host_abi(ctx.clone());
+    let abi: HostAbiFn = {
+        let sent = sent.clone();
+        Arc::new(move |pending| {
+            if let HostOperation::SendDataChunk(request) = &pending {
+                sent.lock().unwrap().push(request.chunk.clone());
+                return Box::pin(async { HostOperationResult::Done });
+            }
+            inner_abi(pending)
+        })
+    };
+
+    // Invocation A: create and park the sink (its send_fn captures A's token).
+    runner
+        .dispatch(
+            &make_envelope("test/park-sink", Vec::new()),
+            test_ctx(),
+            &abi,
+        )
+        .await
+        .expect("park-sink dispatch");
+
+    // Invocation B (token A retired): the parked sink sends data + the close
+    // marker. Both must arrive — pre-fix, the host import trapped on the
+    // retired token ("host ABI bridge not installed").
+    runner
+        .dispatch(
+            &make_envelope("test/parked-sink-send", Vec::new()),
+            test_ctx(),
+            &abi,
+        )
+        .await
+        .expect("parked-sink-send dispatch");
+
+    {
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2, "data chunk + close-time marker");
+        assert_eq!(sent[0].end_of_stream, None);
+        assert_eq!(sent[1].end_of_stream, Some(true));
+    }
+    runner.shutdown().await;
+}
+
+/// P1 regression: the production stream forwarder must forward the peer's
+/// end-of-stream marker into the guest — the guest's stream terminates
+/// (FIFO, after every data chunk) instead of hanging on the next read.
+///
+/// Drives the full production wiring: the guest registers through the real
+/// `lifecycle_host_abi` (which spawns the forwarder), chunks arrive at the
+/// host registry as if from the wire, and the forwarder delivers them into
+/// the guest's `on-data-chunk` export.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn end_of_stream_marker_reaches_guest_via_forwarder() {
+    let host = fixture_host();
+    let wl = instantiate_wasm_workload(host).await.expect("instantiate");
+    let runner = wl.into_workload_runner();
+    let ctx = runtime_context_with_host_transport(
+        test_actr_id(),
+        Arc::new(actr_hyper::transport::HostTransport::new()),
+    );
+    // The production ABI for guest host imports: RegisterStream spawns the
+    // forwarder on the runner, with the forwarder table shared via `ctx`.
+    let abi = runner.lifecycle_host_abi(ctx.clone());
+
+    runner
+        .dispatch(
+            &make_envelope("test/eof-consumer", Vec::new()),
+            test_ctx(),
+            &abi,
+        )
+        .await
+        .expect("eof-consumer dispatch");
+
+    // Feed the host-side subscription as the wire would: two data chunks,
+    // then the graceful end marker.
+    for (sequence, end) in [(1u64, false), (2, false), (3, true)] {
+        let chunk = DataChunk {
+            stream_id: "test/eof-stream".to_string(),
+            sequence,
+            end_of_stream: end.then_some(true),
+            ..Default::default()
+        };
+        invoke_registry_chunk(&ctx, chunk, test_actr_id())
+            .await
+            .expect("subscription must be registered")
+            .expect("chunk must be accepted");
+    }
+
+    // The forwarder delivers asynchronously; poll the guest's probe counters
+    // through follow-up dispatches until the consumer's loop has terminated.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let (chunks_seen, ends_seen) = loop {
+        let stats = runner
+            .dispatch(
+                &make_envelope("test/eof-stats", Vec::new()),
+                test_ctx(),
+                &abi,
+            )
+            .await
+            .expect("eof-stats dispatch");
+        let chunks = u64::from_le_bytes(stats[8..16].try_into().unwrap());
+        let ends = u64::from_le_bytes(stats[16..24].try_into().unwrap());
+        if ends >= 1 {
+            break (chunks, ends);
+        }
+        assert!(
+            Instant::now() < deadline,
+            "guest stream did not end after the end-of-stream marker"
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    };
+    assert_eq!(chunks_seen, 2, "both data chunks must be delivered first");
+    assert_eq!(ends_seen, 1, "the marker must terminate the guest stream");
+    runner.shutdown().await;
+}
+
+/// A guest stream dropped without close tears down only guest-side state;
+/// the host forwarder stays registered until the next delivery finds the
+/// guest subscription gone (NotFound) and retires it. The reclaim must free
+/// the host-side registration — otherwise the parked forwarder and its queue
+/// leak for the actor's lifetime.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forwarder_retires_when_guest_subscription_is_gone() {
+    let host = fixture_host();
+    let wl = instantiate_wasm_workload(host).await.expect("instantiate");
+    let runner = wl.into_workload_runner();
+    let ctx = runtime_context_with_host_transport(
+        test_actr_id(),
+        Arc::new(actr_hyper::transport::HostTransport::new()),
+    );
+    let abi = runner.lifecycle_host_abi(ctx.clone());
+
+    runner
+        .dispatch(
+            &make_envelope("test/drop-subscription", Vec::new()),
+            test_ctx(),
+            &abi,
+        )
+        .await
+        .expect("drop-subscription dispatch");
+
+    // The host forwarder for test/dropped-stream is still registered: the
+    // guest dropped its side without close. Feed one chunk as the wire
+    // would; the delivery finds the guest subscription gone (NotFound), so
+    // the forwarder retires itself and unregisters the host subscription.
+    let chunk = DataChunk {
+        stream_id: "test/dropped-stream".to_string(),
+        sequence: 1,
+        ..Default::default()
+    };
+    invoke_registry_chunk(&ctx, chunk.clone(), test_actr_id())
+        .await
+        .expect("subscription must be registered")
+        .expect("chunk must be accepted");
+
+    // The retiring delivery is asynchronous: probe the registry until the
+    // subscription is gone (a re-feed finds no registration).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match invoke_registry_chunk(&ctx, chunk.clone(), test_actr_id()).await {
+            None => break,
+            Some(_) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "forwarder for a guest-dropped stream never retired"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
     runner.shutdown().await;
 }
 

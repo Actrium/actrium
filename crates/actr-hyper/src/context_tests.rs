@@ -64,6 +64,7 @@ async fn select_gate_peer_errors_when_outproc_unset() {
         None, // outproc_gate unset
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         Arc::new(WebSocketSignalingClient::new(SignalingConfig {
             server_url: url::Url::parse("ws://127.0.0.1:9").unwrap(),
             connection_timeout: 1,
@@ -285,15 +286,19 @@ async fn data_chunk_readiness_consumes_send_budget_before_gate_dispatch() {
 
     ss.enter_rebinding().await;
     let request = tokio::spawn(async move {
-        c.send_data_chunk(
-            &Dest::Host,
-            actr_protocol::DataChunk {
-                stream_id: "stage-budget".to_string(),
-                sequence: 1,
-                ..Default::default()
-            },
-            actr_protocol::PayloadType::StreamReliable,
-        )
+        use futures_util::SinkExt;
+        let mut sink = c
+            .data_chunk_sink(
+                &Dest::Host,
+                "stage-budget".to_string(),
+                actr_protocol::PayloadType::StreamReliable,
+            )
+            .await?;
+        sink.send(actr_protocol::DataChunk {
+            stream_id: "stage-budget".to_string(),
+            sequence: 1,
+            ..Default::default()
+        })
         .await
     });
 
@@ -323,6 +328,7 @@ fn builder() -> BootstrapContextBuilder {
         Some(inproc),
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         {
             use crate::wire::webrtc::{
                 InboundQueueConfig, ReconnectConfig, SignalingConfig, WebSocketSignalingClient,
@@ -407,6 +413,7 @@ fn ctx_with_lock(lock: Option<LockFile>) -> RuntimeContext {
         None,
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
+        Default::default(),
         Arc::new(WebSocketSignalingClient::new(SignalingConfig {
             server_url: url::Url::parse("ws://127.0.0.1:9").unwrap(),
             connection_timeout: 1,

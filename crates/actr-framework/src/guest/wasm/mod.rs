@@ -25,3 +25,9 @@ pub(crate) mod adapter;
 pub(crate) mod context;
 pub(crate) mod context_helpers;
 pub mod generated;
+
+/// Spawn a guest-local task driven by the Component Model async executor.
+///
+/// Stream consumers spawned here make progress whenever the guest runs
+/// (during export calls and async host-import suspensions).
+pub use wit_bindgen::spawn_local;

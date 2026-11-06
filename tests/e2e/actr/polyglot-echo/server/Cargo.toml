@@ -19,6 +19,7 @@ tracing = { workspace = true }
 tracing-subscriber = "0.3"
 prost = { workspace = true }
 bytes = { workspace = true }
+futures-util = { version = "0.3", features = ["sink"] }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 

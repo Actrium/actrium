@@ -54,6 +54,7 @@ actr-config = { workspace = true, optional = true }
 # === Async Runtime (cross-platform minimal) ===
 tokio = { version = "1.48", default-features = false, features = ["sync", "macros", "rt", "time"] }
 async-trait.workspace = true
+futures-channel = { version = "0.3", features = ["sink"] }
 futures-util.workspace = true
 
 # === Serialization ===

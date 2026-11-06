@@ -15,6 +15,7 @@ dependencies = [
  "futures-util",
  "inventory",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -40,6 +41,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "futures-channel",
+ "futures-core",
+ "futures-sink",
  "futures-util",
  "prost",
  "tracing",
@@ -69,6 +73,7 @@ dependencies = [
  "dashmap",
  "dotenvy",
  "ed25519-dalek",
+ "futures-channel",
  "futures-util",
  "getrandom 0.2.17",
  "hex",
@@ -4614,6 +4619,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94c5e45f6d4cfaca727c1c48989ab3e05bb289bf84fbad226e1cfbbef2c04b7f"
 dependencies = [
  "bitflags 2.13.2",
+ "futures",
  "wit-bindgen-rust-macro",
 ]
 

@@ -72,17 +72,24 @@ impl MessageDispatcher for FixtureDispatcher {
                     (1, PayloadType::StreamReliable),
                     (2, PayloadType::StreamLatencyFirst),
                 ] {
-                    ctx.send_data_chunk(
-                        &actr_framework::Dest::Peer(peer.clone()),
+                    let mut sink = ctx
+                        .data_chunk_sink(
+                            &actr_framework::Dest::Peer(peer.clone()),
+                            "relay-interop".into(),
+                            lane,
+                        )
+                        .await?;
+                    futures_util::SinkExt::send(
+                        &mut sink,
                         DataChunk {
                             stream_id: "relay-interop".into(),
                             sequence,
                             payload: payload.clone(),
                             ..Default::default()
                         },
-                        lane,
                     )
                     .await?;
+                    sink.abort().await?;
                 }
                 Ok(reply)
             }
@@ -226,20 +233,36 @@ pubkey_b64 = "{publisher_pubkey_b64}"
     if args.relay_test {
         let context = actr_ref.app_context().await;
         let echo = context.clone();
-        context
-            .register_stream("relay-interop".into(), move |chunk, peer| {
-                let echo = echo.clone();
-                Box::pin(async move {
-                    let lane = if chunk.sequence == 3 {
-                        PayloadType::StreamLatencyFirst
-                    } else {
-                        PayloadType::StreamReliable
-                    };
-                    echo.send_data_chunk(&actr_framework::Dest::Peer(peer), chunk, lane)
-                        .await
-                })
-            })
+        let mut stream = context
+            .data_chunks("relay-interop".into(), Default::default())
             .await?;
+        tokio::spawn(async move {
+            use futures_util::StreamExt as _;
+            while let Some(event) = stream.next().await {
+                let Ok(event) = event else { break };
+                let lane = if event.chunk.sequence == 3 {
+                    PayloadType::StreamLatencyFirst
+                } else {
+                    PayloadType::StreamReliable
+                };
+                let Ok(mut sink) = echo
+                    .data_chunk_sink(
+                        &actr_framework::Dest::Peer(event.sender),
+                        "relay-interop".into(),
+                        lane,
+                    )
+                    .await
+                else {
+                    continue;
+                };
+                if futures_util::SinkExt::send(&mut sink, event.chunk)
+                    .await
+                    .is_ok()
+                {
+                    let _ = sink.abort().await;
+                }
+            }
+        });
     }
 
     // ── 4. Emit readiness JSON ───────────────────────────────────────────────

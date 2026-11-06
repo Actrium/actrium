@@ -13,6 +13,7 @@ name = "error-fixture"
 path = "src/main.rs"
 
 [dependencies]
+futures-util = { version = "0.3", features = ["sink"] }
 actr-mock-loran = { workspace = true }
 actr-protocol = { workspace = true }
 actr-config = { workspace = true }

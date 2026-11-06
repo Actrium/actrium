@@ -152,6 +152,13 @@ class DataChunkBuilder {
     var sequence: ULong = 0uL
     var payload: ByteArray = ByteArray(0)
     var timestamp: Long? = null
+
+    /**
+     * Graceful stream-end marker. Normally left alone: the sink sends it on
+     * close. Set it only to end the stream explicitly without closing the
+     * sink; the sink rejects later sends afterwards.
+     */
+    var endOfStream: Boolean? = null
     private val metadataEntries = mutableListOf<MetadataEntry>()
 
     /**
@@ -193,6 +200,7 @@ class DataChunkBuilder {
             payload = payload,
             metadata = metadataEntries.toList(),
             timestampMs = timestamp,
+            endOfStream = endOfStream,
         )
     }
 }

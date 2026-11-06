@@ -36,7 +36,9 @@ tracing-oslog = { version = "0.2", optional = true }
 url = "2.5"
 async-trait = "0.1"
 parking_lot = "0.12"
-futures-util = "0.3.31"
+futures-channel = { version = "0.3", features = ["sink"] }
+futures-util = { version = "0.3.31", features = ["sink"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 opus = "0.4.0"
 opusic-sys = { version = "0.7.3", features = ["bundled"] }
 

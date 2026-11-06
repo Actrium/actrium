@@ -32,7 +32,7 @@ function toPublicEnvelope(): string {
 
 export function shimSource(entry: string, runtimeEntry: string): string {
   return `
-	import { __dispatchDataChunk, withInvocationCtx } from ${JSON.stringify(runtimeEntry)};
+	import { __dispatchDataChunk, __hasStreamSubscription, withInvocationCtx } from ${JSON.stringify(runtimeEntry)};
 	import userWorkload from ${JSON.stringify(entry)};
 
 function activeWorkload() {
@@ -92,11 +92,21 @@ export const workload = {
 
   async onDataChunk(chunk, sender, ctx) {
     return await withInvocationCtx(ctx, async () => {
+      // The legacy hook must not shadow the stream-first API: feed an active
+      // dataChunks() subscription first, then offer the chunk to the hook.
+      const hasSubscription = __hasStreamSubscription(chunk.streamId);
+      if (hasSubscription) {
+        await __dispatchDataChunk(chunk, sender, ctx);
+      }
       if (typeof activeWorkload().onDataChunk === 'function') {
         await activeWorkload().onDataChunk(chunk, sender, ctx);
         return;
       }
-      await __dispatchDataChunk(chunk, sender, ctx);
+      if (!hasSubscription) {
+        // Neither a subscription nor a hook: surface the stale delivery
+        // instead of dropping it silently.
+        await __dispatchDataChunk(chunk, sender, ctx);
+      }
     });
   },
 

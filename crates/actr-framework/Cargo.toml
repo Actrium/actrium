@@ -14,7 +14,10 @@ workspace = true
 actr-protocol.workspace = true
 async-trait = "0.1"
 bytes = "1.10"
-futures-util = "0.3"
+futures-channel = { version = "0.3", features = ["sink"] }
+futures-core = "0.3"
+futures-sink = "0.3"
+futures-util = { version = "0.3", features = ["sink"] }
 prost = "0.14"
 uuid = { version = "1.18" }
 
@@ -66,7 +69,7 @@ geoip = [
 # `async: true` in generated.rs) so wasmtime 46's async-canonical-option
 # validation accepts the component.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wit-bindgen = "=0.59.0"
+wit-bindgen = { version = "=0.59.0", features = ["async-spawn", "inter-task-wakeup"] }
 
 # Optional wasm-bindgen stack — only compiled in when `web` feature is
 # enabled (which itself requires a `wasm32-unknown-unknown` target).

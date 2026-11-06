@@ -13,9 +13,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use actr_framework::{
-    Bytes, Context, MaybeSendBoxFuture, MaybeSendSync, MessageDispatcher, Workload,
-};
+use actr_framework::{Bytes, Context, MessageDispatcher, Workload};
 use actr_hyper::outbound::HostGate;
 use actr_hyper::transport::HostTransport;
 use actr_protocol::{ActorResult, ActrError, ActrId, PayloadType, RpcEnvelope};
@@ -455,25 +453,20 @@ impl Context for MockContext {
         Err(ActrError::NotImplemented("mock context".to_string()))
     }
 
-    async fn register_stream<F>(&self, _stream_id: String, _callback: F) -> ActorResult<()>
-    where
-        F: Fn(actr_protocol::DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
-            + MaybeSendSync
-            + 'static,
-    {
+    async fn data_chunks(
+        &self,
+        _stream_id: String,
+        _options: actr_framework::DataChunkStreamOptions,
+    ) -> ActorResult<actr_framework::DataChunkStream> {
         Err(ActrError::NotImplemented("mock context".to_string()))
     }
 
-    async fn unregister_stream(&self, _stream_id: &str) -> ActorResult<()> {
-        Err(ActrError::NotImplemented("mock context".to_string()))
-    }
-
-    async fn send_data_chunk(
+    async fn data_chunk_sink(
         &self,
         _target: &actr_framework::Dest,
-        _chunk: actr_protocol::DataChunk,
+        _stream_id: String,
         _payload_type: actr_protocol::PayloadType,
-    ) -> ActorResult<()> {
+    ) -> ActorResult<actr_framework::DataChunkSink> {
         Err(ActrError::NotImplemented("mock context".to_string()))
     }
 

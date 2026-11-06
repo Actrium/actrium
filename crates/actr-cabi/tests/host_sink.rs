@@ -110,6 +110,7 @@ fn chunk(timestamp_ms: Option<i64>) -> DataChunk {
             value: "application/octet-stream".to_string(),
         }],
         timestamp_ms,
+        end_of_stream: None,
     }
 }
 
@@ -149,6 +150,36 @@ fn sender_id() -> ActrId {
 }
 
 // ── stream sink ────────────────────────────────────────────────────────────
+
+#[test]
+fn stream_sink_marks_graceful_end_of_stream() {
+    let _bridge = lock_bridge();
+    clear_sinks();
+    CAPTURED.lock().unwrap().clear();
+
+    // SAFETY: capture_stream_sink is a valid function pointer.
+    let rc = unsafe {
+        actr_cabi::actr_register_stream_sink(Some(capture_stream_sink), std::ptr::null_mut())
+    };
+    assert_eq!(rc, 0);
+
+    let sender = sender_id();
+    let expected_sender = sender.to_string_repr();
+    // The end-of-stream marker is a control signal: empty payload, the
+    // marker's own sequence and sender, and the flag bit set.
+    let mut marker = chunk(None);
+    marker.payload = Bytes::new();
+    marker.end_of_stream = Some(true);
+    assert!(actr_cabi::forward_chunk_to_host(&marker, &sender));
+
+    let captured = CAPTURED.lock().unwrap();
+    assert_eq!(captured.len(), 1);
+    let captured = &captured[0];
+    assert_eq!(captured.flags, actr_cabi::ACTR_CHUNK_FLAG_END_OF_STREAM);
+    assert!(captured.payload.is_empty());
+    assert_eq!(captured.sequence, 7);
+    assert_eq!(captured.sender, expected_sender);
+}
 
 #[test]
 fn stream_sink_forwards_all_chunk_fields() {

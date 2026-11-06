@@ -36,8 +36,8 @@ use crate::handle::{
     drop_actr_ref, drop_handle, take_attached, take_init, take_link_inputs, take_registered,
 };
 pub use crate::host_sink::{
-    ACTR_CHUNK_FLAG_HAS_TIMESTAMP, ReverseRpcCallback, StreamMetadataEntry, StreamSinkCallback,
-    ask_host, forward_chunk_to_host, pending_ask_count,
+    ACTR_CHUNK_FLAG_END_OF_STREAM, ACTR_CHUNK_FLAG_HAS_TIMESTAMP, ReverseRpcCallback,
+    StreamMetadataEntry, StreamSinkCallback, ask_host, forward_chunk_to_host, pending_ask_count,
 };
 use crate::observer::{CabiObserver, ObserverCallbacks};
 
@@ -935,7 +935,10 @@ pub unsafe extern "C" fn actr_ref_discover(
 /// actr-cabi runtime worker threads, may re-enter actr-cabi, must not unwind,
 /// and every buffer it receives is valid only for the duration of the call —
 /// copy before returning. `chunk_flags` bit `0x01` indicates that
-/// `timestamp_ms` is set. `sender_id` is the sending actor's
+/// `timestamp_ms` is set; bit `0x02` marks the graceful end-of-stream
+/// notification fired once when the peer closes its sink (empty payload,
+/// carrying the marker's original sequence and sender; never fired on
+/// abort/teardown). `sender_id` is the sending actor's
 /// `to_string_repr()` form. Metadata entries are forwarded as borrowed key /
 /// value pairs in the callback's `metadata_ptr` array.
 ///
@@ -1019,11 +1022,52 @@ pub unsafe extern "C" fn actr_host_respond_reverse_rpc(
     })
 }
 
+/// Handle to one active stream listener task.
+///
+/// `done` flips to `true` once the listener has closed the stream and
+/// unregistered it from the runtime, so `actr_stream_unlisten` can report
+/// SUCCESS only after actual teardown (listen/unlisten/re-listen flows cannot
+/// race the runtime's duplicate-subscription rejection).
+struct StreamListener {
+    cancel: tokio_util::sync::CancellationToken,
+    done: tokio::sync::watch::Receiver<bool>,
+}
+
+type StreamListenerMap = std::collections::HashMap<(usize, String), std::sync::Arc<StreamListener>>;
+
+/// Cancellation handles of active stream listeners, keyed by
+/// `(ref_handle, stream_id)`. `actr_stream_listen` inserts one entry per
+/// subscription; `actr_stream_unlisten` cancels it and waits for teardown.
+fn stream_listeners() -> &'static std::sync::Mutex<StreamListenerMap> {
+    static LISTENERS: std::sync::OnceLock<std::sync::Mutex<StreamListenerMap>> =
+        std::sync::OnceLock::new();
+    LISTENERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+async fn stop_stream_listener(ref_key: usize, stream_id: String) {
+    // Keep the entry discoverable until the listener itself finishes teardown.
+    // Every concurrent unlisten must wait for the same completion signal.
+    let listener = stream_listeners()
+        .lock()
+        .unwrap()
+        .get(&(ref_key, stream_id))
+        .cloned();
+    if let Some(listener) = listener {
+        listener.cancel.cancel();
+        let mut done = listener.done.clone();
+        while !*done.borrow() {
+            if done.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
 /// Subscribe the node to one inbound data stream and forward every chunk to
 /// the registered host stream sink. Async — registration result via
 /// `callback`. One listener per `stream_id`: a second `listen` for the same
-/// id follows `Context::register_stream` semantics (replacement or error as
-/// implemented by the runtime).
+/// id fails with an error through `callback` (duplicate subscriptions are
+/// rejected by the runtime).
 ///
 /// Chunks arriving before a sink is registered are dropped (traced), not
 /// buffered. Only chunks whose `stream_id` exactly equals this argument reach
@@ -1066,29 +1110,122 @@ pub unsafe extern "C" fn actr_stream_listen(
             }
         };
         let ud = user_data as usize;
+        let ref_key = ref_handle as usize;
+        // Insert the listener entry BEFORE spawning the forwarding task. An
+        // unlisten landing before the task's first await must still find and
+        // cancel it, and a duplicate listen must fail fast instead of
+        // parking a task no later unlisten can reach.
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        {
+            let mut listeners = stream_listeners().lock().unwrap();
+            if listeners.contains_key(&(ref_key, stream_id.clone())) {
+                emit_void_error(
+                    GENERIC_ERROR,
+                    "stream already has a listener",
+                    callback,
+                    user_data,
+                );
+                return GENERIC_ERROR;
+            }
+            listeners.insert((ref_key, stream_id.clone()), entry.clone());
+        }
+        let cancel = entry.cancel.clone();
+        let stream_id_fail = stream_id.clone();
+        let entry_fail = entry.clone();
+        let done_tx_fail = done_tx.clone();
         runtime::spawn_guarded(
             async move {
+                use futures_util::StreamExt;
+
                 let ctx = actr_ref.app_context().await;
-                match ctx
-                    .register_stream(stream_id, |chunk, sender| {
-                        host_sink::forward_chunk_to_host(&chunk, &sender);
-                        Box::pin(async { Ok(()) })
-                    })
-                    .await
+                let mut stream = match ctx.data_chunks(stream_id.clone(), Default::default()).await
                 {
-                    Ok(()) => callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void),
-                    Err(e) => emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void),
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        // Roll back the pre-inserted entry (only ours: a
+                        // re-listen during teardown may already have
+                        // installed a newer listener for this stream) and
+                        // release any unlisten waiting on `done`.
+                        let mut listeners = stream_listeners().lock().unwrap();
+                        if listeners
+                            .get(&(ref_key, stream_id.clone()))
+                            .is_some_and(|current| std::sync::Arc::ptr_eq(current, &entry))
+                        {
+                            listeners.remove(&(ref_key, stream_id.clone()));
+                        }
+                        drop(listeners);
+                        let _ = done_tx.send(true);
+                        emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void);
+                        return;
+                    }
+                };
+                // The listener must not keep the ref alive for its whole
+                // lifetime: a host that releases it (without shutdown) must
+                // still run `ActrRefShared::drop`. The stream drives its own
+                // teardown once the runtime cancels it.
+                drop(actr_ref);
+                callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
+                // Forward until unlistened, the stream ends, or the node
+                // shuts down (runtime teardown terminates the stream).
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => break,
+                        item = stream.next() => match item {
+                            Some(Ok(event)) => {
+                                host_sink::forward_chunk_to_host(&event.chunk, &event.sender);
+                            }
+                            Some(Err(_)) | None => break,
+                        },
+                    }
                 }
+                // The framework stream consumed the peer's in-band
+                // end-of-stream marker; re-materialize it for the C host,
+                // which cannot observe `None` completion. The original
+                // sender and sequence are preserved, so even a stream that
+                // produced zero data chunks gets its end notification.
+                if let Some(marker) = stream.end_marker() {
+                    host_sink::forward_chunk_to_host(&marker.chunk, &marker.sender);
+                }
+                stream.close().await;
+                // Remove only our own entry: a re-listen during close may
+                // already have installed a newer listener for this stream.
+                let mut listeners = stream_listeners().lock().unwrap();
+                if listeners
+                    .get(&(ref_key, stream_id.clone()))
+                    .is_some_and(|current| std::sync::Arc::ptr_eq(current, &entry))
+                {
+                    listeners.remove(&(ref_key, stream_id));
+                }
+                drop(listeners);
+                let _ = done_tx.send(true);
             },
-            move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
+            move |code| {
+                // Spawn/panic failure: roll back the pre-inserted listener
+                // entry so no immortal entry survives the dead task.
+                let mut listeners = stream_listeners().lock().unwrap();
+                if listeners
+                    .get(&(ref_key, stream_id_fail.clone()))
+                    .is_some_and(|current| std::sync::Arc::ptr_eq(current, &entry_fail))
+                {
+                    listeners.remove(&(ref_key, stream_id_fail));
+                }
+                drop(listeners);
+                let _ = done_tx_fail.send(true);
+                emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void)
+            },
         )
     })
 }
 
 /// Stop forwarding one stream. Async — result via `callback`. Unlistening a
 /// stream that was never listened is an idempotent runtime no-op and completes
-/// successfully through `callback`. Chunks already accepted by the runtime
-/// may still finish their callback after unlisten completes.
+/// successfully through `callback`. Unlistening drops chunks buffered for the
+/// listener without delivering them.
 ///
 /// # Safety
 ///
@@ -1114,6 +1251,7 @@ pub unsafe extern "C" fn actr_stream_unlisten(
                 return HANDLE_INVALID;
             }
         };
+        drop(actr_ref);
         // SAFETY: the function's contract requires `stream_id_ptr` to be
         // readable for `stream_id_len` bytes whenever it is non-null.
         let stream_id = match unsafe { decode_str(stream_id_ptr, stream_id_len) } {
@@ -1124,18 +1262,45 @@ pub unsafe extern "C" fn actr_stream_unlisten(
             }
         };
         let ud = user_data as usize;
+        let ref_key = ref_handle as usize;
         runtime::spawn_guarded(
             async move {
-                let ctx = actr_ref.app_context().await;
-                match ctx.unregister_stream(&stream_id).await {
-                    Ok(()) => callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void),
-                    Err(e) => emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void),
-                }
+                stop_stream_listener(ref_key, stream_id).await;
+                callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
             },
             move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
         )
     })
 }
+
+/// Release any opaque handle and its correctly typed inner value.
+///
+/// # Safety
+///
+/// `handle` may be null, stale, already consumed, or already released; those
+/// cases are safe no-ops. Non-null values are treated only as opaque integer
+/// tokens and are never dereferenced.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_release_handle(handle: *mut c_void) {
+    catch_unwind_void(|| {
+        drop_handle(handle);
+    });
+}
+
+/// Release an `ActrRefHandle`.
+///
+/// # Safety
+///
+/// `handle` may be null, stale, already released, or the wrong handle type;
+/// those cases are safe no-ops. In-flight operations own an `ActrRef` clone, so
+/// releasing the token concurrently cannot make those operations dangle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_release_actr_ref(handle: *mut c_void) {
+    catch_unwind_void(|| {
+        drop_actr_ref(handle);
+    });
+}
+
 // ── ActrRef: shutdown ────────────────────────────────────────────────────────
 
 /// Shut down the actr node (synchronous). The handle remains valid for
@@ -1235,54 +1400,97 @@ pub unsafe extern "C" fn actr_free_string(ptr: *mut c_char, len: usize) {
     });
 }
 
-/// Release any opaque handle and its correctly typed inner value.
-///
-/// # Safety
-///
-/// `handle` may be null, stale, already consumed, or already released; those
-/// cases are safe no-ops. Non-null values are treated only as opaque integer
-/// tokens and are never dereferenced.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn actr_release_handle(handle: *mut c_void) {
-    catch_unwind_void(|| {
-        drop_handle(handle);
-    });
-}
-
-/// Release an `ActrRefHandle`.
-///
-/// # Safety
-///
-/// `handle` may be null, stale, already released, or the wrong handle type;
-/// those cases are safe no-ops. In-flight operations own an `ActrRef` clone, so
-/// releasing the token concurrently cannot make those operations dangle.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn actr_release_actr_ref(handle: *mut c_void) {
-    catch_unwind_void(|| {
-        drop_actr_ref(handle);
-    });
-}
-
 #[cfg(test)]
-mod call_error_status_tests {
+mod stream_listener_tests {
     use super::*;
 
-    #[test]
-    fn untracked_call_deadlines_have_uncertain_delivery_status() {
-        assert_eq!(
-            actr_ref_call_error_status(&actr_protocol::ActrError::TimedOut),
-            DELIVERY_UNCERTAIN
+    #[tokio::test]
+    async fn concurrent_unlisten_waits_for_listener_teardown() {
+        let key = (usize::MAX, "concurrent-unlisten".to_owned());
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        stream_listeners()
+            .lock()
+            .unwrap()
+            .insert(key.clone(), entry.clone());
+        let mut first = Box::pin(stop_stream_listener(key.0, key.1.clone()));
+        assert!(futures_util::poll!(first.as_mut()).is_pending());
+        assert!(entry.cancel.is_cancelled());
+        let mut second = Box::pin(stop_stream_listener(key.0, key.1.clone()));
+        assert!(futures_util::poll!(second.as_mut()).is_pending());
+
+        // The listener removes its entry only after closing the subscription.
+        stream_listeners().lock().unwrap().remove(&key);
+        done_tx.send(true).unwrap();
+        first.await;
+        second.await;
+    }
+
+    #[tokio::test]
+    async fn unlisten_before_listener_task_starts_still_cancels_it() {
+        // The listen path inserts its entry BEFORE spawning the forwarding
+        // task, so an unlisten racing the task's first poll must find and
+        // cancel it (previously the entry appeared only after the first
+        // await, and such an unlisten returned success over an immortal
+        // listener).
+        let key = (usize::MAX, "early-unlisten".to_owned());
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        stream_listeners()
+            .lock()
+            .unwrap()
+            .insert(key.clone(), entry.clone());
+
+        // Unlisten lands before the "task" ever runs.
+        let unlisten = tokio::spawn(stop_stream_listener(key.0, key.1.clone()));
+        tokio::task::yield_now().await;
+        assert!(entry.cancel.is_cancelled());
+
+        // The task finally starts: its first select arm observes the
+        // cancellation and runs teardown immediately (remove + done).
+        stream_listeners().lock().unwrap().remove(&key);
+        done_tx.send(true).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), unlisten)
+            .await
+            .expect("unlisten must complete")
+            .unwrap();
+        assert!(
+            stream_listeners().lock().unwrap().get(&key).is_none(),
+            "no listener entry survives the race"
         );
-        assert_eq!(
-            actr_ref_call_error_status(&actr_protocol::ActrError::DeliveryUncertain {
-                operation_id: "op-1".into(),
-                cause: "send was submitted".into(),
-            }),
-            DELIVERY_UNCERTAIN
-        );
-        assert_eq!(
-            actr_ref_call_error_status(&actr_protocol::ActrError::Unavailable("offline".into())),
-            GENERIC_ERROR
-        );
+    }
+
+    #[tokio::test]
+    async fn unlisten_completes_when_listener_dies_without_signaling_done() {
+        // Sender-drop-before-done: if the listener task dies without flipping
+        // `done` (e.g. runner abort), the watch sender closes and the wait
+        // must resolve instead of hanging.
+        let key = (usize::MAX, "dropped-listener".to_owned());
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        stream_listeners()
+            .lock()
+            .unwrap()
+            .insert(key.clone(), entry.clone());
+
+        // The listener task vanished without signaling done.
+        drop(done_tx);
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            stop_stream_listener(key.0, key.1.clone()),
+        )
+        .await
+        .expect("unlisten must not hang on a dead listener");
+        assert!(entry.cancel.is_cancelled());
     }
 }

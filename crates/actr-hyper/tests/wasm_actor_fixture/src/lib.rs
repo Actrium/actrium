@@ -27,11 +27,32 @@
 //! exercising guest→host structured error propagation.
 
 use actr_framework::{Context, Dest, MessageDispatcher, Workload, entry};
-use actr_protocol::{ActorResult, ActrError, ReplyMode, RpcEnvelope, RpcRequest};
+use actr_protocol::{
+    ActorResult, ActrError, DataChunk, PayloadType, ReplyMode, RpcEnvelope, RpcRequest,
+};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::UNIX_EPOCH;
+
+thread_local! {
+    /// Parked `test/captured-context-stream` subscription. Consumed by the
+    /// later `test/drain-parked-stream` invocation (the resident
+    /// run_concurrent region retires spawned subtasks, so consumption is
+    /// driven by explicit dispatches rather than a detached task).
+    static PARKED_STREAM: std::cell::RefCell<Option<actr_framework::DataChunkStream>> =
+        const { std::cell::RefCell::new(None) };
+
+    /// Probe counters for `test/eof-consumer`: (consumer starts, chunks
+    /// seen, stream terminations observed by the consumer loop).
+    static EOF_PROBE: std::cell::Cell<(u64, u64, u64)> =
+        const { std::cell::Cell::new((0, 0, 0)) };
+
+    /// Sink parked by `test/park-sink`, used by `test/parked-sink-send` in a
+    /// later invocation — the sink's captured ctx token is retired by then.
+    static PARKED_SINK: std::cell::RefCell<Option<actr_framework::DataChunkSink>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
 struct TypedDoubleRequest {
@@ -285,30 +306,181 @@ impl MessageDispatcher for DoubleDispatcher {
                 Ok(Bytes::from(peak.to_le_bytes().to_vec()))
             }
             "test/register-stream-context" => {
-                // A stream callback executes after this dispatch has returned.
-                // Capturing Context is the only way the callback-only API can
-                // issue host operations later, so this locks in the V2 token
-                // rebinding contract.
+                // The stream consumer executes after this dispatch has
+                // returned. Capturing Context is the only way the consumer
+                // can issue host operations later, so this locks in the V2
+                // token rebinding contract.
                 let callback_ctx = ctx.clone();
-                ctx.register_stream(
-                    "test/captured-context-stream".to_string(),
-                    move |_chunk, _sender| {
-                        let callback_ctx = callback_ctx.clone();
-                        Box::pin(async move {
-                            callback_ctx
-                                .call_raw(
-                                    callback_ctx.self_id(),
-                                    "test/stream-callback",
-                                    Bytes::from_static(b"stream-callback"),
-                                    30_000,
-                                )
-                                .await?;
-                            Ok(())
-                        })
-                    },
-                )
-                .await?;
+                let mut incoming = ctx
+                    .data_chunks(
+                        "test/captured-context-stream".to_string(),
+                        Default::default(),
+                    )
+                    .await?;
+                let consumer = async move {
+                    use futures_util::StreamExt;
+                    while let Some(event) = incoming.next().await {
+                        if event.is_err() {
+                            break;
+                        }
+                        let _ = callback_ctx
+                            .call_raw(
+                                callback_ctx.self_id(),
+                                "test/stream-callback",
+                                Bytes::from_static(b"stream-callback"),
+                                30_000,
+                            )
+                            .await;
+                    }
+                };
+                #[cfg(target_arch = "wasm32")]
+                actr_framework::guest::wasm::spawn_local(consumer);
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::spawn(consumer);
                 Ok(Bytes::new())
+            }
+            "test/eof-consumer" => {
+                // Stream-end probe: consume until the stream terminates,
+                // counting chunks and the termination. The host feeds this
+                // subscription via the production stream forwarder; a
+                // graceful end-of-stream marker must terminate the loop
+                // (FIFO, after every data chunk) — without marker forwarding
+                // the consumer hangs forever and the count never reaches 1.
+                let mut incoming = ctx
+                    .data_chunks("test/eof-stream".to_string(), Default::default())
+                    .await?;
+                let consumer = async move {
+                    use futures_util::StreamExt;
+                    EOF_PROBE.with(|probe| {
+                        let (starts, chunks, ends) = probe.get();
+                        probe.set((starts + 1, chunks, ends));
+                    });
+                    while let Some(event) = incoming.next().await {
+                        if event.is_err() {
+                            break;
+                        }
+                        EOF_PROBE.with(|probe| {
+                            let (starts, chunks, ends) = probe.get();
+                            probe.set((starts, chunks + 1, ends));
+                        });
+                    }
+                    EOF_PROBE.with(|probe| {
+                        let (starts, chunks, ends) = probe.get();
+                        probe.set((starts, chunks, ends + 1));
+                    });
+                };
+                #[cfg(target_arch = "wasm32")]
+                actr_framework::guest::wasm::spawn_local(consumer);
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::spawn(consumer);
+                Ok(Bytes::new())
+            }
+            "test/eof-stats" => {
+                let (starts, chunks, ends) = EOF_PROBE.with(|probe| probe.get());
+                let mut out = starts.to_le_bytes().to_vec();
+                out.extend_from_slice(&chunks.to_le_bytes());
+                out.extend_from_slice(&ends.to_le_bytes());
+                Ok(Bytes::from(out))
+            }
+            "test/park-sink" => {
+                // Create a sink bound to self and park it across the
+                // invocation boundary. Its send_fn captured THIS invocation's
+                // ctx token, which retires when this dispatch returns.
+                let sink = ctx
+                    .data_chunk_sink(
+                        &actr_framework::Dest::Peer(ctx.self_id().clone()),
+                        "test/parked-sink-stream".to_string(),
+                        PayloadType::StreamReliable,
+                    )
+                    .await?;
+                PARKED_SINK.with(|slot| {
+                    *slot.borrow_mut() = Some(sink);
+                });
+                Ok(Bytes::new())
+            }
+            "test/parked-sink-send" => {
+                // Send from a later invocation: the sink's captured token is
+                // retired, so this exercises the host's standing-ABI fallback
+                // for actor-global stream sends.
+                let mut sink = PARKED_SINK.with(|slot| slot.borrow_mut().take());
+                let Some(sink) = sink.as_mut() else {
+                    return Err(ActrError::Internal(
+                        "no parked sink; call test/park-sink first".into(),
+                    ));
+                };
+                use futures_util::SinkExt;
+                sink.send(DataChunk {
+                    stream_id: "test/parked-sink-stream".to_string(),
+                    sequence: 1,
+                    payload: Bytes::from_static(b"detached"),
+                    metadata: Vec::new(),
+                    timestamp_ms: None,
+                    end_of_stream: None,
+                })
+                .await?;
+                sink.close().await?;
+                Ok(Bytes::new())
+            }
+            "test/park-stream-context" => {
+                // Resident-region variant: on wasm32-wasip2 guest code only
+                // runs while some invocation is active, and the resident
+                // run_concurrent region retires subtasks when their command
+                // completes — so a spawned consumer cannot outlive its
+                // dispatch there. Park the subscription instead and consume
+                // it in a later invocation ("test/drain-parked-stream").
+                let incoming = ctx
+                    .data_chunks(
+                        "test/captured-context-stream".to_string(),
+                        Default::default(),
+                    )
+                    .await?;
+                PARKED_STREAM.with(|slot| {
+                    *slot.borrow_mut() = Some(incoming);
+                });
+                Ok(Bytes::new())
+            }
+            "test/drop-subscription" => {
+                // Subscribe, then drop the stream handle WITHOUT close():
+                // the guest-side teardown is local-only (the closer's async
+                // wait never runs from Drop), so the host forwarder stays
+                // registered until the next delivery finds the guest
+                // subscription gone (NotFound) and retires it.
+                let incoming = ctx
+                    .data_chunks("test/dropped-stream".to_string(), Default::default())
+                    .await?;
+                drop(incoming);
+                Ok(Bytes::new())
+            }
+            "test/drain-parked-stream" => {
+                let taken = PARKED_STREAM.with(|slot| slot.borrow_mut().take());
+                let Some(mut incoming) = taken else {
+                    return Err(ActrError::Internal(
+                        "no parked stream; call test/park-stream-context first".into(),
+                    ));
+                };
+                use futures_util::StreamExt;
+                let mut drained = 0u64;
+                // The test dispatches exactly one chunk; take it, then close
+                // (awaiting the next item would pend on the open channel).
+                if let Some(event) = incoming.next().await {
+                    if event.is_ok() {
+                        drained += 1;
+                        // Use THIS invocation's live context: the captured
+                        // registration token is only aliased during the
+                        // on-data-chunk invocation (begin_stream_callback),
+                        // not here.
+                        let _ = ctx
+                            .call_raw(
+                                ctx.self_id(),
+                                "test/stream-callback",
+                                Bytes::from_static(b"stream-callback"),
+                                30_000,
+                            )
+                            .await;
+                    }
+                }
+                incoming.close().await;
+                Ok(Bytes::from(drained.to_le_bytes().to_vec()))
             }
             "test/boom-after-await" => {
                 // Exercise Phase 0.5 spike Test 8: perform a host-side

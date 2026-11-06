@@ -1,5 +1,12 @@
 [bindings.kotlin]
 package_name = "io.actrium.actr"
 
+# UniFFI objects implement java.lang.AutoCloseable (non-suspend close()); an
+# exported async `close` method clashes at the Kotlin source level. Rename the
+# bridge close methods on the Kotlin side only — Rust and Swift keep `close`.
+[bindings.kotlin.rename]
+"DataChunkStreamBridge.close" = "closeAsync"
+"DataChunkSinkBridge.close" = "closeAsync"
+
 [bindings.swift]
 module_name = "Actr"

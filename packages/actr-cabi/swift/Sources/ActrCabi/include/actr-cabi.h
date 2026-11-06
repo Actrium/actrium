@@ -60,14 +60,20 @@ typedef struct {
 } actr_stream_metadata_entry;
 
 /* Host bridge — stream sink. Fired when a DataChunk forwarded by
- * actr_stream_listen arrives. chunk_flags bit 0 (0x01) indicates timestamp_ms
- * is set; other bits are reserved and must be ignored. All pointers are
+ * actr_stream_listen arrives. chunk_flags bit 0 (ACTR_CHUNK_FLAG_HAS_TIMESTAMP)
+ * indicates timestamp_ms is set; bit 1 (ACTR_CHUNK_FLAG_END_OF_STREAM) marks
+ * the in-band end-of-stream marker: a terminal, payload-less chunk after
+ * which no further chunk arrives on this stream. A host that completes its
+ * consumer on graceful stream end should do so when bit 1 is set. Other bits
+ * are reserved and must be ignored. All pointers are
  * valid ONLY for the duration of the callback; copy before returning.
  * metadata_ptr is an array of metadata_len borrowed actr_stream_metadata_entry
  * values (or NULL when metadata_len is zero).
  * sender_id is the sending actor's string repr. Callbacks run synchronously
  * on actr-cabi runtime worker threads, may re-enter actr-cabi except to
  * replace/clear a sink, and must not unwind across the C ABI boundary. */
+#define ACTR_CHUNK_FLAG_HAS_TIMESTAMP 0x01
+#define ACTR_CHUNK_FLAG_END_OF_STREAM 0x02
 typedef void (*actr_stream_sink_callback)(const char* stream_id_ptr, size_t stream_id_len,
                                           const uint8_t* payload_ptr, size_t payload_len,
                                           const actr_stream_metadata_entry* metadata_ptr,
@@ -157,8 +163,9 @@ int32_t actr_host_respond_reverse_rpc(uint64_t request_id, int32_t status,
  * matching chunk to the registered stream sink. Async — registration result via callback.
  * One listener per stream_id: a second listen for the same id follows the
  * runtime's register_stream semantics. Unlisten is idempotent; it removes
- * that exact listener and reports completion through the callback. Chunks
- * already accepted by the runtime may still finish their callback. */
+ * that exact listener and reports completion through the callback. Unlisten
+ * is prompt: chunks the listener accepted but has not yet delivered are
+ * dropped, not finished. */
 int32_t actr_stream_listen(void* ref_handle,
                            const char* stream_id_ptr, size_t stream_id_len,
                            actr_void_callback callback, void* user_data);

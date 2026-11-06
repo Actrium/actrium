@@ -3,6 +3,7 @@ import {
   PayloadType,
   defineWorkload,
   toUint8Array,
+  type DataChunkStream,
 } from "@actrium/actr-workload";
 import { create } from "@bufbuild/protobuf";
 
@@ -27,6 +28,8 @@ import {
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
+const activeStreams = new Map<string, DataChunkStream>();
+
 class EchoServiceHandlerImpl implements ActrDispatchHandler {
   echoServiceEcho(request: EchoRequest): EchoResponse {
     console.log(`Received Echo request: ${request.message}`);
@@ -45,29 +48,40 @@ class EchoServiceHandlerImpl implements ActrDispatchHandler {
     const replyStreamId = request.replyStreamId;
     const replyMessage = request.replyMessage;
 
-    await ctx.registerStream(
-      inboundStreamId,
-      async (chunk, sender, streamCtx) => {
-        const incoming = textDecoder.decode(toUint8Array(chunk.payload));
+    const stream = await ctx.dataChunks(inboundStreamId);
+    activeStreams.set(inboundStreamId, stream);
 
-        await streamCtx.sendDataChunk(
-          { peer: sender },
-          {
+    void (async () => {
+      try {
+        for await (const event of stream) {
+          const incoming = textDecoder.decode(toUint8Array(event.chunk.payload));
+
+          const sink = await ctx.dataChunkSink(
+            { peer: event.sender },
+            replyStreamId,
+            PayloadType.StreamReliable,
+          );
+          await sink.send({
             streamId: replyStreamId,
-            sequence: BigInt(chunk.sequence) + 1n,
+            sequence: BigInt(event.chunk.sequence) + 1n,
             payload: textEncoder.encode(`${replyMessage}: ${incoming}`),
             metadata: [{ key: "echo-runtime", value: "typescript-wasm" }],
             timestampMs: BigInt(Date.now()),
-          },
-          PayloadType.StreamReliable,
-        );
+          });
+          await sink.close();
 
-        await streamCtx.unregisterStream(inboundStreamId);
-      },
-    );
+          // One reply per subscription, then close (iterator return() also
+          // closes; the finally below is the belt-and-braces path).
+          break;
+        }
+      } finally {
+        activeStreams.delete(inboundStreamId);
+        await stream.close();
+      }
+    })();
 
     return create(StreamPrepareResponseSchema, {
-      status: `registered:${inboundStreamId}`,
+      status: `subscribed:${inboundStreamId}`,
     });
   }
 
@@ -75,9 +89,11 @@ class EchoServiceHandlerImpl implements ActrDispatchHandler {
     request: StreamReleaseRequest,
     ctx: ActrContext,
   ): Promise<StreamReleaseResponse> {
-    await ctx.unregisterStream(request.streamId);
+    const stream = activeStreams.get(request.streamId);
+    activeStreams.delete(request.streamId);
+    await stream?.close();
     return create(StreamReleaseResponseSchema, {
-      status: `unregistered:${request.streamId}`,
+      status: `closed:${request.streamId}`,
     });
   }
 }

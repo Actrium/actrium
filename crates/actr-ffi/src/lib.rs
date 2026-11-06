@@ -12,6 +12,7 @@
 //! 3. Exposes simplified APIs for creating and managing actors
 
 mod context;
+mod data_chunk;
 mod error;
 mod log_callback;
 mod logger;
@@ -20,6 +21,7 @@ mod runtime;
 mod types;
 mod workload;
 
+pub use data_chunk::*;
 pub use error::*;
 pub use log_callback::*;
 pub use opus::*;

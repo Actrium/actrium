@@ -17,23 +17,23 @@ The DataChunk API provides a Fast Path for streaming non-media data (file transf
 ```
 Sender (datastream.Sender)
   └─ SenderWorkload
-      └─ ctx.send_data_chunk(&dest, chunk)
-           │
-           ├─ RuntimeContext::send_data_chunk()
-           ├─ Gate::send_data_chunk()
-           └─ PeerGate::send_data_chunk()
+      └─ ctx.data_chunk_sink(&dest, stream_id, StreamReliable)
+           └─ sink.send(chunk)
                 │
-                └─ PeerTransport::send()
-                     └─ WebRTC DataChannel / WebSocket
+                ├─ RuntimeContext (send path)
+                ├─ Gate::send_data_chunk()
+                └─ PeerGate::send_data_chunk()
+                     │
+                     └─ PeerTransport::send()
+                          └─ WebRTC DataChannel / WebSocket
 
 Receiver (datastream.Receiver)
   └─ ReceiverWorkload
-      └─ ctx.register_stream("file-transfer", callback)
-           │
-           └─ DataChunkRegistry::register()
+      └─ ctx.data_chunks("file-transfer", options)
+           └─ DataChunkRegistry (bounded per-stream queue)
                 │
                 └─ InboundPacketDispatcher::dispatch()
-                     └─ Callback invoked with DataChunk
+                     └─ stream.next() yields DataChunkEvent
 ```
 
 ## Components
@@ -45,7 +45,7 @@ Receiver (datastream.Receiver)
 
 ### Receiver
 - **receiver/src/main.rs**: Entry point, builds `ActrNode` and starts it
-- **receiver/src/receiver_workload.rs**: Workload that registers callback to receive chunks
+- **receiver/src/receiver_workload.rs**: Workload that subscribes to inbound chunks via `data_chunks`
 - **receiver/src/generated/**: Auto-generated code from proto files (via `actr gen`)
 
 ## Running the Example
@@ -139,8 +139,15 @@ cargo run -p data-stream-sender
 ```rust
 use actr_protocol::DataChunk;
 use actr_framework::{Context, Dest};
+use futures_util::SinkExt;
 
-// Create a DataChunk
+// Create a sink bound to the destination, stream ID, and lane
+let dest = Dest::Peer(receiver_id);
+let mut sink = ctx
+    .data_chunk_sink(&dest, "file-transfer".to_string(), PayloadType::StreamReliable)
+    .await?;
+
+// Send chunks; each chunk's stream_id must match the sink's
 let chunk = DataChunk {
     stream_id: "file-transfer".to_string(),
     sequence: 0,
@@ -148,10 +155,10 @@ let chunk = DataChunk {
     metadata: vec![],
     timestamp_ms: Some(chrono::Utc::now().timestamp_millis()),
 };
+sink.send(chunk).await?;
 
-// Send to receiver
-let dest = Dest::Peer(receiver_id);
-ctx.send_data_chunk(&dest, chunk).await?;
+// Flush and close when done
+sink.close().await?;
 ```
 
 `StreamReliable` waits for a usable WebRTC/WebSocket route inside the
@@ -161,53 +168,36 @@ local transport accepted the chunk; it does not acknowledge remote processing.
 If the result is an uncertain-delivery error, stop automatic replay and resolve
 the outcome with an application ACK, checksum, or idempotency key.
 
-The returned future is cancellable. Dropping it releases the framework's
-readiness waiter and does not leave an offline payload queue behind:
-
-```rust
-let shutdown = tokio_util::sync::CancellationToken::new();
-let send = ctx.send_data_chunk(&dest, chunk);
-tokio::select! {
-    result = send => result?,
-    _ = shutdown.cancelled() => return Ok(()),
-}
-```
-
 ### Receiver Side
 
 ```rust
-// Register callback for stream_id
-ctx.register_stream("file-transfer".to_string(), |chunk: DataChunk, sender_id: ActrId| {
-    Box::pin(async move {
-        println!("Received chunk: sequence={}, size={}", chunk.sequence, chunk.payload.len());
-        Ok(())
-    })
-}).await?;
+use futures_util::StreamExt;
 
-// Unregister when done
-ctx.unregister_stream("file-transfer").await?;
+// Subscribe to a stream (single active subscription per stream_id)
+let mut chunks = ctx
+    .data_chunks("file-transfer".to_string(), Default::default())
+    .await?;
+
+while let Some(event) = chunks.next().await {
+    let event = event?;
+    println!(
+        "Received chunk: sequence={}, size={}",
+        event.chunk.sequence,
+        event.chunk.payload.len()
+    );
+}
+
+// Or close explicitly (drop also cancels the subscription)
+chunks.close().await;
 ```
 
 ### Receiver-side rules
 
-Callbacks for one stream run **serially, run-to-completion**: the previous
-chunk's callback future fully resolves before the next chunk's callback
-starts, strictly in arrival order. Different streams run on independent
-workers. Two consequences:
-
-1. **Never wait for a later chunk inside a callback.** A callback that blocks
-   until a later chunk of the same stream arrives self-deadlocks — that
-   chunk's callback is queued behind the blocked one, so neither makes
-   progress. An end-of-stream handler polling for stragglers is the classic
-   trigger. Finalize **outside** the stream callback instead: a separate RPC
-   the sender invokes after the last chunk (this example's `EndTransfer`, see
-   `receiver/src/file_transfer_service.rs`), or a detached task watching
-   shared reassembly state.
-2. **Reassemble by `sequence`.** Same-stream chunks are dispatched in send
-   order, but gaps are possible: `StreamLatencyFirst` drops chunks under
-   pressure, and a reconnect can lose in-flight reliable chunks. Use
-   `DataChunk.sequence` as the authoritative order key and detect gaps
-   explicitly instead of assuming contiguous arrival.
+Same-stream chunks are delivered in send order, but gaps are possible:
+`StreamLatencyFirst` drops chunks under pressure, and a reconnect can lose
+in-flight reliable chunks. Use `DataChunk.sequence` as the authoritative
+reassembly key and detect gaps explicitly instead of assuming contiguous
+arrival.
 
 ## Use Cases
 
@@ -224,7 +214,7 @@ workers. Two consequences:
 | Use Case | Request-response | Streaming data |
 | Overhead | Higher (RpcEnvelope) | Lower (direct protobuf) |
 | Ordering | Single request | Sequence numbers |
-| Callback | Per-message handler | Stream callback |
+| Consumption | Per-message handler | Pull-based chunk stream |
 | Best For | Commands, queries | Bulk data, high frequency |
 
 ## Next Steps

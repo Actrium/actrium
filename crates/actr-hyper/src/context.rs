@@ -10,9 +10,7 @@ use crate::wire::webrtc::SignalingClient;
 #[cfg(feature = "opentelemetry")]
 use crate::wire::webrtc::trace::inject_span_context_to_rpc;
 use actr_config::lock::LockFile;
-use actr_framework::{
-    Bytes, Context, DataChunk, Dest, MaybeSendBoxFuture, MaybeSendSync, MediaSample,
-};
+use actr_framework::{Bytes, Context, DataChunk, Dest, MediaSample};
 use actr_protocol::{
     AIdCredential, ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, Direction,
     PayloadType, RouteCandidatesRequest, RpcEnvelope, RpcRequest, route_candidates_request,
@@ -46,6 +44,11 @@ pub struct RuntimeContext {
     outproc_gate: Option<Gate>, // Remote Actor calls - lazily initialized
     data_chunk_registry: Arc<DataChunkRegistry>, // DataChunk callback registry
     media_frame_registry: Arc<MediaFrameRegistry>, // MediaTrack callback registry
+    /// Guest stream forwarder tasks keyed by stream_id. Shared by every
+    /// host-operation handler built from this context, so a guest's
+    /// register/unregister/re-register calls find the same table across
+    /// invocations (one actor lifetime).
+    stream_forwarders: crate::lifecycle::node::StreamForwarders,
     signaling_client: Arc<dyn SignalingClient>,
     credential: AIdCredential,
     actr_lock: Option<Arc<LockFile>>, // packaged manifest.lock.toml for fingerprint lookups
@@ -121,6 +124,7 @@ impl RuntimeContext {
         outproc_gate: Option<Gate>,
         data_chunk_registry: Arc<DataChunkRegistry>,
         media_frame_registry: Arc<MediaFrameRegistry>,
+        stream_forwarders: crate::lifecycle::node::StreamForwarders,
         signaling_client: Arc<dyn SignalingClient>,
         credential: AIdCredential,
         actr_lock: Option<Arc<LockFile>>,
@@ -147,6 +151,7 @@ impl RuntimeContext {
             outproc_gate,
             data_chunk_registry,
             media_frame_registry,
+            stream_forwarders,
             signaling_client,
             credential,
             actr_lock,
@@ -168,6 +173,7 @@ impl RuntimeContext {
         outproc_gate: Option<Gate>,
         data_chunk_registry: Arc<DataChunkRegistry>,
         media_frame_registry: Arc<MediaFrameRegistry>,
+        stream_forwarders: crate::lifecycle::node::StreamForwarders,
         signaling_client: Arc<dyn SignalingClient>,
         credential: AIdCredential,
         actr_lock: Option<Arc<LockFile>>,
@@ -184,6 +190,7 @@ impl RuntimeContext {
             outproc_gate,
             data_chunk_registry,
             media_frame_registry,
+            stream_forwarders,
             signaling_client,
             credential,
             actr_lock,
@@ -240,9 +247,15 @@ impl RuntimeContext {
         self.reply_claimed.clone()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn data_chunk_registry_for_test(&self) -> Arc<DataChunkRegistry> {
         self.data_chunk_registry.clone()
+    }
+
+    /// Guest stream forwarder table shared by every host-operation handler
+    /// built from this context (one actor lifetime).
+    pub(crate) fn stream_forwarders(&self) -> crate::lifecycle::node::StreamForwarders {
+        self.stream_forwarders.clone()
     }
 
     /// Read-only test handle to the `alias -> ActrType` map.
@@ -284,6 +297,62 @@ impl RuntimeContext {
             Dest::Host | Dest::Workload => &self.self_id,
             Dest::Peer(id) => id,
         }
+    }
+
+    /// Outbound DataChunk send shared by [`Context::data_chunk_sink`], the
+    /// WIT/dynclib host runners, and the C ABI.
+    ///
+    /// Not part of the public `Context` surface; `pub` only so sibling ABI
+    /// crates (actr-cabi) can reach it.
+    #[doc(hidden)]
+    pub async fn send_data_chunk_inner(
+        &self,
+        target: &Dest,
+        chunk: DataChunk,
+        payload_type: actr_protocol::PayloadType,
+    ) -> ActorResult<()> {
+        // An end marker is a control signal: it must not carry a payload.
+        // `DataChunkSink` enforces this for its own sends; this is the choke
+        // point for every other path (guest host-op, raw context calls).
+        if chunk.end_of_stream == Some(true) && !chunk.payload.is_empty() {
+            return Err(ActrError::InvalidArgument(
+                "end_of_stream marker must not carry a payload".into(),
+            ));
+        }
+        let deadline =
+            crate::transport::RpcDeadline::from_duration(crate::transport::DATA_CHUNK_SEND_TIMEOUT);
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_DATA_CHUNK_PREFLIGHT, deadline)
+            .await?;
+        deadline.ensure_remaining()?;
+
+        use actr_protocol::prost::Message as ProstMessage;
+
+        // 1. Serialize DataChunk to bytes
+        let payload = chunk.encode_to_vec();
+        let stream_id = chunk.stream_id.as_str();
+        let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
+
+        tracing::debug!(
+            "📤 Sending DataChunk: stream_id={}, sequence={}, size={} bytes",
+            stream_id,
+            chunk.sequence,
+            payload.len()
+        );
+
+        // 2. Select gate based on Dest
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+
+        // 3. Send via Gate with the caller-specified PayloadType
+        gate.send_data_chunk(
+            target_id,
+            payload_type,
+            stream_id,
+            bytes::Bytes::from(payload),
+            deadline,
+            &operation_id,
+        )
+        .await
     }
 
     /// Terminal permission error for a realm-denied session, shared by every
@@ -816,6 +885,9 @@ pub(crate) struct BootstrapContextBuilder {
     outproc_gate: Option<Gate>,
     data_chunk_registry: Arc<DataChunkRegistry>,
     media_frame_registry: Arc<MediaFrameRegistry>,
+    /// Guest stream forwarder table, shared with every context this builder
+    /// materializes (one actor lifetime — see `RuntimeContext`).
+    stream_forwarders: crate::lifecycle::node::StreamForwarders,
     signaling_client: Arc<dyn SignalingClient>,
     actr_lock: Option<Arc<LockFile>>,
     alias_map: Arc<HashMap<String, ActrType>>,
@@ -838,6 +910,7 @@ impl BootstrapContextBuilder {
         outproc_gate: Option<Gate>,
         data_chunk_registry: Arc<DataChunkRegistry>,
         media_frame_registry: Arc<MediaFrameRegistry>,
+        stream_forwarders: crate::lifecycle::node::StreamForwarders,
         signaling_client: Arc<dyn SignalingClient>,
         actr_lock: Option<Arc<LockFile>>,
         alias_map: Arc<HashMap<String, ActrType>>,
@@ -850,6 +923,7 @@ impl BootstrapContextBuilder {
             outproc_gate,
             data_chunk_registry,
             media_frame_registry,
+            stream_forwarders,
             signaling_client,
             actr_lock,
             alias_map,
@@ -902,6 +976,7 @@ impl BootstrapContextBuilder {
             self.outproc_gate.clone(),
             self.data_chunk_registry.clone(),
             self.media_frame_registry.clone(),
+            self.stream_forwarders.clone(),
             self.signaling_client.clone(),
             credential.clone(),
             self.actr_lock.clone(),
@@ -1035,70 +1110,58 @@ impl Context for RuntimeContext {
 
     // ========== Fast Path: DataChunk Methods ==========
 
-    async fn register_stream<F>(&self, stream_id: String, callback: F) -> ActorResult<()>
-    where
-        F: Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
-            + MaybeSendSync
-            + 'static,
-    {
-        tracing::debug!(
-            "📊 Registering DataChunk callback for stream_id: {}",
-            stream_id
-        );
+    async fn data_chunks(
+        &self,
+        stream_id: String,
+        options: actr_framework::DataChunkStreamOptions,
+    ) -> ActorResult<actr_framework::DataChunkStream> {
+        use futures_util::SinkExt;
+
+        let capacity = actr_framework::validate_stream_options(&options)?;
+        tracing::debug!("📊 Subscribing to DataChunks for stream_id: {}", stream_id);
+
+        let (tx, rx) =
+            futures_channel::mpsc::channel::<ActorResult<actr_framework::DataChunkEvent>>(capacity);
+        let callback = move |chunk: DataChunk, sender: ActrId| {
+            let mut tx = tx.clone();
+            Box::pin(async move {
+                // The lane policy is applied upstream at registry dispatch
+                // (Reliable backpressures, LatencyFirst drops with accounting).
+                // Awaiting this send stalls only this stream's worker, which
+                // propagates backpressure into the bounded registry queue.
+                // If the receiver is gone (stream dropped/closed) the chunk is
+                // discarded; close() is what unregisters the stream.
+                let _ = tx
+                    .send(Ok(actr_framework::DataChunkEvent { chunk, sender }))
+                    .await;
+                Ok(())
+            }) as futures_util::future::BoxFuture<'static, ActorResult<()>>
+        };
         self.data_chunk_registry
-            .register(stream_id, Arc::new(callback));
-        Ok(())
+            .register(stream_id.clone(), Arc::new(callback))?;
+
+        let registry = self.data_chunk_registry.clone();
+        let unregister_id = stream_id;
+        let closer = actr_framework::StreamCloser::new(Box::new(move || {
+            registry.unregister(&unregister_id);
+        }));
+        Ok(actr_framework::DataChunkStream::from_parts(rx, closer))
     }
 
-    async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
-        tracing::debug!(
-            "🚫 Unregistering DataChunk callback for stream_id: {}",
-            stream_id
-        );
-        self.data_chunk_registry.unregister(stream_id);
-        Ok(())
-    }
-
-    async fn send_data_chunk(
+    async fn data_chunk_sink(
         &self,
         target: &Dest,
-        chunk: DataChunk,
+        stream_id: String,
         payload_type: actr_protocol::PayloadType,
-    ) -> ActorResult<()> {
-        let deadline =
-            crate::transport::RpcDeadline::from_duration(crate::transport::DATA_CHUNK_SEND_TIMEOUT);
-        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_DATA_CHUNK_PREFLIGHT, deadline)
-            .await?;
-        deadline.ensure_remaining()?;
-
-        use actr_protocol::prost::Message as ProstMessage;
-
-        // 1. Serialize DataChunk to bytes
-        let payload = chunk.encode_to_vec();
-        let stream_id = chunk.stream_id.as_str();
-        let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
-
-        tracing::debug!(
-            "📤 Sending DataChunk: stream_id={}, sequence={}, size={} bytes",
-            stream_id,
-            chunk.sequence,
-            payload.len()
-        );
-
-        // 2. Select gate based on Dest
-        let gate = self.select_gate(target)?;
-        let target_id = self.extract_target_id(target);
-
-        // 3. Send via Gate with the caller-specified PayloadType
-        gate.send_data_chunk(
-            target_id,
-            payload_type,
-            stream_id,
-            bytes::Bytes::from(payload),
-            deadline,
-            &operation_id,
-        )
-        .await
+    ) -> ActorResult<actr_framework::DataChunkSink> {
+        let this = self.clone();
+        let dest = target.clone();
+        let send_fn: actr_framework::SendDataChunkFn = Box::new(move |chunk| {
+            let this = this.clone();
+            let dest = dest.clone();
+            Box::pin(async move { this.send_data_chunk_inner(&dest, chunk, payload_type).await })
+        });
+        actr_framework::DataChunkSink::new(stream_id, payload_type, send_fn)
     }
 
     #[cfg_attr(

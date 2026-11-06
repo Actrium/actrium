@@ -67,6 +67,8 @@ pub struct DataChunk {
     pub metadata: Vec<MetadataEntry>,
     #[serde(rename = "timestamp-ms")]
     pub timestamp_ms: Option<i64>,
+    #[serde(rename = "end-of-stream")]
+    pub end_of_stream: Option<bool>,
 }
 
 /// Lowered from WIT `record delivery-uncertain-payload`.
