@@ -111,6 +111,11 @@ impl PackageExtensions {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActriumExtension {
+    /// Versioned complete Program declaration. Display-only/Keel packages
+    /// retain their existing shape when this field is absent.
+    #[cfg(feature = "program")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<crate::program::ProgramDeclaration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -292,6 +297,19 @@ impl ActorPackageManifest {
                 )));
             }
         }
+        #[cfg(feature = "program")]
+        if let Some(program) = self
+            .extensions
+            .actrium
+            .as_ref()
+            .and_then(|x| x.program.as_ref())
+        {
+            crate::program::validate_manifest(self, program)?;
+        } else if self.workload.profile == crate::program::SERVICE_COMPONENT_PROFILE {
+            return Err(PackError::InvalidPackage(
+                "Program Service requires extensions.actrium.program".into(),
+            ));
+        }
         Ok(())
     }
 }
@@ -356,6 +374,16 @@ pub fn pack_actor_package(options: &ActorPackOptions) -> Result<Vec<u8>, PackErr
     manifest.signature.algorithm = "ed25519".to_string();
     manifest.signature.key_id =
         crate::compute_key_id(&options.signing_key.verifying_key().to_bytes());
+    #[cfg(feature = "program")]
+    if manifest
+        .extensions
+        .actrium
+        .as_ref()
+        .and_then(|x| x.program.as_ref())
+        .is_some()
+    {
+        crate::program::validate_payloads(&manifest, &options.payloads, &Default::default())?;
+    }
     let manifest_toml = manifest.to_toml()?;
     let signature = options
         .signing_key
@@ -492,6 +520,18 @@ pub fn verify_actor_package(
         return Err(PackError::SignatureVerificationFailed(format!(
             "signature.key-id does not match verifying key: expected `{actual_key_id}`"
         )));
+    }
+    #[cfg(feature = "program")]
+    if inspected
+        .manifest
+        .extensions
+        .actrium
+        .as_ref()
+        .and_then(|x| x.program.as_ref())
+        .is_some()
+    {
+        let payloads = crate::program::read_payloads(bytes, &inspected)?;
+        crate::program::validate_payloads(&inspected.manifest, &payloads, &Default::default())?;
     }
     Ok(inspected)
 }
