@@ -27,14 +27,14 @@ rust-version = "1.95"
 
 [workspace.dependencies]
 # Actr Framework Dependencies (used by all members)
-actr = { version = "0.10.0-alpha.4" }
-actr-framework = { version = "0.10.0-alpha.4" }
-actr-protocol = { version = "0.10.0-alpha.4" }
-actr-runtime = { version = "0.10.0-alpha.4" }
-actr-hyper = { version = "0.10.0-alpha.4", features = ["opentelemetry"] }
-actr-config = { version = "0.10.0-alpha.4" }
-actr-platform-native = { version = "0.10.0-alpha.4" }
-actr-pack = { version = "0.10.0-alpha.4" }
+actr = { version = "0.11.0" }
+actr-framework = { version = "0.11.0" }
+actr-protocol = { version = "0.11.0" }
+actr-runtime = { version = "0.11.0" }
+actr-hyper = { version = "0.11.0", features = ["opentelemetry"] }
+actr-config = { version = "0.11.0" }
+actr-platform-native = { version = "0.11.0" }
+actr-pack = { version = "0.11.0" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

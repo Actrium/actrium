@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr-cabi"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "actr-config"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "chrono",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "actr-hyper"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "base64 0.22.1",
@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "hex",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "actr-relay-security"
-version = "0.10.5"
+version = "0.11.0"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.2.17",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "actr-service-compat"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -1905,7 +1905,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "loran-relay-protocol"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "bytes",
  "serde",

@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "actr"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "actr-config"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "chrono",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "actr-hyper"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -116,10 +116,6 @@ dependencies = [
  "actr-runtime",
  "actr-runtime-mailbox",
  "actr-service-compat",
- "loran-platform",
- "loran-signaling",
- "loran-stun",
- "loran-turn",
  "anyhow",
  "async-trait",
  "axum",
@@ -136,7 +132,11 @@ dependencies = [
  "hmac",
  "if-addrs",
  "libloading",
+ "loran-platform",
  "loran-relay-protocol",
+ "loran-signaling",
+ "loran-stun",
+ "loran-turn",
  "num_cpus",
  "opentelemetry",
  "opentelemetry-appender-tracing",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "actr-mock-loran"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "actr-relay-security",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "base64",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-native"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-hyper",
  "actr-platform-traits",
@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "hex",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "actr-relay-security"
-version = "0.10.5"
+version = "0.11.0"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.2.17",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -306,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "actr-service-compat"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -332,162 +332,6 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "loran-platform"
-version = "0.10.7"
-dependencies = [
- "actr-protocol",
- "loran-proto",
- "loran-signer",
- "anyhow",
- "argon2",
- "async-trait",
- "base64",
- "chrono",
- "ed25519-dalek",
- "hex",
- "hkdf",
- "hmac",
- "lazy_static",
- "loran-relay-protocol",
- "nonce-auth",
- "once_cell",
- "proc-macro2",
- "prometheus",
- "prost",
- "prost-types",
- "pwrzv 0.7.0",
- "quote",
- "rand 0.8.8",
- "reqwest 0.12.28",
- "rustls",
- "rustls-pki-types",
- "rustls-webpki",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "strum",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "tokio",
- "tokio-rustls",
- "tokio-tungstenite 0.28.0",
- "toml 0.8.23",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "loran-proto"
-version = "0.10.7"
-dependencies = [
- "prost",
- "prost-types",
- "tonic",
- "tonic-prost",
- "tonic-prost-build",
-]
-
-[[package]]
-name = "loran-signaling"
-version = "0.10.7"
-dependencies = [
- "actr-protocol",
- "loran-platform",
- "anyhow",
- "axum",
- "base64",
- "bytes",
- "chrono",
- "futures-util",
- "governor",
- "prost",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "loran-signer"
-version = "0.10.7"
-dependencies = [
- "loran-proto",
- "aes-gcm",
- "anyhow",
- "async-trait",
- "axum",
- "base64",
- "ed25519-dalek",
- "hex",
- "hmac",
- "lazy_static",
- "nonce-auth",
- "prometheus",
- "prost",
- "prost-types",
- "rand 0.8.8",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tonic",
- "tonic-prost",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "loran-stun"
-version = "0.10.7"
-dependencies = [
- "anyhow",
- "async-trait",
- "stun",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "turn",
-]
-
-[[package]]
-name = "loran-turn"
-version = "0.10.7"
-dependencies = [
- "actr-protocol",
- "loran-platform",
- "anyhow",
- "async-trait",
- "base64",
- "chrono",
- "hex",
- "hmac",
- "lru",
- "md5",
- "nonce-auth",
- "prost",
- "prost-types",
- "serde",
- "serde_json",
- "sha1",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "turn",
- "webrtc",
- "webrtc-util",
 ]
 
 [[package]]
@@ -1900,7 +1744,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2894,8 +2738,66 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loran-platform"
+version = "0.11.0"
+dependencies = [
+ "actr-protocol",
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "base64",
+ "chrono",
+ "ed25519-dalek",
+ "hex",
+ "hkdf",
+ "hmac",
+ "lazy_static",
+ "loran-proto",
+ "loran-relay-protocol",
+ "loran-signer",
+ "nonce-auth",
+ "once_cell",
+ "proc-macro2",
+ "prometheus",
+ "prost",
+ "prost-types",
+ "pwrzv 0.7.0",
+ "quote",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "rustls",
+ "rustls-pki-types",
+ "rustls-webpki",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "strum",
+ "syn 2.0.117",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite 0.28.0",
+ "toml 0.8.23",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "loran-proto"
+version = "0.11.0"
+dependencies = [
+ "prost",
+ "prost-types",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
 name = "loran-relay"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2912,12 +2814,110 @@ dependencies = [
 
 [[package]]
 name = "loran-relay-protocol"
-version = "0.10.7"
+version = "0.11.0"
 dependencies = [
  "bytes",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "loran-signaling"
+version = "0.11.0"
+dependencies = [
+ "actr-protocol",
+ "anyhow",
+ "axum",
+ "base64",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "governor",
+ "loran-platform",
+ "prost",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "loran-signer"
+version = "0.11.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64",
+ "ed25519-dalek",
+ "hex",
+ "hmac",
+ "lazy_static",
+ "loran-proto",
+ "nonce-auth",
+ "prometheus",
+ "prost",
+ "prost-types",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "loran-stun"
+version = "0.11.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "stun",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "turn",
+]
+
+[[package]]
+name = "loran-turn"
+version = "0.11.0"
+dependencies = [
+ "actr-protocol",
+ "anyhow",
+ "async-trait",
+ "base64",
+ "chrono",
+ "hex",
+ "hmac",
+ "loran-platform",
+ "lru",
+ "md5",
+ "nonce-auth",
+ "prost",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "sha1",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "turn",
+ "webrtc",
+ "webrtc-util",
 ]
 
 [[package]]
@@ -3214,7 +3214,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4003,7 +4003,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4016,7 +4016,7 @@ dependencies = [
  "libc",
  "log",
  "socket2",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4697,7 +4697,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5397,7 +5397,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6890,7 +6890,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
