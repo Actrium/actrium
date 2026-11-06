@@ -633,7 +633,7 @@ fi
 # The durable state root honors an absolute-path override so concurrent
 # multi-instance runs keep independent state trees; the --user-data-root
 # argument feeds the same single choke point.
-if ! rg -q 'ACTRO_USER_DATA_ROOT' windows/src/WindowsAppPaths.cs \
+if ! rg -q 'ACTRIUM_USER_DATA_ROOT' windows/src/WindowsAppPaths.cs \
   || ! rg -q 'UserDataRootEnvironmentVariable' windows/src/Program.cs \
   || ! rg -q -- '--user-data-root' windows/src/WindowsStartupOptions.cs; then
   print_failure "Windows user data root override is not wired through the single app data path choke point"
@@ -1359,15 +1359,15 @@ else
 fi
 
 for host_method in \
-  'actro\.host\.getCoreStatus' \
-  'actro\.host\.openTab' \
-  'actro\.host\.closeTab' \
-  'actro\.host\.selectTab' \
-	  'actro\.host\.navigate' \
-	  'actro\.host\.getTabs' \
-	  'actro\.host\.getActiveTab' \
-	  'actro\.host\.removeBookmark' \
-	  'actro\.host\.removeHistoryEntry'
+  'actrium\.host\.getCoreStatus' \
+  'actrium\.host\.openTab' \
+  'actrium\.host\.closeTab' \
+  'actrium\.host\.selectTab' \
+	  'actrium\.host\.navigate' \
+	  'actrium\.host\.getTabs' \
+	  'actrium\.host\.getActiveTab' \
+	  'actrium\.host\.removeBookmark' \
+	  'actrium\.host\.removeHistoryEntry'
 do
   if ! rg -q "$host_method" windows/src/HostMessageBridge.cs windows/src/HostBridgeProtocol.cs; then
     print_failure "Windows host bridge does not expose method: $host_method"

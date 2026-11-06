@@ -82,7 +82,7 @@ Actrium 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程
 │   │                                                                              │   │
 │   │  TabA.HostView ─┐                                                            │   │
 │   │  TabB.HostView ─┼─► NSRemoteViewController.requestViewController(...)        │   │
-│   │  TabC.HostView ─┤     fromService: "io.actrium.actro.rctviewservice{i}"   │   │
+│   │  TabC.HostView ─┤     fromService: "io.actrium.rctviewservice{i}"   │   │
 │   │  TabD.HostView ─┘                                                            │   │
 │   └─────────────────────────────────────────────────────────────────────────────┘   │
 │                              │                                                       │
@@ -97,7 +97,7 @@ Actrium 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程
 │                                                                                      │
 │  ┌───────────────────────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
 │  │        RCTViewService0            │  │  RCTViewService1 │  │  RCTViewService2 │  │
-│  │ io.actrium.actro.rctviewservice0│  │ ...Service1      │  │ ...Service2      │  │
+│  │ io.actrium.rctviewservice0│  │ ...Service1      │  │ ...Service2      │  │
 │  │                                   │  │                  │  │                  │  │
 │  │  ┌─────────────────────────────┐  │  │ ┌──────────────┐ │  │ ┌──────────────┐ │  │
 │  │  │  ServiceReactNativeHost     │  │  │ │    SRNH      │ │  │ │    SRNH      │ │  │
@@ -153,10 +153,10 @@ Actrium 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程
 
 | Slot | Bundle Identifier |
 |------|-------------------|
-| 0 | `io.actrium.actro.rctviewservice0` |
-| 1 | `io.actrium.actro.rctviewservice1` |
-| 2 | `io.actrium.actro.rctviewservice2` |
-| 3 | `io.actrium.actro.rctviewservice3` |
+| 0 | `io.actrium.rctviewservice0` |
+| 1 | `io.actrium.rctviewservice1` |
+| 2 | `io.actrium.rctviewservice2` |
+| 3 | `io.actrium.rctviewservice3` |
 
 ## IPC Communication
 
@@ -167,10 +167,10 @@ Protocol: Protobuf (定义在 `Shared/IPC/actrium_ipc.proto`)
 
 | Direction | Notification Name | Message Type | 说明 |
 |-----------|-------------------|--------------|------|
-| Host → Service | `com.actro.tabConfig.<bundleId>` | `XPCTabConfig` | Tab 配置（包含 tabId） |
-| Service → Host | `com.actro.xpcServiceReady` | `XPCServiceReady` | Service 就绪通知 |
-| Service → Host | `com.actro.tabState.<tabId>` | `XPCTabState` | Tab 渲染状态 |
-| Service → Host | `com.actro.tabNavigation.<tabId>` | `XPCTabNavigation` | 导航请求 |
+| Host → Service | `io.actrium.tabConfig.<bundleId>` | `XPCTabConfig` | Tab 配置（包含 tabId） |
+| Service → Host | `io.actrium.xpcServiceReady` | `XPCServiceReady` | Service 就绪通知 |
+| Service → Host | `io.actrium.tabState.<tabId>` | `XPCTabState` | Tab 渲染状态 |
+| Service → Host | `io.actrium.tabNavigation.<tabId>` | `XPCTabNavigation` | 导航请求 |
 
 ### Key: tabId (UUID)
 

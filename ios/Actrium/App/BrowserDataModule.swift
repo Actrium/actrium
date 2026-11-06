@@ -3,7 +3,7 @@ import React
 
 private let browserDataModuleLogger = AppLogger.reactNative
 private let browserDataModuleQueue = DispatchQueue(
-    label: "io.actrium.actro.browser-data-module",
+    label: "io.actrium.browser-data-module",
     qos: .userInitiated
 )
 

@@ -331,7 +331,7 @@ final class ResizableContainerView: NSView {
                 debugLog("🤏 Pinch threshold reached → posting pinchToOverview")
                 cumulativeMagnification = 0
                 DistributedNotificationCenter.default().postNotificationName(
-                    NSNotification.Name("com.actro.pinchToOverview"),
+                    NSNotification.Name("io.actrium.pinchToOverview"),
                     object: nil,
                     userInfo: ["tabId": tabId ?? ""],
                     deliverImmediately: true
@@ -874,7 +874,7 @@ final class ServiceReactNativeHost {
 
     private func setupTabConfigListener() {
         // Listen for tab config with service-specific notification
-        let notificationName = "com.actro.tabConfig.\(serviceBundleId)"
+        let notificationName = "io.actrium.tabConfig.\(serviceBundleId)"
         ipcLog("🎧 Setting up tabConfig listener: \(notificationName)")
         tabConfigObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(notificationName),
@@ -886,7 +886,7 @@ final class ServiceReactNativeHost {
         }
 
         // Listen for container size changes from Host (service-specific notification)
-        let containerSizeName = "com.actro.containerSizeChanged.\(serviceBundleId)"
+        let containerSizeName = "io.actrium.containerSizeChanged.\(serviceBundleId)"
         containerSizeObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(containerSizeName),
             object: nil,
@@ -896,7 +896,7 @@ final class ServiceReactNativeHost {
         }
 
         // Listen for explicit tabId binding from Host (connection-aware)
-        let bindName = "com.actro.bindTab.\(serviceBundleId)"
+        let bindName = "io.actrium.bindTab.\(serviceBundleId)"
         bindTabObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(bindName),
             object: nil,
@@ -910,7 +910,7 @@ final class ServiceReactNativeHost {
 
         // Listen for pending tabId from Host (sent before connection request)
         // And also extract hostProcessId For process isolation
-        let pendingTabIdName = "com.actro.pendingTabId.\(serviceBundleId)"
+        let pendingTabIdName = "io.actrium.pendingTabId.\(serviceBundleId)"
         pendingTabIdObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(pendingTabIdName),
             object: nil,
@@ -973,7 +973,7 @@ final class ServiceReactNativeHost {
         }
 
         // Use tape PID Reset the audio monitor for the notification name
-        let tabConfigName = "com.actro.tabConfig.\(pid).\(serviceBundleId)"
+        let tabConfigName = "io.actrium.tabConfig.\(pid).\(serviceBundleId)"
         tabConfigObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(tabConfigName),
             object: nil,
@@ -982,7 +982,7 @@ final class ServiceReactNativeHost {
             self?.handleTabConfigNotification(notification)
         }
 
-        let containerSizeName = "com.actro.containerSizeChanged.\(pid).\(serviceBundleId)"
+        let containerSizeName = "io.actrium.containerSizeChanged.\(pid).\(serviceBundleId)"
         ipcLog("🎧 Setting up containerSizeChanged listener: \(containerSizeName)")
         containerSizeObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(containerSizeName),
@@ -992,7 +992,7 @@ final class ServiceReactNativeHost {
             self?.handleContainerSizeChanged(notification)
         }
 
-        let bindTabName = "com.actro.bindTab.\(pid).\(serviceBundleId)"
+        let bindTabName = "io.actrium.bindTab.\(pid).\(serviceBundleId)"
         bindTabObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(bindTabName),
             object: nil,
@@ -1005,7 +1005,7 @@ final class ServiceReactNativeHost {
         }
 
         // Listen for UI state changes (e.g. left panel visibility toggle)
-        let uiStateName = "com.actro.uiStateChanged.\(pid).\(serviceBundleId)"
+        let uiStateName = "io.actrium.uiStateChanged.\(pid).\(serviceBundleId)"
         uiStateChangedObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(uiStateName),
             object: nil,
@@ -1018,7 +1018,7 @@ final class ServiceReactNativeHost {
 
         // 🔑 Announcements Host The wire is set. Request re-transmit. containerSizeChanged
         // This resolves the competitive conditions:Host Probably sent it before the wires were set. containerSizeChanged
-        let listenerReadyName = "com.actro.listenerReady.\(pid).\(serviceBundleId)"
+        let listenerReadyName = "io.actrium.listenerReady.\(pid).\(serviceBundleId)"
         ipcLog("📤 Sending listenerReady notification: \(listenerReadyName)")
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(listenerReadyName),
@@ -1223,9 +1223,9 @@ final class ServiceReactNativeHost {
         }
         let notificationName: String
         if let pid = hostProcessId {
-            notificationName = "com.actro.sizeApplied.\(pid).\(serviceBundleId)"
+            notificationName = "io.actrium.sizeApplied.\(pid).\(serviceBundleId)"
         } else {
-            notificationName = "com.actro.sizeApplied.\(serviceBundleId)"
+            notificationName = "io.actrium.sizeApplied.\(serviceBundleId)"
         }
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
@@ -1247,7 +1247,7 @@ final class ServiceReactNativeHost {
             userInfo["hostProcessId"] = pid
         }
         DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.xpcServiceReady"),
+            NSNotification.Name("io.actrium.xpcServiceReady"),
             object: nil,
             userInfo: userInfo,
             deliverImmediately: true
@@ -1725,7 +1725,7 @@ public func registerActriumServiceViewController() {
             userInfo["hostProcessId"] = pid
         }
         DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.xpcConnectionCreated"),
+            NSNotification.Name("io.actrium.xpcConnectionCreated"),
             object: nil,
             userInfo: userInfo,
             deliverImmediately: true

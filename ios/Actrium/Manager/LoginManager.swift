@@ -242,7 +242,7 @@ class LoginManager: ObservableObject {
     func saveUserToLocal() {}
 
     // MARK: - Global user information (used to determine differences) appId (Accessors are consistent)
-    private let globalUserInfoKeyPrefix = "Actro.globalUserInfo"
+    private let globalUserInfoKeyPrefix = "Actrium.globalUserInfo"
     
     /// Generate global user information storage based on the current environment key
     private var globalUserInfoKey: String {

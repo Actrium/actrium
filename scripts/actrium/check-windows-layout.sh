@@ -829,7 +829,7 @@ check_pattern_in_each_file \
 # The single app data path choke point honors an absolute-path override so
 # concurrent multi-instance runs keep fully independent state trees.
 check_pattern_in_each_file \
-  'ACTRO_USER_DATA_ROOT' \
+  'ACTRIUM_USER_DATA_ROOT' \
   "Windows app data root honors the user data root override" \
   "Windows app data root does not honor the user data root override" \
   windows/src/WindowsAppPaths.cs
@@ -1853,15 +1853,15 @@ check_pattern_in_each_file \
 
 missing_host_bridge_methods=()
 for host_method in \
-  'actro\.host\.getCoreStatus' \
-  'actro\.host\.openTab' \
-  'actro\.host\.closeTab' \
-  'actro\.host\.selectTab' \
-	  'actro\.host\.navigate' \
-	  'actro\.host\.getTabs' \
-	  'actro\.host\.getActiveTab' \
-	  'actro\.host\.removeBookmark' \
-	  'actro\.host\.removeHistoryEntry'
+  'actrium\.host\.getCoreStatus' \
+  'actrium\.host\.openTab' \
+  'actrium\.host\.closeTab' \
+  'actrium\.host\.selectTab' \
+	  'actrium\.host\.navigate' \
+	  'actrium\.host\.getTabs' \
+	  'actrium\.host\.getActiveTab' \
+	  'actrium\.host\.removeBookmark' \
+	  'actrium\.host\.removeHistoryEntry'
 do
   if ! rg -q "$host_method" windows/src/HostMessageBridge.cs windows/src/HostBridgeProtocol.cs; then
     missing_host_bridge_methods+=("$host_method")

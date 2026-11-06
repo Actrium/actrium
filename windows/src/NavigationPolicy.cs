@@ -2,9 +2,9 @@ namespace Actrium.Windows;
 
 internal static class NavigationPolicy
 {
-    public const string HomeAddress = "actro://home";
-    public const string HistoryAddress = "actro://history";
-    public const string BookmarksAddress = "actro://bookmarks";
+    public const string HomeAddress = "about:home";
+    public const string HistoryAddress = "about:history";
+    public const string BookmarksAddress = "about:bookmarks";
 
     public static bool TryNormalizeAddress(string address, out string normalizedAddress)
     {

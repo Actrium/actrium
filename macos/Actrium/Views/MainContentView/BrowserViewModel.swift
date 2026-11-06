@@ -668,7 +668,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Navigation Current Tab To Assign URL Or apply ID
     /// Unified navigation portal - Process all types of input
     /// - If the input is about: URLNavigator to the corresponding system application
-    /// - If the input is actro:// URLLoad Actrium Apply
     /// - If the input is http/https URL, as Web Load
     /// - Load if input is a local file path ACTR Apply
     /// - Otherwise, as app id Process
@@ -721,40 +720,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 return
             }
 
-            // Check if it's an actro:// URL for Actrium apps.
-            // Legacy app-scheme links are still accepted as aliases.
-            // Two formats supported:
-            // - actro://bundleId - lookup by bundleId in database
-            // - actro:///absolute/path - local file path (three slashes)
-            if ActriumAppURLScheme.isSupported(url.scheme) {
-                var sourcePath: String?
-
-                // Check if it's a local path (actro:///path/to/app)
-                // URL parsing: actro:///path -> host is nil/empty, path is /path
-                if let host = url.host, !host.isEmpty {
-                    // bundleId mode: actro://com.example.app - lookup in database
-                    logger.notice("📱 [navigateCurrentTab] Navigator to Actrium Apply (bundleId): \(host)")
-                    let appRepo = AppRepository()
-                    if let app = appRepo.getByBundleId(host) {
-                        sourcePath = app.sourcePath
-                        appRepo.updateLastUsed(bundleId: host)
-                    } else {
-                        logger.warning("⚠️ [navigateCurrentTab] No applications found: \(host)")
-                        return
-                    }
-                } else {
-                    // local path mode: actro:///Users/example-dev-2/path/to/app
-                    sourcePath = url.path
-                    logger.notice("📂 [navigateCurrentTab] Navigator to Local Actrium Apply: \(sourcePath ?? "")")
-                }
-
-                // Load ACTR app into current tab
-                if let path = sourcePath {
-                    loadActrPackageIntoCurrentTab(from: URL(fileURLWithPath: path), tabIndex: index)
-                }
-                return
-            }
-
             logger.notice("🌐 [navigateCurrentTab] Navigator to URL: \(url.absoluteString)")
             // Update Tab Yes Web Contents
             tabs[index].url = url
@@ -782,8 +747,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Load ACTR app into the current tab (in-place update, not creating new tab)
-    /// Used by actro:// URL navigation to update current tab content
-    private func loadActrPackageIntoCurrentTab(from fileURL: URL, tabIndex: Int) {
+    /// Used by actr:// URL navigation to update current tab content
+    private func loadActrPackageIntoCurrentTab(
+        from fileURL: URL,
+        tabIndex: Int,
+        displayURL: URL? = nil
+    ) {
         let resolvedURL = fileURL.standardizedFileURL
 
         var isDirectory: ObjCBool = false
@@ -844,15 +813,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
             let guestScript = readGuestScript(fromRoot: rootDir)
 
-            // Construct actro:// URL for History and address bar
-            let appURL: URL
-            if let appId = manifestInfo.appId,
-               let url = URL(string: "\(ActriumAppURLScheme.primary)://\(appId)") {
-                appURL = url
-            } else {
-                // Local dev path: actro:///absolute/path
-                appURL = ActriumAppURLScheme.appURL(filePath: resolvedURL.path) ?? resolvedURL
-            }
+            // Public packages retain their stable actr:// address. Local development
+            // inputs remain file URLs instead of masquerading as authority URLs.
+            let appURL = displayURL ?? resolvedURL
 
             // Update current tab in-place (like about: URL handling)
             logger.notice("📱 [loadActrPackageIntoCurrentTab] Update Current Tab: \(tabTitle), url=\(appURL.absoluteString)")
@@ -903,9 +866,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// Checks whether input is a local file path
     func isLocalFilePath(_ input: String) -> Bool {
-        // actro://... may itself point at an .actr archive. It must be parsed as
-        // an application URL instead of being treated as a literal filesystem path.
-        if ActriumAppURLScheme.hasSupportedPrefix(input) {
+        // actr:// identifies an authority target and is never a filesystem path.
+        if ActrPublicURLScheme.hasSupportedPrefix(input) {
             return false
         }
         // Here. / The first is the absolute path.
@@ -928,13 +890,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Parsing URL String
-    /// - If about:/http/https/actrium, Directly decipher
+    /// - If about:/http/https/actr, parse directly
     /// - If it looks like a domain name (includes) . and does not contain spaces) add https:// Prefix
     func parseURL(_ input: String) -> URL? {
-        // It's complete. URL (http/https/about/actrium)
+        // It's complete. URL (http/https/about/actr)
         if input.hasPrefix("http://") || input.hasPrefix("https://") ||
            input.hasPrefix("about:") ||
-           ActriumAppURLScheme.hasSupportedPrefix(input) {
+           ActrPublicURLScheme.hasSupportedPrefix(input) {
             return URL(string: input)
         }
 
@@ -1498,7 +1460,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Register an Actrium app in the database
-    /// This allows the app to be opened via actro://bundleId URL
+    /// Registration records local package metadata without creating a public URL.
     private func registerApp(
         name: String,
         bundleId: String,
@@ -1572,11 +1534,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         rightPanelDefaultVisible: Bool = false,
         themeColor: String? = nil
     ) {
-        // Use actro:// URL for History and address bar
-        let appURL = ActriumAppURLScheme.appURL(filePath: sourceURL.path) ?? sourceURL
         let newTab = Tab(
             title: title,
-            url: appURL,
+            url: sourceURL,
             appId: appId,
             htmlContent: htmlContent,
             guestScript: guestScript,

@@ -9,8 +9,8 @@ license = "Apache-2.0"
 tags = ["dev", "client"]
 
 [package.actr_type]
-publisher = "actro"
-name = "actro"
+publisher = "actrium"
+name = "actrium"
 
 [dependencies]
 ask-service = { actr_type = "acmeopenclaw+AskService" }

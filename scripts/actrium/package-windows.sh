@@ -19,7 +19,7 @@
 # KNOWN GAP: artifacts are unsigned - no code-signing certificate exists
 # yet, so SmartScreen warns on first run/install. Uninstall removes the
 # installed binaries and shortcuts but deliberately leaves the user's
-# profile data (%LOCALAPPDATA%\Actrium\Actro\Windows and the WebView2
+# profile data (%LOCALAPPDATA%\Actrium\Actrium\Windows and the WebView2
 # browsing profile) in place; the policy is documented in
 # windows/packaging/actrium-installer.iss.
 set -euo pipefail

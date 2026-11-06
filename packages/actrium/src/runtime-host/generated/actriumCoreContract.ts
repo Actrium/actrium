@@ -430,8 +430,8 @@ export const ACTR_CONFIG_CONTRACT = {
     },
   },
   clientActrType: {
-    publisher: 'actro',
-    name: 'actro',
+    publisher: 'actrium',
+    name: 'actrium',
   },
   dependencyName: 'bid-service',
   defaultSignalingUrl: 'wss://loran.example.com/signaling/ws',

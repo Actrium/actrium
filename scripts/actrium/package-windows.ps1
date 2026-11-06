@@ -28,7 +28,7 @@
       registry keys and runs the official Microsoft bootstrapper
       (downloaded by this script at package time) only when it is missing.
     - Uninstall removes the installed binaries and shortcuts but leaves
-      user profile data (%LOCALAPPDATA%\Actrium\Actro\Windows and the
+      user profile data (%LOCALAPPDATA%\Actrium\Actrium\Windows and the
       WebView2 browsing profile) in place, so a reinstall restores the
       user's session, bookmarks and history.
 

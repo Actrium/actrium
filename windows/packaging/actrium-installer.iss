@@ -17,7 +17,7 @@
 ;     bootstrapper runs only when no runtime is found.
 ;   - Uninstall removes the installed binaries, the shortcut and the
 ;     uninstaller itself, but deliberately leaves user profile data in
-;     place (%LOCALAPPDATA%\Actrium\Actro\Windows: browser SQLite store,
+;     place (%LOCALAPPDATA%\Actrium\Actrium\Windows: browser SQLite store,
 ;     settings, plus the WebView2 browsing profile), so reinstalling
 ;     restores the user's session, bookmarks and history. It also leaves
 ;     the WebView2 runtime installed: it is machine/user infrastructure

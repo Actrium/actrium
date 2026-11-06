@@ -35,17 +35,17 @@ Native Windows WebView2 browser shell for Actrium.
   explicit page bookmarks, backed by the shared browser SQLite schema.
 - `src/BrowserBookmarksDocumentPolicy.cs` owns safe generated bookmarks-page
   HTML plus in-page filtering and remove controls for the local
-  `actro://bookmarks` document.
+  `about:bookmarks` document.
 - `src/BrowserLocalListDocumentPolicy.cs` owns shared generated-list chrome for
   Windows-local pages that need safe rows, filtering, and remove controls.
 - `src/BrowserHistoryStore.cs` owns Windows-local browser history snapshots for
   successful non-private external navigations, backed by the shared browser
   SQLite schema.
-- `src/BrowserStorageDatabase.cs` adapts the Rust-owned `actro_browser.db`
+- `src/BrowserStorageDatabase.cs` adapts the Rust-owned `actrium_browser.db`
   schema and repository SQL to Windows through `Microsoft.Data.Sqlite`, including
   one-time import from the older JSON files.
 - `src/BrowserHistoryDocumentPolicy.cs` owns safe generated history-page HTML
-  plus in-page filtering and remove controls for the local `actro://history`
+  plus in-page filtering and remove controls for the local `about:history`
   document.
 - `src/BrowserMenuCommand.cs`, `src/BrowserMenuModel.cs` and
   `src/BrowserAppMenu.cs` own the compact application menu (Chrome/Edge
@@ -102,7 +102,7 @@ Native Windows WebView2 browser shell for Actrium.
   allowlisting, and navigation scheme allowlisting.
 - `src/ActriumCore.cs` is the only Windows C# entrypoint for the Rust ActriumCore C
   ABI.
-- `src/HostBridgeProtocol.cs` owns the Windows-local `actro.host.*` JSON
+- `src/HostBridgeProtocol.cs` owns the Windows-local `actrium.host.*` JSON
   protocol, source allowlist, request dispatch, response shape, and payload DTOs.
 - `src/HostMessageBridge.cs` owns the WebView2 wrapper for that protocol: script
   injection, `WebMessageReceived`, and JSON responses back to the page.
@@ -226,7 +226,7 @@ or persist this snapshot, which keeps temporary window placement from replacing
 the user's primary browser window state.
 
 The host message bridge is deliberately small. It injects `window.actriumHost`,
-accepts only allowlisted `actro.host.*` requests from trusted local/dev WebView2
+accepts only allowlisted `actrium.host.*` requests from trusted local/dev WebView2
 sources, returns the core status payload through the C# `ActriumCore` adapter, and
 delegates `openTab`, `closeTab`, `selectTab`, `navigate`, `getTabs`, and
 `getActiveTab` to `MainForm`. The protocol dispatcher is separated from the
@@ -235,7 +235,7 @@ routing, page navigation, WebView lifecycle, or high-volume UI events through
 Rust just to centralize them.
 
 The native home page is Windows-owned. `BrowserHomeDocumentPolicy` builds the
-generated `actro://home` HTML and safely renders the ActriumCore availability
+generated `about:home` HTML and safely renders the ActriumCore availability
 summary before the page requests the host bridge for live status. `MainForm` only
 decides when to show that document. This keeps start-page UX and WebView2
 document rendering in the shell; Rust only provides stable core metadata through
@@ -267,8 +267,8 @@ saved passwords. Prompt and status text stay testable through
 Browser history is Windows-owned in this first slice. `MainForm` records
 successful non-private external navigations and handles the generated page's
 remove action, `BrowserHistoryStore` persists through `BrowserStorageDatabase`
-into the Rust-owned `actro_browser.db` schema, and
-`BrowserHistoryDocumentPolicy` renders the generated `actro://history` page with
+into the Rust-owned `actrium_browser.db` schema, and
+`BrowserHistoryDocumentPolicy` renders the generated `about:history` page with
 local filtering through `BrowserLocalListDocumentPolicy`. Older
 `browser-history.json` files are imported once. WebView2 event timing,
 private-window rules, generated document routing, and host-bridge action
@@ -277,8 +277,8 @@ dispatch stay in the Windows shell.
 Browser bookmarks are Windows-owned in this first slice too. `MainForm` handles
 the explicit bookmark/unbookmark command and the generated page's remove action,
 `BrowserBookmarkStore` persists through `BrowserStorageDatabase` into the
-Rust-owned `actro_browser.db` schema, and `BrowserBookmarksDocumentPolicy`
-renders the generated `actro://bookmarks` page. Older `browser-bookmarks.json`
+Rust-owned `actrium_browser.db` schema, and `BrowserBookmarksDocumentPolicy`
+renders the generated `about:bookmarks` page. Older `browser-bookmarks.json`
 files are imported once. Menu routing, bookmark-page filtering/rendering through
 `BrowserLocalListDocumentPolicy`, host-bridge action dispatch, and active-tab
 checked state stay in the Windows shell.
@@ -326,7 +326,7 @@ External protocol handoff is Windows-owned. When a page tries to navigate to a
 non-browser scheme such as `mailto:` or `tel:`, the WebView navigation is
 canceled first. `BrowserExternalProtocolManager` then requests the user before
 opening the target through Windows' default protocol handler. Browser-internal or
-unsafe schemes such as `javascript:`, `data:`, `blob:`, and `actro:` are never
+unsafe schemes such as `javascript:`, `data:`, `blob:`, and `actrium:` are never
 handed off.
 
 The tab sidebar is also Windows-owned. Each tab owns a separate WebView2 control
@@ -339,7 +339,7 @@ such as `Ctrl+Tab`, `Ctrl+Shift+Tab`, `Ctrl+PageUp`, `Ctrl+PageDown`, and
 duplicate-tab creation, closed-tab reopening, or WebView ownership into Rust.
 
 The session store is Windows-owned for now. It writes the first-window session
-into the Rust-owned `actro_browser.db` schema through `BrowserStorageDatabase`,
+into the Rust-owned `actrium_browser.db` schema through `BrowserStorageDatabase`,
 restores tabs when no `--url` startup override is provided, ignores corrupt
 legacy session files, and drops unsafe navigation entries instead of restoring
 them. Older `browser-session.json` files are imported once. This launch/restore
@@ -453,7 +453,7 @@ On a Windows host, `scripts/actrium/package-windows.sh` (a thin wrapper around
   administrator rights, installs to `%LOCALAPPDATA%\Programs\Actrium`, creates a
   per-user Start Menu shortcut, and runs the embedded official WebView2
   Evergreen bootstrapper only when the runtime is missing. Uninstall removes
-  binaries and shortcuts but leaves `%LOCALAPPDATA%\Actrium\Actro\Windows`
+  binaries and shortcuts but leaves `%LOCALAPPDATA%\Actrium\Actrium\Windows`
   (profile data) in place.
 
 Known gaps: artifacts are unsigned (no code-signing certificate yet), and the

@@ -54,7 +54,7 @@ Edit `Scripts/ExportOptions.plist`:
 
 <key>provisioningProfiles</key>
 <dict>
-    <key>com.actrium.actro</key>  <!-- It's yours. Bundle ID -->
+    <key>com.example.actrium</key>  <!-- It's yours. Bundle ID -->
     <string>YOUR_PROVISIONING_PROFILE_NAME</string>  <!-- It's yours. Provisioning Profile Name -->
 </dict>
 ```

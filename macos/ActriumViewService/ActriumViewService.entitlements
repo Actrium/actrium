@@ -9,7 +9,7 @@
 	<!-- App Group for shared Metro config -->
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.io.actrium.actro</string>
+		<string>group.io.actrium</string>
 	</array>
 
 	<!-- Network Access for Metro bundler -->

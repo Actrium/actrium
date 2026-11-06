@@ -9,8 +9,8 @@
 /* Begin PBXBuildFile section */
 		442EB4E3928B6CB9A596ED32 /* libPods-Actrium.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 54BE6183EA33DF557E1EAE93 /* libPods-Actrium.a */; };
 		45693714731FFE1094AABA6D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9E8F106EEB5ACFC4B33B67C7 /* PrivacyInfo.xcprivacy */; };
-		AB20110022003300AA00BB02 /* ActriumCore in Frameworks */ = {isa = PBXBuildFile; productRef = AB20110022003300AA00BB03 /* ActriumCore */; };
 		AA20110022003300AA00BB02 /* ActriumVault in Frameworks */ = {isa = PBXBuildFile; productRef = AA20110022003300AA00BB03 /* ActriumVault */; };
+		AB20110022003300AA00BB02 /* ActriumCore in Frameworks */ = {isa = PBXBuildFile; productRef = AB20110022003300AA00BB03 /* ActriumCore */; };
 		E55904C52F1643D700514034 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = E55904C42F1643D700514034 /* Highlightr */; };
 		E57012CD2F20D8BD0033B7CE /* A1SDK in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CC2F20D8BD0033B7CE /* A1SDK */; };
 		E57012D02F20D8DD0033B7CE /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = E57012CF2F20D8DD0033B7CE /* Kingfisher */; };
@@ -536,7 +536,8 @@
 					"-fmodule-map-file=\"${PODS_ROOT}/Headers/Public/react_utils/React-utils.modulemap\"",
 					"-fmodule-map-file=\"${PODS_ROOT}/Headers/Public/yoga/Yoga.modulemap\"",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.ios;
+				// Use the Actrium application identity in every build configuration.
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.ios;
 				PRODUCT_NAME = Actrium;
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -681,7 +682,8 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MARKETING_VERSION = 1.28.5;
-				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.ios;
+				// Use the Actrium application identity in every build configuration.
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.ios;
 				PRODUCT_NAME = Actrium;
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -729,13 +731,13 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		AB20110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumCore" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../packages/actrium-platform/apple/ActriumCore;
-		};
 		AA20110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumVault" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../packages/actrium-platform/apple/ActriumVault;
+			relativePath = "../packages/actrium-platform/apple/ActriumVault";
+		};
+		AB20110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../packages/actrium-platform/apple/ActriumCore";
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -783,15 +785,15 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AB20110022003300AA00BB03 /* ActriumCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AB20110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumCore" */;
-			productName = ActriumCore;
-		};
 		AA20110022003300AA00BB03 /* ActriumVault */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = AA20110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumVault" */;
 			productName = ActriumVault;
+		};
+		AB20110022003300AA00BB03 /* ActriumCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AB20110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumCore" */;
+			productName = ActriumCore;
 		};
 		E55904C42F1643D700514034 /* Highlightr */ = {
 			isa = XCSwiftPackageProductDependency;

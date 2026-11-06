@@ -254,7 +254,7 @@ message ViewportApplied {
 // ============================================
 
 // Host -> Service: Tab configuration
-// Notification: com.actro.tabConfig.<serviceBundleId>
+// Notification: io.actrium.tabConfig.<serviceBundleId>
 message XPCTabConfig {
     // Core identifier (UUID string)
     string tab_id = 1;
@@ -291,13 +291,13 @@ message XPCTabConfig {
 }
 
 // Service -> Host: Service ready notification
-// Notification: com.actro.xpcServiceReady
+// Notification: io.actrium.xpcServiceReady
 message XPCServiceReady {
-    string service_bundle_id = 1;  // e.g., "io.actrium.actro.rctviewservice0"
+    string service_bundle_id = 1;  // e.g., "io.actrium.rctviewservice0"
 }
 
 // Service -> Host: Tab render state
-// Notification: com.actro.tabState.<tabId>
+// Notification: io.actrium.tabState.<tabId>
 message XPCTabState {
     string tab_id = 1;
     TabRenderState state = 2;
@@ -311,7 +311,7 @@ message XPCTabState {
 }
 
 // Service -> Host: Tab navigation request
-// Notification: com.actro.tabNavigation.<tabId>
+// Notification: io.actrium.tabNavigation.<tabId>
 message XPCTabNavigation {
     string tab_id = 1;
     string url = 2;

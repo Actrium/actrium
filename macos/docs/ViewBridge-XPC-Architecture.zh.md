@@ -110,12 +110,12 @@ viewportSize.height / cardHeight = scale
 
 | 通知名称 | 方向 | 用途 |
 |----------|------|------|
-| `com.actro.xpcServiceReady` | XPC → Host | XPC Service 就绪，可接收配置 |
-| `com.actro.tabConfig.<bundleId>` | Host → XPC | 发送 Tab 配置（tabId, systemAppType 等） |
-| `com.actro.metro.config` | Host → XPC | 广播 Metro 配置（host, port） |
-| `com.actro.containerSizeChanged` | Host → XPC | 容器尺寸变化通知 |
-| `com.actro.openBookmark` | XPC → Host | 用户点击书签 |
-| `com.actro.openHistoryItem` | XPC → Host | 用户点击历史记录 |
+| `io.actrium.xpcServiceReady` | XPC → Host | XPC Service 就绪，可接收配置 |
+| `io.actrium.tabConfig.<bundleId>` | Host → XPC | 发送 Tab 配置（tabId, systemAppType 等） |
+| `io.actrium.metro.config` | Host → XPC | 广播 Metro 配置（host, port） |
+| `io.actrium.containerSizeChanged` | Host → XPC | 容器尺寸变化通知 |
+| `io.actrium.openBookmark` | XPC → Host | 用户点击书签 |
+| `io.actrium.openHistoryItem` | XPC → Host | 用户点击历史记录 |
 
 ### 4.2 Tab Config 结构
 
@@ -306,7 +306,7 @@ sequenceDiagram
 ### 6.1 配置
 
 - **Pool 大小**: 4 个 slot (RCTViewService0 - RCTViewService3)
-- **Bundle ID 格式**: `io.actrium.actro.rctviewservice{N}`
+- **Bundle ID 格式**: `io.actrium.rctviewservice{N}`
 
 ### 6.2 分配策略
 
@@ -345,7 +345,7 @@ sequenceDiagram
 
 **问题**: ViewBridge 私有 API 尺寸同步不稳定
 
-**解决**: 添加 DistributedNotificationCenter 备用机制 (`com.actro.containerSizeChanged`)
+**解决**: 添加 DistributedNotificationCenter 备用机制 (`io.actrium.containerSizeChanged`)
 
 ## 8. 未解决的问题：Focus 模式渲染
 
@@ -582,7 +582,7 @@ log show --predicate 'eventMessage contains "Metro"' --last 1m
 ### 11.2 根因分析
 
 1) **Tab 配置路由缺少“连接维度”**
-   - Host → Service 的配置广播只有 `com.actro.tabConfig.<bundleId>`，未携带哪个 NSRemoteViewController/连接在请求该配置。
+   - Host → Service 的配置广播只有 `io.actrium.tabConfig.<bundleId>`，未携带哪个 NSRemoteViewController/连接在请求该配置。
    - Service 侧用 `assignPendingEntry(tabId:)` 的 FIFO 策略把收到的 `tabId` 绑定到“最老的 pending entry”——即最早 `loadView` 的连接。
    - 当同一进程槽（slot0）里同时有 StartPage/Bookmarks/History 三个连接时，只要“连接建立顺序”和“配置发送顺序”不一致，就会把 TabA 的 config 绑定到 TabB 的远程视图，出现内容错位。
 

@@ -5,17 +5,17 @@ namespace Actrium.Windows;
 
 internal sealed class HostBridgeDispatcher
 {
-    public const string RequestType = "actro.host.request";
-    public const string ResponseType = "actro.host.response";
-    public const string GetCoreStatusMethod = "actro.host.getCoreStatus";
-    public const string OpenTabMethod = "actro.host.openTab";
-    public const string CloseTabMethod = "actro.host.closeTab";
-    public const string SelectTabMethod = "actro.host.selectTab";
-    public const string NavigateMethod = "actro.host.navigate";
-    public const string GetTabsMethod = "actro.host.getTabs";
-    public const string GetActiveTabMethod = "actro.host.getActiveTab";
-    public const string RemoveBookmarkMethod = "actro.host.removeBookmark";
-    public const string RemoveHistoryEntryMethod = "actro.host.removeHistoryEntry";
+    public const string RequestType = "actrium.host.request";
+    public const string ResponseType = "actrium.host.response";
+    public const string GetCoreStatusMethod = "actrium.host.getCoreStatus";
+    public const string OpenTabMethod = "actrium.host.openTab";
+    public const string CloseTabMethod = "actrium.host.closeTab";
+    public const string SelectTabMethod = "actrium.host.selectTab";
+    public const string NavigateMethod = "actrium.host.navigate";
+    public const string GetTabsMethod = "actrium.host.getTabs";
+    public const string GetActiveTabMethod = "actrium.host.getActiveTab";
+    public const string RemoveBookmarkMethod = "actrium.host.removeBookmark";
+    public const string RemoveHistoryEntryMethod = "actrium.host.removeHistoryEntry";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {

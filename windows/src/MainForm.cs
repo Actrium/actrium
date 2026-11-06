@@ -1132,7 +1132,7 @@ internal sealed class MainForm : Form
             && !string.Equals(args.Uri, "about:blank", StringComparison.OrdinalIgnoreCase))
         {
             // Generated documents keep their virtual address (e.g.
-            // actro://home); real navigations adopt the target URI.
+            // about:home); real navigations adopt the target URI.
             tab.Address = args.Uri;
             tab.IsShowingErrorPage = false;
         }

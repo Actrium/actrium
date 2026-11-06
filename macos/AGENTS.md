@@ -18,7 +18,7 @@ Directly initiate:
 
 Auto Open After Start CounterApp(Recommended for validation) keel/Bundle Matches:
 
-`open -a "$(xcodebuild -workspace Actrium.xcworkspace -scheme Actrium -showBuildSettings 2>/dev/null | awk '/BUILT_PRODUCTS_DIR/ {print $3; exit}')/Actrium.app" --args --url "actro://$(cd ../../../packages/actrium/keel-guest-examples/counterapp && pwd)"`
+`open -a "$(xcodebuild -workspace Actrium.xcworkspace -scheme Actrium -showBuildSettings 2>/dev/null | awk '/BUILT_PRODUCTS_DIR/ {print $3; exit}')/Actrium.app" --args --url "$(cd ../../../packages/actrium/keel-guest-examples/counterapp && pwd)"`
 
 ## 5) View Log
 IPC Debug log:

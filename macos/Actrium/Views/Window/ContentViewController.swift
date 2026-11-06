@@ -169,12 +169,12 @@ private struct ContentAreaView: View {
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.clearHistory)) { _ in
             historyVM.clearHistory()
         }
-        // Handle internal URI navigation (e.g., actro://bookmarks/tags/{tagId})
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.actro.openURI"))) { notification in
+        // Handle internal URI navigation (e.g., about:bookmarks/tags/{tagId})
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("io.actrium.openURI"))) { notification in
             guard let userInfo = notification.userInfo,
                   let uri = userInfo["uri"] as? String else { return }
 
-            if uri.hasPrefix("actro://bookmarks") {
+            if uri.hasPrefix("about:bookmarks") {
                 _ = viewModel.openSystemTab(.bookmarks)
                 if let tagId = userInfo["tagId"] as? String,
                    let tagName = userInfo["tagName"] as? String {

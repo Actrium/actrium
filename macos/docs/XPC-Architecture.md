@@ -82,7 +82,7 @@ Actrium Use ViewBridge XPC Structure will React Native Rendering isolation to th
 │   │                                                                              │   │
 │   │  TabA.HostView ─┐                                                            │   │
 │   │  TabB.HostView ─┼─► NSRemoteViewController.requestViewController(...)        │   │
-│   │  TabC.HostView ─┤     fromService: "io.actrium.actro.rctviewservice{i}"   │   │
+│   │  TabC.HostView ─┤     fromService: "io.actrium.rctviewservice{i}"   │   │
 │   │  TabD.HostView ─┘                                                            │   │
 │   └─────────────────────────────────────────────────────────────────────────────┘   │
 │                              │                                                       │
@@ -97,7 +97,7 @@ Actrium Use ViewBridge XPC Structure will React Native Rendering isolation to th
 │                                                                                      │
 │  ┌───────────────────────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
 │  │        RCTViewService0            │  │  RCTViewService1 │  │  RCTViewService2 │  │
-│  │ io.actrium.actro.rctviewservice0│  │ ...Service1      │  │ ...Service2      │  │
+│  │ io.actrium.rctviewservice0│  │ ...Service1      │  │ ...Service2      │  │
 │  │                                   │  │                  │  │                  │  │
 │  │  ┌─────────────────────────────┐  │  │ ┌──────────────┐ │  │ ┌──────────────┐ │  │
 │  │  │  ServiceReactNativeHost     │  │  │ │    SRNH      │ │  │ │    SRNH      │ │  │
@@ -153,10 +153,10 @@ The same. XPC Service Within the process:
 
 | Slot | Bundle Identifier |
 |------|-------------------|
-| 0 | `io.actrium.actro.rctviewservice0` |
-| 1 | `io.actrium.actro.rctviewservice1` |
-| 2 | `io.actrium.actro.rctviewservice2` |
-| 3 | `io.actrium.actro.rctviewservice3` |
+| 0 | `io.actrium.rctviewservice0` |
+| 1 | `io.actrium.rctviewservice1` |
+| 2 | `io.actrium.rctviewservice2` |
+| 3 | `io.actrium.rctviewservice3` |
 
 ## IPC Communication
 
@@ -167,10 +167,10 @@ Protocol: Protobuf (Define in `Shared/IPC/actrium_ipc.proto`)
 
 | Direction | Notification Name | Message Type | Annotations |
 |-----------|-------------------|--------------|------|
-| Host → Service | `com.actro.tabConfig.<bundleId>` | `XPCTabConfig` | Tab Configure (includes) tabId) |
-| Service → Host | `com.actro.xpcServiceReady` | `XPCServiceReady` | Service Ready |
-| Service → Host | `com.actro.tabState.<tabId>` | `XPCTabState` | Tab Render Status |
-| Service → Host | `com.actro.tabNavigation.<tabId>` | `XPCTabNavigation` | Navigation Request |
+| Host → Service | `io.actrium.tabConfig.<bundleId>` | `XPCTabConfig` | Tab Configure (includes) tabId) |
+| Service → Host | `io.actrium.xpcServiceReady` | `XPCServiceReady` | Service Ready |
+| Service → Host | `io.actrium.tabState.<tabId>` | `XPCTabState` | Tab Render Status |
+| Service → Host | `io.actrium.tabNavigation.<tabId>` | `XPCTabNavigation` | Navigation Request |
 
 ### Key: tabId (UUID)
 

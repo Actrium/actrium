@@ -130,7 +130,7 @@ public final class AppleBrowserStorageDatabase {
     }
 
     public static func databasePath(in directory: URL) -> String {
-        directory.appendingPathComponent(databaseName).path
+        ApplePersistentStoragePaths.browserDatabasePath(in: directory, currentName: databaseName)
     }
 
     public var tableNames: [String] {

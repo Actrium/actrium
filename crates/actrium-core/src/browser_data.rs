@@ -50,8 +50,8 @@ pub const BROWSER_STORAGE_SYNC_TRANSPORT_PUSH_PATH: &str = "/v1/browser-storage/
 pub const BROWSER_STORAGE_SYNC_TRANSPORT_PULL_PATH: &str = "/v1/browser-storage/sync/pull";
 pub const BROWSER_STORAGE_SYNC_TRANSPORT_CURSORS_PATH: &str = "/v1/browser-storage/sync/cursors";
 pub const BROWSER_STORAGE_SYNC_AUTHORIZATION_HEADER: &str = "Authorization";
-pub const BROWSER_STORAGE_SYNC_ACCOUNT_HEADER: &str = "X-Actro-Account-Id";
-pub const BROWSER_STORAGE_SYNC_DEVICE_HEADER: &str = "X-Actro-Device-Id";
+pub const BROWSER_STORAGE_SYNC_ACCOUNT_HEADER: &str = "X-Actrium-Account-Id";
+pub const BROWSER_STORAGE_SYNC_DEVICE_HEADER: &str = "X-Actrium-Device-Id";
 pub const BROWSER_STORAGE_SYNC_CONTENT_TYPE: &str = "application/json";
 pub const MIN_UNIX_SECONDS: i64 = 0;
 pub const MAX_UNIX_SECONDS: i64 = 253_402_300_799;
@@ -84,18 +84,18 @@ pub const BROWSER_STORAGE_SYNC_CLOUD_DEFAULT_LOOP_MAX_ATTEMPTS: u32 = 3;
 pub const BROWSER_STORAGE_SYNC_CLOUD_MAX_LOOP_ATTEMPTS: u32 = 8;
 pub const BROWSER_STORAGE_SYNC_CLOUD_MAX_PULL_CONTINUATION_PAGES: u32 =
     MAX_BROWSER_STORAGE_SYNC_RECORDS as u32;
-pub const BROWSER_STORAGE_SYNC_CLOUD_ROOT_PATH: &str = "Actro/BrowserSync";
-pub const BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH: &str = "Actro/BrowserSync/manifest.json";
-pub const BROWSER_STORAGE_SYNC_CLOUD_DEVICES_PREFIX: &str = "Actro/BrowserSync/devices/";
-pub const BROWSER_STORAGE_SYNC_CLOUD_LOGS_PREFIX: &str = "Actro/BrowserSync/logs/";
-pub const BROWSER_STORAGE_SYNC_CLOUD_SNAPSHOTS_PREFIX: &str = "Actro/BrowserSync/snapshots/";
-pub const BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX: &str = "Actro/BrowserSync/recovery/";
+pub const BROWSER_STORAGE_SYNC_CLOUD_ROOT_PATH: &str = "Actrium/BrowserSync";
+pub const BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH: &str = "Actrium/BrowserSync/manifest.json";
+pub const BROWSER_STORAGE_SYNC_CLOUD_DEVICES_PREFIX: &str = "Actrium/BrowserSync/devices/";
+pub const BROWSER_STORAGE_SYNC_CLOUD_LOGS_PREFIX: &str = "Actrium/BrowserSync/logs/";
+pub const BROWSER_STORAGE_SYNC_CLOUD_SNAPSHOTS_PREFIX: &str = "Actrium/BrowserSync/snapshots/";
+pub const BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX: &str = "Actrium/BrowserSync/recovery/";
 pub const BROWSER_STORAGE_SYNC_CLOUD_DEVICE_PATH_TEMPLATE: &str =
-    "Actro/BrowserSync/devices/<device-id>.json";
+    "Actrium/BrowserSync/devices/<device-id>.json";
 pub const BROWSER_STORAGE_SYNC_CLOUD_LOG_PATH_TEMPLATE: &str =
-    "Actro/BrowserSync/logs/<collection>/<device-id>-<sequence>.json";
+    "Actrium/BrowserSync/logs/<collection>/<device-id>-<sequence>.json";
 pub const BROWSER_STORAGE_SYNC_CLOUD_SNAPSHOT_PATH_TEMPLATE: &str =
-    "Actro/BrowserSync/snapshots/<collection>.json";
+    "Actrium/BrowserSync/snapshots/<collection>.json";
 pub const BROWSER_STORAGE_SYNC_CLOUD_DEVICE_STATUS_ACTIVE: &str = "active";
 pub const BROWSER_STORAGE_SYNC_CLOUD_DEVICE_STATUS_REVOKED: &str = "revoked";
 pub const BROWSER_STORAGE_SYNC_CLOUD_RETAIN_LOG_SEQUENCES: u32 = 8;
@@ -122,14 +122,14 @@ pub const BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_POLICY: &str =
     "browserStorageSessionActiveTabConsistency";
 pub const BROWSER_STORAGE_RETENTION_PRUNING_POLICY: &str = "browserStorageRetentionPruning";
 
-pub const HOME_ADDRESS: &str = "actro://home";
-pub const HISTORY_ADDRESS: &str = "actro://history";
-pub const BOOKMARKS_ADDRESS: &str = "actro://bookmarks";
+pub const HOME_ADDRESS: &str = "about:home";
+pub const HISTORY_ADDRESS: &str = "about:history";
+pub const BOOKMARKS_ADDRESS: &str = "about:bookmarks";
 
 pub const BROWSER_STORAGE_SCHEMA_VERSION: u32 = 6;
-pub const BROWSER_STORAGE_DATABASE_NAME: &str = "actro_browser.db";
+pub const BROWSER_STORAGE_DATABASE_NAME: &str = "actrium_browser.db";
 pub const BROWSER_STORAGE_SYNC_SERVER_SCHEMA_VERSION: u32 = 1;
-pub const BROWSER_STORAGE_SYNC_SERVER_DATABASE_NAME: &str = "actro_browser_sync_server.db";
+pub const BROWSER_STORAGE_SYNC_SERVER_DATABASE_NAME: &str = "actrium_browser_sync_server.db";
 
 pub const BROWSER_STORAGE_TABLE_NAMES: &[&str] = &[
     "browser_schema_meta",
@@ -7569,7 +7569,7 @@ pub fn browser_storage_sync_cloud_store_contract() -> BrowserStorageSyncCloudSto
                 "path",
                 true,
                 "Provider-local path under the Actrium browser sync root.",
-                &["Actro/BrowserSync/manifest.json"],
+                &["Actrium/BrowserSync/manifest.json"],
             ),
             cloud_store_metadata(
                 "revision",
@@ -7669,7 +7669,7 @@ pub fn browser_storage_sync_cloud_provider_adapter_contract() -> Value {
             {
                 "name": "rootPath",
                 "required": false,
-                "description": "Provider-visible Actrium browser sync root. It must resolve to Actro/BrowserSync inside the user-owned provider space."
+                "description": "Provider-visible Actrium browser sync root. It must resolve to Actrium/BrowserSync inside the user-owned provider space."
             },
             {
                 "name": "capabilities",
@@ -7690,7 +7690,7 @@ pub fn browser_storage_sync_cloud_provider_adapter_contract() -> Value {
             "snapshotsPrefix": BROWSER_STORAGE_SYNC_CLOUD_SNAPSHOTS_PREFIX,
             "recoveryPrefix": BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX,
             "pathRules": [
-                "All adapter-visible paths are UTF-8 slash-separated object keys under Actro/BrowserSync.",
+                "All adapter-visible paths are UTF-8 slash-separated object keys under Actrium/BrowserSync.",
                 "Provider file ids, record names, drive ids, inode ids, and local absolute paths are metadata only; they must not become sync record identity.",
                 "Adapters must reject or remap dot segments, backslashes, empty path segments, and objects outside the Actrium browser sync root before provider IO."
             ]
@@ -7855,7 +7855,7 @@ fn browser_storage_sync_cloud_provider_adapter_plan_value(
         provider_action,
         user_action,
         path_mapping_policy:
-            "Map provider-specific handles onto stable slash-separated object keys under Actro/BrowserSync; keep provider ids and local absolute paths in metadata only."
+            "Map provider-specific handles onto stable slash-separated object keys under Actrium/BrowserSync; keep provider ids and local absolute paths in metadata only."
                 .to_string(),
         operation_boundary:
             "Execute provider SDK IO in coarse native/provider rounds and pass batched bytes, revisions, receipts, or errors to Rust planners; do not add per-object cross-FFI provider calls."
@@ -8090,7 +8090,7 @@ pub fn browser_storage_sync_cloud_store_capability_preflight(
             Some(capabilities),
             "providerSetupRequired",
             "configureCloudProviderRoot",
-            "exposeActroBrowserSyncRoot",
+            "exposeActriumBrowserSyncRoot",
             "chooseProviderFolder",
             missing_required_capabilities,
             degraded_capabilities,
@@ -8982,7 +8982,7 @@ fn browser_storage_sync_cloud_provider_error_canonical_kind_from_text(kind: &str
         "conflict" | "revisionmismatch" | "preconditionfailed" | "etagmismatch" => "conflict",
         "notfound" | "missing" | "missingobject" | "filenotfound" => "notFound",
         "storage" | "permission" | "rootpathmissing" | "providersetuprequired" => "storage",
-        "invalidpath" | "pathtraversal" | "pathoutsideactroroot" => "invalidPath",
+        "invalidpath" | "pathtraversal" | "pathoutsideactriumroot" => "invalidPath",
         "unsupported" | "adapterunsupported" | "providerunsupported" => "unsupported",
         "invaliddocument"
         | "invalidclouddocument"
@@ -9719,18 +9719,18 @@ fn browser_storage_sync_cloud_provider_adapter_actions(
     }
     match classification {
         "ready" => (
-            "useActroBrowserSyncRoot".to_string(),
+            "useActriumBrowserSyncRoot".to_string(),
             "continueProviderSync".to_string(),
             "none".to_string(),
         ),
         "degraded" if requires_adapter_emulation => (
-            "useActroBrowserSyncRoot".to_string(),
+            "useActriumBrowserSyncRoot".to_string(),
             "enableAdapterEmulation".to_string(),
             "none".to_string(),
         ),
         "providerSetupRequired" => (
-            "configureActroBrowserSyncRoot".to_string(),
-            "exposeActroBrowserSyncRoot".to_string(),
+            "configureActriumBrowserSyncRoot".to_string(),
+            "exposeActriumBrowserSyncRoot".to_string(),
             "chooseProviderFolder".to_string(),
         ),
         "providerLimitTooSmall" => (
@@ -11887,7 +11887,7 @@ pub fn browser_storage_sync_cloud_high_watermark_plan(
 }
 
 /// Parse the recovery-root coordinates out of a cloud object path shaped like
-/// `Actro/BrowserSync/recovery/<012-unix-seconds>-<mode>/<suffix>`. Returns the
+/// `Actrium/BrowserSync/recovery/<012-unix-seconds>-<mode>/<suffix>`. Returns the
 /// parsed leading unix-seconds token and the full recovery-root path. Paths
 /// that are not recovery objects (wrong prefix, no object under the root, or a
 /// non-numeric timestamp token) return `None` and are ignored by the planner.
@@ -11911,7 +11911,7 @@ fn browser_storage_sync_cloud_recovery_root_of_object(path: &str) -> Option<(i64
 
 /// Pure retention planner for the timestamped recovery-snapshot roots that
 /// migration/repair/preflight rounds write under
-/// `Actro/BrowserSync/recovery/<ts>-<mode>/`. These roots accumulate without
+/// `Actrium/BrowserSync/recovery/<ts>-<mode>/`. These roots accumulate without
 /// bound because no compaction/cleanup planner ever touches them. Given the
 /// full set of recovery object paths and the retention policy, this groups the
 /// objects by their root, retains the newest `retain_snapshots` roots (ordered
@@ -14993,7 +14993,7 @@ pub async fn browser_storage_sync_cloud_run_cleanup_round<S: BrowserStorageSyncC
 
 /// Run one provider-backed recovery-snapshot retention round in Rust: preflight
 /// cloud-file compatibility, list every object under
-/// `Actro/BrowserSync/recovery/`, feed the paths to the pure retention planner,
+/// `Actrium/BrowserSync/recovery/`, feed the paths to the pure retention planner,
 /// execute only the Rust-selected `candidateDeleteRecoverySnapshot` deletes for
 /// objects under the oldest roots, and classify the receipts through the shared
 /// recovery-retention result planner. `retain_snapshots_override` sets how many
@@ -28193,9 +28193,9 @@ fn normalize_session_tab_id(id: &str, index: usize, address: &str) -> String {
 }
 
 fn stable_session_tab_id(index: usize, address: &str) -> String {
-    let seed = format!("actro-session-tab:{index}:{address}");
+    let seed = format!("actrium-session-tab:{index}:{address}");
     let first = fnv1a64(seed.as_bytes());
-    let second = fnv1a64(format!("actro:{seed}").as_bytes());
+    let second = fnv1a64(format!("actrium:{seed}").as_bytes());
     let mut bytes = [0u8; 16];
     for index in 0..8 {
         bytes[index] = ((first >> ((7 - index) * 8)) & 0xff) as u8;
@@ -28233,16 +28233,16 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
+fn internal_address(trimmed: &str) -> Option<&'static str> {
+    [HOME_ADDRESS, HISTORY_ADDRESS, BOOKMARKS_ADDRESS]
+        .into_iter()
+        .find(|address| trimmed.eq_ignore_ascii_case(address))
+}
+
 fn normalize_session_address(address: &str) -> Option<String> {
     let trimmed = address.trim();
-    if trimmed.eq_ignore_ascii_case(HOME_ADDRESS) {
-        return Some(HOME_ADDRESS.to_string());
-    }
-    if trimmed.eq_ignore_ascii_case(HISTORY_ADDRESS) {
-        return Some(HISTORY_ADDRESS.to_string());
-    }
-    if trimmed.eq_ignore_ascii_case(BOOKMARKS_ADDRESS) {
-        return Some(BOOKMARKS_ADDRESS.to_string());
+    if let Some(address) = internal_address(trimmed) {
+        return Some(address.to_string());
     }
     if let Some(address) = canonicalize_session_only_address(trimmed) {
         return Some(address);
@@ -28263,24 +28263,8 @@ pub fn browser_storage_canonicalize_address(input: &str) -> BrowserStorageCanoni
         return browser_storage_canonical_address_rejected(input, "empty", "emptyAddress");
     }
 
-    if trimmed.eq_ignore_ascii_case(HOME_ADDRESS) {
-        return browser_storage_canonical_address_accepted(input, "internal", HOME_ADDRESS, false);
-    }
-    if trimmed.eq_ignore_ascii_case(HISTORY_ADDRESS) {
-        return browser_storage_canonical_address_accepted(
-            input,
-            "internal",
-            HISTORY_ADDRESS,
-            false,
-        );
-    }
-    if trimmed.eq_ignore_ascii_case(BOOKMARKS_ADDRESS) {
-        return browser_storage_canonical_address_accepted(
-            input,
-            "internal",
-            BOOKMARKS_ADDRESS,
-            false,
-        );
+    if let Some(address) = internal_address(trimmed) {
+        return browser_storage_canonical_address_accepted(input, "internal", address, false);
     }
     if let Some(address) = canonicalize_session_only_address(trimmed) {
         return browser_storage_canonical_address_accepted(input, "session", &address, false);
@@ -32768,7 +32752,7 @@ mod tests {
                 " HTTP://Example.COM:80/Path?Q=1#Top ",
                 "https://Example.COM:443",
                 "https://user:secret@Example.COM:443/secure",
-                "actro://HOME",
+                "about:HOME",
                 "about:blank",
                 "ftp://example.com/file",
                 "example.com"
@@ -32816,7 +32800,7 @@ mod tests {
             batch["canonicalizationSummary"]["canonicalAddresses"],
             json!([
                 "about:blank",
-                "actro://home",
+                "about:home",
                 "http://example.com/Path?Q=1#Top",
                 "https://example.com/",
                 "https://example.com/secure"
@@ -32926,10 +32910,10 @@ mod tests {
 
     #[test]
     fn browser_storage_sync_cloud_recovery_retention_plan_retains_newest_roots() {
-        let root100 = "Actro/BrowserSync/recovery/000000000100-migration";
-        let root200 = "Actro/BrowserSync/recovery/000000000200-repair";
-        let root300 = "Actro/BrowserSync/recovery/000000000300-preflight";
-        let root400 = "Actro/BrowserSync/recovery/000000000400-migration";
+        let root100 = "Actrium/BrowserSync/recovery/000000000100-migration";
+        let root200 = "Actrium/BrowserSync/recovery/000000000200-repair";
+        let root300 = "Actrium/BrowserSync/recovery/000000000300-preflight";
+        let root400 = "Actrium/BrowserSync/recovery/000000000400-migration";
         let paths = vec![
             format!("{root100}/manifest.json"),
             format!("{root100}/snapshots/historyPages.json"),
@@ -32939,8 +32923,8 @@ mod tests {
             format!("{root400}/manifest.json"),
             // Ignored: non-recovery object, non-numeric timestamp, and a bare
             // root with no object under it.
-            "Actro/BrowserSync/manifest.json".to_string(),
-            "Actro/BrowserSync/recovery/notanumber-migration/x.json".to_string(),
+            "Actrium/BrowserSync/manifest.json".to_string(),
+            "Actrium/BrowserSync/recovery/notanumber-migration/x.json".to_string(),
             root100.to_string(),
         ];
 
@@ -33010,8 +32994,8 @@ mod tests {
 
     #[test]
     fn browser_storage_sync_cloud_recovery_retention_plan_breaks_timestamp_ties_by_root() {
-        let migration = "Actro/BrowserSync/recovery/000000000500-migration";
-        let repair = "Actro/BrowserSync/recovery/000000000500-repair";
+        let migration = "Actrium/BrowserSync/recovery/000000000500-migration";
+        let repair = "Actrium/BrowserSync/recovery/000000000500-repair";
         let plan = browser_storage_sync_cloud_recovery_retention_plan(
             Some(vec![
                 format!("{migration}/manifest.json"),
@@ -33069,7 +33053,7 @@ mod tests {
             for object in ["payload.json", "state/data.json"] {
                 let file = root
                     .path
-                    .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"));
+                    .join(format!("Actrium/BrowserSync/recovery/{root_name}/{object}"));
                 fs::create_dir_all(file.parent().unwrap()).unwrap();
                 fs::write(&file, b"{}").unwrap();
             }
@@ -33099,8 +33083,8 @@ mod tests {
         assert_eq!(
             round["recoveryRetentionPlan"]["retainedRoots"],
             json!([
-                "Actro/BrowserSync/recovery/000000000300-preflight",
-                "Actro/BrowserSync/recovery/000000000400-migration"
+                "Actrium/BrowserSync/recovery/000000000300-preflight",
+                "Actrium/BrowserSync/recovery/000000000400-migration"
             ])
         );
         assert_eq!(round["roundSummary"]["deletedRootCount"], json!(2));
@@ -33131,7 +33115,7 @@ mod tests {
                 assert!(
                     !root
                         .path
-                        .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"))
+                        .join(format!("Actrium/BrowserSync/recovery/{root_name}/{object}"))
                         .exists()
                 );
             }
@@ -33140,7 +33124,7 @@ mod tests {
             for object in ["payload.json", "state/data.json"] {
                 assert!(
                     root.path
-                        .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"))
+                        .join(format!("Actrium/BrowserSync/recovery/{root_name}/{object}"))
                         .exists()
                 );
             }
@@ -33170,11 +33154,11 @@ mod tests {
 
     #[test]
     fn cloud_recovery_retention_result_plan_classifies_delete_failures() {
-        let older = "Actro/BrowserSync/recovery/000000000100-migration/payload.json";
+        let older = "Actrium/BrowserSync/recovery/000000000100-migration/payload.json";
         let plan = browser_storage_sync_cloud_recovery_retention_plan(
             Some(vec![
                 older.to_string(),
-                "Actro/BrowserSync/recovery/000000000200-repair/payload.json".to_string(),
+                "Actrium/BrowserSync/recovery/000000000200-repair/payload.json".to_string(),
             ]),
             Some(recovery_retention_policy(1)),
             300,
@@ -33880,7 +33864,7 @@ mod tests {
         );
         assert_eq!(
             browser_storage_bookmark_restore_placement_plan_json(
-                r#"{"bookmarks":[{"id":"bookmark-a","address":"actro://home"}]}"#
+                r#"{"bookmarks":[{"id":"bookmark-a","address":"about:home"}]}"#
             ),
             "null"
         );
@@ -34244,7 +34228,7 @@ mod tests {
         );
         assert_eq!(
             browser_storage_bookmark_ownership_plan_json(
-                r#"{"bookmarks":[{"id":"bookmark-a","address":"actro://home"}]}"#
+                r#"{"bookmarks":[{"id":"bookmark-a","address":"about:home"}]}"#
             ),
             "null"
         );
@@ -34492,7 +34476,7 @@ mod tests {
         );
         assert_eq!(
             browser_storage_history_visit_aggregation_plan_json(
-                r#"{"visits":[{"id":"visit-1","address":"actro://home","visitedAtUnixSeconds":1}]}"#
+                r#"{"visits":[{"id":"visit-1","address":"about:home","visitedAtUnixSeconds":1}]}"#
             ),
             "null"
         );
@@ -34550,7 +34534,7 @@ mod tests {
                 ],
                 "candidateSessionTabs": [
                     {"sessionId":"session-a","tabId":"tab-a","tabIndex":0,"title":"Moved","address":"https://example.com/a","createdAtUnixSeconds":10,"updatedAtUnixSeconds":30},
-                    {"sessionId":"session-b","tabId":"","tabIndex":2,"title":"","address":"actro://home","createdAtUnixSeconds":40,"updatedAtUnixSeconds":40}
+                    {"sessionId":"session-b","tabId":"","tabIndex":2,"title":"","address":"about:home","createdAtUnixSeconds":40,"updatedAtUnixSeconds":40}
                 ]
             }"#,
         ))
@@ -34749,7 +34733,7 @@ mod tests {
     fn session_tab_id_plan_derives_stable_ids_for_empty_ids() {
         let plan = serde_json::from_str::<Value>(&browser_storage_session_tab_id_plan_json(
             r#"[
-                {"id":"","index":0,"address":"actro://home"},
+                {"id":"","index":0,"address":"about:home"},
                 {"id":"  tab-a  ","index":1,"address":"https://example.com/a"},
                 {"id":"","index":2,"address":"https://example.com/b"}
             ]"#,
@@ -34761,12 +34745,12 @@ mod tests {
         assert_eq!(plan["tabCount"], json!(3));
         assert_eq!(plan["preservedTabIdCount"], json!(1));
         assert_eq!(plan["derivedTabIdCount"], json!(2));
-        // Fixed vector: double FNV-1a over "actro-session-tab:0:actro://home"
+        // Fixed vector: double FNV-1a over "actrium-session-tab:0:about:home"
         // with the version/variant nibbles applied, rendered as lowercase hex.
         // Every platform must store this exact byte sequence.
         assert_eq!(
             plan["tabIds"][0],
-            json!("fa3d824d-efbc-593f-b327-a463b5e0973c")
+            json!("d1cf82a6-21b1-5f7b-a0fe-927c04728a08")
         );
         // The derived id must match the id Rust itself derives for the home
         // session snapshot, because that is the merge identity key.
@@ -34781,14 +34765,14 @@ mod tests {
         // aliases must not change the derived identity.
         let plan = serde_json::from_str::<Value>(&browser_storage_session_tab_id_plan_json(
             r#"[
-                {"id":"","index":0,"address":"ACTRO://HOME"},
-                {"id":"","index":0,"address":"  actro://home  "}
+                {"id":"","index":0,"address":"ABOUT:HOME"},
+                {"id":"","index":0,"address":"  about:home  "}
             ]"#,
         ))
         .unwrap();
         assert_eq!(
             plan["tabIds"][0],
-            json!("fa3d824d-efbc-593f-b327-a463b5e0973c")
+            json!("d1cf82a6-21b1-5f7b-a0fe-927c04728a08")
         );
         assert_eq!(plan["tabIds"][0], plan["tabIds"][1]);
     }
@@ -34809,13 +34793,13 @@ mod tests {
     #[test]
     fn session_tab_id_plan_accepts_wrapped_tabs_and_defaults_index_to_position() {
         let plan = serde_json::from_str::<Value>(&browser_storage_session_tab_id_plan_json(
-            r#"{"sessionTabs":[{"address":"actro://home"}]}"#,
+            r#"{"sessionTabs":[{"address":"about:home"}]}"#,
         ))
         .unwrap();
         assert_eq!(plan["tabCount"], json!(1));
         assert_eq!(
             plan["tabIds"][0],
-            json!("fa3d824d-efbc-593f-b327-a463b5e0973c")
+            json!("d1cf82a6-21b1-5f7b-a0fe-927c04728a08")
         );
 
         let empty =
@@ -34841,7 +34825,7 @@ mod tests {
         let oversized = format!(
             "[{}]",
             (0..=MAX_BROWSER_STORAGE_SYNC_RECORDS)
-                .map(|index| format!(r#"{{"id":"","index":{index},"address":"actro://home"}}"#))
+                .map(|index| format!(r#"{{"id":"","index":{index},"address":"about:home"}}"#))
                 .collect::<Vec<_>>()
                 .join(",")
         );
@@ -35632,7 +35616,7 @@ mod tests {
         );
         assert_eq!(
             browser_storage_retention_pruning_plan_json(
-                r#"{"historyPages":[{"address":"actro://home"}]}"#
+                r#"{"historyPages":[{"address":"about:home"}]}"#
             ),
             "null"
         );
@@ -35675,7 +35659,7 @@ mod tests {
             "version": 99,
             "activeTabIndex": 9,
             "tabs": [
-                {"title":" Home ","address":" ACTRO://HOME "},
+                {"title":" Home ","address":" ABOUT:HOME "},
                 {"title":"","address":"https://example.com/"},
                 {"title":"Bad","address":"javascript:alert(1)"}
             ]
@@ -35740,7 +35724,7 @@ mod tests {
     #[test]
     fn browser_storage_schema_covers_cross_platform_browser_data() {
         assert_eq!(BROWSER_STORAGE_SCHEMA_VERSION, 6);
-        assert_eq!(BROWSER_STORAGE_DATABASE_NAME, "actro_browser.db");
+        assert_eq!(BROWSER_STORAGE_DATABASE_NAME, "actrium_browser.db");
 
         let sql = browser_storage_schema_statements().join("\n");
         for table in BROWSER_STORAGE_TABLE_NAMES {
@@ -36076,7 +36060,7 @@ mod tests {
         assert_eq!(BROWSER_STORAGE_SYNC_SERVER_SCHEMA_VERSION, 1);
         assert_eq!(
             BROWSER_STORAGE_SYNC_SERVER_DATABASE_NAME,
-            "actro_browser_sync_server.db"
+            "actrium_browser_sync_server.db"
         );
 
         let schema = browser_storage_sync_server_schema();
@@ -36143,7 +36127,7 @@ mod tests {
             serde_json::from_str::<Value>(&browser_storage_sync_server_schema_json()).unwrap();
         assert_eq!(
             schema_json["databaseName"],
-            json!("actro_browser_sync_server.db")
+            json!("actrium_browser_sync_server.db")
         );
         assert!(
             schema_json["tableNames"]
@@ -36756,7 +36740,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(capabilities["providerKind"], json!("localFolder"));
-        assert_eq!(capabilities["rootPath"], json!("Actro/BrowserSync"));
+        assert_eq!(capabilities["rootPath"], json!("Actrium/BrowserSync"));
         assert_eq!(capabilities["revisionKind"], json!("contentHash"));
         assert_eq!(
             capabilities["maxPageSize"],
@@ -37061,7 +37045,7 @@ mod tests {
         );
 
         let unsafe_write = block_on_immediate(store.write(BrowserStorageSyncCloudWriteRequest {
-            path: "Actro/BrowserSync/../manifest.json",
+            path: "Actrium/BrowserSync/../manifest.json",
             bytes: br#"{}"#,
             expected_revision: None,
             content_type: Some(BROWSER_STORAGE_SYNC_CLOUD_CONTENT_TYPE_JSON),
@@ -37830,7 +37814,7 @@ mod tests {
             browser_storage_sync_cloud_log_object_json("bookmarks", 1, &serialize_json(&batch));
         let mut legacy_log = serde_json::from_str::<Value>(&log_json).unwrap();
         legacy_log["storageSchemaVersion"] = json!(BROWSER_STORAGE_SCHEMA_VERSION - 1);
-        let legacy_path = "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000001.json";
+        let legacy_path = "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000001.json";
         let legacy_file = root.path.join(legacy_path);
         fs::create_dir_all(legacy_file.parent().unwrap()).unwrap();
         fs::write(&legacy_file, serialize_json(&legacy_log)).unwrap();
@@ -37931,7 +37915,7 @@ mod tests {
         let snapshot_path = first_round["writeResults"][0]["path"].as_str().unwrap();
         assert_eq!(
             snapshot_path,
-            "Actro/BrowserSync/recovery/000000000104-migration/logs/bookmarks/device-a-0000000000000001.json"
+            "Actrium/BrowserSync/recovery/000000000104-migration/logs/bookmarks/device-a-0000000000000001.json"
         );
         assert_eq!(
             first_round["roundSummary"]["snapshotPaths"],
@@ -39372,7 +39356,7 @@ mod tests {
         assert_eq!(setup_plan["shouldBlockSync"], json!(true));
         assert_eq!(
             setup_plan["rootPathAction"],
-            json!("configureActroBrowserSyncRoot")
+            json!("configureActriumBrowserSyncRoot")
         );
         assert!(
             setup_plan["blockedReasons"]
@@ -41272,7 +41256,7 @@ mod tests {
                     {
                         "operationType": "writeManifest",
                         "providerStatusCode": 412,
-                        "path": "Actro/BrowserSync/manifest.json"
+                        "path": "Actrium/BrowserSync/manifest.json"
                     }
                 ]
             })),
@@ -41344,7 +41328,7 @@ mod tests {
                                 {
                                     "operationIndex": 2,
                                     "operationType": "listLogs",
-                                    "path": "Actro/BrowserSync/logs/historyPages/",
+                                    "path": "Actrium/BrowserSync/logs/historyPages/",
                                     "success": false,
                                     "exists": false,
                                     "errorKind": "network",
@@ -41412,7 +41396,7 @@ mod tests {
                             {
                                 "operationIndex": 0,
                                 "operationType": "writeDevice",
-                                "path": "Actro/BrowserSync/devices/device-a.json",
+                                "path": "Actrium/BrowserSync/devices/device-a.json",
                                 "success": true
                             }
                         ],
@@ -42153,11 +42137,11 @@ mod tests {
 
         let docs = serialize_json(&json!([
             {
-                "path": "Actro/BrowserSync/manifest.json",
+                "path": "Actrium/BrowserSync/manifest.json",
                 "documentJson": manifest,
             },
             {
-                "path": "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
+                "path": "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
                 "documentJson": log_json,
             },
         ]));
@@ -42188,11 +42172,11 @@ mod tests {
         let blocked_docs = serialize_json(&json!({
             "documents": [
                 {
-                    "path": "Actro/BrowserSync/manifest.json",
+                    "path": "Actrium/BrowserSync/manifest.json",
                     "document": future_manifest,
                 },
                 {
-                    "path": "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
+                    "path": "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
                     "documentJson": log_json,
                 },
             ],
@@ -42212,7 +42196,7 @@ mod tests {
         let invalid_docs = serialize_json(&json!([
             {
                 "documentKind": "snapshot",
-                "path": "Actro/BrowserSync/snapshots/bookmarks.json",
+                "path": "Actrium/BrowserSync/snapshots/bookmarks.json",
                 "documentJson": "{bad",
             },
         ]));
@@ -42232,7 +42216,7 @@ mod tests {
             &serialize_json(&json!({
                 "documents": [
                     {
-                        "path": "Actro/BrowserSync/manifest.json",
+                        "path": "Actrium/BrowserSync/manifest.json",
                         "document": serde_json::from_str::<Value>(&manifest).unwrap(),
                     },
                 ],
@@ -42332,7 +42316,7 @@ mod tests {
         let legacy_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
                 {
-                    "path": "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
+                    "path": "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
                     "document": legacy_log,
                 },
             ])),
@@ -42356,7 +42340,7 @@ mod tests {
         let invalid_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
                 {
-                    "path": "Actro/BrowserSync/snapshots/bookmarks.json",
+                    "path": "Actrium/BrowserSync/snapshots/bookmarks.json",
                     "documentJson": "{bad",
                 },
             ])),
@@ -42451,7 +42435,7 @@ mod tests {
         let legacy_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
                 {
-                    "path": "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
+                    "path": "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
                     "document": legacy_log,
                 },
             ])),
@@ -42502,7 +42486,7 @@ mod tests {
         let invalid_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
                 {
-                    "path": "Actro/BrowserSync/snapshots/bookmarks.json",
+                    "path": "Actrium/BrowserSync/snapshots/bookmarks.json",
                     "documentJson": "{bad",
                 },
             ])),
@@ -42614,7 +42598,7 @@ mod tests {
             browser_storage_sync_cloud_log_object_json("bookmarks", 1, &serialize_json(&batch));
         let mut legacy_log = serde_json::from_str::<Value>(&log_json).unwrap();
         legacy_log["storageSchemaVersion"] = json!(BROWSER_STORAGE_SCHEMA_VERSION - 1);
-        let legacy_path = "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000001.json";
+        let legacy_path = "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000001.json";
         let legacy_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
                 {
@@ -42658,7 +42642,7 @@ mod tests {
         assert_eq!(
             legacy_snapshot["operations"][0]["snapshotPath"],
             json!(
-                "Actro/BrowserSync/recovery/000000000112-migration/logs/bookmarks/device-a-0000000000000001.json"
+                "Actrium/BrowserSync/recovery/000000000112-migration/logs/bookmarks/device-a-0000000000000001.json"
             )
         );
         assert_eq!(
@@ -42669,7 +42653,7 @@ mod tests {
         let invalid_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
                 {
-                    "path": "Actro/BrowserSync/snapshots/bookmarks.json",
+                    "path": "Actrium/BrowserSync/snapshots/bookmarks.json",
                     "documentJson": "{bad",
                 },
                 {
@@ -42700,7 +42684,7 @@ mod tests {
         assert_eq!(invalid_snapshot["skippedDocumentCount"], json!(1));
         assert_eq!(
             invalid_snapshot["operations"][0]["snapshotPath"],
-            json!("Actro/BrowserSync/recovery/000000000116-repair/snapshots/bookmarks.json")
+            json!("Actrium/BrowserSync/recovery/000000000116-repair/snapshots/bookmarks.json")
         );
         assert_eq!(
             invalid_snapshot["skippedDocuments"][0]["skipReason"],
@@ -42728,7 +42712,7 @@ mod tests {
             browser_storage_sync_cloud_log_object_json("bookmarks", 1, &serialize_json(&batch));
         let mut legacy_log = serde_json::from_str::<Value>(&log_json).unwrap();
         legacy_log["storageSchemaVersion"] = json!(BROWSER_STORAGE_SCHEMA_VERSION - 1);
-        let legacy_path = "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000001.json";
+        let legacy_path = "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000001.json";
         let legacy_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
                 {
@@ -42795,11 +42779,11 @@ mod tests {
         let invalid_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
                 {
-                    "path": "Actro/BrowserSync/snapshots/bookmarks.json",
+                    "path": "Actrium/BrowserSync/snapshots/bookmarks.json",
                     "documentJson": "{bad",
                 },
                 {
-                    "path": "Actro/BrowserSync/logs/historyPages/device-b-0000000000000003.json",
+                    "path": "Actrium/BrowserSync/logs/historyPages/device-b-0000000000000003.json",
                     "documentJson": "{bad",
                 },
             ])),
@@ -42939,7 +42923,7 @@ mod tests {
         assert_eq!(manifest["writerDeviceId"], json!("device-a"));
         assert_eq!(
             manifest["devices"][0]["devicePath"],
-            json!("Actro/BrowserSync/devices/device-a.json")
+            json!("Actrium/BrowserSync/devices/device-a.json")
         );
         assert_eq!(manifest["collections"].as_array().unwrap().len(), 6);
 
@@ -43046,7 +43030,7 @@ mod tests {
         assert_eq!(join["memberDeviceId"], json!("device-b"));
         assert_eq!(
             join["devicePath"],
-            json!("Actro/BrowserSync/devices/device-b.json")
+            json!("Actrium/BrowserSync/devices/device-b.json")
         );
         assert_eq!(join["operations"].as_array().unwrap().len(), 2);
         assert_eq!(join["operations"][0]["operationType"], json!("writeDevice"));
@@ -43056,7 +43040,7 @@ mod tests {
         );
         assert_eq!(
             join["operations"][0]["path"],
-            json!("Actro/BrowserSync/devices/device-b.json")
+            json!("Actrium/BrowserSync/devices/device-b.json")
         );
         assert_eq!(
             join["operations"][1]["operationType"],
@@ -43524,7 +43508,7 @@ mod tests {
         assert_eq!(log["collection"], json!("bookmarks"));
         assert_eq!(
             log["path"],
-            json!("Actro/BrowserSync/logs/bookmarks/device-a-0000000000000007.json")
+            json!("Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000007.json")
         );
         assert_eq!(log["baseCursor"], json!("2"));
         assert_eq!(log["batch"]["records"].as_array().unwrap().len(), 1);
@@ -43538,7 +43522,7 @@ mod tests {
         assert_eq!(snapshot["collection"], json!("historyPages"));
         assert_eq!(
             snapshot["path"],
-            json!("Actro/BrowserSync/snapshots/historyPages.json")
+            json!("Actrium/BrowserSync/snapshots/historyPages.json")
         );
         assert_eq!(snapshot["records"].as_array().unwrap().len(), 1);
         assert_eq!(snapshot["records"][0]["recordType"], json!("historyPage"));
@@ -43605,7 +43589,7 @@ mod tests {
             if state.collection == "bookmarks" {
                 state.latest_log_sequence = 7;
                 state.latest_log_path = Some(
-                    "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000007.json".to_string(),
+                    "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000007.json".to_string(),
                 );
                 state.high_watermark_cursor = "1".to_string();
             }
@@ -43663,17 +43647,17 @@ mod tests {
         assert_eq!(
             plan["writeSummary"]["writePaths"],
             json!([
-                "Actro/BrowserSync/devices/device-a.json",
-                "Actro/BrowserSync/logs/historyPages/device-a-0000000000000001.json",
-                "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000008.json",
-                "Actro/BrowserSync/manifest.json"
+                "Actrium/BrowserSync/devices/device-a.json",
+                "Actrium/BrowserSync/logs/historyPages/device-a-0000000000000001.json",
+                "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000008.json",
+                "Actrium/BrowserSync/manifest.json"
             ])
         );
         assert_eq!(
             plan["writeSummary"]["logPaths"],
             json!([
-                "Actro/BrowserSync/logs/historyPages/device-a-0000000000000001.json",
-                "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000008.json"
+                "Actrium/BrowserSync/logs/historyPages/device-a-0000000000000001.json",
+                "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000008.json"
             ])
         );
         assert_eq!(plan["operations"][0]["operationType"], json!("writeDevice"));
@@ -43717,7 +43701,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             bookmark_log["path"],
-            json!("Actro/BrowserSync/logs/bookmarks/device-a-0000000000000008.json")
+            json!("Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000008.json")
         );
         assert_eq!(
             bookmark_log["batch"]["records"].as_array().unwrap().len(),
@@ -43919,21 +43903,21 @@ mod tests {
             {
                 "operationIndex": 0,
                 "operationType": "writeDevice",
-                "path": "Actro/BrowserSync/devices/device-a.json",
+                "path": "Actrium/BrowserSync/devices/device-a.json",
                 "success": true,
                 "providerRevision": "device-written"
             },
             {
                 "operationIndex": 1,
                 "operationType": "writeLog",
-                "path": "Actro/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
+                "path": "Actrium/BrowserSync/logs/bookmarks/device-a-0000000000000001.json",
                 "success": true,
                 "providerRevision": "log-written"
             },
             {
                 "operationIndex": 2,
                 "operationType": "writeManifest",
-                "path": "Actro/BrowserSync/manifest.json",
+                "path": "Actrium/BrowserSync/manifest.json",
                 "success": false,
                 "errorKind": "conflict",
                 "errorMessage": "manifest revision changed",
@@ -44014,7 +43998,7 @@ mod tests {
                 "historyPages" => {
                     state.latest_log_sequence = 3;
                     state.latest_log_path = Some(
-                        "Actro/BrowserSync/logs/historyPages/device-b-0000000000000003.json"
+                        "Actrium/BrowserSync/logs/historyPages/device-b-0000000000000003.json"
                             .to_string(),
                     );
                     state.high_watermark_cursor = "3".to_string();
@@ -44022,7 +44006,7 @@ mod tests {
                 "bookmarks" => {
                     state.latest_log_sequence = 2;
                     state.latest_log_path = Some(
-                        "Actro/BrowserSync/logs/bookmarks/device-b-0000000000000002.json"
+                        "Actrium/BrowserSync/logs/bookmarks/device-b-0000000000000002.json"
                             .to_string(),
                     );
                     state.high_watermark_cursor = "2".to_string();
@@ -44030,7 +44014,7 @@ mod tests {
                 "sessions" => {
                     state.latest_log_sequence = 4;
                     state.latest_log_path = Some(
-                        "Actro/BrowserSync/logs/sessions/device-b-0000000000000004.json"
+                        "Actrium/BrowserSync/logs/sessions/device-b-0000000000000004.json"
                             .to_string(),
                     );
                     state.snapshot_revision = 2;
@@ -44111,13 +44095,13 @@ mod tests {
         );
         assert_eq!(
             plan["readSummary"]["readPaths"],
-            json!(["Actro/BrowserSync/snapshots/sessions.json"])
+            json!(["Actrium/BrowserSync/snapshots/sessions.json"])
         );
         assert_eq!(
             plan["readSummary"]["readPrefixes"],
             json!([
-                "Actro/BrowserSync/logs/historyPages/",
-                "Actro/BrowserSync/logs/sessions/"
+                "Actrium/BrowserSync/logs/historyPages/",
+                "Actrium/BrowserSync/logs/sessions/"
             ])
         );
 
@@ -44132,7 +44116,7 @@ mod tests {
         assert_eq!(history_pages["shouldListLogs"], json!(true));
         assert_eq!(
             history_pages["logsPrefix"],
-            json!("Actro/BrowserSync/logs/historyPages/")
+            json!("Actrium/BrowserSync/logs/historyPages/")
         );
 
         let bookmarks = collections
@@ -44161,7 +44145,7 @@ mod tests {
         );
         assert_eq!(
             operations[0]["prefix"],
-            json!("Actro/BrowserSync/logs/historyPages/")
+            json!("Actrium/BrowserSync/logs/historyPages/")
         );
         assert_eq!(operations[0]["maxObjects"], json!(25));
         assert_eq!(operations[1]["operationType"], json!("readSnapshot"));
@@ -44172,7 +44156,7 @@ mod tests {
         );
         assert_eq!(
             operations[1]["path"],
-            json!("Actro/BrowserSync/snapshots/sessions.json")
+            json!("Actrium/BrowserSync/snapshots/sessions.json")
         );
         assert_eq!(operations[2]["operationType"], json!("listLogs"));
         assert_eq!(operations[2]["collection"], json!("sessions"));
@@ -44375,7 +44359,7 @@ mod tests {
         assert_eq!(skipped_snapshots[0]["collection"], json!("bookmarks"));
         assert_eq!(
             skipped_snapshots[0]["path"],
-            json!("Actro/BrowserSync/snapshots/bookmarks.json")
+            json!("Actrium/BrowserSync/snapshots/bookmarks.json")
         );
         assert_eq!(
             skipped_snapshots[0]["skipReason"],
@@ -44469,13 +44453,13 @@ mod tests {
         );
         assert_eq!(
             plan["applySummary"]["skippedSnapshotPaths"],
-            json!(["Actro/BrowserSync/snapshots/bookmarks.json"])
+            json!(["Actrium/BrowserSync/snapshots/bookmarks.json"])
         );
         assert_eq!(
             plan["applySummary"]["skippedLogPaths"],
             json!([
-                "Actro/BrowserSync/logs/historyVisits/device-a-0000000000000001.json",
-                "Actro/BrowserSync/logs/bookmarks/device-b-0000000000000002.json"
+                "Actrium/BrowserSync/logs/historyVisits/device-a-0000000000000001.json",
+                "Actrium/BrowserSync/logs/bookmarks/device-b-0000000000000002.json"
             ])
         );
         assert_eq!(plan["recordCount"], json!(2));
@@ -44637,7 +44621,7 @@ mod tests {
         assert_eq!(plan["cleanupCandidates"][0]["required"], json!(false));
         assert_eq!(
             plan["cleanupCandidates"][0]["path"],
-            json!("Actro/BrowserSync/logs/historyPages/device-b-0000000000000001.json")
+            json!("Actrium/BrowserSync/logs/historyPages/device-b-0000000000000001.json")
         );
         assert!(
             plan["resultPolicy"]
@@ -44976,7 +44960,7 @@ mod tests {
             if state.collection == "historyPages" {
                 state.latest_log_sequence = 3;
                 state.latest_log_path = Some(
-                    "Actro/BrowserSync/logs/historyPages/device-b-0000000000000003.json"
+                    "Actrium/BrowserSync/logs/historyPages/device-b-0000000000000003.json"
                         .to_string(),
                 );
                 state.high_watermark_cursor = "3".to_string();
@@ -45056,7 +45040,7 @@ mod tests {
         assert_eq!(plan["operations"][0]["collection"], json!("historyPages"));
         assert_eq!(
             plan["operations"][0]["path"],
-            json!("Actro/BrowserSync/snapshots/historyPages.json")
+            json!("Actrium/BrowserSync/snapshots/historyPages.json")
         );
         assert_eq!(
             plan["operations"][1]["operationType"],
@@ -45072,7 +45056,7 @@ mod tests {
         );
         assert_eq!(
             plan["deleteOperations"][0]["path"],
-            json!("Actro/BrowserSync/logs/historyPages/device-b-0000000000000001.json")
+            json!("Actrium/BrowserSync/logs/historyPages/device-b-0000000000000001.json")
         );
         assert_eq!(
             plan["deleteOperations"][0]["deleteReason"],
@@ -45080,7 +45064,7 @@ mod tests {
         );
         assert_eq!(
             plan["deleteOperations"][1]["path"],
-            json!("Actro/BrowserSync/logs/historyPages/device-b-0000000000000002.json")
+            json!("Actrium/BrowserSync/logs/historyPages/device-b-0000000000000002.json")
         );
         assert_eq!(
             plan["compactedCollections"][0]["nextSnapshotRevision"],
@@ -45312,7 +45296,7 @@ mod tests {
             if state.collection == "historyPages" {
                 state.latest_log_sequence = 3;
                 state.latest_log_path = Some(
-                    "Actro/BrowserSync/logs/historyPages/device-b-0000000000000003.json"
+                    "Actrium/BrowserSync/logs/historyPages/device-b-0000000000000003.json"
                         .to_string(),
                 );
                 state.high_watermark_cursor = "3".to_string();

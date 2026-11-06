@@ -32,7 +32,7 @@ internal sealed class BrowserStorageDatabase
     public static BrowserStorageDatabase CreateDefault()
     {
         return new BrowserStorageDatabase(
-            Path.Combine(WindowsAppPaths.GetLocalAppDataRoot(), Contract.DatabaseName));
+            GetDatabasePathInDirectory(WindowsAppPaths.GetLocalAppDataRoot()));
     }
 
     public static BrowserStorageDatabase CreateForLegacyFile(string legacyFilePath)
@@ -48,12 +48,16 @@ internal sealed class BrowserStorageDatabase
             || string.Equals(fileName, "browser-bookmarks.json", StringComparison.OrdinalIgnoreCase)
             || string.Equals(fileName, "browser-session.json", StringComparison.OrdinalIgnoreCase))
         {
-            return Path.Combine(
-                string.IsNullOrWhiteSpace(directory) ? WindowsAppPaths.GetLocalAppDataRoot() : directory,
-                Contract.DatabaseName);
+            return GetDatabasePathInDirectory(
+                string.IsNullOrWhiteSpace(directory) ? WindowsAppPaths.GetLocalAppDataRoot() : directory);
         }
 
         return Path.ChangeExtension(legacyFilePath, ".db");
+    }
+
+    internal static string GetDatabasePathInDirectory(string directory)
+    {
+        return Path.Combine(directory, Contract.DatabaseName);
     }
 
     public bool HasMetaFlag(string key)

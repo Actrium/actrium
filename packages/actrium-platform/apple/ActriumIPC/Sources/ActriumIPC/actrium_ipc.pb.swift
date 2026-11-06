@@ -839,7 +839,7 @@ public struct Actrium_Ipc_ViewportApplied: Sendable {
 }
 
 /// Host -> Service: Tab configuration
-/// Notification: com.actro.tabConfig.<serviceBundleId>
+/// Notification: io.actrium.tabConfig.<serviceBundleId>
 public struct Actrium_Ipc_XPCTabConfig: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -892,13 +892,13 @@ public struct Actrium_Ipc_XPCTabConfig: Sendable {
 }
 
 /// Service -> Host: Service ready notification
-/// Notification: com.actro.xpcServiceReady
+/// Notification: io.actrium.xpcServiceReady
 public struct Actrium_Ipc_XPCServiceReady: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// e.g., "io.actrium.actro.rctviewservice0"
+  /// e.g., "io.actrium.rctviewservice0"
   public var serviceBundleID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -907,7 +907,7 @@ public struct Actrium_Ipc_XPCServiceReady: Sendable {
 }
 
 /// Service -> Host: Tab render state
-/// Notification: com.actro.tabState.<tabId>
+/// Notification: io.actrium.tabState.<tabId>
 public struct Actrium_Ipc_XPCTabState: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -963,7 +963,7 @@ public struct Actrium_Ipc_XPCTabState: Sendable {
 }
 
 /// Service -> Host: Tab navigation request
-/// Notification: com.actro.tabNavigation.<tabId>
+/// Notification: io.actrium.tabNavigation.<tabId>
 public struct Actrium_Ipc_XPCTabNavigation: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for

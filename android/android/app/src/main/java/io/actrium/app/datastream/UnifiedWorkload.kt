@@ -35,7 +35,7 @@ import io.actor_rtc.actr.WorkloadBridge
  */
 class UnifiedWorkload(
     private val handler: UnifiedHandler,
-    private val realm: String = "actro@example.com"
+    private val realm: String = "actrium@example.com"
 ) : WorkloadBridge {
 
     companion object {

@@ -129,7 +129,7 @@ public class ViewBridgeHostView: NSView {
     /// Convenience initializer with default Actrium service
     public convenience init() {
         self.init(
-            serviceBundleIdentifier: "io.actrium.app.viewservice",
+            serviceBundleIdentifier: "io.actrium.viewservice",
             viewControllerClassName: "ActriumServiceViewController"
         )
     }
@@ -153,7 +153,7 @@ public class ViewBridgeHostView: NSView {
     }
 
     required init?(coder: NSCoder) {
-        self.serviceBundleIdentifier = "io.actrium.app.viewservice"
+        self.serviceBundleIdentifier = "io.actrium.viewservice"
         self.serviceViewControllerClassName = "ActriumServiceViewController"
         super.init(coder: coder)
         setupView()
@@ -444,7 +444,7 @@ public class ViewBridgeHostView: NSView {
         pendingConnectionInternalId = nil
 
         connectionCreatedObserverForDirect = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.xpcConnectionCreated"),
+            forName: NSNotification.Name("io.actrium.xpcConnectionCreated"),
             object: nil,
             queue: .main
         ) { [weak self] notification in
@@ -484,7 +484,7 @@ public class ViewBridgeHostView: NSView {
 
         // Send bindTab Notification (if any) internalId)
         if let internalId = pendingConnectionInternalId, let tabId = coordinator?.tabId {
-            let bindName = "com.actro.bindTab.\(ActriumHostProcessId).\(serviceBundleIdentifier)"
+            let bindName = "io.actrium.bindTab.\(ActriumHostProcessId).\(serviceBundleIdentifier)"
             DistributedNotificationCenter.default().postNotificationName(
                 NSNotification.Name(bindName),
                 object: nil,
@@ -955,7 +955,7 @@ final class ViewBridgeCoordinator {
         }
 
         // 🔑 Use without PID * The name of the notification, ensuring that Service We're on it.
-        let notificationName = "com.actro.tabConfig.\(serviceId)"
+        let notificationName = "io.actrium.tabConfig.\(serviceId)"
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
             object: nil,
@@ -1202,7 +1202,7 @@ final class ViewBridgeCoordinator {
         guard sizeAppliedObserver == nil,
               let serviceId = allocatedServiceId else { return }
 
-        let notificationName = "com.actro.sizeApplied.\(ActriumHostProcessId).\(serviceId)"
+        let notificationName = "io.actrium.sizeApplied.\(ActriumHostProcessId).\(serviceId)"
         sizeAppliedObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(notificationName),
             object: nil,
@@ -1425,7 +1425,7 @@ final class ViewBridgeCoordinator {
         }
 
         // 🔑 Send directly DistributedNotification,Format with Service Peer-to-penetrating match
-        let notificationName = "com.actro.containerSizeChanged.\(ActriumHostProcessId).\(serviceId)"
+        let notificationName = "io.actrium.containerSizeChanged.\(ActriumHostProcessId).\(serviceId)"
 
         ipcLog("📐 [HOST→SVC] containerSizeChanged req=\(requestId) tab=\(String(tabId.uuidString.prefix(8))) size=\(Int(size.width))x\(Int(size.height)) isOverviewMode=\(isOverviewMode) name=\(notificationName)")
 
@@ -1464,7 +1464,7 @@ final class ViewBridgeCoordinator {
             return
         }
 
-        let notificationName = "com.actro.uiStateChanged.\(ActriumHostProcessId).\(serviceId)"
+        let notificationName = "io.actrium.uiStateChanged.\(ActriumHostProcessId).\(serviceId)"
 
         ipcLog("📤 [HOST→SVC] leftPanelVisibility tab=\(String(tabId.uuidString.prefix(8))) visible=\(visible) name=\(notificationName)")
 
@@ -2410,9 +2410,9 @@ struct UnifiedReactNativeLayer: View {
         // 🔥 Quick Path Already checkPrewarmStatusAndSetReady Processing
         // Only listeners are set up here as backup (processors) Service Relaunch, etc.)
 
-        // Listening com.actro.xpcServiceReady(no suffix) pass userInfo.bundleId and hostProcessId Filter
+        // Listening io.actrium.xpcServiceReady(no suffix) pass userInfo.bundleId and hostProcessId Filter
         coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.xpcServiceReady"),
+            forName: NSNotification.Name("io.actrium.xpcServiceReady"),
             object: nil,
             queue: .main
         ) { [serviceId] notification in
@@ -2443,7 +2443,7 @@ struct UnifiedReactNativeLayer: View {
     private func setupListenerReadyListener(serviceId: String) {
         guard coordinator.listenerReadyObserver == nil else { return }
 
-        let listenerReadyName = "com.actro.listenerReady.\(ActriumHostProcessId).\(serviceId)"
+        let listenerReadyName = "io.actrium.listenerReady.\(ActriumHostProcessId).\(serviceId)"
         ipcLog("🎧 Setting up listenerReady listener: \(listenerReadyName)")
 
         coordinator.listenerReadyObserver = DistributedNotificationCenter.default().addObserver(

@@ -41,6 +41,10 @@ cargo run --bin uniffi-bindgen generate "$UDL_FILE" --language swift --out-dir "
 perl -pi -e 's/[ \t]+$//' \
     "${GENERATED_DIR}/${CRATE_NAME}.swift" \
     "${GENERATED_DIR}/${CRATE_NAME}FFI.h"
+perl -0777 -pi -e 's/\n+\z/\n/' \
+    "${GENERATED_DIR}/${CRATE_NAME}.swift" \
+    "${GENERATED_DIR}/${CRATE_NAME}FFI.h" \
+    "${GENERATED_DIR}/${CRATE_NAME}FFI.modulemap"
 mkdir -p "$(dirname "$APPLE_PACKAGE_SWIFT")"
 cp "${GENERATED_DIR}/${CRATE_NAME}.swift" "$APPLE_PACKAGE_SWIFT"
 
