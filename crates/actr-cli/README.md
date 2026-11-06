@@ -103,7 +103,8 @@ Groups are named after **what the subcommand operates on**:
 - `registry` — the remote registry / Issuer (discover, publish, fingerprint)
 - `dlq` — the Dead Letter Queue
 - `realm` — a Realm signing key (keygen, and signed Realm management requests),
-  and a member's Realm client key (join, invite, members, …)
+  a member's Realm client key (join, invite, members, …), and a Service's
+  instance ACL (service-acl grant/revoke/list, FR-SEC-013)
 - `publisher profile` — a Publisher Profile signing key and the signed
   `publisher` member of a domain's authority descriptor
 

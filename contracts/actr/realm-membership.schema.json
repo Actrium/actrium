@@ -118,7 +118,10 @@
             "set_role",
             "transfer_owner",
             "leave",
-            "update_realm"
+            "update_realm",
+            "service_acl_grant",
+            "service_acl_revoke",
+            "service_acl_list"
           ]
         },
         "invite": {
@@ -183,6 +186,15 @@
         },
         "status": {
           "const": "retired"
+        },
+        "service_serial": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The Service Actor: the serial of this Realm's issued identity"
+        },
+        "grant_expires_at": {
+          "type": "string",
+          "format": "date-time"
         }
       },
       "additionalProperties": true

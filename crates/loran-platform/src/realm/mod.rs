@@ -13,6 +13,7 @@ pub mod management;
 pub mod membership;
 pub mod model;
 pub mod profile;
+pub mod service_acl;
 pub mod turn_secret;
 pub mod validation;
 

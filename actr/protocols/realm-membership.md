@@ -98,6 +98,9 @@ no `requester`.
 | `transfer_owner` | `member_id`, optional `previous_owner_role` (default `editor`) | The owner | Atomically hands ownership to another active member that has at least one unrevoked client key; the previous owner takes the given role |
 | `leave` | none | A member other than the owner | Removes itself, with the effect of `remove_member` |
 | `update_realm` | optional `package`, `display_name`, or `status: "retired"` | The owner; only for Realms under the Realm Infra Provider's domain | The Realm Infra Provider signs and publishes a Realm Profile with a higher sequence (Realm Profile sections 7.2 and 7.4); responds `{realm, sequence}` |
+| `service_acl_grant` | `service_serial`, `member_id`, `role` (`editor`/`viewer`), `grant_expires_at` | The Service Actor's owner | Grants or refreshes the member's role on the Service Actor until the expiry; responds the grant |
+| `service_acl_revoke` | `service_serial`, `member_id` | The Service Actor's owner | The grant stops allowing attach from the next check |
+| `service_acl_list` | `service_serial` | The Service Actor's owner | The grant rows with their state (`active`, `expired`, `revoked`) |
 
 In a `join` request, `signature.key_id` **MUST** equal the `key_id` computed
 from `public_key`; the signature is the proof of possession. For every other
@@ -164,6 +167,48 @@ holds a registered key or a valid invite; otherwise the answer is
 `client_unknown` or `invite_unknown`, revealing nothing about the Realm's
 state. Expired, used, revoked and Realm-mismatched invites **MUST** be distinct
 errors.
+
+### 4.4 Service instance ACL
+
+Realm membership is not instance authorization (FR-SEC-013): joining a Realm
+grants no access to a Service Actor running in it. The Service's owner — the
+member the Actor identity was issued to — delegates attach access with
+`service_acl_grant`. The owner is implicit: a grant row names a delegate, never
+the owner, and the owner always attaches.
+
+The Service Actor is named by `service_serial`, the `serial_number` of the
+identity issued by this Realm Infra Provider; the request's `realm` names the
+Realm. `grant_expires_at` is required and at most 366 days out; a grant without
+an expiry is refused. Re-granting a member refreshes its role, granter and
+expiry. Only the owner grants, revokes and lists. A known Service answers
+`forbidden` to a non-owner; an unknown serial or member gets `not_found` —
+the existence of a serial is not the secret, and the owner must learn that
+theirs does not exist.
+
+Signaling enforces the ACL on every path whose output feeds a direct attach:
+
+- `route_candidates` and `get_service_spec` only return a Service the
+  caller's credential may attach to: the `member` claim is the owner, or
+  names a member with an unrevoked, unexpired grant.
+- `ActrRelay` applies the same rule when the target is this Realm's
+  profile-package Service (the actor the Realm Profile names). Fronts and
+  helpers are not instance-guarded at the relay — guarding every issued
+  Actor would break the service -> front return path of an authorized
+  session.
+- Presence pushes (`ActrUpEvent`) disclose an Actor's identity only to
+  subscribers whose member may attach to it: for an issued Actor the
+  actor_id reaches its owner and grantees, nobody else. Knowing the
+  actor_id was the last input a direct relay attach needed.
+
+The checks read the store on every request, so a revocation or expiry is
+live from the next message — matching the rule of section 6 that a decision
+based on `member`/`role` claims never outlives the credential. An Actor this
+Realm Infra Provider did not issue has no owner record and is not guarded by
+this layer (the type-level ACL still applies). A store failure fails the
+request closed and honestly: the reply is a 503-class error, never a
+pretense that the Service does not exist. Signaling cannot distinguish
+`editor` from `viewer` traffic; that distinction belongs to the Service, once
+the Host hands it the caller's claims (section 6).
 
 ## 5. Issuing owner invites
 

@@ -128,6 +128,7 @@ fn realm_group_exposes_the_signing_and_membership_tools() {
             "retire",
             "revoke-client",
             "revoke-invite",
+            "service-acl",
             "set-role",
             "sign-profile",
             "transfer-owner",
