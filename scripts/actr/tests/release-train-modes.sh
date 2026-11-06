@@ -1032,12 +1032,14 @@ test_prepare_only_updates_validates_and_commits_without_publishing() {
   ensure_versions_prepared() { calls+=("ensure_versions_prepared"); }
   publish_rust_package() { calls+=("publish_rust_package"); }
   create_final_tag() { calls+=("create_final_tag"); }
+  cargo() { :; }
 
   VERSION="1.2.3"
   DRY_RUN=false
   PREPARE_ONLY=true
 
   run_release_train
+  unset -f cargo
 
   assert_eq "update_versions" "${calls[0]}" "first prepare step"
   assert_eq "run_validation_suite" "${calls[1]}" "second prepare step"
@@ -1634,6 +1636,7 @@ EOF
   # Stub out all Cargo.toml paths.
   for f in \
     Cargo.toml \
+    examples/actr/rust/Cargo.toml \
     crates/actr-relay-security/Cargo.toml \
     crates/loran-relay-protocol/Cargo.toml \
     crates/loran-relay/Cargo.toml \
@@ -1715,7 +1718,9 @@ println("protoc-gen-actrframework-kotlin 0.2.0")
 println("    0.2.0")
 EOF
 
+  cargo() { :; }
   update_versions
+  unset -f cargo
 
   assert_eq \
     'version = "0.3.0"' \
@@ -1790,6 +1795,7 @@ test_update_versions_rewrites_prerelease_embedded_versions() {
   # Stub out all Cargo.toml paths.
   for f in \
     Cargo.toml \
+    examples/actr/rust/Cargo.toml \
     crates/actr-relay-security/Cargo.toml \
     crates/loran-relay-protocol/Cargo.toml \
     crates/loran-relay/Cargo.toml \
@@ -1865,6 +1871,7 @@ EOF
 
   # Plain version -> pre-release bump.
   VERSION="0.10.0-alpha.1"
+  cargo() { :; }
   update_versions
   assert_eq \
     'println("protoc-gen-actrframework-kotlin 0.10.0-alpha.1")
@@ -1890,6 +1897,7 @@ println("    0.10.0-alpha.1")' \
   # of appending to it.
   VERSION="0.10.0-rc.1"
   update_versions
+  unset -f cargo
   assert_eq \
     'println("protoc-gen-actrframework-kotlin 0.10.0-rc.1")
 println("    0.10.0-rc.1")' \

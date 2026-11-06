@@ -1081,6 +1081,9 @@ package_files = [
     repo / "packages/actr-web/crates/framework-web-entry-smoke/Cargo.toml",
 ]
 
+# Examples retain their own package version but follow the train's dependencies.
+dependency_only_files = [repo / "examples/actr/rust/Cargo.toml"]
+
 cli_dependency_names = {
     "actr",
     "actr-runtime-mailbox",
@@ -1108,6 +1111,8 @@ dependency_version_names = {
 }
 
 workspace_dependency_names = {
+    "actr",
+    "actr-hlc",
     "actr-protocol",
     "actr-service-compat",
     "actr-config",
@@ -1131,7 +1136,7 @@ def replace_first_version(lines: list[str]) -> list[str]:
             return lines
     raise RuntimeError("package version line not found")
 
-for path in package_files:
+for path in package_files + dependency_only_files:
     lines = path.read_text().splitlines()
     if path.name != "Cargo.toml" or path.parent == repo / "crates/actr-cli":
         lines = replace_first_version(lines)
@@ -1150,7 +1155,7 @@ for path in package_files:
                 package_done = True
                 continue
 
-            if current_section == "[workspace.package]" and stripped.startswith("version = ") and not workspace_package_done:
+            if current_section == "[workspace.package]" and stripped.startswith("version = ") and not workspace_package_done and path not in dependency_only_files:
                 lines[index] = f'version = "{version}"'
                 workspace_package_done = True
                 continue
@@ -1299,6 +1304,18 @@ PY
       cargo update --manifest-path tests/e2e/actr/winui-echo-app/workload/Cargo.toml
     )
   fi
+
+  # Refresh local package versions while retaining locked registry dependencies.
+  local nested_manifest
+  for nested_manifest in \
+    examples/actr/rust/Cargo.toml \
+    examples/actr/audio-capture/rust-receiver/Cargo.toml \
+    crates/actr-hyper/tests/dynclib_actor_fixture/Cargo.toml; do
+    (
+      cd "$WORK_REPO_ROOT"
+      cargo update --workspace --manifest-path "$nested_manifest"
+    )
+  done
 }
 
 all_publishable_crates() {
@@ -1850,6 +1867,10 @@ publish_package_sync_repo() {
 
 stage_release_version_files() {
   git add Cargo.toml Cargo.lock \
+    examples/actr/rust/Cargo.toml \
+    examples/actr/rust/Cargo.lock \
+    examples/actr/audio-capture/rust-receiver/Cargo.lock \
+    crates/actr-hyper/tests/dynclib_actor_fixture/Cargo.lock \
     crates/actr-relay-security/Cargo.toml \
     crates/loran-relay-protocol/Cargo.toml \
     crates/loran-relay/Cargo.toml \

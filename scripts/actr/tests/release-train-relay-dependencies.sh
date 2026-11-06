@@ -69,9 +69,16 @@ workspace_deps = tomllib.loads((repo / "Cargo.toml").read_text())["workspace"]["
 upstream_sources = {name: (workspace_deps[name]["git"], workspace_deps[name]["rev"]) for name in upstream_names}
 # Execute the real release version updater against isolated copies, never the checkout.
 updater = script.split("update_versions() {", 1)[1].split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+stage_function = script.split("stage_release_version_files() {", 1)[1].split("\n}", 1)[0]
+stage_paths = stage_function.removeprefix("\n  git add ").replace("\\\n", "").split()
+nested_manifests = [
+    "examples/actr/rust/Cargo.toml",
+    "examples/actr/audio-capture/rust-receiver/Cargo.toml",
+    "crates/actr-hyper/tests/dynclib_actor_fixture/Cargo.toml",
+]
 with tempfile.TemporaryDirectory(prefix="actr-relay-release-") as directory:
     copied = Path(directory)
-    for relative in set(re.findall(r'repo / "([^"]+)"', updater)):
+    for relative in set(re.findall(r'repo / "([^"]+)"', updater)) | set(stage_paths):
         source = repo / relative
         if source.is_file():
             destination = copied / relative
@@ -83,10 +90,47 @@ with tempfile.TemporaryDirectory(prefix="actr-relay-release-") as directory:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
     version = "0.11.0-review-test"
-    subprocess.run([sys.executable, "-", str(copied), version, "true"], input=updater, text=True, check=True)
+    # Exercise both the real updater and staging helper. Only Cargo is stubbed;
+    # dependency resolution is verified separately with the committed lockfiles.
+    helper = copied / "release-train-test.sh"
+    helper.write_text(script.replace('main "$@"\n', ''))
+    subprocess.run(["git", "init", "-q", str(copied)], check=True)
+    subprocess.run(["git", "-C", str(copied), "add", "."], check=True)
+    subprocess.run([
+        "git", "-C", str(copied), "-c", "user.name=Fixture",
+        "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture",
+    ], check=True)
+    subprocess.run(["bash", "-c", r'''
+set -euo pipefail
+source "$1"
+WORK_REPO_ROOT=$2
+VERSION=$3
+SKIP_PYTHON=true
+cargo() {
+  printf '%s\n' "$*" >> "$WORK_REPO_ROOT/cargo-calls"
+  if [[ "$1 $2" == "update --workspace" ]]; then
+    printf '\n# Refreshed by release train\n' >> "${4%Cargo.toml}Cargo.lock"
+  fi
+}
+cd "$WORK_REPO_ROOT"
+update_versions
+stage_release_version_files
+''', "release-sync-test", str(helper), str(copied), version], check=True)
     check_dependencies(copied, version)
     updated_deps = tomllib.loads((copied / "Cargo.toml").read_text())["workspace"]["dependencies"]
+    assert updated_deps["actr-hlc"]["version"] == version
+    examples = tomllib.loads((copied / nested_manifests[0]).read_text())["workspace"]
+    original_examples = tomllib.loads((repo / nested_manifests[0]).read_text())
+    assert examples["package"]["version"] == original_examples["workspace"]["package"]["version"]
+    for name in original_examples["patch"]["crates-io"]:
+        assert examples["dependencies"][name]["version"] == version, name
+    calls = (copied / "cargo-calls").read_text().splitlines()
+    staged = subprocess.check_output(["git", "-C", str(copied), "diff", "--cached", "--name-only"], text=True).splitlines()
+    for manifest in nested_manifests:
+        assert f"update --workspace --manifest-path {manifest}" in calls, manifest
+        assert manifest.replace("Cargo.toml", "Cargo.lock") in staged, manifest
+    assert nested_manifests[0] in staged
     for name, source in upstream_sources.items():
         assert (updated_deps[name]["git"], updated_deps[name]["rev"]) == source, (name, "release bump changed upstream source")
-print("Release dependency order, publishable versions and isolated version bump passed.")
+print("Release dependency order, version bump, nested lock refresh and staging passed.")
 PY
