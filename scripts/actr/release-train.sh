@@ -61,15 +61,14 @@ readonly LORAN_CRATES=(
   "loran-server"
 )
 
-# GitHub Release binary matrix for the `actr` CLI.
-# Format per entry: rust-target|runner|use_zigbuild (true=zig cross-compile, false=native cargo build)
+# CLI targets for the shell release path. Runner selection belongs to the workflow.
 readonly CLI_BINARY_TARGETS=(
-  "x86_64-unknown-linux-gnu|ubuntu-latest|false"
-  "x86_64-unknown-linux-musl|ubuntu-latest|true"
-  "aarch64-unknown-linux-gnu|ubuntu-latest|true"
-  "aarch64-unknown-linux-musl|ubuntu-latest|true"
-  "aarch64-apple-darwin|macos-14|false"
-  "x86_64-pc-windows-msvc|windows-latest|false"
+  "x86_64-unknown-linux-gnu"
+  "x86_64-unknown-linux-musl"
+  "aarch64-unknown-linux-gnu"
+  "aarch64-unknown-linux-musl"
+  "aarch64-apple-darwin"
+  "x86_64-pc-windows-msvc"
 )
 
 readonly VALID_STAGES=(
@@ -2223,15 +2222,12 @@ stage_build_cli_binaries() {
   read_context
 
   local staging="$WORK_REPO_ROOT/release/reports/cli-binaries"
-  local descriptors=() descriptor target
+  local targets=("${CLI_BINARY_TARGETS[@]}") target
   if [[ -n "${ACTR_CLI_TARGET_DESCRIPTOR:-}" ]]; then
-    descriptors+=("$ACTR_CLI_TARGET_DESCRIPTOR")
-  else
-    descriptors+=("${CLI_BINARY_TARGETS[@]}")
+    targets=("${ACTR_CLI_TARGET_DESCRIPTOR%%|*}")
   fi
 
-  for descriptor in "${descriptors[@]}"; do
-    target=$(printf "%s" "$descriptor" | cut -d"|" -f1)
+  for target in "${targets[@]}"; do
     local args=(build --target "$target" --version "$VERSION" --output "$staging" --state-file "$STATE_FILE")
     [[ "$DRY_RUN" == true ]] && args+=(--dry-run)
     RELEASE_SHA="$RELEASE_SHA" PACKAGE_SYNC_OWNER="$PACKAGE_SYNC_OWNER" \

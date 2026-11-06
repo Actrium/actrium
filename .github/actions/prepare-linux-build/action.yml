@@ -1,0 +1,11 @@
+name: Prepare Linux build space
+description: Reclaim unused hosted SDK space before restoring Rust build caches.
+runs:
+  using: composite
+  steps:
+    - name: Free unused SDK and container storage
+      shell: bash
+      run: |
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/share/boost
+        sudo docker system prune --all --force || true
+        df -h /

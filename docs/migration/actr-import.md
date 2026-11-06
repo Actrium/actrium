@@ -66,7 +66,6 @@ repository layout truthfully.
 | `docs/` | `docs/actr/` | Actr-specific implementation documentation |
 | `rfcs/` | `rfcs/actr/` | Existing Actr proposals |
 | `scripts/` | `scripts/actr/` | Actr release and repository scripts |
-| `tools/ci/runner/` | `tools/ci/runner/` | Repository CI runner support, not Loran deployment |
 | `.github/`, shared style files | repository root | Monorepo-wide automation baseline |
 
 The old workspace manifest is split after the pure relocation commit: its

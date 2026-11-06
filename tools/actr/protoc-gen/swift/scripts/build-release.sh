@@ -9,21 +9,12 @@ CONFIGURATION="release"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 BUILD_DIR="${BUILD_DIR:-$ROOT_DIR/.build}"
 
-swift build \
-  --package-path "$ROOT_DIR" \
-  -c "$CONFIGURATION" \
-  --product "$PRODUCT_NAME" \
-  --arch "$ARCH"
-
-PRIMARY_BIN_PATH="$BUILD_DIR/$ARCH-apple-macosx/$CONFIGURATION/$PRODUCT_NAME"
-FALLBACK_BIN_PATH="$BUILD_DIR/$CONFIGURATION/$PRODUCT_NAME"
-
-if [[ -f "$PRIMARY_BIN_PATH" ]]; then
-  BIN_PATH="$PRIMARY_BIN_PATH"
-elif [[ -f "$FALLBACK_BIN_PATH" ]]; then
-  BIN_PATH="$FALLBACK_BIN_PATH"
-else
-  echo "Release binary not found under $BUILD_DIR." >&2
+build_options=(--package-path "$ROOT_DIR" --scratch-path "$BUILD_DIR" -c "$CONFIGURATION" --arch "$ARCH")
+swift build "${build_options[@]}" --product "$PRODUCT_NAME"
+bin_dir=$(swift build "${build_options[@]}" --show-bin-path)
+BIN_PATH="$bin_dir/$PRODUCT_NAME"
+if [[ ! -x "$BIN_PATH" ]]; then
+  echo "Release binary not found at $BIN_PATH." >&2
   exit 1
 fi
 

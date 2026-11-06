@@ -12,13 +12,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-web-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   format-and-check:
     name: Web Format And Check
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
@@ -32,9 +32,11 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-web -> ../../target/bindings-web
 
       - name: Install wasm-pack
         run: |
@@ -84,9 +86,7 @@ jobs:
 
   browser-e2e:
     name: Web Browser E2E (Puppeteer)
-    # Hosted on purpose: the job drives a real Chrome that the GitHub runner
-    # images ship; the ARC runner image has no browser and containerizing one
-    # (with its sandbox deps) is a separate follow-up.
+    # Use the system Chrome supplied by the GitHub-hosted image.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -105,7 +105,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Install wasm Component Model toolchain
         run: |

@@ -8,15 +8,25 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-typescript-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint-and-build:
     name: TypeScript Format, Lint And Build
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.99.0
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/actr-typescript -> ../../target/bindings-typescript
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -51,12 +61,9 @@ jobs:
 
   workload:
     name: TypeScript Workload Authoring Check
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-
-      - name: Set up light runner
-        uses: ./.github/actions/setup-light-runner
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

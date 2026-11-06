@@ -327,7 +327,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Cache cargo-installed tools
         id: cargo-tools
@@ -586,7 +586,7 @@ jobs:
             build_args: ""
             use_zig: false
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
             artifact: actr.darwin-arm64.node
             build_args: ""
             use_zig: false
@@ -637,7 +637,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Setup Zig
         if: ${{ matrix.use_zig }}
@@ -750,7 +750,6 @@ jobs:
         with:
           name: create-tag-artifacts
           path: release/reports
-
 
       - name: Download native artifacts
         uses: actions/download-artifact@v4

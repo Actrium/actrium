@@ -13,9 +13,9 @@ import tomllib
 
 
 def run_cargo(repo: Path, arguments: list[str], **kwargs):
-    # Use the repository's canonical cache when the local build helper exists.
+    # Honor Cargo configuration and the caller's environment directly.
     return subprocess.run(
-        ["bash", "-c", 'if [ -x /usr/local/bin/rust-target-env ]; then eval "$(/usr/local/bin/rust-target-env)"; fi; exec cargo "$@"', "cargo", *arguments],
+        ["cargo", *arguments],
         cwd=repo,
         check=True,
         **kwargs,

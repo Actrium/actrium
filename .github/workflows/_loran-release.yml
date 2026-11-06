@@ -19,7 +19,7 @@ env:
 jobs:
   validate:
     name: Validate Loran server release tag
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag_sha: ${{ steps.release.outputs.tag_sha }}
@@ -85,7 +85,7 @@ jobs:
         target:
           - { os: ubuntu-latest, asset: loran-linux-x86_64, exe_ext: "" }
           - { os: ubuntu-24.04-arm, asset: loran-linux-arm64, exe_ext: "" }
-          - { os: macos-14, asset: loran-macos-arm64, exe_ext: "" }
+          - { os: macos-15, asset: loran-macos-arm64, exe_ext: "" }
           # Windows loran build temporarily skipped: the opentelemetry feature
           # (#486) pushes the Windows release build past the 30m timeout on a
           # cold cache, cancelling the job and skipping Upload loran assets
@@ -100,21 +100,18 @@ jobs:
           ref: ${{ inputs.source_ref }}
           path: source
           persist-credentials: false
-      - uses: actions/checkout@v5
-        with:
-          path: automation
-          persist-credentials: false
-
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - uses: dtolnay/rust-toolchain@1.99.0
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: source
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -167,7 +164,7 @@ jobs:
           pnpm run build
 
       - name: Build loran (release)
-        run: cargo build --release -p loran-server --features opentelemetry
+        run: cargo build --release --target-dir target -p loran-server --features opentelemetry
         working-directory: source
 
       - name: Stage binary
@@ -207,7 +204,7 @@ jobs:
           workspaces: source/loran/deploy
       - name: Build loran-deploy (release)
         working-directory: source/loran/deploy
-        run: cargo build --release
+        run: cargo build --release --target-dir target
       - name: Stage binary
         shell: bash
         run: |

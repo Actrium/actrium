@@ -14,13 +14,11 @@ service, actor identity, SQLite path, or internal service shared key.
 Build the `loran-server` package and run its `loran` executable:
 
 ```sh
-eval "$(/usr/local/bin/rust-target-env)" && cargo build --release -p loran-server
-/build/actrium/target/release/loran --config loran/config/ice.example.toml
+cargo run --release -p loran-server --bin loran -- --config loran/config/ice.example.toml
 ```
 
 Copy the example, replace `bind.ice.advertised_ip` with a reachable relay
-address, and configure `[turn.users]` or `turn.turn_secret`. Outside this
-development environment, use Cargo's usual build output path.
+address, and configure `[turn.users]` or `turn.turn_secret`.
 SIGINT and SIGTERM gracefully stop the services. SIGHUP reloads the existing
 configuration and restarts ICE when its binding or credentials change;
 adding an HTTP listener requires a process restart.

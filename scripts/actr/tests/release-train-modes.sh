@@ -1983,6 +1983,10 @@ EOF
 
   cat >"$temp_dir/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == metadata ]]; then
+  python3 -c 'import json, os; print(json.dumps({"target_directory": os.environ["CARGO_TARGET_DIR"]}))'
+  exit 0
+fi
 printf '%s\n' "$*" >"${CARGO_ARGS_LOG}"
 target=""
 previous=""
@@ -1993,8 +1997,8 @@ for arg in "$@"; do
   fi
   previous="$arg"
 done
-mkdir -p "${ACTR_REPO_ROOT}/target/${target}/release"
-printf 'actr test binary\n' >"${ACTR_REPO_ROOT}/target/${target}/release/actr"
+mkdir -p "${CARGO_TARGET_DIR}/${target}/release"
+printf 'actr test binary\n' >"${CARGO_TARGET_DIR}/${target}/release/actr"
 exit 0
 EOF
   chmod +x "$temp_dir/bin/cargo"
@@ -2006,7 +2010,10 @@ EOF
   export GITHUB_REPOSITORY="actrium/actr"
   export RELEASE_SHA="abc123"
 
-  command_build \
+  # Leave a stale default-path binary to catch staging from the wrong build.
+  mkdir -p "$temp_dir/target/aarch64-unknown-linux-musl/release"
+  printf 'stale binary\n' >"$temp_dir/target/aarch64-unknown-linux-musl/release/actr"
+  CARGO_TARGET_DIR="$temp_dir/custom target" command_build \
     --target aarch64-unknown-linux-musl \
     --version 1.2.3 \
     --output "$temp_dir/staging" \
@@ -2014,6 +2021,10 @@ EOF
 
   PATH=$original_path
   unset CARGO_ARGS_LOG ACTR_REPO_ROOT GITHUB_REPOSITORY RELEASE_SHA
+
+  local packaged
+  packaged=$(tar -xOzf "$temp_dir/staging/actr-v1.2.3-aarch64-unknown-linux-musl.tar.gz" actr)
+  assert_eq 'actr test binary' "$packaged" 'CLI archive uses Cargo-resolved binary'
 
   if grep -q '^zigbuild build ' "$cargo_args_log"; then
     printf 'cargo zigbuild must not receive cargo build subcommand arguments\n' >&2

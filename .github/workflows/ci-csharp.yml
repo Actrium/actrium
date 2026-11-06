@@ -45,7 +45,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       # The blocking PR gate builds one low-optimization win-x64 fixture, which
       # is enough to exercise NuGet RID resolution and the real native load path.

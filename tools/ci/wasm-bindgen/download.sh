@@ -1,5 +1,5 @@
 #!/bin/sh
-# Shared download handling; only download archives belong in the cache mount.
+# Shared download handling with checksum validation and an optional archive cache.
 
 github_url() {
     if [ -n "${GITHUB_PROXY:-}" ]; then

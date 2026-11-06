@@ -14,13 +14,15 @@ defaults:
 jobs:
   build:
     name: Build & Check
-    runs-on: actrium-linux-light
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
-      - name: Set up light runner
-        uses: ./.github/actions/setup-light-runner
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
       - name: Set up Python
         uses: actions/setup-python@v5

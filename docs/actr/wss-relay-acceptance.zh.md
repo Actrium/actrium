@@ -86,21 +86,21 @@
 
 移植后重新执行并通过：根 workspace 与独立 NAPI 的 locked all-targets check，原生/服务端/relay all-targets clippy，根与浏览器格式检查；服务端/配置/UDP/加密会话/独立启动器 159 项，原生 relay/路径迁移/TURN 轮换 27 项，真实 Opus RTP 回环 1 项，真实 Chromium WASM 68 项，Chromium Service Worker 与重新构建的原生节点加密互通 1 项，JS 25 项及严格 TypeScript 检查。正式 release WASM/JS、CLI 资产同步和真实 Chromium 发布资产加载检查通过。发布依赖顺序、真实版本更新、release modes、asset validation、打包目录两项回归通过，重新生成并检查 35 个归档，确认版本化依赖链、ABI authors 和全部 137 个稳定版 RTC 库源码。独立 Astra 另行复核 main 移植差异，没有未关闭发现；报告为 `main-port-review.md`。上述测试组存在重叠，不能相加为独立用例总数。
 
-在仓库内每条 cargo 命令先注入规范 target 环境，同机串行构建。按本机安装情况提供 `PROTOC`。
+以下命令使用 Cargo 标准配置和环境变量，同机串行构建。需要自定义构建目录时设置 `CARGO_TARGET_DIR`，按本机安装情况提供 `PROTOC`。
 
 ```bash
-eval "$(/usr/local/bin/rust-target-env)" && cargo nextest run --offline -p loran-relay-protocol -p loran-relay
+cargo nextest run --offline -p loran-relay-protocol -p loran-relay
 
-eval "$(/usr/local/bin/rust-target-env)" && cargo nextest run --offline -p actr-protocol -p actr-config -p loran-platform -p loran-stun -p loran-turn -p loran-server --lib --test relay_only --test ice_only --test udp_protocol
+cargo nextest run --offline -p actr-protocol -p actr-config -p loran-platform -p loran-stun -p loran-turn -p loran-server --lib --test relay_only --test ice_only --test udp_protocol
 
-eval "$(/usr/local/bin/rust-target-env)" && cargo nextest run --offline -p actr-hyper --test node_start_smoke --test media_loopback -E 'test(relay_) or test(test_media_rtp_audio_loopback)' --run-ignored all --retries 0
+cargo nextest run --offline -p actr-hyper --test node_start_smoke --test media_loopback -E 'test(relay_) or test(test_media_rtp_audio_loopback)' --run-ignored all --retries 0
 ```
 
 浏览器为独立 workspace，先构建 WASM 测试，再用真实 Chromium 执行：
 
 ```bash
 cd packages/actr-web
-eval "$(/usr/local/bin/rust-target-env)" && cargo test --offline -p actr-sw-host --lib --test relay_interop --target wasm32-unknown-unknown --no-run
+cargo test --offline -p actr-sw-host --lib --test relay_interop --target wasm32-unknown-unknown --no-run
 ```
 
 `tests/e2e/relay-runtime.mjs` 接受生成的测试 `.wasm` 路径；提供与 lockfile 匹配的 `WASM_BINDGEN_TEST_RUNNER` 和浏览器 `TEST_BROWSER_PATH`。`--interop` 还需要 `ACTR_RELAY_FIXTURE` 指向根 workspace 构建的 `error-fixture`；可用 `PLAYWRIGHT_MODULE` 指定已安装的 Playwright。测试自动启动并关闭本地 fixture、HTTP 转发器和浏览器，不连接外部业务服务。
