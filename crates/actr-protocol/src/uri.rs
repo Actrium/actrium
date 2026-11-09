@@ -73,6 +73,19 @@ pub struct ActrUri {
 }
 
 impl ActrUri {
+    /// Parse a Realm link and reject a local Realm owned by another installation.
+    ///
+    /// Opening a Realm link should use this constructor before accessing local
+    /// records, changing state, or starting network discovery.
+    pub fn parse_for_installation(
+        input: &str,
+        installation_id: &str,
+    ) -> Result<Self, ActrUriError> {
+        let uri: Self = input.parse()?;
+        uri.check_local(installation_id)?;
+        Ok(uri)
+    }
+
     /// Construct the domain-only URI `actr://<domain>`.
     pub fn from_domain(domain: &str) -> Result<Self, ActrUriError> {
         Ok(Self {
@@ -131,6 +144,15 @@ impl ActrUri {
     /// Whether the domain is a local Realm pseudo-domain `<installation-id>.actr.alt`.
     pub fn is_local(&self) -> bool {
         self.domain.ends_with(LOCAL_REALM_SUFFIX)
+    }
+
+    /// Whether this address names a Realm instance that can be shared with another installation.
+    ///
+    /// Domain-only addresses and local Realms are not shareable. Local Realms
+    /// remain unshareable before their ownership has been validated with
+    /// [`Self::check_local`].
+    pub fn is_shareable(&self) -> bool {
+        self.realm_id.is_some() && !self.is_local()
     }
 
     /// Reject a local Realm that belongs to another installation.

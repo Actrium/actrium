@@ -16,6 +16,7 @@ pub mod c_api;
 pub mod domain;
 mod ffi;
 pub mod persistence;
+pub mod realm_link;
 pub mod runtime_persistence;
 pub mod speech;
 
