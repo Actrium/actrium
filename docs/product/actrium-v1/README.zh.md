@@ -55,7 +55,7 @@ Tab
 | D-006 | Front workload 由 Actrium 原生提供，Publisher 不能替换 Actr Host；Publisher 只能提供 Keel Guest、资源、声明与 Service workload。 |
 | D-007 | v1 第三方 Front Guest 只开放 Keel JS Guest，并固定使用具备硬超时和堆上限的 QuickJS 后端。 |
 | D-008 | 一个 Actrium Program Release 是一个签名 `.actr` 包：Service workload 是可执行主体，Keel Guest 是受签名保护的包资源。 |
-| D-009 | 链接只指向实例：`actr://<Realm 域名>/<realm_id>`，Realm 域名声明 `links` 时也可写成 https 形式；打开链接只连接该实例，不得失败后偷偷新建。新建实例是 Actrium 内的本地操作，不是链接。 |
+| D-009 | 链接只指向实例，且只使用 `actr://<Realm 域名>/<realm_id>` 形式；打开链接只连接该实例，不得失败后偷偷新建。新建实例是 Actrium 内的本地操作，不是链接。 |
 | D-010 | Publisher 身份是规范化域名，不含端口；Publisher Profile 只用来验证包签名，下载地址不属于 Publisher 身份，可以在任何位置。 |
 | D-011 | Marketplace 是发现、审核与撤销信息源，不是 Publisher 命名权威；域名与包签名才是来源链。 |
 | D-012 | v1 ActorId 必须包含可验证的 Realm 名（`<realm_id>@<domain>`，如 `notes@acme.com`），程序类型不在 ActorId 中；它是公开地址和密码学身份，不是 bearer token，知道地址不等于有权连接。 |

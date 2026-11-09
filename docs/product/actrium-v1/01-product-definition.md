@@ -198,7 +198,7 @@ A controlled node cannot offset another unknown or uncontrolled node; lacking ev
 
 - a complete closed loop on macOS/Windows desktop;
 - a foreground run-and-restore closed loop on iOS/Android;
-- opening and sharing Realm links (including the https form); creating instances from the program library;
+- opening and sharing `actr://` Realm links; creating instances from the program library;
 - the Program Catalog and the Service Inventory;
 - domain-based Publishers, HTTPS download, signature and digest verification;
 - a fixed Native Front Host + Keel JS Guest;

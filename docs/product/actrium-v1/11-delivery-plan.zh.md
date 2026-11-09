@@ -62,7 +62,7 @@ flowchart LR
 
 ### 交付物
 
-- Realm 链接（`actr://` URI）与 `links` 转换的测试向量；
+- `actr://` Realm 链接的测试向量；
 - Publisher Profile schema；
 - Actrium manifest extension schema；
 - Realm 签名 key（authority descriptor 的 `realm_signing_keys` 成员与 core relation `realms`，已在 Actr Authority Discovery §4.3–4.4 定义）与 Realm Profile schema；
