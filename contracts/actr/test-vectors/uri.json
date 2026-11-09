@@ -59,7 +59,7 @@
     },
     {
       "name": "idna_unicode_domain",
-      "input": "actr://例子.中国/k7m2q9xh",
+      "input": "actr://\u4f8b\u5b50.\u4e2d\u56fd/k7m2q9xh",
       "normalized": "actr://xn--fsqu00a.xn--fiqs8s/k7m2q9xh",
       "domain": "xn--fsqu00a.xn--fiqs8s",
       "realm_id": "k7m2q9xh",
@@ -315,7 +315,7 @@
     },
     {
       "name": "raw_unicode_path",
-      "input": "actr://acme.com/k7m2q9xh/中",
+      "input": "actr://acme.com/k7m2q9xh/\u4e2d",
       "code": "URI_LABEL_INVALID"
     },
     {
@@ -325,7 +325,7 @@
     },
     {
       "name": "raw_unicode_fragment",
-      "input": "actr://acme.com/k7m2q9xh#中",
+      "input": "actr://acme.com/k7m2q9xh#\u4e2d",
       "code": "URI_LABEL_INVALID"
     },
     {
