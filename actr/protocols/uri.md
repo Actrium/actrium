@@ -163,6 +163,11 @@ out-of-range serials; they **MUST NOT** rewrite them into valid serials.
 An ActorId contains no program type; the program type is carried by the Actor
 credential. An ActorId itself is not a URI; its URI form is given in Section 2.
 
+Shared Actor URI/ActorId serial boundary vectors are in
+[`actor-uri-serial.json`](../../contracts/actr/test-vectors/actor-uri-serial.json).
+Exact serial values are strings, including the decimal expectations, so JSON
+consumers do not lose precision above JavaScript's safe integer range.
+
 ## 6. Normalization and comparison
 
 1. Lowercase the scheme to `actr`;

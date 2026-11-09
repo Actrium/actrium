@@ -475,46 +475,49 @@ mod tests {
     fn actor_serial_contract_is_consistent() {
         use crate::actr_ext::{ActrIdError, parse_actor_id};
 
-        for (serial, expected) in [
-            ("0", 0),
-            ("2af01", 0x2af01),
-            ("fffffffffffff", 0xfffffffffffff),
-            ("3fffffffffffff", (1 << 54) - 1),
-        ] {
-            let uri = parse(&format!("actr://acme.com/{serial}.k7m2q9xh"));
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/actr/test-vectors/actor-uri-serial.json"
+        ))
+        .expect("valid Actor URI serial vectors");
+
+        for case in vectors["valid"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let input = case["input"].as_str().unwrap();
+            let serial = case["serial"].as_str().unwrap();
+            let expected = case["serial_number"]
+                .as_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap();
+            let uri = parse(input);
+            assert_eq!(uri.to_string(), input, "{name}");
+            assert_eq!(uri.serial(), Some(serial), "{name}");
             let actor_id = uri.actor_id().unwrap();
-            assert_eq!(parse_actor_id(&actor_id).unwrap().1, expected, "{serial}");
+            assert_eq!(actor_id, case["actor_id"].as_str().unwrap(), "{name}");
+            assert_eq!(parse_actor_id(&actor_id).unwrap().1, expected, "{name}");
             let actor = crate::ActrId::from_uri(&uri)
-                .unwrap_or_else(|| panic!("valid Actor URI rejected for serial {serial}"));
-            assert_eq!(actor.serial_number, expected, "{serial}");
-            assert_eq!(actor.to_string_repr(), actor_id, "{serial}");
+                .unwrap_or_else(|| panic!("{name}: valid Actor URI rejected"));
+            assert_eq!(actor.serial_number, expected, "{name}");
+            assert_eq!(actor.to_string_repr(), actor_id, "{name}");
         }
 
-        for serial in [
-            "",
-            "00",
-            "02af01",
-            "2AF01",
-            "2ag01",
-            "40000000000000",
-            "ffffffffffffff",
-            "100000000000000",
-        ] {
-            let uri = format!("actr://acme.com/{serial}.k7m2q9xh");
+        for case in vectors["invalid"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let uri = case["input"].as_str().unwrap();
             let error = uri.parse::<ActrUri>().unwrap_err();
             assert!(
                 matches!(&error, ActrUriError::InvalidLabel(_)),
-                "{uri}: {error:?}"
+                "{name}: {error:?}"
             );
-            assert_eq!(error.code(), "URI_LABEL_INVALID", "{uri}");
+            assert_eq!(error.code(), case["code"].as_str().unwrap(), "{name}");
 
-            let actor_id = format!("{serial}.k7m2q9xh@acme.com");
+            let actor_id = case["actor_id"].as_str().unwrap();
             assert!(
                 matches!(
-                    parse_actor_id(&actor_id),
+                    parse_actor_id(actor_id),
                     Err(ActrIdError::InvalidComponent(_))
                 ),
-                "{actor_id}"
+                "{name}: {actor_id}"
             );
         }
     }

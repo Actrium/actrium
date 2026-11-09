@@ -129,6 +129,11 @@ non-zero-hex    = %x31-39 / %x61-66          ; 1-9 或 a-f
 ActorId 不含程序类型，程序类型由 Actor credential 携带。ActorId 本身不是 URI，其 URI
 形式见第 2 节。
 
+Actor URI/ActorId serial 边界的共享测试向量见
+[`actor-uri-serial.json`](../../contracts/actr/test-vectors/actor-uri-serial.json)。
+serial 精确值（包括十进制预期值）均使用字符串，避免 JSON 消费方在超出 JavaScript
+安全整数范围时丢失精度。
+
 ## 6. 规范化与比较
 
 1. scheme 小写为 `actr`；
