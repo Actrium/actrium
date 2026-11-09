@@ -253,7 +253,9 @@ impl FromStr for ActrUri {
             Some((serial, realm_id)) => (Some(serial), realm_id),
             None => (None, target.as_str()),
         };
-        if serial.is_some_and(|serial| !is_serial(serial)) || !is_realm_id(realm_id) {
+        if serial.is_some_and(|serial| parse_actor_serial(serial).is_none())
+            || !is_realm_id(realm_id)
+        {
             return Err(ActrUriError::InvalidLabel(target));
         }
         uri.serial = serial.map(str::to_string);
@@ -340,12 +342,26 @@ pub fn is_realm_id(value: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// Serial: one or more lowercase hexadecimal digits.
-fn is_serial(value: &str) -> bool {
-    !value.is_empty()
-        && value
+/// Largest Actor serial: serials are at most 54 bits.
+const MAX_ACTOR_SERIAL: u64 = (1 << 54) - 1;
+
+/// Parse an Actor serial in its canonical text form.
+///
+/// A serial is `0` or lowercase hexadecimal without leading zeros, and its
+/// value must be at most `2^54 - 1` (`3fffffffffffff`).
+pub(crate) fn parse_actor_serial(value: &str) -> Option<u64> {
+    if value.is_empty()
+        || value.len() > 14
+        || (value != "0" && value.starts_with('0'))
+        || !value
             .bytes()
             .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return None;
+    }
+    u64::from_str_radix(value, 16)
+        .ok()
+        .filter(|serial| *serial <= MAX_ACTOR_SERIAL)
 }
 
 /// A `links` prefix starts and ends with `/` and has at least one segment.
@@ -453,6 +469,54 @@ mod tests {
         assert_eq!(uri.realm_name().as_deref(), Some("k7m2q9xh@acme.com"));
         assert_eq!(uri.actor_id().as_deref(), Some("2af01.k7m2q9xh@acme.com"));
         assert_eq!(uri.to_string(), "actr://acme.com/2af01.k7m2q9xh");
+    }
+
+    #[test]
+    fn actor_serial_contract_is_consistent() {
+        use crate::actr_ext::{ActrIdError, parse_actor_id};
+
+        for (serial, expected) in [
+            ("0", 0),
+            ("2af01", 0x2af01),
+            ("fffffffffffff", 0xfffffffffffff),
+            ("3fffffffffffff", (1 << 54) - 1),
+        ] {
+            let uri = parse(&format!("actr://acme.com/{serial}.k7m2q9xh"));
+            let actor_id = uri.actor_id().unwrap();
+            assert_eq!(parse_actor_id(&actor_id).unwrap().1, expected, "{serial}");
+            let actor = crate::ActrId::from_uri(&uri)
+                .unwrap_or_else(|| panic!("valid Actor URI rejected for serial {serial}"));
+            assert_eq!(actor.serial_number, expected, "{serial}");
+            assert_eq!(actor.to_string_repr(), actor_id, "{serial}");
+        }
+
+        for serial in [
+            "",
+            "00",
+            "02af01",
+            "2AF01",
+            "2ag01",
+            "40000000000000",
+            "ffffffffffffff",
+            "100000000000000",
+        ] {
+            let uri = format!("actr://acme.com/{serial}.k7m2q9xh");
+            let error = uri.parse::<ActrUri>().unwrap_err();
+            assert!(
+                matches!(&error, ActrUriError::InvalidLabel(_)),
+                "{uri}: {error:?}"
+            );
+            assert_eq!(error.code(), "URI_LABEL_INVALID", "{uri}");
+
+            let actor_id = format!("{serial}.k7m2q9xh@acme.com");
+            assert!(
+                matches!(
+                    parse_actor_id(&actor_id),
+                    Err(ActrIdError::InvalidComponent(_))
+                ),
+                "{actor_id}"
+            );
+        }
     }
 
     #[test]
