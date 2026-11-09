@@ -144,6 +144,8 @@ serial 精确值（包括十进制预期值）均使用字符串，避免 JSON �
 6. 只有 `domain` 时省略尾部 `/`。
 
 规范化后逐字节相同的两个 URI 等价。RealmId 之后的 path、query 与 fragment 区分大小写。
+解析与规范化的共享测试向量见
+[`contracts/actr/test-vectors/uri.json`](../../contracts/actr/test-vectors/uri.json)。
 
 ## 7. 旧格式
 
@@ -183,5 +185,5 @@ References: this document
 
 ## 11. 待完成工作
 
-- 增加解析、规范化与 https 转换的测试向量；
+- 增加 https 转换的测试向量；
 - 确立 IANA 登记使用的长期公开规范地址和项目联系人。
