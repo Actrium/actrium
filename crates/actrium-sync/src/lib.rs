@@ -573,7 +573,6 @@ impl BrowserSyncServerDatabase {
         let mut statement = self.connection.prepare(sql)?;
         let names = statement
             .column_names()
-            .into_iter()
             .map(ToOwned::to_owned)
             .collect::<Vec<_>>();
         let rows = statement

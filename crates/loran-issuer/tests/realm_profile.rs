@@ -49,22 +49,19 @@ async fn setup() -> (Arc<RealmProfiles>, TempDir) {
     }
     let dir = TempDir::new().unwrap();
     let pool = platform::storage::db::get_database().get_pool();
-    for table in [
-        "actoracl",
-        "realm_issuer_key",
-        "realm_profile",
-        "realm_domain",
-        "realm_mgmt_nonce",
-        "realm",
-        "publisher_key_history",
-        "publisher_package",
-        "publisher_publish_nonce",
-        "publisher",
+    for statement in [
+        "DELETE FROM actoracl",
+        "DELETE FROM realm_issuer_key",
+        "DELETE FROM realm_profile",
+        "DELETE FROM realm_domain",
+        "DELETE FROM realm_mgmt_nonce",
+        "DELETE FROM realm",
+        "DELETE FROM publisher_key_history",
+        "DELETE FROM publisher_package",
+        "DELETE FROM publisher_publish_nonce",
+        "DELETE FROM publisher",
     ] {
-        sqlx::query(&format!("DELETE FROM {table}"))
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(statement).execute(pool).await.unwrap();
     }
 
     let shared_key = "test-shared-key";
