@@ -150,42 +150,6 @@ impl ActrUri {
     pub fn discovery_url(&self) -> Option<String> {
         (!self.is_local()).then(|| format!("https://{}/.well-known/actr", self.domain))
     }
-
-    /// https form of a Realm link under a declared `links` prefix.
-    ///
-    /// Returns `None` for a local Realm, a domain-only URI, or an invalid prefix.
-    pub fn to_https(&self, prefix: &str) -> Option<String> {
-        if self.is_local() || self.realm_id.is_none() || !is_link_prefix(prefix) {
-            return None;
-        }
-        let uri = self.to_string();
-        let rest = &uri["actr://".len() + self.domain.len() + 1..];
-        Some(format!("https://{}{prefix}{rest}", self.domain))
-    }
-
-    /// Convert an https address to a Realm link using the domain's declared
-    /// `links` prefixes, longest prefix first.
-    ///
-    /// Returns `None` when no prefix matches or the result is not a Realm link;
-    /// such an address is an ordinary web page.
-    pub fn from_https(url: &str, links: &[String]) -> Option<Self> {
-        let (scheme, rest) = url.split_once("://")?;
-        if !scheme.eq_ignore_ascii_case("https") {
-            return None;
-        }
-        let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-        let (host, rest) = rest.split_at(end);
-        let path_end = rest.find(['?', '#']).unwrap_or(rest.len());
-        let (path, suffix) = rest.split_at(path_end);
-        let prefix = links
-            .iter()
-            .filter(|prefix| is_link_prefix(prefix) && path.starts_with(prefix.as_str()))
-            .max_by_key(|prefix| prefix.len())?;
-        let uri = format!("actr://{host}/{}{suffix}", &path[prefix.len()..])
-            .parse::<Self>()
-            .ok()?;
-        (uri.realm_id.is_some() && !uri.is_local()).then_some(uri)
-    }
 }
 
 impl Display for ActrUri {
@@ -562,54 +526,11 @@ mod tests {
         let uri = parse(&format!("actr://{id}.actr.alt/h3x8p2wq"));
         assert!(uri.is_local());
         assert_eq!(uri.discovery_url(), None);
-        assert_eq!(uri.to_https("/i/"), None);
         uri.check_local(id).unwrap();
         let error = uri.check_local("bcdefghijklmnopqrstuvwxyza").unwrap_err();
         assert_eq!(error.code(), "URI_LOCAL_REALM_FOREIGN");
         assert!(!parse("actr://acme.com/k7m2q9xh").is_local());
         parse("actr://acme.com/k7m2q9xh").check_local(id).unwrap();
-    }
-
-    #[test]
-    fn https_form_uses_declared_prefix() {
-        let links = vec!["/i/".to_string()];
-        let uri = ActrUri::from_https("https://acme.com/i/k7m2q9xh/today?view=week", &links);
-        assert_eq!(
-            uri.as_ref().map(ToString::to_string).as_deref(),
-            Some("actr://acme.com/k7m2q9xh/today?view=week")
-        );
-        assert_eq!(
-            uri.unwrap().to_https("/i/").as_deref(),
-            Some("https://acme.com/i/k7m2q9xh/today?view=week")
-        );
-    }
-
-    #[test]
-    fn https_form_prefers_longest_prefix() {
-        let links = vec!["/i/".to_string(), "/i/x/".to_string()];
-        let uri = ActrUri::from_https("https://acme.com/i/x/k7m2q9xh", &links).unwrap();
-        assert_eq!(uri.to_string(), "actr://acme.com/k7m2q9xh");
-    }
-
-    #[test]
-    fn undeclared_https_is_an_ordinary_page() {
-        let links = vec!["/i/".to_string()];
-        for url in [
-            "https://acme.com/k7m2q9xh",
-            "https://acme.com/i/",
-            "https://acme.com/i/Bad_Id",
-            "https://acme.com:8443/i/k7m2q9xh",
-            "http://acme.com/i/k7m2q9xh",
-            "https://abcdefghijklmnopqrstuvwxyz.actr.alt/i/h3x8p2wq",
-        ] {
-            assert_eq!(ActrUri::from_https(url, &links), None, "{url}");
-        }
-        assert_eq!(
-            ActrUri::from_https("https://acme.com/i/k7m2q9xh", &[]),
-            None
-        );
-        assert_eq!(parse("actr://acme.com").to_https("/i/"), None);
-        assert_eq!(parse("actr://acme.com/k7m2q9xh").to_https("/"), None);
     }
 
     #[test]

@@ -9,7 +9,6 @@
 ```text
 actr://acme.com/k7m2q9xh                         ; 打开实例 k7m2q9xh@acme.com
 actr://acme.com/notes/today?filter=assigned      ; 显式可读 RealmId，带页面路径与 query
-https://acme.com/i/k7m2q9xh                      ; https 形式，acme.com 声明了 links: ["/i/"]
 actr://acme.com/2af01.k7m2q9xh                   ; 实例里的某个 Actor（ActorId 2af01.k7m2q9xh@acme.com）
 actr://<installation-id>.actr.alt/h3x8p2wq       ; 本机 Realm，不可分享
 ```
@@ -348,7 +347,7 @@ https://acme.com/.well-known/actr
 }
 ```
 
-`realm_signing_keys.keys` 是该域名下所有 Realm 的长期信任根；`rotations` 中每一项由 `from` key 对 `{from, to, public_key, sequence}` 的 JCS 形式签名，`sequence` 为引入该轮换时的成员 `sequence`；从 `keys` 移除某个 key 即吊销它签过的全部 Realm Profile；`realm_signing_keys.signature` 由某个 `active` key 对去掉 `signature` 后的该成员 JCS 规范化结果签名，覆盖 `sequence`。descriptor 其余部分不签名，也不列出 Realm 清单。`links` 声明 `https://acme.com/i/<realm_id>…` 是 Realm 链接的 https 形式（Actr Authority Discovery §4.6），前缀由域名自选，没有默认值。`services` 中的 signaling、ice-config 等服务于该 authority 自身，与该域名下的 Realm 无关；访问 Realm 只使用其 Realm Profile 指定的 Realm Infra Provider，Realm Profile 不可用、无效或退役时不得使用任何其他 Realm Infra Provider。Realm Infra Provider 自身的 descriptor（`https://provider.example/.well-known/actr`）另以 `realm-management` link（protocol `actr-realm-management/1`）公布管理请求端点。
+`realm_signing_keys.keys` 是该域名下所有 Realm 的长期信任根；`rotations` 中每一项由 `from` key 对 `{from, to, public_key, sequence}` 的 JCS 形式签名，`sequence` 为引入该轮换时的成员 `sequence`；从 `keys` 移除某个 key 即吊销它签过的全部 Realm Profile；`realm_signing_keys.signature` 由某个 `active` key 对去掉 `signature` 后的该成员 JCS 规范化结果签名，覆盖 `sequence`。descriptor 其余部分不签名，也不列出 Realm 清单。`links` 作为 descriptor 元数据保留（Actr Authority Discovery §4.6），但 Actrium 不通过它解析或分享 Realm 链接；Realm 链接的输入与分享只使用 `actr://`。`services` 中的 signaling、ice-config 等服务于该 authority 自身，与该域名下的 Realm 无关；访问 Realm 只使用其 Realm Profile 指定的 Realm Infra Provider，Realm Profile 不可用、无效或退役时不得使用任何其他 Realm Infra Provider。Realm Infra Provider 自身的 descriptor（`https://provider.example/.well-known/actr`）另以 `realm-management` link（protocol `actr-realm-management/1`）公布管理请求端点。
 
 ### 6.2 Realm Profile
 
