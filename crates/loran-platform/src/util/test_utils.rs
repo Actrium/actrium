@@ -53,28 +53,26 @@ pub mod utils {
         // while the `serial` test guard is held by callers.
         let pool = crate::storage::db::get_database().get_pool();
         let mut transaction = pool.begin().await?;
-        for table in [
-            "actoracl",
-            "pending_registration",
-            "issued_actor_identity",
-            "issuer_renewal_token",
-            "issuer_control_attempt",
-            "publisher_publish_nonce",
-            "publisher_key_history",
-            "publisher_package",
-            "publisher",
-            "realm_issuer_key",
-            "realm_profile",
-            "realm_domain",
-            "realm_mgmt_nonce",
-            "realm_invite",
-            "realm_client_key",
-            "realm_member",
-            "realm",
+        for statement in [
+            "DELETE FROM actoracl",
+            "DELETE FROM pending_registration",
+            "DELETE FROM issued_actor_identity",
+            "DELETE FROM issuer_renewal_token",
+            "DELETE FROM issuer_control_attempt",
+            "DELETE FROM publisher_publish_nonce",
+            "DELETE FROM publisher_key_history",
+            "DELETE FROM publisher_package",
+            "DELETE FROM publisher",
+            "DELETE FROM realm_issuer_key",
+            "DELETE FROM realm_profile",
+            "DELETE FROM realm_domain",
+            "DELETE FROM realm_mgmt_nonce",
+            "DELETE FROM realm_invite",
+            "DELETE FROM realm_client_key",
+            "DELETE FROM realm_member",
+            "DELETE FROM realm",
         ] {
-            sqlx::query(&format!("DELETE FROM {table}"))
-                .execute(&mut *transaction)
-                .await?;
+            sqlx::query(statement).execute(&mut *transaction).await?;
         }
         sqlx::query("DELETE FROM sqlite_sequence")
             .execute(&mut *transaction)

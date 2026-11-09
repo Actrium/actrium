@@ -557,7 +557,9 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(&format!("PRAGMA user_version = {LORAN_SCHEMA_VERSION}"))
+        sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA user_version = ")
+            .push(LORAN_SCHEMA_VERSION)
+            .build()
             .execute(&mut *tx)
             .await?;
 
@@ -572,7 +574,7 @@ impl Database {
     }
 
     /// Execute an SQL statement and return the number of affected rows
-    pub async fn execute(&self, sql: &str) -> Result<u64> {
+    pub async fn execute(&self, sql: impl sqlx::SqlSafeStr) -> Result<u64> {
         let result = sqlx::query(sql).execute(&self.pool).await?;
         Ok(result.rows_affected())
     }
@@ -743,13 +745,12 @@ mod tests {
     async fn previous_schema_version_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::new(dir.path()).await.unwrap();
-        sqlx::query(&format!(
-            "PRAGMA user_version = {}",
-            LORAN_SCHEMA_VERSION - 1
-        ))
-        .execute(db.get_pool())
-        .await
-        .unwrap();
+        sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA user_version = ")
+            .push(LORAN_SCHEMA_VERSION - 1)
+            .build()
+            .execute(db.get_pool())
+            .await
+            .unwrap();
         db.get_pool().close().await;
 
         let error = Database::new(dir.path())

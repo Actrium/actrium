@@ -365,15 +365,12 @@ impl Publisher {
     /// nothing.
     pub async fn delete(pool: &SqlitePool, id: i64) -> Result<(), PublisherRegistryError> {
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-        for table in [
-            "publisher_key_history",
-            "publisher_package",
-            "publisher_publish_nonce",
+        for statement in [
+            "DELETE FROM publisher_key_history WHERE publisher_id = ?",
+            "DELETE FROM publisher_package WHERE publisher_id = ?",
+            "DELETE FROM publisher_publish_nonce WHERE publisher_id = ?",
         ] {
-            sqlx::query(&format!("DELETE FROM {table} WHERE publisher_id = ?"))
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(statement).bind(id).execute(&mut *tx).await?;
         }
         sqlx::query("DELETE FROM publisher WHERE id = ?")
             .bind(id)

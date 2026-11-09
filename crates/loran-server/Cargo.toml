@@ -96,7 +96,7 @@ lazy_static = "1.4"
 jsonwebtoken = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
 argon2 = "0.5"
 mime_guess = { version = "2", optional = true }
-sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
+sqlx.workspace = true
 
 # OpenTelemetry dependencies (optional, enabled by feature)
 opentelemetry = { version = "0.32.0", features = ["trace", "logs"], optional = true }
