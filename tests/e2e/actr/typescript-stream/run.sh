@@ -219,6 +219,7 @@ import {
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
+const activeStreams = new Map();
 
 function toUint8Array(payload: ArrayBuffer | ArrayLike<number>): Uint8Array {
   if (payload instanceof Uint8Array) {
@@ -250,25 +251,33 @@ class EchoServiceHandlerImpl implements ActrDispatchHandler {
       `typescript echo: prepare ${inboundStreamId} -> ${replyStreamId}`,
     );
 
-    await ctx.registerStream(
-      inboundStreamId,
-      async (chunk, sender, streamCtx) => {
-        const incoming = textDecoder.decode(toUint8Array(chunk.payload));
-        console.log(`typescript echo: stream ${inboundStreamId} ${incoming}`);
-        await streamCtx.sendDataChunk(
-          { peer: sender },
-          {
+    const stream = await ctx.dataChunks(inboundStreamId);
+    activeStreams.set(inboundStreamId, stream);
+    void (async () => {
+      try {
+        for await (const event of stream) {
+          const incoming = textDecoder.decode(toUint8Array(event.chunk.payload));
+          console.log(`typescript echo: stream ${inboundStreamId} ${incoming}`);
+          const sink = await ctx.dataChunkSink(
+            { peer: event.sender },
+            replyStreamId,
+            PayloadType.StreamReliable,
+          );
+          await sink.send({
             streamId: replyStreamId,
-            sequence: BigInt(chunk.sequence) + 1n,
+            sequence: BigInt(event.chunk.sequence) + 1n,
             payload: textEncoder.encode(`${replyMessage}: ${incoming}`),
             metadata: [{ key: 'echo-runtime', value: 'typescript-wasm' }],
             timestampMs: BigInt(Date.now()),
-          },
-          PayloadType.StreamReliable,
-        );
-        await streamCtx.unregisterStream(inboundStreamId);
-      },
-    );
+          });
+          await sink.close();
+          break;
+        }
+      } finally {
+        activeStreams.delete(inboundStreamId);
+        await stream.close();
+      }
+    })();
 
     return create(StreamPrepareResponseSchema, {
       status: `registered:${inboundStreamId}`,
@@ -280,7 +289,9 @@ class EchoServiceHandlerImpl implements ActrDispatchHandler {
     ctx: ActrContext,
   ): Promise<StreamReleaseResponse> {
     console.log(`typescript echo: release ${request.streamId}`);
-    await ctx.unregisterStream(request.streamId);
+    const stream = activeStreams.get(request.streamId);
+    activeStreams.delete(request.streamId);
+    await stream?.close();
     return create(StreamReleaseResponseSchema, {
       status: `unregistered:${request.streamId}`,
     });
@@ -678,26 +689,29 @@ async fn start_stream_round_trip<C: Context>(
     let inbound_stream_id = format!("demo1-{label}-to-echo");
     let reply_stream_id = format!("demo1-{label}-to-relay");
     let label = label.to_string();
-    let callback_ctx = ctx.clone();
     let callback_label = label.clone();
-    let callback_reply_stream_id = reply_stream_id.clone();
 
-    ctx.register_stream(reply_stream_id.clone(), move |chunk, _sender| {
-        let label = callback_label.clone();
-        let reply_stream_id = callback_reply_stream_id.clone();
-        let ctx = callback_ctx.clone();
-        Box::pin(async move {
-            let payload = String::from_utf8(chunk.payload.to_vec()).map_err(|err| {
-                ActrError::DecodeFailure(format!("stream payload is not utf-8: {err}"))
-            })?;
-            stream_results()
-                .lock()
-                .map_err(|_| ActrError::Internal("stream result mutex poisoned".to_string()))?
-                .insert(label, payload);
-            ctx.unregister_stream(&reply_stream_id).await
-        })
-    })
-    .await?;
+    let mut incoming = ctx
+        .data_chunks(reply_stream_id.clone(), Default::default())
+        .await?;
+    tokio::spawn(async move {
+        use futures_util::StreamExt;
+        if let Some(event) = incoming.next().await {
+            let payload = match event {
+                Ok(event) => String::from_utf8(event.chunk.payload.to_vec()).map_err(|err| {
+                    ActrError::DecodeFailure(format!("stream payload is not utf-8: {err}"))
+                }),
+                Err(err) => Err(err),
+            };
+            if let Ok(payload) = payload {
+                let _ = stream_results()
+                    .lock()
+                    .map_err(|_| ActrError::Internal("stream result mutex poisoned".to_string()))
+                    .map(|mut results| results.insert(callback_label, payload));
+            }
+        }
+        incoming.close().await;
+    });
 
     let prepare: StreamPrepareResponse = ctx
         .call(
@@ -717,21 +731,27 @@ async fn start_stream_round_trip<C: Context>(
         )));
     }
 
-    ctx.send_data_chunk(
-        &Dest::Peer(echo_actor),
-        DataChunk {
-            stream_id: inbound_stream_id,
-            sequence: 1,
-            payload: Bytes::from(outbound_message.to_string()),
-            metadata: vec![MetadataEntry {
-                key: "relay-lane".to_string(),
-                value: label,
-            }],
-            timestamp_ms: Some(now_millis()),
-        },
-        payload_type,
-    )
+    use futures_util::SinkExt;
+    let mut sink = ctx
+        .data_chunk_sink(
+            &Dest::Peer(echo_actor),
+            inbound_stream_id.clone(),
+            payload_type,
+        )
+        .await?;
+    sink.send(DataChunk {
+        stream_id: inbound_stream_id,
+        sequence: 1,
+        payload: Bytes::from(outbound_message.to_string()),
+        metadata: vec![MetadataEntry {
+            key: "relay-lane".to_string(),
+            value: label,
+        }],
+        timestamp_ms: Some(now_millis()),
+        end_of_stream: None,
+    })
     .await?;
+    sink.close().await?;
     Ok(())
 }
 
@@ -781,6 +801,7 @@ actr-framework = "=$ACTR_CRATE_VERSION"
 actr-protocol = "=$ACTR_CRATE_VERSION"
 async-trait = "0.1"
 bytes = "1"
+futures-util = { version = "0.3", features = ["sink"] }
 prost = "0.14"
 prost-types = "0.14"
 

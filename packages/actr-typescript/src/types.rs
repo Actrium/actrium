@@ -116,6 +116,10 @@ pub struct DataChunk {
     pub metadata: Vec<MetadataEntry>,
     #[napi(js_name = "timestampMs")]
     pub timestamp_ms: Option<i64>,
+    /// Graceful stream-end marker: sent by the sink on close; the receiving
+    /// stream yields everything before it, then ends. Never surfaced as data.
+    #[napi(js_name = "endOfStream")]
+    pub end_of_stream: Option<bool>,
 }
 
 #[napi(object)]
@@ -139,6 +143,7 @@ impl From<actr_protocol::DataChunk> for DataChunk {
                 })
                 .collect(),
             timestamp_ms: stream.timestamp_ms,
+            end_of_stream: stream.end_of_stream,
         }
     }
 }
@@ -158,6 +163,7 @@ impl From<DataChunk> for actr_protocol::DataChunk {
                 })
                 .collect(),
             timestamp_ms: stream.timestamp_ms,
+            end_of_stream: stream.end_of_stream,
         }
     }
 }

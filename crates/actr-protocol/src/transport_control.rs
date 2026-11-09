@@ -30,6 +30,7 @@ pub fn barrier(nonce: &str) -> DataChunk {
         payload: MAGIC.to_vec().into(),
         metadata: Vec::new(),
         timestamp_ms: None,
+        end_of_stream: None,
     }
 }
 

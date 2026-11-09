@@ -1216,17 +1216,19 @@ async fn relay_only_rpc_streams_and_warm_reconnection_need_no_peer_listener() {
     let ctx_a = a.app_context().await;
     let ctx_b = b.app_context().await;
     let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
-    for ctx in [&ctx_a, &ctx_b] {
+    for ctx in [ctx_a.clone(), ctx_b.clone()] {
         let chunks = chunks.clone();
-        ctx.register_stream("relay-stream".into(), move |chunk, peer| {
-            let chunks = chunks.clone();
-            Box::pin(async move {
-                chunks.send((chunk, peer)).unwrap();
-                Ok(())
-            })
-        })
-        .await
-        .unwrap();
+        let mut stream = ctx
+            .data_chunks("relay-stream".into(), Default::default())
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            use futures_util::StreamExt as _;
+            while let Some(event) = stream.next().await {
+                let event = event.unwrap();
+                chunks.send((event.chunk, event.sender)).unwrap();
+            }
+        });
     }
     for (ctx, target, source) in [
         (&ctx_a, b.actor_id(), a.actor_id()),
@@ -1237,18 +1239,22 @@ async fn relay_only_rpc_streams_and_warm_reconnection_need_no_peer_listener() {
             (2, PayloadType::StreamLatencyFirst),
         ] {
             let payload = Bytes::from(vec![sequence as u8; 64 * 1024]);
-            ctx.send_data_chunk(
-                &Dest::Peer(target.clone()),
+            let mut sink = ctx
+                .data_chunk_sink(&Dest::Peer(target.clone()), "relay-stream".into(), lane)
+                .await
+                .unwrap();
+            futures_util::SinkExt::send(
+                &mut sink,
                 actr_protocol::DataChunk {
                     stream_id: "relay-stream".into(),
                     sequence,
                     payload: payload.clone(),
                     ..Default::default()
                 },
-                lane,
             )
             .await
             .unwrap();
+            let _ = sink.abort().await;
             let (chunk, sender) = tokio::time::timeout(wait, received.recv())
                 .await
                 .unwrap()
@@ -1366,26 +1372,35 @@ async fn relay_upgrades_to_real_direct_rtc_with_ordered_streams_and_survives_rel
     assert!(server.relay_frame_count() > before);
     let ctx = a.app_context().await;
     let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
-    b.app_context()
+    let mut upgrade_stream = b
+        .app_context()
         .await
-        .register_stream("upgrade-stream".into(), move |chunk, _| {
-            let chunks = chunks.clone();
-            Box::pin(async move {
-                chunks.send(chunk.sequence).unwrap();
-                Ok(())
-            })
-        })
+        .data_chunks("upgrade-stream".into(), Default::default())
         .await
         .unwrap();
-    ctx.send_data_chunk(
-        &Dest::Peer(b.actor_id()),
+    tokio::spawn(async move {
+        use futures_util::StreamExt as _;
+        while let Some(event) = upgrade_stream.next().await {
+            let Ok(event) = event else { break };
+            chunks.send(event.chunk.sequence).unwrap();
+        }
+    });
+    let mut upgrade_sink = ctx
+        .data_chunk_sink(
+            &Dest::Peer(b.actor_id()),
+            "upgrade-stream".into(),
+            PayloadType::StreamReliable,
+        )
+        .await
+        .unwrap();
+    futures_util::SinkExt::send(
+        &mut upgrade_sink,
         actr_protocol::DataChunk {
             stream_id: "upgrade-stream".into(),
             sequence: 0,
             payload: Bytes::from_static(b"old relay route"),
             ..Default::default()
         },
-        PayloadType::StreamReliable,
     )
     .await
     .unwrap();
@@ -1405,19 +1420,19 @@ async fn relay_upgrades_to_real_direct_rtc_with_ordered_streams_and_survives_rel
     .await
     .expect("both real RTC selected pairs become direct");
     for sequence in 1..32 {
-        ctx.send_data_chunk(
-            &Dest::Peer(b.actor_id()),
+        futures_util::SinkExt::send(
+            &mut upgrade_sink,
             actr_protocol::DataChunk {
                 stream_id: "upgrade-stream".into(),
                 sequence,
                 payload: Bytes::from(vec![sequence as u8; 64 * 1024]),
                 ..Default::default()
             },
-            PayloadType::StreamReliable,
         )
         .await
         .unwrap();
     }
+    let _ = upgrade_sink.abort().await;
     for sequence in 0..32 {
         assert_eq!(
             tokio::time::timeout(deadline, received.recv())

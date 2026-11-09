@@ -18,6 +18,7 @@ actr-framework.workspace = true
 actr-hyper.workspace = true
 actr-config.workspace = true
 tokio = { workspace = true }
+tokio-util = { version = "0.7", features = ["rt"] }
 inventory = "0.3"
 bytes = { workspace = true }
 async-trait = { workspace = true }

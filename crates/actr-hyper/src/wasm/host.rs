@@ -135,6 +135,12 @@ pub(crate) struct HostState {
     /// Reset to one whenever the map is cleared on a trap-poison so a rebuilt
     /// instance starts from a clean sheet.
     next_token: u64,
+    /// The most recently allocated invocation's ABI, used as the routing
+    /// fallback for actor-global stream sends (`send-data-chunk`) whose
+    /// captured ctx token has been retired. Detached guest consumers outlive
+    /// their creating invocation; a stream chunk carries no invocation-scoped
+    /// reply state, so routing by instance identity is sound.
+    standing_host_abi: Option<HostAbiFn>,
     /// issue #346: per-store resource limits (memory/table/instance caps).
     /// Installed via `Store::limiter` so `memory.grow`/`table.grow` over the
     /// bound trap (or return an error, per `trap_on_grow_failure`).
@@ -190,6 +196,7 @@ impl HostState {
             stream_context_tokens: HashMap::new(),
             stream_token_aliases: HashMap::new(),
             next_token: 1,
+            standing_host_abi: None,
             limits: StoreResourceLimiter::new(limits),
         }
     }
@@ -226,6 +233,9 @@ impl HostState {
                 .as_ref()
                 .map(|_| Arc::new(AtomicBool::new(false)))
         });
+        // Latest-allocated wins: actor-global stream sends that arrive with a
+        // retired token fall back to this ABI (see `stream_host_abi`).
+        self.standing_host_abi = Some(host_abi.clone());
         self.invocations.insert(
             token,
             InvocationEntry {
@@ -256,6 +266,22 @@ impl HostState {
         self.invocations
             .get(&token)
             .map(|e| Arc::clone(&e.host_abi))
+    }
+
+    /// Resolve the ABI for an actor-global stream import (`send-data-chunk`,
+    /// `register-stream`, `unregister-stream`).
+    /// Falls back to the most recently allocated invocation's ABI when the
+    /// presented token has no live entry: a sink captured by a detached guest
+    /// consumer outlives its creating invocation, and a chunk send carries no
+    /// invocation-scoped reply state, so routing by instance identity is
+    /// sound. Register/unregister are likewise actor-global — the forwarder
+    /// table they mutate is node-scoped — so a guest closing or subscribing
+    /// from a detached/resident task may present its captured (retired)
+    /// token. Request-scoped imports (call/tell/reply/discover) stay
+    /// fail-closed on unknown tokens.
+    pub(crate) fn stream_host_abi(&self, token: u64) -> Option<HostAbiFn> {
+        self.invocation_host_abi(token)
+            .or_else(|| self.standing_host_abi.clone())
     }
 
     pub(crate) fn invocation_exists(&self, token: u64) -> bool {
@@ -590,12 +616,12 @@ impl WasmHost {
     /// Probes the component's exported world and rejects anything that is not
     /// the sole supported `actr:workload@0.8.0` async world, then instantiates
     /// it on the `run_concurrent` async path via [`WasmWorkloadV2::instantiate`].
-    /// Retired `@0.1.0` through `@0.5.0` packages (or an unrecognised world)
+    /// Retired `@0.1.0` through `@0.7.0` packages (or an unrecognised world)
     /// are rejected with an actionable rebuild hint rather than loaded.
     ///
     /// Builds a fresh [`Linker`] per instance (cheap) inside the V2
     /// instantiation helper, registers WASI p2 as well as the generated
-    /// `actr:workload/host@0.6.0` linker, and runs `Component::instantiate_async`.
+    /// `actr:workload/host@0.8.0` linker, and runs `Component::instantiate_async`.
     pub(crate) async fn instantiate(&self) -> WasmResult<WasmWorkloadV2> {
         let store_permit = acquire_store(&self.limits)?;
         probe_world(&self.component, &self.engine)?;
@@ -621,10 +647,11 @@ impl WasmHost {
 /// so it reflects what the binary actually exports.
 ///
 /// A component exporting a retired world (`@0.1.0` synchronous, the
-/// `@0.2.0`/`@0.3.0` async worlds, the pre-state-hook `@0.4.0`, or the
-/// pre-EXPLICIT-reply `@0.5.0`) — or no recognised world at all — is rejected
-/// with an actionable rebuild hint. Older packages must be rebuilt with the
-/// current SDK, which emits only the 0.8.0 async-world ABI.
+/// `@0.2.0`/`@0.3.0` async worlds, the pre-state-hook `@0.4.0`, the
+/// pre-EXPLICIT-reply `@0.5.0`, or the pre-end-of-stream `@0.7.0`) — or no
+/// recognised world at all — is rejected with an actionable rebuild hint.
+/// Older packages must be rebuilt with the current SDK, which emits only the
+/// 0.8.0 async-world ABI.
 fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
     let mut saw_v08 = false;
     let mut saw_v07 = false;
@@ -674,7 +701,11 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
     }
     if saw_v07 {
         return Err(WasmError::LoadFailed(
-            "component exports the retired actr:workload@0.7.0 world with the old Actor identity record; rebuild the package with the current SDK, which emits actr:workload@0.8.0".to_string(),
+            "component exports the retired actr:workload@0.7.0 world, whose Actor identity \
+             record and data-chunk record (no end-of-stream marker) predate this \
+             contract; rebuild the package with the current SDK, which emits \
+             actr:workload@0.8.0"
+                .to_string(),
         ));
     }
     if saw_v5 {

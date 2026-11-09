@@ -56,6 +56,13 @@ open class SimpleWorkload(
     /** Channel for sending DataChunk requests from UI to workload. */
     private val dataChunkChannel = Channel<DataChunkRequest>(Channel.UNLIMITED)
 
+    /** Consumer of [dataChunkChannel]; cancelled in [onStop] so a post-stop
+     * [sendDataChunk] cannot recreate a sink that nothing will close. */
+    private val dispatchJob = AtomicReference<kotlinx.coroutines.Job?>(null)
+
+    /** Set between [onStop] and the next [onStart]; sends are dropped then. */
+    private val stopped = java.util.concurrent.atomic.AtomicBoolean(false)
+
     /** Data class for DataChunk requests. */
     data class DataChunkRequest(
         val target: ActrId,
@@ -121,25 +128,44 @@ open class SimpleWorkload(
         target: ActrId,
         dataChunk: DataChunk,
     ) {
+        if (stopped.get()) {
+            println("sendDataChunk after onStop dropped (stream ${dataChunk.streamId})")
+            return
+        }
         dataChunkChannel.send(DataChunkRequest(target, dataChunk))
     }
 
+    /** Sinks bound to (target, streamId), created lazily on first send and
+     * closed on failure and in [onStop]. */
+    private val dataChunkSinks =
+        java.util.concurrent.ConcurrentHashMap<Pair<ActrId, String>, io.actrium.actr.DataChunkSinkBridge>()
+
     override suspend fun onStart(ctx: ActrContext) {
+        stopped.set(false)
         // Start a coroutine to handle DataChunk requests
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
-            for (request in dataChunkChannel) {
-                try {
-                    ctx.sendDataChunk(
-                        request.target,
-                        request.dataChunk,
-                        PayloadType.STREAM_RELIABLE,
-                    )
-                } catch (e: Exception) {
-                    // Log error but continue processing
-                    println("Failed to send DataChunk: ${e.message}")
+        dispatchJob.set(
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                for (request in dataChunkChannel) {
+                    val key = request.target to request.dataChunk.streamId
+                    try {
+                        val sink = dataChunkSinks.getOrPut(key) {
+                            ctx.dataChunkSink(
+                                request.target,
+                                request.dataChunk.streamId,
+                                PayloadType.STREAM_RELIABLE,
+                            )
+                        }
+                        sink.send(request.dataChunk)
+                    } catch (e: Exception) {
+                        // Evict and abort the failed sink WITHOUT the graceful
+                        // end-of-stream marker: a transient failure must not end
+                        // the peer's stream. A later send recreates the sink.
+                        dataChunkSinks.remove(key)?.runCatching { abort() }
+                        println("Failed to send DataChunk: ${e.message}")
+                    }
                 }
-            }
-        }
+            },
+        )
 
         // Call user-provided handler
         onStartHandler(ctx)
@@ -150,6 +176,12 @@ open class SimpleWorkload(
     }
 
     override suspend fun onStop(ctx: ActrContext) {
+        stopped.set(true)
+        // Stop the dispatch coroutine first so no sink can be recreated
+        // after the cache is cleared.
+        dispatchJob.getAndSet(null)?.cancel()
+        dataChunkSinks.values.forEach { bridge -> bridge.runCatching { bridge.closeAsync() } }
+        dataChunkSinks.clear()
         onStopHandler(ctx)
     }
 

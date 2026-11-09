@@ -583,6 +583,7 @@ async-trait = "0.1"
 prost = "0.14"
 prost-types = "0.14"
 bytes = "1"
+futures-util = { version = "0.3", features = ["sink"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(actr_has_generated)'] }
@@ -855,6 +856,9 @@ struct SessionState {
     client_chunks_received: Arc<StdMutex<u64>>,
     service_chunks_sent: Arc<StdMutex<u64>>,
     payload_mode: StreamPayloadMode,
+    /// Echo consumer task; aborting it drops the stream (unregistering the
+    /// subscription) and the reply sink.
+    consumer: tokio::task::JoinHandle<()>,
 }
 
 pub struct DuplexStreamServiceImpl {
@@ -892,39 +896,40 @@ impl DuplexStreamServiceHandler for DuplexStreamServiceImpl {
         let client_chunks_received = Arc::new(StdMutex::new(0u64));
         let service_chunks_sent = Arc::new(StdMutex::new(0u64));
 
-        let ctx2 = ctx.clone();
-        let client_actr_id = ctx2.caller_id().cloned().unwrap_or_default();
-        let s2c_clone = s2c_id.clone();
-        let c2s_clone = c2s_id.clone();
-        let session_clone = session_id.clone();
+        let client_actr_id = ctx.caller_id().cloned().unwrap_or_default();
         let payload_type = payload_to_payload_type(payload_mode);
+
+        let mut incoming = ctx
+            .data_chunks(c2s_id.clone(), Default::default())
+            .await?;
+        let mut echo_sink = ctx
+            .data_chunk_sink(&Dest::Peer(client_actr_id), s2c_id.clone(), payload_type)
+            .await?;
+
         let chunks_recv = client_chunks_received.clone();
         let chunks_sent = service_chunks_sent.clone();
+        let c2s_task = c2s_id.clone();
+        let session_task = session_id.clone();
 
-        ctx.register_stream(c2s_id.clone(), move |data_chunk: DataChunk, _sender_id| {
-            let original_sequence = data_chunk.sequence;
-            let client = client_actr_id.clone();
-            let s2c = s2c_clone.clone();
-            let c2s = c2s_clone.clone();
-            let session = session_clone.clone();
-            let ctx = ctx2.clone();
-            let recv = chunks_recv.clone();
-            let sent = chunks_sent.clone();
-
-            Box::pin(async move {
+        let consumer = tokio::spawn(async move {
+            use futures_util::{SinkExt, StreamExt};
+            while let Some(event) = incoming.next().await {
+                let Ok(event) = event else { break };
+                let data_chunk = event.chunk;
+                let original_sequence = data_chunk.sequence;
                 let text = String::from_utf8(data_chunk.payload.to_vec())
                     .unwrap_or_else(|_| format!("<{} bytes>", data_chunk.payload.len()));
-                println!("DuplexStream: received chunk #{original_sequence} on {c2s}: {text}");
+                println!("DuplexStream: received chunk #{original_sequence} on {c2s_task}: {text}");
 
                 {
-                    let mut r = recv.lock().unwrap();
+                    let mut r = chunks_recv.lock().unwrap();
                     *r += 1;
                 }
 
                 let metadata = vec![
                     MetadataEntry {
                         key: "session_id".to_string(),
-                        value: session,
+                        value: session_task.clone(),
                     },
                     MetadataEntry {
                         key: "direction".to_string(),
@@ -936,29 +941,33 @@ impl DuplexStreamServiceHandler for DuplexStreamServiceImpl {
                     },
                     MetadataEntry {
                         key: "source_stream_id".to_string(),
-                        value: c2s,
+                        value: c2s_task.clone(),
                     },
                 ];
 
                 let echo_chunk = DataChunk {
-                    stream_id: s2c,
+                    stream_id: echo_sink.stream_id().to_string(),
                     sequence: original_sequence,
                     payload: format!("echo: {text}").into_bytes().into(),
                     metadata,
                     ..Default::default()
                 };
 
-                ctx.send_data_chunk(&Dest::Peer(client), echo_chunk, payload_type)
-                    .await?;
-
-                {
-                    let mut s = sent.lock().unwrap();
-                    *s += 1;
+                if let Err(e) = echo_sink.send(echo_chunk).await {
+                    println!("DuplexStream: echo send failed on {c2s_task}: {e:?}");
+                    break;
                 }
 
-                Ok(())
-            })
-        }).await?;
+                {
+                    let mut s = chunks_sent.lock().unwrap();
+                    *s += 1;
+                }
+            }
+            // The inbound stream ended (graceful marker or teardown): closing
+            // the sink forwards the end-of-stream marker to the client.
+            let _ = echo_sink.close().await;
+            incoming.close().await;
+        });
 
         {
             let mut sessions = self.sessions.lock().unwrap();
@@ -970,6 +979,7 @@ impl DuplexStreamServiceHandler for DuplexStreamServiceImpl {
                     client_chunks_received,
                     service_chunks_sent,
                     payload_mode,
+                    consumer,
                 },
             );
         }
@@ -985,11 +995,9 @@ impl DuplexStreamServiceHandler for DuplexStreamServiceImpl {
     async fn finish_duplex_stream<C: Context>(
         &self,
         req: FinishDuplexStreamRequest,
-        ctx: &C,
+        _ctx: &C,
     ) -> ActorResult<FinishDuplexStreamResponse> {
         let session_id = req.session_id.clone();
-
-        ctx.unregister_stream(&req.client_to_service_stream_id).await?;
 
         let state = {
             let mut sessions = self.sessions.lock().unwrap();
@@ -998,6 +1006,9 @@ impl DuplexStreamServiceHandler for DuplexStreamServiceImpl {
 
         let (client_chunks_received, service_chunks_sent) = match state {
             Some(s) => {
+                // Aborting the consumer drops the stream, which unregisters
+                // the subscription and discards anything still buffered.
+                s.consumer.abort();
                 let recv = *s.client_chunks_received.lock().unwrap();
                 let sent = *s.service_chunks_sent.lock().unwrap();
                 (recv as u32, sent as u32)

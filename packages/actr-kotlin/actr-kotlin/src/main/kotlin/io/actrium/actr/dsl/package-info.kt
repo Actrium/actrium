@@ -10,7 +10,7 @@
  *
  * This gives you access to:
  * - Type aliases: ActrNode, ActrRef, Workload, ActrContext, RpcEnvelope, LogCallback,
- *   DataChunkCallback, MediaSample, MediaTrackCallback, MediaType, OpusEncoder
+ *   MediaSample, MediaTrackCallback, MediaType, OpusEncoder
  * - DSL builders: actrType(), actrId(), dataChunk(), workload()
  * - Extensions: String.toActrType(), ActrRef.discover(String), etc.
  * - Utilities: withRetry() for explicitly idempotent non-transport work,

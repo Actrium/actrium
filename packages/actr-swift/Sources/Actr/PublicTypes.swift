@@ -185,8 +185,8 @@ public enum ActrError: Error, Equatable, Hashable, LocalizedError, Sendable {
             self = .Internal(msg: msg)
         case let .Config(msg):
             self = .Config(msg: msg)
-        case let .DeliveryUncertain(operationId, cause):
-            self = .DeliveryUncertain(operationId: operationId, cause: cause)
+        case let .DeliveryUncertain(operationId, causeDetail):
+            self = .DeliveryUncertain(operationId: operationId, cause: causeDetail)
         }
     }
 
@@ -227,7 +227,7 @@ public enum ActrError: Error, Equatable, Hashable, LocalizedError, Sendable {
         case let .Config(msg):
             return .Config(msg: msg)
         case let .DeliveryUncertain(operationId, cause):
-            return .DeliveryUncertain(operationId: operationId, cause: cause)
+            return .DeliveryUncertain(operationId: operationId, causeDetail: cause)
         }
     }
 
@@ -603,19 +603,26 @@ public struct DataChunk: Equatable, Hashable, Sendable {
     public var payload: Data
     public var metadata: [MetadataEntry]
     public var timestampMs: Int64?
+    /// Graceful stream-end marker: a sink sends it on close; the receiving
+    /// sequence yields everything before it, then ends. Never surfaced as
+    /// data. Can be lost on latency-first lanes, so back completion with an
+    /// application-level timeout there.
+    public var endOfStream: Bool?
 
     public init(
         streamId: String,
         sequence: UInt64,
         payload: Data,
         metadata: [MetadataEntry],
-        timestampMs: Int64?
+        timestampMs: Int64?,
+        endOfStream: Bool? = nil
     ) {
         self.streamId = streamId
         self.sequence = sequence
         self.payload = payload
         self.metadata = metadata
         self.timestampMs = timestampMs
+        self.endOfStream = endOfStream
     }
 
     init(bridge: ActrBindings.DataChunk) {
@@ -624,7 +631,8 @@ public struct DataChunk: Equatable, Hashable, Sendable {
             sequence: bridge.sequence,
             payload: bridge.payload,
             metadata: bridge.metadata.map(MetadataEntry.init(bridge:)),
-            timestampMs: bridge.timestampMs
+            timestampMs: bridge.timestampMs,
+            endOfStream: bridge.endOfStream
         )
     }
 
@@ -634,7 +642,8 @@ public struct DataChunk: Equatable, Hashable, Sendable {
             sequence: sequence,
             payload: payload,
             metadata: metadata.map(\.bridge),
-            timestampMs: timestampMs
+            timestampMs: timestampMs,
+            endOfStream: endOfStream
         )
     }
 }

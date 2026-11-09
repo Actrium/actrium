@@ -3,7 +3,7 @@
 //! Currently provides a simple `DummyContext` implementation of the `Context` trait
 //! for unit tests that need a context but do not exercise transport logic.
 
-use crate::{Context, Dest, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
+use crate::{Context, Dest, MediaSample};
 use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, RpcRequest};
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
@@ -65,26 +65,21 @@ impl Context for DummyContext {
         Err(Self::not_implemented("DummyContext::tell"))
     }
 
-    async fn register_stream<F>(&self, _stream_id: String, _callback: F) -> ActorResult<()>
-    where
-        F: Fn(actr_protocol::DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
-            + MaybeSendSync
-            + 'static,
-    {
-        Ok(())
+    async fn data_chunks(
+        &self,
+        _stream_id: String,
+        _options: crate::DataChunkStreamOptions,
+    ) -> ActorResult<crate::DataChunkStream> {
+        Err(Self::not_implemented("DummyContext::data_chunks"))
     }
 
-    async fn unregister_stream(&self, _stream_id: &str) -> ActorResult<()> {
-        Ok(())
-    }
-
-    async fn send_data_chunk(
+    async fn data_chunk_sink(
         &self,
         _target: &Dest,
-        _chunk: actr_protocol::DataChunk,
+        _stream_id: String,
         _payload_type: actr_protocol::PayloadType,
-    ) -> ActorResult<()> {
-        Err(Self::not_implemented("DummyContext::send_data_chunk"))
+    ) -> ActorResult<crate::DataChunkSink> {
+        Err(Self::not_implemented("DummyContext::data_chunk_sink"))
     }
 
     async fn discover_route_candidate(&self, _target_type: &ActrType) -> ActorResult<ActrId> {

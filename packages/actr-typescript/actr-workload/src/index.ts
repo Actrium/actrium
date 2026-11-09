@@ -51,9 +51,22 @@ export interface DataChunk {
   payload: PayloadBytes;
   metadata?: MetadataEntry[];
   timestampMs?: bigint | number;
+  /**
+   * Graceful stream-end marker: a sink sends it on close; the receiving
+   * stream yields everything before it, then ends. Never surfaced to
+   * consumers as data. Can be lost on StreamLatencyFirst lanes, so back
+   * completion with an application-level timeout there.
+   */
+  endOfStream?: boolean;
 }
 
 export type Dest = 'host' | 'workload' | { peer: ActrId };
+
+/** One inbound DataChunk together with its sender. */
+export interface DataChunkEvent {
+  chunk: DataChunk;
+  sender: ActrId;
+}
 
 // Per-invocation context threaded through every V2 export. Carries the
 // identity triple that the 0.1.0 world exposed via getter imports, plus the
@@ -181,12 +194,6 @@ export interface RpcRequest<Response> {
   decode(payload: Uint8Array): Response;
 }
 
-export type StreamCallback = (
-  chunk: DataChunk,
-  sender: ActrId,
-  ctx: InvocationCtx,
-) => void | Promise<void>;
-
 // `ctx` is optional on every hook: the host always threads an `invocation-ctx`
 // into the export, but callers may ignore it. Host-import wrappers below read
 // the `ctx-token` from an explicitly-passed `ctx` (the concurrency-safe path,
@@ -256,7 +263,8 @@ export function defineWorkload(workload: Workload): Workload {
   return workload;
 }
 
-const streamCallbacks = new Map<string, StreamCallback>();
+const streamQueues = new Map<string, BoundedQueue<DataChunkEvent>>();
+const closingStreams = new Set<string>();
 
 // Optional `AsyncLocalStorage` for the Node (vitest / non-component) path. The
 // StarlingMonkey wasm guest has no `node:async_hooks`, so in a real component
@@ -272,21 +280,43 @@ try {
   // StarlingMonkey wasm guest: no node:async_hooks. ctx is threaded explicitly.
 }
 
+// Tokens of invocations currently inside an export call. Tracked explicitly
+// because the wasm guest has no AsyncLocalStorage; a token is removed the
+// moment its export settles, so a member of this set is a live token (host
+// imports with a retired token trap the store).
+const liveTokens = new Set<bigint>();
+
 /**
  * Enter an invocation context for the duration of `fn`. Used by the
  * componentize shim at each export entry so host-import wrappers can read the
- * current `ctx-token` without an explicit argument on the Node side. In the
- * wasm guest this is a pass-through (no `AsyncLocalStorage`); callers pass
- * `ctx` to the wrappers directly.
+ * current `ctx-token` without an explicit argument on the Node side, and so
+ * token liveness is tracked on both sides. In the wasm guest this is a
+ * pass-through for the value (no `AsyncLocalStorage`); callers pass `ctx` to
+ * the wrappers directly.
  */
 export function withInvocationCtx<T>(
   ctx: InvocationCtx,
   fn: () => T | Promise<T>,
 ): T | Promise<T> {
-  if (invocationStorage) {
-    return invocationStorage.run(ctx, fn);
-  }
-  return fn();
+  liveTokens.add(ctx.ctxToken);
+  const exit = () => {
+    liveTokens.delete(ctx.ctxToken);
+  };
+  const run = (): T | Promise<T> => {
+    let result: T | Promise<T>;
+    try {
+      result = fn();
+    } catch (error) {
+      exit();
+      throw error;
+    }
+    if (result instanceof Promise) {
+      return result.finally(exit);
+    }
+    exit();
+    return result;
+  };
+  return invocationStorage ? invocationStorage.run(ctx, run) : run();
 }
 
 /**
@@ -296,6 +326,37 @@ export function withInvocationCtx<T>(
  */
 export function getCurrentInvocationCtx(): InvocationCtx | undefined {
   return invocationStorage?.getStore();
+}
+
+/**
+ * Resolve a token that is live right now, for actor-global host imports
+ * (stream register/unregister, chunk sends) that run outside their creating
+ * invocation. Order: the explicit ctx when its invocation is still active,
+ * then the AsyncLocalStorage store (Node), then any currently-live token
+ * (wasm guest, where actor-global imports are not invocation-scoped).
+ * `undefined` when no invocation is active anywhere.
+ */
+function resolveLiveToken(explicit?: InvocationCtx): bigint | undefined {
+  if (explicit && liveTokens.has(explicit.ctxToken)) {
+    return explicit.ctxToken;
+  }
+  const stored = invocationStorage?.getStore();
+  if (stored) {
+    return stored.ctxToken;
+  }
+  return liveTokens.values().next().value;
+}
+
+/**
+ * Token resolution for actor-global stream SENDS (sink `send`, and the
+ * close-time end marker). Live tokens win for precise routing; when nothing
+ * is live (a detached consumer resumed after its invocation settled) the
+ * sink's captured token is presented and the host routes the send via the
+ * instance's standing ABI — the host accepts a retired token for this
+ * actor-global import. `undefined` only when the sink carries no ctx at all.
+ */
+function resolveStreamSendToken(explicit?: InvocationCtx): bigint | undefined {
+  return resolveLiveToken(explicit) ?? explicit?.ctxToken;
 }
 
 function resolveCtxToken(ctx?: InvocationCtx): bigint {
@@ -352,6 +413,7 @@ function toWitDataChunk(chunk: DataChunk): WitDataChunk {
     metadata: chunk.metadata ?? [],
     timestampMs:
       chunk.timestampMs === undefined ? undefined : BigInt(chunk.timestampMs),
+    endOfStream: chunk.endOfStream,
   };
 }
 
@@ -454,39 +516,354 @@ export async function resolveDependency(
   return hostResolveDependency(resolveCtxToken(ctx), alias);
 }
 
-export async function registerStream(
-  streamId: string,
-  callback: StreamCallback,
-  ctx?: InvocationCtx,
-): Promise<void> {
-  // Register host-side first so the runner queues any DataChunk delivery behind
-  // this invocation; installing the guest callback immediately after the
-  // awaited import cannot miss a delivery, and avoids retaining a guest
-  // callback when host registration fails.
-  await hostRegisterStream(resolveCtxToken(ctx), streamId);
-  streamCallbacks.set(streamId, callback);
+const DEFAULT_DATA_CHUNK_CAPACITY = 64;
+
+/**
+ * Bounded FIFO queue feeding one stream subscription. Producers suspend when
+ * the buffer is full — safe because the host awaits each per-stream dispatch,
+ * so a full queue backpressures only that stream. `close()` drops buffered
+ * items and resolves every waiter.
+ */
+class BoundedQueue<T> {
+  private buffer: T[] = [];
+  private putWaiters: Array<() => void> = [];
+  private takeWaiters: Array<(result: { done: boolean; value?: T }) => void> =
+    [];
+  private closedFlag = false;
+
+  constructor(private readonly capacity: number) {}
+
+  async enqueue(item: T): Promise<void> {
+    while (!this.closedFlag && this.buffer.length >= this.capacity) {
+      await new Promise<void>((resolve) => this.putWaiters.push(resolve));
+    }
+    if (this.closedFlag) {
+      return;
+    }
+    const waiter = this.takeWaiters.shift();
+    if (waiter) {
+      waiter({ done: false, value: item });
+    } else {
+      this.buffer.push(item);
+    }
+    this.wakePutWaiters();
+  }
+
+  async dequeue(): Promise<{ done: boolean; value?: T }> {
+    if (this.buffer.length > 0) {
+      const value = this.buffer.shift() as T;
+      this.wakePutWaiters();
+      return { done: false, value };
+    }
+    if (this.closedFlag) {
+      return { done: true };
+    }
+    return new Promise((resolve) => this.takeWaiters.push(resolve));
+  }
+
+  close(): void {
+    if (this.closedFlag) {
+      return;
+    }
+    this.closedFlag = true;
+    this.buffer = [];
+    for (const waiter of this.takeWaiters.splice(0)) {
+      waiter({ done: true });
+    }
+    for (const waiter of this.putWaiters.splice(0)) {
+      waiter();
+    }
+  }
+
+  private wakePutWaiters(): void {
+    while (this.buffer.length < this.capacity && this.putWaiters.length > 0) {
+      const waiter = this.putWaiters.shift();
+      waiter?.();
+    }
+  }
 }
 
-export async function unregisterStream(
-  streamId: string,
-  ctx?: InvocationCtx,
-): Promise<void> {
-  await hostUnregisterStream(resolveCtxToken(ctx), streamId);
-  streamCallbacks.delete(streamId);
+/**
+ * Single-consumer async iterable over one DataChunk subscription. `close()`
+ * unregisters immediately, drops buffered items, and wakes pending readers;
+ * the iterator's `return()` (e.g. `break` out of `for await`) closes too.
+ *
+ * Graceful end: when the peer's sink closes it sends an in-band
+ * `endOfStream` marker; the iterator yields every chunk queued before it,
+ * then returns `done` (the marker itself is never yielded). On
+ * StreamLatencyFirst lanes the marker can be dropped like any other chunk,
+ * so applications on lossy lanes should still back completion with a
+ * timeout.
+ *
+ * Host-side teardown: `close()` unregisters through the host import with the
+ * captured (possibly retired) ctx token; the host routes this actor-global
+ * import through the instance's standing ABI when the token has no live
+ * entry, and resolves a close issued from inside this stream's own delivery
+ * to a cancel-only path, so the call is safe from any invocation state. The
+ * import is skipped only when the stream carries no ctx and no invocation is
+ * live — there is nothing to present; the host then reclaims the
+ * registration when a delivery finds the guest queue gone.
+ */
+export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
+  private iterator?: AsyncIterator<DataChunkEvent>;
+  private closePromise?: Promise<void>;
+
+  constructor(
+    private readonly streamId: string,
+    private readonly queue: BoundedQueue<DataChunkEvent>,
+    private readonly ctx?: InvocationCtx,
+  ) {}
+
+  async close(): Promise<void> {
+    if (!this.closePromise) {
+      this.closePromise = (async () => {
+        this.queue.close();
+        streamQueues.delete(this.streamId);
+        closingStreams.add(this.streamId);
+        try {
+          // Always unregister host-side: the captured (possibly retired)
+          // token is routed through the instance's standing ABI, and a close
+          // from inside this stream's own delivery resolves to a cancel-only
+          // host path — neither traps nor self-deadlocks. Skipping the
+          // import would leak the host forwarder whenever no further chunk
+          // arrives to trip its reclaim path.
+          const token = resolveStreamSendToken(this.ctx);
+          if (token !== undefined) {
+            await hostUnregisterStream(token, this.streamId);
+          }
+        } finally {
+          closingStreams.delete(this.streamId);
+        }
+      })();
+    }
+    return this.closePromise;
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<DataChunkEvent> {
+    if (this.iterator) {
+      throw new Error(
+        `DataChunkStream for '${this.streamId}' is single-consumer`,
+      );
+    }
+    let pending = false;
+    const iterator: AsyncIterator<DataChunkEvent> = {
+      next: async (): Promise<IteratorResult<DataChunkEvent>> => {
+        if (pending) {
+          throw new Error('concurrent next() on DataChunkStream iterator');
+        }
+        pending = true;
+        try {
+          const item = await this.queue.dequeue();
+          if (item.done) {
+            return { done: true, value: undefined };
+          }
+          const event = item.value as DataChunkEvent;
+          if (event.chunk.endOfStream === true) {
+            // Graceful end: FIFO delivery means every data chunk was already
+            // yielded; unwrap the marker into termination (never surfaced).
+            await this.close();
+            return { done: true, value: undefined };
+          }
+          return { done: false, value: event };
+        } finally {
+          pending = false;
+        }
+      },
+      return: async (): Promise<IteratorResult<DataChunkEvent>> => {
+        await this.close();
+        return { done: true, value: undefined };
+      },
+    };
+    this.iterator = iterator;
+    return iterator;
+  }
 }
 
-export async function sendDataChunk(
+/**
+ * Outbound DataChunk sink bound to one destination, stream ID, and lane.
+ * Sends are serialized in acceptance order; `close()` stops accepting new
+ * sends, waits for accepted sends to finish, sends the in-band
+ * `endOfStream` marker (sequence one past the last chunk), and is
+ * idempotent. A `send()` after close — or after an application-sent end
+ * marker — throws. A failed `close()` can be retried: it never reports an
+ * unsent marker as success. Note the marker is at-least-once under retries:
+ * if its send response was lost in transit, a retried close re-sends it —
+ * the receiver's runtime drops the duplicate (the stream already ended).
+ */
+export class DataChunkSink {
+  private closed = false;
+  private tail: Promise<void> = Promise.resolve();
+  private lastSequence?: bigint;
+  private endMarkerSent = false;
+  private closePromise?: Promise<void>;
+
+  constructor(
+    private readonly target: Dest,
+    readonly streamId: string,
+    readonly payloadType: PayloadType,
+    private readonly ctx?: InvocationCtx,
+  ) {}
+
+  async send(chunk: DataChunk): Promise<void> {
+    if (this.closed) {
+      throw new Error('DataChunkSink is closed');
+    }
+    if (this.endMarkerSent) {
+      throw new Error('endOfStream marker already sent for this stream');
+    }
+    if (chunk.streamId !== this.streamId) {
+      // Never silently rewrite the wire item.
+      throw new Error(
+        `chunk streamId '${chunk.streamId}' does not match sink streamId '${this.streamId}'`,
+      );
+    }
+    if (chunk.endOfStream === true) {
+      // An end marker is a control signal: it must not carry a payload (the
+      // receiving stream never surfaces it as data).
+      if (toUint8Array(chunk.payload).length > 0) {
+        throw new Error('endOfStream marker must not carry a payload');
+      }
+    }
+    // Resolve the token BEFORE mutating any state: every failure above this
+    // line leaves the sink reusable, and a token-resolution failure must not
+    // poison the marker/sequence bookkeeping that close() relies on.
+    // Resolve the token NOW, while the caller's invocation is certainly
+    // live; the host import executes at the end of the tail chain, possibly
+    // after this invocation has settled — the host then falls back to the
+    // instance's standing ABI for this actor-global import. A sink carrying
+    // no ctx with no live invocation is the only failure mode.
+    const token = resolveStreamSendToken(this.ctx);
+    if (token === undefined) {
+      throw new Error(
+        'ACTR host import requires an InvocationCtx; the sink carries none and no invocation is live',
+      );
+    }
+    const isMarker = chunk.endOfStream === true;
+    if (isMarker) {
+      // The application ended the stream explicitly; close() will not send
+      // a duplicate marker. If the delivery fails the state is rolled back
+      // so a later close() can retry the marker (see below).
+      this.endMarkerSent = true;
+    }
+    this.lastSequence = BigInt(chunk.sequence);
+    const send = this.tail.then(() =>
+      hostSendDataChunk(token, toWitDest(this.target), toWitDataChunk(chunk), {
+        tag: this.payloadType,
+      } satisfies WitPayloadType).then(() => undefined),
+    );
+    // Later sends queue behind this one even if it fails.
+    this.tail = send.catch(() => undefined);
+    if (isMarker) {
+      // A failed marker send leaves the close path retryable.
+      send.catch(() => {
+        this.endMarkerSent = false;
+      });
+    }
+    return send;
+  }
+
+  async close(): Promise<void> {
+    // `closed` is set up front: a failed close (e.g. the marker send
+    // rejected) may be retried via close(), but sends are not reopened —
+    // the sink never accepts data after close was requested.
+    this.closed = true;
+    if (!this.closePromise) {
+      // Resolve the token at call time, while the caller's invocation is
+      // certainly live; the marker goes out at the end of the tail chain.
+      // A retired token is still presented — the host routes this
+      // actor-global send via the instance's standing ABI. A sink carrying
+      // no ctx with nothing live fails closed, matching send(): the peer
+      // must not be left hanging on a graceful end that never comes.
+      const token = resolveStreamSendToken(this.ctx);
+      this.closePromise = (async () => {
+        await this.tail;
+        if (this.endMarkerSent) {
+          return;
+        }
+        // The marker rides the same lane so it travels behind every data
+        // chunk in FIFO order.
+        if (token === undefined) {
+          throw new Error(
+            'ACTR host import requires an InvocationCtx; the sink carries none and no invocation is live — the end-of-stream marker was not sent',
+          );
+        }
+        const marker: DataChunk = {
+          streamId: this.streamId,
+          sequence:
+            this.lastSequence === undefined ? 0n : this.lastSequence + 1n,
+          payload: new Uint8Array(0),
+          metadata: [],
+          endOfStream: true,
+        };
+        await hostSendDataChunk(
+          token,
+          toWitDest(this.target),
+          toWitDataChunk(marker),
+          { tag: this.payloadType } satisfies WitPayloadType,
+        ).then(() => undefined);
+        this.endMarkerSent = true;
+      })();
+      // A failed close (marker send error) does not confirm: the next
+      // close() retries from scratch instead of reporting success.
+      this.closePromise.catch(() => {
+        this.closePromise = undefined;
+      });
+    }
+    return this.closePromise;
+  }
+}
+
+/**
+ * Subscribe to inbound DataChunks for a stream ID. Registration happens at
+ * call time, reserving the ID until host registration finishes; only one active
+ * subscription is allowed per stream ID within one actor/context instance.
+ */
+export async function dataChunks(
+  streamId: string,
+  options?: { capacity?: number },
+  ctx?: InvocationCtx,
+): Promise<DataChunkStream> {
+  const capacity = options?.capacity ?? DEFAULT_DATA_CHUNK_CAPACITY;
+  if (!Number.isInteger(capacity) || capacity <= 0) {
+    throw new RangeError(
+      `capacity must be a positive integer, got ${capacity}`,
+    );
+  }
+  if (streamQueues.has(streamId) || closingStreams.has(streamId)) {
+    throw new Error(`stream '${streamId}' already has an active subscription`);
+  }
+  // Reserve the ID before yielding so concurrent registrations cannot replace
+  // each other's host forwarder or guest queue. The capacity crosses the
+  // boundary so the host-side subscription applies the same backpressure
+  // bound as the guest queue.
+  const queue = new BoundedQueue<DataChunkEvent>(capacity);
+  streamQueues.set(streamId, queue);
+  try {
+    await hostRegisterStream(resolveCtxToken(ctx), streamId, capacity);
+  } catch (error) {
+    streamQueues.delete(streamId);
+    queue.close();
+    throw error;
+  }
+  return new DataChunkStream(streamId, queue, ctx);
+}
+
+/** Create an outbound sink; only the two stream lanes are accepted. */
+export async function dataChunkSink(
   target: Dest,
-  chunk: DataChunk,
+  streamId: string,
   payloadType: PayloadType,
   ctx?: InvocationCtx,
-): Promise<void> {
-  await hostSendDataChunk(
-    resolveCtxToken(ctx),
-    toWitDest(target),
-    toWitDataChunk(chunk),
-    { tag: payloadType } satisfies WitPayloadType,
-  );
+): Promise<DataChunkSink> {
+  if (
+    payloadType !== PayloadType.StreamReliable &&
+    payloadType !== PayloadType.StreamLatencyFirst
+  ) {
+    throw new RangeError(
+      `payloadType '${payloadType}' is not a DataChunk stream lane`,
+    );
+  }
+  return new DataChunkSink(target, streamId, payloadType, ctx);
 }
 
 export async function logMessage(
@@ -500,13 +877,20 @@ export async function logMessage(
 export async function __dispatchDataChunk(
   chunk: DataChunk,
   sender: ActrId,
-  ctx: InvocationCtx,
+  _ctx: InvocationCtx,
 ): Promise<void> {
-  const callback = streamCallbacks.get(chunk.streamId);
-  if (!callback) {
-    throw new Error(`No stream callback registered for ${chunk.streamId}`);
+  const queue = streamQueues.get(chunk.streamId);
+  if (!queue) {
+    throw new Error(`No stream subscription for ${chunk.streamId}`);
   }
-  await callback(chunk, sender, ctx);
+  await queue.enqueue({ chunk, sender });
+}
+
+/** Whether a live `dataChunks()` subscription exists for `streamId`. The
+ * componentize shim uses it to keep the legacy `onDataChunk` hook from
+ * shadowing the stream-first API. */
+export function __hasStreamSubscription(streamId: string): boolean {
+  return streamQueues.has(streamId);
 }
 
 function validateTimeout(timeoutMs: bigint | number): bigint {
@@ -593,32 +977,19 @@ export class ActrContext {
     );
   }
 
-  async registerStream(
+  async dataChunks(
     streamId: string,
-    callback: (
-      chunk: DataChunk,
-      sender: ActrId,
-      ctx: ActrContext,
-    ) => Promise<void>,
-  ): Promise<void> {
-    return registerStream(
-      streamId,
-      async (chunk, sender, ctx) =>
-        callback(chunk, sender, new ActrContext(ctx)),
-      this.ctx,
-    );
+    options?: { capacity?: number },
+  ): Promise<DataChunkStream> {
+    return dataChunks(streamId, options, this.ctx);
   }
 
-  async unregisterStream(streamId: string): Promise<void> {
-    return unregisterStream(streamId, this.ctx);
-  }
-
-  async sendDataChunk(
+  async dataChunkSink(
     target: Dest,
-    chunk: DataChunk,
+    streamId: string,
     payloadType: PayloadType,
-  ): Promise<void> {
-    return sendDataChunk(target, chunk, payloadType, this.ctx);
+  ): Promise<DataChunkSink> {
+    return dataChunkSink(target, streamId, payloadType, this.ctx);
   }
 }
 

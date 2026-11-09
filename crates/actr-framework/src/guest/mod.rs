@@ -932,7 +932,7 @@ macro_rules! entry {
             #[unsafe(no_mangle)]
             pub unsafe extern "C" fn actr_shutdown() -> i32 {
                 let shutdown_result = $crate::guest::dynclib::shutdown();
-                $crate::guest::dynclib::context::clear_stream_callbacks();
+                $crate::guest::dynclib::context::clear_stream_senders();
                 unsafe {
                     __ACTR_WORKLOAD = None;
                     __ACTR_VTABLE = None;

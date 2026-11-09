@@ -525,11 +525,10 @@ pub async fn run_on_data_chunk(
     sender: wit_types::ActrId,
     _inv: wit_types::InvocationCtx,
 ) -> Result<(), wit_types::ActrError> {
-    // The registered stream callback receives (chunk, sender) only; it has
-    // no fresh `Context`, so the invocation-ctx is accepted for contract
-    // uniformity but not consumed on this path. The host temporarily aliases
-    // the registering context's retired token to this DataChunk invocation's
-    // live bridge while the callback runs.
+    // The stream queue receives (chunk, sender) only; the invocation-ctx is
+    // accepted for contract uniformity. The host temporarily aliases the
+    // registering context's retired token to this DataChunk invocation's live
+    // bridge while the delivery runs.
     super::context::dispatch_registered_stream(chunk, sender)
         .await
         .map_err(actr_error_to_wit)

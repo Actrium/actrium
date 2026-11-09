@@ -1135,6 +1135,7 @@ impl TestPeer {
             Some(peer_gate),
             Arc::new(crate::inbound::DataChunkRegistry::new()),
             Arc::new(crate::inbound::MediaFrameRegistry::new()),
+            Default::default(),
             self.signaling_client.clone(),
             self.credential.clone(),
             None,

@@ -14,6 +14,7 @@ fn chunk_seq(stream_id: &str, sequence: u64) -> DataChunk {
         payload: Default::default(),
         metadata: vec![],
         timestamp_ms: None,
+        end_of_stream: None,
     }
 }
 
@@ -133,7 +134,7 @@ fn register_and_default() {
     let reg = DataChunkRegistry::default();
     assert_eq!(reg.callback_len(), 0);
     let (cb, _) = counting_callback();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
     assert_eq!(reg.callback_len(), 1);
 }
 
@@ -141,7 +142,7 @@ fn register_and_default() {
 fn unregister_removes_stream() {
     let reg = DataChunkRegistry::new();
     let (cb, _) = counting_callback();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
     reg.unregister("s1");
     assert_eq!(reg.callback_len(), 0);
     // Unknown id is a no-op.
@@ -154,15 +155,15 @@ fn clear_removes_all_streams_and_closes_registry() {
     let reg = DataChunkRegistry::new();
     let (first, _) = counting_callback();
     let (second, _) = counting_callback();
-    reg.register("s1".into(), first);
-    reg.register("s2".into(), second);
+    reg.register("s1".into(), first).unwrap();
+    reg.register("s2".into(), second).unwrap();
 
     reg.clear();
     assert_eq!(reg.callback_len(), 0);
     assert!(reg.shutdown_token().is_cancelled());
 
     let (replacement, _) = counting_callback();
-    reg.register("s3".into(), replacement);
+    assert!(reg.register("s3".into(), replacement).is_err());
     assert_eq!(reg.callback_len(), 0);
 }
 
@@ -170,7 +171,7 @@ fn clear_removes_all_streams_and_closes_registry() {
 async fn dispatch_invokes_registered_callback() {
     let reg = DataChunkRegistry::new();
     let (cb, _h, mut probe) = Harness::new();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
 
     reg.dispatch(chunk("s1"), ActrId::default(), RELIABLE).await;
     assert_eq!(probe.wait_done().await, 1);
@@ -192,7 +193,7 @@ async fn dispatch_unknown_stream_is_noop() {
 async fn same_stream_reliable_preserves_order() {
     let reg = DataChunkRegistry::new();
     let (cb, h, mut probe) = Harness::new();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
 
     // Gate seq 1 so its callback blocks until we release it.
     let release1 = h.gate(1);
@@ -219,8 +220,8 @@ async fn same_stream_reliable_preserves_order() {
 async fn distinct_streams_are_independent() {
     let reg = DataChunkRegistry::new();
     let (cb, h, mut probe) = Harness::new();
-    reg.register("slow".into(), cb.clone());
-    reg.register("fast".into(), cb);
+    reg.register("slow".into(), cb.clone()).unwrap();
+    reg.register("fast".into(), cb).unwrap();
 
     // Block the slow stream indefinitely (hold the sender).
     let _hold = h.gate(10);
@@ -242,7 +243,7 @@ async fn distinct_streams_are_independent() {
 async fn callback_panic_is_isolated() {
     let reg = DataChunkRegistry::new();
     let (cb, h, mut probe) = Harness::new();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
     h.make_panic(1);
 
     reg.dispatch(chunk_seq("s1", 1), ActrId::default(), RELIABLE)
@@ -277,7 +278,7 @@ async fn synchronous_callback_panic_is_isolated() {
             Ok(())
         })
     });
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
 
     reg.dispatch(chunk_seq("s1", 1), ActrId::default(), RELIABLE)
         .await;
@@ -309,7 +310,7 @@ async fn synchronous_callback_panic_is_isolated() {
 async fn unregister_drains_queued_chunks() {
     let reg = DataChunkRegistry::with_capacity(8);
     let (cb, h, mut probe) = Harness::new();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
 
     let release1 = h.gate(1);
     // Enqueue 4 chunks; the first blocks the worker, the rest queue up.
@@ -363,7 +364,7 @@ async fn shutdown_cancels_queue_and_joins() {
             Ok(())
         })
     });
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
 
     for seq in 1..=3 {
         reg.dispatch(chunk_seq("s1", seq), ActrId::default(), RELIABLE)
@@ -391,7 +392,7 @@ async fn shutdown_cancels_queue_and_joins() {
 async fn shutdown_is_terminal_for_late_dispatch() {
     let reg = DataChunkRegistry::new();
     let (cb, _h, mut probe) = Harness::new();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
 
     reg.shutdown().await;
     reg.dispatch(chunk_seq("s1", 1), ActrId::default(), RELIABLE)
@@ -436,7 +437,7 @@ async fn cancelling_shutdown_aborts_taken_workers() {
             Ok(())
         })
     });
-    reg.register("s1".into(), callback);
+    reg.register("s1".into(), callback).unwrap();
     reg.dispatch(chunk("s1"), ActrId::default(), RELIABLE).await;
     tokio::time::timeout(Duration::from_secs(2), started_rx)
         .await
@@ -470,7 +471,7 @@ async fn cancelling_shutdown_aborts_taken_workers() {
 async fn latency_first_drops_on_overflow() {
     let reg = DataChunkRegistry::with_capacity(1);
     let (cb, h, mut probe) = Harness::new();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
 
     let release1 = h.gate(1);
     // seq 1 occupies the worker (in-flight, blocked on gate).
@@ -503,7 +504,7 @@ async fn latency_first_drops_on_overflow() {
 async fn reliable_backpressure_blocks_then_delivers() {
     let reg = Arc::new(DataChunkRegistry::with_capacity(1));
     let (cb, h, mut probe) = Harness::new();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
 
     let release1 = h.gate(1);
     // seq 1 in-flight (blocked), seq 2 fills the one queue slot.
@@ -540,13 +541,12 @@ async fn reliable_backpressure_blocks_then_delivers() {
     assert_eq!(probe.completions(), vec![1, 2, 3]);
 }
 
-/// (9) Re-register replaces the handler in place: re-registering the same
-/// `stream_id` (without unregistering first) makes the *new* callback handle the
-/// next chunk, while chunks already in flight/queued keep FIFO order. This is
-/// the regression guard for the "worker pins its spawn-time callback" bug — on
-/// the buggy path seq 2 would be handled by the old handler `A`.
+/// (9) Duplicate subscription is rejected: re-registering the same
+/// `stream_id` (without unregistering first) returns
+/// [`actr_protocol::ActrError::InvalidArgument`] and the original handler
+/// keeps serving the stream with FIFO order intact.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn reregister_swaps_handler_and_preserves_order() {
+async fn duplicate_subscription_rejected_and_order_preserved() {
     // Shared log of (handler_label, seq) in completion order.
     let record: Arc<Mutex<Vec<(char, u64)>>> = Arc::new(Mutex::new(Vec::new()));
     let gates: Arc<Mutex<HashMap<u64, oneshot::Receiver<()>>>> =
@@ -580,7 +580,7 @@ async fn reregister_swaps_handler_and_preserves_order() {
     };
 
     let reg = DataChunkRegistry::with_capacity(8);
-    reg.register("s1".into(), make_cb('A'));
+    reg.register("s1".into(), make_cb('A')).unwrap();
 
     // Gate seq 1 so handler A stays in flight until we release it.
     let (release1_tx, release1_rx) = oneshot::channel();
@@ -597,10 +597,14 @@ async fn reregister_swaps_handler_and_preserves_order() {
         ('A', 1)
     );
 
-    // Replace the handler in place (no unregister first).
-    reg.register("s1".into(), make_cb('B'));
+    // A second subscription while A is active must be rejected.
+    let duplicate = reg.register("s1".into(), make_cb('B'));
+    assert!(
+        matches!(duplicate, Err(actr_protocol::ActrError::InvalidArgument(_))),
+        "duplicate subscription must be rejected, got {duplicate:?}"
+    );
 
-    // seq 2 is dispatched after the swap; it must run under B, after seq 1.
+    // seq 2 is dispatched after the rejection; it must still run under A.
     reg.dispatch(chunk_seq("s1", 2), ActrId::default(), RELIABLE)
         .await;
     // Nothing completed yet: seq 2 is queued behind the blocked seq 1.
@@ -617,13 +621,13 @@ async fn reregister_swaps_handler_and_preserves_order() {
         .expect("seq 2 never finished")
         .unwrap();
 
-    assert_eq!(first, ('A', 1), "seq 1 was in flight under the old handler");
+    assert_eq!(first, ('A', 1));
     assert_eq!(
         second,
-        ('B', 2),
-        "seq 2 must run under the re-registered handler, in order"
+        ('A', 2),
+        "seq 2 must run under the original handler, in order"
     );
-    assert_eq!(*record.lock().unwrap(), vec![('A', 1), ('B', 2)]);
+    assert_eq!(*record.lock().unwrap(), vec![('A', 1), ('A', 2)]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -659,7 +663,7 @@ async fn unregister_then_reregister_waits_for_draining_worker() {
         })
     };
 
-    reg.register("s1".into(), make_cb('A'));
+    reg.register("s1".into(), make_cb('A')).unwrap();
     let (release1_tx, release1_rx) = oneshot::channel();
     gates.lock().unwrap().insert(1, release1_rx);
 
@@ -674,7 +678,7 @@ async fn unregister_then_reregister_waits_for_draining_worker() {
     );
 
     reg.unregister("s1");
-    reg.register("s1".into(), make_cb('B'));
+    reg.register("s1".into(), make_cb('B')).unwrap();
 
     let reg_dispatch = reg.clone();
     let dispatch2 = tokio::spawn(async move {
@@ -716,10 +720,75 @@ async fn unregister_then_reregister_waits_for_draining_worker() {
 async fn dispatch_after_unregister_is_warn_only() {
     let reg = DataChunkRegistry::new();
     let (cb, _h, _probe) = Harness::new();
-    reg.register("s1".into(), cb);
+    reg.register("s1".into(), cb).unwrap();
     reg.unregister("s1");
 
     // No callback registered -> warn + return, no panic, no worker spawned.
     reg.dispatch(chunk("s1"), ActrId::default(), RELIABLE).await;
     assert_eq!(reg.worker_len(), 0);
+}
+
+/// A re-registered stream must never receive chunks dispatched before its own
+/// registration: a chunk dropped while the stream was unregistered does not
+/// surface on the replacement subscription.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reregistered_stream_only_receives_chunks_dispatched_after_registration() {
+    let reg = DataChunkRegistry::with_capacity(8);
+    let (cb_a, _, mut probe_a) = Harness::new();
+    let (cb_b, _, mut probe_b) = Harness::new();
+
+    reg.register("s1".into(), cb_a).unwrap();
+    reg.dispatch(chunk_seq("s1", 1), ActrId::default(), RELIABLE)
+        .await;
+    assert_eq!(probe_a.wait_done().await, 1);
+
+    reg.unregister("s1");
+    // Dispatched while unregistered: dropped, never delivered to anyone.
+    reg.dispatch(chunk_seq("s1", 2), ActrId::default(), RELIABLE)
+        .await;
+
+    reg.register("s1".into(), cb_b).unwrap();
+    reg.dispatch(chunk_seq("s1", 3), ActrId::default(), RELIABLE)
+        .await;
+    assert_eq!(probe_b.wait_done().await, 3);
+
+    assert_eq!(probe_a.completions(), vec![1]);
+    assert_eq!(probe_b.completions(), vec![3]);
+}
+
+/// A chunk queued before unregister drains to the PREVIOUS consumer only;
+/// the replacement subscription never sees it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chunk_queued_before_unregister_never_reaches_replacement() {
+    let reg = DataChunkRegistry::with_capacity(8);
+    let (cb_a, h_a, mut probe_a) = Harness::new();
+    let (cb_b, _h_b, mut probe_b) = Harness::new();
+
+    reg.register("s1".into(), cb_a).unwrap();
+    // Gate chunk 1 so chunk 2 stays queued behind it when unregister lands.
+    let gate1 = h_a.gate(1);
+    reg.dispatch(chunk_seq("s1", 1), ActrId::default(), RELIABLE)
+        .await;
+    assert_eq!(probe_a.wait_started().await, 1);
+    reg.dispatch(chunk_seq("s1", 2), ActrId::default(), RELIABLE)
+        .await;
+
+    reg.unregister("s1");
+    reg.register("s1".into(), cb_b).unwrap();
+    // Release the gate BEFORE dispatching chunk 3: re-registration makes new
+    // dispatches wait for the previous worker's drain ("drain first"), so
+    // dispatching while the gate is held would self-deadlock this test.
+    gate1.send(()).unwrap();
+    reg.dispatch(chunk_seq("s1", 3), ActrId::default(), RELIABLE)
+        .await;
+
+    // The gated chunk and the chunk queued behind it both drain to the old
+    // consumer; the replacement only receives what was dispatched after it
+    // registered.
+    assert_eq!(probe_a.wait_done().await, 1);
+    assert_eq!(probe_a.wait_done().await, 2);
+    assert_eq!(probe_b.wait_done().await, 3);
+
+    assert_eq!(probe_a.completions(), vec![1, 2]);
+    assert_eq!(probe_b.completions(), vec![3]);
 }

@@ -7,14 +7,14 @@ use crate::guest::dynclib_abi::{
     reply_to_actr_error,
 };
 use crate::guest::vtable::HostVTable;
-use crate::{Context, Dest, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
+use crate::{Context, Dest, LogLevel, MediaSample};
 use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use prost::Message as ProstMessage;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 /// cdylib guest-side actor execution context.
 pub struct DynclibContext {
@@ -29,37 +29,52 @@ pub struct DynclibContext {
 unsafe impl Send for DynclibContext {}
 unsafe impl Sync for DynclibContext {}
 
-type StreamCallback =
-    Arc<dyn Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>> + Send + Sync>;
-
-fn stream_callbacks() -> &'static Mutex<HashMap<String, StreamCallback>> {
-    static CALLBACKS: OnceLock<Mutex<HashMap<String, StreamCallback>>> = OnceLock::new();
-    CALLBACKS.get_or_init(|| Mutex::new(HashMap::new()))
+fn stream_senders() -> &'static Mutex<
+    HashMap<String, futures_channel::mpsc::Sender<ActorResult<crate::DataChunkEvent>>>,
+> {
+    static SENDERS: OnceLock<
+        Mutex<HashMap<String, futures_channel::mpsc::Sender<ActorResult<crate::DataChunkEvent>>>>,
+    > = OnceLock::new();
+    SENDERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub fn dispatch_registered_stream(payload: GuestDataChunkV1) -> ActorResult<()> {
-    let callback = {
-        let callbacks = stream_callbacks()
+    let bridge_token = payload.bridge_token;
+    let stream_id = payload.chunk.stream_id.clone();
+    let tx = {
+        let senders = stream_senders()
             .lock()
-            .map_err(|_| ActrError::Internal("stream callback registry poisoned".into()))?;
-        callbacks.get(&payload.chunk.stream_id).cloned()
+            .map_err(|_| ActrError::Internal("stream sender registry poisoned".into()))?;
+        senders.get(&stream_id).cloned()
     };
 
-    let Some(callback) = callback else {
+    let Some(mut tx) = tx else {
         return Err(ActrError::NotFound(format!(
-            "no stream callback registered for '{}'",
-            payload.chunk.stream_id
+            "no stream subscription for '{stream_id}'"
         )));
     };
 
-    let fut = callback(payload.chunk, payload.sender);
-    crate::guest::dynclib::block_on(payload.bridge_token, fut)?
+    let stream_id2 = stream_id.clone();
+    let fut = async move {
+        use futures_util::SinkExt;
+        let event = crate::DataChunkEvent {
+            chunk: payload.chunk,
+            sender: payload.sender,
+        };
+        tx.send(Ok(event)).await.map_err(|_| {
+            ActrError::NotFound(format!("stream subscription for '{stream_id2}' is gone"))
+        })
+    };
+    // Stream Drop already removed this subscription's sender. A replacement
+    // may now own the same ID, so failure must not remove it. Returning the
+    // error causes the host forwarder to retire its own subscription.
+    crate::guest::dynclib::block_on(bridge_token, fut)?
 }
 
 #[doc(hidden)]
-pub fn clear_stream_callbacks() {
-    if let Ok(mut callbacks) = stream_callbacks().lock() {
-        callbacks.clear();
+pub fn clear_stream_senders() {
+    if let Ok(mut senders) = stream_senders().lock() {
+        senders.clear();
     }
 }
 
@@ -99,6 +114,35 @@ impl DynclibContext {
         unsafe { &*self.vtable }
     }
 
+    /// Outbound chunk send through the host frame ABI (sink `send_fn` body).
+    async fn send_data_chunk_host(
+        &self,
+        target: &Dest,
+        chunk: DataChunk,
+        payload_type: PayloadType,
+    ) -> ActorResult<()> {
+        let payload = HostSendDataChunkV1 {
+            dest: dest_to_v1(target),
+            chunk,
+            payload_type: payload_type as i32,
+        };
+        let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
+        if reply.status != abi::code::SUCCESS {
+            return Err(reply_to_actr_error(reply));
+        }
+        Ok(())
+    }
+
+    /// Host-side stream unregister used by [`crate::DataChunkStream`] teardown.
+    async fn unregister_stream_host(&self, stream_id: String) -> ActorResult<()> {
+        let payload = HostUnregisterStreamV1 { stream_id };
+        let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
+        if reply.status != abi::code::SUCCESS {
+            return Err(reply_to_actr_error(reply));
+        }
+        Ok(())
+    }
+
     fn invoke_frame(&self, frame: abi::AbiFrame) -> Result<AbiReply, ActrError> {
         let frame_bytes = abi::encode_message(&frame).map_err(abi_error_to_actr)?;
         let mut reply_ptr: *mut u8 = std::ptr::null_mut();
@@ -128,6 +172,13 @@ impl DynclibContext {
             data
         };
 
+        // Every legit reply is a non-empty frame; an empty one would decode to
+        // a default AbiReply whose SUCCESS status is a lie.
+        if bytes.is_empty() {
+            return Err(ActrError::Internal(
+                "dynclib host returned an empty reply frame".into(),
+            ));
+        }
         abi::decode_message::<AbiReply>(&bytes).map_err(abi_error_to_actr)
     }
 }
@@ -249,57 +300,88 @@ impl Context for DynclibContext {
         Ok(())
     }
 
-    async fn register_stream<F>(&self, stream_id: String, callback: F) -> ActorResult<()>
-    where
-        F: Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
-            + MaybeSendSync
-            + 'static,
-    {
-        stream_callbacks()
-            .lock()
-            .map_err(|_| ActrError::Internal("stream callback registry poisoned".into()))?
-            .insert(stream_id.clone(), Arc::new(callback));
+    async fn data_chunks(
+        &self,
+        stream_id: String,
+        options: crate::DataChunkStreamOptions,
+    ) -> ActorResult<crate::DataChunkStream> {
+        let capacity = crate::validate_stream_options(&options)?;
 
-        let payload = HostRegisterStreamV1 { stream_id };
-        let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
-        if reply.status != abi::code::SUCCESS {
-            return Err(reply_to_actr_error(reply));
+        // Reserve the stream id under the lock, then invoke the host WITHOUT
+        // holding it: `invoke_frame` is a synchronous, unbounded host
+        // round-trip, and holding the process-global sender lock across it
+        // stalls every other stream's delivery lookup. The reservation makes
+        // a concurrent data_chunks for the same id fail fast as a duplicate
+        // while this registration is in flight; a failed registration rolls
+        // the entry back (it can only still be ours — nobody else could have
+        // inserted past the reservation).
+        let (tx, rx) = futures_channel::mpsc::channel(capacity);
+        {
+            let mut senders = stream_senders()
+                .lock()
+                .map_err(|_| ActrError::Internal("stream sender registry poisoned".into()))?;
+            if senders.contains_key(&stream_id) {
+                return Err(ActrError::InvalidArgument(format!(
+                    "stream '{stream_id}' already has an active subscription"
+                )));
+            }
+            senders.insert(stream_id.clone(), tx);
         }
-        Ok(())
-    }
 
-    async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
-        stream_callbacks()
-            .lock()
-            .map_err(|_| ActrError::Internal("stream callback registry poisoned".into()))?
-            .remove(stream_id);
-
-        let payload = HostUnregisterStreamV1 {
-            stream_id: stream_id.to_string(),
+        let payload = HostRegisterStreamV1 {
+            stream_id: stream_id.clone(),
+            capacity: Some(capacity as u32),
         };
-        let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
-        if reply.status != abi::code::SUCCESS {
-            return Err(reply_to_actr_error(reply));
+        let registration = payload
+            .to_frame()
+            .map_err(abi_error_to_actr)
+            .and_then(|frame| self.invoke_frame(frame))
+            .and_then(|reply| {
+                if reply.status == abi::code::SUCCESS {
+                    Ok(())
+                } else {
+                    Err(reply_to_actr_error(reply))
+                }
+            });
+        if let Err(error) = registration {
+            if let Ok(mut senders) = stream_senders().lock() {
+                senders.remove(&stream_id);
+            }
+            return Err(error);
         }
-        Ok(())
+
+        let cancel_stream_id = stream_id.clone();
+        let wait_stream_id = stream_id;
+        let this = self.clone();
+        let closer = crate::StreamCloser::with_wait(
+            Box::new(move || {
+                if let Ok(mut senders) = stream_senders().lock() {
+                    senders.remove(&cancel_stream_id);
+                }
+            }),
+            Box::new(move || {
+                Box::pin(async move {
+                    let _ = this.unregister_stream_host(wait_stream_id).await;
+                })
+            }),
+        );
+        Ok(crate::DataChunkStream::from_parts(rx, closer))
     }
 
-    async fn send_data_chunk(
+    async fn data_chunk_sink(
         &self,
         target: &Dest,
-        chunk: DataChunk,
+        stream_id: String,
         payload_type: PayloadType,
-    ) -> ActorResult<()> {
-        let payload = HostSendDataChunkV1 {
-            dest: dest_to_v1(target),
-            chunk,
-            payload_type: payload_type as i32,
-        };
-        let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
-        if reply.status != abi::code::SUCCESS {
-            return Err(reply_to_actr_error(reply));
-        }
-        Ok(())
+    ) -> ActorResult<crate::DataChunkSink> {
+        let this = self.clone();
+        let dest = target.clone();
+        let send_fn: crate::SendDataChunkFn = Box::new(move |chunk| {
+            let this = this.clone();
+            let dest = dest.clone();
+            Box::pin(async move { this.send_data_chunk_host(&dest, chunk, payload_type).await })
+        });
+        crate::DataChunkSink::new(stream_id, payload_type, send_fn)
     }
 
     async fn discover_route_candidate(&self, target_type: &ActrType) -> ActorResult<ActrId> {
@@ -414,5 +496,59 @@ impl Context for DynclibContext {
         Err(ActrError::NotImplemented(
             "WebRTC media tracks are not supported in dynclib environment".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" fn retain(_: u64) -> i32 {
+        abi::code::SUCCESS
+    }
+    unsafe extern "C" fn release(_: u64) {}
+    unsafe extern "C" fn free(_: *mut u8, _: usize) {}
+    unsafe extern "C" fn log(_: u64, _: u8, _: *const u8, _: usize) {}
+    unsafe extern "C" fn failed_invoke(
+        token: u64,
+        _: *const u8,
+        _: usize,
+        _: *mut *mut u8,
+        _: *mut usize,
+    ) -> i32 {
+        if token == 1 {
+            abi::code::UNSUPPORTED_OP
+        } else {
+            // SUCCESS with no reply exercises the reply decoding error path.
+            abi::code::SUCCESS
+        }
+    }
+
+    static FAILING_HOST: HostVTable = HostVTable {
+        retain_context: retain,
+        release_context: release,
+        invoke: failed_invoke,
+        free_host_buf: free,
+        log,
+    };
+
+    #[tokio::test]
+    async fn failed_registration_releases_local_reservation() {
+        for token in [1, 2] {
+            let ctx = DynclibContext {
+                vtable: &FAILING_HOST,
+                bridge_token: token,
+                retained: false,
+                self_id: Default::default(),
+                caller_id: None,
+                request_id: String::new(),
+            };
+            let stream_id = format!("failed-registration-{token}");
+            for _ in 0..2 {
+                let result = ctx.data_chunks(stream_id.clone(), Default::default()).await;
+                assert!(result.is_err());
+                assert!(!stream_senders().lock().unwrap().contains_key(&stream_id));
+            }
+        }
     }
 }

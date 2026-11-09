@@ -93,6 +93,11 @@ def patch(source: str, language: str) -> str:
         # Include its converter accesses; the Rust field and wire layout stay intact.
         patched = patched.replace("val `cause`: kotlin.String", "val causeDetail: kotlin.String")
         patched = patched.replace("value.`cause`", "value.causeDetail")
+        # Alternatively the FFI already renamed the field at the source
+        # (`cause_detail`), and UniFFI emitted the backticked camelCase form;
+        # normalize it so both generation paths converge on the same name.
+        patched = patched.replace("val `causeDetail`: kotlin.String", "val causeDetail: kotlin.String")
+        patched = patched.replace("value.`causeDetail`", "value.causeDetail")
         if patched.count("val causeDetail: kotlin.String") != 1 or patched.count("value.causeDetail") != 2:
             raise ValueError("DeliveryUncertain cause field/converter template changed")
     return source[:block.start()] + patched + source[block.end():]

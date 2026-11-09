@@ -400,7 +400,8 @@ static unsafe class Trampolines
                 sequence,
                 (chunkFlags & ActrStreamChunk.HasTimestampFlag) != 0 ? timestampMs : null,
                 ActrCabiException.PtrToUtf8(senderIdPtr, senderIdLen),
-                CopyMetadata(metadataPtr, metadataLen));
+                CopyMetadata(metadataPtr, metadataLen),
+                (chunkFlags & ActrStreamChunk.EndOfStreamFlag) != 0);
             ActrHostBridge.OnStreamChunk(chunk);
         }
         catch
@@ -716,7 +717,8 @@ public sealed record ActrStreamChunk(
     ulong Sequence,
     long? TimestampMs,
     string SenderId,
-    IReadOnlyList<ActrStreamMetadata> Metadata)
+    IReadOnlyList<ActrStreamMetadata> Metadata,
+    bool EndOfStream = false)
 {
     /// <summary>Creates a chunk with no metadata (source-compatible helper).</summary>
     public ActrStreamChunk(
@@ -731,6 +733,14 @@ public sealed record ActrStreamChunk(
 
     /// <summary>Bit set when the producer annotated <see cref="TimestampMs"/>.</summary>
     public const byte HasTimestampFlag = 0x01;
+
+    /// <summary>
+    /// Bit set on the in-band end-of-stream marker: a terminal, payload-less
+    /// chunk after which no further chunk arrives on this stream. Consumers
+    /// waiting for graceful stream end should complete when
+    /// <see cref="EndOfStream"/> is true.
+    /// </summary>
+    public const byte EndOfStreamFlag = 0x02;
 }
 
 /// <summary>An inbound request a Rust workload explicitly delegated to its host.</summary>

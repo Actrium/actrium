@@ -3657,6 +3657,7 @@ mod tests {
             payload: Bytes::from_static(b"chunk"),
             metadata: vec![],
             timestamp_ms: None,
+            end_of_stream: None,
         };
 
         let err = gate

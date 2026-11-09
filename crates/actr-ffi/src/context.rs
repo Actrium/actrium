@@ -1,6 +1,4 @@
-use actr_framework::{
-    Bytes, Context, DataChunk, Dest, MediaSample as FrameworkMediaSample, ReplyOutcome,
-};
+use actr_framework::{Bytes, Context, Dest, MediaSample as FrameworkMediaSample, ReplyOutcome};
 use actr_hyper::context::RuntimeContext;
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
@@ -10,29 +8,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::run_on_tokio_runtime;
 use crate::{ActrError, ActrResult};
-
-/// Callback interface for DataChunk events.
-///
-/// Chunks of one stream are delivered to `on_stream` serially,
-/// run-to-completion, strictly in arrival order; different streams run
-/// independently (see `Context::register_stream`). Consequently `on_stream`
-/// must not block waiting for a later chunk of the same stream — that chunk
-/// is queued behind this call, so both stall forever (self-deadlock).
-/// Finalize a stream out-of-band instead: a separate RPC the sender invokes
-/// after the last chunk, or a background task watching shared reassembly
-/// state. Reassemble and detect gaps by `DataChunk.sequence` — chunks are
-/// dispatched in send order, but `StreamLatencyFirst` drops and reconnects
-/// can lose in-flight chunks.
-#[uniffi::export(callback_interface)]
-#[async_trait]
-pub trait DataChunkCallback: Send + Sync + 'static {
-    /// Handle an incoming DataChunk.
-    async fn on_stream(
-        &self,
-        chunk: crate::types::DataChunk,
-        sender: crate::types::ActrId,
-    ) -> ActrResult<()>;
-}
 
 /// Callback interface for MediaTrack events.
 #[uniffi::export(callback_interface)]
@@ -224,59 +199,47 @@ impl ContextBridge {
         .await
     }
 
-    /// Send a DataChunk to a remote actor (Fast Path)
+    /// Subscribe to inbound DataChunks for a stream ID.
     ///
-    /// # Arguments
-    /// - `target`: Target actor ID
-    /// - `chunk`: DataChunk containing stream_id, sequence, payload, etc.
-    /// - `payload_type`: Stream lane selection for delivery guarantees.
-    pub async fn send_data_chunk(
-        &self,
-        target: crate::types::ActrId,
-        chunk: crate::types::DataChunk,
-        payload_type: crate::types::PayloadType,
-    ) -> crate::error::ActrResult<()> {
-        let target_id: ActrId = target.into();
-        let chunk: DataChunk = chunk.into();
-        let payload_type: PayloadType = payload_type.into();
-        self.inner
-            .send_data_chunk(&Dest::Peer(target_id), chunk, payload_type)
-            .await?;
-        Ok(())
-    }
-
-    /// Register a DataChunk callback for a stream ID.
+    /// Returns an opaque pull handle; `None` capacity selects the default.
+    /// Only one active subscription is allowed per stream ID within one
+    /// actor/context instance.
     ///
-    /// Chunks of one stream are delivered to the callback serially,
-    /// run-to-completion, in arrival order; different streams run
-    /// independently. See [`DataChunkCallback`] for the resulting blocking
-    /// constraint and reassembly rules.
-    pub async fn register_stream(
+    /// Delivery is FIFO per stream. Reassemble and detect gaps by
+    /// `DataChunk.sequence` — chunks are delivered in send order, but
+    /// `StreamLatencyFirst` drops under pressure and reconnects can lose
+    /// in-flight chunks.
+    pub async fn data_chunks(
         &self,
         stream_id: String,
-        callback: Box<dyn DataChunkCallback>,
-    ) -> crate::error::ActrResult<()> {
-        let callback: Arc<dyn DataChunkCallback> = Arc::from(callback);
-        self.inner
-            .register_stream(stream_id, move |chunk, sender| {
-                let callback = callback.clone();
-                Box::pin(async move {
-                    let chunk: crate::types::DataChunk = chunk.into();
-                    let sender: crate::types::ActrId = sender.into();
-                    callback
-                        .on_stream(chunk, sender)
-                        .await
-                        .map_err(actr_protocol::ActrError::from)
-                })
-            })
-            .await?;
-        Ok(())
+        capacity: Option<u32>,
+    ) -> crate::error::ActrResult<Arc<crate::data_chunk::DataChunkStreamBridge>> {
+        let options = actr_framework::DataChunkStreamOptions {
+            capacity: capacity
+                .map(|capacity| capacity as usize)
+                .unwrap_or(actr_framework::DEFAULT_DATA_CHUNK_CAPACITY),
+        };
+        let stream = self.inner.data_chunks(stream_id, options).await?;
+        Ok(Arc::new(crate::data_chunk::DataChunkStreamBridge::new(
+            stream,
+        )))
     }
 
-    /// Unregister a DataChunk callback for a stream ID.
-    pub async fn unregister_stream(&self, stream_id: String) -> crate::error::ActrResult<()> {
-        self.inner.unregister_stream(&stream_id).await?;
-        Ok(())
+    /// Create an opaque send handle bound to a target actor, stream ID, and
+    /// lane (`StreamReliable` or `StreamLatencyFirst`).
+    pub async fn data_chunk_sink(
+        &self,
+        target: crate::types::ActrId,
+        stream_id: String,
+        payload_type: crate::types::PayloadType,
+    ) -> crate::error::ActrResult<Arc<crate::data_chunk::DataChunkSinkBridge>> {
+        let target_id: ActrId = target.into();
+        let payload_type: PayloadType = payload_type.into();
+        let sink = self
+            .inner
+            .data_chunk_sink(&Dest::Peer(target_id), stream_id, payload_type)
+            .await?;
+        Ok(Arc::new(crate::data_chunk::DataChunkSinkBridge::new(sink)))
     }
 
     /// Discover an actor of the specified type

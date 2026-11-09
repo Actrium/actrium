@@ -1,6 +1,6 @@
 //! Context trait - Execution context interface for actors
 
-use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType};
+use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, PayloadType};
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 
@@ -202,86 +202,76 @@ pub trait Context: Clone + MaybeSendSync + 'static {
 
     // ========== Fast Path: DataChunk Methods ==========
 
-    /// Register a DataChunk callback for a specific stream
+    /// Subscribe to inbound DataChunks for a stream as a [`futures_core::Stream`].
     ///
-    /// When a DataChunk with matching stream_id arrives, the registered callback will be invoked.
+    /// Delivery is FIFO and run-to-completion for one stream. Different streams
+    /// use independent inbound workers, although a serial-only workload backend
+    /// may still serialize their final guest delivery.
     ///
-    /// # Dispatch semantics
-    ///
-    /// Chunks of one stream are delivered to the callback **serially,
-    /// run-to-completion**: the previous chunk's callback future fully
-    /// resolves before the next chunk's callback starts, strictly in arrival
-    /// order. Different streams use independent inbound workers, although a
-    /// serial-only workload backend may still serialize their final guest
-    /// callbacks.
-    ///
-    /// # Never await a later chunk of the same stream
-    ///
-    /// Because dispatch is serial per stream, a callback that blocks waiting
-    /// for a chunk that has not been delivered yet **self-deadlocks**: the
-    /// awaited chunk's callback is queued behind the still-running callback,
-    /// so neither can make progress. An end-of-stream handler polling for
-    /// stragglers is the classic trigger. Finalize **outside** the stream
-    /// callback instead:
-    ///
-    /// - a separate RPC the sender invokes after the last chunk — the
-    ///   `EndTransfer` pattern in
-    ///   `examples/actr/rust/data-stream/receiver/src/file_transfer_service.rs`, or
-    /// - a detached task (`tokio::spawn`) that watches shared reassembly state.
+    /// Only one active subscription is allowed per `stream_id` within one
+    /// actor/context instance; a duplicate subscription returns
+    /// [`ActrError::InvalidArgument`]. Closing or dropping the returned stream
+    /// unregisters immediately and discards buffered items.
     ///
     /// # Ordering and reassembly
     ///
-    /// [`DataChunk::sequence`] is the authoritative reassembly key. Same-stream
-    /// chunks are dispatched in send order per payload-type lane (do not mix
+    /// [`DataChunk::sequence`][crate::DataChunk] is the authoritative reassembly key. Same-stream
+    /// chunks are delivered in send order per payload-type lane (do not mix
     /// payload types within one stream), but chunks can still be missing:
     /// [`PayloadType::StreamLatencyFirst`] drops under pressure, and a
     /// reconnect can lose in-flight reliable chunks. Reassemble and detect
     /// gaps by `sequence`; do not assume contiguous arrival.
     ///
+    /// # Stream end
+    ///
+    /// A peer's sink close sends an in-band [`DataChunk::end_of_stream`][crate::DataChunk]
+    /// marker; the stream yields every chunk queued before it, then ends. On
+    /// `StreamLatencyFirst` lanes the marker can be dropped, so back
+    /// completion with an application-level timeout there.
+    ///
     /// # Parameters
     ///
     /// - `stream_id`: Stream identifier (must be globally unique)
-    /// - `callback`: Handler function that receives (DataChunk, sender ActrId)
+    /// - `options`: Per-subscription options (queue capacity)
     ///
     /// # Example
     ///
     /// ```rust,ignore
-    /// ctx.register_stream("log-stream", |chunk, sender| {
-    ///     Box::pin(async move {
-    ///         println!("Received chunk {} from {:?}", chunk.sequence, sender);
-    ///         Ok(())
-    ///     })
-    /// }).await?;
+    /// use futures_util::StreamExt;
+    ///
+    /// let mut chunks = ctx.data_chunks("log-stream".into(), Default::default()).await?;
+    /// while let Some(event) = chunks.next().await {
+    ///     let event = event?;
+    ///     println!("Received chunk {} from {:?}", event.chunk.sequence, event.sender);
+    /// }
     /// ```
-    async fn register_stream<F>(&self, stream_id: String, callback: F) -> ActorResult<()>
-    where
-        F: Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
-            + MaybeSendSync
-            + 'static;
+    async fn data_chunks(
+        &self,
+        stream_id: String,
+        options: crate::DataChunkStreamOptions,
+    ) -> ActorResult<crate::DataChunkStream>;
 
-    /// Unregister a DataChunk callback
+    /// Create a [`futures_sink::Sink`] of outbound DataChunks bound to a
+    /// destination, stream ID, and lane.
+    ///
+    /// `payload_type` must be [`PayloadType::StreamReliable`] (ordered reliable
+    /// delivery, default) or [`PayloadType::StreamLatencyFirst`] (low-latency
+    /// partial-reliable); anything else returns [`ActrError::InvalidArgument`].
+    /// Every sent chunk's `stream_id` must equal `stream_id`. Closing the sink
+    /// sends an in-band [`DataChunk::end_of_stream`][crate::DataChunk] marker
+    /// after the last chunk, so the peer's stream ends after draining.
     ///
     /// # Parameters
     ///
-    /// - `stream_id`: Stream identifier to unregister
-    async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()>;
-
-    /// Send a DataChunk to a destination with explicit lane selection.
-    ///
-    /// Use [`PayloadType::StreamReliable`] for ordered reliable delivery (default) or
-    /// [`PayloadType::StreamLatencyFirst`] for low-latency partial-reliable delivery.
-    ///
-    /// # Parameters
-    ///
-    /// - `target`: Target destination
-    /// - `chunk`: DataChunk to send
+    /// - `target`: Target destination (`Dest::Host` for local, `Dest::Peer(id)` for remote)
+    /// - `stream_id`: Stream identifier the sink is bound to
     /// - `payload_type`: Lane selection (`StreamReliable` or `StreamLatencyFirst`)
-    async fn send_data_chunk(
+    async fn data_chunk_sink(
         &self,
         target: &crate::Dest,
-        chunk: DataChunk,
+        stream_id: String,
         payload_type: PayloadType,
-    ) -> ActorResult<()>;
+    ) -> ActorResult<crate::DataChunkSink>;
 
     /// Discover a remote Actor of the specified type via the signaling server.
     ///

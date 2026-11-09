@@ -163,7 +163,7 @@ pub enum ErrorCategory {
     /// Transport layer failure: WebSocket / WebRTC connection errors, lane
     /// / mpsc plumbing faults.
     TransportFailure,
-    /// A `send_data_chunk` was active when the WebRTC/DataChannel path was
+    /// A data-chunk send was active when the WebRTC/DataChannel path was
     /// interrupted. Delivery is uncertain; the framework has not confirmed
     /// loss or performed resume.
     DataChunkDeliveryUncertain,

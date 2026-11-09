@@ -103,6 +103,11 @@ pub struct DataChunk {
     pub metadata: Vec<MetadataEntry>,
     /// Optional timestamp in milliseconds
     pub timestamp_ms: Option<i64>,
+    /// Graceful stream-end marker: the sink sends it on close, the receiving
+    /// stream yields everything before it, then ends. Never surfaced as data.
+    /// Can be lost on `StreamLatencyFirst` lanes, so back completion with an
+    /// application-level timeout there.
+    pub end_of_stream: Option<bool>,
 }
 
 impl From<actr_protocol::DataChunk> for DataChunk {
@@ -113,6 +118,7 @@ impl From<actr_protocol::DataChunk> for DataChunk {
             payload: chunk.payload.to_vec(),
             metadata: chunk.metadata.into_iter().map(|m| m.into()).collect(),
             timestamp_ms: chunk.timestamp_ms,
+            end_of_stream: chunk.end_of_stream,
         }
     }
 }
@@ -125,6 +131,7 @@ impl From<DataChunk> for actr_protocol::DataChunk {
             payload: chunk.payload.into(),
             metadata: chunk.metadata.into_iter().map(|m| m.into()).collect(),
             timestamp_ms: chunk.timestamp_ms,
+            end_of_stream: chunk.end_of_stream,
         }
     }
 }
