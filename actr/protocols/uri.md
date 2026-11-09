@@ -147,13 +147,26 @@ A Realm name looks like an email address but is not one. An Actr Host
 
 ```abnf
 actor-id        = serial "." realm-name
-serial          = 1*( DIGIT / %x61-66 )        ; lowercase hexadecimal
+serial          = "0" / non-zero-hex *12hex-digit / %x31-33 13hex-digit
+hex-digit       = DIGIT / %x61-66            ; lowercase hexadecimal
+non-zero-hex    = %x31-39 / %x61-66          ; 1-9 or a-f
 ```
 
 For example `2af01.k7m2q9xh@acme.com`: `serial` is assigned by the Realm's
-Issuer, and removing `<serial>.` gives the Realm name. An ActorId contains no
-program type; the program type is carried by the Actor credential. An ActorId
-itself is not a URI; its URI form is given in Section 2.
+Issuer, and removing `<serial>.` gives the Realm name. Its canonical text form
+is `0` or lowercase hexadecimal without leading zeros, and its unsigned value
+**MUST** be at most `2^54 - 1` (`3fffffffffffff`). Consequently, a 14-digit
+serial starts with `1`, `2`, or `3`, and longer serials are invalid.
+Implementations **MUST** reject uppercase hexadecimal, leading zeros, and
+out-of-range serials; they **MUST NOT** rewrite them into valid serials.
+
+An ActorId contains no program type; the program type is carried by the Actor
+credential. An ActorId itself is not a URI; its URI form is given in Section 2.
+
+Shared Actor URI/ActorId serial boundary vectors are in
+[`actor-uri-serial.json`](../../contracts/actr/test-vectors/actor-uri-serial.json).
+Exact serial values are strings, including the decimal expectations, so JSON
+consumers do not lose precision above JavaScript's safe integer range.
 
 ## 6. Normalization and comparison
 
@@ -161,8 +174,10 @@ itself is not a URI; its URI form is given in Section 2.
 2. convert `domain` to lowercase IDNA A-labels;
 3. use uppercase hexadecimal digits in percent-encoding, and decode
    percent-encoded unreserved characters;
-4. reject empty segments and dot segments;
-5. omit a trailing `/` when there is only a `domain`.
+4. require an Actor `serial` to use the canonical text form in Section 5.2,
+   without stripping leading zeros, changing case, or truncating it;
+5. reject empty segments and dot segments;
+6. omit a trailing `/` when there is only a `domain`.
 
 Two URIs are equivalent when their normalized forms are byte-for-byte equal.
 The path after the RealmId, the query, and the fragment are case-sensitive.

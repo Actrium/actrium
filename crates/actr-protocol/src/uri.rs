@@ -253,7 +253,9 @@ impl FromStr for ActrUri {
             Some((serial, realm_id)) => (Some(serial), realm_id),
             None => (None, target.as_str()),
         };
-        if serial.is_some_and(|serial| !is_serial(serial)) || !is_realm_id(realm_id) {
+        if serial.is_some_and(|serial| parse_actor_serial(serial).is_none())
+            || !is_realm_id(realm_id)
+        {
             return Err(ActrUriError::InvalidLabel(target));
         }
         uri.serial = serial.map(str::to_string);
@@ -340,12 +342,26 @@ pub fn is_realm_id(value: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// Serial: one or more lowercase hexadecimal digits.
-fn is_serial(value: &str) -> bool {
-    !value.is_empty()
-        && value
+/// Largest Actor serial: serials are at most 54 bits.
+const MAX_ACTOR_SERIAL: u64 = (1 << 54) - 1;
+
+/// Parse an Actor serial in its canonical text form.
+///
+/// A serial is `0` or lowercase hexadecimal without leading zeros, and its
+/// value must be at most `2^54 - 1` (`3fffffffffffff`).
+pub(crate) fn parse_actor_serial(value: &str) -> Option<u64> {
+    if value.is_empty()
+        || value.len() > 14
+        || (value != "0" && value.starts_with('0'))
+        || !value
             .bytes()
             .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return None;
+    }
+    u64::from_str_radix(value, 16)
+        .ok()
+        .filter(|serial| *serial <= MAX_ACTOR_SERIAL)
 }
 
 /// A `links` prefix starts and ends with `/` and has at least one segment.
@@ -453,6 +469,57 @@ mod tests {
         assert_eq!(uri.realm_name().as_deref(), Some("k7m2q9xh@acme.com"));
         assert_eq!(uri.actor_id().as_deref(), Some("2af01.k7m2q9xh@acme.com"));
         assert_eq!(uri.to_string(), "actr://acme.com/2af01.k7m2q9xh");
+    }
+
+    #[test]
+    fn actor_serial_contract_is_consistent() {
+        use crate::actr_ext::{ActrIdError, parse_actor_id};
+
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/actr/test-vectors/actor-uri-serial.json"
+        ))
+        .expect("valid Actor URI serial vectors");
+
+        for case in vectors["valid"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let input = case["input"].as_str().unwrap();
+            let serial = case["serial"].as_str().unwrap();
+            let expected = case["serial_number"]
+                .as_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap();
+            let uri = parse(input);
+            assert_eq!(uri.to_string(), input, "{name}");
+            assert_eq!(uri.serial(), Some(serial), "{name}");
+            let actor_id = uri.actor_id().unwrap();
+            assert_eq!(actor_id, case["actor_id"].as_str().unwrap(), "{name}");
+            assert_eq!(parse_actor_id(&actor_id).unwrap().1, expected, "{name}");
+            let actor = crate::ActrId::from_uri(&uri)
+                .unwrap_or_else(|| panic!("{name}: valid Actor URI rejected"));
+            assert_eq!(actor.serial_number, expected, "{name}");
+            assert_eq!(actor.to_string_repr(), actor_id, "{name}");
+        }
+
+        for case in vectors["invalid"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let uri = case["input"].as_str().unwrap();
+            let error = uri.parse::<ActrUri>().unwrap_err();
+            assert!(
+                matches!(&error, ActrUriError::InvalidLabel(_)),
+                "{name}: {error:?}"
+            );
+            assert_eq!(error.code(), case["code"].as_str().unwrap(), "{name}");
+
+            let actor_id = case["actor_id"].as_str().unwrap();
+            assert!(
+                matches!(
+                    parse_actor_id(actor_id),
+                    Err(ActrIdError::InvalidComponent(_))
+                ),
+                "{name}: {actor_id}"
+            );
+        }
     }
 
     #[test]
