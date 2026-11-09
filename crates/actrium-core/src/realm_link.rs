@@ -1,9 +1,9 @@
-//! Installation-aware guards for opening and sharing Realm links.
+//! Preparatory guards for opening and sharing Realm links.
 //!
-//! This module does not implement Realm discovery or the Front-Service flow.
-//! It ensures that the future open path cannot accidentally perform local
-//! record access, state mutation, or network discovery before ownership is
-//! validated.
+//! These helpers validate installation ownership and select a supplied local
+//! or remote resolver. Production open/share integration remains tracked by
+//! <https://github.com/Actrium/actrium/issues/400> as part of the Front-Service
+//! flow in <https://github.com/Actrium/actrium/issues/324>.
 
 use actr_protocol::uri::{ActrUri, ActrUriError};
 
@@ -14,6 +14,8 @@ use actr_protocol::uri::{ActrUri, ActrUriError};
 /// must resolve the installation's local record without network discovery. A
 /// DNS Realm is passed only to `discover_remote`. A foreign local Realm fails
 /// with [`ActrUriError::LocalRealmForeign`] before either callback is entered.
+/// An authority-only URI has no RealmId and fails with
+/// [`ActrUriError::InvalidLabel`] before either callback is entered.
 pub fn open_realm_link<T, E>(
     input: &str,
     installation_id: &str,
@@ -24,6 +26,11 @@ where
     E: From<ActrUriError>,
 {
     let uri = ActrUri::parse_for_installation(input, installation_id).map_err(E::from)?;
+    if uri.realm_id().is_none() {
+        return Err(E::from(ActrUriError::InvalidLabel(
+            "a Realm link must include a RealmId".to_string(),
+        )));
+    }
     if uri.is_local() {
         open_local(&uri)
     } else {

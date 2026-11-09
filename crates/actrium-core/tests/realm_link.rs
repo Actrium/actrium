@@ -90,6 +90,35 @@ fn dns_realm_uses_network_discovery_without_installation_comparison() {
 }
 
 #[test]
+fn authority_only_links_fail_before_either_resolver_is_entered() {
+    for input in [
+        "actr://acme.com".to_string(),
+        format!("actr://{INSTALLATION_ID}.actr.alt"),
+    ] {
+        let local_record_reads = Cell::new(0);
+        let network_requests = Cell::new(0);
+
+        let error = open_realm_link(
+            &input,
+            INSTALLATION_ID,
+            |_| -> Result<(), ActrUriError> {
+                local_record_reads.set(local_record_reads.get() + 1);
+                Ok(())
+            },
+            |_| -> Result<(), ActrUriError> {
+                network_requests.set(network_requests.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code(), "URI_LABEL_INVALID", "{input}");
+        assert_eq!(local_record_reads.get(), 0, "{input}");
+        assert_eq!(network_requests.get(), 0, "{input}");
+    }
+}
+
+#[test]
 fn sharing_is_disabled_for_every_local_realm_before_opening() {
     let owned = format!("actr://{INSTALLATION_ID}.actr.alt/h3x8p2wq");
     let foreign = format!("actr://{FOREIGN_INSTALLATION_ID}.actr.alt/h3x8p2wq");
