@@ -62,7 +62,7 @@ Turn this document's product semantics into a cross-repository, testable contrac
 
 ### Deliverables
 
-- test vectors for the Realm link (`actr://` URI) and the `links` conversion;
+- test vectors for the `actr://` Realm link;
 - Publisher Profile schema;
 - Actrium manifest extension schema;
 - the Realm signing key (the authority descriptor's `realm_signing_keys` member and the core `realms` relation, already defined in Actr Authority Discovery §4.3–4.4) and the Realm Profile schema;
