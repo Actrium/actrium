@@ -163,6 +163,9 @@ jobs:
       - name: Verify registry-resolved STUN package
         run: cargo package -p loran-stun --locked
 
+      - name: Verify SQLx registry consumer resolution
+        run: python3 -m unittest scripts.actr.tests.test_apply_upstream_patches.ApplyUpstreamPatchesTest.test_generated_sqlx_override_resolves_with_patched_sqlite
+
       - name: Run release train script unit checks
         run: |
           python3 scripts/actr/tests/test_generate_changelog.py
