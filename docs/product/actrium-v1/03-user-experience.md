@@ -296,7 +296,7 @@ Everything favorited in the address bar is an instance; opening it returns to th
 
 ### 8.3 Sharing
 
-Sharing an instance shares only the address; it does not automatically grant access. If the Realm domain declares `links`, share the https form so the recipient can open an explanatory web page even without Actrium; otherwise share the `actr://` form.
+Sharing an instance shares only its canonical `actr://` address; it does not automatically grant access.
 
 - The recipient still needs to join that instance's Realm;
 - Application permissions must allow it;

@@ -21,7 +21,7 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 sha2 = { workspace = true }
 toml = { version = "0.8" }
-sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
+sqlx.workspace = true
 
 # Not in workspace
 rand = "0.8"

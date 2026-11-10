@@ -169,7 +169,9 @@ impl KeyStorageBackend for SqliteBackend {
         // the database is already at the current version so a healthy startup
         // performs no header write.
         if version != SIGNER_SCHEMA_VERSION {
-            sqlx::query(&format!("PRAGMA user_version = {SIGNER_SCHEMA_VERSION}"))
+            sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA user_version = ")
+                .push(SIGNER_SCHEMA_VERSION)
+                .build()
                 .execute(&self.pool)
                 .await
                 .map_err(|e| {

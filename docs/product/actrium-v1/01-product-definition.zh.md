@@ -198,7 +198,7 @@ Tab、Front Actor、Guest 都可以重建；Workspace 绑定、业务状态与�
 
 - macOS/Windows 桌面端完整闭环；
 - iOS/Android 前台运行与恢复闭环；
-- Realm 链接的打开与分享（含 https 形式）；程序库中新建实例；
+- `actr://` Realm 链接的打开与分享；程序库中新建实例；
 - Program Catalog 与 Service Inventory；
 - 域名 Publisher、HTTPS 下载、签名和 digest 校验；
 - 固定 Native Front Host + Keel JS Guest；

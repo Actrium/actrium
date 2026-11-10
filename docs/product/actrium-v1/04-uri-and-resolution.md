@@ -3,9 +3,8 @@
 ## 1. Purpose
 
 An application instance is a Realm, and its address is the Realm link. This chapter only covers
-how Actrium displays, opens, saves, and shares that address; the link syntax, the https form, and
-the opening procedure are defined in [Actr URI](../../../actr/protocols/uri.md) and are not
-repeated here.
+how Actrium displays, opens, saves, and shares that address; the link syntax and opening procedure
+are defined in [Actr URI](../../../actr/protocols/uri.md) and are not repeated here.
 
 - What appears in the address bar, history, favorites, and shares is always the instance address;
   opening it returns to the same instance;
@@ -18,7 +17,6 @@ repeated here.
 ```text
 actr://acme.com/k7m2q9xh
 actr://acme.com/k7m2q9xh/today?view=week#item-3
-https://acme.com/i/k7m2q9xh/today?view=week        ; acme.com declares links: ["/i/"]
 ```
 
 - `acme.com` is the Realm domain, and also the trust root the user sees; `k7m2q9xh` is the
@@ -30,11 +28,10 @@ https://acme.com/i/k7m2q9xh/today?view=week        ; acme.com declares links: ["
   procedure is the same, except it connects to that Actor directly instead of looking it up by
   type, and that Actor's type must match the package. This kind of link stops working once a
   program upgrade replaces the Actor, so instance links are the default for sharing;
-- The https form only holds when the Realm domain's `/.well-known/actr` declares the prefix via
-  `links`; on a device without Actrium, the same address opens the web page served by that
-  domain, and the page carries an "Open in Actrium" affordance;
-- A local Realm's address looks like `actr://<installation-id>.actr.alt/h3x8p2wq`, is valid only
-  on this installation, and has no https form.
+- Only `actr://` is supported for Realm-link input and sharing. An `https://` address is rejected
+  with `URI_SCHEME_INVALID`; Actrium does not convert it via `links`;
+- A local Realm's address looks like `actr://<installation-id>.actr.alt/h3x8p2wq` and is valid
+  only on this installation.
 
 ## 3. Opening
 
@@ -53,8 +50,8 @@ Product-level requirements:
   another Actr Facility Provider, does not swap packages, and does not create a new instance.
 - **No membership yet**: enter the join flow (e.g., a Realm invitation) instead of failing
   silently.
-- The user may choose "open in browser" for an https link; when navigating within a page on the
-  same domain, Actrium does not force a takeover.
+- The user may choose "open in browser" for an external https link; when navigating within a page
+  on the same domain, Actrium does not force a takeover.
 - A link cannot pre-grant any permission; unknown query parameters are handed to the app only and
   do not affect the install or permission screens.
 
@@ -66,8 +63,7 @@ Product-level requirements:
   address with a replace (not a push): back does not return to the create-confirmation page,
   refresh connects to the new instance, and history holds only the final address;
 - What gets favorited is the instance, not the program;
-- "Copy link": copies the https form when the Realm domain declares `links`, otherwise copies the
-  `actr://` form;
+- "Copy link": copies the normalized `actr://` address;
 - A local Realm disables "copy link"; it must not forge a domain.
 
 Creating a new instance is not itself a link; it is a local operation inside Actrium — see

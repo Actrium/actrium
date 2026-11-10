@@ -39,8 +39,6 @@ aes-gcm = "0.10"              # AES-256-GCM for KEK encryption
 # Storage backends
 # SQLite and PostgreSQL - unified async interface via sqlx
 sqlx = { workspace = true, default-features = false, features = [
-    "runtime-tokio-rustls",
-    "sqlite",
     "postgres",
     "macros",
 ], optional = true }

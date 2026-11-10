@@ -3,6 +3,20 @@
 Actor, transport, runtime, and protocol contracts that cross an Actr boundary
 belong here.
 
+## Actor URI serials
+
+[`test-vectors/actor-uri-serial.json`](test-vectors/actor-uri-serial.json)
+contains shared valid and invalid Actor URI/ActorId serial cases from
+[`uri.md`](../../actr/protocols/uri.md), section 5.2. Valid cases include exact
+decimal `serial_number` strings; do not parse them through floating-point JSON
+numbers. Negative cases specify the stable URI error code.
+
+Run the fixture-backed parser and conversion assertions with:
+
+```sh
+cargo test -p actr-protocol --lib uri::tests::actor_serial_contract_is_consistent --locked
+```
+
 ## Realm Profile
 
 [`realm-profile.schema.json`](realm-profile.schema.json) describes the public

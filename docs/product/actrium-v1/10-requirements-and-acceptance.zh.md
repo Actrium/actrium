@@ -25,7 +25,7 @@
 | FR-URI-004 | Service 的 Actor 类型必须与 Realm Profile 所指包声明的 Actor 类型一致。 |
 | FR-URI-005 | Realm 链接不得包含 credential、session secret、Workspace secret 或 bearer invite。 |
 | FR-URI-006 | Realm 链接不得含端口；开发来源只通过包地址（localhost、回环地址或私有 CA）区分。 |
-| FR-URI-007 | https 形式只能按 Realm 域名 authority descriptor 中 `links` 的声明转换，不得凭路径外观推断。 |
+| FR-URI-007 | Realm 链接的输入与分享只能使用 `actr://`；`https://` 输入必须以 `URI_SCHEME_INVALID` 拒绝，不得通过 `links` 转换。 |
 | FR-URI-008 | Parser 必须实施 IDNA、非法编码和控制字符检查。 |
 | FR-URI-009 | 新建实例是 Actrium 本地操作，不由链接触发；成功后地址栏显示该实例的 Realm 链接。 |
 

@@ -575,24 +575,35 @@ async fn ensure_realm(sqlite_dir: &Path, realm: &str) {
         .expect("init db");
     let public_key = client_key(TEST_CLIENT_KEY).verifying_key().to_bytes();
     let key_id = actr_protocol::realm_membership::client_key_id(&public_key);
-    let public_key = hex::encode(public_key);
-    for statement in [
-        format!(
-            "INSERT OR IGNORE INTO realm (name, status, enabled, created_at)
-             VALUES ('{realm}', 'active', 1, strftime('%s','now'))"
-        ),
-        format!(
-            "INSERT OR IGNORE INTO realm_member (realm, member_id, role, status, created_at)
-             VALUES ('{realm}', '{TEST_OWNER_MEMBER}', 'owner', 'active', 1)"
-        ),
-        format!(
-            "INSERT OR IGNORE INTO realm_client_key
-                (realm, key_id, public_key, member_id, registered_at)
-             VALUES ('{realm}', '{key_id}', X'{public_key}', '{TEST_OWNER_MEMBER}', 1)"
-        ),
-    ] {
-        db.execute(&statement).await.expect("seed realm");
-    }
+    sqlx::query(
+        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at)
+         VALUES (?, 'active', 1, strftime('%s','now'))",
+    )
+    .bind(realm)
+    .execute(db.get_pool())
+    .await
+    .expect("seed realm");
+    sqlx::query(
+        "INSERT OR IGNORE INTO realm_member (realm, member_id, role, status, created_at)
+         VALUES (?, ?, 'owner', 'active', 1)",
+    )
+    .bind(realm)
+    .bind(TEST_OWNER_MEMBER)
+    .execute(db.get_pool())
+    .await
+    .expect("seed realm member");
+    sqlx::query(
+        "INSERT OR IGNORE INTO realm_client_key
+            (realm, key_id, public_key, member_id, registered_at)
+         VALUES (?, ?, ?, ?, 1)",
+    )
+    .bind(realm)
+    .bind(key_id)
+    .bind(public_key.as_slice())
+    .bind(TEST_OWNER_MEMBER)
+    .execute(db.get_pool())
+    .await
+    .expect("seed realm client key");
 }
 
 /// `POST /issuer/membership` with `request` signed by the key `label`.

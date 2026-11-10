@@ -373,13 +373,11 @@ pub(crate) async fn retire_in(
         .execute(&mut **tx)
         .await?;
     // ActorId text is `<serial_hex>.<realm>`; the serial has no dot.
-    for table in ["issuer_renewal_token", "issuer_control_attempt"] {
-        sqlx::query(&format!(
-            "DELETE FROM {table} WHERE substr(actor_id, instr(actor_id, '.') + 1) = ?"
-        ))
-        .bind(name)
-        .execute(&mut **tx)
-        .await?;
+    for statement in [
+        "DELETE FROM issuer_renewal_token WHERE substr(actor_id, instr(actor_id, '.') + 1) = ?",
+        "DELETE FROM issuer_control_attempt WHERE substr(actor_id, instr(actor_id, '.') + 1) = ?",
+    ] {
+        sqlx::query(statement).bind(name).execute(&mut **tx).await?;
     }
 
     Ok(())
@@ -592,15 +590,18 @@ mod tests {
 
         Realm::retire("old@example.com").await?;
 
-        for (table, column) in [
-            ("actoracl", "realm"),
-            ("pending_registration", "realm"),
-            ("issued_actor_identity", "realm"),
+        for (table, statement) in [
+            ("actoracl", "SELECT realm FROM actoracl ORDER BY 1"),
+            (
+                "pending_registration",
+                "SELECT realm FROM pending_registration ORDER BY 1",
+            ),
+            (
+                "issued_actor_identity",
+                "SELECT realm FROM issued_actor_identity ORDER BY 1",
+            ),
         ] {
-            let rows: Vec<String> =
-                sqlx::query_scalar(&format!("SELECT {column} FROM {table} ORDER BY 1"))
-                    .fetch_all(pool)
-                    .await?;
+            let rows: Vec<String> = sqlx::query_scalar(statement).fetch_all(pool).await?;
             let expected: &[&str] = if table == "issued_actor_identity" {
                 &["keep@example.com", "old@example.com"]
             } else {

@@ -1,0 +1,90 @@
+{
+  "description": "Shared canonical 54-bit Actor serial vectors for ActrUri and ActorId text parsing (actr/protocols/uri.md section 5.2). Valid inputs are canonical Actor URIs. All serial values, including decimal serial_number expectations, are strings so implementations never round them through a JSON number.",
+  "valid": [
+    {
+      "name": "zero",
+      "input": "actr://acme.com/0.k7m2q9xh",
+      "actor_id": "0.k7m2q9xh@acme.com",
+      "serial": "0",
+      "serial_number": "0"
+    },
+    {
+      "name": "ordinary_serial",
+      "input": "actr://acme.com/2af01.k7m2q9xh",
+      "actor_id": "2af01.k7m2q9xh@acme.com",
+      "serial": "2af01",
+      "serial_number": "175873"
+    },
+    {
+      "name": "thirteen_hex_digits",
+      "input": "actr://acme.com/fffffffffffff.k7m2q9xh",
+      "actor_id": "fffffffffffff.k7m2q9xh@acme.com",
+      "serial": "fffffffffffff",
+      "serial_number": "4503599627370495"
+    },
+    {
+      "name": "above_javascript_safe_integer",
+      "input": "actr://acme.com/20000000000001.k7m2q9xh",
+      "actor_id": "20000000000001.k7m2q9xh@acme.com",
+      "serial": "20000000000001",
+      "serial_number": "9007199254740993"
+    },
+    {
+      "name": "maximum_serial",
+      "input": "actr://acme.com/3fffffffffffff.k7m2q9xh",
+      "actor_id": "3fffffffffffff.k7m2q9xh@acme.com",
+      "serial": "3fffffffffffff",
+      "serial_number": "18014398509481983"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "empty_serial",
+      "input": "actr://acme.com/.k7m2q9xh",
+      "actor_id": ".k7m2q9xh@acme.com",
+      "code": "URI_LABEL_INVALID"
+    },
+    {
+      "name": "multiple_zero_digits",
+      "input": "actr://acme.com/00.k7m2q9xh",
+      "actor_id": "00.k7m2q9xh@acme.com",
+      "code": "URI_LABEL_INVALID"
+    },
+    {
+      "name": "leading_zero",
+      "input": "actr://acme.com/02af01.k7m2q9xh",
+      "actor_id": "02af01.k7m2q9xh@acme.com",
+      "code": "URI_LABEL_INVALID"
+    },
+    {
+      "name": "uppercase_hex",
+      "input": "actr://acme.com/2AF01.k7m2q9xh",
+      "actor_id": "2AF01.k7m2q9xh@acme.com",
+      "code": "URI_LABEL_INVALID"
+    },
+    {
+      "name": "non_hex_digit",
+      "input": "actr://acme.com/2ag01.k7m2q9xh",
+      "actor_id": "2ag01.k7m2q9xh@acme.com",
+      "code": "URI_LABEL_INVALID"
+    },
+    {
+      "name": "one_above_maximum",
+      "input": "actr://acme.com/40000000000000.k7m2q9xh",
+      "actor_id": "40000000000000.k7m2q9xh@acme.com",
+      "code": "URI_LABEL_INVALID"
+    },
+    {
+      "name": "fourteen_hex_f_digits",
+      "input": "actr://acme.com/ffffffffffffff.k7m2q9xh",
+      "actor_id": "ffffffffffffff.k7m2q9xh@acme.com",
+      "code": "URI_LABEL_INVALID"
+    },
+    {
+      "name": "overlong_serial",
+      "input": "actr://acme.com/100000000000000.k7m2q9xh",
+      "actor_id": "100000000000000.k7m2q9xh@acme.com",
+      "code": "URI_LABEL_INVALID"
+    }
+  ]
+}

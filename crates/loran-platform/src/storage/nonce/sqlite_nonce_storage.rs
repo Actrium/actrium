@@ -117,7 +117,9 @@ impl SqliteNonceStorage {
         // the database is already at the current version so a healthy startup
         // performs no header write.
         if version != NONCE_SCHEMA_VERSION {
-            sqlx::query(&format!("PRAGMA user_version = {NONCE_SCHEMA_VERSION}"))
+            sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA user_version = ")
+                .push(NONCE_SCHEMA_VERSION)
+                .build()
                 .execute(&pool)
                 .await?;
         }

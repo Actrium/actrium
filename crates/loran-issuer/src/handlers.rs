@@ -1351,14 +1351,16 @@ mod tests {
             Err((403, "Realm is retired".to_string()))
         );
         let pool = platform::storage::db::get_database().get_pool();
-        for table in ["actoracl", "pending_registration"] {
-            let rows: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE realm = ?"))
-                    .bind(realm)
-                    .fetch_one(pool)
-                    .await
-                    .unwrap();
-            assert_eq!(rows, 0, "{table}");
+        for statement in [
+            "SELECT COUNT(*) FROM actoracl WHERE realm = ?",
+            "SELECT COUNT(*) FROM pending_registration WHERE realm = ?",
+        ] {
+            let rows: i64 = sqlx::query_scalar(statement)
+                .bind(realm)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+            assert_eq!(rows, 0, "{statement}");
         }
     }
 
@@ -1410,13 +1412,15 @@ mod tests {
         };
         let rows = || async {
             let mut counts = Vec::new();
-            for table in ["actoracl", "pending_registration"] {
-                let count: i64 =
-                    sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE realm = ?"))
-                        .bind(realm)
-                        .fetch_one(pool)
-                        .await
-                        .unwrap();
+            for statement in [
+                "SELECT COUNT(*) FROM actoracl WHERE realm = ?",
+                "SELECT COUNT(*) FROM pending_registration WHERE realm = ?",
+            ] {
+                let count: i64 = sqlx::query_scalar(statement)
+                    .bind(realm)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap();
                 counts.push(count);
             }
             counts

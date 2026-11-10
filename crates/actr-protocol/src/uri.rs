@@ -73,6 +73,19 @@ pub struct ActrUri {
 }
 
 impl ActrUri {
+    /// Parse a Realm link and reject a local Realm owned by another installation.
+    ///
+    /// Opening a Realm link should use this constructor before accessing local
+    /// records, changing state, or starting network discovery.
+    pub fn parse_for_installation(
+        input: &str,
+        installation_id: &str,
+    ) -> Result<Self, ActrUriError> {
+        let uri: Self = input.parse()?;
+        uri.check_local(installation_id)?;
+        Ok(uri)
+    }
+
     /// Construct the domain-only URI `actr://<domain>`.
     pub fn from_domain(domain: &str) -> Result<Self, ActrUriError> {
         Ok(Self {
@@ -133,6 +146,15 @@ impl ActrUri {
         self.domain.ends_with(LOCAL_REALM_SUFFIX)
     }
 
+    /// Whether this address names a Realm instance that can be shared with another installation.
+    ///
+    /// Domain-only addresses and local Realms are not shareable. Local Realms
+    /// remain unshareable before their ownership has been validated with
+    /// [`Self::check_local`].
+    pub fn is_shareable(&self) -> bool {
+        self.realm_id.is_some() && !self.is_local()
+    }
+
     /// Reject a local Realm that belongs to another installation.
     pub fn check_local(&self, installation_id: &str) -> Result<(), ActrUriError> {
         if self.is_local() && self.domain != format!("{installation_id}{LOCAL_REALM_SUFFIX}") {
@@ -149,42 +171,6 @@ impl ActrUri {
     /// HTTPS discovery URL of the domain. A local Realm has none.
     pub fn discovery_url(&self) -> Option<String> {
         (!self.is_local()).then(|| format!("https://{}/.well-known/actr", self.domain))
-    }
-
-    /// https form of a Realm link under a declared `links` prefix.
-    ///
-    /// Returns `None` for a local Realm, a domain-only URI, or an invalid prefix.
-    pub fn to_https(&self, prefix: &str) -> Option<String> {
-        if self.is_local() || self.realm_id.is_none() || !is_link_prefix(prefix) {
-            return None;
-        }
-        let uri = self.to_string();
-        let rest = &uri["actr://".len() + self.domain.len() + 1..];
-        Some(format!("https://{}{prefix}{rest}", self.domain))
-    }
-
-    /// Convert an https address to a Realm link using the domain's declared
-    /// `links` prefixes, longest prefix first.
-    ///
-    /// Returns `None` when no prefix matches or the result is not a Realm link;
-    /// such an address is an ordinary web page.
-    pub fn from_https(url: &str, links: &[String]) -> Option<Self> {
-        let (scheme, rest) = url.split_once("://")?;
-        if !scheme.eq_ignore_ascii_case("https") {
-            return None;
-        }
-        let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-        let (host, rest) = rest.split_at(end);
-        let path_end = rest.find(['?', '#']).unwrap_or(rest.len());
-        let (path, suffix) = rest.split_at(path_end);
-        let prefix = links
-            .iter()
-            .filter(|prefix| is_link_prefix(prefix) && path.starts_with(prefix.as_str()))
-            .max_by_key(|prefix| prefix.len())?;
-        let uri = format!("actr://{host}/{}{suffix}", &path[prefix.len()..])
-            .parse::<Self>()
-            .ok()?;
-        (uri.realm_id.is_some() && !uri.is_local()).then_some(uri)
     }
 }
 
@@ -253,7 +239,9 @@ impl FromStr for ActrUri {
             Some((serial, realm_id)) => (Some(serial), realm_id),
             None => (None, target.as_str()),
         };
-        if serial.is_some_and(|serial| !is_serial(serial)) || !is_realm_id(realm_id) {
+        if serial.is_some_and(|serial| parse_actor_serial(serial).is_none())
+            || !is_realm_id(realm_id)
+        {
             return Err(ActrUriError::InvalidLabel(target));
         }
         uri.serial = serial.map(str::to_string);
@@ -340,12 +328,26 @@ pub fn is_realm_id(value: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// Serial: one or more lowercase hexadecimal digits.
-fn is_serial(value: &str) -> bool {
-    !value.is_empty()
-        && value
+/// Largest Actor serial: serials are at most 54 bits.
+const MAX_ACTOR_SERIAL: u64 = (1 << 54) - 1;
+
+/// Parse an Actor serial in its canonical text form.
+///
+/// A serial is `0` or lowercase hexadecimal without leading zeros, and its
+/// value must be at most `2^54 - 1` (`3fffffffffffff`).
+pub(crate) fn parse_actor_serial(value: &str) -> Option<u64> {
+    if value.is_empty()
+        || value.len() > 14
+        || (value != "0" && value.starts_with('0'))
+        || !value
             .bytes()
             .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return None;
+    }
+    u64::from_str_radix(value, 16)
+        .ok()
+        .filter(|serial| *serial <= MAX_ACTOR_SERIAL)
 }
 
 /// A `links` prefix starts and ends with `/` and has at least one segment.
@@ -456,6 +458,57 @@ mod tests {
     }
 
     #[test]
+    fn actor_serial_contract_is_consistent() {
+        use crate::actr_ext::{ActrIdError, parse_actor_id};
+
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/actr/test-vectors/actor-uri-serial.json"
+        ))
+        .expect("valid Actor URI serial vectors");
+
+        for case in vectors["valid"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let input = case["input"].as_str().unwrap();
+            let serial = case["serial"].as_str().unwrap();
+            let expected = case["serial_number"]
+                .as_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap();
+            let uri = parse(input);
+            assert_eq!(uri.to_string(), input, "{name}");
+            assert_eq!(uri.serial(), Some(serial), "{name}");
+            let actor_id = uri.actor_id().unwrap();
+            assert_eq!(actor_id, case["actor_id"].as_str().unwrap(), "{name}");
+            assert_eq!(parse_actor_id(&actor_id).unwrap().1, expected, "{name}");
+            let actor = crate::ActrId::from_uri(&uri)
+                .unwrap_or_else(|| panic!("{name}: valid Actor URI rejected"));
+            assert_eq!(actor.serial_number, expected, "{name}");
+            assert_eq!(actor.to_string_repr(), actor_id, "{name}");
+        }
+
+        for case in vectors["invalid"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let uri = case["input"].as_str().unwrap();
+            let error = uri.parse::<ActrUri>().unwrap_err();
+            assert!(
+                matches!(&error, ActrUriError::InvalidLabel(_)),
+                "{name}: {error:?}"
+            );
+            assert_eq!(error.code(), case["code"].as_str().unwrap(), "{name}");
+
+            let actor_id = case["actor_id"].as_str().unwrap();
+            assert!(
+                matches!(
+                    parse_actor_id(actor_id),
+                    Err(ActrIdError::InvalidComponent(_))
+                ),
+                "{name}: {actor_id}"
+            );
+        }
+    }
+
+    #[test]
     fn domain_only_uri_names_no_realm() {
         let uri = parse("actr://acme.com/");
         assert_eq!(uri.realm_id(), None);
@@ -495,54 +548,11 @@ mod tests {
         let uri = parse(&format!("actr://{id}.actr.alt/h3x8p2wq"));
         assert!(uri.is_local());
         assert_eq!(uri.discovery_url(), None);
-        assert_eq!(uri.to_https("/i/"), None);
         uri.check_local(id).unwrap();
         let error = uri.check_local("bcdefghijklmnopqrstuvwxyza").unwrap_err();
         assert_eq!(error.code(), "URI_LOCAL_REALM_FOREIGN");
         assert!(!parse("actr://acme.com/k7m2q9xh").is_local());
         parse("actr://acme.com/k7m2q9xh").check_local(id).unwrap();
-    }
-
-    #[test]
-    fn https_form_uses_declared_prefix() {
-        let links = vec!["/i/".to_string()];
-        let uri = ActrUri::from_https("https://acme.com/i/k7m2q9xh/today?view=week", &links);
-        assert_eq!(
-            uri.as_ref().map(ToString::to_string).as_deref(),
-            Some("actr://acme.com/k7m2q9xh/today?view=week")
-        );
-        assert_eq!(
-            uri.unwrap().to_https("/i/").as_deref(),
-            Some("https://acme.com/i/k7m2q9xh/today?view=week")
-        );
-    }
-
-    #[test]
-    fn https_form_prefers_longest_prefix() {
-        let links = vec!["/i/".to_string(), "/i/x/".to_string()];
-        let uri = ActrUri::from_https("https://acme.com/i/x/k7m2q9xh", &links).unwrap();
-        assert_eq!(uri.to_string(), "actr://acme.com/k7m2q9xh");
-    }
-
-    #[test]
-    fn undeclared_https_is_an_ordinary_page() {
-        let links = vec!["/i/".to_string()];
-        for url in [
-            "https://acme.com/k7m2q9xh",
-            "https://acme.com/i/",
-            "https://acme.com/i/Bad_Id",
-            "https://acme.com:8443/i/k7m2q9xh",
-            "http://acme.com/i/k7m2q9xh",
-            "https://abcdefghijklmnopqrstuvwxyz.actr.alt/i/h3x8p2wq",
-        ] {
-            assert_eq!(ActrUri::from_https(url, &links), None, "{url}");
-        }
-        assert_eq!(
-            ActrUri::from_https("https://acme.com/i/k7m2q9xh", &[]),
-            None
-        );
-        assert_eq!(parse("actr://acme.com").to_https("/i/"), None);
-        assert_eq!(parse("actr://acme.com/k7m2q9xh").to_https("/"), None);
     }
 
     #[test]

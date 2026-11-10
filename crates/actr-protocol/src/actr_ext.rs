@@ -10,7 +10,7 @@
 //! | Program identity | `publisher/program@version` | `apps.example.com/echo@1.0.0` |
 //! | ActrId | `<serial_hex>.<realm_id>@<domain>` | `2af01.k7m2q9xh@acme.com` |
 
-use crate::uri::{ActrUri, ActrUriError};
+use crate::uri::{ActrUri, ActrUriError, parse_actor_serial};
 use crate::{ActrId, ActrType, name::Name};
 use thiserror::Error;
 
@@ -264,9 +264,6 @@ impl std::fmt::Display for ActrType {
     }
 }
 
-/// Largest Actor serial: serials are at most 54 bits.
-const MAX_ACTOR_SERIAL: u64 = (1 << 54) - 1;
-
 /// Formats an ActorId `<serial_hex>.<realm_id>@<domain>` from a Realm name and
 /// an Actor serial.
 pub fn format_actor_id(realm: &str, serial_number: u64) -> String {
@@ -293,16 +290,8 @@ pub fn parse_actor_id(s: &str) -> Result<(String, u64), ActrIdError> {
         .split_once('.')
         .filter(|(serial, _)| !serial.contains('@'))
         .ok_or_else(|| ActrIdError::InvalidFormat(format!("{s} ({expected})")))?;
-    let serial_number = (!serial.is_empty()
-        && serial.len() <= 14
-        && (serial == "0" || !serial.starts_with('0'))
-        && serial
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
-    .then(|| u64::from_str_radix(serial, 16).ok())
-    .flatten()
-    .filter(|serial| *serial <= MAX_ACTOR_SERIAL)
-    .ok_or_else(|| ActrIdError::InvalidComponent(format!("Invalid Actor serial: {serial}")))?;
+    let serial_number = parse_actor_serial(serial)
+        .ok_or_else(|| ActrIdError::InvalidComponent(format!("Invalid Actor serial: {serial}")))?;
     crate::uri::parse_realm_name(realm)
         .map_err(|error| ActrIdError::InvalidComponent(error.to_string()))?;
     Ok((realm.to_string(), serial_number))
@@ -348,7 +337,12 @@ impl ActrId {
 
     /// The Actor named by an Actor link, if the URI names one.
     pub fn from_uri(uri: &ActrUri) -> Option<Self> {
-        Self::from_string_repr(&uri.actor_id()?).ok()
+        let serial_number = parse_actor_serial(uri.serial()?)
+            .expect("ActrUri validates Actor serials while parsing");
+        Some(Self {
+            realm: uri.realm_name()?,
+            serial_number,
+        })
     }
 }
 

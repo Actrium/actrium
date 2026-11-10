@@ -115,19 +115,33 @@ Realm 名形似电子邮件地址，但不是。Actr Host **MUST NOT** 把它渲
 
 ```abnf
 actor-id        = serial "." realm-name
-serial          = 1*( DIGIT / %x61-66 )        ; 小写十六进制
+serial          = "0" / non-zero-hex *12hex-digit / %x31-33 13hex-digit
+hex-digit       = DIGIT / %x61-66            ; 小写十六进制
+non-zero-hex    = %x31-39 / %x61-66          ; 1-9 或 a-f
 ```
 
-例如 `2af01.k7m2q9xh@acme.com`：`serial` 由该 Realm 的 Issuer 分配，去掉 `<serial>.` 即得
-Realm 名。ActorId 不含程序类型，程序类型由 Actor credential 携带。ActorId 本身不是 URI，其 URI 形式见第 2 节。
+例如 `2af01.k7m2q9xh@acme.com`：`serial` 由该 Realm 的 Issuer 分配，去掉
+`<serial>.` 即得 Realm 名。其规范文本形式是 `0`，或不带前导零的小写十六进制，
+无符号数值 **MUST** 不超过 `2^54 - 1`（`3fffffffffffff`）。因此，14 位 serial
+必须以 `1`、`2` 或 `3` 开头，超过 14 位的 serial 无效。实现 **MUST** 拒绝大写
+十六进制、前导零和超出范围的 serial，**MUST NOT** 将其改写为有效的 serial。
+
+ActorId 不含程序类型，程序类型由 Actor credential 携带。ActorId 本身不是 URI，其 URI
+形式见第 2 节。
+
+Actor URI/ActorId serial 边界的共享测试向量见
+[`actor-uri-serial.json`](../../contracts/actr/test-vectors/actor-uri-serial.json)。
+serial 精确值（包括十进制预期值）均使用字符串，避免 JSON 消费方在超出 JavaScript
+安全整数范围时丢失精度。
 
 ## 6. 规范化与比较
 
 1. scheme 小写为 `actr`；
 2. `domain` 转为小写 IDNA A-label；
 3. percent-encoding 的十六进制数字大写，表示 unreserved 字符的编码解码；
-4. 拒绝空 segment 与 dot segment；
-5. 只有 `domain` 时省略尾部 `/`。
+4. Actor 的 `serial` MUST 使用第 5.2 节的规范文本形式，不得删除前导零、改变大小写或截断；
+5. 拒绝空 segment 与 dot segment；
+6. 只有 `domain` 时省略尾部 `/`。
 
 规范化后逐字节相同的两个 URI 等价。RealmId 之后的 path、query 与 fragment 区分大小写。
 

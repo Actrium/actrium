@@ -25,7 +25,7 @@
 | FR-URI-004 | The Service's Actor type MUST match the Actor type declared by the package the Realm Profile points to. |
 | FR-URI-005 | A Realm link MUST NOT contain a credential, session secret, Workspace secret or bearer invite. |
 | FR-URI-006 | A Realm link MUST NOT contain a port; development origins are distinguished only through the package address (localhost, loopback addresses or a private CA). |
-| FR-URI-007 | An https form MAY only be produced according to the `links` declaration in the Realm domain's authority descriptor; it MUST NOT be inferred from the path's appearance. |
+| FR-URI-007 | Realm-link input and sharing MUST use `actr://` only; an `https://` input MUST be rejected with `URI_SCHEME_INVALID`, not converted via `links`. |
 | FR-URI-008 | The parser MUST implement IDNA, illegal-encoding and control-character checks. |
 | FR-URI-009 | Creating an instance is a local Actrium operation and is not triggered by a link; on success the address bar shows that instance's Realm link. |
 

@@ -158,8 +158,11 @@ serial_test = "3.0"
 hex = "0.4.3"
 hkdf = "0.12"
 hmac = "0.12"
-sqlx = { version = "0.8", default-features = false, features = [
-    "runtime-tokio-rustls",
+# SQLx #4502 allows patched libsqlite3-sys 0.39. Keep this pinned upstream
+# revision until a published release includes that fix.
+sqlx = { version = "=0.9.0", git = "https://github.com/transact-rs/sqlx", rev = "10462fa4414c6c7f1ed1d39bb31678e3b726878c", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls-ring",
     "sqlite",
 ] }
 
@@ -169,7 +172,8 @@ sha2 = "0.10"
 rand = "0.8"
 
 # === Storage ===
-rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
+# Preserve cached statements and checked u64/usize SQLite conversions.
+rusqlite = { version = "0.41.1", default-features = false, features = ["bundled", "cache", "fallible_uint", "serde_json"] }
 
 # === WASM Runtime ===
 # Pinned to 48.0.8 for Component Model host execution (Rust >= 1.95).
