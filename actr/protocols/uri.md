@@ -181,6 +181,8 @@ consumers do not lose precision above JavaScript's safe integer range.
 
 Two URIs are equivalent when their normalized forms are byte-for-byte equal.
 The path after the RealmId, the query, and the fragment are case-sensitive.
+Shared parsing and normalization vectors are in
+[`contracts/actr/test-vectors/uri.json`](../../contracts/actr/test-vectors/uri.json).
 
 ## 7. Legacy forms
 
@@ -227,6 +229,6 @@ References: this document
 
 ## 11. Open work
 
-- Add test vectors for parsing, normalization, and https conversion;
+- Add test vectors for https conversion;
 - establish the long-term public specification URL and project contact used
   for IANA registration.

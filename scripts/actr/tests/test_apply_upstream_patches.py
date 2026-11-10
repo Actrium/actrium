@@ -53,14 +53,16 @@ loran-turn = {{ path = {json.dumps((module.REPO / 'crates/loran-turn').as_posix(
         dependencies = tomllib.loads((module.REPO / "Cargo.toml").read_text())["workspace"]["dependencies"]
         for package, dependency in (
             ("webrtc", "webrtc"), ("rtc", "rtc"), ("rtc-turn", "rtc"),
-            ("rtc-rtp", "rtc-rtp"), ("sqlx", "sqlx"),
+            ("rtc-rtp", "rtc-rtp"),
         ):
             with self.subTest(package=package):
                 self.assertEqual(patches[package]["git"], dependencies[dependency]["git"])
                 self.assertEqual(patches[package]["rev"], dependencies[dependency]["rev"])
 
-    def test_generated_sqlx_override_resolves_with_patched_sqlite(self):
-        patch = tomllib.loads(module.PATCH_SOURCE.read_text())["patch"]["crates-io"]["sqlx"]
+    def test_loran_consumer_sqlx_override_resolves_with_patched_sqlite(self):
+        dependencies = tomllib.loads((module.REPO / "Cargo.toml").read_text())["workspace"]["dependencies"]
+        patch = dependencies["sqlx"]
+        rusqlite = dependencies["rusqlite"]
         with tempfile.TemporaryDirectory(prefix="actr-registry-sqlx-") as directory:
             root = Path(directory)
             (root / "src").mkdir()
@@ -74,8 +76,8 @@ edition = "2024"
 [workspace]
 
 [dependencies]
-sqlx = {{ version = "=0.9.0", default-features = false, features = ["runtime-tokio", "sqlite"] }}
-rusqlite = {{ version = "0.41.1", features = ["bundled"] }}
+sqlx = {{ version = {json.dumps(patch["version"])}, default-features = false, features = ["runtime-tokio", "sqlite"] }}
+rusqlite = {{ version = {json.dumps(rusqlite["version"])}, features = ["bundled"] }}
 
 [patch.crates-io]
 sqlx = {{ git = {json.dumps(patch["git"])}, rev = {json.dumps(patch["rev"])} }}

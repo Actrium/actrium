@@ -22,8 +22,8 @@ inherit these dependencies without adding a workspace `[patch]` table.
 
 Cargo converts Git dependencies with a `version` to registry dependencies when
 packaging. Until compatible upstream releases contain the required fixes,
-consumers of published Actr crates must put the RTC and SQLx overrides in their
-own workspace root. The CLI's
+consumers of published Actr crates that use native RTC must put its overrides
+in their own workspace root. The CLI's
 [generated Rust app manifest](../../crates/actr-cli/fixtures/rust/Cargo.toml.hbs)
 contains the required `[patch.crates-io]` entries; existing projects can copy
 those entries and merge them with any existing table. These overrides are not
@@ -38,16 +38,33 @@ workspace manifest:
 python3 scripts/actr/apply-upstream-patches.py /path/to/workspace/Cargo.toml
 ```
 
-The published `sqlx` 0.9.0 requires `libsqlite3-sys <0.38`, which cannot
-resolve alongside `rusqlite` 0.41's `libsqlite3-sys 0.39` dependency. The
-SQLx override must be present in the consumer's workspace until an upstream
-release supports the patched SQLite version. Publishing without client-side
-consumer overrides also requires upstream registry releases containing the RTC
-fixes; pinning Git revisions alone does not provide that. `turn` 0.17.3 provides
-the APIs required by `loran-stun`. The release
-train checks this package before uploading Rust crates; its `--dry-run` mode
-does not verify registry-resolved Rust packages. The remaining RTC registry
-migration is tracked by
+The generated app's default dependency graph uses SQLite through
+`actr-hyper` and `rusqlite`. Apps using older registry releases need to upgrade
+to an Actr release built with `rusqlite` 0.41 and refresh their lockfile to
+receive the bundled SQLite fix for RUSTSEC-2026-0459.
+
+Published Loran crates such as `loran-server` resolve the registry SQLx
+`=0.9.0`, which requires `libsqlite3-sys <0.38` for its SQLite backend.
+That range conflicts with `rusqlite` 0.41's `libsqlite3-sys 0.39`. To use
+the patched SQLite with Loran's SQLx backend, including in a workspace that
+also uses `rusqlite` 0.41, add this entry to the consumer workspace's existing
+`[patch.crates-io]` table until a compatible upstream SQLx release is available:
+
+```toml
+[patch.crates-io]
+sqlx = { git = "https://github.com/transact-rs/sqlx", rev = "10462fa4414c6c7f1ed1d39bb31678e3b726878c" }
+```
+
+The SQLx update also moves the PostgreSQL backend from `whoami` 1.6.1 to
+2.1.3. For deployments that rely on the OS account lookup for the default
+database username, the inferred username can change, especially in containers
+where the process UID has no passwd entry. Set the database username explicitly
+when relying on a particular PostgreSQL role.
+
+`turn` 0.17.3 provides the APIs required by `loran-stun`. Release Train
+Basic Verify checks the registry-resolved STUN package before running the
+release dry-run. The release train also checks the package before uploading
+Rust crates. The remaining RTC registry migration is tracked by
 [issue #359](https://github.com/Actrium/actrium/issues/359).
 
 The `turn` implementation provides the UDP TURN/STUN profile used here;
