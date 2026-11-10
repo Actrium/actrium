@@ -11,7 +11,6 @@ Syntax: see [Actr URI](../../../actr/protocols/uri.md).
 ```text
 actr://acme.com/k7m2q9xh                         ; open instance k7m2q9xh@acme.com
 actr://acme.com/notes/today?filter=assigned      ; an explicit readable RealmId, with a page path and query
-https://acme.com/i/k7m2q9xh                      ; https form, acme.com declares links: ["/i/"]
 actr://acme.com/2af01.k7m2q9xh                   ; an Actor within the instance (ActorId 2af01.k7m2q9xh@acme.com)
 actr://<installation-id>.actr.alt/h3x8p2wq       ; a local Realm, not shareable
 ```
@@ -385,9 +384,9 @@ Authority Discovery §4.3–4.4):
 rotation was introduced. Removing a key from `keys` revokes every Realm Profile it signed.
 `realm_signing_keys.signature` is signed by some `active` key over the JCS-normalized result of
 that member with `signature` removed, covering `sequence`. The rest of the descriptor is unsigned
-and does not list a Realm inventory. `links` declares that `https://acme.com/i/<realm_id>…` is the
-https form of a Realm link (Actr Authority Discovery §4.6); the prefix is chosen by the domain and
-has no default. The signaling, ice-config, and similar entries under `services` serve that
+and does not list a Realm inventory. The optional `links` member is retained as descriptor metadata
+(Actr Authority Discovery §4.6), but Actrium does not use it to parse or share Realm links; Realm-link
+input and sharing use `actr://` only. The signaling, ice-config, and similar entries under `services` serve that
 authority itself and have nothing to do with the Realms under that domain; accessing a Realm only
 ever uses the Realm Infra Provider named in its own Realm Profile, and no other Realm Infra Provider may be
 used when that Realm Profile is unavailable, invalid, or retired. A Realm Infra Provider's own descriptor
