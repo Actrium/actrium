@@ -75,6 +75,9 @@ Actr Host 以 HTTPS `POST <issuer.url>/membership` 发送 membership 请求（pr
 | `transfer_owner` | `member_id`、可选 `previous_owner_role`（缺省 `editor`） | owner | 原子地把 owner 交给另一 active 且至少有一把未撤销客户端 key 的成员，原 owner 改为指定角色 |
 | `leave` | 无 | 非 owner 成员 | 移除自己，效果同 `remove_member` |
 | `update_realm` | 可选 `package`、`display_name`，或 `status: "retired"` | owner；只用于 Realm Infra Provider 域名下的 Realm | Realm Infra Provider 签署并发布 sequence 更高的 Realm Profile（Realm Profile 第 7.2、7.4 节）；响应 `{realm, sequence}` |
+| `service_acl_grant` | `service_serial`、`member_id`、`role`（`editor`/`viewer`）、`grant_expires_at` | 该 Service Actor 的 owner | 授予或刷新该成员在该 Service 上的角色至过期时刻；响应该授权 |
+| `service_acl_revoke` | `service_serial`、`member_id` | 该 Service Actor 的 owner | 授权从下一次检查起不再放行 attach |
+| `service_acl_list` | `service_serial` | 该 Service Actor 的 owner | 授权行及其状态（`active`、`expired`、`revoked`） |
 
 `join` 请求中 `signature.key_id` **MUST** 等于由 `public_key` 算出的 `key_id`，签名即持有证明。其他请求的签名
 key **MUST** 是该 Realm 已登记、未撤销、属于 `active` 成员的 Realm 客户端 key。
@@ -122,6 +125,34 @@ Realm Infra Provider 以 JSON `{"error": "<code>", "message": "<text>"}` 返回�
 
 `realm_unavailable` 只在请求方已证明持有登记的 key 或有效邀请之后返回；否则一律 `client_unknown` 或
 `invite_unknown`，不透露 Realm 状态。邀请过期、已用、已撤销与 Realm 不匹配 **MUST** 是不同错误。
+
+### 4.4 Service 实例 ACL
+
+Realm membership 不是实例授权（FR-SEC-013）：加入 Realm 不获得其中任何 Service Actor 的访问权。Service 的
+owner——Actor 身份签发给的成员——用 `service_acl_grant` 委派 attach 权限。owner 是隐式的：授权行只命名被委派者，
+永远不命名 owner；owner 本人始终可以 attach。
+
+Service Actor 由 `service_serial` 指定，即该 Realm Infra Provider 签发的身份 `serial_number`；请求的 `realm`
+指定 Realm。`grant_expires_at` 必填，最远 366 天；没有过期时刻的授权被拒绝。对同一成员重复授权会刷新其角色、
+授权人与过期时刻。只有 owner 可以授权、撤销与查看。已存在的 Service 对非 owner 一律回答 `forbidden`；未知 serial 或成员得到
+`not_found`——serial 的存在本身不是秘密，且 owner 必须知道自己的 serial 不存在。
+
+Signaling 在每条会促成直连 attach 的路径上执行该 ACL：
+
+- `route_candidates` 与 `get_service_spec` 只返回调用方 credential 有权 attach 的
+  Service：`member` claim 是 owner，或属于持有未撤销、未过期授权的成员。
+- `ActrRelay` 在目标是本 Realm Profile 所指的 Service（profile-package 类型）时适用同一
+  规则。Front 与辅助 Actor 不受 relay 层的实例约束——若对每个已签发 Actor 都强制，已授权会话的
+  service → front 回程会在协商中途被切断。
+- Presence 推送（`ActrUpEvent`）只把 Actor 身份披露给其 member 有权 attach 的订阅者：对已签发
+  的 Actor，actor_id 只到达 owner 与授权成员。掌握 actor_id 曾是直连 relay attach 所需的最后一个
+  输入。
+
+检查在每次请求时读存储，因此撤销或过期从下一次消息即生效——与第 6 节的规则一致：基于 `member`/`role`
+claim 的决定不得超过 credential 自身的有效期。不是该 Realm Infra Provider 签发的 Actor 没有 owner 记录，
+不受这一层约束（类型级 ACL 仍然生效）。存储故障时请求以 fail-closed 且诚实的方式失败：回复是 503 类错误，
+绝不伪装成 Service 不存在。Signaling 无法区分 `editor` 与 `viewer` 的流量；这一区分属于 Service 自身，
+待 Host 把调用方 claim 交给它之后（第 6 节）。
 
 ## 5. owner 邀请的签发
 

@@ -24,7 +24,7 @@
 //! };
 //!
 //! // Actor A subscribes to online events for the user-service type
-//! manager.subscribe(actor_a_id, actor_a_type, user_service_type.clone());
+//! manager.subscribe(actor_a_id, actor_a_type, user_service_type.clone(), member);
 //!
 //! // When a new user-service instance registers
 //! let subscribers = manager.get_subscribers(&actor_a_id.realm, &user_service_type);
@@ -40,13 +40,25 @@ use std::collections::{HashMap, HashSet};
 ///
 /// Partitioned by Realm: an Actor subscribes to a type within its own Realm
 /// and is only told about Actors of that Realm.
+/// One presence subscription: the subscriber and its verified identity.
+#[derive(Debug, Clone)]
+struct Subscription {
+    actor_id: ActrId,
+    actor_type: ActrType,
+    /// The `member` claim of the subscriber's credential. The instance ACL
+    /// key for guarded Services (FR-SEC-013): presence of an Actor reaches
+    /// only the member that may attach to it.
+    member: String,
+}
+
 #[derive(Debug, Default)]
 pub struct PresenceManager {
-    /// Subscription map: (realm, target_type) -> Vec<(subscriber_actor_id, subscriber_type)>
+    /// Subscription map: (realm, target_type) -> Vec<Subscription>
     ///
     /// Key: the subscriber's Realm and the subscribed service type (ActrType)
-    /// Value: list of Actors subscribed to that type, with their verified types
-    subscriptions: HashMap<(String, ActrType), Vec<(ActrId, ActrType)>>,
+    /// Value: the Actors subscribed to that type, with their verified types
+    /// and membership
+    subscriptions: HashMap<(String, ActrType), Vec<Subscription>>,
     /// Realms retired while this process runs; nobody subscribes in them again
     retired: HashSet<String>,
 }
@@ -63,16 +75,18 @@ impl PresenceManager {
     /// - `subscriber`: the subscriber's ActrId
     /// - `subscriber_type`: the subscriber's verified Actor type
     /// - `target_type`: the service type to subscribe to
+    /// - `member`: the subscriber's verified `member` claim (instance ACL key)
     ///
     /// # Example
     /// ```ignore
-    /// manager.subscribe(client_actor_id, client_actor_type, user_service_type);
+    /// manager.subscribe(client_actor_id, client_actor_type, user_service_type, member);
     /// ```
     pub fn subscribe(
         &mut self,
         subscriber: ActrId,
         subscriber_type: ActrType,
         target_type: ActrType,
+        member: String,
     ) {
         if self.retired.contains(&subscriber.realm) {
             platform::recording::warn!(
@@ -94,8 +108,12 @@ impl PresenceManager {
             .or_default();
 
         // Avoid duplicate subscriptions
-        if !subscribers.iter().any(|(id, _)| id == &subscriber) {
-            subscribers.push((subscriber, subscriber_type));
+        if !subscribers.iter().any(|s| s.actor_id == subscriber) {
+            subscribers.push(Subscription {
+                actor_id: subscriber,
+                actor_type: subscriber_type,
+                member,
+            });
             platform::recording::debug!(
                 "Subscription successful, current subscriber count: {}",
                 subscribers.len()
@@ -128,7 +146,7 @@ impl PresenceManager {
         let key = (subscriber.realm.clone(), target_type.clone());
         if let Some(subscribers) = self.subscriptions.get_mut(&key) {
             let original_len = subscribers.len();
-            subscribers.retain(|(id, _)| id != subscriber);
+            subscribers.retain(|s| s.actor_id != *subscriber);
 
             let removed = subscribers.len() < original_len;
             if removed {
@@ -182,7 +200,7 @@ impl PresenceManager {
         // Remove this subscriber from all subscription lists
         self.subscriptions.retain(|_key, subscribers| {
             let original_len = subscribers.len();
-            subscribers.retain(|(id, _)| id != subscriber);
+            subscribers.retain(|s| s.actor_id != *subscriber);
             removed_count += original_len - subscribers.len();
 
             // If the list is empty, return false to remove the entry
@@ -218,7 +236,7 @@ impl PresenceManager {
     pub fn get_subscribers(&self, realm: &str, target_type: &ActrType) -> Vec<&ActrId> {
         self.subscriptions
             .get(&(realm.to_string(), target_type.clone()))
-            .map(|subscribers| subscribers.iter().map(|(id, _)| id).collect())
+            .map(|subscribers| subscribers.iter().map(|s| &s.actor_id).collect())
             .unwrap_or_default()
     }
 
@@ -241,7 +259,7 @@ impl PresenceManager {
     pub fn is_subscribed(&self, subscriber: &ActrId, target_type: &ActrType) -> bool {
         self.subscriptions
             .get(&(subscriber.realm.clone(), target_type.clone()))
-            .map(|subscribers| subscribers.iter().any(|(id, _)| id == subscriber))
+            .map(|subscribers| subscribers.iter().any(|s| s.actor_id == *subscriber))
             .unwrap_or(false)
     }
 
@@ -272,30 +290,61 @@ impl PresenceManager {
 
         let mut allowed_subscribers = Vec::new();
 
-        for (subscriber_id, subscriber_type) in subscribers {
-            // ACL check: can subscriber discover target?
-            match Self::check_discovery_acl(
+        for subscription in subscribers {
+            let subscriber_id = &subscription.actor_id;
+            // Type-level ACL: can subscriber discover target?
+            let type_allowed = match Self::check_discovery_acl(
                 subscriber_id,
-                subscriber_type,
+                &subscription.actor_type,
                 target_actor_id,
                 target_type,
             )
             .await
             {
-                Ok(true) => {
-                    allowed_subscribers.push(subscriber_id.clone());
-                }
+                Ok(true) => true,
                 Ok(false) => {
                     platform::recording::debug!(
                         "ACL denied discovery notification: subscriber={}, target={}",
                         subscriber_id.to_string_repr(),
                         target_actor_id.to_string_repr()
                     );
+                    false
                 }
                 Err(e) => {
                     platform::recording::warn!(
                         "ACL check failed, denying notification: subscriber={}, target={}, error={}",
                         subscriber_id.to_string_repr(),
+                        target_actor_id.to_string_repr(),
+                        e
+                    );
+                    false
+                }
+            };
+            if !type_allowed {
+                continue;
+            }
+            // Instance ACL (FR-SEC-013): the actor_id of an Actor this
+            // Provider issued reaches only its owner and grantees — knowing
+            // it is the last input a stranger needs for a direct relay
+            // attach. A store failure denies the notification.
+            match platform::realm::service_acl::service_attachee_allowed(
+                target_actor_id,
+                &subscription.member,
+            )
+            .await
+            {
+                Ok(true) => allowed_subscribers.push(subscriber_id.clone()),
+                Ok(false) => {
+                    platform::recording::debug!(
+                        "Service ACL denied presence: member {} cannot attach to {}",
+                        subscription.member,
+                        target_actor_id.to_string_repr(),
+                    );
+                }
+                Err(e) => {
+                    platform::recording::warn!(
+                        "Service ACL check failed, denying notification: member {}, target={}, error={}",
+                        subscription.member,
                         target_actor_id.to_string_repr(),
                         e
                     );
@@ -369,11 +418,13 @@ mod tests {
             actor1.clone(),
             create_test_actor_type("test-actor"),
             target_type.clone(),
+            "member-1".to_string(),
         );
         manager.subscribe(
             actor2.clone(),
             create_test_actor_type("test-actor"),
             target_type.clone(),
+            "member-1".to_string(),
         );
 
         let subscribers = manager.get_subscribers("test@example.com", &target_type);
@@ -390,6 +441,7 @@ mod tests {
             actor1.clone(),
             create_test_actor_type("test-actor"),
             target_type.clone(),
+            "member-1".to_string(),
         );
         assert!(manager.unsubscribe(&actor1, &target_type));
 
@@ -408,11 +460,13 @@ mod tests {
             actor1.clone(),
             create_test_actor_type("test-actor"),
             type1.clone(),
+            "member-1".to_string(),
         );
         manager.subscribe(
             actor1.clone(),
             create_test_actor_type("test-actor"),
             type2.clone(),
+            "member-1".to_string(),
         );
 
         let removed = manager.unsubscribe_all(&actor1);
@@ -432,11 +486,13 @@ mod tests {
             actor1.clone(),
             create_test_actor_type("test-actor"),
             target_type.clone(),
+            "member-1".to_string(),
         );
         manager.subscribe(
             actor1.clone(),
             create_test_actor_type("test-actor"),
             target_type.clone(),
+            "member-1".to_string(),
         ); // duplicate subscription
 
         let subscribers = manager.get_subscribers("test@example.com", &target_type);
@@ -455,16 +511,19 @@ mod tests {
             actor1.clone(),
             create_test_actor_type("test-actor"),
             type1.clone(),
+            "member-1".to_string(),
         );
         manager.subscribe(
             actor2.clone(),
             create_test_actor_type("test-actor"),
             type1.clone(),
+            "member-1".to_string(),
         );
         manager.subscribe(
             actor1.clone(),
             create_test_actor_type("test-actor"),
             type2.clone(),
+            "member-1".to_string(),
         );
 
         let (type_count, subscriber_count) = manager.stats();
@@ -486,6 +545,7 @@ mod tests {
             a.clone(),
             create_test_actor_type("test-actor"),
             target_type.clone(),
+            "member-1".to_string(),
         );
 
         assert_eq!(manager.get_subscribers(&a.realm, &target_type), vec![&a]);

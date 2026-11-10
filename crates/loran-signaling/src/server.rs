@@ -1585,12 +1585,20 @@ async fn handle_actr_to_server(
                 client_id,
                 server,
                 request_envelope_id,
+                &claims.member,
             )
             .await?;
         }
         Some(actr_to_signaling::Payload::GetServiceSpecRequest(req)) => {
-            handle_get_service_spec_request(source, req, client_id, server, request_envelope_id)
-                .await?;
+            handle_get_service_spec_request(
+                source,
+                req,
+                client_id,
+                server,
+                request_envelope_id,
+                &claims.member,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::SubscribeActrUpRequest(req)) => {
             handle_subscribe_actr_up(
@@ -1600,6 +1608,7 @@ async fn handle_actr_to_server(
                 client_id,
                 server,
                 request_envelope_id,
+                &claims.member,
             )
             .await?;
         }
@@ -2063,6 +2072,57 @@ async fn handle_actr_relay(
         )
         .await?;
         return Ok(());
+    }
+
+    // Instance ACL (FR-SEC-013): the Realm's profile-package Service relays
+    // only for its owner and grantees — otherwise knowing the actor_id (e.g.
+    // from a presence push) would be a complete attach bypass. Fronts and
+    // helpers are not guarded here, or the service -> front return path of
+    // an authorized session would die mid-negotiation. A store failure is
+    // answered honestly as 503, not as a silent deny.
+    match platform::realm::service_acl::relay_attachee_allowed(
+        &target,
+        &target_type,
+        &claims.member,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            platform::recording::warn!(
+                "⚠️  Service ACL denied relay: member {} -> {}",
+                claims.member,
+                target.to_string_repr(),
+            );
+            send_error_response(
+                client_id,
+                &source,
+                403,
+                "Service ACL denies relay to target actor",
+                server,
+                Some(request_envelope_id),
+            )
+            .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            platform::recording::warn!(
+                "⚠️  Service ACL check failed: member {} -> {}: {}",
+                claims.member,
+                target.to_string_repr(),
+                error,
+            );
+            send_error_response(
+                client_id,
+                &source,
+                503,
+                &format!("Service ACL check failed: {error}"),
+                server,
+                Some(request_envelope_id),
+            )
+            .await?;
+            return Ok(());
+        }
     }
 
     let connection_status = relay_source_connection_status(client_id, &source, server).await;
@@ -2754,6 +2814,7 @@ async fn handle_route_candidates_request(
     client_id: &str,
     server: &SignalingServerHandle,
     request_envelope_id: &str,
+    caller_member: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "🎯 Processing RouteCandidates request from Actor {}: target_type={}/{}",
@@ -2847,6 +2908,39 @@ async fn handle_route_candidates_request(
         acl_filtered_candidates.len()
     );
 
+    // Service instance ACL (FR-SEC-013): Realm membership alone is not
+    // instance access. A candidate issued by this Provider is reachable only
+    // by its owner or a member with a live grant; the check reads the store,
+    // so a revocation is live from the next request. A check error denies
+    // the candidate: fail closed.
+    let mut service_acl_candidates = Vec::new();
+    for candidate in acl_filtered_candidates {
+        match platform::realm::service_acl::service_attachee_allowed(
+            &candidate.actor_id,
+            caller_member,
+        )
+        .await
+        {
+            Ok(true) => service_acl_candidates.push(candidate),
+            Ok(false) => {
+                platform::recording::debug!(
+                    "Service ACL denied: member {} cannot attach to {}",
+                    caller_member,
+                    candidate.actor_id.to_string_repr(),
+                );
+            }
+            Err(error) => {
+                platform::recording::warn!(
+                    "Service ACL check failed for {} (member {}): {}",
+                    candidate.actor_id.to_string_repr(),
+                    caller_member,
+                    error,
+                );
+            }
+        }
+    }
+    let acl_filtered_candidates = service_acl_candidates;
+
     // Extract client location from request (if provided)
     let client_location = req.client_location.as_ref().and_then(|loc| {
         if let (Some(lat), Some(lon)) = (loc.latitude, loc.longitude) {
@@ -2928,6 +3022,7 @@ async fn handle_get_service_spec_request(
     client_id: &str,
     server: &SignalingServerHandle,
     request_envelope_id: &str,
+    caller_member: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let service_name = req.name.as_str();
     platform::recording::info!(
@@ -2936,22 +3031,69 @@ async fn handle_get_service_spec_request(
         service_name
     );
 
-    // Find matching ServiceSpec in ActorRegistry by spec name, only among
-    // services of the requester's own Realm.
-    let result = server
+    // Find a matching ServiceSpec in ActorRegistry by spec name, only among
+    // services of the requester's own Realm that its member may attach to
+    // (FR-SEC-013; same rule as route candidates). The first allowed service
+    // wins; a store failure is an honest 503, not "not found".
+    let mut result = None;
+    // Snapshot the candidate ids first: the registry guard must not outlive
+    // the per-candidate ACL queries, and only the winning service's spec is
+    // cloned (a second short read).
+    let candidates: Vec<ActrId> = server
         .actor_registry
         .read()
         .await
         .discover_by_spec_name(&source.realm, service_name)
         .into_iter()
-        .find_map(|service| service.service_spec.clone())
-        .map(actr_protocol::get_service_spec_response::Result::Success)
-        .unwrap_or_else(|| {
-            actr_protocol::get_service_spec_response::Result::Error(ErrorResponse {
-                code: 404,
-                message: format!("Service specification not found for name={service_name}"),
-            })
-        });
+        .map(|service| service.actor_id.clone())
+        .collect();
+    for actor_id in candidates {
+        match platform::realm::service_acl::service_attachee_allowed(&actor_id, caller_member).await
+        {
+            Ok(true) => {
+                let spec = server
+                    .actor_registry
+                    .read()
+                    .await
+                    .get_service_spec(&actor_id)
+                    .cloned();
+                if let Some(spec) = spec {
+                    result = Some(actr_protocol::get_service_spec_response::Result::Success(
+                        spec,
+                    ));
+                    break;
+                }
+            }
+            Ok(false) => {
+                platform::recording::debug!(
+                    "Service ACL denied spec: member {} cannot attach to {}",
+                    caller_member,
+                    actor_id.to_string_repr(),
+                );
+            }
+            Err(error) => {
+                platform::recording::warn!(
+                    "Service ACL check failed for {} (member {}): {}",
+                    actor_id.to_string_repr(),
+                    caller_member,
+                    error,
+                );
+                result = Some(actr_protocol::get_service_spec_response::Result::Error(
+                    ErrorResponse {
+                        code: 503,
+                        message: format!("Service ACL check failed: {error}"),
+                    },
+                ));
+                break;
+            }
+        }
+    }
+    let result = result.unwrap_or_else(|| {
+        actr_protocol::get_service_spec_response::Result::Error(ErrorResponse {
+            code: 404,
+            message: format!("Service specification not found for name={service_name}"),
+        })
+    });
 
     let response = actr_protocol::GetServiceSpecResponse {
         result: Some(result),
@@ -3044,6 +3186,7 @@ async fn handle_subscribe_actr_up(
     client_id: &str,
     server: &SignalingServerHandle,
     request_envelope_id: &str,
+    caller_member: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
         "📢 Actor {} subscribed to service up events: target_type={}/{}",
@@ -3052,9 +3195,16 @@ async fn handle_subscribe_actr_up(
         req.target_type.name
     );
 
-    // Add subscription to PresenceManager
+    // Add subscription to PresenceManager. The member claim is stored with
+    // the subscription: the instance ACL filters presence pushes for guarded
+    // Services (FR-SEC-013).
     let mut presence = server.presence_manager.write().await;
-    presence.subscribe(source.clone(), source_type, req.target_type);
+    presence.subscribe(
+        source.clone(),
+        source_type,
+        req.target_type,
+        caller_member.to_string(),
+    );
     drop(presence);
 
     let response = actr_protocol::SubscribeActrUpResponse {
@@ -3519,6 +3669,7 @@ mod tests {
                 actor.clone(),
                 create_test_actr_type(),
                 create_test_actr_type(),
+                "member-1".to_string(),
             );
         }
 
@@ -3559,6 +3710,7 @@ mod tests {
                 actor.clone(),
                 create_test_actr_type(),
                 create_test_actr_type(),
+                "member-1".to_string(),
             );
         }
 
@@ -3615,6 +3767,7 @@ mod tests {
             late,
             create_test_actr_type(),
             create_test_actr_type(),
+            "member-1".to_string(),
         );
         assert!(
             server
@@ -4247,6 +4400,7 @@ mod tests {
                     "lookup-source",
                     &server,
                     "lookup-request",
+                    "test-member",
                 )
                 .await
                 .unwrap();
@@ -4270,7 +4424,459 @@ mod tests {
             }
         }
 
+        #[tokio::test]
+        #[serial]
+        async fn route_candidates_enforce_the_service_instance_acl() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 950, "acl-lookup").await;
+            let candidate = connect(&server, 5000, "acl-guarded").await;
+            register(&server, &candidate.id, worker()).await;
+
+            // The candidate is a Service Actor whose identity was issued to
+            // "owner-member". The default test credential claims "member-1",
+            // which has no grant: the candidate is filtered out. Actors with
+            // no issued identity stay reachable (enforce what is known).
+            let pool = platform::storage::db::get_database().get_pool();
+            sqlx::query(
+                "INSERT INTO issued_actor_identity
+                     (realm, serial_number, actor_type, member_id, client_key_id,
+                      issued_at)
+                 VALUES (?, ?, 'acme.com/worker@1.0.0', 'owner-member',
+                         '0000000000000000', ?)",
+            )
+            .bind(REALM)
+            .bind(candidate.id.serial_number as i64)
+            .bind(now() as i64)
+            .execute(pool)
+            .await
+            .unwrap();
+            let unguarded = connect(&server, 5001, "acl-unguarded").await;
+            register(&server, &unguarded.id, worker()).await;
+            insert_active_member("owner-member").await;
+            insert_active_member("member-1").await;
+
+            // The stranger sees only the unguarded Actor; the owner sees both.
+            let seen = lookup_candidates(&server, &mut source, "member-1", "acl-lookup").await;
+            assert_eq!(seen, vec![unguarded.id.clone()]);
+            let seen = lookup_candidates(&server, &mut source, "owner-member", "acl-lookup").await;
+            assert_eq!(seen.len(), 2);
+
+            // A grant opens the Service, a revocation closes it again — from
+            // the very next request, no broadcast involved.
+            sqlx::query(
+                "INSERT INTO service_acl
+                     (realm, serial_number, member_id, role, granted_by,
+                      expires_at, created_at)
+                 VALUES (?, ?, 'member-1', 'editor', 'owner-key',
+                         ?, ?)",
+            )
+            .bind(REALM)
+            .bind(candidate.id.serial_number as i64)
+            .bind((now() + 3600) as i64)
+            .bind(now() as i64)
+            .execute(pool)
+            .await
+            .unwrap();
+            let seen = lookup_candidates(&server, &mut source, "member-1", "acl-lookup").await;
+            assert_eq!(seen.len(), 2);
+            sqlx::query(
+                "UPDATE service_acl SET revoked_at = ?
+                 WHERE realm = ? AND serial_number = ? AND member_id = 'member-1'",
+            )
+            .bind(now() as i64)
+            .bind(REALM)
+            .bind(candidate.id.serial_number as i64)
+            .execute(pool)
+            .await
+            .unwrap();
+            let seen = lookup_candidates(&server, &mut source, "member-1", "acl-lookup").await;
+            assert_eq!(seen, vec![unguarded.id.clone()]);
+
+            // The fixture rows leave with the test: other tests share this
+            // database and these serials.
+            sqlx::query("DELETE FROM realm_member WHERE realm = ? AND member_id IN ('owner-member', 'member-1')")
+                .bind(REALM)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM service_acl WHERE realm = ? AND serial_number = ?")
+                .bind(REALM)
+                .bind(candidate.id.serial_number as i64)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM issued_actor_identity WHERE realm = ? AND serial_number = ?")
+                .bind(REALM)
+                .bind(candidate.id.serial_number as i64)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+
+        /// The Realm Profile's package type: the only Actor the relay guards.
+        fn guarded() -> ActrType {
+            ActrType {
+                publisher: "acme.com".to_string(),
+                name: "guarded".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        }
+
+        /// An active member row: the ACL only honors grants of active
+        /// members (a removed member's grants stop counting immediately).
+        async fn insert_active_member(member_id: &str) {
+            sqlx::query(
+                "INSERT INTO realm_member (realm, member_id, role, status, created_at)
+                 VALUES (?, ?, 'editor', 'active', ?)",
+            )
+            .bind(REALM)
+            .bind(member_id)
+            .bind(now() as i64)
+            .execute(platform::storage::db::get_database().get_pool())
+            .await
+            .unwrap();
+        }
+
+        async fn insert_identity_binding(serial: u64, member: &str) {
+            sqlx::query(
+                "INSERT INTO issued_actor_identity
+                     (realm, serial_number, actor_type, member_id, client_key_id,
+                      issued_at)
+                 VALUES (?, ?, 'acme.com/guarded@1.0.0', ?, 'key', ?)",
+            )
+            .bind(REALM)
+            .bind(serial as i64)
+            .bind(member)
+            .bind(now() as i64)
+            .execute(platform::storage::db::get_database().get_pool())
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn relay_enforces_the_service_instance_acl() {
+            setup().await;
+            let server = create_test_server_handle();
+            // The Realm's profile-package type is `guarded`; edge may relay
+            // to it at the type level.
+            let mut rule = ActorAcl::new(
+                REALM.to_string(),
+                edge().to_string_repr(),
+                guarded().to_string_repr(),
+                true,
+            );
+            rule.save().await.unwrap();
+            // The profile must be a valid RealmProfile: the credential
+            // validator re-checks cached issuer keys against its issuer.keys.
+            use base64::Engine as _;
+            let profile_document = serde_json::json!({
+                "schema": "actr.realm/v1",
+                "sequence": 1,
+                "realm": { "name": REALM, "display_name": "Test", "status": "active" },
+                "package": {
+                    "href": "https://acme.com/pkg.actr",
+                    "sha256": "ab".repeat(32),
+                    "type": "acme.com/guarded@1.0.0",
+                },
+                "issuer": { "url": "https://issuer.example", "keys": [{
+                    "id": KEY_ID.to_string(),
+                    "algorithm": "Ed25519",
+                    "status": "active",
+                    "public_key": base64::engine::general_purpose::STANDARD.encode(
+                        signing_key().verifying_key().to_bytes(),
+                    ),
+                }] },
+                "provider": { "id": "provider.example", "signaling": [], "ice": [] },
+                "policy": { "membership": "invite-only" },
+                "issued_at": "2026-09-25T00:00:00Z",
+                "signature": {
+                    "key_id": "rs-1",
+                    "algorithm": "Ed25519",
+                    "value": base64::engine::general_purpose::STANDARD.encode([0u8; 64]),
+                },
+            });
+            sqlx::query(
+                "INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at)
+                 VALUES (?, 1, 'd', ?, ?)",
+            )
+            .bind(REALM)
+            .bind(profile_document.to_string())
+            .bind(now() as i64)
+            .execute(platform::storage::db::get_database().get_pool())
+            .await
+            .unwrap();
+
+            let mut source = connect(&server, 6100, "relay-source").await;
+            let mut target = connect(&server, 6101, "relay-target").await;
+            register(&server, &target.id, guarded()).await;
+            insert_identity_binding(6101, "owner-member").await;
+            let mut front = connect(&server, 6102, "relay-front").await;
+            register(&server, &front.id, worker()).await;
+            insert_identity_binding(6102, "front-owner").await;
+            insert_active_member("owner-member").await;
+            insert_active_member("member-1").await;
+            insert_active_member("front-owner").await;
+
+            // A stranger cannot relay to the guarded Service, even knowing
+            // its actor_id; a bound Front relays freely (only the
+            // profile-package Service is instance-guarded at the relay).
+            send(
+                &server,
+                "relay-source",
+                relay(
+                    &source.id,
+                    &target.id,
+                    credential_as(&source.id, edge(), "member-1"),
+                ),
+            )
+            .await;
+            let flow = next_flow(&mut source);
+            eprintln!("DEBUG relay reply: {flow:?}");
+            assert_eq!(error_code(flow), 403);
+            assert!(next_flow(&mut target).is_none());
+            send(
+                &server,
+                "relay-source",
+                relay(
+                    &source.id,
+                    &front.id,
+                    credential_as(&source.id, edge(), "member-1"),
+                ),
+            )
+            .await;
+            assert!(next_flow(&mut front).is_some());
+
+            // The owner's member relays; so does a stranger with a grant;
+            // a revocation closes it again from the next message.
+            send(
+                &server,
+                "relay-source",
+                relay(
+                    &source.id,
+                    &target.id,
+                    credential_as(&source.id, edge(), "owner-member"),
+                ),
+            )
+            .await;
+            assert!(next_flow(&mut target).is_some());
+            sqlx::query(
+                "INSERT INTO service_acl
+                     (realm, serial_number, member_id, role, granted_by,
+                      expires_at, created_at)
+                 VALUES (?, ?, 'member-1', 'editor', 'key', ?, ?)",
+            )
+            .bind(REALM)
+            .bind(6101i64)
+            .bind((now() + 3600) as i64)
+            .bind(now() as i64)
+            .execute(platform::storage::db::get_database().get_pool())
+            .await
+            .unwrap();
+            send(
+                &server,
+                "relay-source",
+                relay(
+                    &source.id,
+                    &target.id,
+                    credential_as(&source.id, edge(), "member-1"),
+                ),
+            )
+            .await;
+            assert!(next_flow(&mut target).is_some());
+            sqlx::query(
+                "UPDATE service_acl SET revoked_at = ?
+                 WHERE realm = ? AND serial_number = ? AND member_id = 'member-1'",
+            )
+            .bind(now() as i64)
+            .bind(REALM)
+            .bind(6101i64)
+            .execute(platform::storage::db::get_database().get_pool())
+            .await
+            .unwrap();
+            send(
+                &server,
+                "relay-source",
+                relay(
+                    &source.id,
+                    &target.id,
+                    credential_as(&source.id, edge(), "member-1"),
+                ),
+            )
+            .await;
+            assert_eq!(error_code(next_flow(&mut source)), 403);
+            assert!(next_flow(&mut target).is_none());
+
+            // The fixture rows leave with the test.
+            let pool = platform::storage::db::get_database().get_pool();
+            sqlx::query("DELETE FROM service_acl WHERE realm = ? AND serial_number = ?")
+                .bind(REALM)
+                .bind(6101i64)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM issued_actor_identity WHERE realm = ? AND serial_number IN (6101, 6102)")
+                .bind(REALM)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM realm_profile WHERE realm = ?")
+                .bind(REALM)
+                .execute(pool)
+                .await
+                .unwrap();
+            // The type-level rule is shared state too.
+            ActorAcl::delete_by_target(REALM, &guarded().to_string_repr())
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM realm_member WHERE realm = ? AND member_id IN ('owner-member', 'member-1', 'front-owner')")
+                .bind(REALM)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+
+        /// `get_subscribers_with_acl` against the fixture server's presence
+        /// manager.
+        async fn presence_subscribers(
+            server: &SignalingServerHandle,
+            announced: &ActrId,
+        ) -> Vec<ActrId> {
+            server
+                .presence_manager
+                .read()
+                .await
+                .get_subscribers_with_acl(announced, &worker())
+                .await
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn presence_push_respects_the_service_instance_acl() {
+            setup().await;
+            let server = create_test_server_handle();
+            let pool = platform::storage::db::get_database().get_pool();
+            let mut presence = server.presence_manager.write().await;
+            presence.subscribe(
+                create_test_actr_id(6201),
+                edge(),
+                worker(),
+                "owner-member".to_string(),
+            );
+            presence.subscribe(
+                create_test_actr_id(6202),
+                edge(),
+                worker(),
+                "stranger".to_string(),
+            );
+            drop(presence);
+
+            let announced = create_test_actr_id(6200);
+            // No binding yet: the actor is not instance-guarded, everyone
+            // subscribed hears about it.
+            let seen = presence_subscribers(&server, &announced).await;
+            assert_eq!(seen.len(), 2);
+
+            // Issued to "owner-member": only its own member hears; the
+            // stranger's actor_id disclosure stops (it was the last input a
+            // direct relay attach needed).
+            insert_active_member("owner-member").await;
+            insert_active_member("stranger").await;
+            insert_identity_binding(6200, "owner-member").await;
+            let seen = presence_subscribers(&server, &announced).await;
+            assert_eq!(seen, vec![create_test_actr_id(6201)]);
+
+            // A grant reaches the stranger too; a revocation closes it.
+            sqlx::query(
+                "INSERT INTO service_acl
+                     (realm, serial_number, member_id, role, granted_by,
+                      expires_at, created_at)
+                 VALUES (?, ?, 'stranger', 'viewer', 'key', ?, ?)",
+            )
+            .bind(REALM)
+            .bind(6200i64)
+            .bind((now() + 3600) as i64)
+            .bind(now() as i64)
+            .execute(pool)
+            .await
+            .unwrap();
+            let seen = presence_subscribers(&server, &announced).await;
+            assert_eq!(seen.len(), 2);
+            sqlx::query(
+                "UPDATE service_acl SET revoked_at = ?
+                 WHERE realm = ? AND serial_number = ? AND member_id = 'stranger'",
+            )
+            .bind(now() as i64)
+            .bind(REALM)
+            .bind(6200i64)
+            .execute(pool)
+            .await
+            .unwrap();
+            let seen = presence_subscribers(&server, &announced).await;
+            assert_eq!(seen, vec![create_test_actr_id(6201)]);
+
+            // The fixture rows leave with the test.
+            sqlx::query("DELETE FROM service_acl WHERE realm = ? AND serial_number = ?")
+                .bind(REALM)
+                .bind(6200i64)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM issued_actor_identity WHERE realm = ? AND serial_number = ?")
+                .bind(REALM)
+                .bind(6200i64)
+                .execute(pool)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM realm_member WHERE realm = ? AND member_id IN ('owner-member', 'stranger')")
+                .bind(REALM)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+
+        /// `handle_route_candidates_request` against the fixture, returning
+        async fn lookup_candidates(
+            server: &SignalingServerHandle,
+            source: &mut Peer,
+            caller_member: &str,
+            client_id: &str,
+        ) -> Vec<ActrId> {
+            handle_route_candidates_request(
+                source.id.clone(),
+                &edge(),
+                actr_protocol::RouteCandidatesRequest {
+                    target_type: worker(),
+                    ..Default::default()
+                },
+                client_id,
+                server,
+                "acl-request",
+                caller_member,
+            )
+            .await
+            .unwrap();
+            let Some(signaling_envelope::Flow::ServerToActr(SignalingToActr {
+                payload: Some(signaling_to_actr::Payload::RouteCandidatesResponse(response)),
+                ..
+            })) = next_flow(source)
+            else {
+                panic!("missing response")
+            };
+            let Some(actr_protocol::route_candidates_response::Result::Success(ok)) =
+                response.result
+            else {
+                panic!("lookup failed")
+            };
+            ok.candidates
+        }
+
         fn credential(actor: &ActrId, actor_type: ActrType) -> AIdCredential {
+            credential_as(actor, actor_type, "member-1")
+        }
+
+        fn credential_as(actor: &ActrId, actor_type: ActrType, member: &str) -> AIdCredential {
             let claims = IdentityClaims {
                 realm: REALM.to_string(),
                 actor_id: actor.to_string_repr(),
@@ -4280,7 +4886,7 @@ mod tests {
                 provider: "provider.example".to_string(),
                 audience: "actr.signaling".to_string(),
                 actor_type,
-                member: "member-1".to_string(),
+                member: member.to_string(),
                 client_key: "0000000000000000".to_string(),
                 role: actr_protocol::MemberRole::Owner as i32,
                 development: None,

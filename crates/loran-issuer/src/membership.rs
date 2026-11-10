@@ -128,6 +128,44 @@ async fn handle(
         }
         MembershipOp::Leave => membership::leave(&signer).await,
         MembershipOp::UpdateRealm => update_realm(state, &signer, &request).await,
+        MembershipOp::ServiceAclGrant => {
+            let service_serial = required_serial(&request)?;
+            let member_id = required(&request.member_id, "member_id")?;
+            let role = request
+                .role
+                .ok_or_else(|| invalid(&"service_acl_grant needs role"))?;
+            let expires_at = request
+                .grant_expires_at
+                .as_deref()
+                .ok_or_else(|| invalid(&"service_acl_grant needs grant_expires_at"))?;
+            let expires_at = chrono::DateTime::parse_from_rfc3339(expires_at)
+                .map_err(|e| invalid(&e))?
+                .timestamp();
+            platform::realm::service_acl::acl_grant(
+                &signer,
+                service_serial,
+                member_id,
+                role,
+                expires_at,
+            )
+            .await
+        }
+        MembershipOp::ServiceAclRevoke => {
+            let service_serial = required_serial(&request)?;
+            let member_id = required(&request.member_id, "member_id")?;
+            platform::realm::service_acl::acl_revoke(&signer, service_serial, member_id).await
+        }
+        MembershipOp::ServiceAclList => {
+            let service_serial = required_serial(&request)?;
+            platform::realm::service_acl::acl_list(&signer, service_serial).await
+        }
+    }
+}
+
+fn required_serial(request: &MembershipRequest) -> Result<u64, MembershipError> {
+    match request.service_serial {
+        Some(serial) if serial > 0 => Ok(serial),
+        _ => fail(Code::InvalidRequest, "service_serial is missing or zero"),
     }
 }
 

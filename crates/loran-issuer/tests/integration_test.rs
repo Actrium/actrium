@@ -4386,6 +4386,160 @@ async fn test_membership_requests_over_http() {
     env.shutdown_signer().await;
 }
 
+/// Service instance ACL over HTTP (FR-SEC-013): the Service's owner grants,
+/// refreshes, revokes and lists; anyone else learns nothing.
+#[tokio::test]
+#[serial]
+async fn test_service_acl_over_http() {
+    use actr_protocol::realm_membership::MembershipOp;
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let realm = "acl-http@example.com";
+    seed_realm(realm, Some("acl-owner")).await;
+    let owner_key = key_for("acl-owner");
+
+    // The owner invites an editor, who joins.
+    let mut invite = membership_request(MembershipOp::CreateInvite, realm);
+    invite.role = Some(Role::Editor);
+    invite.invite_expires_at = Some((chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339());
+    let (status, created) = post_membership(app.clone(), invite.sign(&owner_key)).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let text = created["invite"].as_str().unwrap().to_string();
+    let (status, joined) = join_over_http(&app, realm, &text, "acl-editor").await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    let editor_member = joined["member_id"].as_str().unwrap().to_string();
+    let editor_key = key_for("acl-editor");
+
+    // A Service Actor the Realm issued to the owner (serial 1).
+    const SERVICE: i64 = 1;
+    sqlx::query(
+        "INSERT INTO issued_actor_identity
+             (realm, serial_number, actor_type, member_id, client_key_id,
+              issued_at)
+         VALUES (?, ?, 'example.com/notes@1.0.0', ?, ?, ?)",
+    )
+    .bind(realm)
+    .bind(SERVICE)
+    .bind(joined_owner_member(realm).await)
+    .bind("acl-owner-key")
+    .bind(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64,
+    )
+    .execute(platform::storage::db::get_database().get_pool())
+    .await
+    .unwrap();
+
+    let grant = |role: Role, expires_at: String| {
+        let mut grant = membership_request(MembershipOp::ServiceAclGrant, realm);
+        grant.service_serial = Some(SERVICE as u64);
+        grant.member_id = Some(editor_member.clone());
+        grant.role = Some(role);
+        grant.grant_expires_at = Some(expires_at);
+        grant
+    };
+    let hour = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+
+    // A non-owner cannot grant on an existing Service, and probing an
+    // unknown serial gets `not_found` (existence is not the secret; the
+    // owner must learn their serial does not exist).
+    let (status, error) = post_membership(
+        app.clone(),
+        grant(Role::Editor, hour.clone()).sign(&editor_key),
+    )
+    .await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("forbidden")),
+        "{error}"
+    );
+    let mut foreign = grant(Role::Editor, hour.clone());
+    foreign.service_serial = Some(999);
+    let (status, error) = post_membership(app.clone(), foreign.sign(&editor_key)).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::NOT_FOUND, Some("not_found"))
+    );
+
+    // Grants are validated: no owner role, no past expiry, unknown member.
+    let (status, error) = post_membership(
+        app.clone(),
+        grant(Role::Owner, hour.clone()).sign(&owner_key),
+    )
+    .await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("invalid_request"))
+    );
+    let past = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+    let (status, error) =
+        post_membership(app.clone(), grant(Role::Editor, past).sign(&owner_key)).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("invalid_request"))
+    );
+    let mut unknown = grant(Role::Editor, hour.clone());
+    unknown.member_id = Some("0000000000000000".to_string());
+    let (status, error) = post_membership(app.clone(), unknown.sign(&owner_key)).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::NOT_FOUND, Some("not_found"))
+    );
+
+    // The owner grants, lists and revokes.
+    let (status, grant_reply) = post_membership(
+        app.clone(),
+        grant(Role::Editor, hour.clone()).sign(&owner_key),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{grant_reply}");
+    assert_eq!(grant_reply["role"], "editor");
+
+    let mut list = membership_request(MembershipOp::ServiceAclList, realm);
+    list.service_serial = Some(SERVICE as u64);
+    let (status, listed) = post_membership(app.clone(), list.sign(&owner_key)).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["grants"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["grants"][0]["state"], "active");
+    // A non-owner does not read the ACL.
+    let mut foreign_list = membership_request(MembershipOp::ServiceAclList, realm);
+    foreign_list.service_serial = Some(SERVICE as u64);
+    let (status, error) = post_membership(app.clone(), foreign_list.sign(&editor_key)).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("forbidden"))
+    );
+
+    let revoke_request = || {
+        let mut revoke = membership_request(MembershipOp::ServiceAclRevoke, realm);
+        revoke.service_serial = Some(SERVICE as u64);
+        revoke.member_id = Some(editor_member.clone());
+        revoke
+    };
+    let (status, _) = post_membership(app.clone(), revoke_request().sign(&owner_key)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, error) = post_membership(app.clone(), revoke_request().sign(&owner_key)).await;
+    assert_eq!(
+        (status, error["error"].as_str()),
+        (StatusCode::NOT_FOUND, Some("not_found"))
+    );
+
+    env.shutdown_signer().await;
+}
+
+/// The member id of `realm`'s owner.
+async fn joined_owner_member(realm: &str) -> String {
+    let (member_id,): (String,) =
+        sqlx::query_as("SELECT member_id FROM realm_member WHERE realm = ? AND role = 'owner'")
+            .bind(realm)
+            .fetch_one(platform::storage::db::get_database().get_pool())
+            .await
+            .expect("an owner");
+    member_id
+}
+
 /// Only the owner registers the Realm's Service, any version of it.
 // Reloading the signing key from storage uses `block_in_place`.
 #[tokio::test(flavor = "multi_thread")]

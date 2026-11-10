@@ -32,8 +32,8 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use super::realm_members::{
-    self, InviteArgs, InviteIdArgs, JoinArgs, KeyArgs, MemberArgs, RevokeClientArgs, SetRoleArgs,
-    TransferOwnerArgs,
+    self, InviteArgs, InviteIdArgs, JoinArgs, KeyArgs, MemberArgs, RevokeClientArgs,
+    ServiceAclArgs, SetRoleArgs, TransferOwnerArgs,
 };
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
 
@@ -85,6 +85,9 @@ pub enum RealmCommand {
     TransferOwner(TransferOwnerArgs),
     /// Leave the Realm; revokes all your clients.
     Leave(KeyArgs),
+    /// Instance ACL of a Service Actor: who may attach to it, separate from
+    /// Realm membership (FR-SEC-013). The Service's owner manages it.
+    ServiceAcl(ServiceAclArgs),
 }
 
 #[derive(Args, Debug)]
@@ -273,6 +276,7 @@ impl Command for RealmArgs {
             RealmCommand::SetRole(args) => realm_members::set_role(args).await?,
             RealmCommand::TransferOwner(args) => realm_members::transfer_owner(args).await?,
             RealmCommand::Leave(args) => realm_members::leave(args).await?,
+            RealmCommand::ServiceAcl(args) => realm_members::service_acl(&args.command).await?,
         };
         Ok(CommandResult::Success(serde_json::to_string_pretty(
             &output,
