@@ -40,9 +40,7 @@ fn rust_app_template_uses_the_workspace_upstream_overrides() {
         ("rtc", "rtc"),
         ("rtc-turn", "rtc"),
         ("rtc-rtp", "rtc-rtp"),
-        ("turn", "turn_crate"),
-        ("stun", "webrtc-stun"),
-        ("webrtc-util", "webrtc-util"),
+        ("sqlx", "sqlx"),
     ] {
         assert_eq!(overrides[package]["git"], dependencies[dependency]["git"]);
         assert_eq!(overrides[package]["rev"], dependencies[dependency]["rev"]);

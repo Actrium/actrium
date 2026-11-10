@@ -160,6 +160,9 @@ jobs:
           repo-token: ${{ github.token }}
           version: ${{ vars.PROTOC_VERSION || '29.3' }}
 
+      - name: Verify registry-resolved STUN package
+        run: cargo package -p loran-stun --locked
+
       - name: Run release train script unit checks
         run: |
           python3 scripts/actr/tests/test_generate_changelog.py

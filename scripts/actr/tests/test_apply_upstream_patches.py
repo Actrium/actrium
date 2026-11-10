@@ -53,8 +53,7 @@ loran-turn = {{ path = {json.dumps((module.REPO / 'crates/loran-turn').as_posix(
         dependencies = tomllib.loads((module.REPO / "Cargo.toml").read_text())["workspace"]["dependencies"]
         for package, dependency in (
             ("webrtc", "webrtc"), ("rtc", "rtc"), ("rtc-turn", "rtc"),
-            ("rtc-rtp", "rtc-rtp"), ("turn", "turn_crate"),
-            ("stun", "webrtc-stun"), ("webrtc-util", "webrtc-util"),
+            ("rtc-rtp", "rtc-rtp"), ("sqlx", "sqlx"),
         ):
             with self.subTest(package=package):
                 self.assertEqual(patches[package]["git"], dependencies[dependency]["git"])
@@ -78,9 +77,9 @@ loran-turn = {{ path = {json.dumps((module.REPO / 'crates/loran-turn').as_posix(
     def test_rejects_conflicting_patch_without_writing(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "Cargo.toml"
-            original = '[package]\nname = "demo"\nversion = "0.1.0"\n\n[patch.crates-io]\nturn = { path = "../other" }\n'
+            original = '[package]\nname = "demo"\nversion = "0.1.0"\n\n[patch.crates-io]\nwebrtc = { path = "../other" }\n'
             manifest.write_text(original)
-            with self.assertRaisesRegex(ValueError, "conflicting patch for turn"):
+            with self.assertRaisesRegex(ValueError, "conflicting patch for webrtc"):
                 module.apply(module.PATCH_SOURCE, manifest)
             self.assertEqual(manifest.read_text(), original)
 
