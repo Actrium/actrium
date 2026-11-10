@@ -416,12 +416,12 @@ final class BrowserDataRepository {
             tabs: browserTabs.map { $0.item },
             surfaceKind: "macos"
         )
-        // Known prototype gap (not fixed here): Core's session normalization
-        // (browser_data.rs normalize_session_address) accepts only about/http/
-        // https, so a mixed snapshot keeps the web tabs and drops actr:// tabs
-        // on the Core path; an actr-only snapshot falls back to verbatim
-        // persistence (AppleBrowserStorageDatabase.saveSession else branch).
-        // Extending the Core whitelist belongs to the Rust side (A/组外).
+        // Core's session normalization accepts only about/http/https/file
+        // (browser_data.rs normalize_session_address); AppleCore therefore
+        // persists snapshots containing actr:// / actro:// tabs verbatim
+        // (AppleBrowserStorageDatabase.coreNormalizedSessionSnapshot returns
+        // nil) so instance addresses survive restarts (15-B B7). Extending the
+        // Core whitelist itself still belongs to the Rust side (A/组外).
         if database?.saveSession(snapshot: snapshot) == true {
             scheduleSyncAfterLocalChange()
         }

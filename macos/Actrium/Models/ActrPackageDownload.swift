@@ -1,9 +1,9 @@
 import Foundation
 import CryptoKit
 
-/// Size cap for prototype package downloads (05 §15; doc 20 §2.14 suggests 64 MiB).
+/// Size cap for prototype package downloads (05 §15; 64 MiB prototype cap).
 enum ActrPackageDownloadLimits {
-    static let maxBytes: Int64 = 64 * 1024 * 1024
+    nonisolated static let maxBytes: Int64 = 64 * 1024 * 1024
 }
 
 /// Policy deciding which URLs enter the package direct-link download flow.
@@ -58,12 +58,15 @@ struct ActivePackageDownload: Identifiable {
 }
 
 /// Notice shown when the user enters a formal `actr://` address.
-/// Realm Profile resolution (doc 20 §1.5/§2.13) is not wired yet in the prototype,
+/// Realm Profile resolution (04 §3 open flow) is not wired yet in the prototype,
 /// so the address cannot be opened; the notice tells the user what to do instead.
 struct ActrUriNotice: Identifiable {
     let id = UUID()
     let uri: String
     let domain: String
+    /// Optional failure detail (e.g. local instance not found); when nil the
+    /// sheet explains the pending formal Realm Profile resolution.
+    var detail: String? = nil
 }
 
 enum ActrPackageDownloadError: LocalizedError {
@@ -91,13 +94,16 @@ enum ActrPackageDownloadService {
         let digest: String
     }
 
-    /// Downloads the archive to a stable temporary file, enforcing the size cap.
-    /// Supports Swift concurrency cancellation (task cancel aborts the transfer).
+    /// Streams the archive to a stable temporary file, aborting as soon as the
+    /// size cap is crossed (05 §15: unfinished downloads stay isolated). The
+    /// transfer is also rejected when a redirect lands on a different host or
+    /// downgrades the scheme, so the host confirmed in the sheet stays the
+    /// trust root (04 §3 "confirm before connect").
     nonisolated static func download(from url: URL) async throws -> URL {
-        let tempURL: URL
+        let bytes: URLSession.AsyncBytes
         let response: URLResponse
         do {
-            (tempURL, response) = try await URLSession.shared.download(from: url)
+            (bytes, response) = try await URLSession.shared.bytes(from: url)
         } catch let error as URLError where error.code == .cancelled {
             throw ActrPackageDownloadError.cancelled
         } catch is CancellationError {
@@ -108,35 +114,68 @@ enum ActrPackageDownloadService {
 
         if let http = response as? HTTPURLResponse {
             guard (200..<300).contains(http.statusCode) else {
-                try? FileManager.default.removeItem(at: tempURL)
                 throw ActrPackageDownloadError.failed(reason: "HTTP \(http.statusCode)")
             }
         }
 
+        guard let finalURL = response.url,
+              finalURL.host?.lowercased() == url.host?.lowercased(),
+              finalURL.scheme?.lowercased() == url.scheme?.lowercased()
+        else {
+            throw ActrPackageDownloadError.failed(reason: "重定向目标与确认的地址不一致")
+        }
+
         // Pre-check via declared Content-Length when the server provides it.
-        let expected = response.expectedContentLength
-        if expected > ActrPackageDownloadLimits.maxBytes {
-            try? FileManager.default.removeItem(at: tempURL)
+        if response.expectedContentLength > ActrPackageDownloadLimits.maxBytes {
             throw ActrPackageDownloadError.sizeExceeded(maxBytes: ActrPackageDownloadLimits.maxBytes)
         }
 
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("actr-pkg-\(UUID().uuidString).actr")
-        do {
-            // Move out of the session's scratch location so the file survives the session.
-            try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.moveItem(at: tempURL, to: destination)
-        } catch {
-            try? FileManager.default.removeItem(at: tempURL)
-            throw ActrPackageDownloadError.failed(reason: error.localizedDescription)
+        _ = FileManager.default.createFile(atPath: destination.path, contents: nil)
+        guard let handle = FileHandle(forWritingAtPath: destination.path) else {
+            throw ActrPackageDownloadError.failed(reason: "无法创建下载临时文件")
         }
 
-        // Actual size check (covers servers without Content-Length).
-        let attributes = try? FileManager.default.attributesOfItem(atPath: destination.path)
-        let actualSize = (attributes?[.size] as? Int64) ?? 0
-        if actualSize > ActrPackageDownloadLimits.maxBytes {
+        var written: Int64 = 0
+        var buffer = Data()
+        buffer.reserveCapacity(1 << 20)
+
+        func flush() throws {
+            guard !buffer.isEmpty else { return }
+            written += Int64(buffer.count)
+            guard written <= ActrPackageDownloadLimits.maxBytes else {
+                throw ActrPackageDownloadError.sizeExceeded(maxBytes: ActrPackageDownloadLimits.maxBytes)
+            }
+            try handle.write(contentsOf: buffer)
+            buffer.removeAll(keepingCapacity: true)
+        }
+
+        do {
+            for try await byte in bytes {
+                buffer.append(byte)
+                if buffer.count >= (1 << 20) {
+                    try flush()
+                }
+            }
+            try flush()
+            try handle.close()
+        } catch let error as ActrPackageDownloadError {
+            try? handle.close()
             try? FileManager.default.removeItem(at: destination)
-            throw ActrPackageDownloadError.sizeExceeded(maxBytes: ActrPackageDownloadLimits.maxBytes)
+            throw error
+        } catch let error as URLError where error.code == .cancelled {
+            try? handle.close()
+            try? FileManager.default.removeItem(at: destination)
+            throw ActrPackageDownloadError.cancelled
+        } catch is CancellationError {
+            try? handle.close()
+            try? FileManager.default.removeItem(at: destination)
+            throw ActrPackageDownloadError.cancelled
+        } catch {
+            try? handle.close()
+            try? FileManager.default.removeItem(at: destination)
+            throw ActrPackageDownloadError.failed(reason: error.localizedDescription)
         }
 
         return destination
@@ -160,7 +199,7 @@ enum ActrPackageDownloadService {
         try sha256File(at: url)
     }
 
-    private static func sha256File(at url: URL) throws -> String {
+    nonisolated private static func sha256File(at url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()

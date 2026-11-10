@@ -12,7 +12,8 @@ import CryptoKit
 /// 2. `~/.actr/dev-key.json` — the `actr pkg keygen` default keychain
 ///    (05 §14 local development signing key), field `public_key` (base64).
 ///
-/// Long-term target: unified verifyActrPackage FFI + Publisher Registry (doc 20 §2.12).
+/// Long-term target: unified verifyActrPackage FFI on actr-ffi + Publisher Registry
+/// (15 号计划 IF-1).
 enum ActrPackageTrustStore {
     struct TrustedKey {
         /// Raw 32-byte Ed25519 public key.
@@ -25,15 +26,30 @@ enum ActrPackageTrustStore {
     static func trustedKeys() -> [TrustedKey] {
         var keys: [TrustedKey] = []
         keys.append(contentsOf: loadFromAppSupport())
-        keys.append(contentsOf: loadFromDevKeychain())
+        // ~/.actr/dev-key.json is writable by any local process, so trusting it
+        // in release builds would let anything bypass signature verification.
+        // Keep it for development only (05 §14 local development signing key).
+        if allowsDevelopmentKeychain {
+            keys.append(contentsOf: loadFromDevKeychain())
+        }
         return keys
+    }
+
+    private static var allowsDevelopmentKeychain: Bool {
+        #if DEBUG
+        return true
+        #else
+        return ProcessInfo.processInfo.environment["ACTR_ALLOW_DEV_KEY"] == "1"
+        #endif
     }
 
     // MARK: - Key id (aligned with actr_pack::compute_key_id)
 
     static func keyId(for publicKey: Data) -> String {
-        let digest = SHA256.hash(data: publicKey)
-        let prefix = digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+        // Mirror actr_pack::compute_key_id: "actr-pub-" + the first 16 hex
+        // characters of sha256(public_key), i.e. 8 digest bytes (not 16).
+        let hex = SHA256.hash(data: publicKey).map { String(format: "%02x", $0) }.joined()
+        let prefix = hex.prefix(16)
         return "actr-pub-\(prefix)"
     }
 

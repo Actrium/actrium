@@ -1847,12 +1847,22 @@ private func resolvedGuestScript(fromConfig config: [String: Any]) -> String? {
         return config["unifiedScript"] as? String
     }
     let fm = FileManager.default
+    let rootPath = URL(fileURLWithPath: extractedPath).standardizedFileURL.path
+    // The manifest entry is relative data: never let it escape the verified
+    // extraction root via `..` (05 §8.2 controlled byte source).
+    func isInsideRoot(_ candidate: String) -> Bool {
+        // Resolve symlinks as well as `..` so an entry cannot point outside the
+        // extraction root through a link.
+        let path = URL(fileURLWithPath: candidate).resolvingSymlinksInPath().standardizedFileURL.path
+        let root = URL(fileURLWithPath: rootPath).resolvingSymlinksInPath().standardizedFileURL.path
+        return path == root || path.hasPrefix(root + "/")
+    }
     var candidates: [String] = []
     if let entryName = config["guestEntry"] as? String, !entryName.isEmpty {
         candidates.append((extractedPath as NSString).appendingPathComponent(entryName))
     }
     candidates.append((extractedPath as NSString).appendingPathComponent("unified-app.js"))
-    for candidate in candidates where fm.fileExists(atPath: candidate) {
+    for candidate in candidates where isInsideRoot(candidate) && fm.fileExists(atPath: candidate) {
         if let text = try? String(contentsOfFile: candidate, encoding: .utf8), !text.isEmpty {
             return text
         }

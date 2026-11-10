@@ -86,7 +86,8 @@ public enum AppleActrPackageManifestReader {
     /// actr_pack::verify_actor_package: fail-closed on a signed package.
     ///
     /// Trusted key sourcing is platform-specific and stays with the host app;
-    /// the long-term target is a unified verifyActrPackage FFI (doc 20 §2.12).
+    /// the long-term target is a unified verifyActrPackage FFI on actr-ffi
+    /// (15 号计划 IF-1).
     ///
     /// - Parameter trustedKeys: raw 32-byte Ed25519 public keys; any match accepts.
     public static func verifyManifestSignature(fromRoot root: URL, trustedKeys: [Data]) throws {

@@ -65,10 +65,23 @@ enum ActrPackageCache {
 
     /// Extracts a cached archive into its digest-addressed directory; reuses an
     /// existing extraction (same digest = same content, no re-extract on reopen).
-    static func extractArchiveIfNeeded(_ archiveURL: URL, digest: String) throws -> URL {
+    ///
+    /// `validate` runs against the staging directory *before* it is moved to
+    /// the digest-addressed path, so unverified content never becomes the
+    /// cached extraction (05 §15: extracted files only come from verified
+    /// packages). A hit on an existing extraction is re-validated as well,
+    /// since the cache directory is not a trust boundary on its own.
+    static func extractArchiveIfNeeded(
+        _ archiveURL: URL,
+        digest: String,
+        validate: ((URL) throws -> Void)? = nil
+    ) throws -> URL {
         let fm = FileManager.default
         let destination = extractedURL(forDigest: digest)
-        if fm.fileExists(atPath: destination.path) { return destination }
+        if fm.fileExists(atPath: destination.path) {
+            try validate?(destination)
+            return destination
+        }
 
         let parent = destination.deletingLastPathComponent()
         try fm.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -77,6 +90,7 @@ enum ActrPackageCache {
         do {
             try fm.createDirectory(at: staging, withIntermediateDirectories: true)
             try unzipArchive(archiveURL, to: staging)
+            try validate?(staging)
             do {
                 try fm.moveItem(at: staging, to: destination)
             } catch {

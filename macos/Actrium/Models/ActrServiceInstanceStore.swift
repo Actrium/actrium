@@ -8,7 +8,7 @@ enum ActrBindingsAvailability {
     static var actrNodeType: ActrNode.Type { ActrNode.self }
 }
 
-// MARK: - Installation identity (local Realm bootstrap, doc 20 §1.8)
+// MARK: - Installation identity (local realm address prefix, 04 §2)
 
 /// Shell-owned local installation identity (26-char base32, a-z 2-7 —
 /// validateInstallationId format). Generated once, persisted in App Support;
@@ -88,7 +88,7 @@ struct PendingInstanceCreation: Identifiable {
     var proposedInstanceURL: URL? { ActrInstanceAddress.instanceURL(actorId: "") }
 }
 
-/// Result of serviceCreate / serviceRecover (subset of doc 20 §2.15 ServiceHandle).
+/// Result of serviceCreate / serviceRecover (subset of the IF-1 ServiceHandle shape).
 struct ActrServiceHandle {
     /// Persistent instance identity; survives restarts (B7 recover matches it).
     let actorId: String
@@ -96,7 +96,7 @@ struct ActrServiceHandle {
     let displayName: String?
 }
 
-/// Errors aligned with doc 20 §2.15–2.17 stable codes.
+/// Errors aligned with the stable codes of 04 §7 / 12 §10.
 enum ActrServiceInstanceError: LocalizedError {
     case idempotencyConflict
     case instanceNotFound(actorId: String)
@@ -107,7 +107,7 @@ enum ActrServiceInstanceError: LocalizedError {
         case .idempotencyConflict:
             return "创建请求冲突（IDEMPOTENCY_CONFLICT）"
         case .instanceNotFound(let actorId):
-            return "实例不存在（INSTANCE_NOT_FOUND）：\(actorId)"
+            return "实例不存在（SERVICE_NOT_FOUND）：\(actorId)"
         case .digestMismatch(let expected, let actual):
             return "包指纹不一致（PACKAGE_DIGEST_MISMATCH）：期望 \(expected.prefix(12))…，实际 \(actual.prefix(12))…"
         }
@@ -115,7 +115,7 @@ enum ActrServiceInstanceError: LocalizedError {
 }
 
 /// Host-side service-instance operations consumed by the shell (15-B B6/B7).
-/// Signature mirrors A's actr-ffi surface (doc 20 §2.15/§2.17) so switching to
+/// Signature mirrors A's actr-ffi surface (15 号计划 IF-1) so switching to
 /// the real FFI backend is a one-line change for the shell.
 protocol ActrServiceInstanceProviding: Sendable {
     /// Creates a local Realm instance for a cached, verified package.
@@ -184,7 +184,7 @@ final class MockActrServiceInstanceStore: ActrServiceInstanceProviding {
         idempotencyKey: String
     ) async throws -> ActrServiceHandle {
         try queue.sync {
-            // Idempotent retry returns the same instance (doc 20 §2.15).
+            // Idempotent retry returns the same instance (15 号计划 §5).
             if let actorId = store.pendingCreates[idempotencyKey],
                let record = store.instances.first(where: { $0.actorId == actorId }) {
                 return ActrServiceHandle(

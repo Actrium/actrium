@@ -469,7 +469,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             do {
                 let digest = try ActrPackageDownloadService.sha256FileSync(at: resolvedURL)
                 let archiveURL = try ActrPackageCache.installArchive(at: resolvedURL, digest: digest)
-                rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest)
+                rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest) {
+                    try self.validateExtractedPackage(at: $0)
+                }
             } catch {
                 logger.error(" [restoreGroup] .actr Loading failed:\(error.localizedDescription)")
                 return
@@ -701,7 +703,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 0. Formal actr:// address (04 §2): actr://<realm-domain>/<realm-id>.
-        // Realm Profile resolution (doc 20 §1.5/§2.13) is not wired yet in the
+        // Realm Profile resolution (04 §3 open flow) is not wired yet in the
         // prototype, so the address cannot be opened — surface an actionable notice.
         if trimmed.hasPrefix("actr://") {
             handleActrUriInput(trimmed)
@@ -829,12 +831,37 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     // MARK: - Package Direct-Link Download (15-B B1)
     // confirm → download (size cap) → SHA-256 digest → hand over to the import pipeline.
 
-    /// Shows the actr:// notice sheet; domain extraction is best-effort here.
-    /// The formal parseActrUri (doc 20 §1.5) arrives with A's actrium-core work.
+    /// Opens a local Realm instance address, or shows the notice sheet for
+    /// formal `actr://` realm addresses (formal parse/resolution still pending).
     private func handleActrUriInput(_ uri: String) {
-        let remainder = String(uri.dropFirst("actr://".count))
-        let domain = remainder.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
-            .first.map(String.init) ?? remainder
+        guard let url = URL(string: uri) else {
+            actrUriNotice = ActrUriNotice(uri: uri, domain: "")
+            return
+        }
+        let domain = url.host ?? ""
+
+        // 04 §3: an instance address opens the same instance — focus it when
+        // already open, otherwise recover it through the instance store.
+        if ActrInstanceAddress.isLocalInstanceURL(url) {
+            if let existing = tabs.first(where: { $0.url?.absoluteString == uri }) {
+                switchToTab(id: existing.id)
+                return
+            }
+            let label = url.lastPathComponent
+            if serviceInstanceStore.resolveActorId(byAddressLabel: label) != nil {
+                logger.notice("🧭 [navigateCurrentTab] local instance address: \(uri)")
+                restoreInstanceTab(address: url, title: domain, isActiveTab: true)
+                return
+            }
+            logger.error("❌ [navigateCurrentTab] local instance not found: \(uri)")
+            actrUriNotice = ActrUriNotice(
+                uri: uri,
+                domain: domain,
+                detail: "本机实例未找到或已被清除（SERVICE_NOT_FOUND），无法打开该地址。"
+            )
+            return
+        }
+
         logger.notice("🧭 [navigateCurrentTab] actr:// address (prototype: realm resolution pending): \(uri)")
         actrUriNotice = ActrUriNotice(uri: uri, domain: domain)
     }
@@ -899,7 +926,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard let pending = pendingInstanceCreation else { return }
         pendingInstanceCreation = nil
         // The idempotency key covers retries within this single create; pressing
-        // 「创建」 again later means a new instance = a new key (doc 20 §2.15).
+        // 「创建」 again later means a new instance = a new key (15 号计划 §5).
         let idempotencyKey = UUID().uuidString
         Task { [weak self] in
             guard let self else { return }
@@ -954,6 +981,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             // remember the link → digest mapping so re-opening the same link skips
             // the download; the import pipeline reuses the cached extraction.
             let cachedArchiveURL = try ActrPackageCache.installArchive(at: localURL, digest: digest)
+            // installArchive copies into the cache; the download scratch file
+            // is no longer needed.
+            try? FileManager.default.removeItem(at: localURL)
             ActrPackageCache.rememberDownloadURL(active.pending.url, digest: digest)
 
             // Hand over to the existing import pipeline (manifest → runtime tab).
@@ -990,7 +1020,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             do {
                 let digest = try ActrPackageDownloadService.sha256FileSync(at: resolvedURL)
                 let archiveURL = try ActrPackageCache.installArchive(at: resolvedURL, digest: digest)
-                rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest)
+                rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest) {
+                    try self.validateExtractedPackage(at: $0)
+                }
             } catch {
                 logger.error("❌ [loadActrPackageIntoCurrentTab] Unpressure failed: \(error.localizedDescription)")
                 return
@@ -1218,7 +1250,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             do {
                 let digest = try ActrPackageDownloadService.sha256FileSync(at: resolvedURL)
                 let archiveURL = try ActrPackageCache.installArchive(at: resolvedURL, digest: digest)
-                rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest)
+                rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest) {
+                    try self.validateExtractedPackage(at: $0)
+                }
             } catch {
                 logger.error(" [reloadCurrentTab] Depression failed:\(error.localizedDescription)")
                 return
@@ -1346,7 +1380,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             do {
                 let digest = try knownDigest ?? ActrPackageDownloadService.sha256FileSync(at: resolvedURL)
                 let archiveURL = try ActrPackageCache.installArchive(at: resolvedURL, digest: digest)
-                rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest)
+                rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest) {
+                    try self.validateExtractedPackage(at: $0)
+                }
                 packageDigest = digest
                 cachedArchiveURL = archiveURL
             } catch {
@@ -1559,7 +1595,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 <h1>无法验证程序包签名</h1>
                 <div class="message">\(error.localizedDescription)</div>
                 <div class="suggestion">\(suggestion)</div>
-                <div class="path">\(sourcePath)</div>
+                <div class="path">\(escapeHTML(sourcePath))</div>
             </div>
         </body>
         </html>
@@ -1579,6 +1615,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         didRestoreSession = true
         guard let session = browserDataRepository.restoreSession(), !session.tabs.isEmpty else { return }
         logger.notice("🔄 [RestoreSession] restoring \(session.tabs.count) session tab(s)")
+
+        // The persisted session is the source of truth on launch: drop the
+        // placeholder Start Page created in init() so restoring does not leave
+        // an extra blank tab next to the restored ones.
+        if tabs.count == 1, let only = tabs.first,
+           only.systemTabType == .startPage, only.url == nil {
+            tabs.removeAll()
+            tabSlotPositions.removeAll()
+            currentTabId = nil
+        }
 
         var restoredTabIds: [UUID] = []
         var activeTabId: UUID?
@@ -1650,11 +1696,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Recovers one actr:// instance tab: serviceRecover (same ActorId) →
     /// re-render from the digest cache → restore the instance address.
     private func restoreInstanceTab(address: URL, title: String, isActiveTab: Bool) {
-        guard let label = address.pathComponents.first,
+        // `URL.pathComponents` starts with "/" for a hierarchical URL, so the
+        // address label is the last path component (04 §2).
+        let label = address.lastPathComponent
+        guard !label.isEmpty,
               let actorId = serviceInstanceStore.resolveActorId(byAddressLabel: label),
               let expectedDigest = serviceInstanceStore.knownDigest(actorId: actorId)
         else {
-            logger.error("❌ [RestoreSession] instance record missing for \(address.absoluteString) (INSTANCE_NOT_FOUND)")
+            logger.error("❌ [RestoreSession] instance record missing for \(address.absoluteString) (SERVICE_NOT_FOUND)")
             return
         }
         Task { [weak self] in
@@ -1932,6 +1981,23 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         try ActrPackageManifestReader.read(fromRoot: root, requireSignature: requireSignature)
     }
 
+    /// Escapes text interpolated into the static HTML error/info pages.
+    private func escapeHTML(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
+    }
+
+    /// Validates a staging extraction before it enters the digest cache
+    /// (05 §15): manifest signature (actr-package/2) plus per-file SHA-256
+    /// integrity. Throws on failure so the cache never keeps unverified bytes.
+    private func validateExtractedPackage(at root: URL) throws {
+        _ = try readPackageManifest(fromRoot: root, requireSignature: true)
+    }
+
     /// Universal script reading method
     private func readScript(fromRoot root: URL, fileName: String) -> String? {
         let fm = FileManager.default
@@ -2010,13 +2076,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         </head>
         <body>
             <div class="card">
-                <h1>🧩 \(name)</h1>
+                <h1>🧩 \(escapeHTML(name))</h1>
                 <div class="meta">
-                    <span class="pill">version \(version)</span>
+                    <span class="pill">version \(escapeHTML(version))</span>
                     <span class="pill">ACTR package</span>
                 </div>
-                <div class="desc">\(description)</div>
-                <div class="path">\(sourcePath)</div>
+                <div class="desc">\(escapeHTML(description))</div>
+                <div class="path">\(escapeHTML(sourcePath))</div>
             </div>
         </body>
         </html>

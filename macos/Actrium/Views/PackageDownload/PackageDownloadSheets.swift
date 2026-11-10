@@ -159,7 +159,7 @@ struct ActivePackageDownloadSheet: View {
     }
 }
 
-/// Instance-creation confirm sheet (15-B B6, doc 20 §2.15): shows the package
+/// Instance-creation confirm sheet (15-B B6): shows the package
 /// identity, declared permissions and the instance address that will replace
 /// the package URL; confirm → serviceCreate → URI replace.
 struct PackageInstanceConfirmSheet: View {
@@ -250,7 +250,7 @@ struct PackageInstanceConfirmSheet: View {
 }
 
 /// Notice shown for formal `actr://` addresses in the prototype period:
-/// Realm Profile resolution is pending (doc 20 §1.5/§2.13), so the address
+/// Realm Profile resolution is pending (04 §3 open flow), so the address
 /// cannot be opened yet; the notice says what works instead.
 struct ActrUriNoticeSheet: View {
     let notice: ActrUriNotice
@@ -283,10 +283,14 @@ struct ActrUriNoticeSheet: View {
                         .foregroundColor(.accentColor)
                 }
 
-                Text("正式实例地址（域名 \(notice.domain.isEmpty ? "未知" : notice.domain)）需要 Realm Profile 解析，当前原型暂未支持。")
-                Text("原型期可使用包直链（https 地址，以 .actr 结尾）或本地 .actr 文件路径。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if let detail = notice.detail {
+                    Text(detail)
+                } else {
+                    Text("正式实例地址（域名 \(notice.domain.isEmpty ? "未知" : notice.domain)）需要 Realm Profile 解析，当前原型暂未支持。")
+                    Text("原型期可使用包直链（https 地址，以 .actr 结尾）或本地 .actr 文件路径。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()

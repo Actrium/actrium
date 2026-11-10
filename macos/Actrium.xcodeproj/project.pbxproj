@@ -1057,19 +1057,19 @@
 /* Begin XCLocalSwiftPackageReference section */
 		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "ActriumIPC" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../packages/actrium-platform/apple/ActriumIPC";
+			relativePath = ../packages/actrium-platform/apple/ActriumIPC;
 		};
 		AA00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumVault" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../packages/actrium-platform/apple/ActriumVault";
+			relativePath = ../packages/actrium-platform/apple/ActriumVault;
 		};
 		AB00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActriumCore" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../packages/actrium-platform/apple/ActriumCore";
+			relativePath = ../packages/actrium-platform/apple/ActriumCore;
 		};
 		5C0B1A2D3E4F506172830003 /* XCLocalSwiftPackageReference "Actr" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../packages/actr-swift";
+			relativePath = ../packages/actr-swift;
 		};
 /* End XCLocalSwiftPackageReference section */
 
