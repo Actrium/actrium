@@ -400,6 +400,7 @@ private final class RendererTabSurface {
     let window: NSWindow
     let context: RendererCAContext
     private var generation: UInt64 = 0
+    private var hasCommitted = false
     private var accessibilityObservers: [NSObjectProtocol] = []
     private var accessibilityPublishWork: DispatchWorkItem?
 
@@ -461,8 +462,16 @@ private final class RendererTabSurface {
 
     func commit() {
         context.layer = container.layer
-        container.needsLayout = true
-        container.layoutSubtreeIfNeeded()
+        // The first commit happens on an empty view tree, so lay it out once.
+        // Later commits rely on AppKit/RN marking the container dirty
+        // (addSubview, surface stage change, resize); Fabric sets frames
+        // directly, so a subtree-only dirty state is intentionally not
+        // remeasured here.
+        if !hasCommitted || container.needsLayout {
+            container.needsLayout = true
+            container.layoutSubtreeIfNeeded()
+            hasCommitted = true
+        }
         CATransaction.flush()
     }
 
