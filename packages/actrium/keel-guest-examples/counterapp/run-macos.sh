@@ -4,11 +4,12 @@
 # in Actrium. The host app is reused unless --rebuild-app is passed.
 #
 # Usage:
-#   ./run-macos.sh [--no-open] [--rebuild-app]
+#   ./run-macos.sh [--no-open] [--rebuild-app] [--skip-install]
 #
 # Options:
 #   --no-open       Build and verify without launching Actrium.
 #   --rebuild-app   Rebuild the Actrium host app before opening the package.
+#   --skip-install  Reuse the existing pnpm workspace installation.
 #   --help          Show this help.
 
 set -euo pipefail
@@ -19,6 +20,7 @@ APP_PATH="$REPO_ROOT/target/xcode-derived-data/actrium-counter/Build/Products/De
 PACKAGE_PATH="$SCRIPT_DIR/dist/actrium-counter-1.0.0.actr"
 REBUILD_APP=0
 OPEN_APP=1
+SKIP_INSTALL=0
 
 usage() {
     sed -n '/^# Usage:/,/^$/p' "$0" \
@@ -33,6 +35,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --rebuild-app)
             REBUILD_APP=1
+            shift
+            ;;
+        --skip-install)
+            SKIP_INSTALL=1
             shift
             ;;
         --help|-h)
@@ -54,7 +60,27 @@ for command in bun cargo; do
 done
 
 cd "$SCRIPT_DIR"
+if [ "$SKIP_INSTALL" = "0" ]; then
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo "Required command is missing: pnpm" >&2
+        exit 1
+    fi
+    pnpm install --frozen-lockfile --ignore-scripts
+fi
+
+# Keel keeps its own Bun lockfile outside the pnpm workspace.
+if [ "$SKIP_INSTALL" = "0" ] || [ ! -d "$REPO_ROOT/packages/keel/node_modules/commander" ]; then
+    (cd "$REPO_ROOT/packages/keel"; bun install --frozen-lockfile)
+fi
+
 bun run build
+
+# actr-cli embeds the web runtime assets; a clean checkout must build them.
+if [ ! -f "$REPO_ROOT/crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm" ] \
+   && [ ! -f "$REPO_ROOT/packages/actr-web/dist/sw/actr_sw_host_bg.wasm" ]; then
+    (cd "$REPO_ROOT" && bash packages/actr-web/scripts/sync-cli-assets.sh --build)
+fi
+
 bun run build:package
 bun run verify:package
 
@@ -67,6 +93,12 @@ if [ "$REBUILD_APP" = "1" ] || [ ! -d "$APP_PATH" ]; then
     done
 
     cd "$REPO_ROOT/macos"
+    # apple-macos rebuilds the whole xcframework and keeps only the macOS
+    # slice; use the `apple` target instead if iOS slices are needed.
+    if [ ! -f "$REPO_ROOT/crates/actrium-core/ActriumCore.xcframework/macos-arm64_x86_64/libactrium_core.a" ] \
+       || [ ! -f "$REPO_ROOT/crates/actrium-vault/ActriumVault.xcframework/macos-arm64_x86_64/libactrium_vault.a" ]; then
+        "$REPO_ROOT/scripts/actrium/build-actrium-rust-bindings.sh" apple-macos
+    fi
     if [ ! -d Pods ]; then
         pod install
     fi
