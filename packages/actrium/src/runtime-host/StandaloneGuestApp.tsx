@@ -85,6 +85,11 @@ export const StandaloneGuestApp: React.FC<Props> = ({
   const hasActorCallPermission = (tab.permissions ?? []).includes('actor.call');
 
   React.useEffect(() => {
+    // A reload must start from a clean state, otherwise a previous load
+    // failure keeps rendering even after the new bundle loads successfully.
+    setError('');
+    setContent(null);
+
     if (!guestScript) {
       setError('The application does not contain a Keel guest bundle.');
       return;
