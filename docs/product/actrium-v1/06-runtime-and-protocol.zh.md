@@ -69,9 +69,15 @@ Service 按已验证 Program Release 记录中的 Front 包类型校验该类型
 
 这些字段统一由 Actrium Host 根据已验证的包和本地会话状态构造。Service 将它们作为客户端声明用于兼容性协商。
 
-Attach 时，两端 Host 从 `dependencies.service.contract` 选定的已验证 RPC Proto 生成
-`protocolFingerprint`。使用该 Proto 的文件名和内容，沿用现有 Service 语义指纹算法，输出形式为
-`service_semantic:<64 位小写十六进制字符>`。见[指纹实现](../../../crates/actr-service-compat/src/fingerprint.rs)。
+两个 Host 在配套包验证时，从已验证的 Front manifest 取得 `dependencies.service.contract`。
+各自从已验证归档读取该路径的 Proto，以路径最后一段文件名作为 `ProtoFile.name`，
+构成 `Fingerprint::calculate_service_semantic_fingerprint` 的单文件输入。
+
+算法通过 `proto_fingerprint::Spec` 取得每个文件的语义指纹，按 `name` 排序，
+将 `name:semantic-fingerprint` 条目用 LF 连接，末尾不加 LF。
+对该字符串的 UTF-8 字节计算 SHA-256，以小写十六进制编码并加上 `service_semantic:` 前缀。
+此处选定的 Product v1 契约只有一个输入条目。
+见[指纹实现](../../../crates/actr-service-compat/src/fingerprint.rs)。
 
 平台提供可选的远端证明：受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential，供需要的 Service 验证。
 

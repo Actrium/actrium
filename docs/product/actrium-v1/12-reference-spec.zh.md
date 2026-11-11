@@ -173,7 +173,7 @@ version = "1.4.2"
 
 [workload]
 profile = "actr.component/1"
-entry = "bin/service.wasm"
+entry = "workload/service.wasm"
 
 [host]
 profile = "actr.host/1"
@@ -191,14 +191,14 @@ algorithm = "ed25519"
 key-id = "actr-pub-3f9a1c0d2b7e4a61"
 
 [[files]]
-path = "bin/service.wasm"
+path = "workload/service.wasm"
 role = "workload"
 media-type = "application/wasm"
 size = 1832000
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [[files]]
-path = "proto/service.proto"
+path = "contracts/service.proto"
 role = "contract"
 media-type = "text/plain"
 size = 1204
@@ -237,7 +237,7 @@ optional-capabilities = []
 [dependencies.service]
 actor = "notes.example/team-notes"
 version = "=1.4.2"
-contract = "proto/service.proto"
+contract = "contracts/service.proto"
 required = true
 
 [signature]
@@ -266,14 +266,14 @@ size = 512
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [[files]]
-path = "proto/service.proto"
+path = "contracts/service.proto"
 role = "contract"
 media-type = "text/plain"
 size = 1204
 sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
 ```
 
-两个示例使用同一份 `proto/service.proto`。每个归档各自包含 `manifest.sig`。
+两个示例使用同一份 `contracts/service.proto`。每个归档各自包含 `manifest.sig`。
 Realm、信令与信任等部署参数由 `actr.toml` 提供。
 
 ## 5. Keel Capability Manifest

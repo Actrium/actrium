@@ -72,9 +72,15 @@ The Actr Host supplies these values during Attach.
 The Actrium Host alone constructs these values from the verified packages and local session state.
 The Service treats them as client declarations for compatibility negotiation.
 
-For Attach, both Hosts derive `protocolFingerprint` from the verified RPC Proto selected by
-`dependencies.service.contract`. Use the Proto file's basename and contents with the existing
-Service semantic fingerprint algorithm. The result has the form `service_semantic:<64 lowercase hex>`.
+During pair verification, both Hosts obtain `dependencies.service.contract` from the verified
+Front manifest. Each reads the selected Proto from its own verified archive and uses the path's
+basename as `ProtoFile.name`. This defines the single-file input to
+`Fingerprint::calculate_service_semantic_fingerprint`.
+
+The algorithm obtains each file's semantic fingerprint from `proto_fingerprint::Spec`,
+sorts files by `name`, and joins the `name:semantic-fingerprint` entries with LF, without a trailing LF.
+It hashes the UTF-8 bytes of that string with SHA-256 and prefixes the lowercase hexadecimal result
+with `service_semantic:`. For the selected Product v1 contract, the input contains one entry.
 See the [fingerprint implementation](../../../crates/actr-service-compat/src/fingerprint.rs).
 
 The platform provides optional remote attestation: a managed Realm can fold platform app attestation, distribution signatures, or enterprise device attestation into the credential, for a Service that needs it to verify.

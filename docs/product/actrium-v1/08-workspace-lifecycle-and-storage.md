@@ -185,8 +185,11 @@ Local creation must use a durable intent:
 ```text
 CreationIntent
 ├── idempotency_key
-├── package_source
-├── program_release + digest
+├── package_sources
+├── program_release
+├── service_package_digest
+├── front_package_digest
+├── privacy_contract_digest (when declared)
 ├── realm_name
 ├── workspace_selection
 ├── requested_permissions

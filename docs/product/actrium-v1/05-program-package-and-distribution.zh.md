@@ -108,9 +108,9 @@ Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证�
 team-notes.actr
 ├── manifest.toml
 ├── manifest.sig
-├── bin/
+├── workload/
 │   └── service.wasm
-└── proto/
+└── contracts/
     └── service.proto
 
 team-notes-front.actr
@@ -119,9 +119,8 @@ team-notes-front.actr
 ├── workload/
 │   ├── guest.js
 │   └── capabilities.json
-├── contracts/
-│   └── notes.json
-└── proto/
+└── contracts/
+    ├── notes.json
     └── service.proto
 ```
 
@@ -202,6 +201,9 @@ Actr 基础清单提供以下表。
 - Service manifest 的 `[workspace]` 声明静态的 `requirement`、`access` 和 `providers`。
 
 对 Product v1 的配套包，`dependencies.service.contract` 以包内相对路径选定 RPC Proto。
+两个 Host 在配套包验证时，从已验证的 Front manifest 读取此路径。
+Service Host 按签名发布记录取得配套 Front 的清单，保存验证后的路径用于 Attach，
+再从自身已验证的 Service 归档读取选定的 Proto。
 两个清单必须在该路径登记角色为 `contract` 且 SHA-256 相同的文件。包中包含其他契约文件时，
 也按此路径选择 RPC 契约。Actr Host 按[第 06 章 §2.2](06-runtime-and-protocol.zh.md#22-front-actor-类型)计算 Attach 指纹。
 
@@ -211,7 +213,7 @@ Service 节点使用现有 Actr `actr.toml` 格式配置 Realm、信令和信任
 
 两份完整清单见[参考协议](12-reference-spec.zh.md#4-actr-manifest)。
 
-## 7. 权限、组件和配额声明
+## 7. 能力声明与运行时策略
 
 包声明的是「申请」，不是实际授权：
 
@@ -226,6 +228,10 @@ effective capabilities =
 
 Actr Host 按产品策略评估以下内容。包的能力要求来自 `[host]`，Guest 的声明来自其签名保护的 Keel 能力清单，
 Workspace 要求来自签名 Service manifest，实例设置和实际授权来自部署及授权流程。
+Guest 堆、执行时间、render op 上限，以及 Service 内存、fuel、存储和网络配额，
+来自平台或部署策略，由 Host 执行。最低 Actrium 客户端版本和受支持的 SDK/工具链版本
+属于平台发行策略。包的兼容性通过 `host.api`、`workload.profile`、
+`workload.keel.guest-api` 和已验证的 RPC 契约指纹检查。
 
 - Front capability；
 - Service capability；
@@ -235,7 +241,7 @@ Workspace 要求来自签名 Service manifest，实例设置和实际授权来�
 - Workspace access mode；
 - Guest heap、单次执行时间、render op；
 - Service memory/fuel/storage/network；
-- 最低 Actr Host/SDK/contract 版本。
+- 平台支持的工具链下的 Host API 与 Workload/Guest 契约兼容性。
 - 数据分类、预期 Actor 出口、terminal egress、required/optional 和最低节点结论。
 
 新增高风险权限必须发布新版本，并在升级时重新确认。
@@ -255,7 +261,14 @@ Realm Profile package / 用户选定的发布版本
 
 ### 8.1 检查顺序
 
-每个归档都执行以下检查。两个包的 Actor 类型和 SHA-256 必须匹配签名发布记录，
+先按[第 12 章 §3.1](12-reference-spec.zh.md#31-签名-program-release-记录)验证 Program Release 记录。
+检查 schema、`release_id = service.type`、归属声明 Publisher 的两个不同 Actor 类型，
+以及由已接受 Publisher key 验证的 JCS/Ed25519 签名。
+与已接受记录比较不可变的包和 Privacy Contract 绑定。
+通过 Realm 打开时，还需将 `service.type`、`service.sha256` 与已验证的 Realm Profile 核对。
+
+随后分别对 `service` 和 `front` 成员指定的归档执行以下检查。
+各包的 Actor 类型和 SHA-256 必须匹配对应成员，
 Front 的 `dependencies.service` 以已验证的 Service 包为准解析。
 
 1. 校验 Publisher DNS/IDNA；
@@ -266,12 +279,15 @@ Front 的 `dependencies.service` 以已验证的 Service 包为准解析。
 6. `actr-package/2` 格式和 `signature.key-id`。
 7. 清单声明的 Publisher 对应的 Publisher Profile。
 8. Ed25519 签名。
-9. 本包签名清单中的 Actor 身份、Workload Profile 和入口。
+9. 签名清单中的 Actor 身份和入口，以及 Workload Profile 是否符合发布记录的包角色和第 4.1 节的分发策略。
 10. ZIP 文件清单、大小和 SHA-256 与 `[[files]]` 精确匹配。
-11. Guest 静态依赖和 capability manifest；
-12. Service WASM imports；
+11. 对 Front 包，检查 Guest 静态依赖和能力清单。
+12. 对 WASM Service 包，检查 WASM imports。
 13. Host API、Keel API，以及 Front 所需契约与 Service 包的兼容性；
 14. 本地/组织安全策略。
+
+声明 Privacy Contract 时，先按签名发布记录验证其原始字节的 SHA-256，
+再核对契约中的发布版本和两个包绑定，随后才能用于授权。
 
 任何一步失败都不得把部分内容交给 Keel 或 Service runtime。
 

@@ -114,9 +114,9 @@ the Keel and Proto contract files have role `contract`, and icons and static ass
 team-notes.actr
 ├── manifest.toml
 ├── manifest.sig
-├── bin/
+├── workload/
 │   └── service.wasm
-└── proto/
+└── contracts/
     └── service.proto
 
 team-notes-front.actr
@@ -125,9 +125,8 @@ team-notes-front.actr
 ├── workload/
 │   ├── guest.js
 │   └── capabilities.json
-├── contracts/
-│   └── notes.json
-└── proto/
+└── contracts/
+    ├── notes.json
     └── service.proto
 ```
 
@@ -209,6 +208,9 @@ The Actr base manifest provides the following tables.
 - `[workspace]` in the Service manifest for static `requirement`, `access`, and `providers` declarations.
 
 For a Product v1 pair, `dependencies.service.contract` selects the RPC Proto by package-relative path.
+During pair verification, both Hosts read this selector from the verified Front manifest.
+The Service Host obtains the paired Front manifest through the signed release record and retains
+the verified selector for Attach, then reads the selected Proto from its own verified Service archive.
 Both manifests must declare the file at that path with role `contract` and the same SHA-256.
 The explicit path selects the RPC contract when the archives carry other contract files. Actr Host
 derives the Attach fingerprint as described in [06 §2.2](06-runtime-and-protocol.md#22-front-actor-type).
@@ -220,7 +222,7 @@ table. The deployment or creation flow selects `provisioning`, and the Host stor
 
 See both manifests in the [Reference Specification](12-reference-spec.md#4-actr-manifest).
 
-## 7. Permission, component and quota declarations
+## 7. Capability declarations and runtime policy
 
 What a package declares is a "request," not an actual grant:
 
@@ -237,6 +239,11 @@ The Actr Host evaluates the following as product policy. Package capability requ
 from `[host]`, and Guest declarations come from its signed Keel capability manifest.
 The signed Service manifest declares Workspace requirements. Deployment and authorization supply
 the instance-specific settings and grants.
+Guest heap, execution time, render-operation limits, and Service memory, fuel, storage, and network
+quotas come from platform or deployment policy and are enforced by the Host.
+Minimum Actrium client and supported SDK/toolchain versions are platform release policy.
+Package compatibility is checked through `host.api`, `workload.profile`, `workload.keel.guest-api`,
+and the verified RPC contract fingerprint.
 
 - Front capability;
 - Service capability;
@@ -246,7 +253,7 @@ the instance-specific settings and grants.
 - Workspace access mode;
 - Guest heap, single-execution time, render ops;
 - Service memory/fuel/storage/network;
-- minimum Actr Host/SDK/contract version;
+- Host API and Workload/Guest contract compatibility under the supported platform toolchain;
 - data classes, expected Actor egress, terminal egress, required/optional, and the minimum node conclusion.
 
 Adding a new high-risk permission requires a new version, and reconfirmation at upgrade time.
@@ -266,8 +273,15 @@ Realm Profile package / user-selected release
 
 ### 8.1 Check order
 
-Apply these checks to each archive. Match both Actor types and SHA-256 digests to the signed
-release record, and resolve the Front's `dependencies.service` against the verified Service package.
+First verify the Program Release record under [12 §3.1](12-reference-spec.md#31-signed-program-release-record).
+Check its schema, `release_id = service.type`, distinct Service and Front Actor types under the
+declared Publisher, and the JCS/Ed25519 signature with the accepted Publisher key.
+Compare its immutable package and Privacy Contract bindings with any previously accepted record.
+On Realm entry, also match `service.type` and `service.sha256` to the verified Realm Profile.
+
+Then apply the following checks independently to the archive named by each `service` or `front`
+member. Match its Actor type and SHA-256 to that member, and resolve the Front's
+`dependencies.service` against the verified Service package.
 
 1. verify the Publisher's DNS/IDNA;
 2. TLS and hostname;
@@ -277,12 +291,15 @@ release record, and resolve the Front's `dependencies.service` against the verif
 6. The `actr-package/2` format and `signature.key-id`.
 7. The Publisher Profile of the Publisher declared in the manifest.
 8. The Ed25519 signature.
-9. The package's signed Actor identity, Workload Profile, and entry.
+9. The signed Actor identity and entry, and whether the Workload Profile matches the record's package role and distribution policy under §4.1.
 10. The exact ZIP inventory, sizes, and SHA-256 hashes against `[[files]]`.
-11. the Guest's static dependencies and capability manifest;
-12. the Service WASM imports;
+11. For the Front package, the Guest's static dependencies and capability manifest.
+12. For a WASM Service package, its WASM imports.
 13. Host API, Keel API and compatibility between the Front's expected Service contract and the Service package;
 14. local/organizational security policy.
+
+For any declared Privacy Contract, verify its exact-byte SHA-256 against the signed record,
+then check its release and both package bindings before using its policy for authorization.
 
 If any step fails, no part of the content may be handed to the Keel or Service runtime.
 

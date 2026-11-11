@@ -205,7 +205,7 @@ version = "1.4.2"
 
 [workload]
 profile = "actr.component/1"
-entry = "bin/service.wasm"
+entry = "workload/service.wasm"
 
 [host]
 profile = "actr.host/1"
@@ -223,14 +223,14 @@ algorithm = "ed25519"
 key-id = "actr-pub-3f9a1c0d2b7e4a61"
 
 [[files]]
-path = "bin/service.wasm"
+path = "workload/service.wasm"
 role = "workload"
 media-type = "application/wasm"
 size = 1832000
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [[files]]
-path = "proto/service.proto"
+path = "contracts/service.proto"
 role = "contract"
 media-type = "text/plain"
 size = 1204
@@ -269,7 +269,7 @@ optional-capabilities = []
 [dependencies.service]
 actor = "notes.example/team-notes"
 version = "=1.4.2"
-contract = "proto/service.proto"
+contract = "contracts/service.proto"
 required = true
 
 [signature]
@@ -298,14 +298,14 @@ size = 512
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [[files]]
-path = "proto/service.proto"
+path = "contracts/service.proto"
 role = "contract"
 media-type = "text/plain"
 size = 1204
 sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
 ```
 
-The two examples use the same `proto/service.proto` bytes. Each archive has its own `manifest.sig`.
+The two examples use the same `contracts/service.proto` bytes. Each archive has its own `manifest.sig`.
 Deployment settings such as Realm, signaling, and trust are supplied through `actr.toml`.
 
 ## 5. Keel Capability Manifest
