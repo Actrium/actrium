@@ -820,7 +820,9 @@ function analyzeSourceComponents(code) {
     throw new Error("oxc-parser not available. Please install it with 'npm i -D oxc-parser'.");
   }
 
-  const sdkNames = new Set();
+  // Local JSX binding name -> imported SDK component name. Aliased imports
+  // (`Modal as M`) must be resolved through this map, not compared directly.
+  const componentBindings = new Map();
   const jsxNames = new Set();
 
   try {
@@ -830,13 +832,23 @@ function analyzeSourceComponents(code) {
     traverseAST(ast, (node) => {
       if (node.type === 'ImportDeclaration' && node.source?.value === 'keel/guest') {
         for (const specifier of node.specifiers ?? []) {
-          const name = specifier.imported?.name ?? specifier.local?.name;
-          if (name) sdkNames.add(name);
+          const localName = specifier.local?.name;
+          if (!localName) continue;
+          componentBindings.set(localName, specifier.imported?.name ?? localName);
         }
       }
       if (node.type === 'JSXElement') {
-        const name = getJSXElementName(node.openingElement);
-        if (sdkNames.has(name)) jsxNames.add(name);
+        const localName = getJSXElementName(node.openingElement);
+        const importedName = componentBindings.get(localName);
+        if (importedName) {
+          jsxNames.add(importedName);
+        } else if (localName.includes('.')) {
+          // Namespace imports (`import * as guest`) render `guest.View`.
+          const [root, member] = localName.split('.');
+          if (componentBindings.has(root) && member) {
+            jsxNames.add(member);
+          }
+        }
       }
     });
   } catch (err) {

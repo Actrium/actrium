@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -106,18 +106,9 @@ describe('createV1CapabilityManifest', () => {
   });
 });
 
-describe('v1 component allowlist integration', () => {
-  let tempDir: string | undefined;
-
-  afterEach(() => {
-    if (tempDir) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-      tempDir = undefined;
-    }
-  });
-
-  it('rejects components rendered by imported modules in minified builds', async () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-components-'));
+async function expectModalViolation(childSource: string) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-components-'));
+  try {
     const srcDir = path.join(tempDir, 'src');
     fs.mkdirSync(srcDir, { recursive: true });
     fs.writeFileSync(
@@ -135,20 +126,7 @@ export default function App() {
 }
 `
     );
-    fs.writeFileSync(
-      path.join(srcDir, 'child.tsx'),
-      `
-import { Modal, Text } from 'keel/guest';
-
-export function Child() {
-  return (
-    <Modal>
-      <Text>hello</Text>
-    </Modal>
-  );
-}
-`
-    );
+    fs.writeFileSync(path.join(srcDir, 'child.tsx'), childSource);
 
     await expect(
       build({
@@ -164,5 +142,37 @@ export function Child() {
         ),
       })
     ).rejects.toThrow('Modal');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+describe('v1 component allowlist integration', () => {
+  it('rejects components rendered by imported modules in minified builds', async () => {
+    await expectModalViolation(`
+import { Modal, Text } from 'keel/guest';
+
+export function Child() {
+  return (
+    <Modal>
+      <Text>hello</Text>
+    </Modal>
+  );
+}
+`);
+  });
+
+  it('rejects aliased SDK components in minified builds', async () => {
+    await expectModalViolation(`
+import { Modal as M, Text } from 'keel/guest';
+
+export function Child() {
+  return (
+    <M>
+      <Text>hello</Text>
+    </M>
+  );
+}
+`);
   });
 });
