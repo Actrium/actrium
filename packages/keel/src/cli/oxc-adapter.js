@@ -787,6 +787,34 @@ function analyzeBundleComponents(code) {
  * validated against the Guest component allowlist. This analysis runs on the
  * entry source, so minification cannot hide the names.
  */
+/**
+ * Static import specifiers from a source module.
+ *
+ * moduleLexerSync does not reliably lex JSX/TSX sources, so this uses the
+ * full parser to collect relative imports for the source module graph.
+ */
+function analyzeSourceImports(code) {
+  if (!oxc || !oxc.parseSync) {
+    throw new Error("oxc-parser not available. Please install it with 'npm i -D oxc-parser'.");
+  }
+
+  const imports = new Set();
+  try {
+    const result = oxc.parseSync(code, { sourceType: 'module', sourceFilename: 'source.tsx' });
+    const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
+
+    traverseAST(ast, (node) => {
+      if (node.type === 'ImportDeclaration' && typeof node.source?.value === 'string') {
+        imports.add(node.source.value);
+      }
+    });
+  } catch (err) {
+    console.error('[oxc-adapter] analyzeSourceImports failed:', err.message);
+  }
+
+  return Array.from(imports);
+}
+
 function analyzeSourceComponents(code) {
   if (!oxc || !oxc.parseSync) {
     throw new Error("oxc-parser not available. Please install it with 'npm i -D oxc-parser'.");
@@ -824,4 +852,5 @@ module.exports = {
   analyzeJSXProps,
   analyzeBundleComponents,
   analyzeSourceComponents,
+  analyzeSourceImports,
 };

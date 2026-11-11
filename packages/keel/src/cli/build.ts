@@ -769,6 +769,10 @@ export function createV1CapabilityManifest(
   },
   contract?: KeelContractShape
 ): CapabilityManifestV1 {
+  if (!contract) {
+    throw new Error('v1 capability manifests require a contract');
+  }
+
   const hostModules: Record<string, { rpc: string[]; events: string[] }> = {};
 
   for (const capability of boundary.hostCapabilities) {
@@ -817,6 +821,71 @@ function writeJsonFile(filePath: string, value: unknown): void {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Resolve a relative source import to a file on disk.
+ */
+function resolveSourceModule(fromFile: string, specifier: string): string | null {
+  const base = path.resolve(path.dirname(fromFile), specifier);
+  const candidates = [
+    base,
+    `${base}.tsx`,
+    `${base}.ts`,
+    `${base}.jsx`,
+    `${base}.js`,
+    path.join(base, 'index.tsx'),
+    path.join(base, 'index.ts'),
+    path.join(base, 'index.jsx'),
+    path.join(base, 'index.js'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Missing candidates are expected while probing extensions.
+    }
+  }
+  return null;
+}
+
+/**
+ * Walk the relative source import graph so components rendered by imported
+ * modules are analyzed even when the bundle is minified.
+ */
+function collectSourceComponents(
+  entryPath: string,
+  analyzeSourceImports: (code: string) => string[],
+  analyzeSourceComponents: (code: string) => string[]
+): string[] {
+  const visited = new Set<string>();
+  const components = new Set<string>();
+
+  const visit = (filePath: string) => {
+    const absolutePath = path.resolve(filePath);
+    if (visited.has(absolutePath)) return;
+    visited.add(absolutePath);
+
+    let source: string;
+    try {
+      source = fs.readFileSync(absolutePath, 'utf8');
+    } catch {
+      return;
+    }
+
+    for (const name of analyzeSourceComponents(source)) {
+      components.add(name);
+    }
+
+    for (const specifier of analyzeSourceImports(source)) {
+      if (!specifier.startsWith('.')) continue;
+      const resolved = resolveSourceModule(absolutePath, specifier);
+      if (resolved) visit(resolved);
+    }
+  };
+
+  visit(entryPath);
+  return [...components];
 }
 
 /**
@@ -947,17 +1016,24 @@ export async function build(options: BuildOptions): Promise<void> {
   let bundleImports: string[] = [];
   let bundleComponents = jsxAnalysis.components;
   try {
-    const { analyzeModuleIDs, analyzeBundleComponents, analyzeSourceComponents } = await import(
-      './oxc-adapter'
-    );
+    const {
+      analyzeModuleIDs,
+      analyzeBundleComponents,
+      analyzeSourceComponents,
+      analyzeSourceImports,
+    } = await import('./oxc-adapter');
     bundleImports = analyzeModuleIDs(bundleCode).static.filter(
       (moduleId) => !moduleId.startsWith('.') && !moduleId.startsWith('host:')
     );
     // Source analysis survives minification; minified bundles rename the
     // imported guest namespace (`import_guest` -> `i`) and yield no names.
-    // Always merge the lowered-bundle pass as well: entry-only analysis misses
-    // components rendered by imported modules.
-    const sourceComponents = analyzeSourceComponents(await Bun.file(entryPath).text());
+    // Walk the relative source import graph so components rendered by
+    // imported modules are included, then merge the lowered-bundle pass.
+    const sourceComponents = collectSourceComponents(
+      entryPath,
+      analyzeSourceImports,
+      analyzeSourceComponents
+    );
     const loweredComponents = analyzeBundleComponents(bundleCode);
     bundleComponents = [
       ...new Set([...bundleComponents, ...sourceComponents, ...loweredComponents]),
@@ -1122,6 +1198,9 @@ ${footerCode}
   }
 
   if (v1CapabilityManifest) {
+    if (!contract) {
+      throw new Error('--v1-capability-manifest requires --contract');
+    }
     // The component allowlist belongs to the v1 contract. Generic Keel builds
     // keep the full preset component set.
     assertAllowedComponents(bundleComponents);

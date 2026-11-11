@@ -125,3 +125,13 @@ export function analyzeSourceComponents(code: string): string[] {
   const impl = require('./oxc-adapter.js');
   return impl.analyzeSourceComponents(code);
 }
+
+/**
+ * Static import specifiers from a source module. Uses the full parser so
+ * JSX/TSX sources are handled consistently.
+ */
+export function analyzeSourceImports(code: string): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxc-adapter.js');
+  return impl.analyzeSourceImports(code);
+}
