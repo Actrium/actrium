@@ -8,7 +8,15 @@ import {
 } from 'react-native';
 import { EventHandler, HostHttpHandler } from 'askit/host-events';
 import { Engine, type ComponentMap } from 'keel/host';
-import { ScrollView, Text, TextInput, View } from 'keel/host/preset';
+import {
+  FlatList,
+  Image,
+  ScrollView,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'keel/host/preset';
 
 import { hasDeclaredCapability } from './capabilities';
 import { contract } from './contract';
@@ -50,7 +58,11 @@ const hostComponents: ComponentMap = {
   Button: GuestButton as unknown as React.ComponentType<
     Record<string, unknown>
   >,
+  FlatList: FlatList as unknown as React.ComponentType<Record<string, unknown>>,
+  // v1 exposes images as `ImageAsset`; the preset component is `Image`.
+  ImageAsset: Image as unknown as React.ComponentType<Record<string, unknown>>,
   ScrollView: ScrollView as React.ComponentType<Record<string, unknown>>,
+  Switch: Switch as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as React.ComponentType<Record<string, unknown>>,
   TextInput: TextInput as React.ComponentType<Record<string, unknown>>,
   View: View as React.ComponentType<Record<string, unknown>>,

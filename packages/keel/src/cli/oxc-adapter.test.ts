@@ -4,6 +4,7 @@ import {
   analyzeHostBoundary,
   analyzeJSXProps,
   analyzeModuleIDs,
+  analyzeSourceComponents,
 } from './oxc-adapter';
 
 describe('oxcAdapter - Module ID Analysis', () => {
@@ -278,6 +279,25 @@ describe('oxcAdapter - Bundle Components', () => {
       jsx_runtime.jsx(this.props.wrapper, {});
     `;
     expect(analyzeBundleComponents(code)).toEqual([]);
+  });
+});
+
+describe('oxcAdapter - Source Components', () => {
+  test('collects only SDK components used in JSX', () => {
+    const code = `
+      import { View, Text } from 'keel/guest';
+      function Panel() { return null; }
+      const App = () => <Panel><View><Text>hi</Text></View></Panel>;
+    `;
+    expect(analyzeSourceComponents(code)).toEqual(['Text', 'View']);
+  });
+
+  test('collects an SDK import even if the SDK does not define it', () => {
+    const code = `
+      import { CustomThing } from 'keel/guest';
+      const App = () => <CustomThing />;
+    `;
+    expect(analyzeSourceComponents(code)).toEqual(['CustomThing']);
   });
 });
 

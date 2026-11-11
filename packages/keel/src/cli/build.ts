@@ -719,6 +719,34 @@ function createGuestCapabilitiesManifest(
   };
 }
 
+/** Keel components a Guest may render (v1 12 §4). `Image` maps to `ImageAsset`. */
+export const KEEL_COMPONENT_WHITELIST = [
+  'View',
+  'Text',
+  'ScrollView',
+  'TextInput',
+  'Button',
+  'FlatList',
+  'ImageAsset',
+  'Switch',
+] as const;
+
+function normalizeComponentName(name: string): string {
+  return name === 'Image' ? 'ImageAsset' : name;
+}
+
+export function assertAllowedComponents(components: readonly string[]): void {
+  const allowed = new Set<string>(KEEL_COMPONENT_WHITELIST);
+  const disallowed = components
+    .map(normalizeComponentName)
+    .filter((name) => !allowed.has(name));
+  if (disallowed.length > 0) {
+    throw new Error(
+      `Keel component violations: ${disallowed.join(', ')}`
+    );
+  }
+}
+
 export type CapabilityManifestV1 = {
   schemaVersion: 1;
   keelApi: string;
@@ -779,7 +807,7 @@ export function createV1CapabilityManifest(
     guestEntry: options.guestEntry,
     imports: [...boundary.hostModuleIds, ...(options.imports ?? [])].sort(),
     hostModules,
-    components: options.components ?? [],
+    components: (options.components ?? []).map(normalizeComponentName),
   };
 }
 
@@ -925,18 +953,30 @@ export async function build(options: BuildOptions): Promise<void> {
   let bundleImports: string[] = [];
   let bundleComponents = jsxAnalysis.components;
   try {
-    const { analyzeModuleIDs, analyzeBundleComponents } = await import(
-      './oxc-adapter'
-    );
+    const {
+      analyzeModuleIDs,
+      analyzeBundleComponents,
+      analyzeSourceComponents,
+    } = await import('./oxc-adapter');
     bundleImports = analyzeModuleIDs(bundleCode).static.filter(
       (moduleId) => !moduleId.startsWith('.') && !moduleId.startsWith('host:')
     );
+    // Source analysis survives minification; minified bundles rename the
+    // imported guest namespace (`import_guest` -> `i`) and yield no names.
+    const sourceComponents = analyzeSourceComponents(
+      await Bun.file(entryPath).text()
+    );
+    bundleComponents = [
+      ...new Set([...bundleComponents, ...sourceComponents]),
+    ].sort();
     if (bundleComponents.length === 0) {
       bundleComponents = analyzeBundleComponents(bundleCode);
     }
   } catch {
     // Best-effort: the manifest keeps the host imports even if this fails.
   }
+
+  assertAllowedComponents(bundleComponents);
 
   // Transform external imports to global variable references
   // Bun marks externals as require() calls, we need to map them to globals

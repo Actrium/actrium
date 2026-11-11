@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { defineKeelContract, rpc, subscription } from '../contract';
-import { createV1CapabilityManifest } from './build';
+import {
+  assertAllowedComponents,
+  createV1CapabilityManifest,
+} from './build';
 
 const contract = defineKeelContract({
   version: '1.0.0',
@@ -44,6 +47,25 @@ describe('createV1CapabilityManifest', () => {
       },
       components: [],
     });
+  });
+
+  it('rejects components outside the allowlist', () => {
+    expect(() => assertAllowedComponents(['View', 'WebView'])).toThrow(
+      'WebView'
+    );
+  });
+
+  it('maps the preset Image component to ImageAsset', () => {
+    expect(() => assertAllowedComponents(['Image', 'View'])).not.toThrow();
+    const manifest = createV1CapabilityManifest(
+      { hostModuleIds: [], hostCapabilities: [] },
+      {
+        keelApi: '1.0',
+        guestEntry: 'ui/guest.bundle.js',
+        components: ['Image', 'View'],
+      }
+    );
+    expect(manifest.components).toEqual(['ImageAsset', 'View']);
   });
 
   it('keeps imports and components supplied by bundle analysis', () => {

@@ -783,9 +783,48 @@ function analyzeBundleComponents(code) {
   return Array.from(components).sort();
 }
 
+/**
+ * Component names imported from `keel/guest` and used in JSX.
+ *
+ * Local components (`<Panel/>`) are not capability components and must not be
+ * validated against the Guest component allowlist. This analysis runs on the
+ * entry source, so minification cannot hide the names.
+ */
+function analyzeSourceComponents(code) {
+  if (!oxc || !oxc.parseSync) {
+    throw new Error("oxc-parser not available. Please install it with 'npm i -D oxc-parser'.");
+  }
+
+  const sdkNames = new Set();
+  const jsxNames = new Set();
+
+  try {
+    const result = oxc.parseSync(code, { sourceFilename: 'source.tsx' });
+    const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
+
+    traverseAST(ast, (node) => {
+      if (node.type === 'ImportDeclaration' && node.source?.value === 'keel/guest') {
+        for (const specifier of node.specifiers ?? []) {
+          const name = specifier.imported?.name ?? specifier.local?.name;
+          if (name) sdkNames.add(name);
+        }
+      }
+      if (node.type === 'JSXElement') {
+        const name = getJSXElementName(node.openingElement);
+        if (sdkNames.has(name)) jsxNames.add(name);
+      }
+    });
+  } catch (err) {
+    console.error('[oxc-adapter] analyzeSourceComponents failed:', err.message);
+  }
+
+  return Array.from(jsxNames).sort();
+}
+
 module.exports = {
   analyzeModuleIDs,
   analyzeHostBoundary,
   analyzeJSXProps,
   analyzeBundleComponents,
+  analyzeSourceComponents,
 };

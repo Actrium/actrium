@@ -115,3 +115,13 @@ export function analyzeBundleComponents(code: string): string[] {
   const impl = require('./oxc-adapter.js');
   return impl.analyzeBundleComponents(code);
 }
+
+/**
+ * Component names imported from `keel/guest` and used in JSX. Local components
+ * are excluded; this analysis runs on source and survives minification.
+ */
+export function analyzeSourceComponents(code: string): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxc-adapter.js');
+  return impl.analyzeSourceComponents(code);
+}
