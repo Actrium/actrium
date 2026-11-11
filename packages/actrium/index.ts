@@ -15,4 +15,4 @@ function EmptyApp() {
   });
 }
 
-AppRegistry.registerComponent('RuntimeApp', () => EmptyApp);
+AppRegistry.registerComponent('actrium', () => EmptyApp);
