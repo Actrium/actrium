@@ -314,6 +314,26 @@ final class RendererProcessController {
         publishAccessibilityTree(tabId: tabId)
     }
 
+    /// Called from the Fabric surface-presenter observer after mount
+    /// instructions are applied. Re-commits the matching tab surface so the
+    /// new CAContext frame reaches the Host instead of waiting for a resize.
+    func commitSurface(forRootTag rootTag: Int) {
+        let surfaceSelector = NSSelectorFromString("surface")
+        let rootTagSelector = NSSelectorFromString("rootTag")
+        for surface in surfaces.values {
+            guard let rootView = surface.entry.rootView else { continue }
+            let rootObject = rootView as AnyObject
+            guard rootObject.responds(to: surfaceSelector) else { continue }
+            guard let surfaceObject = rootObject.value(forKey: "surface") as AnyObject?,
+                  surfaceObject.responds(to: rootTagSelector) else { continue }
+            let tagValue = surfaceObject.value(forKey: "rootTag")
+            let tag = (tagValue as? NSNumber)?.intValue ?? (tagValue as? Int)
+            if tag == rootTag {
+                surface.commit()
+            }
+        }
+    }
+
     func publishAccessibilityTree(tabId: String) {
         guard let surface = surfaces[tabId] else { return }
         try? connection.sendAccessibilityTree(surface.accessibilityTree())
@@ -353,6 +373,22 @@ final class RendererProcessController {
 private final class RendererProcessLifetime {
     static let shared = RendererProcessLifetime()
     var controller: RendererProcessController?
+}
+
+/// Fabric mount observer: commit the matching Renderer surface after the
+/// native mount instructions finish, so reload content is published without
+/// waiting for a window resize.
+final class RendererSurfaceMountObserver: NSObject {
+    static let shared = RendererSurfaceMountObserver()
+
+    @objc(didMountComponentsWithRootTag:)
+    func didMountComponents(rootTag: Int) {
+        Task { @MainActor in
+            RendererProcessLifetime.shared.controller?.commitSurface(
+                forRootTag: rootTag
+            )
+        }
+    }
 }
 
 /// One Tab root and its remotely hosted CoreAnimation context.
