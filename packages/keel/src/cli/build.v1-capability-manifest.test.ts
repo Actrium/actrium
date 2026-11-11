@@ -244,6 +244,57 @@ export default function App() {
     });
   });
 
+  it('rejects member-expression SDK components in minified builds', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { Modal } from 'keel/guest';
+
+const bag = { C: Modal };
+
+export default function App() {
+  return <bag.C>hidden</bag.C>;
+}
+`,
+    });
+  });
+
+  it('allows React fragments in minified builds', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-fragment-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+
+export default function App() {
+  return (
+    <>
+      <View />
+    </>
+  );
+}
+`
+      );
+
+      await build({
+        entry: path.join(srcDir, 'entry.tsx'),
+        outfile: path.join(tempDir, 'dist/bundle.js'),
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        contract,
+        v1CapabilityManifest: path.join(
+          tempDir,
+          'dist/capability-manifest.json'
+        ),
+      });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('fails closed when component provenance is unresolved', async () => {
     const tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'keel-v1-provenance-')

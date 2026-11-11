@@ -716,6 +716,31 @@ function traverseAST(node, visitor) {
   }
 }
 
+const FRAMEWORK_MODULES = new Set([
+  'react',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  'react-native',
+]);
+
+function isFrameworkRequire(node) {
+  if (!node || node.type !== 'CallExpression' || node.callee?.type !== 'Identifier') {
+    return false;
+  }
+  if (node.callee.name === 'require') {
+    const arg = node.arguments?.[0];
+    return (
+      (arg?.type === 'StringLiteral' || arg?.type === 'Literal') &&
+      typeof arg.value === 'string' &&
+      FRAMEWORK_MODULES.has(arg.value)
+    );
+  }
+  if (node.callee.name === '__toESM') {
+    return isFrameworkRequire(node.arguments?.[0]);
+  }
+  return false;
+}
+
 /**
  * Extract component names from a transpiled bundle.
  *
@@ -735,6 +760,10 @@ function analyzeBundleComponents(code, options = {}) {
   const aliasSources = new Map();
   const localComponents = new Set();
   const jsxIdentifiers = new Set();
+  const frameworkBindings = new Set();
+  const objectAliases = new Map();
+  const objectAliasSources = new Map();
+  const memberAliasSources = new Map();
 
   try {
     const result = oxc.parseSync(code, { sourceFilename: 'bundle.js' });
@@ -750,15 +779,36 @@ function analyzeBundleComponents(code, options = {}) {
         const init = node.init;
         if (init?.type === 'ArrowFunctionExpression' || init?.type === 'FunctionExpression') {
           localComponents.add(name);
+        } else if (isFrameworkRequire(init)) {
+          frameworkBindings.add(name);
         } else if (init?.type === 'Identifier') {
           aliasSources.set(name, init.name);
+        } else if (init?.type === 'ObjectExpression') {
+          for (const property of init.properties ?? []) {
+            const key = propertyName(property);
+            if (!key || !property.value) continue;
+            const value = property.value;
+            if (
+              (value.type === 'MemberExpression' || value.type === 'StaticMemberExpression') &&
+              value.object?.type === 'Identifier' &&
+              /^import_guest\d*$/.test(value.object.name) &&
+              value.property?.type === 'Identifier'
+            ) {
+              objectAliases.set(`${name}.${key}`, value.property.name);
+            } else if (value.type === 'Identifier') {
+              objectAliasSources.set(`${name}.${key}`, value.name);
+            }
+          }
         } else if (
           (init?.type === 'MemberExpression' || init?.type === 'StaticMemberExpression') &&
           init.object?.type === 'Identifier' &&
-          /^import_guest\d*$/.test(init.object.name) &&
           init.property?.type === 'Identifier'
         ) {
-          sdkAliases.set(name, init.property.name);
+          if (/^import_guest\d*$/.test(init.object.name)) {
+            sdkAliases.set(name, init.property.name);
+          } else {
+            memberAliasSources.set(name, `${init.object.name}.${init.property.name}`);
+          }
         }
       }
 
@@ -790,22 +840,41 @@ function analyzeBundleComponents(code, options = {}) {
         (first.type === 'MemberExpression' || first.type === 'StaticMemberExpression') &&
         first.property?.type === 'Identifier'
       ) {
-        // Only Guest-module bindings (`import_guest.View`) describe capability
-        // components. Local values such as `item.Component` or
-        // `this.props.wrapper` must not leak into the manifest.
-        const object = first.object;
-        const objectName = object?.type === 'Identifier' ? object.name : undefined;
+        const objectName = first.object?.type === 'Identifier' ? first.object.name : undefined;
+        const property = first.property.name;
         if (objectName && /^import_guest\d*$/.test(objectName)) {
-          components.add(first.property.name);
+          components.add(property);
+        } else if (objectName && objectAliases.has(`${objectName}.${property}`)) {
+          components.add(objectAliases.get(`${objectName}.${property}`));
+        } else if ((objectName && frameworkBindings.has(objectName)) || property === 'Fragment') {
+          // React runtime components are not Guest capability components.
+        } else if (options.failClosed) {
+          throw new Error(
+            `Unable to establish component provenance for "${objectName ?? 'member'}.${property}"`
+          );
         }
       } else if (first.type === 'Identifier') {
         jsxIdentifiers.add(first.name);
+      } else if (options.failClosed) {
+        throw new Error('Unable to establish component provenance for a dynamic JSX component');
       }
     });
 
     let changed = true;
     while (changed) {
       changed = false;
+      for (const [key, source] of objectAliasSources) {
+        if (!objectAliases.has(key) && sdkAliases.has(source)) {
+          objectAliases.set(key, sdkAliases.get(source));
+          changed = true;
+        }
+      }
+      for (const [name, memberKey] of memberAliasSources) {
+        if (!sdkAliases.has(name) && objectAliases.has(memberKey)) {
+          sdkAliases.set(name, objectAliases.get(memberKey));
+          changed = true;
+        }
+      }
       for (const [name, source] of aliasSources) {
         if (!sdkAliases.has(name) && sdkAliases.has(source)) {
           sdkAliases.set(name, sdkAliases.get(source));
@@ -818,7 +887,9 @@ function analyzeBundleComponents(code, options = {}) {
       const sdkName = sdkAliases.get(name);
       if (sdkName) {
         components.add(sdkName);
-      } else if (!localComponents.has(name) && options.failClosed) {
+      } else if (localComponents.has(name) || frameworkBindings.has(name)) {
+        continue;
+      } else if (options.failClosed) {
         throw new Error(`Unable to establish component provenance for "${name}"`);
       }
     }
@@ -923,12 +994,30 @@ function analyzeServiceUsage(code) {
     if (method !== 'call' && method !== 'tell' && method !== 'on') return;
 
     const argument = node.arguments?.[0];
+    if (method === 'on') {
+      // The host contract exposes `on(handler)`; only an explicit object
+      // literal with a literal event can be recorded at build time.
+      if (argument?.type !== 'ObjectExpression') return;
+      const eventProperty = (argument.properties ?? []).find(
+        (candidate) => propertyName(candidate) === 'event'
+      );
+      const eventValue = eventProperty?.value;
+      if (
+        !eventProperty ||
+        !(eventValue?.type === 'StringLiteral' || eventValue?.type === 'Literal') ||
+        typeof eventValue.value !== 'string'
+      ) {
+        throw new Error('host:service.on requires a literal "event"');
+      }
+      events.add(eventValue.value);
+      return;
+    }
+
     if (!argument || argument.type !== 'ObjectExpression') {
       throw new Error(`host:service.${method} requires an object literal`);
     }
-    const key = method === 'on' ? 'event' : 'route';
     const property = (argument.properties ?? []).find(
-      (candidate) => propertyName(candidate) === key
+      (candidate) => propertyName(candidate) === 'route'
     );
     const value = property?.value;
     if (
@@ -936,13 +1025,9 @@ function analyzeServiceUsage(code) {
       !(value?.type === 'StringLiteral' || value?.type === 'Literal') ||
       typeof value.value !== 'string'
     ) {
-      throw new Error(`host:service.${method} requires a literal "${key}"`);
+      throw new Error(`host:service.${method} requires a literal "route"`);
     }
-    if (method === 'on') {
-      events.add(value.value);
-    } else {
-      rpc.add(value.value);
-    }
+    rpc.add(value.value);
   });
 
   return { rpc: Array.from(rpc).sort(), events: Array.from(events).sort() };
