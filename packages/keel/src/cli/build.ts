@@ -824,81 +824,6 @@ function escapeRegExp(value: string): string {
 }
 
 /**
- * Find the project root (nearest tsconfig) for alias resolution.
- */
-function findProjectRoot(fromFile: string): string {
-  const entryDir = path.dirname(fs.realpathSync(path.resolve(fromFile)));
-  let dir = entryDir;
-  while (true) {
-    if (fs.existsSync(path.join(dir, 'tsconfig.json'))) {
-      return fs.realpathSync(dir);
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return entryDir;
-    dir = parent;
-  }
-}
-
-/**
- * Resolve a source import to a file on disk. Bun's resolver applies the
- * project's tsconfig paths, so aliases such as `@/child` resolve too.
- */
-function resolveSourceModule(
-  fromFile: string,
-  specifier: string,
-  projectRoot: string
-): string | null {
-  if (specifier.startsWith('host:') || EXTERNALS[specifier]) return null;
-  try {
-    const resolved = fs.realpathSync(Bun.resolveSync(specifier, path.dirname(fromFile)));
-    if (resolved.includes('/node_modules/')) return null;
-    if (!resolved.startsWith(projectRoot + path.sep)) return null;
-    return resolved;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Walk the relative source import graph so components rendered by imported
- * modules are analyzed even when the bundle is minified.
- */
-function collectSourceComponents(
-  entryPath: string,
-  analyzeSourceImports: (code: string) => string[],
-  analyzeSourceComponents: (code: string) => string[]
-): string[] {
-  const projectRoot = findProjectRoot(entryPath);
-  const visited = new Set<string>();
-  const components = new Set<string>();
-
-  const visit = (filePath: string) => {
-    const absolutePath = path.resolve(filePath);
-    if (visited.has(absolutePath)) return;
-    visited.add(absolutePath);
-
-    let source: string;
-    try {
-      source = fs.readFileSync(absolutePath, 'utf8');
-    } catch {
-      return;
-    }
-
-    for (const name of analyzeSourceComponents(source)) {
-      components.add(name);
-    }
-
-    for (const specifier of analyzeSourceImports(source)) {
-      const resolved = resolveSourceModule(absolutePath, specifier, projectRoot);
-      if (resolved) visit(resolved);
-    }
-  };
-
-  visit(entryPath);
-  return [...components];
-}
-
-/**
  * Execute build using Bun.build
  */
 export async function build(options: BuildOptions): Promise<void> {
@@ -1026,30 +951,48 @@ export async function build(options: BuildOptions): Promise<void> {
   let bundleImports: string[] = [];
   let bundleComponents = jsxAnalysis.components;
   try {
-    const {
-      analyzeModuleIDs,
-      analyzeBundleComponents,
-      analyzeSourceComponents,
-      analyzeSourceImports,
-    } = await import('./oxc-adapter');
+    const { analyzeModuleIDs, analyzeBundleComponents } = await import('./oxc-adapter');
     bundleImports = analyzeModuleIDs(bundleCode).static.filter(
       (moduleId) => !moduleId.startsWith('.') && !moduleId.startsWith('host:')
     );
-    // Source analysis survives minification; minified bundles rename the
-    // imported guest namespace (`import_guest` -> `i`) and yield no names.
-    // Walk the relative source import graph so components rendered by
-    // imported modules are included, then merge the lowered-bundle pass.
-    const sourceComponents = collectSourceComponents(
-      entryPath,
-      analyzeSourceImports,
-      analyzeSourceComponents
-    );
+    // A separate unminified build lets the bundler resolve aliases, barrel
+    // re-exports and dynamic imports. The lowered pass alone cannot recover
+    // renamed guest bindings in a minified bundle.
+    let analysisComponents: string[] = [];
+    if (v1CapabilityManifest) {
+      const analysisResult = await Bun.build({
+        entrypoints: [entryPath],
+        target: 'browser',
+        format: 'cjs',
+        minify: false,
+        sourcemap: 'none',
+        external: [...Object.keys(EXTERNALS), HOST_MODULE_EXTERNAL],
+        plugins: [await createBabelPlugin({ dev: options.dev ?? false })],
+        define: {
+          'process.env.NODE_ENV': '"production"',
+          __DEV__: 'false',
+        },
+        write: false,
+      });
+      if (!analysisResult.success) {
+        throw new Error('Component analysis build failed');
+      }
+      const jsOutputs = analysisResult.outputs.filter((output) => output.path.endsWith('.js'));
+      if (jsOutputs.length === 0) {
+        throw new Error('Component analysis build produced no output');
+      }
+      const analysisCode = (await Promise.all(jsOutputs.map((output) => output.text()))).join('\n');
+      analysisComponents = analyzeBundleComponents(analysisCode);
+    }
     const loweredComponents = analyzeBundleComponents(bundleCode);
     bundleComponents = [
-      ...new Set([...bundleComponents, ...sourceComponents, ...loweredComponents]),
+      ...new Set([...bundleComponents, ...loweredComponents, ...analysisComponents]),
     ].sort();
-  } catch {
-    // Best-effort: the manifest keeps the host imports even if this fails.
+  } catch (error) {
+    if (v1CapabilityManifest) {
+      throw error;
+    }
+    // Best-effort: generic builds do not depend on component analysis.
   }
 
   // Transform external imports to global variable references

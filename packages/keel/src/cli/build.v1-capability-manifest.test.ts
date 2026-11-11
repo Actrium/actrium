@@ -206,4 +206,19 @@ describe('v1 component allowlist integration', () => {
       'src/child.tsx': DIRECT_CHILD,
     });
   });
+
+  it('rejects components behind a dynamic import in minified builds', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { View } from 'keel/guest';
+
+void import('./child');
+
+export default function App() {
+  return <View />;
+}
+`,
+      'src/child.tsx': DIRECT_CHILD,
+    });
+  });
 });
