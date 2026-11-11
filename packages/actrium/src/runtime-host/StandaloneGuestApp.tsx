@@ -283,6 +283,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     guestScript,
     hasServiceCapability,
     tab.id,
+    tab.serviceCallUrl,
     tab.reloadKey,
   ]);
 
