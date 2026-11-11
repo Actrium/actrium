@@ -737,13 +737,9 @@ function normalizeComponentName(name: string): string {
 
 export function assertAllowedComponents(components: readonly string[]): void {
   const allowed = new Set<string>(KEEL_COMPONENT_WHITELIST);
-  const disallowed = components
-    .map(normalizeComponentName)
-    .filter((name) => !allowed.has(name));
+  const disallowed = components.map(normalizeComponentName).filter((name) => !allowed.has(name));
   if (disallowed.length > 0) {
-    throw new Error(
-      `Keel component violations: ${disallowed.join(', ')}`
-    );
+    throw new Error(`Keel component violations: ${disallowed.join(', ')}`);
   }
 }
 
@@ -781,9 +777,7 @@ export function createV1CapabilityManifest(
     const moduleId = capability.slice(0, separator);
     const exportName = capability.slice(separator + 1);
     const descriptor =
-      contract?.hostModules[moduleId as keyof typeof contract.hostModules]?.[
-        exportName
-      ];
+      contract?.hostModules[moduleId as keyof typeof contract.hostModules]?.[exportName];
     // v1 12 §5 keys hostModules by capability name (`service`), not by the
     // contract module id (`host:service`); imports keep the `host:` form.
     const moduleKey = moduleId.replace(/^host:/, '');
@@ -953,22 +947,16 @@ export async function build(options: BuildOptions): Promise<void> {
   let bundleImports: string[] = [];
   let bundleComponents = jsxAnalysis.components;
   try {
-    const {
-      analyzeModuleIDs,
-      analyzeBundleComponents,
-      analyzeSourceComponents,
-    } = await import('./oxc-adapter');
+    const { analyzeModuleIDs, analyzeBundleComponents, analyzeSourceComponents } = await import(
+      './oxc-adapter'
+    );
     bundleImports = analyzeModuleIDs(bundleCode).static.filter(
       (moduleId) => !moduleId.startsWith('.') && !moduleId.startsWith('host:')
     );
     // Source analysis survives minification; minified bundles rename the
     // imported guest namespace (`import_guest` -> `i`) and yield no names.
-    const sourceComponents = analyzeSourceComponents(
-      await Bun.file(entryPath).text()
-    );
-    bundleComponents = [
-      ...new Set([...bundleComponents, ...sourceComponents]),
-    ].sort();
+    const sourceComponents = analyzeSourceComponents(await Bun.file(entryPath).text());
+    bundleComponents = [...new Set([...bundleComponents, ...sourceComponents])].sort();
     if (bundleComponents.length === 0) {
       bundleComponents = analyzeBundleComponents(bundleCode);
     }

@@ -118,9 +118,8 @@ export interface SubscriptionDescriptor<Event = unknown> {
 // descriptors and inferred by `HostModuleImplementation`. This alias only
 // constrains the runtime shape, so the phantom `__input`/`__output`/`__event`
 // fields must not force every concrete descriptor through `unknown`.
-export type HostCapabilityDescriptor =
-  | RpcDescriptor<any, any>
-  | SubscriptionDescriptor<any>;
+// biome-ignore lint/suspicious/noExplicitAny: concrete descriptor types are inferred at the implementation boundary
+export type HostCapabilityDescriptor = RpcDescriptor<any, any> | SubscriptionDescriptor<any>;
 
 export type HostModuleSpec = Record<string, HostCapabilityDescriptor>;
 

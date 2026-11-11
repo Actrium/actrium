@@ -740,8 +740,7 @@ function analyzeBundleComponents(code) {
       const calleeName =
         callee?.type === 'Identifier'
           ? callee.name
-          : callee?.type === 'MemberExpression' ||
-              callee?.type === 'StaticMemberExpression'
+          : callee?.type === 'MemberExpression' || callee?.type === 'StaticMemberExpression'
             ? callee.property?.name
             : undefined;
       if (
@@ -761,16 +760,14 @@ function analyzeBundleComponents(code) {
       ) {
         components.add(first.value);
       } else if (
-        (first.type === 'MemberExpression' ||
-          first.type === 'StaticMemberExpression') &&
+        (first.type === 'MemberExpression' || first.type === 'StaticMemberExpression') &&
         first.property?.type === 'Identifier'
       ) {
         // Only Guest-module bindings (`import_guest.View`) describe capability
         // components. Local values such as `item.Component` or
         // `this.props.wrapper` must not leak into the manifest.
         const object = first.object;
-        const objectName =
-          object?.type === 'Identifier' ? object.name : undefined;
+        const objectName = object?.type === 'Identifier' ? object.name : undefined;
         if (objectName && /^import_guest\d*$/.test(objectName)) {
           components.add(first.property.name);
         }
