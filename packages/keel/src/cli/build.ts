@@ -955,16 +955,16 @@ export async function build(options: BuildOptions): Promise<void> {
     );
     // Source analysis survives minification; minified bundles rename the
     // imported guest namespace (`import_guest` -> `i`) and yield no names.
+    // Always merge the lowered-bundle pass as well: entry-only analysis misses
+    // components rendered by imported modules.
     const sourceComponents = analyzeSourceComponents(await Bun.file(entryPath).text());
-    bundleComponents = [...new Set([...bundleComponents, ...sourceComponents])].sort();
-    if (bundleComponents.length === 0) {
-      bundleComponents = analyzeBundleComponents(bundleCode);
-    }
+    const loweredComponents = analyzeBundleComponents(bundleCode);
+    bundleComponents = [
+      ...new Set([...bundleComponents, ...sourceComponents, ...loweredComponents]),
+    ].sort();
   } catch {
     // Best-effort: the manifest keeps the host imports even if this fails.
   }
-
-  assertAllowedComponents(bundleComponents);
 
   // Transform external imports to global variable references
   // Bun marks externals as require() calls, we need to map them to globals
@@ -1122,6 +1122,9 @@ ${footerCode}
   }
 
   if (v1CapabilityManifest) {
+    // The component allowlist belongs to the v1 contract. Generic Keel builds
+    // keep the full preset component set.
+    assertAllowedComponents(bundleComponents);
     // v1's `keelApi` is the Keel API version, not the business contract
     // version. Keep it pinned until keel exposes an explicit constant.
     const keelApi = '1.0';
