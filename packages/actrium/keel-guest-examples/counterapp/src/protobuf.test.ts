@@ -21,4 +21,16 @@ describe('echo protobuf codec', () => {
       timestamp: 7,
     });
   });
+
+  test('rejects a field length that exceeds the payload', () => {
+    expect(() => decodeEchoResponse('CgVoaQ==')).toThrow();
+  });
+
+  test('rejects a truncated varint', () => {
+    expect(() => decodeEchoResponse('CoA=')).toThrow();
+  });
+
+  test('accepts a zero-length reply field', () => {
+    expect(decodeEchoResponse('CgA=')).toEqual({ reply: '', timestamp: 0 });
+  });
 });

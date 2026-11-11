@@ -6,8 +6,11 @@ import {
 } from 'keel/guest';
 
 function encodeVarint(value: number): number[] {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error('encodeVarint requires a non-negative safe integer');
+  }
   const bytes: number[] = [];
-  let remaining = Math.max(0, Math.floor(value));
+  let remaining = value;
   do {
     const byte = remaining % 128;
     remaining = Math.floor(remaining / 128);
@@ -28,7 +31,9 @@ function decodeVarint(
     value += (byte & 0x7f) * multiplier;
     if ((byte & 0x80) === 0) return { value, next: cursor };
     multiplier *= 128;
-    if (multiplier > Number.MAX_SAFE_INTEGER) break;
+    if (multiplier > Number.MAX_SAFE_INTEGER) {
+      throw new Error('Invalid protobuf varint');
+    }
   }
   throw new Error('Invalid protobuf varint');
 }
@@ -61,6 +66,9 @@ export function decodeEchoResponse(payloadBase64: string): {
     if (fieldNumber === 1 && wireType === 2) {
       const length = decodeVarint(bytes, cursor);
       cursor = length.next;
+      if (cursor + length.value > bytes.length) {
+        throw new Error('Invalid protobuf field length');
+      }
       reply = createUtf8Decoder()(
         bytes.slice(cursor, cursor + length.value),
       );
@@ -73,7 +81,11 @@ export function decodeEchoResponse(payloadBase64: string): {
       cursor = decodeVarint(bytes, cursor).next;
     } else if (wireType === 2) {
       const length = decodeVarint(bytes, cursor);
-      cursor = length.next + length.value;
+      cursor = length.next;
+      if (cursor + length.value > bytes.length) {
+        throw new Error('Invalid protobuf field length');
+      }
+      cursor += length.value;
     } else {
       throw new Error(`Unsupported protobuf wire type: ${wireType}`);
     }
