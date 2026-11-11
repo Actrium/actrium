@@ -114,7 +114,13 @@ export interface SubscriptionDescriptor<Event = unknown> {
   readonly __event?: Event;
 }
 
-export type HostCapabilityDescriptor = RpcDescriptor<unknown, unknown> | SubscriptionDescriptor;
+// The concrete Input/Output/Event types are carried by each contract's own
+// descriptors and inferred by `HostModuleImplementation`. This alias only
+// constrains the runtime shape, so the phantom `__input`/`__output`/`__event`
+// fields must not force every concrete descriptor through `unknown`.
+export type HostCapabilityDescriptor =
+  | RpcDescriptor<any, any>
+  | SubscriptionDescriptor<any>;
 
 export type HostModuleSpec = Record<string, HostCapabilityDescriptor>;
 

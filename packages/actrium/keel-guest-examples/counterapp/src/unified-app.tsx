@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
+import { call } from 'host:service';
 import { ScrollView, Text, TextInput, View } from 'keel/guest';
+import { decodeEchoResponse, encodeEchoRequest } from './protobuf';
 
 type Message = {
   id: number;
@@ -103,17 +105,40 @@ const INITIAL_MESSAGES: Message[] = [
 export default function DialogApp() {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [input, setInput] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState('');
 
   const send = useCallback(() => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || isSending) return;
 
-    setMessages((prev) => [
-      ...prev,
-      { id: Date.now(), role: 'user', text },
-    ]);
+    const userMessage: Message = { id: Date.now(), role: 'user', text };
+    setMessages((prev) => [...prev, userMessage]);
     setInput('');
-  }, [input]);
+    setError('');
+    setIsSending(true);
+
+    void call({
+      route: 'echo.EchoService.Echo',
+      payloadBase64: encodeEchoRequest(text),
+      timeoutMs: 30_000,
+    })
+      .then((response) => {
+        const decoded = decodeEchoResponse(response.payloadBase64);
+        const reply: Message = {
+          id: Date.now() + 1,
+          role: 'assistant',
+          text: decoded.reply,
+        };
+        setMessages((prev) => [...prev, reply]);
+      })
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        setIsSending(false);
+      });
+  }, [input, isSending]);
 
   return (
     <View style={{ flex: 1, backgroundColor: '#f5f7fa' }}>
@@ -193,9 +218,15 @@ export default function DialogApp() {
             shadowRadius: 8,
           }}
         >
+          {error ? (
+            <Text style={{ color: '#dc2626', fontSize: 13, marginBottom: 8 }}>
+              {error}
+            </Text>
+          ) : null}
           <TextInput
             value={input}
             onChangeText={setInput}
+            editable={!isSending}
             placeholder="Type a message..."
             placeholderTextColor="#9ca3af"
             multiline
@@ -214,7 +245,7 @@ export default function DialogApp() {
             }}
           />
           <Text
-            onPress={input.trim() ? send : undefined}
+            onPress={input.trim() && !isSending ? send : undefined}
             style={{
               position: 'absolute',
               right: 12,
@@ -223,7 +254,8 @@ export default function DialogApp() {
               height: 30,
               lineHeight: 30,
               borderRadius: 15,
-              backgroundColor: input.trim() ? '#2563eb' : '#cbd5e1',
+              backgroundColor:
+                input.trim() && !isSending ? '#2563eb' : '#cbd5e1',
               color: '#ffffff',
               fontSize: 18,
               fontWeight: '600',

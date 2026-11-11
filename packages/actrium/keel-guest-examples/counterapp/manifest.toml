@@ -16,7 +16,7 @@ guest-api = "keel.guest/1"
 [host]
 profile = "actr.host/1"
 api = "^1.0.0"
-required-capabilities = ["ui.render"]
+required-capabilities = ["service"]
 optional-capabilities = []
 
 [extensions.actrium]

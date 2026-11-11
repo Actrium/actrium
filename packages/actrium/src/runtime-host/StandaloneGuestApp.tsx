@@ -10,6 +10,9 @@ import { EventHandler, HostHttpHandler } from 'askit/host-events';
 import { Engine, type ComponentMap } from 'keel/host';
 import { ScrollView, Text, TextInput, View } from 'keel/host/preset';
 
+import { hasDeclaredCapability } from './capabilities';
+import { contract } from './contract';
+import { createHostModules, type ActorCall } from './host-modules';
 import type { TabConfig } from './types';
 
 type GuestButtonProps = {
@@ -82,7 +85,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
   const [content, setContent] = React.useState<React.ReactElement | null>(null);
   const [error, setError] = React.useState('');
   const guestScript = tab.unifiedScript || tab.guestScript;
-  const hasActorCallPermission = (tab.permissions ?? []).includes('actor.call');
+  const hasServiceCapability = hasDeclaredCapability(
+    tab.permissions ?? [],
+    'service'
+  );
 
   React.useEffect(() => {
     // A reload must start from a clean state, otherwise a previous load
@@ -96,7 +102,30 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     }
 
     let disposed = false;
-    const engine = new Engine({ debug: false });
+    const callActor: ActorCall = async ({
+      requestId,
+      route,
+      payloadBase64,
+      timeoutMs,
+    }) => {
+      const gatewayUrl =
+        globalThis.__ACTRIUM_ACTR_GATEWAY_URL__ ??
+        'http://127.0.0.1:8391/v1/call';
+      logToNative(`[StandaloneGuestApp] actor call ${route}`);
+      const result = await HostHttpHandler.handleRequest<ActorCallResult>({
+        requestId,
+        url: gatewayUrl,
+        method: 'POST',
+        body: { routeKey: route, payloadBase64, timeoutMs },
+      });
+      return {
+        success: result.success && result.data?.success === true,
+        payloadBase64: result.data?.payloadBase64,
+        message: result.data?.error ?? result.message,
+      };
+    };
+    const hostModules = createHostModules({ hasServiceCapability, callActor });
+    const engine = new Engine({ debug: false, contract, hostModules });
     engine.register(hostComponents);
     engine.createReceiver();
 
@@ -112,6 +141,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         logToNative(`[StandaloneGuestApp] ${direction}: ${event}`);
       },
       handlers: {
+        // Legacy event-bridge path kept for the echo demo. New Guests use
+        // host:service.call; remove this handler after the echo demo migrates.
         ACTR_CALL: {
           responseEvent: 'ACTR_CALL_RESULT',
           handle: async (payload: {
@@ -121,12 +152,12 @@ export const StandaloneGuestApp: React.FC<Props> = ({
             timeoutMs?: unknown;
           }) => {
             const requestId = payload?.requestId;
-            if (!hasActorCallPermission) {
+            if (!hasServiceCapability) {
               return {
                 requestId,
                 success: false,
                 error:
-                  'The Actor package does not declare the actor.call capability.',
+                  'The application does not declare the service capability.',
               };
             }
             if (
@@ -140,35 +171,25 @@ export const StandaloneGuestApp: React.FC<Props> = ({
               };
             }
 
-            const gatewayUrl =
-              globalThis.__ACTRIUM_ACTR_GATEWAY_URL__ ??
-              'http://127.0.0.1:8391/v1/call';
-            logToNative(
-              `[StandaloneGuestApp] ACTR_CALL ${payload.routeKey}`,
-            );
-            const result = await HostHttpHandler.handleRequest<ActorCallResult>({
-              requestId,
-              url: gatewayUrl,
-              method: 'POST',
-              body: {
-                routeKey: payload.routeKey,
-                payloadBase64: payload.payloadBase64,
-                timeoutMs:
-                  typeof payload.timeoutMs === 'number'
-                    ? payload.timeoutMs
-                    : 30_000,
-              },
+            logToNative(`[StandaloneGuestApp] ACTR_CALL ${payload.routeKey}`);
+            const response = await callActor({
+              requestId: requestId ?? `actr-${Date.now()}`,
+              route: payload.routeKey,
+              payloadBase64: payload.payloadBase64,
+              timeoutMs:
+                typeof payload.timeoutMs === 'number'
+                  ? payload.timeoutMs
+                  : 30_000,
             });
-            const response = {
-              requestId,
-              success: result.success && result.data?.success === true,
-              payloadBase64: result.data?.payloadBase64,
-              error: result.data?.error ?? result.message,
-            };
             logToNative(
               `[StandaloneGuestApp] ACTR_CALL completed: ${response.success ? 'success' : 'failure'}`,
             );
-            return response;
+            return {
+              requestId,
+              success: response.success,
+              payloadBase64: response.payloadBase64,
+              error: response.message,
+            };
           },
         },
       },
@@ -201,7 +222,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     // enough for the guest bundle, and RN handles later size changes.
     // reloadKey still forces a clean reload when the package changes.
     guestScript,
-    hasActorCallPermission,
+    hasServiceCapability,
     tab.id,
     tab.reloadKey,
   ]);
