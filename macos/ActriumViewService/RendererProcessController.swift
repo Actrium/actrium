@@ -539,9 +539,12 @@ private final class RendererTabSurface {
 
     func dispatch(_ input: Actrium_Ipc_InputEvent) {
         let modifiers = modifierFlags(from: input.modifiers)
-        // IPC coordinates are top-left based, while AppKit window events and
-        // hit-testing use bottom-left based window coordinates.
+        // IPC coordinates are top-left based, while AppKit window events use
+        // bottom-left based window coordinates.
         let location = NSPoint(x: input.x, y: container.bounds.height - input.y)
+        // The content view is flipped, so hit-testing needs top-left based
+        // container coordinates rather than the window event coordinates.
+        let hitLocation = container.convert(location, from: nil)
         let timestamp = ProcessInfo.processInfo.systemUptime
 
         switch input.type {
@@ -571,7 +574,7 @@ private final class RendererTabSurface {
                 return
             }
 
-            let hitView = window.contentView?.hitTest(location)
+            let hitView = window.contentView?.hitTest(hitLocation)
             // Editable RN controls keep AppKit's native focus path; routing
             // their clicks through the JS responder revokes first responder.
             let isNativeTextInput = hitView is RCTUITextView || hitView is NSTextField
@@ -587,7 +590,7 @@ private final class RendererTabSurface {
             }
 
         case .scroll:
-            guard let hitView = window.contentView?.hitTest(location) else { return }
+            guard let hitView = window.contentView?.hitTest(hitLocation) else { return }
             let scrollView = sequence(first: hitView, next: \.superview)
                 .compactMap { $0 as? NSScrollView }
                 .first { candidate in
