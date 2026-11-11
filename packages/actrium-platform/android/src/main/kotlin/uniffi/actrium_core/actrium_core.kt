@@ -30,6 +30,7 @@ import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 // This is a helper for safely working with byte buffers returned from the Rust code.
 // A rust-owned buffer is represented by its capacity, its current length, and a
@@ -1217,6 +1218,18 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1232,7 +1245,9 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
     // Integrity check functions only
-    fun uniffi_actrium_core_checksum_func_active_tab_from_row(
+    fun uniffi_actrium_core_checksum_func_accept_package_publisher(
+): Short
+fun uniffi_actrium_core_checksum_func_active_tab_from_row(
 ): Short
 fun uniffi_actrium_core_checksum_func_active_tab_rows_from_tabs(
 ): Short
@@ -1562,6 +1577,8 @@ fun uniffi_actrium_core_checksum_func_evaluate_contract(
 ): Short
 fun uniffi_actrium_core_checksum_func_extract_app_id_from_url(
 ): Short
+fun uniffi_actrium_core_checksum_func_inspect_downloaded_program(
+): Short
 fun uniffi_actrium_core_checksum_func_is_asset_path(
 ): Short
 fun uniffi_actrium_core_checksum_func_normalize_browser_storage_sync_ack_batch_json(
@@ -1738,6 +1755,12 @@ fun uniffi_actrium_core_checksum_func_user_info_bridge_contract(
 ): Short
 fun uniffi_actrium_core_checksum_func_validate_actr_package_manifest(
 ): Short
+fun uniffi_actrium_core_checksum_func_validate_package_source(
+): Short
+fun uniffi_actrium_core_checksum_method_packagepublisher_pins_json(
+): Short
+fun uniffi_actrium_core_checksum_method_packagepublisher_verify_program(
+): Short
 fun ffi_actrium_core_uniffi_contract_version(
 ): Int
 
@@ -1780,10 +1803,24 @@ internal interface UniffiLib : Library {
             lib
         }
 
+        // The Cleaner for the whole library
+        internal val CLEANER: UniffiCleaner by lazy {
+            UniffiCleaner.create()
+        }
     }
 
     // FFI functions
-    fun uniffi_actrium_core_fn_func_active_tab_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_actrium_core_fn_clone_packagepublisher(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_actrium_core_fn_free_packagepublisher(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_actrium_core_fn_method_packagepublisher_pins_json(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_method_packagepublisher_verify_program(`ptr`: Pointer,`source`: RustBuffer.ByValue,`archive`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_accept_package_publisher(`domain`: RustBuffer.ByValue,`descriptorJson`: RustBuffer.ByValue,`pinsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_actrium_core_fn_func_active_tab_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_active_tab_rows_from_tabs(`tabs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -2113,6 +2150,8 @@ fun uniffi_actrium_core_fn_func_evaluate_contract(`name`: RustBuffer.ByValue,`ve
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_extract_app_id_from_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_inspect_downloaded_program(`source`: RustBuffer.ByValue,`archive`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_is_asset_path(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 fun uniffi_actrium_core_fn_func_normalize_browser_storage_sync_ack_batch_json(`ackJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -2289,6 +2328,8 @@ fun uniffi_actrium_core_fn_func_user_info_bridge_contract(uniffi_out_err: Uniffi
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_validate_actr_package_manifest(`source`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
+fun uniffi_actrium_core_fn_func_validate_package_source(`source`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
 fun ffi_actrium_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_actrium_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -2415,6 +2456,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_actrium_core_checksum_func_accept_package_publisher() != 15062.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_func_active_tab_from_row() != 51323.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2910,6 +2954,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_extract_app_id_from_url() != 65157.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_func_inspect_downloaded_program() != 3858.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_func_is_asset_path() != 48112.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3174,6 +3221,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_validate_actr_package_manifest() != 38515.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_func_validate_package_source() != 43725.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_method_packagepublisher_pins_json() != 58274.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_method_packagepublisher_verify_program() != 432.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
 }
 
 /**
@@ -3252,6 +3308,93 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
  * @suppress
  * */
 object NoPointer
+/**
+ * The cleaner interface for Object finalization code to run.
+ * This is the entry point to any implementation that we're using.
+ *
+ * The cleaner registers objects and returns cleanables, so now we are
+ * defining a `UniffiCleaner` with a `UniffiClenaer.Cleanable` to abstract the
+ * different implmentations available at compile time.
+ *
+ * @suppress
+ */
+interface UniffiCleaner {
+    interface Cleanable {
+        fun clean()
+    }
+
+    fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable
+
+    companion object
+}
+
+// The fallback Jna cleaner, which is available for both Android, and the JVM.
+private class UniffiJnaCleaner : UniffiCleaner {
+    private val cleaner = com.sun.jna.internal.Cleaner.getCleaner()
+
+    override fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable =
+        UniffiJnaCleanable(cleaner.register(value, cleanUpTask))
+}
+
+private class UniffiJnaCleanable(
+    private val cleanable: com.sun.jna.internal.Cleaner.Cleanable,
+) : UniffiCleaner.Cleanable {
+    override fun clean() = cleanable.clean()
+}
+
+
+// We decide at uniffi binding generation time whether we were
+// using Android or not.
+// There are further runtime checks to chose the correct implementation
+// of the cleaner.
+private fun UniffiCleaner.Companion.create(): UniffiCleaner =
+    try {
+        // For safety's sake: if the library hasn't been run in android_cleaner = true
+        // mode, but is being run on Android, then we still need to think about
+        // Android API versions.
+        // So we check if java.lang.ref.Cleaner is there, and use that…
+        java.lang.Class.forName("java.lang.ref.Cleaner")
+        JavaLangRefCleaner()
+    } catch (e: ClassNotFoundException) {
+        // … otherwise, fallback to the JNA cleaner.
+        UniffiJnaCleaner()
+    }
+
+private class JavaLangRefCleaner : UniffiCleaner {
+    val cleaner = java.lang.ref.Cleaner.create()
+
+    override fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable =
+        JavaLangRefCleanable(cleaner.register(value, cleanUpTask))
+}
+
+private class JavaLangRefCleanable(
+    val cleanable: java.lang.ref.Cleaner.Cleanable
+) : UniffiCleaner.Cleanable {
+    override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterUByte: FfiConverter<UByte, Byte> {
+    override fun lift(value: Byte): UByte {
+        return value.toUByte()
+    }
+
+    override fun read(buf: ByteBuffer): UByte {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: UByte): Byte {
+        return value.toByte()
+    }
+
+    override fun allocationSize(value: UByte) = 1UL
+
+    override fun write(value: UByte, buf: ByteBuffer) {
+        buf.put(value.toByte())
+    }
+}
 
 /**
  * @suppress
@@ -3422,6 +3565,257 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
         val byteBuf = toUtf8(value)
         buf.putInt(byteBuf.limit())
         buf.put(byteBuf)
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a Pointer/Arc<T>
+// to the live Rust struct on the other side of the FFI.
+//
+// Each instance implements core operations for working with the Rust `Arc<T>` and the
+// Kotlin Pointer to work with the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque pointer to the underlying Rust struct.
+//     Method calls need to read this pointer from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its pointer should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the pointer, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the pointer, but is interrupted
+//      before it can pass the pointer over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read pointer value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface PackagePublisherInterface {
+
+    fun `pinsJson`(): kotlin.String
+
+    fun `verifyProgram`(`source`: PackageSourceInfo, `archive`: List<kotlin.UByte>): VerifiedProgramInfo
+
+    companion object
+}
+
+open class PackagePublisher: Disposable, AutoCloseable, PackagePublisherInterface
+{
+
+    constructor(pointer: Pointer) {
+        this.pointer = pointer
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    /**
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noPointer: NoPointer) {
+        this.pointer = null
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    protected val pointer: Pointer?
+    protected val cleanable: UniffiCleaner.Cleanable
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithPointer(block: (ptr: Pointer) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the pointer being freed concurrently.
+        try {
+            return block(this.uniffiClonePointer())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val pointer: Pointer?) : Runnable {
+        override fun run() {
+            pointer?.let { ptr ->
+                uniffiRustCall { status ->
+                    UniffiLib.INSTANCE.uniffi_actrium_core_fn_free_packagepublisher(ptr, status)
+                }
+            }
+        }
+    }
+
+    fun uniffiClonePointer(): Pointer {
+        return uniffiRustCall() { status ->
+            UniffiLib.INSTANCE.uniffi_actrium_core_fn_clone_packagepublisher(pointer!!, status)
+        }
+    }
+
+    override fun `pinsJson`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_packagepublisher_pins_json(
+        it, _status)
+}
+    }
+    )
+    }
+
+
+
+    @Throws(CoreException::class)override fun `verifyProgram`(`source`: PackageSourceInfo, `archive`: List<kotlin.UByte>): VerifiedProgramInfo {
+            return FfiConverterTypeVerifiedProgramInfo.lift(
+    callWithPointer {
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_packagepublisher_verify_program(
+        it, FfiConverterTypePackageSourceInfo.lower(`source`),FfiConverterSequenceUByte.lower(`archive`),_status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+    companion object
+
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePackagePublisher: FfiConverter<PackagePublisher, Pointer> {
+
+    override fun lower(value: PackagePublisher): Pointer {
+        return value.uniffiClonePointer()
+    }
+
+    override fun lift(value: Pointer): PackagePublisher {
+        return PackagePublisher(value)
+    }
+
+    override fun read(buf: ByteBuffer): PackagePublisher {
+        // The Rust code always writes pointers as 8 bytes, and will
+        // fail to compile if they don't fit.
+        return lift(Pointer(buf.getLong()))
+    }
+
+    override fun allocationSize(value: PackagePublisher) = 8UL
+
+    override fun write(value: PackagePublisher, buf: ByteBuffer) {
+        // The Rust code always expects pointers written as 8 bytes,
+        // and will fail to compile if they don't fit.
+        buf.putLong(Pointer.nativeValue(lower(value)))
     }
 }
 
@@ -5391,6 +5785,82 @@ public object FfiConverterTypePackageIntegrityPlanInfo: FfiConverterRustBuffer<P
 
 
 
+data class PackagePublisherInfo (
+    var `domain`: kotlin.String,
+    var `bootstrapUrl`: kotlin.String,
+    var `digest`: kotlin.String,
+    var `actorType`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePackagePublisherInfo: FfiConverterRustBuffer<PackagePublisherInfo> {
+    override fun read(buf: ByteBuffer): PackagePublisherInfo {
+        return PackagePublisherInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PackagePublisherInfo) = (
+            FfiConverterString.allocationSize(value.`domain`) +
+            FfiConverterString.allocationSize(value.`bootstrapUrl`) +
+            FfiConverterString.allocationSize(value.`digest`) +
+            FfiConverterString.allocationSize(value.`actorType`)
+    )
+
+    override fun write(value: PackagePublisherInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`domain`, buf)
+            FfiConverterString.write(value.`bootstrapUrl`, buf)
+            FfiConverterString.write(value.`digest`, buf)
+            FfiConverterString.write(value.`actorType`, buf)
+    }
+}
+
+
+
+data class PackageSourceInfo (
+    var `href`: kotlin.String,
+    var `expectedSha256`: kotlin.String?,
+    var `expectedActorType`: kotlin.String?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePackageSourceInfo: FfiConverterRustBuffer<PackageSourceInfo> {
+    override fun read(buf: ByteBuffer): PackageSourceInfo {
+        return PackageSourceInfo(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PackageSourceInfo) = (
+            FfiConverterString.allocationSize(value.`href`) +
+            FfiConverterOptionalString.allocationSize(value.`expectedSha256`) +
+            FfiConverterOptionalString.allocationSize(value.`expectedActorType`)
+    )
+
+    override fun write(value: PackageSourceInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`href`, buf)
+            FfiConverterOptionalString.write(value.`expectedSha256`, buf)
+            FfiConverterOptionalString.write(value.`expectedActorType`, buf)
+    }
+}
+
+
+
 data class RuntimeContainerSizeChangeEventInfo (
     var `containerWidth`: kotlin.Int,
     var `containerHeight`: kotlin.Int
@@ -5991,6 +6461,106 @@ public object FfiConverterTypeUserInfoBridgeContractInfo: FfiConverterRustBuffer
 
 
 
+data class VerifiedProgramFileInfo (
+    var `path`: kotlin.String,
+    var `bytes`: List<kotlin.UByte>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVerifiedProgramFileInfo: FfiConverterRustBuffer<VerifiedProgramFileInfo> {
+    override fun read(buf: ByteBuffer): VerifiedProgramFileInfo {
+        return VerifiedProgramFileInfo(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceUByte.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VerifiedProgramFileInfo) = (
+            FfiConverterString.allocationSize(value.`path`) +
+            FfiConverterSequenceUByte.allocationSize(value.`bytes`)
+    )
+
+    override fun write(value: VerifiedProgramFileInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`path`, buf)
+            FfiConverterSequenceUByte.write(value.`bytes`, buf)
+    }
+}
+
+
+
+data class VerifiedProgramInfo (
+    var `publisher`: kotlin.String,
+    var `program`: kotlin.String,
+    var `version`: kotlin.String,
+    var `digest`: kotlin.String,
+    var `signingKeyId`: kotlin.String,
+    var `title`: kotlin.String,
+    var `description`: kotlin.String?,
+    var `guestCode`: kotlin.String,
+    var `serviceBytes`: List<kotlin.UByte>,
+    var `resources`: List<VerifiedProgramFileInfo>,
+    var `metadataJson`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVerifiedProgramInfo: FfiConverterRustBuffer<VerifiedProgramInfo> {
+    override fun read(buf: ByteBuffer): VerifiedProgramInfo {
+        return VerifiedProgramInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceUByte.read(buf),
+            FfiConverterSequenceTypeVerifiedProgramFileInfo.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VerifiedProgramInfo) = (
+            FfiConverterString.allocationSize(value.`publisher`) +
+            FfiConverterString.allocationSize(value.`program`) +
+            FfiConverterString.allocationSize(value.`version`) +
+            FfiConverterString.allocationSize(value.`digest`) +
+            FfiConverterString.allocationSize(value.`signingKeyId`) +
+            FfiConverterString.allocationSize(value.`title`) +
+            FfiConverterOptionalString.allocationSize(value.`description`) +
+            FfiConverterString.allocationSize(value.`guestCode`) +
+            FfiConverterSequenceUByte.allocationSize(value.`serviceBytes`) +
+            FfiConverterSequenceTypeVerifiedProgramFileInfo.allocationSize(value.`resources`) +
+            FfiConverterString.allocationSize(value.`metadataJson`)
+    )
+
+    override fun write(value: VerifiedProgramInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`publisher`, buf)
+            FfiConverterString.write(value.`program`, buf)
+            FfiConverterString.write(value.`version`, buf)
+            FfiConverterString.write(value.`digest`, buf)
+            FfiConverterString.write(value.`signingKeyId`, buf)
+            FfiConverterString.write(value.`title`, buf)
+            FfiConverterOptionalString.write(value.`description`, buf)
+            FfiConverterString.write(value.`guestCode`, buf)
+            FfiConverterSequenceUByte.write(value.`serviceBytes`, buf)
+            FfiConverterSequenceTypeVerifiedProgramFileInfo.write(value.`resources`, buf)
+            FfiConverterString.write(value.`metadataJson`, buf)
+    }
+}
+
+
+
 
 enum class ContractGateStatus {
 
@@ -6026,6 +6596,8 @@ public object FfiConverterTypeContractGateStatus: FfiConverterRustBuffer<Contrac
 
 sealed class CoreException(message: String): kotlin.Exception(message) {
 
+        class PackageVerification(message: String) : CoreException(message)
+
         class InvalidJson(message: String) : CoreException(message)
 
         class MissingField(message: String) : CoreException(message)
@@ -6053,13 +6625,14 @@ public object FfiConverterTypeCoreError : FfiConverterRustBuffer<CoreException> 
     override fun read(buf: ByteBuffer): CoreException {
 
             return when(buf.getInt()) {
-            1 -> CoreException.InvalidJson(FfiConverterString.read(buf))
-            2 -> CoreException.MissingField(FfiConverterString.read(buf))
-            3 -> CoreException.UnsupportedContract(FfiConverterString.read(buf))
-            4 -> CoreException.ContractTooNew(FfiConverterString.read(buf))
-            5 -> CoreException.UnknownSystemAppType(FfiConverterString.read(buf))
-            6 -> CoreException.UnknownAppSourceType(FfiConverterString.read(buf))
-            7 -> CoreException.InvalidActrActorType(FfiConverterString.read(buf))
+            1 -> CoreException.PackageVerification(FfiConverterString.read(buf))
+            2 -> CoreException.InvalidJson(FfiConverterString.read(buf))
+            3 -> CoreException.MissingField(FfiConverterString.read(buf))
+            4 -> CoreException.UnsupportedContract(FfiConverterString.read(buf))
+            5 -> CoreException.ContractTooNew(FfiConverterString.read(buf))
+            6 -> CoreException.UnknownSystemAppType(FfiConverterString.read(buf))
+            7 -> CoreException.UnknownAppSourceType(FfiConverterString.read(buf))
+            8 -> CoreException.InvalidActrActorType(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
 
@@ -6071,32 +6644,36 @@ public object FfiConverterTypeCoreError : FfiConverterRustBuffer<CoreException> 
 
     override fun write(value: CoreException, buf: ByteBuffer) {
         when(value) {
-            is CoreException.InvalidJson -> {
+            is CoreException.PackageVerification -> {
                 buf.putInt(1)
                 Unit
             }
-            is CoreException.MissingField -> {
+            is CoreException.InvalidJson -> {
                 buf.putInt(2)
                 Unit
             }
-            is CoreException.UnsupportedContract -> {
+            is CoreException.MissingField -> {
                 buf.putInt(3)
                 Unit
             }
-            is CoreException.ContractTooNew -> {
+            is CoreException.UnsupportedContract -> {
                 buf.putInt(4)
                 Unit
             }
-            is CoreException.UnknownSystemAppType -> {
+            is CoreException.ContractTooNew -> {
                 buf.putInt(5)
                 Unit
             }
-            is CoreException.UnknownAppSourceType -> {
+            is CoreException.UnknownSystemAppType -> {
                 buf.putInt(6)
                 Unit
             }
-            is CoreException.InvalidActrActorType -> {
+            is CoreException.UnknownAppSourceType -> {
                 buf.putInt(7)
+                Unit
+            }
+            is CoreException.InvalidActrActorType -> {
+                buf.putInt(8)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -6430,6 +7007,34 @@ public object FfiConverterOptionalTypeRuntimeTabUpdateInfo: FfiConverterRustBuff
 /**
  * @suppress
  */
+public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByte>> {
+    override fun read(buf: ByteBuffer): List<kotlin.UByte> {
+        val len = buf.getInt()
+        return List<kotlin.UByte>(len) {
+            FfiConverterUByte.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.UByte>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterUByte.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.UByte>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterUByte.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
     override fun read(buf: ByteBuffer): List<kotlin.String> {
         val len = buf.getInt()
@@ -6675,6 +7280,48 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
         }
     }
 }
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeVerifiedProgramFileInfo: FfiConverterRustBuffer<List<VerifiedProgramFileInfo>> {
+    override fun read(buf: ByteBuffer): List<VerifiedProgramFileInfo> {
+        val len = buf.getInt()
+        return List<VerifiedProgramFileInfo>(len) {
+            FfiConverterTypeVerifiedProgramFileInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<VerifiedProgramFileInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeVerifiedProgramFileInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<VerifiedProgramFileInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeVerifiedProgramFileInfo.write(it, buf)
+        }
+    }
+}
+        /**
+         * Descriptor MUST have been fetched from this Publisher's HTTPS bootstrap.
+         * Persist pins_json() even when subsequent package verification fails.
+         */
+    @Throws(CoreException::class) fun `acceptPackagePublisher`(`domain`: kotlin.String, `descriptorJson`: kotlin.String, `pinsJson`: kotlin.String?): PackagePublisher {
+            return FfiConverterTypePackagePublisher.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_package_publisher(
+        FfiConverterString.lower(`domain`),FfiConverterString.lower(`descriptorJson`),FfiConverterOptionalString.lower(`pinsJson`),_status)
+}
+    )
+    }
+
+
         /**
          * Convert a persisted active-tab row into the platform active-tab model.
          */ fun `activeTabFromRow`(`row`: ActiveTabRowInfo): ActiveTabInfo {
@@ -8609,6 +9256,19 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
+         * Unauthenticated identity for discovering the Publisher. Never execution bytes.
+         */
+    @Throws(CoreException::class) fun `inspectDownloadedProgram`(`source`: PackageSourceInfo, `archive`: List<kotlin.UByte>): PackagePublisherInfo {
+            return FfiConverterTypePackagePublisherInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_inspect_downloaded_program(
+        FfiConverterTypePackageSourceInfo.lower(`source`),FfiConverterSequenceUByte.lower(`archive`),_status)
+}
+    )
+    }
+
+
+        /**
          * Return whether the path points to a known ACTR asset extension.
          */ fun `isAssetPath`(`path`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -9542,6 +10202,18 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_validate_actr_package_manifest(
         FfiConverterString.lower(`source`),_status)
+}
+
+
+
+        /**
+         * Host-selected HTTPS source, or package fields from an accepted Realm Profile.
+         */
+    @Throws(CoreException::class) fun `validatePackageSource`(`source`: PackageSourceInfo)
+        =
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_validate_package_source(
+        FfiConverterTypePackageSourceInfo.lower(`source`),_status)
 }
 
 

@@ -82,6 +82,9 @@ enum SystemTabType: String, Codable {
 }
 
 struct Tab: Identifiable {
+    /// Authenticated Service/Guest bytes for controlled runtime consumers.
+    /// Session authorization and persistent version pins are handled separately.
+    var verifiedProgram: VerifiedLocalProgram? = nil
     let id = UUID()
     var title: String
     var url: URL?
