@@ -486,6 +486,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 leftPanelScript: leftPanelScript,
                 rightPanelScript: rightPanelScript,
                 unifiedScript: unifiedScript,
+                capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                 contractName: manifestInfo.contractName,
                 contractVersion: manifestInfo.contractVersion,
                 permissions: manifestInfo.permissions,
@@ -711,6 +712,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 tabs[index].title = systemType.title
                 // Clear web/RN content
                 tabs[index].unifiedScript = nil
+                tabs[index].capabilityManifestJSON = nil
                 tabs[index].leftPanelScript = nil
                 tabs[index].rightPanelScript = nil
                 tabs[index].guestScript = nil
@@ -762,6 +764,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].title = url.host ?? url.absoluteString
             // Clear RN Relevant
             tabs[index].unifiedScript = nil
+            tabs[index].capabilityManifestJSON = nil
             tabs[index].leftPanelScript = nil
             tabs[index].rightPanelScript = nil
             tabs[index].guestScript = nil
@@ -887,6 +890,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].contractName = manifestInfo.contractName
             tabs[tabIndex].contractVersion = manifestInfo.contractVersion
             tabs[tabIndex].permissions = manifestInfo.permissions
+            tabs[tabIndex].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
             tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
 
@@ -1067,6 +1071,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].contractName = manifestInfo.contractName
             tabs[index].contractVersion = manifestInfo.contractVersion
             tabs[index].permissions = manifestInfo.permissions
+            tabs[index].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
             tabs[index].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[index].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
             leftPanelVisibility[tabs[index].id] = manifestInfo.leftPanelDefaultVisible
@@ -1207,6 +1212,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
+                    capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                     rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                     themeColor: manifestInfo.themeColor
@@ -1224,6 +1230,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
+                    capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                     rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                     themeColor: manifestInfo.themeColor
@@ -1239,6 +1246,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
+                    capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                     themeColor: manifestInfo.themeColor
                 )
             } else {
@@ -1335,6 +1343,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                         themeColor: manifestInfo.themeColor
@@ -1349,6 +1358,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                         themeColor: manifestInfo.themeColor
@@ -1362,6 +1372,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         themeColor: manifestInfo.themeColor
                     )
                 } else {
@@ -1462,6 +1473,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                         themeColor: manifestInfo.themeColor
@@ -1476,6 +1488,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                         themeColor: manifestInfo.themeColor
@@ -1489,6 +1502,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         themeColor: manifestInfo.themeColor
                     )
                 } else {
@@ -1571,6 +1585,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         contractName: String? = nil,
         contractVersion: Int? = nil,
         permissions: [String] = [],
+        capabilityManifestJSON: String? = nil,
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
         themeColor: String? = nil
@@ -1587,6 +1602,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             leftPanelScript: leftPanelScript,
             rightPanelScript: rightPanelScript,
             unifiedScript: unifiedScript,
+            capabilityManifestJSON: capabilityManifestJSON,
             contractName: contractName,
             contractVersion: contractVersion,
             permissions: permissions,

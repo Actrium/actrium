@@ -40,6 +40,7 @@ export function verifyCapabilityManifest(
     appAllowComponents?: readonly string[];
     allowedImports?: ReadonlySet<string>;
     hostSupportedModules?: ReadonlySet<string>;
+    hostSupportedMethods?: Record<string, ReadonlySet<string>>;
     contractKinds?: Record<string, Record<string, 'rpc' | 'subscription'>>;
     /** Allowed business routes/events for `host:service`. */
     serviceCapabilities?: {
@@ -184,6 +185,46 @@ export function verifyCapabilityManifest(
           return fail(
             'capability_mismatch',
             `"${moduleId}.${eventName}" is not a subscription in the contract.`
+          );
+        }
+      }
+    }
+  }
+
+  if (options.hostSupportedMethods) {
+    for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
+      const moduleId = toModuleId(rawKey);
+      // `host:service` entries are business routes/events, not transport
+      // exports (`call`/`tell`/`on`). They are validated against
+      // `serviceCapabilities` when a policy is supplied; the transport
+      // method set must not reject them.
+      if (moduleId === 'host:service') {
+        // Business rpc routes are deferred to `serviceCapabilities`, but an
+        // event subscription still needs an implemented `on` transport.
+        const supported = options.hostSupportedMethods['host:service'];
+        if ((entry.events?.length ?? 0) > 0 && !supported?.has('on')) {
+          return fail(
+            'unknown_capability',
+            'Host method "host:service.on" is not implemented.'
+          );
+        }
+        continue;
+      }
+      const supportedMethods = options.hostSupportedMethods[moduleId];
+      if (!supportedMethods) {
+        return fail(
+          'unknown_capability',
+          `Host module "${moduleId}" is not supported.`
+        );
+      }
+      for (const methodName of [
+        ...(entry.rpc ?? []),
+        ...(entry.events ?? []),
+      ]) {
+        if (!supportedMethods.has(methodName)) {
+          return fail(
+            'unknown_capability',
+            `Host method "${moduleId}.${methodName}" is not implemented.`
           );
         }
       }

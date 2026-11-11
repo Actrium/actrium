@@ -1417,6 +1417,9 @@ final class ServiceReactNativeHost {
 
         // Scripts
         if let s = config["unifiedScript"] as? String { tabDict["unifiedScript"] = s }
+        if let s = config["capabilityManifestJSON"] as? String {
+            tabDict["capabilityManifestJSON"] = s
+        }
         if let s = config["leftPanelScript"] as? String { tabDict["leftPanelScript"] = s }
         if let s = config["rightPanelScript"] as? String { tabDict["rightPanelScript"] = s }
         if let s = config["guestScript"] as? String { tabDict["guestScript"] = s }
@@ -1917,6 +1920,9 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     }
     if let unifiedScript = config["unifiedScript"] as? String {
         tabDict["unifiedScript"] = unifiedScript
+    }
+    if let capabilityManifestJSON = config["capabilityManifestJSON"] as? String {
+        tabDict["capabilityManifestJSON"] = capabilityManifestJSON
     }
     if let permissions = config["permissions"] as? [String] {
         tabDict["permissions"] = permissions

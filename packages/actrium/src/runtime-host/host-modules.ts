@@ -29,6 +29,15 @@ export type HostModules = {
   };
 };
 
+/** Methods with a real Host implementation, excluding throwing placeholders. */
+export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
+  'host:service': new Set(['call']),
+};
+
+/** Modules with a real Host implementation, not just a contract declaration. */
+export const HOST_SUPPORTED_MODULES: ReadonlySet<string> = new Set(
+  Object.keys(HOST_SUPPORTED_METHODS)
+);
 
 // `callActor` is expected to resolve with a failure result instead of
 // rejecting after the race settles. HostHttpHandler catches transport errors,

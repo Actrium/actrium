@@ -938,6 +938,9 @@ final class ViewBridgeCoordinator {
                 config[RuntimeBridgeContract.systemAppType] = systemAppType
             }
             if let script = tabConfig.unifiedScript { config["unifiedScript"] = script }
+            if let manifest = tabConfig.capabilityManifestJSON {
+                config["capabilityManifestJSON"] = manifest
+            }
             if let leftPanelScript = tabConfig.leftPanelScript { config["leftPanelScript"] = leftPanelScript }
             if let serviceCallUrl = tabConfig.serviceCallUrl { config["serviceCallUrl"] = serviceCallUrl }
             if let appId = tabConfig.appId { config["appId"] = appId }
@@ -2263,6 +2266,7 @@ struct UnifiedReactNativeLayer: View {
                 containerSize: isFocused ? viewportSize : cardSize,
                 systemAppType: tab.systemTabType?.rawValue,
                 unifiedScript: tab.unifiedScript,
+                capabilityManifestJSON: tab.capabilityManifestJSON,
                 leftPanelScript: tab.leftPanelScript,
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
@@ -2313,6 +2317,7 @@ struct UnifiedReactNativeLayer: View {
                 containerSize: isFocused ? viewportSize : cardSize,
                 systemAppType: tab.systemTabType?.rawValue,
                 unifiedScript: tab.unifiedScript,
+                capabilityManifestJSON: tab.capabilityManifestJSON,
                 leftPanelScript: tab.leftPanelScript,
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
@@ -2350,6 +2355,9 @@ struct UnifiedReactNativeLayer: View {
         }
         if let unifiedScript = tab.unifiedScript {
             config["unifiedScript"] = unifiedScript
+        }
+        if let capabilityManifestJSON = tab.capabilityManifestJSON {
+            config["capabilityManifestJSON"] = capabilityManifestJSON
         }
         if let leftPanelScript = tab.leftPanelScript {
             config["leftPanelScript"] = leftPanelScript
@@ -2546,6 +2554,9 @@ struct UnifiedReactNativeLayer: View {
         // Add optional scripts
         if let unifiedScript = tab.unifiedScript {
             tabConfig["unifiedScript"] = unifiedScript
+        }
+        if let capabilityManifestJSON = tab.capabilityManifestJSON {
+            tabConfig["capabilityManifestJSON"] = capabilityManifestJSON
         }
         if let systemTabType = tab.systemTabType {
             tabConfig[RuntimeBridgeContract.systemAppType] = systemTabType.rawValue

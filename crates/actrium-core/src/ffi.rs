@@ -26,6 +26,7 @@ pub struct ActrPackageManifestInfo {
     pub contract_name: Option<String>,
     pub contract_version: Option<u32>,
     pub permissions: Vec<String>,
+    pub capabilities: Option<String>,
     pub system_app_type: Option<String>,
     pub theme_color: Option<String>,
 }
@@ -34,6 +35,11 @@ impl From<ActrPackageManifest> for ActrPackageManifestInfo {
     fn from(manifest: ActrPackageManifest) -> Self {
         let extension = manifest.extensions.actrium.as_ref();
         let is_keel_guest = manifest.workload.profile == actr_pack::KEEL_GUEST_PROFILE_V1;
+        let capabilities = manifest
+            .workload
+            .keel
+            .as_ref()
+            .and_then(|keel| keel.capabilities.clone());
 
         Self {
             name: extension
@@ -54,6 +60,7 @@ impl From<ActrPackageManifest> for ActrPackageManifestInfo {
             contract_name: is_keel_guest.then(|| "keel.guest".to_string()),
             contract_version: is_keel_guest.then_some(1),
             permissions: manifest.host.required_capabilities,
+            capabilities,
             system_app_type: None,
             theme_color: extension.and_then(|value| value.theme_color.clone()),
         }
@@ -2896,6 +2903,7 @@ mod tests {
                 [workload.keel]
                 runtime = "js"
                 guest-api = "keel.guest/1"
+                capabilities = "ui/capability-manifest.json"
                 [host]
                 profile = "actr.host/1"
                 api = "^1"
@@ -2912,6 +2920,12 @@ mod tests {
                 media-type = "text/javascript"
                 size = 1
                 sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                [[files]]
+                path = "ui/capability-manifest.json"
+                role = "profile"
+                media-type = "application/json"
+                size = 1
+                sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             "##
             .to_string(),
         )
@@ -2921,6 +2935,10 @@ mod tests {
         assert_eq!(info.theme_color.as_deref(), Some("#111111"));
         assert_eq!(info.contract_name.as_deref(), Some("keel.guest"));
         assert_eq!(info.contract_version, Some(1));
+        assert_eq!(
+            info.capabilities.as_deref(),
+            Some("ui/capability-manifest.json")
+        );
         assert_eq!(info.system_app_type, None);
     }
 

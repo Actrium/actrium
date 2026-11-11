@@ -110,6 +110,9 @@ struct Tab: Identifiable {
     /// v2.0 unified script (unified-app.js) for the single-engine architecture.
     var unifiedScript: String?
 
+    /// Raw capability manifest from the verified package payload.
+    var capabilityManifestJSON: String?
+
     /// Phase 1 contracts used for host prompts and version compatibility.
     var contractName: String?
     var contractVersion: Int?
@@ -145,6 +148,7 @@ struct Tab: Identifiable {
         leftPanelScript: String? = nil,
         rightPanelScript: String? = nil,
         unifiedScript: String? = nil,
+        capabilityManifestJSON: String? = nil,
         contractName: String? = nil,
         contractVersion: Int? = nil,
         permissions: [String] = [],
@@ -166,6 +170,7 @@ struct Tab: Identifiable {
         self.leftPanelScript = leftPanelScript
         self.rightPanelScript = rightPanelScript
         self.unifiedScript = unifiedScript
+        self.capabilityManifestJSON = capabilityManifestJSON
         self.contractName = contractName
         self.contractVersion = contractVersion
         self.permissions = permissions
