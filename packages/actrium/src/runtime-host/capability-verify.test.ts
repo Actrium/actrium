@@ -27,6 +27,49 @@ describe('verifyCapabilityManifest', () => {
     });
   });
 
+  test('enforces the per-app component allowlist', () => {
+    expect(
+      verifyCapabilityManifest(manifest, {
+        ...options,
+        appAllowComponents: ['View', 'Text'],
+      }).ok
+    ).toBe(true);
+
+    const result = verifyCapabilityManifest(manifest, {
+      ...options,
+      appAllowComponents: ['View'],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('component_not_allowed');
+  });
+
+  test('an explicit empty app allowlist denies every component', () => {
+    const result = verifyCapabilityManifest(manifest, {
+      ...options,
+      appAllowComponents: [],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('component_not_allowed');
+  });
+
+  test('tolerates duplicates in the app allowlist', () => {
+    expect(
+      verifyCapabilityManifest(manifest, {
+        ...options,
+        appAllowComponents: ['View', 'View', 'Text'],
+      }).ok
+    ).toBe(true);
+  });
+
+  test('rejects an app allowlist outside the host allowlist', () => {
+    const result = verifyCapabilityManifest(manifest, {
+      ...options,
+      appAllowComponents: ['WebView'],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('component_not_allowed');
+  });
+
   test('rejects a component outside the allowlist', () => {
     const result = verifyCapabilityManifest(
       { ...manifest, components: ['View', 'WebView'] },

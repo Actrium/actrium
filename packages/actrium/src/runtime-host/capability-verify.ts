@@ -31,6 +31,8 @@ export function verifyCapabilityManifest(
   manifest: CapabilityManifestV1,
   options: {
     allowedComponents?: readonly string[];
+    /** Per-app `[actrium.components].allow` from the package manifest. */
+    appAllowComponents?: readonly string[];
     allowedImports?: ReadonlySet<string>;
     hostSupportedModules?: ReadonlySet<string>;
     contractKinds?: Record<string, Record<string, 'rpc' | 'subscription'>>;
@@ -53,14 +55,28 @@ export function verifyCapabilityManifest(
     );
   }
 
-  const allowedComponents = new Set(
-    options.allowedComponents ?? COMPONENT_WHITELIST
-  );
+  const hostAllow = new Set(options.allowedComponents ?? COMPONENT_WHITELIST);
+  if (options.appAllowComponents) {
+    for (const component of options.appAllowComponents) {
+      if (!hostAllow.has(component)) {
+        return fail(
+          'component_not_allowed',
+          `Component "${component}" is not in the host allowlist.`
+        );
+      }
+    }
+  }
+
+  // usage ⊆ app allow ⊆ host allow (v1 12 §4).
+  const appAllow = new Set(options.appAllowComponents ?? hostAllow);
+  const allowlistLabel = options.appAllowComponents
+    ? 'app allowlist'
+    : 'host allowlist';
   for (const component of manifest.components) {
-    if (!allowedComponents.has(component)) {
+    if (!appAllow.has(component)) {
       return fail(
         'component_not_allowed',
-        `Component "${component}" is not in the allowlist.`
+        `Component "${component}" is not in the ${allowlistLabel}.`
       );
     }
   }
