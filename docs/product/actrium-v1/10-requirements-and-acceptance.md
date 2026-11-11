@@ -40,8 +40,8 @@
 | FR-PKG-005 | Zip traversal, an excessive file count, an excessive total extracted size and zip bombs MUST be rejected. |
 | FR-PKG-006 | A third-party package MUST NOT contain a Front Host/native plugin. |
 | FR-PKG-007 | The Guest MUST load from verified local bytes; Keel MUST NOT trust a remote URL directly. |
-| FR-PKG-008 | A different Service or Front package digest for the same Program Release MUST hard fail. |
-| FR-PKG-009 | Service and Front packages MUST remain cached while a Service instance references them. |
+| FR-PKG-008 | A different Service, Front, or Privacy Contract binding for the same Program Release MUST hard fail. |
+| FR-PKG-009 | Service and Front packages and any bound Privacy Contract MUST remain cached while a Service instance references the release. |
 | FR-PKG-010 | Marketplace metadata MUST NOT override the Publisher's package identity. |
 | FR-PKG-011 | Product v1 local import MUST accept a matching Service and Front `.actr` pair. Development sources MUST be clearly labeled. |
 | FR-PKG-012 | Advisory/Block-new/Quarantine/Critical-block revocation levels MUST be supported. |
@@ -79,7 +79,7 @@
 | FR-SVC-010 | A Service may orchestrate other Actors within the Realm, but the Front binds only to the Service. |
 | FR-SVC-011 | A v1 version upgrade MUST go through a new Actor plus an explicit migration. |
 | FR-SVC-012 | Once a Service is purged, its ActorId MUST NOT be reused. |
-| FR-SVC-013 | A Workspace MUST separately declare its requirement, provisioning, access, and allowed Workspace Providers (`providers`). |
+| FR-SVC-013 | Static Workspace requirements MUST use the Service manifest's `[workspace]` table with `requirement`, `access`, and `providers`. Omitting the table means `requirement = "none"`. Provisioning and actual bindings are instance settings. A required binding MUST satisfy the declared access before the Service enters Ready. |
 | FR-SVC-014 | Moving to trash MUST preserve identity and instance data and remain recoverable; purging MUST revoke identity and be unrecoverable. |
 | FR-SVC-015 | Lifecycle, reachability, health, placement and attachment state MUST be recorded as separate fields. |
 | FR-SVC-016 | v1 only creates a new instance on the current device's supported local Actr Host; remote management MUST require a separate management capability granted by that host. |
@@ -161,7 +161,7 @@
 | FR-SEC-043 | When Evidence, an Attestation Result, a Reference Value, an Endorsement, or a TCB status expires or is revoked, new sensitive-data and key release MUST stop, and re-attestation/rekeying MUST be triggered. |
 | FR-SEC-044 | Highly sensitive output crossing a data class MUST go through an explicit declassification/output policy; a legitimate Actor response MUST NOT become a covert channel that bypasses egress closure. |
 | FR-SEC-045 | Green MUST be bound to the current `ApplicationStateDigest` (`structureDigest` + Principal + Merkle root) and `Ready`; a blanket green label MUST NOT be given to a Publisher or a Program. |
-| FR-SEC-046 | The Program Privacy Contract MUST statically declare the allowed Actor roles/types/profiles, cardinality, edges, data classes, capabilities, terminals, audit sinks and assurance requirements. |
+| FR-SEC-046 | The Program Privacy Contract MUST statically declare the allowed Actor roles/types/profiles, cardinality, edges, data classes, capabilities, terminals, audit sinks and assurance requirements. The Host MUST verify its raw-byte SHA-256 against the signed Program Release record and check its release and package bindings before using it for authorization. |
 | FR-SEC-047 | The effective capabilities the Actr Host may grant MUST be the intersection of the Contract, user/organization policy, host policy and the instance grant; an undeclared capability MUST NOT obtain a handle. |
 | FR-SEC-048 | The actual Actor/runtime graph MUST be an instance of the Contract's graph grammar; every mutation MUST first form a candidate graph and MUST NOT directly change an already-approved data graph. |
 | FR-SEC-049 | The initial graph MUST complete identity, evidence, policy and `ApplicationAssurance` evaluation before releasing protected data or a DEK. |

@@ -140,7 +140,9 @@ Turn this document's product semantics into a cross-repository, testable contrac
 
 - `actor.publisher` carries a normalized Publisher domain.
 - Service and Front each use an `actr-package/2` manifest for one Workload.
+- Readers and packagers support the Service manifest's `[workspace]`, and the Host enforces required bindings before Ready.
 - The verifier checks each manifest and the release record that pairs the packages.
+- The verifier authenticates Privacy Contract bytes against `privacy_contract.sha256` in the signed release record.
 - The loader validates each package's Workload Profile before loading its entry.
 - `[[files]]` binds the files for the Guest, contracts, assets, and any dependency lock.
 - `signature.key-id` ties into the Publisher Profile.

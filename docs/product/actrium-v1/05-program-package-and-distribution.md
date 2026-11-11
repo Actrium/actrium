@@ -206,6 +206,7 @@ The Actr base manifest provides the following tables.
 - `[dependencies.<alias>]` for required Actor types, version constraints, and contract paths.
 - `[signature]` for the signature algorithm and `key-id`.
 - `[[files]]` for payload roles, sizes, and SHA-256 hashes, including any lock file.
+- `[workspace]` in the Service manifest for static `requirement`, `access`, and `providers` declarations.
 
 For a Product v1 pair, `dependencies.service.contract` selects the RPC Proto by package-relative path.
 Both manifests must declare the file at that path with role `contract` and the same SHA-256.
@@ -214,8 +215,8 @@ derives the Attach fingerprint as described in [06 §2.2](06-runtime-and-protoco
 
 Service nodes use the existing Actr `actr.toml` schema for deployment settings such as Realm,
 signaling, and trust. The [node configuration definition](../../../crates/actr-config/src/actr_raw.rs)
-describes these fields. Workspace requirements come from the signed release record. The Host stores
-the binding and grant per instance.
+describes these fields. Workspace requirements come from the signed Service manifest's `[workspace]`
+table. The deployment or creation flow selects `provisioning`, and the Host stores the binding and grant per instance.
 
 See both manifests in the [Reference Specification](12-reference-spec.md#4-actr-manifest).
 
@@ -234,7 +235,7 @@ effective capabilities =
 
 The Actr Host evaluates the following as product policy. Package capability requirements come
 from `[host]`, and Guest declarations come from its signed Keel capability manifest.
-The signed release record declares Workspace requirements. Deployment and authorization supply
+The signed Service manifest declares Workspace requirements. Deployment and authorization supply
 the instance-specific settings and grants.
 
 - Front capability;
@@ -302,16 +303,17 @@ Actrium stores locally under the following composite key:
 (publisher, program, version, service_package_digest)
 ```
 
-The key uses the Service package digest. The Program Release record also fixes the Front digest.
+The key uses the Service package digest. The Program Release record also fixes the Front digest
+and any Privacy Contract content digest.
 
 Rules:
 
-- the first acceptance pins both package digests for the Program Release.
-- a different Service or Front digest for the same Program Release is `PACKAGE_EQUIVOCATION`.
+- The first acceptance pins both package digests and any Privacy Contract binding for the Program Release.
+- A different Service, Front, or Privacy Contract binding for the same Program Release is `PACKAGE_EQUIVOCATION`.
 - "the Publisher updated the file" cannot be used to overwrite the cache;
 - an update must use a new SemVer;
 - a Service instance is fixed to its Service package digest.
-- the Service and Front packages stay cached while referenced by a Service instance;
+- The Service and Front packages and any bound Privacy Contract stay cached while referenced by a Service instance.
 - each re-downloaded archive is re-verified against its pinned digest.
 
 A local first-seen pin only protects the current install; a Marketplace can help multiple clients compare digests they have seen. Providing global non-equivocation across all clients requires introducing a public, append-only transparency log later. v1 does not overstate a single-machine pin into global transparency.
@@ -428,5 +430,6 @@ Requirements:
 - atomic writes;
 - incomplete downloads are isolated;
 - cache metadata records the Publisher key and verification time;
+- Store the signed release record and cache any Privacy Contract bytes under `privacy_contract.sha256` for offline re-verification.
 - a local instance can run offline from its pinned Service and Front packages under the offline policy.
 - expiry of Realm credentials/revocations is handled under offline security policy, and is not equivalent to package verification failure.

@@ -48,7 +48,8 @@ ProgramReleaseId = publisher/program@version
 ```
 
 Publisher 签名的发布记录固定 Service 和 Front 两个包的摘要。两个包分别声明自己的
-Workload、契约和 Host 要求。Actrium 通过部署与授权应用 Workspace、配额等实例策略。
+Workload、契约和 Host 要求。Service manifest 的 `[workspace]` 声明静态 Workspace 要求。
+Actrium 通过部署与授权应用准备方式、实际授权、配额等实例策略。
 
 ### 2.3 Service
 

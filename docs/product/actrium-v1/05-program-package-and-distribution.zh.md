@@ -199,14 +199,15 @@ Actr 基础清单提供以下表。
 - `[dependencies.<alias>]` 声明 Actor 依赖的类型、版本约束和契约路径。
 - `[signature]` 声明签名算法和 `key-id`。
 - `[[files]]` 记录包内文件的角色、大小和 SHA-256，也包含随包分发的依赖锁。
+- Service manifest 的 `[workspace]` 声明静态的 `requirement`、`access` 和 `providers`。
 
 对 Product v1 的配套包，`dependencies.service.contract` 以包内相对路径选定 RPC Proto。
 两个清单必须在该路径登记角色为 `contract` 且 SHA-256 相同的文件。包中包含其他契约文件时，
 也按此路径选择 RPC 契约。Actr Host 按[第 06 章 §2.2](06-runtime-and-protocol.zh.md#22-front-actor-类型)计算 Attach 指纹。
 
 Service 节点使用现有 Actr `actr.toml` 格式配置 Realm、信令和信任等部署参数。字段见
-[节点配置定义](../../../crates/actr-config/src/actr_raw.rs)。Workspace 要求来自签名发布记录，
-Host 按实例保存绑定和实际授权。
+[节点配置定义](../../../crates/actr-config/src/actr_raw.rs)。Workspace 要求来自签名 Service manifest 的
+`[workspace]`。部署或创建流程选择 `provisioning`，Host 按实例保存绑定和实际授权。
 
 两份完整清单见[参考协议](12-reference-spec.zh.md#4-actr-manifest)。
 
@@ -224,7 +225,7 @@ effective capabilities =
 ```
 
 Actr Host 按产品策略评估以下内容。包的能力要求来自 `[host]`，Guest 的声明来自其签名保护的 Keel 能力清单，
-Workspace 要求来自签名发布记录，实例设置和实际授权来自部署及授权流程。
+Workspace 要求来自签名 Service manifest，实例设置和实际授权来自部署及授权流程。
 
 - Front capability；
 - Service capability；
@@ -291,16 +292,16 @@ Actrium 本地以以下联合键保存：
 (publisher, program, version, service_package_digest)
 ```
 
-联合键使用 Service 包 digest，Program Release 记录同时固定 Front 包 digest。
+联合键使用 Service 包 digest，Program Release 记录同时固定 Front 包和所绑定 Privacy Contract 的内容摘要。
 
 规则：
 
-- 第一次接受发布版本时固定两个包的摘要。
-- 同一 Program Release 的 Service 或 Front 包出现不同 digest 时报告 `PACKAGE_EQUIVOCATION`。
+- 第一次接受发布版本时固定两个包的摘要和所声明的 Privacy Contract 绑定。
+- 同一 Program Release 的 Service、Front 或 Privacy Contract 绑定发生变化时报告 `PACKAGE_EQUIVOCATION`。
 - 不能用「Publisher 更新了文件」覆盖缓存；
 - 更新必须使用新 SemVer；
 - Service 实例固定其执行的 Service 包摘要。
-- Service 实例仍引用时，保留 Service 和 Front 两个包的缓存；
+- Service 实例仍引用时，保留 Service、Front 包及绑定的 Privacy Contract 缓存。
 - 每个重新下载的归档都要按其固定摘要重新验证。
 
 本地 first-seen pin 只能保护当前安装；Marketplace 可以帮助多个客户端比对已见 digest。要对所有客户端提供全局 non-equivocation，需要后续引入公开 append-only transparency log。v1 不把单机 pin 夸大成全局透明性。
@@ -417,5 +418,6 @@ cache/extracted/sha256/<digest>/...
 - 原子写入；
 - 未完成下载隔离；
 - 缓存元数据记录 Publisher key 与验证时间；
+- 保存签名发布记录，并按固定内容摘要缓存 Privacy Contract 字节，以便离线重新验证。
 - Publisher 离线时，本地实例按离线策略使用固定的 Service 和 Front 包运行。
 - Realm 凭据/撤销过期时按离线安全政策处理，不等同于 package 验证失败。

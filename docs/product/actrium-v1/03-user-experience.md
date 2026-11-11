@@ -159,15 +159,16 @@ The RealmId cannot be changed after creation; a RealmId already used within the 
 
 ### 5.3 Workspace selection
 
-When an application uses a Workspace, the signed Program Release record declares three separate requirements.
+The verified Service manifest declares the application's static requirements in `[workspace]`.
 
 - `requirement` selects `none`, `optional`, or `required`.
-- `provisioning` selects `managed` or `user-selected`.
 - `access` requests `read-only` or `read-write`.
+- `providers` lists the supported Workspace Provider types.
 
-The record may also restrict `providers`, such as `managed-store`, `local-folder`, `cloud-drive`,
-or `remote-repository`. Actrium uses these requirements and the user's authorization to select a
-Workspace. The Host stores the selected location, granted access, and lease with the instance.
+Actrium intersects `providers` with platform support and user or organization policy.
+The deployment or creation flow selects `provisioning`, either `managed` or `user-selected`.
+The Host stores the selected Provider and location, granted access, and lease with the instance.
+For `requirement = "required"`, the binding must satisfy the declared access before the Service enters Ready.
 Node deployment settings are described in [05 §6](05-program-package-and-distribution.md#6-package-manifest-fields).
 
 The selector shows:

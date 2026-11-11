@@ -48,8 +48,9 @@ ProgramReleaseId = publisher/program@version
 ```
 
 The Publisher-signed release record pins the Service and Front package digests. The packages
-carry their respective Workloads, contracts, and Host requirements. Actrium applies the
-Workspace, quota, and other instance policies through deployment and authorization.
+carry their respective Workloads, contracts, and Host requirements. The Service manifest declares
+static Workspace requirements in `[workspace]`. Actrium applies provisioning, actual grants,
+quotas, and other instance policies through deployment and authorization.
 
 ### 2.3 Service
 

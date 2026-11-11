@@ -176,8 +176,10 @@ The Contract freezes at least:
 - output/declassification rules;
 - the action to take on unknown or invalid evidence.
 
-The standalone Privacy Contract binds the Program Release and both archive digests. The verifier
-matches them to the signed release record.
+The signed Program Release record authenticates the standalone Privacy Contract's exact bytes
+through `privacy_contract.sha256`. The verifier checks this hash before interpreting the contract
+for authorization, then matches its release identity and both package digests to the record.
+The binding and verification rules are defined in [12 §3.1](12-reference-spec.md#31-signed-program-release-record).
 
 ```toml
 [privacy_contract]

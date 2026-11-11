@@ -146,15 +146,9 @@ The release record names both packages. The archive SHA-256 values and signature
     "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
     "type": "notes.example/team-notes-front@1.4.2"
   },
-  "workspace": {
-    "requirement": "required",
-    "provisioning": "user-selected",
-    "access": "read-write",
-    "providers": [
-      "managed-store",
-      "local-folder",
-      "cloud-drive"
-    ]
+  "privacy_contract": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.privacy.toml",
+    "sha256": "0f9e4a476a26c7d6896f8be66f3dec4ebfb3168addde52d3ff339662e12d2147"
   },
   "signature": {
     "key_id": "actr-pub-3f9a1c0d2b7e4a61",
@@ -167,8 +161,8 @@ The release record names both packages. The archive SHA-256 values and signature
 `schema` is `actrium.program-release/v1`. `release_id` is the Service Actor type in
 `publisher/program@version` form. The two Actor types must be distinct and belong to that Publisher.
 The `service` and `front` members identify the package roles and bind each archive's HTTPS address,
-SHA-256, and exact Actor type. Within a release, both package types,
-their digests, and the Workspace requirements are fixed. Download addresses can change.
+SHA-256, and exact Actor type. Within a release, both package types and digests,
+and the presence and digest of a Privacy Contract, are fixed. Download addresses can change.
 
 The Publisher signs the record with an active package signing key from the Publisher Profile's
 `keys`. The signature covers the record with the `signature` member removed, canonicalized
@@ -176,14 +170,20 @@ using RFC 8785 JCS. The signature value is the base64-encoded Ed25519 signature.
 verifies it with the trusted Publisher key selected by `signature.key_id`, following the key
 acceptance and revocation rules for package signatures.
 
-The optional `workspace` member declares the application's Workspace requirements as described
-in [03 §5.3](03-user-experience.md#53-workspace-selection). When it is absent, the release has
-no Workspace requirement. Actrium records the actual Workspace and access grant per instance.
+Workspace requirements are declared by `[workspace]` in the signed Service manifest, as described
+in [03 §5.3](03-user-experience.md#53-workspace-selection).
+
+When a release uses a Program Privacy Contract, its signed record must include `privacy_contract`
+with the HTTPS address and SHA-256 of that file's exact bytes. Actrium verifies the record, then
+checks the fetched contract against that digest before using its declarations for authorization.
+It also checks the contract's `release_id` and both package digests against the record.
+Contract contents and binding must pass verification before the Host can grant capabilities
+governed by that contract. See [14 §4.2](14-privacy-primitives-and-attestation.md#42-program-privacy-contract).
 
 Actrium can use a verified local record or obtain a record from the Publisher or Marketplace.
 When opening a Realm, the record's `service.type` and `service.sha256` must match
 `Realm Profile.package`. Installing a published release requires a verified matching record. Actrium rejects
-conflicting package bindings for an accepted release. See
+conflicting package or Privacy Contract bindings for an accepted release. See
 [05 §3](05-program-package-and-distribution.md#3-where-a-package-comes-from) for package selection.
 
 ## 4. `.actr` Manifest
@@ -212,6 +212,11 @@ profile = "actr.host/1"
 api = "^1.0.0"
 required-capabilities = []
 optional-capabilities = []
+
+[workspace]
+requirement = "required"
+access = "read-write"
+providers = ["managed-store", "local-folder", "cloud-drive"]
 
 [signature]
 algorithm = "ed25519"

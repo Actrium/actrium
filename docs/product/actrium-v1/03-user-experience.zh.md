@@ -159,15 +159,17 @@ RealmId 创建后不可修改；同一 Realm 域名内已用过的 RealmId 不�
 
 ### 5.3 Workspace 选择
 
-应用使用 Workspace 时，签名 Program Release 记录分别声明三个要求。
+已验证的 Service manifest 通过 `[workspace]` 声明应用的静态要求。
 
 - `requirement` 取 `none`、`optional` 或 `required`。
-- `provisioning` 取 `managed` 或 `user-selected`。
 - `access` 申请 `read-only` 或 `read-write`。
+- `providers` 列出支持的 Workspace Provider 类型。
 
-发布记录还可通过 `providers` 限制允许的 Workspace Provider，例如 `managed-store`、`local-folder`、
-`cloud-drive` 或 `remote-repository`。Actrium 根据这些要求和用户授权选择 Workspace。
-Host 按实例保存选定的位置、实际授权和租约。节点部署参数见[第 05 章 §6](05-program-package-and-distribution.zh.md#6-包清单字段)。
+Actrium 将 `providers` 与平台支持范围、用户和组织策略取交集。
+部署或创建流程选择 `provisioning`，取值为 `managed` 或 `user-selected`。
+Host 按实例保存选定的 Provider、位置、实际授权和租约。
+`requirement = "required"` 时，绑定必须满足声明的访问要求，Service 才能进入 Ready。
+节点部署参数见[第 05 章 §6](05-program-package-and-distribution.zh.md#6-包清单字段)。
 
 选择器显示：
 

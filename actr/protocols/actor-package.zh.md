@@ -392,6 +392,29 @@ Profile 的 `keys` 中找 key（`active` 或 `retired` 均可）验证 `manifest
 Publisher Profile 签名 key（`profile_signing_keys`）的轮换另按
 [Actr Authority Discovery](authority-discovery.zh.md) 第 4.4、4.5 节进行。
 
+### 6.9 `[workspace]`
+
+可选的顶层 `[workspace]` 表声明此 Workload 对用户工作空间的静态要求，由 manifest 签名覆盖。
+Product v1 在 Service 包中声明这些要求。
+
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `requirement` | `none` / `optional` / `required` | 是否申请 Workspace，以及进入 Ready 前是否必须绑定。 |
+| `access` | `read-only` / `read-write` | Workload 申请的访问级别。 |
+| `providers` | 非空字符串数组 | Workload 支持的 Workspace Provider 类型，例如 `local-folder`、`cloud-drive`。 |
+
+省略此表等同于 `requirement = "none"`。声明此表时必须提供 `requirement`。
+`requirement` 为 `optional` 或 `required` 时，必须提供 `access` 和至少一个 `providers` 条目。
+`requirement = "none"` 时省略 `access` 和 `providers`，Workload 仍可使用实例私有存储。
+
+Host 将 Provider 支持范围与平台能力、用户和组织策略取交集，并取得用户授权。
+绑定必须提供声明的访问级别，实际授权以 `access` 为上限。`required` 的绑定要求满足后，
+Workload 才能进入 Ready。`optional` 允许以未绑定 Workspace 的状态运行。
+
+`provisioning`（`managed` 或 `user-selected`）由部署或实例创建流程选择。
+实际 Provider、位置、凭据引用、授权和租约由 Host 按实例保存。
+`[workspace]` 仅接受上表定义的三个字段。
+
 ## 7. Workload Profile
 
 ### 7.1 Profile 的职责

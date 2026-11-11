@@ -140,7 +140,9 @@ flowchart LR
 
 - `actor.publisher` 保存规范化 Publisher 域名。
 - Service 与 Front 各使用一份 `actr-package/2` 清单，分别描述一个 Workload。
+- 读取器和打包器支持 Service manifest 的 `[workspace]`，Host 在 Ready 前检查必需绑定。
 - 验证器检查各自的包清单和绑定两个包的发布记录。
+- 验证器按签名发布记录中的 `privacy_contract.sha256` 认证 Privacy Contract 字节。
 - 加载器验证每个包的 Workload Profile 后装载其入口。
 - `[[files]]` 绑定 Guest、契约、资源和随包分发的依赖锁。
 - `signature.key-id` 对接 Publisher Profile。

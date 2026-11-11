@@ -44,16 +44,20 @@ Guest 可见的 launch context 只包含：
 
 ## 3. Workspace 声明
 
-Workspace 由互相正交的字段描述：
+签名的 Service manifest 在 `[workspace]` 中声明以下静态要求。
 
 | 维度 | 值 | 含义 |
 |---|---|---|
 | requirement | `none` / `optional` / `required` | 是否需要用户 Workspace，以及何时必须绑定 |
-| provisioning | `managed` / `user-selected` | 由 Actrium 创建，还是由用户选择 |
-| access | `read-only` / `read-write` | Service 获得的访问能力 |
+| access | `read-only` / `read-write` | Service 申请的访问能力 |
 | providers | 一组 Workspace Provider 类型 | 允许 `managed-store`、`local-folder`、`cloud-drive` 等实现 |
 
-`requirement=none` 时 Service 仍可使用实例私有 store，但不能获得用户 Workspace。`requirement=required` 与 `provisioning=managed` 可以同时出现，含义是创建 Service 时由 Actrium 自动创建一个必需 Workspace。
+省略 `[workspace]` 等同于 `requirement = "none"`，Service 仍可使用实例私有存储。
+字段校验和就绪规则见[包协议](../../../actr/protocols/actor-package.zh.md#69-workspace)。
+
+部署或实例创建流程选择 `provisioning`。`managed` 表示由 Actrium 准备 Workspace，
+`user-selected` 表示由用户选择并授权。实际 Provider、位置、凭据、访问授权和租约
+保存在实例的 Workspace 绑定中。
 
 写入并发策略：
 
@@ -255,7 +259,7 @@ actrium-data/
 ```text
 program_release
   publisher, program, version, service_package_digest, front_package_digest,
-  release_record, trust_state
+  privacy_contract_digest, release_record, trust_state
 
 service
   realm_name, actor_id, actor_id_hash, publisher, program, version, service_package_digest,

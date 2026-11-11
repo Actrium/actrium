@@ -176,7 +176,9 @@ Contract 至少冻结：
 - output/declassification 规则；
 - 未知或失效证据的动作。
 
-独立的 Privacy Contract 绑定 Program Release 及两个归档的摘要。验证器将这些字段与签名发布记录核对。
+签名的 Program Release 记录通过 `privacy_contract.sha256` 认证独立 Privacy Contract 的原始字节。
+验证器先校验内容哈希，再解释契约用于授权，并将发布身份和两个包摘要与记录核对。
+绑定和验证规则见[第 12 章 §3.1](12-reference-spec.zh.md#31-签名-program-release-记录)。
 
 ```toml
 [privacy_contract]

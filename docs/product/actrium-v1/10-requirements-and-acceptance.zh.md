@@ -40,8 +40,8 @@
 | FR-PKG-005 | 必须拒绝 zip traversal、超限文件数、解压总量和压缩炸弹。 |
 | FR-PKG-006 | 第三方 package 不得包含 Front Host/native plugin。 |
 | FR-PKG-007 | Guest 必须从已验证本地 bytes 加载，不得由 Keel 直接信任远端 URL。 |
-| FR-PKG-008 | 同一 Program Release 的 Service 或 Front 包出现不同摘要时必须拒绝。 |
-| FR-PKG-009 | Service 实例仍在引用时，必须保留 Service 和 Front 包的缓存。 |
+| FR-PKG-008 | 同一 Program Release 的 Service、Front 或 Privacy Contract 绑定发生变化时必须拒绝。 |
+| FR-PKG-009 | Service 实例仍在引用发布版本时，必须保留 Service、Front 包及绑定的 Privacy Contract 缓存。 |
 | FR-PKG-010 | Marketplace metadata 不得覆盖 Publisher package identity。 |
 | FR-PKG-011 | Product v1 的本地导入必须支持配套的 Service 与 Front `.actr` 文件。开发来源必须明确标记。 |
 | FR-PKG-012 | 必须支持 Advisory/Block new/Quarantine/Critical block 撤销等级。 |
@@ -79,7 +79,7 @@
 | FR-SVC-010 | Service 可以编排 Realm 内的其他 Actor，但 Front 只绑定 Service。 |
 | FR-SVC-011 | v1 版本升级必须走新 Actor + 显式迁移。 |
 | FR-SVC-012 | Service 彻底清除后 ActorId 不得复用。 |
-| FR-SVC-013 | Workspace 必须分别声明 requirement、provisioning、access 与允许的 Workspace Provider（`providers`）。 |
+| FR-SVC-013 | 静态 Workspace 要求必须通过 Service manifest 的 `[workspace]` 表声明，字段为 `requirement`、`access` 和 `providers`。省略此表等同于 `requirement = "none"`。准备方式和实际绑定属于实例设置。必需的绑定满足声明的访问要求后，Service 才能进入 Ready。 |
 | FR-SVC-014 | 移入回收站必须保留身份与实例数据并可恢复；彻底清除必须撤销身份且不可恢复。 |
 | FR-SVC-015 | 生命周期、可达性、健康度、placement 与 attachment 状态必须分字段记录。 |
 | FR-SVC-016 | v1 新建实例只在当前设备的受支持本地 Actr Host 创建；远端管理必须另有宿主授予的 management capability。 |
@@ -161,7 +161,7 @@
 | FR-SEC-043 | Evidence、Attestation Result、Reference Value、Endorsement 或 TCB 状态到期/撤销时必须停止新的敏感数据与 key release，并触发 re-attestation/rekey。 |
 | FR-SEC-044 | 高敏输出跨越 data class 时必须经过显式 declassification/output policy；合法 Actor response 不得成为绕过 egress closure 的隐蔽出口。 |
 | FR-SEC-045 | 绿色必须绑定当前 `ApplicationStateDigest`（`structureDigest` + Principal + Merkle 根）且 `Ready`；不得给 Publisher 或 Program 笼统绿标。 |
-| FR-SEC-046 | Program Privacy Contract 必须静态声明允许的 Actor roles/types/profiles、cardinality、edges、data classes、capabilities、terminals、audit sinks 和 assurance requirements。 |
+| FR-SEC-046 | Program Privacy Contract 必须静态声明允许的 Actor roles/types/profiles、cardinality、edges、data classes、capabilities、terminals、audit sinks 和 assurance requirements。Host 将其用于授权前，必须按签名 Program Release 记录验证契约原始字节的 SHA-256，并核对发布版本和包绑定。 |
 | FR-SEC-047 | Actr Host 可发放的有效 capability 必须是 Contract、用户/组织 policy、Host policy 和 instance grant 的交集；未声明能力不得获得 handle。 |
 | FR-SEC-048 | 实际 Actor/runtime 图必须是 Contract graph grammar 的实例；所有 mutation 必须先形成 candidate graph，不得直接改变已获批数据图。 |
 | FR-SEC-049 | 初始图必须在释放受保护数据或 DEK 前完成身份、证据、策略和 `ApplicationAssurance` 评估。 |
