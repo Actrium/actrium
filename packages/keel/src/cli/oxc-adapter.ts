@@ -110,10 +110,30 @@ export function analyzeJSXProps(code: string): JSXAnalysisResult {
  * Extract component names from a transpiled bundle (JSX is already lowered
  * to `jsx(...)`/`createElement(...)` calls at this point).
  */
-export function analyzeBundleComponents(code: string): string[] {
+export function analyzeBundleComponents(
+  code: string,
+  options?: { failClosed?: boolean }
+): string[] {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const impl = require('./oxc-adapter.js');
-  return impl.analyzeBundleComponents(code);
+  return impl.analyzeBundleComponents(code, options);
+}
+
+export type ServiceUsage = {
+  /** Literal `host:service.call` / `tell` routes. */
+  rpc: string[];
+  /** Literal `host:service.on` event names. */
+  events: string[];
+};
+
+/**
+ * Collect literal `host:service` routes and events from a lowered bundle.
+ * Throws when a route or event cannot be determined statically.
+ */
+export function analyzeServiceUsage(code: string): ServiceUsage {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxc-adapter.js');
+  return impl.analyzeServiceUsage(code);
 }
 
 /**

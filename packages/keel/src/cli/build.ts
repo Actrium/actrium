@@ -766,6 +766,7 @@ export function createV1CapabilityManifest(
     guestEntry: string;
     imports?: string[];
     components?: string[];
+    service?: { rpc: string[]; events: string[] };
   },
   contract?: KeelContractShape
 ): CapabilityManifestV1 {
@@ -797,6 +798,15 @@ export function createV1CapabilityManifest(
   for (const entry of Object.values(hostModules)) {
     entry.rpc.sort();
     entry.events.sort();
+  }
+
+  if (options.service && hostModules.service) {
+    // `host:service` is a generic transport module; the v1 manifest must list
+    // the business routes/events the Guest actually invokes.
+    hostModules.service = {
+      rpc: Array.from(new Set(options.service.rpc)).sort(),
+      events: Array.from(new Set(options.service.events)).sort(),
+    };
   }
 
   return {
@@ -950,8 +960,11 @@ export async function build(options: BuildOptions): Promise<void> {
   // jsx(...) calls; component names come from analyzeBundleComponents.
   let bundleImports: string[] = [];
   let bundleComponents = jsxAnalysis.components;
+  let serviceUsage: { rpc: string[]; events: string[] } | undefined;
   try {
-    const { analyzeModuleIDs, analyzeBundleComponents } = await import('./oxc-adapter');
+    const { analyzeModuleIDs, analyzeBundleComponents, analyzeServiceUsage } = await import(
+      './oxc-adapter'
+    );
     bundleImports = analyzeModuleIDs(bundleCode).static.filter(
       (moduleId) => !moduleId.startsWith('.') && !moduleId.startsWith('host:')
     );
@@ -982,7 +995,10 @@ export async function build(options: BuildOptions): Promise<void> {
         throw new Error('Component analysis build produced no output');
       }
       const analysisCode = (await Promise.all(jsOutputs.map((output) => output.text()))).join('\n');
-      analysisComponents = analyzeBundleComponents(analysisCode);
+      analysisComponents = analyzeBundleComponents(analysisCode, {
+        failClosed: true,
+      });
+      serviceUsage = analyzeServiceUsage(analysisCode);
       if (!/import_guest\d*/.test(analysisCode) && analysisCode.includes('keel/guest')) {
         console.warn('  ⚠ Component analysis could not resolve keel/guest bindings');
       }
@@ -1179,6 +1195,7 @@ ${footerCode}
           guestEntry,
           imports: bundleImports,
           components: bundleComponents,
+          service: serviceUsage,
         },
         contract
       )

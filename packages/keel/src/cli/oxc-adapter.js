@@ -720,21 +720,48 @@ function traverseAST(node, visitor) {
  * Extract component names from a transpiled bundle.
  *
  * JSX is already lowered to `jsx(...)` / `jsxs(...)` / `createElement(...)`
- * calls, so the component is the first argument: a string literal or a
- * member expression such as `import_guest.View`.
+ * calls. The component can be a string tag, an `import_guest.View` member, or
+ * a local identifier aliasing an SDK component (`const M = Modal; <M />`).
+ * When `failClosed` is set, identifiers whose provenance cannot be resolved
+ * reject the build instead of silently widening the allowlist.
  */
-function analyzeBundleComponents(code) {
+function analyzeBundleComponents(code, options = {}) {
   if (!oxc || !oxc.parseSync) {
     throw new Error("oxc-parser not available. Please install it with 'npm i -D oxc-parser'.");
   }
 
   const components = new Set();
+  const sdkAliases = new Map();
+  const aliasSources = new Map();
+  const localComponents = new Set();
+  const jsxIdentifiers = new Set();
 
   try {
     const result = oxc.parseSync(code, { sourceFilename: 'bundle.js' });
     const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
 
     traverseAST(ast, (node) => {
+      if (node.type === 'FunctionDeclaration' && node.id?.name) {
+        localComponents.add(node.id.name);
+      } else if (node.type === 'ClassDeclaration' && node.id?.name) {
+        localComponents.add(node.id.name);
+      } else if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') {
+        const name = node.id.name;
+        const init = node.init;
+        if (init?.type === 'ArrowFunctionExpression' || init?.type === 'FunctionExpression') {
+          localComponents.add(name);
+        } else if (init?.type === 'Identifier') {
+          aliasSources.set(name, init.name);
+        } else if (
+          (init?.type === 'MemberExpression' || init?.type === 'StaticMemberExpression') &&
+          init.object?.type === 'Identifier' &&
+          /^import_guest\d*$/.test(init.object.name) &&
+          init.property?.type === 'Identifier'
+        ) {
+          sdkAliases.set(name, init.property.name);
+        }
+      }
+
       if (node.type !== 'CallExpression') return;
       const callee = node.callee;
       const calleeName =
@@ -771,13 +798,154 @@ function analyzeBundleComponents(code) {
         if (objectName && /^import_guest\d*$/.test(objectName)) {
           components.add(first.property.name);
         }
+      } else if (first.type === 'Identifier') {
+        jsxIdentifiers.add(first.name);
       }
     });
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [name, source] of aliasSources) {
+        if (!sdkAliases.has(name) && sdkAliases.has(source)) {
+          sdkAliases.set(name, sdkAliases.get(source));
+          changed = true;
+        }
+      }
+    }
+
+    for (const name of jsxIdentifiers) {
+      const sdkName = sdkAliases.get(name);
+      if (sdkName) {
+        components.add(sdkName);
+      } else if (!localComponents.has(name) && options.failClosed) {
+        throw new Error(`Unable to establish component provenance for "${name}"`);
+      }
+    }
   } catch (err) {
+    if (options.failClosed) throw err;
     console.error('[oxc-adapter] analyzeBundleComponents failed:', err.message);
   }
 
   return Array.from(components).sort();
+}
+
+function isHostServiceRequire(node) {
+  if (!node || node.type !== 'CallExpression' || node.callee?.type !== 'Identifier') {
+    return false;
+  }
+  if (node.callee.name === 'require') {
+    const arg = node.arguments?.[0];
+    return (
+      (arg?.type === 'StringLiteral' || arg?.type === 'Literal') && arg.value === 'host:service'
+    );
+  }
+  if (node.callee.name === '__toESM') {
+    return isHostServiceRequire(node.arguments?.[0]);
+  }
+  return false;
+}
+
+function propertyName(property) {
+  if (!property || (property.type !== 'Property' && property.type !== 'ObjectProperty')) {
+    return undefined;
+  }
+  const key = property.key;
+  if (key?.type === 'Identifier') return key.name;
+  if ((key?.type === 'StringLiteral' || key?.type === 'Literal') && typeof key.value === 'string') {
+    return key.value;
+  }
+  return undefined;
+}
+
+/**
+ * Collect literal `host:service` routes and events from a lowered bundle.
+ * Dynamic route/event values reject the build because the manifest cannot
+ * describe which operation the Guest actually invokes.
+ */
+function analyzeServiceUsage(code) {
+  if (!oxc || !oxc.parseSync) {
+    throw new Error("oxc-parser not available. Please install it with 'npm i -D oxc-parser'.");
+  }
+
+  const serviceBindings = new Set();
+  const serviceMethods = new Map();
+  const rpc = new Set();
+  const events = new Set();
+
+  const result = oxc.parseSync(code, { sourceFilename: 'bundle.js' });
+  const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
+
+  traverseAST(ast, (node) => {
+    if (
+      node.type === 'VariableDeclarator' &&
+      node.id?.type === 'Identifier' &&
+      isHostServiceRequire(node.init)
+    ) {
+      serviceBindings.add(node.id.name);
+    }
+    if (
+      node.type === 'VariableDeclarator' &&
+      node.id?.type === 'ObjectPattern' &&
+      isHostServiceRequire(node.init)
+    ) {
+      for (const property of node.id.properties ?? []) {
+        const method = propertyName(property);
+        if (method && property.value?.type === 'Identifier') {
+          serviceMethods.set(property.value.name, method);
+        }
+      }
+    }
+    if (
+      node.type === 'VariableDeclarator' &&
+      node.id?.type === 'Identifier' &&
+      (node.init?.type === 'MemberExpression' || node.init?.type === 'StaticMemberExpression') &&
+      node.init.object?.type === 'Identifier' &&
+      serviceBindings.has(node.init.object.name) &&
+      node.init.property?.type === 'Identifier'
+    ) {
+      serviceMethods.set(node.id.name, node.init.property.name);
+    }
+
+    if (node.type !== 'CallExpression') return;
+    let method;
+    if (
+      (node.callee?.type === 'MemberExpression' ||
+        node.callee?.type === 'StaticMemberExpression') &&
+      node.callee.object?.type === 'Identifier' &&
+      serviceBindings.has(node.callee.object.name) &&
+      node.callee.property?.type === 'Identifier'
+    ) {
+      method = node.callee.property.name;
+    } else if (node.callee?.type === 'Identifier') {
+      method = serviceMethods.get(node.callee.name);
+    }
+    if (method !== 'call' && method !== 'tell' && method !== 'on') return;
+
+    const argument = node.arguments?.[0];
+    if (!argument || argument.type !== 'ObjectExpression') {
+      throw new Error(`host:service.${method} requires an object literal`);
+    }
+    const key = method === 'on' ? 'event' : 'route';
+    const property = (argument.properties ?? []).find(
+      (candidate) => propertyName(candidate) === key
+    );
+    const value = property?.value;
+    if (
+      !property ||
+      !(value?.type === 'StringLiteral' || value?.type === 'Literal') ||
+      typeof value.value !== 'string'
+    ) {
+      throw new Error(`host:service.${method} requires a literal "${key}"`);
+    }
+    if (method === 'on') {
+      events.add(value.value);
+    } else {
+      rpc.add(value.value);
+    }
+  });
+
+  return { rpc: Array.from(rpc).sort(), events: Array.from(events).sort() };
 }
 
 /**
@@ -868,6 +1036,7 @@ module.exports = {
   analyzeHostBoundary,
   analyzeJSXProps,
   analyzeBundleComponents,
+  analyzeServiceUsage,
   analyzeSourceComponents,
   analyzeSourceImports,
 };

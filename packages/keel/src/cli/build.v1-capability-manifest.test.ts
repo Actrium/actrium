@@ -62,6 +62,29 @@ describe('createV1CapabilityManifest', () => {
     ).toThrow('require a contract');
   });
 
+  it('uses literal service routes and events from usage analysis', () => {
+    const manifest = createV1CapabilityManifest(
+      {
+        hostModuleIds: ['host:service'],
+        hostCapabilities: ['host:service.call', 'host:service.on'],
+      },
+      {
+        keelApi: '1.0',
+        guestEntry: 'ui/guest.bundle.js',
+        service: {
+          rpc: ['echo.EchoService.Echo'],
+          events: ['demo.chat.v1.messageAdded'],
+        },
+      },
+      contract
+    );
+
+    expect(manifest.hostModules.service).toEqual({
+      rpc: ['echo.EchoService.Echo'],
+      events: ['demo.chat.v1.messageAdded'],
+    });
+  });
+
   it('rejects components outside the allowlist', () => {
     expect(() => assertAllowedComponents(['View', 'WebView'])).toThrow(
       'WebView'
@@ -205,6 +228,148 @@ describe('v1 component allowlist integration', () => {
       'src/barrel.ts': "export { Child } from './child';",
       'src/child.tsx': DIRECT_CHILD,
     });
+  });
+
+  it('rejects aliased SDK components in identifier position', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { Modal } from 'keel/guest';
+
+const M = Modal;
+
+export default function App() {
+  return <M />;
+}
+`,
+    });
+  });
+
+  it('fails closed when component provenance is unresolved', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'keel-v1-provenance-')
+    );
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+
+function Wrapper(C) {
+  return <C />;
+}
+
+export default function App() {
+  return <Wrapper C={View} />;
+}
+`
+      );
+
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          contract,
+          v1CapabilityManifest: path.join(
+            tempDir,
+            'dist/capability-manifest.json'
+          ),
+        })
+      ).rejects.toThrow('provenance');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('emits literal service routes in the v1 manifest', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-service-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+export function send() {
+  return call({ route: 'echo.EchoService.Echo', payloadBase64: '' });
+}
+
+export default function App() {
+  return <View />;
+}
+`
+      );
+      const manifestPath = path.join(
+        tempDir,
+        'dist/capability-manifest.json'
+      );
+
+      await build({
+        entry: path.join(srcDir, 'entry.tsx'),
+        outfile: path.join(tempDir, 'dist/bundle.js'),
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        contract,
+        v1CapabilityManifest: manifestPath,
+      });
+
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      expect(manifest.hostModules.service).toEqual({
+        rpc: ['echo.EchoService.Echo'],
+        events: [],
+      });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects dynamic service routes', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'keel-v1-service-dynamic-')
+    );
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+export function send(route: string) {
+  return call({ route, payloadBase64: '' });
+}
+
+export default function App() {
+  return <View />;
+}
+`
+      );
+
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          contract,
+          v1CapabilityManifest: path.join(
+            tempDir,
+            'dist/capability-manifest.json'
+          ),
+        })
+      ).rejects.toThrow('literal "route"');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('rejects components behind a dynamic import in minified builds', async () => {
