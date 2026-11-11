@@ -37,9 +37,23 @@ function asObject(value: unknown, label: string): Record<string, unknown> {
 
 function requireString(value: unknown, label: string, allowEmpty = false): string {
   if (typeof value !== 'string' || (!allowEmpty && value.length === 0)) {
-    throw new Error(`${label} must be a${allowEmpty ? 'n' : ' non-empty'} string`);
+    throw new Error(
+      `${label} must be ${allowEmpty ? 'a string' : 'a non-empty string'}`
+    );
   }
   return value;
+}
+
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+
+function requireBase64(value: unknown, label: string): string {
+  const text = requireString(value, label, true);
+  if (text.length % 4 !== 0 || !BASE64_PATTERN.test(text)) {
+    throw new Error(
+      `${label} must be standard base64 (RFC 4648, padded)`
+    );
+  }
+  return text;
 }
 
 export const contract = defineKeelContract({
@@ -51,10 +65,9 @@ export const contract = defineKeelContract({
           parseInput: (value) => {
             const input = asObject(value, 'service.call input');
             const route = requireString(input.route, 'service.call input.route');
-            const payloadBase64 = requireString(
+            const payloadBase64 = requireBase64(
               input.payloadBase64,
-              'service.call input.payloadBase64',
-              true
+              'service.call input.payloadBase64'
             );
             const { timeoutMs } = input;
             if (
@@ -72,10 +85,9 @@ export const contract = defineKeelContract({
           parseOutput: (value) => {
             const output = asObject(value, 'service.call output');
             return {
-              payloadBase64: requireString(
+              payloadBase64: requireBase64(
                 output.payloadBase64,
-                'service.call output.payloadBase64',
-                true
+                'service.call output.payloadBase64'
               ),
             };
           },
@@ -87,10 +99,9 @@ export const contract = defineKeelContract({
             const input = asObject(value, 'service.tell input');
             return {
               route: requireString(input.route, 'service.tell input.route'),
-              payloadBase64: requireString(
+              payloadBase64: requireBase64(
                 input.payloadBase64,
-                'service.tell input.payloadBase64',
-                true
+                'service.tell input.payloadBase64'
               ),
             };
           },
@@ -102,10 +113,9 @@ export const contract = defineKeelContract({
             const event = asObject(value, 'service.on event');
             return {
               event: requireString(event.event, 'service.on event.event'),
-              payloadBase64: requireString(
+              payloadBase64: requireBase64(
                 event.payloadBase64,
-                'service.on event.payloadBase64',
-                true
+                'service.on event.payloadBase64'
               ),
             };
           },

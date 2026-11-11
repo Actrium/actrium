@@ -40,6 +40,15 @@ describe('host:service contract', () => {
     ).toThrow();
   });
 
+  test('call rejects invalid base64 payloads', () => {
+    expect(() =>
+      call.schema?.parseInput?.({ route: 'echo.EchoService.Echo', payloadBase64: 'AAE' })
+    ).toThrow();
+    expect(() =>
+      call.schema?.parseInput?.({ route: 'echo.EchoService.Echo', payloadBase64: '!!!' })
+    ).toThrow();
+  });
+
   test('call rejects a non-string payload', () => {
     expect(() =>
       call.schema?.parseInput?.({ route: 'echo.EchoService.Echo', payloadBase64: 1 })
@@ -78,6 +87,22 @@ describe('host:service contract', () => {
       payloadBase64: 'AAEC',
     });
     expect(() => call.schema?.parseOutput?.({ payloadBase64: 1 })).toThrow();
+  });
+
+  test('tell rejects invalid base64 payloads', () => {
+    expect(() =>
+      tell.schema?.parseInput?.({ route: 'echo.EchoService.Echo', payloadBase64: 'AAE' })
+    ).toThrow();
+  });
+
+  test('on rejects invalid base64 event payloads', () => {
+    expect(() =>
+      on.schema?.parseEvent?.({ event: 'echo.changed', payloadBase64: 'AAE' })
+    ).toThrow();
+  });
+
+  test('call output rejects invalid base64 payloads', () => {
+    expect(() => call.schema?.parseOutput?.({ payloadBase64: 'AAE' })).toThrow();
   });
 
   test('tell accepts a valid request and rejects a missing route', () => {
