@@ -122,6 +122,23 @@ describe('verifyCapabilityManifest', () => {
     expect(result.code).toBe('capability_mismatch');
   });
 
+  test('rejects an imported host module the package did not declare', () => {
+    const result = verifyCapabilityManifest(
+      {
+        ...manifest,
+        imports: ['host:service', 'host:clipboard'],
+        hostModules: { service: { rpc: ['call'] } },
+      },
+      {
+        ...options,
+        declaredCapabilities: ['service'],
+        hostSupportedModules: new Set(['host:service', 'host:clipboard']),
+      }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+  });
+
   test('rejects an unsupported manifest schema version', () => {
     const result = verifyCapabilityManifest(
       { ...manifest, schemaVersion: 2 },

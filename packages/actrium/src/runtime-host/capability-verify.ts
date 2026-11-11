@@ -173,6 +173,20 @@ export function verifyCapabilityManifest(
         );
       }
     }
+    // Importing a host module is itself a capability acquisition, even when
+    // the manifest records no calls or events for it.
+    for (const importName of manifest.imports) {
+      if (!importName.startsWith('host:')) continue;
+      const capability =
+        importName === 'host:service' ? 'service' : importName;
+      const resolved = resolveDeclaredCapability(capability);
+      if (!resolved || !declared.has(resolved)) {
+        return fail(
+          'capability_mismatch',
+          `Capability "${capability}" is imported but not declared by the package.`
+        );
+      }
+    }
   }
 
   return { ok: true, details };
