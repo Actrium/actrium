@@ -291,20 +291,20 @@ Actor 依赖按 alias 声明。示例：
 
 ```toml
 [dependencies.sync]
-actor = "acme:notes-sync"
+actor = "acme.com/notes-sync"
 version = "^2.0.0"
 contract = "contracts/sync.proto"
 required = true
 
 [dependencies.index]
-actor = "acme:notes-index"
+actor = "acme.com/notes-index"
 version = "^1.4.0"
 required = false
 ```
 
-Alias 是当前 Workload 内的稳定引用名。`actor` 标识 publisher 与 Actor name，`version`
-给出允许范围。`contract` 可绑定调用方编译时使用的 interface；Profile 或下级规范可以增加
-contract fingerprint。
+Alias 是当前 Workload 内的稳定引用名。`actor` 使用 `publisher/program`，版本约束由
+`version` 单独声明。`contract` 可绑定调用方编译时使用的 interface。Profile 或下级规范可以
+增加 contract fingerprint。
 
 依赖：
 
@@ -637,7 +637,7 @@ required-capabilities = [
 optional-capabilities = ["actor.storage"]
 
 [dependencies.sync]
-actor = "acme:notes-sync"
+actor = "acme.com/notes-sync"
 version = "^2.0.0"
 contract = "contracts/sync.proto"
 required = true

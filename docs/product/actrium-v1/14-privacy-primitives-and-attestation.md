@@ -176,13 +176,16 @@ The Contract freezes at least:
 - output/declassification rules;
 - the action to take on unknown or invalid evidence.
 
-The example binds a standalone Privacy Contract to the finished package digest.
+The standalone Privacy Contract binds the Program Release and both archive digests. The verifier
+matches them to the signed release record.
 
 ```toml
 [privacy_contract]
 schema_version = 1
 contract_id = "notes.example/team-notes@1.4.2#privacy"
-package_digest = "sha256:..."
+release_id = "notes.example/team-notes@1.4.2"
+service_package_digest = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+front_package_digest = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
 
 [[privacy_contract.actor_role]]
 role = "service"

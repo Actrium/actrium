@@ -64,7 +64,7 @@ Tab
 | D-015 | Actor credential 证明 Actor key、身份和 claims，不证明对端实际运行的代码。应用如何据此授权属于应用写法，见[应用开发建议](app-development-guidance.zh.md)。 |
 | D-016 | Workspace 的 requirement、provisioning、access 和允许的 Workspace Provider（`providers`）是独立维度，不能混成一个枚举。 |
 | D-017 | 删除分为可恢复的 Trashed 与不可恢复的 Purged/Deleted；删除 Workspace 始终是独立动作。 |
-| D-018 | Publisher 与 Realm 域名的 bootstrap 固定使用 HTTPS 443（即 `https://<domain>/.well-known/actr`）；Realm Profile 来自 `realms` 声明的 HTTPS 位置（可带端口），其中给出实例运行的包与 Actr Facility Provider 端点（可带端口）。取不到或验不过 Realm Profile 时不得使用 Realm Profile 以外的任何 Actr Facility Provider。 |
+| D-018 | Publisher 与 Realm 域名的 bootstrap 固定使用 HTTPS 443（即 `https://<domain>/.well-known/actr`）；Realm Profile 来自 `realms` 声明的 HTTPS 位置（可带端口），其中固定 Service 包与 Actr Facility Provider 端点（可带端口）。取不到或验不过 Realm Profile 时不得使用 Realm Profile 以外的任何 Actr Facility Provider。 |
 | D-019 | 应用保障按无根有效依赖图汇聚；通道有效且 `Ready` 时，展示颜色取全部节点结论的最弱项。Front 只定位，不是图根。 |
 | D-020 | `ActorAssurance` 由验证者签发，`issuer ≠ subject`。Actr Host 可评 Guest、可提供证据，不得自签自己的最终结论。 |
 | D-021 | 顶层只分绿 / 黄 / 红；切面未就绪时显示无法建立，不是第四色。未知不是已确认泄漏，但绝不能显示为绿。 |

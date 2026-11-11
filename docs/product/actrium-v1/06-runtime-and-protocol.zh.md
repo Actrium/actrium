@@ -69,6 +69,10 @@ Service 按已验证 Program Release 记录中的 Front 包类型校验该类型
 
 这些字段统一由 Actrium Host 根据已验证的包和本地会话状态构造。Service 将它们作为客户端声明用于兼容性协商。
 
+Attach 时，两端 Host 从 `dependencies.service.contract` 选定的已验证 RPC Proto 生成
+`protocolFingerprint`。使用该 Proto 的文件名和内容，沿用现有 Service 语义指纹算法，输出形式为
+`service_semantic:<64 位小写十六进制字符>`。见[指纹实现](../../../crates/actr-service-compat/src/fingerprint.rs)。
+
 平台提供可选的远端证明：受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential，供需要的 Service 验证。
 
 ### 2.3 Front 生命周期
@@ -351,7 +355,7 @@ actrium.session.v1.GetStatus
     "frontHostApi": "1.0",
     "keelApi": "1.0"
   },
-  "protocolFingerprint": "sha256:...",
+  "protocolFingerprint": "service_semantic:...",
   "tabSessionNonce": "<random>",
   "requestedLease": "exclusive",
   "challengeResponse": "<signed-proof>"
@@ -372,7 +376,7 @@ actrium.session.v1.GetStatus
     "actorId": "<ActorId>",
     "program": "notes.example/team-notes@1.4.2",
     "packageDigest": "sha256:...",
-    "protocolFingerprint": "sha256:..."
+    "protocolFingerprint": "service_semantic:..."
   },
   "workspace": {
     "displayName": "Team Notes",

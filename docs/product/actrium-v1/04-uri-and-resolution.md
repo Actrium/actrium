@@ -108,10 +108,10 @@ See [12 §10](12-reference-spec.md) for the full list. Those related to links:
 | `REALM_PROFILE_ROLLBACK` | The Realm Profile's `sequence` rolls back |
 | `ACTR_FACILITY_PROVIDER_MISMATCH` | `provider.id` differs from the one already accepted |
 | `REALM_RETIRED` | The Realm is retired |
-| `PACKAGE_DIGEST_MISMATCH` | The downloaded package does not match `package.sha256` |
+| `PACKAGE_DIGEST_MISMATCH` | A downloaded archive differs from the digest pinned for its package role |
 | `PACKAGE_SIGNATURE_INVALID` | Package signature verification failed |
-| `SERVICE_NOT_FOUND` | There is not exactly one Actor in the Realm whose type matches the package |
-| `SERVICE_ACTOR_TYPE_MISMATCH` | The Actor an Actor link points to has a type that does not match the package |
+| `SERVICE_NOT_FOUND` | The Realm has zero or multiple Actors whose type matches the pinned Service package |
+| `SERVICE_ACTOR_TYPE_MISMATCH` | The linked Actor's type differs from the type in the pinned Service package |
 
 Error codes are for logs, tests, and developer tools; user-facing copy must explain what the user
 can do.

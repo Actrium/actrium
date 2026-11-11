@@ -64,7 +64,7 @@ Turn this document's product semantics into a cross-repository, testable contrac
 
 - test vectors for the `actr://` Realm link;
 - Publisher Profile schema;
-- signed Program Release record schema and discovery rules.
+- signed Program Release record verification vectors and an online discovery interface.
 - the Realm signing key (the authority descriptor's `realm_signing_keys` member and the core `realms` relation, already defined in Actr Authority Discovery §4.3–4.4) and the Realm Profile schema;
 - persistent Actor identity lifecycle ADR;
 - Front–Service session proto;

@@ -7,7 +7,7 @@ The distribution design must keep three things separate:
 | Layer | Identifier | What it proves |
 |---|---|---|
 | Publisher | Normalized domain name | Who currently controls the publishing entry point |
-| Program Release | `publisher/program@version` + digest | Which immutable set of bytes to run |
+| Program Release | `publisher/program@version` with pinned Service and Front digests | Which two archives make up the release |
 | Service | ActorId + Actor credential | Which running instance is currently being talked to |
 
 HTTPS cannot prove a program is not malicious; Marketplace review cannot prove an Actor's identity on the network; an Actor credential cannot prove that the Guest loaded locally is the correct version either.
@@ -67,7 +67,7 @@ An offline root is a strongly recommended Publisher operating practice, but whet
 
 Control of a domain only determines the future publishing entry point; it must not silently rewrite history:
 
-- an already-installed `Program Release + digest + signing key` can keep running offline;
+- an installed release can run offline with its verified release record and both pinned packages.
 - when a new key has no verifiable rotation chain from the historical key, treat it as a Publisher ownership change;
 - an already-installed version must not change just because the current domain now returns a different package;
 - a new install or update must display the identity change;
@@ -77,7 +77,8 @@ Control of a domain only determines the future publishing entry point; it must n
 
 A Publisher-signed Program Release record pairs the Front and Service packages by download
 address, SHA-256 digest, and Actor type. Actrium verifies the record against the Publisher's
-trusted keys and verifies each package independently.
+trusted keys and verifies each package independently. See the
+[signed record example](12-reference-spec.md#31-signed-program-release-record).
 
 - **Opening an instance.** The Realm Profile's `package` pins the Service package. Match its
   Actor type and digest to a verified Program Release record to find the Front package.
@@ -94,12 +95,15 @@ trusted keys and verifies each package independently.
 Each Program Release binds two independently signed `actr-package/2` archives. Each manifest
 declares one Actor type and one Workload under the
 [Actor Package protocol](../../../actr/protocols/actor-package.zh.md) (Chinese).
+During verification, the record's `service` and `front` members select the expected package role
+and the Host checks the Workload Profile against that role and the distribution policy.
 
 - **Service package.** `[workload]` selects the Service executable. The Realm Profile's `package`
-  points to this archive.
+  points to this archive. A Marketplace Service uses `actr.component/1`.
 - **Front package.** `[workload]` selects the Keel Guest under `keel.guest/1`.
   `[workload.keel]` names its runtime, capability manifest, and Keel contract.
-  `[dependencies.service]` declares the expected Service Actor type, version, and contract.
+  Product v1 reserves the `service` dependency alias in the Front manifest. It must declare
+  `required = true`. Its `actor` and `version` constraint must match the Service pinned by the release record.
 
 Each package's entry has role `workload`. The Guest capability manifest has role `profile`,
 the Keel and Proto contract files have role `contract`, and icons and static assets have role `resource`.
@@ -203,11 +207,15 @@ The Actr base manifest provides the following tables.
 - `[signature]` for the signature algorithm and `key-id`.
 - `[[files]]` for payload roles, sizes, and SHA-256 hashes, including any lock file.
 
-The Front package carries the Proto referenced by `dependencies.service.contract` for the
-contract it was built against. The Service package carries its exported RPC contract as a file
-with role `contract`. A Workload Profile defines how to select the primary contract when a package
-has multiple contract files. The Host derives the Attach protocol fingerprint from the verified
-Proto contract. Node deployment settings, including Realm, signaling, and trust, go in `actr.toml`.
+For a Product v1 pair, `dependencies.service.contract` selects the RPC Proto by package-relative path.
+Both manifests must declare the file at that path with role `contract` and the same SHA-256.
+The explicit path selects the RPC contract when the archives carry other contract files. Actr Host
+derives the Attach fingerprint as described in [06 §2.2](06-runtime-and-protocol.md#22-front-actor-type).
+
+Service nodes use the existing Actr `actr.toml` schema for deployment settings such as Realm,
+signaling, and trust. The [node configuration definition](../../../crates/actr-config/src/actr_raw.rs)
+describes these fields. Workspace requirements come from the signed release record. The Host stores
+the binding and grant per instance.
 
 See both manifests in the [Reference Specification](12-reference-spec.md#4-actr-manifest).
 
@@ -226,7 +234,8 @@ effective capabilities =
 
 The Actr Host evaluates the following as product policy. Package capability requirements come
 from `[host]`, and Guest declarations come from its signed Keel capability manifest.
-Deployment and authorization supply the instance-specific settings.
+The signed release record declares Workspace requirements. Deployment and authorization supply
+the instance-specific settings and grants.
 
 - Front capability;
 - Service capability;
@@ -290,20 +299,20 @@ Keel's `Engine.loadBundle(URL)` is only a loading mechanism, not an installation
 Actrium stores locally under the following composite key:
 
 ```text
-(publisher, program, version, package_digest)
+(publisher, program, version, service_package_digest)
 ```
 
 The key uses the Service package digest. The Program Release record also fixes the Front digest.
 
 Rules:
 
-- the digest is fixed after the first acceptance;
+- the first acceptance pins both package digests for the Program Release.
 - a different Service or Front digest for the same Program Release is `PACKAGE_EQUIVOCATION`.
 - "the Publisher updated the file" cannot be used to overwrite the cache;
 - an update must use a new SemVer;
-- a Service instance is fixed to its package digest;
+- a Service instance is fixed to its Service package digest.
 - the Service and Front packages stay cached while referenced by a Service instance;
-- re-downloading must be re-verified and compared against the fixed digest.
+- each re-downloaded archive is re-verified against its pinned digest.
 
 A local first-seen pin only protects the current install; a Marketplace can help multiple clients compare digests they have seen. Providing global non-equivocation across all clients requires introducing a public, append-only transparency log later. v1 does not overstate a single-machine pin into global transparency.
 
@@ -335,7 +344,7 @@ A Marketplace may:
 - record Publisher verification;
 - do static/dynamic review;
 - give a risk rating;
-- record Program Releases/digests it has seen;
+- record the Service and Front digests it has seen for each Program Release.
 - publish revocations and malware intelligence;
 - provide a cache or mirror.
 
@@ -360,7 +369,7 @@ Revocation tiers:
 
 A revocation record must contain:
 
-- Program Release/digest/key;
+- the Program Release and the affected package digest or signing key.
 - the reason;
 - the publication time;
 - the publisher's or marketplace's signature;
@@ -389,15 +398,15 @@ This avoids a mismatch between the version in an ActorId and the workload actual
 
 Supported:
 
-- a local `.actr` file;
-- a package address on localhost, a loopback address, or an explicitly trusted private CA;
+- a local pair of Service and Front `.actr` files.
+- a pair of package addresses on localhost, a loopback address, or an explicitly trusted private CA.
 - a local development signing key;
 - hot-updating the Guest;
 - an unpublished Program Catalog entry.
 
 Restrictions:
 
-- every code change produces a new dev digest;
+- each changed archive gets a new development digest.
 - an unverified key does not inherit the formal Publisher permissions of the same domain;
 - a local package does not enter the formal Marketplace;
 - private-network, loopback and link-local URLs are only allowed in development mode or under enterprise policy;
@@ -419,5 +428,5 @@ Requirements:
 - atomic writes;
 - incomplete downloads are isolated;
 - cache metadata records the Publisher key and verification time;
-- an existing local Service can keep running its fixed digest while the Publisher is offline;
+- a local instance can run offline from its pinned Service and Front packages under the offline policy.
 - expiry of Realm credentials/revocations is handled under offline security policy, and is not equivalent to package verification failure.

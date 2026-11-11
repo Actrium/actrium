@@ -84,9 +84,9 @@ Actrium 按 Actr URI 第 4 节打开链接。先验证 Realm Profile 和其中 `
 | `REALM_PROFILE_ROLLBACK` | Realm Profile 的 `sequence` 回退 |
 | `ACTR_FACILITY_PROVIDER_MISMATCH` | `provider.id` 与已接受的不同 |
 | `REALM_RETIRED` | Realm 已退役 |
-| `PACKAGE_DIGEST_MISMATCH` | 下载的包与 `package.sha256` 不符 |
+| `PACKAGE_DIGEST_MISMATCH` | 下载的归档与其包角色所固定的摘要不符 |
 | `PACKAGE_SIGNATURE_INVALID` | 包签名验证失败 |
-| `SERVICE_NOT_FOUND` | Realm 内 Actor 类型与包相同的 Actor 不是恰好一个 |
-| `SERVICE_ACTOR_TYPE_MISMATCH` | Actor 链接所指 Actor 的类型与包不一致 |
+| `SERVICE_NOT_FOUND` | Realm 内匹配固定 Service 包类型的 Actor 为零个或多个 |
+| `SERVICE_ACTOR_TYPE_MISMATCH` | 链接所指 Actor 的类型与固定的 Service 包类型不符 |
 
 错误码供日志、测试和开发者工具使用；给用户的文案必须说明可以怎么做。

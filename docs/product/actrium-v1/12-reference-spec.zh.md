@@ -88,16 +88,72 @@ https://notes.example/.well-known/actr
 Realm Profile 的 `package` 指定实例的 Service 包（样例见 §6.2）。
 
 ```json
-"package": {
-  "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-  "sha256": "<64 hex>",
-  "type": "notes.example/team-notes@1.4.2"
+{
+  "package": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "type": "notes.example/team-notes@1.4.2"
+  }
 }
 ```
 
 Actrium 按 [Realm Profile 协议](../../../actr/protocols/realm-profile.zh.md)第 6 节下载 `href`（不带 credential 的 HTTPS GET）、核对 `sha256`，再用 Publisher Profile（§2）中的包签名 key 验证 manifest 签名；manifest 声明的 Actor 类型即该实例的程序。下载地址可以在任何位置（Publisher CDN、Loran 包托管、对象存储），不是信任源。
 
-Actrium 按 Service 包摘要匹配 Publisher 签名的 Program Release 记录，再独立验证该记录固定的 Front 包。
+Actrium 按 Service 包的 Actor 类型和 SHA-256 匹配 Publisher 签名的 Program Release 记录，
+再独立验证该记录固定的 Front 包。
+
+### 3.1 签名 Program Release 记录
+
+发布记录分别标识两个包。以下归档的 SHA-256 和签名均为示例值。
+
+```json
+{
+  "schema": "actrium.program-release/v1",
+  "release_id": "notes.example/team-notes@1.4.2",
+  "service": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "type": "notes.example/team-notes@1.4.2"
+  },
+  "front": {
+    "href": "https://cdn.notes.example/team-notes-front-1.4.2.actr",
+    "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "type": "notes.example/team-notes-front@1.4.2"
+  },
+  "workspace": {
+    "requirement": "required",
+    "provisioning": "user-selected",
+    "access": "read-write",
+    "providers": [
+      "managed-store",
+      "local-folder",
+      "cloud-drive"
+    ]
+  },
+  "signature": {
+    "key_id": "actr-pub-3f9a1c0d2b7e4a61",
+    "algorithm": "Ed25519",
+    "value": "<base64>"
+  }
+}
+```
+
+`schema` 为 `actrium.program-release/v1`。`release_id` 是 `publisher/program@version` 形式的
+Service Actor 类型。两个包使用不同的 Actor 类型，均归属该 Publisher。`service` 与 `front` 标识包角色，
+并分别绑定 HTTPS 下载地址、SHA-256 和精确的 Actor 类型。
+同一发布版本固定两个包的类型、摘要和 Workspace 要求。下载地址可变。
+
+Publisher 使用 Publisher Profile 的 `keys` 中状态为 `active` 的包签名 key 签署发布记录。
+签名覆盖去掉 `signature` 成员后按 RFC 8785 JCS 规范化的记录，签名值为 Ed25519 签名的 base64 编码。
+Actrium 按 `signature.key_id` 选择已信任的 Publisher key，并沿用包签名的 key 接受和吊销规则。
+
+可选的 `workspace` 声明应用对 Workspace 的要求，见[第 03 章 §5.3](03-user-experience.zh.md#53-workspace-选择)。
+缺省时该发布版本没有 Workspace 要求。Actrium 按实例记录实际选择的 Workspace 与授权。
+
+Actrium 可使用已验证的本地记录，或从 Publisher、Marketplace 取得记录。打开 Realm 时，
+记录的 `service.type` 和 `service.sha256` 必须匹配 `Realm Profile.package`。
+安装正式发布版本需要已验证且匹配的发布记录。已接受的发布版本出现冲突的包绑定时，Actrium 必须拒绝。
+包的选择流程见[第 05 章 §3](05-program-package-and-distribution.zh.md#3-包从哪来)。
 
 ## 4. `.actr` Manifest
 
@@ -349,7 +405,7 @@ https://realms.provider.example/acme.com/k7m2q9xh
   },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
@@ -401,7 +457,7 @@ https://realms.provider.example/acme.com/k7m2q9xh
 }
 ```
 
-`signature` 由 `realm_signing_keys` 中的 `active` key 签署；Actor credential 的 issuer 即 `realm.name`，存放位置不影响有效性；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Actr Facility Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。`package` 给出该实例运行的包（§3），升级程序即发布 `package` 不同、`sequence` 更高的 Realm Profile。同一 Actr Facility Provider 下轮换 Realm issuer key 或变更端点时同样发布更高 `sequence` 的 Realm Profile；退役时发布 `status` 为 `retired` 的新 Realm Profile，永久有效。
+`signature` 由 `realm_signing_keys` 中的 `active` key 签署；Actor credential 的 issuer 即 `realm.name`，存放位置不影响有效性；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Actr Facility Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。`package` 固定该实例的 Service 包（§3）。升级程序时发布指向新 Service 包、`sequence` 更高的 Realm Profile。同一 Actr Facility Provider 下轮换 Realm issuer key 或变更端点时同样发布更高 `sequence` 的 Realm Profile；退役时发布 `status` 为 `retired` 的新 Realm Profile，永久有效。
 
 ## 7. Service Inventory Record
 

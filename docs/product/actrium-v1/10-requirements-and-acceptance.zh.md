@@ -43,7 +43,7 @@
 | FR-PKG-008 | 同一 Program Release 的 Service 或 Front 包出现不同摘要时必须拒绝。 |
 | FR-PKG-009 | Service 实例仍在引用时，必须保留 Service 和 Front 包的缓存。 |
 | FR-PKG-010 | Marketplace metadata 不得覆盖 Publisher package identity。 |
-| FR-PKG-011 | 必须支持本地 `.actr` 和明确标记的开发来源。 |
+| FR-PKG-011 | Product v1 的本地导入必须支持配套的 Service 与 Front `.actr` 文件。开发来源必须明确标记。 |
 | FR-PKG-012 | 必须支持 Advisory/Block new/Quarantine/Critical block 撤销等级。 |
 | FR-PKG-013 | Publisher bootstrap 必须固定 HTTPS 443；Publisher Profile 必须有规范化签名、序号/时效和回滚保护。 |
 | FR-PKG-014 | 官方发布工具必须构建、验证并签名两个包，发布签名记录，再回读核对两个包的 SHA-256 与签名。 |
@@ -69,7 +69,7 @@
 |---|---|
 | FR-SVC-001 | 本地新建必须创建持久 Service ActorId。 |
 | FR-SVC-002 | Service 重启、续期、signaling 切换后必须保留 ActorId。 |
-| FR-SVC-003 | Service 必须固定 Program Release digest。 |
+| FR-SVC-003 | Service 实例必须固定 Program Release 和它所运行的 Service 包摘要。 |
 | FR-SVC-004 | Service 必须有独立于 ActrType 的 per-instance store。 |
 | FR-SVC-005 | Workspace 必须由 Service Host broker 持有，Front 不得获得路径/credential。 |
 | FR-SVC-006 | v1 默认 Workspace 写入模式为 exclusive writer。 |
@@ -286,15 +286,15 @@
 
 ### AC-004：Service 类型不匹配
 
-**Given** 对端 Service 的 credential 中的 Actor 类型与 Realm Profile 所指包的 Actor 类型不同<br>
+**Given** 对端 Service 的 credential 中的 Actor 类型与 Realm Profile 固定的 Service 包类型不同<br>
 **When** Attach 握手<br>
 **Then** 在任何 Guest 执行前以 `SERVICE_ACTOR_TYPE_MISMATCH` 失败，不创建替代实例。
 
 ### AC-005：同版本异包
 
-**Given** 本地已固定 digest A<br>
-**When** 同一 Program Release 出现 digest B<br>
-**Then** 以 `PACKAGE_EQUIVOCATION` 阻止安装和运行新字节，保留 A 供审计。
+**Given** 本地已固定一个 Program Release 的 Service 和 Front 包摘要<br>
+**When** 同一 Program Release 的任一包出现不同摘要<br>
+**Then** 以 `PACKAGE_EQUIVOCATION` 阻止安装和运行变更的归档，保留原有摘要供审计。
 
 ### AC-006：Front Guest 越权
 

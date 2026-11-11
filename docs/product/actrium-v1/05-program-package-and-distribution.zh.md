@@ -7,7 +7,7 @@
 | 层 | 标识 | 证明什么 |
 |---|---|---|
 | Publisher | 规范化域名 | 当前谁控制发布入口 |
-| Program Release | `publisher/program@version` + digest | 要运行哪一组不可变字节 |
+| Program Release | `publisher/program@version` 与固定的 Service、Front 包摘要 | 哪两个归档组成该发布版本 |
 | Service | ActorId + Actor credential | 当前在与哪个运行实例通信 |
 
 HTTPS 不能证明程序无恶意；Marketplace 审核不能证明网络中的 Actor 身份；Actor credential 也不能证明本地加载的 Guest 是正确版本。
@@ -67,7 +67,7 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 
 域名控制只决定未来发布入口，不得静默改写历史：
 
-- 已安装 `Program Release + digest + signing key` 可继续离线运行；
+- 已安装版本可凭已验证的发布记录和两个固定的包继续离线运行。
 - 新 key 与历史 key 无可验证轮换链时，视为 Publisher ownership change；
 - 已安装版本不得因当前域名返回不同包而变化；
 - 新安装或更新必须显示身份变化；
@@ -76,7 +76,7 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 ## 3. 包从哪来
 
 Publisher 签名的 Program Release 记录绑定 Front 和 Service 两个包的下载地址、SHA-256 与 Actor 类型。
-Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证两个包。
+Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证两个包。见[签名记录示例](12-reference-spec.zh.md#31-签名-program-release-记录)。
 
 - **打开实例。** Realm Profile 的 `package` 固定 Service 包。按该包的 Actor 类型和摘要匹配已验证的
   Program Release 记录，取得 Front 包。Actrium 可使用已安装记录，或从 Publisher、Marketplace 取得记录。
@@ -90,11 +90,14 @@ Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证�
 
 每个 Program Release 绑定两个独立签名的 `actr-package/2` 包。每份清单按
 [Actor Package 协议](../../../actr/protocols/actor-package.zh.md)声明一个 Actor 类型和一个 Workload。
+验证时按发布记录的 `service` 和 `front` 成员确定预期包角色，Host 检查 Workload Profile 是否符合该角色和分发策略。
 
 - **Service 包。** `[workload]` 选择 Service 可执行文件。Realm Profile 的 `package` 指向该归档。
+  Marketplace Service 使用 `actr.component/1`。
 - **Front 包。** `[workload]` 以 `keel.guest/1` 选择 Keel Guest。
   `[workload.keel]` 声明其运行时、能力清单和 Keel 契约。
-  `[dependencies.service]` 声明所需的 Service Actor 类型、版本和契约。
+  Product v1 的 Front 清单保留 `service` 依赖别名，并必须声明 `required = true`。
+  `actor` 和 `version` 约束必须与签名发布记录固定的 Service 匹配。
 
 每个包的入口使用角色 `workload`。Guest 能力清单使用 `profile`，Keel 和 Proto 契约使用 `contract`，
 图标和静态资源使用 `resource`。
@@ -197,10 +200,13 @@ Actr 基础清单提供以下表。
 - `[signature]` 声明签名算法和 `key-id`。
 - `[[files]]` 记录包内文件的角色、大小和 SHA-256，也包含随包分发的依赖锁。
 
-Front 包携带 `dependencies.service.contract` 指定的 Proto，作为构建时所用的 Service 契约。
-Service 包将对外 RPC 契约登记为角色 `contract` 的文件。存在多个契约文件时，由 Workload Profile
-定义主契约的选择规则。Host 根据已验证的 Proto 契约计算 Attach 使用的协议指纹。
-Realm、信令与信任等节点部署配置写在 `actr.toml` 中。
+对 Product v1 的配套包，`dependencies.service.contract` 以包内相对路径选定 RPC Proto。
+两个清单必须在该路径登记角色为 `contract` 且 SHA-256 相同的文件。包中包含其他契约文件时，
+也按此路径选择 RPC 契约。Actr Host 按[第 06 章 §2.2](06-runtime-and-protocol.zh.md#22-front-actor-类型)计算 Attach 指纹。
+
+Service 节点使用现有 Actr `actr.toml` 格式配置 Realm、信令和信任等部署参数。字段见
+[节点配置定义](../../../crates/actr-config/src/actr_raw.rs)。Workspace 要求来自签名发布记录，
+Host 按实例保存绑定和实际授权。
 
 两份完整清单见[参考协议](12-reference-spec.zh.md#4-actr-manifest)。
 
@@ -218,7 +224,7 @@ effective capabilities =
 ```
 
 Actr Host 按产品策略评估以下内容。包的能力要求来自 `[host]`，Guest 的声明来自其签名保护的 Keel 能力清单，
-实例设置来自部署配置和授权流程。
+Workspace 要求来自签名发布记录，实例设置和实际授权来自部署及授权流程。
 
 - Front capability；
 - Service capability；
@@ -282,20 +288,20 @@ Keel `Engine.loadBundle(URL)` 只是加载机制，不是安装信任机制。Ac
 Actrium 本地以以下联合键保存：
 
 ```text
-(publisher, program, version, package_digest)
+(publisher, program, version, service_package_digest)
 ```
 
 联合键使用 Service 包 digest，Program Release 记录同时固定 Front 包 digest。
 
 规则：
 
-- 第一次接受后固定 digest；
+- 第一次接受发布版本时固定两个包的摘要。
 - 同一 Program Release 的 Service 或 Front 包出现不同 digest 时报告 `PACKAGE_EQUIVOCATION`。
 - 不能用「Publisher 更新了文件」覆盖缓存；
 - 更新必须使用新 SemVer；
-- Service 实例固定其 package digest；
+- Service 实例固定其执行的 Service 包摘要。
 - Service 实例仍引用时，保留 Service 和 Front 两个包的缓存；
-- 重新下载必须再次验证后与固定 digest 比较。
+- 每个重新下载的归档都要按其固定摘要重新验证。
 
 本地 first-seen pin 只能保护当前安装；Marketplace 可以帮助多个客户端比对已见 digest。要对所有客户端提供全局 non-equivocation，需要后续引入公开 append-only transparency log。v1 不把单机 pin 夸大成全局透明性。
 
@@ -327,7 +333,7 @@ Marketplace 可以：
 - 记录 Publisher 验证；
 - 静态/动态审核；
 - 风险评级；
-- 记录已见 Program Release/digest；
+- 记录各 Program Release 已见的 Service 和 Front 包摘要。
 - 发布撤销和恶意软件情报；
 - 提供缓存或镜像。
 
@@ -352,7 +358,7 @@ Marketplace 不可以：
 
 撤销记录必须包含：
 
-- Program Release/digest/key；
+- Program Release 及受影响的包摘要或签名 key。
 - 原因；
 - 发布时间；
 - 发布者或市场签名；
@@ -381,15 +387,15 @@ v1 升级：
 
 支持：
 
-- 本地 `.actr` 文件；
-- localhost、回环地址或显式信任的私有 CA 上的包地址；
+- 配套的本地 Service 和 Front `.actr` 文件。
+- localhost、回环地址或显式信任的私有 CA 上的两个包地址。
 - 本地开发 signing key；
 - 热更新 Guest；
 - 未发布 Program Catalog entry。
 
 限制：
 
-- 每次代码变化产生新 dev digest；
+- 修改归档会产生新的开发包摘要。
 - 未验证 key 不继承同域名正式 Publisher 权限；
 - 本地包不进入正式 Marketplace；
 - 私网、loopback、link-local URL 只在开发模式或企业策略中允许；
@@ -411,5 +417,5 @@ cache/extracted/sha256/<digest>/...
 - 原子写入；
 - 未完成下载隔离；
 - 缓存元数据记录 Publisher key 与验证时间；
-- 已有本地 Service 在 Publisher 离线时可以运行固定 digest；
+- Publisher 离线时，本地实例按离线策略使用固定的 Service 和 Front 包运行。
 - Realm 凭据/撤销过期时按离线安全政策处理，不等同于 package 验证失败。

@@ -43,7 +43,7 @@
 | FR-PKG-008 | A different Service or Front package digest for the same Program Release MUST hard fail. |
 | FR-PKG-009 | Service and Front packages MUST remain cached while a Service instance references them. |
 | FR-PKG-010 | Marketplace metadata MUST NOT override the Publisher's package identity. |
-| FR-PKG-011 | Local `.actr` files and clearly marked development sources MUST be supported. |
+| FR-PKG-011 | Product v1 local import MUST accept a matching Service and Front `.actr` pair. Development sources MUST be clearly labeled. |
 | FR-PKG-012 | Advisory/Block-new/Quarantine/Critical-block revocation levels MUST be supported. |
 | FR-PKG-013 | Publisher bootstrap MUST be pinned to HTTPS 443; the Publisher Profile MUST have a normalized signature, a sequence number/freshness, and rollback protection. |
 | FR-PKG-014 | The official publishing tool MUST build, validate, and sign both packages and publish their signed release record. It MUST read both packages back to verify their SHA-256 digests and signatures. |
@@ -69,7 +69,7 @@
 |---|---|
 | FR-SVC-001 | A local Create MUST create a persistent Service ActorId. |
 | FR-SVC-002 | The Service MUST keep its ActorId across restarts, credential renewal and signaling switchover. |
-| FR-SVC-003 | The Service MUST pin a fixed Program Release digest. |
+| FR-SVC-003 | Each Service instance MUST pin its Program Release and the digest of the Service package it runs. |
 | FR-SVC-004 | The Service MUST have a per-instance store independent of the ActrType. |
 | FR-SVC-005 | The Workspace MUST be held by a broker in the Service Host; the Front MUST NOT obtain its path/credential. |
 | FR-SVC-006 | v1's default Workspace write mode is exclusive writer. |
@@ -286,15 +286,15 @@ Any increase MUST still be bounded by the platform's cap and permission policy.
 
 ### AC-004: Service type mismatch
 
-**Given** the Actor type in the peer Service's credential differs from the Actor type declared by the package the Realm Profile points to<br>
+**Given** the Actor type in the peer Service's credential differs from the type declared by the Service package pinned by the Realm Profile<br>
 **When** the Attach handshake runs<br>
 **Then** it fails with `SERVICE_ACTOR_TYPE_MISMATCH` before any Guest executes, and no substitute instance is created.
 
 ### AC-005: Same version, different package
 
-**Given** digest A is already pinned locally<br>
-**When** digest B appears for the same Program Release<br>
-**Then** `PACKAGE_EQUIVOCATION` blocks installing and running the new bytes, and A is retained for audit.
+**Given** the Service and Front package digests for a release are already pinned locally<br>
+**When** either package has a different digest for the same Program Release<br>
+**Then** `PACKAGE_EQUIVOCATION` blocks installing and running the changed archive. The original digests are retained for audit.
 
 ### AC-006: Front Guest overreach
 

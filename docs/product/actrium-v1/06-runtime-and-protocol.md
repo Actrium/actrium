@@ -72,6 +72,11 @@ The Actr Host supplies these values during Attach.
 The Actrium Host alone constructs these values from the verified packages and local session state.
 The Service treats them as client declarations for compatibility negotiation.
 
+For Attach, both Hosts derive `protocolFingerprint` from the verified RPC Proto selected by
+`dependencies.service.contract`. Use the Proto file's basename and contents with the existing
+Service semantic fingerprint algorithm. The result has the form `service_semantic:<64 lowercase hex>`.
+See the [fingerprint implementation](../../../crates/actr-service-compat/src/fingerprint.rs).
+
 The platform provides optional remote attestation: a managed Realm can fold platform app attestation, distribution signatures, or enterprise device attestation into the credential, for a Service that needs it to verify.
 
 ### 2.3 Front lifecycle
@@ -354,7 +359,7 @@ actrium.session.v1.GetStatus
     "frontHostApi": "1.0",
     "keelApi": "1.0"
   },
-  "protocolFingerprint": "sha256:...",
+  "protocolFingerprint": "service_semantic:...",
   "tabSessionNonce": "<random>",
   "requestedLease": "exclusive",
   "challengeResponse": "<signed-proof>"
@@ -375,7 +380,7 @@ actrium.session.v1.GetStatus
     "actorId": "<ActorId>",
     "program": "notes.example/team-notes@1.4.2",
     "packageDigest": "sha256:...",
-    "protocolFingerprint": "sha256:..."
+    "protocolFingerprint": "service_semantic:..."
   },
   "workspace": {
     "displayName": "Team Notes",

@@ -254,10 +254,11 @@ A suggested minimal model:
 
 ```text
 program_release
-  publisher, program, version, digest, key_id, manifest, trust_state
+  publisher, program, version, service_package_digest, front_package_digest,
+  release_record, trust_state
 
 service
-  realm_name, actor_id, actor_id_hash, publisher, program, version, digest,
+  realm_name, actor_id, actor_id_hash, publisher, program, version, service_package_digest,
   workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
@@ -380,7 +381,7 @@ Snapshots have two layers:
 
 The manifest should declare a snapshot schema version. Restoring must verify:
 
-- Program Release/digest;
+- the Program Release and the pinned Service package digest.
 - the snapshot schema;
 - the Workspace fingerprint;
 - the ActorId;
@@ -407,19 +408,22 @@ Old Service ActorId + v1 Workspace
   → import/migrate
   → Workspace lease handoff
   → user verification
-  → the Realm Profile's package is repointed to the v2 package
+  → the Realm Profile's package points to the new Service package
   → Old archived
 ```
 
 Advantages:
 
 - exact version semantics are not broken;
-- the package digest remains auditable;
+- the Service and Front package digests remain auditable.
 - it can be rolled back;
 - the old and new contracts can coexist;
 - the old ActorId is never said to have become the new type.
 
-The new Service is created in the same Realm as the original instance: the instance has not changed, the Realm link, Realm membership and application permissions all carry over, and only the Service's ActorId changes. When another device opens the same Realm link, it fetches the new package per the new Realm Profile and finds the new Service by its Actor type.
+The upgrade changes the Service's ActorId and carries over the Realm link, membership, and
+application permissions. When another device opens that link, it verifies the new Service package
+pinned by the Realm Profile, finds the Front package through the matching release record, and
+Attaches to the new Service by its Actor type.
 
 ## 12. Migrating a Service to another device
 

@@ -176,13 +176,15 @@ Contract 至少冻结：
 - output/declassification 规则；
 - 未知或失效证据的动作。
 
-此示例将独立的 Privacy Contract 绑定到成品包的摘要。
+独立的 Privacy Contract 绑定 Program Release 及两个归档的摘要。验证器将这些字段与签名发布记录核对。
 
 ```toml
 [privacy_contract]
 schema_version = 1
 contract_id = "notes.example/team-notes@1.4.2#privacy"
-package_digest = "sha256:..."
+release_id = "notes.example/team-notes@1.4.2"
+service_package_digest = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+front_package_digest = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
 
 [[privacy_contract.actor_role]]
 role = "service"

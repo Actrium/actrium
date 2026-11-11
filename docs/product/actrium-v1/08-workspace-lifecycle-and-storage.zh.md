@@ -254,10 +254,11 @@ actrium-data/
 
 ```text
 program_release
-  publisher, program, version, digest, key_id, manifest, trust_state
+  publisher, program, version, service_package_digest, front_package_digest,
+  release_record, trust_state
 
 service
-  realm_name, actor_id, actor_id_hash, publisher, program, version, digest,
+  realm_name, actor_id, actor_id_hash, publisher, program, version, service_package_digest,
   workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
@@ -380,7 +381,7 @@ Snapshot 分两层：
 
 Manifest 应声明 snapshot schema version。恢复必须验证：
 
-- Program Release/digest；
+- Program Release 与固定的 Service 包摘要。
 - snapshot schema；
 - Workspace fingerprint；
 - ActorId；
@@ -407,19 +408,20 @@ Old Service ActorId + v1 Workspace
   → import/migrate
   → Workspace lease handoff
   → user verification
-  → Realm Profile 的 package 改指 v2 包
+  → Realm Profile 的 package 指向新 Service 包
   → Old archived
 ```
 
 优点：
 
 - 精确版本语义不破坏；
-- package digest 仍可审计；
+- Service 与 Front 包摘要可供审计。
 - 可回滚；
 - 新旧 contract 可以并存；
 - 旧 ActorId 不会被说成已变成新类型。
 
-新 Service 创建在原实例的同一 Realm 内：实例没有变，Realm 链接、Realm 成员与应用权限都延续，只有 Service 的 ActorId 变化。其他设备打开同一 Realm 链接时，按新的 Realm Profile 取得新包，并按其 Actor 类型找到新 Service。
+升级会更换 Service 的 ActorId，并延续原有 Realm 链接、成员和应用权限。其他设备打开该链接时，
+验证 Realm Profile 固定的新 Service 包，通过匹配的发布记录取得 Front 包，再按 Actor 类型 Attach 到新 Service。
 
 ## 12. Service 迁移设备
 

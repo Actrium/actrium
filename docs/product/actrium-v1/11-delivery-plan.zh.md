@@ -64,7 +64,7 @@ flowchart LR
 
 - `actr://` Realm 链接的测试向量；
 - Publisher Profile schema；
-- 签名 Program Release 记录的结构与发现规则。
+- 签名 Program Release 记录的验签向量与线上发现接口。
 - Realm 签名 key（authority descriptor 的 `realm_signing_keys` 成员与 core relation `realms`，已在 Actr Authority Discovery §4.3–4.4 定义）与 Realm Profile schema；
 - persistent Actor identity lifecycle ADR；
 - Front–Service session proto；

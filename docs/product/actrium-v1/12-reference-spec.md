@@ -110,10 +110,12 @@ Chinese only).
 The Realm Profile's `package` identifies the instance's Service package (sample in §6.2).
 
 ```json
-"package": {
-  "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-  "sha256": "<64 hex>",
-  "type": "notes.example/team-notes@1.4.2"
+{
+  "package": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "type": "notes.example/team-notes@1.4.2"
+  }
 }
 ```
 
@@ -123,8 +125,66 @@ the package signing key from the Publisher Profile (§2); the Actor type the man
 the instance's program. The download address can be anywhere (a Publisher CDN, Loran package
 hosting, object storage) — it is not a trust source.
 
-Actrium uses the Service package digest to match a Publisher-signed Program Release record and
-independently verifies the Front package pinned by that record.
+Actrium matches the Service package's Actor type and SHA-256 to a Publisher-signed Program Release
+record, then independently verifies the Front package pinned by that record.
+
+### 3.1 Signed Program Release record
+
+The release record names both packages. The archive SHA-256 values and signature below are illustrative.
+
+```json
+{
+  "schema": "actrium.program-release/v1",
+  "release_id": "notes.example/team-notes@1.4.2",
+  "service": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "type": "notes.example/team-notes@1.4.2"
+  },
+  "front": {
+    "href": "https://cdn.notes.example/team-notes-front-1.4.2.actr",
+    "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "type": "notes.example/team-notes-front@1.4.2"
+  },
+  "workspace": {
+    "requirement": "required",
+    "provisioning": "user-selected",
+    "access": "read-write",
+    "providers": [
+      "managed-store",
+      "local-folder",
+      "cloud-drive"
+    ]
+  },
+  "signature": {
+    "key_id": "actr-pub-3f9a1c0d2b7e4a61",
+    "algorithm": "Ed25519",
+    "value": "<base64>"
+  }
+}
+```
+
+`schema` is `actrium.program-release/v1`. `release_id` is the Service Actor type in
+`publisher/program@version` form. The two Actor types must be distinct and belong to that Publisher.
+The `service` and `front` members identify the package roles and bind each archive's HTTPS address,
+SHA-256, and exact Actor type. Within a release, both package types,
+their digests, and the Workspace requirements are fixed. Download addresses can change.
+
+The Publisher signs the record with an active package signing key from the Publisher Profile's
+`keys`. The signature covers the record with the `signature` member removed, canonicalized
+using RFC 8785 JCS. The signature value is the base64-encoded Ed25519 signature. Actrium
+verifies it with the trusted Publisher key selected by `signature.key_id`, following the key
+acceptance and revocation rules for package signatures.
+
+The optional `workspace` member declares the application's Workspace requirements as described
+in [03 §5.3](03-user-experience.md#53-workspace-selection). When it is absent, the release has
+no Workspace requirement. Actrium records the actual Workspace and access grant per instance.
+
+Actrium can use a verified local record or obtain a record from the Publisher or Marketplace.
+When opening a Realm, the record's `service.type` and `service.sha256` must match
+`Realm Profile.package`. Installing a published release requires a verified matching record. Actrium rejects
+conflicting package bindings for an accepted release. See
+[05 §3](05-program-package-and-distribution.md#3-where-a-package-comes-from) for package selection.
 
 ## 4. `.actr` Manifest
 
@@ -392,7 +452,7 @@ Sample:
   },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
@@ -451,7 +511,7 @@ higher `sequence`. A Realm Profile carries no expiry; rollback protection relies
 `sequence`. `provider.id` is the Actr Facility Provider's normalized DNS authority and is immutable for the
 life of the Realm. Multiple signaling endpoints sharing a `control_plane_id` are replicas or
 failover entry points of the same Actr Facility Provider presence/control plane, not v1 federation.
-`package` gives the package the instance runs (§3); upgrading the program means publishing a Realm
+`package` pins the instance's Service archive (§3). Upgrading the program means publishing a Realm
 Profile with a different `package` and a higher `sequence`. Rotating the Realm issuer key or
 changing endpoints under the same Actr Facility Provider likewise means publishing a Realm Profile with a
 higher `sequence`; retiring publishes a new Realm Profile with `status` set to `retired`, valid
