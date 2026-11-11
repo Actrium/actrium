@@ -68,6 +68,10 @@ if [ "$SKIP_INSTALL" = "0" ]; then
     pnpm install --frozen-lockfile --ignore-scripts
 fi
 
+# Apply the repository's idempotent react-native-macos compatibility fixes.
+# The root install intentionally skips all package lifecycle scripts above.
+node "$REPO_ROOT/packages/actrium/scripts/patch-react-native-macos.js"
+
 # Keel keeps its own Bun lockfile outside the pnpm workspace.
 if [ "$SKIP_INSTALL" = "0" ] || [ ! -d "$REPO_ROOT/packages/keel/node_modules/commander" ]; then
     (cd "$REPO_ROOT/packages/keel"; bun install --frozen-lockfile)
