@@ -165,6 +165,24 @@ describe('computeServiceCapabilities', () => {
     ).toEqual(declared);
   });
 
+  test('drops malformed service capabilities', () => {
+    const malformed = [
+      'workspace:write',
+      'net:http://insecure.example',
+      'actor:call:notes.example:index-worker',
+      'shell:unknown',
+    ];
+    expect(
+      computeServiceCapabilities({
+        declared: malformed,
+        hostSupported: new Set(malformed),
+        policy: new Set(malformed),
+        session: new Set(malformed),
+        instance: { audience: 'third_party' },
+      })
+    ).toEqual([]);
+  });
+
   test('drops capabilities missing from policy or session', () => {
     expect(
       computeServiceCapabilities({

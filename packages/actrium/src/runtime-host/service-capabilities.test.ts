@@ -22,10 +22,17 @@ describe('service capability grammar', () => {
     expect(
       classifyServiceCapability('net:https://api.notes.example/v1/items')
     ).toBe('net');
+    expect(
+      classifyServiceCapability('net:https://api.notes.example:8443/v1')
+    ).toBe('net');
     expect(classifyServiceCapability('net:http://api.notes.example')).toBeUndefined();
     expect(
       classifyServiceCapability('net:https://user:pass@evil.example')
     ).toBeUndefined();
+    expect(classifyServiceCapability('net:https://foo bar')).toBeUndefined();
+    expect(classifyServiceCapability('net:https://..')).toBeUndefined();
+    expect(classifyServiceCapability('net:https://example.com#frag')).toBeUndefined();
+    expect(classifyServiceCapability('net:https://')).toBeUndefined();
   });
 
   test('classifies actor calls with a pinned version', () => {

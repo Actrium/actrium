@@ -4,6 +4,7 @@ import {
   resolveDeclaredCapability,
   type FrontCapability,
 } from './capabilities';
+import { isValidServiceCapability } from './service-capabilities';
 
 /**
  * Capability layering and effective-set computation.
@@ -246,6 +247,7 @@ export function computeServiceCapabilities(
 ): string[] {
   return input.declared.filter(
     (capability) =>
+      isValidServiceCapability(capability) &&
       input.hostSupported.has(capability) &&
       input.policy.has(capability) &&
       input.session.has(capability)
