@@ -9,6 +9,7 @@ describe('Front capability mapping', () => {
     expect(resolveDeclaredCapability('service')).toBe('service');
     expect(resolveDeclaredCapability('host:clipboard')).toBe('host:clipboard');
     expect(resolveDeclaredCapability('host:net')).toBe('host:net');
+    expect(resolveDeclaredCapability('host:navigate')).toBe('host:navigate');
   });
 
   test('maps the legacy actor.call alias to service', () => {
