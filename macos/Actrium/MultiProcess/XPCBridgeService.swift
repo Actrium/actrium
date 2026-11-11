@@ -37,6 +37,7 @@ struct XPCTabConfig {
     let bookmarks: [[String: Any]]
     let recentHistory: [[String: Any]]
     let reloadKey: Int
+    let serviceCallUrl: String?
 
     func toDictionary(isOverviewMode: Bool) -> [String: Any] {
         var dict: [String: Any] = [
@@ -61,6 +62,9 @@ struct XPCTabConfig {
         }
         if let leftPanelScript = leftPanelScript {
             dict["leftPanelScript"] = leftPanelScript
+        }
+        if let serviceCallUrl = serviceCallUrl {
+            dict["serviceCallUrl"] = serviceCallUrl
         }
         return dict
     }
