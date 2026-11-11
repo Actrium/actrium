@@ -20,7 +20,8 @@ export type ServiceCapabilityRule = {
 
 export const SERVICE_CAPABILITY_RULES: readonly ServiceCapabilityRule[] = [
   { kind: 'workspace', pattern: /^workspace:(read-only|read-write)$/ },
-  { kind: 'net', pattern: /^net:https:\/\/[^/@]+$/ },
+  // Domain, optional port and path are allowed; userinfo (`user:pass@`) is not.
+  { kind: 'net', pattern: /^net:https:\/\/[^@]+$/ },
   {
     kind: 'actor',
     pattern: /^actor:call:[A-Za-z0-9._-]+:[A-Za-z0-9._-]+:\d+$/,

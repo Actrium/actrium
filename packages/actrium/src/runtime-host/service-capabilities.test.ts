@@ -19,6 +19,9 @@ describe('service capability grammar', () => {
     expect(classifyServiceCapability('net:https://api.notes.example:8443')).toBe(
       'net'
     );
+    expect(
+      classifyServiceCapability('net:https://api.notes.example/v1/items')
+    ).toBe('net');
     expect(classifyServiceCapability('net:http://api.notes.example')).toBeUndefined();
     expect(
       classifyServiceCapability('net:https://user:pass@evil.example')
