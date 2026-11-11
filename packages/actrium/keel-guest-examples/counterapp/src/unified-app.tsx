@@ -11,92 +11,92 @@ const INITIAL_MESSAGES: Message[] = [
   {
     id: 1,
     role: 'assistant',
-    text: '你好，我是 Actrium 助手。有什么可以帮你？',
+    text: "Hi, I'm the Actrium assistant. How can I help?",
   },
   {
     id: 2,
     role: 'user',
-    text: '帮我看看今天的安排。',
+    text: 'Take a look at my schedule for today.',
   },
   {
     id: 3,
     role: 'assistant',
-    text: '今天下午有一个产品评审，其余时间空闲。',
+    text: 'You have a product review this afternoon; the rest of the day is free.',
   },
   {
     id: 4,
     role: 'user',
-    text: '帮我把评审材料整理一下。',
+    text: 'Help me organize the review materials.',
   },
   {
     id: 5,
     role: 'assistant',
-    text: '好的，已经列出大纲：目标、范围、风险、验收标准。',
+    text: 'Done. The outline covers goals, scope, risks, and acceptance criteria.',
   },
   {
     id: 6,
     role: 'user',
-    text: '再补一个时间线。',
+    text: 'Add a timeline as well.',
   },
   {
     id: 7,
     role: 'assistant',
-    text: '建议按 30 分钟评审、15 分钟讨论、15 分钟结论来安排。',
+    text: 'I suggest 30 minutes for the review, 15 for discussion, and 15 for conclusions.',
   },
   {
     id: 8,
     role: 'user',
-    text: '可以，顺便提醒我提前十分钟。',
+    text: 'Sounds good. Also remind me ten minutes before.',
   },
   {
     id: 9,
     role: 'assistant',
-    text: '已记录，会在评审前十分钟提醒你。',
+    text: "Noted. I'll remind you ten minutes before the review.",
   },
   {
     id: 10,
     role: 'user',
-    text: '评审材料里再补一个竞品对比。',
+    text: 'Add a competitor comparison to the review materials.',
   },
   {
     id: 11,
     role: 'assistant',
-    text: '好的，我会按功能、价格、生态三个维度整理竞品对比。',
+    text: "Sure. I'll compare competitors across features, pricing, and ecosystem.",
   },
   {
     id: 12,
     role: 'user',
-    text: '重点看一下移动端体验。',
+    text: 'Focus on the mobile experience.',
   },
   {
     id: 13,
     role: 'assistant',
-    text: '移动端会单独列一页，覆盖启动速度、输入体验和离线能力。',
+    text: 'Mobile gets its own page covering launch speed, input experience, and offline capability.',
   },
   {
     id: 14,
     role: 'user',
-    text: '把风险项也列出来。',
+    text: 'List the risks too.',
   },
   {
     id: 15,
     role: 'assistant',
-    text: '风险项包括：范围蔓延、接口变更、性能回退和测试覆盖不足。',
+    text: 'Risks include scope creep, API changes, performance regressions, and insufficient test coverage.',
   },
   {
     id: 16,
     role: 'user',
-    text: '每个风险给一个缓解方案。',
+    text: 'Give each risk a mitigation.',
   },
   {
     id: 17,
     role: 'assistant',
-    text: '已补充：冻结范围、接口版本化、性能基线和自动化回归。',
+    text: 'Added: scope freeze, API versioning, performance baselines, and automated regression.',
   },
   {
     id: 18,
     role: 'user',
-    text: '好，先这样。',
+    text: 'Okay, that is all for now.',
   },
 ]
 
@@ -127,7 +127,7 @@ export default function DialogApp() {
         }}
       >
         <Text style={{ fontSize: 18, fontWeight: '600', color: '#111827' }}>
-          Actrium 对话
+          Actrium Chat
         </Text>
       </View>
 
@@ -196,7 +196,7 @@ export default function DialogApp() {
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="输入消息..."
+            placeholder="Type a message..."
             placeholderTextColor="#9ca3af"
             multiline
             numberOfLines={2}
