@@ -328,7 +328,7 @@ final class RendererProcessController {
             guard let surfaceObject = rootObject.value(forKey: "surface") as AnyObject?,
                   surfaceObject.responds(to: rootTagSelector) else { continue }
             let tagValue = surfaceObject.value(forKey: "rootTag")
-            let tag = (tagValue as? NSNumber)?.intValue ?? (tagValue as? Int)
+            let tag = (tagValue as? NSNumber).map { Int(truncating: $0) } ?? (tagValue as? Int)
             if tag == rootTag {
                 surface.commit()
             }
