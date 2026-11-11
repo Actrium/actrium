@@ -804,7 +804,12 @@ function analyzeSourceImports(code) {
     const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
 
     traverseAST(ast, (node) => {
-      if (node.type === 'ImportDeclaration' && typeof node.source?.value === 'string') {
+      if (
+        (node.type === 'ImportDeclaration' ||
+          node.type === 'ExportNamedDeclaration' ||
+          node.type === 'ExportAllDeclaration') &&
+        typeof node.source?.value === 'string'
+      ) {
         imports.add(node.source.value);
       }
     });

@@ -106,16 +106,9 @@ describe('createV1CapabilityManifest', () => {
   });
 });
 
-async function expectModalViolation(childSource: string) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-components-'));
-  try {
-    const srcDir = path.join(tempDir, 'src');
-    fs.mkdirSync(srcDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(srcDir, 'entry.tsx'),
-      `
+const ENTRY_TEMPLATE = (moduleId: string) => `
 import { View } from 'keel/guest';
-import { Child } from './child';
+import { Child } from '${moduleId}';
 
 export default function App() {
   return (
@@ -124,13 +117,44 @@ export default function App() {
     </View>
   );
 }
-`
-    );
-    fs.writeFileSync(path.join(srcDir, 'child.tsx'), childSource);
+`;
+
+const DIRECT_CHILD = `
+import { Modal, Text } from 'keel/guest';
+
+export function Child() {
+  return (
+    <Modal>
+      <Text>hello</Text>
+    </Modal>
+  );
+}
+`;
+
+const ALIASED_CHILD = `
+import { Modal as M, Text } from 'keel/guest';
+
+export function Child() {
+  return (
+    <M>
+      <Text>hello</Text>
+    </M>
+  );
+}
+`;
+
+async function expectModalViolation(files: Record<string, string>) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-components-'));
+  try {
+    for (const [relativePath, content] of Object.entries(files)) {
+      const target = path.join(tempDir, relativePath);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content);
+    }
 
     await expect(
       build({
-        entry: path.join(srcDir, 'entry.tsx'),
+        entry: path.join(tempDir, 'src/entry.tsx'),
         outfile: path.join(tempDir, 'dist/bundle.js'),
         minify: true,
         sourcemap: false,
@@ -149,30 +173,37 @@ export default function App() {
 
 describe('v1 component allowlist integration', () => {
   it('rejects components rendered by imported modules in minified builds', async () => {
-    await expectModalViolation(`
-import { Modal, Text } from 'keel/guest';
-
-export function Child() {
-  return (
-    <Modal>
-      <Text>hello</Text>
-    </Modal>
-  );
-}
-`);
+    await expectModalViolation({
+      'src/entry.tsx': ENTRY_TEMPLATE('./child'),
+      'src/child.tsx': DIRECT_CHILD,
+    });
   });
 
   it('rejects aliased SDK components in minified builds', async () => {
-    await expectModalViolation(`
-import { Modal as M, Text } from 'keel/guest';
+    await expectModalViolation({
+      'src/entry.tsx': ENTRY_TEMPLATE('./child'),
+      'src/child.tsx': ALIASED_CHILD,
+    });
+  });
 
-export function Child() {
-  return (
-    <M>
-      <Text>hello</Text>
-    </M>
-  );
-}
-`);
+  it('rejects components behind a tsconfig path alias in minified builds', async () => {
+    await expectModalViolation({
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: { '@/*': ['src/*'] },
+        },
+      }),
+      'src/entry.tsx': ENTRY_TEMPLATE('@/child'),
+      'src/child.tsx': DIRECT_CHILD,
+    });
+  });
+
+  it('rejects components behind a barrel re-export in minified builds', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': ENTRY_TEMPLATE('./barrel'),
+      'src/barrel.ts': "export { Child } from './child';",
+      'src/child.tsx': DIRECT_CHILD,
+    });
   });
 });

@@ -824,29 +824,39 @@ function escapeRegExp(value: string): string {
 }
 
 /**
- * Resolve a relative source import to a file on disk.
+ * Find the project root (nearest tsconfig) for alias resolution.
  */
-function resolveSourceModule(fromFile: string, specifier: string): string | null {
-  const base = path.resolve(path.dirname(fromFile), specifier);
-  const candidates = [
-    base,
-    `${base}.tsx`,
-    `${base}.ts`,
-    `${base}.jsx`,
-    `${base}.js`,
-    path.join(base, 'index.tsx'),
-    path.join(base, 'index.ts'),
-    path.join(base, 'index.jsx'),
-    path.join(base, 'index.js'),
-  ];
-  for (const candidate of candidates) {
-    try {
-      if (fs.statSync(candidate).isFile()) return candidate;
-    } catch {
-      // Missing candidates are expected while probing extensions.
+function findProjectRoot(fromFile: string): string {
+  const entryDir = path.dirname(fs.realpathSync(path.resolve(fromFile)));
+  let dir = entryDir;
+  while (true) {
+    if (fs.existsSync(path.join(dir, 'tsconfig.json'))) {
+      return fs.realpathSync(dir);
     }
+    const parent = path.dirname(dir);
+    if (parent === dir) return entryDir;
+    dir = parent;
   }
-  return null;
+}
+
+/**
+ * Resolve a source import to a file on disk. Bun's resolver applies the
+ * project's tsconfig paths, so aliases such as `@/child` resolve too.
+ */
+function resolveSourceModule(
+  fromFile: string,
+  specifier: string,
+  projectRoot: string
+): string | null {
+  if (specifier.startsWith('host:') || EXTERNALS[specifier]) return null;
+  try {
+    const resolved = fs.realpathSync(Bun.resolveSync(specifier, path.dirname(fromFile)));
+    if (resolved.includes('/node_modules/')) return null;
+    if (!resolved.startsWith(projectRoot + path.sep)) return null;
+    return resolved;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -858,6 +868,7 @@ function collectSourceComponents(
   analyzeSourceImports: (code: string) => string[],
   analyzeSourceComponents: (code: string) => string[]
 ): string[] {
+  const projectRoot = findProjectRoot(entryPath);
   const visited = new Set<string>();
   const components = new Set<string>();
 
@@ -878,8 +889,7 @@ function collectSourceComponents(
     }
 
     for (const specifier of analyzeSourceImports(source)) {
-      if (!specifier.startsWith('.')) continue;
-      const resolved = resolveSourceModule(absolutePath, specifier);
+      const resolved = resolveSourceModule(absolutePath, specifier, projectRoot);
       if (resolved) visit(resolved);
     }
   };
