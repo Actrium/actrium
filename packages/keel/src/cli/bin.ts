@@ -34,6 +34,10 @@ program
   .option('--metafile <path>', 'Output build metadata to file')
   .option('--contract <path>', 'Contract module path exporting `contract` or default contract')
   .option('--capability-manifest <path>', 'Output host capability manifest to file')
+  .option(
+    '--v1-capability-manifest <path>',
+    'Output the v1-shaped capability manifest (schemaVersion/keelApi/guestEntry/imports/hostModules/components)'
+  )
   .option('--no-strict', 'Disable strict post-build dependency guard (not recommended)')
   .option(
     '--strict-peer-versions',
@@ -60,6 +64,9 @@ program
       }
       if (options.capabilityManifest !== undefined) {
         buildOpts.capabilityManifest = options.capabilityManifest;
+      }
+      if (options.v1CapabilityManifest !== undefined) {
+        buildOpts.v1CapabilityManifest = options.v1CapabilityManifest;
       }
       if (options.footer !== undefined) {
         buildOpts.footer = options.footer;

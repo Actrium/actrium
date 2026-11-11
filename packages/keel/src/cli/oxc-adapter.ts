@@ -60,6 +60,8 @@ export type PropHint = {
 
 export type JSXAnalysisResult = {
   propHints: PropHint[];
+  /** JSX element names used by the bundle, sorted and deduplicated. */
+  components: string[];
   stats: {
     totalElements: number;
     jsiSafeProps: number;
@@ -102,4 +104,14 @@ export function analyzeJSXProps(code: string): JSXAnalysisResult {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const impl = require('./oxc-adapter.js');
   return impl.analyzeJSXProps(code);
+}
+
+/**
+ * Extract component names from a transpiled bundle (JSX is already lowered
+ * to `jsx(...)`/`createElement(...)` calls at this point).
+ */
+export function analyzeBundleComponents(code: string): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxc-adapter.js');
+  return impl.analyzeBundleComponents(code);
 }

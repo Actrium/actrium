@@ -421,6 +421,7 @@ function analyzeJSXProps(code) {
   }
 
   const propHints = [];
+  const components = new Set();
   const stats = {
     totalElements: 0,
     jsiSafeProps: 0,
@@ -450,6 +451,7 @@ function analyzeJSXProps(code) {
 
         if (node.type === 'JSXElement') {
           const elementName = getJSXElementName(node.openingElement);
+          components.add(elementName);
           const props = {};
 
           // Analyze each prop
@@ -497,7 +499,7 @@ function analyzeJSXProps(code) {
     // Return empty result on error
   }
 
-  return { propHints, stats };
+  return { propHints, components: Array.from(components).sort(), stats };
 }
 
 /**
@@ -714,4 +716,76 @@ function traverseAST(node, visitor) {
   }
 }
 
-module.exports = { analyzeModuleIDs, analyzeHostBoundary, analyzeJSXProps };
+/**
+ * Extract component names from a transpiled bundle.
+ *
+ * JSX is already lowered to `jsx(...)` / `jsxs(...)` / `createElement(...)`
+ * calls, so the component is the first argument: a string literal or a
+ * member expression such as `import_guest.View`.
+ */
+function analyzeBundleComponents(code) {
+  if (!oxc || !oxc.parseSync) {
+    throw new Error("oxc-parser not available. Please install it with 'npm i -D oxc-parser'.");
+  }
+
+  const components = new Set();
+
+  try {
+    const result = oxc.parseSync(code, { sourceFilename: 'bundle.js' });
+    const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
+
+    traverseAST(ast, (node) => {
+      if (node.type !== 'CallExpression') return;
+      const callee = node.callee;
+      const calleeName =
+        callee?.type === 'Identifier'
+          ? callee.name
+          : callee?.type === 'MemberExpression' ||
+              callee?.type === 'StaticMemberExpression'
+            ? callee.property?.name
+            : undefined;
+      if (
+        calleeName !== 'jsx' &&
+        calleeName !== 'jsxs' &&
+        calleeName !== 'jsxDEV' &&
+        calleeName !== 'createElement'
+      ) {
+        return;
+      }
+
+      const first = node.arguments?.[0];
+      if (!first) return;
+      if (
+        (first.type === 'StringLiteral' || first.type === 'Literal') &&
+        typeof first.value === 'string'
+      ) {
+        components.add(first.value);
+      } else if (
+        (first.type === 'MemberExpression' ||
+          first.type === 'StaticMemberExpression') &&
+        first.property?.type === 'Identifier'
+      ) {
+        // Only Guest-module bindings (`import_guest.View`) describe capability
+        // components. Local values such as `item.Component` or
+        // `this.props.wrapper` must not leak into the manifest.
+        const object = first.object;
+        const objectName =
+          object?.type === 'Identifier' ? object.name : undefined;
+        if (objectName && /^import_guest\d*$/.test(objectName)) {
+          components.add(first.property.name);
+        }
+      }
+    });
+  } catch (err) {
+    console.error('[oxc-adapter] analyzeBundleComponents failed:', err.message);
+  }
+
+  return Array.from(components).sort();
+}
+
+module.exports = {
+  analyzeModuleIDs,
+  analyzeHostBoundary,
+  analyzeJSXProps,
+  analyzeBundleComponents,
+};

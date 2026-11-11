@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { analyzeHostBoundary, analyzeJSXProps, analyzeModuleIDs } from './oxc-adapter';
+import {
+  analyzeBundleComponents,
+  analyzeHostBoundary,
+  analyzeJSXProps,
+  analyzeModuleIDs,
+} from './oxc-adapter';
 
 describe('oxcAdapter - Module ID Analysis', () => {
   describe('Basic Functionality', () => {
@@ -248,6 +253,31 @@ describe('oxcAdapter - Host Boundary Analysis', () => {
     expect(result.violations.map((violation) => violation.code)).toContain(
       'host-dynamic-import'
     );
+  });
+});
+
+describe('oxcAdapter - Bundle Components', () => {
+  test('extracts component names from lowered jsx calls', () => {
+    const code = `
+      const a = jsx_runtime.jsxs(import_guest.View, { children: [
+        jsx_runtime.jsx(import_guest.Text, { children: 'hi' }),
+        jsx_runtime.jsx(import_guest.TextInput, {})
+      ]});
+    `;
+    expect(analyzeBundleComponents(code)).toEqual(['Text', 'TextInput', 'View']);
+  });
+
+  test('extracts string tag names from createElement calls', () => {
+    const code = `React.createElement('FlatList', {});`;
+    expect(analyzeBundleComponents(code)).toEqual(['FlatList']);
+  });
+
+  test('ignores local component expressions', () => {
+    const code = `
+      jsx_runtime.jsx(item.Component, {});
+      jsx_runtime.jsx(this.props.wrapper, {});
+    `;
+    expect(analyzeBundleComponents(code)).toEqual([]);
   });
 });
 
