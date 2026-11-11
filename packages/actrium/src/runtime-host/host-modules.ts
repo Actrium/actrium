@@ -1,8 +1,10 @@
-export type ServiceCallRequest = {
-  route: string;
-  payloadBase64: string;
-  timeoutMs?: number;
-};
+import type {
+  ServiceCallInput,
+  ServiceEvent,
+  ServiceTellInput,
+} from './contract';
+
+export type ServiceCallRequest = ServiceCallInput;
 
 export type ServiceCallResult = {
   success: boolean;
@@ -16,6 +18,17 @@ export type ActorCall = (request: {
   payloadBase64: string;
   timeoutMs: number;
 }) => Promise<ServiceCallResult>;
+
+export type HostModules = {
+  'host:service': {
+    call: (input: ServiceCallRequest) => Promise<{ payloadBase64: string }>;
+    tell: (input: ServiceTellInput) => Promise<void>;
+    on: (
+      handler: (event: ServiceEvent) => void
+    ) => () => void;
+  };
+};
+
 
 // `callActor` is expected to resolve with a failure result instead of
 // rejecting after the race settles. HostHttpHandler catches transport errors,
@@ -41,7 +54,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 export function createHostModules(options: {
   hasServiceCapability: boolean;
   callActor: ActorCall;
-}) {
+}): HostModules {
   let requestSequence = 0;
 
   return {

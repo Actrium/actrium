@@ -37,8 +37,10 @@ describe('host:service implementation', () => {
     await expect(hostModules['host:service'].call(input)).resolves.toEqual({
       payloadBase64: 'AAEC',
     });
-    expect(captured?.route).toBe('echo.EchoService.Echo');
-    expect(captured?.timeoutMs).toBe(30_000);
+    expect(captured).toMatchObject({
+      route: 'echo.EchoService.Echo',
+      timeoutMs: 30_000,
+    });
   });
 
   test('propagates gateway errors', async () => {
