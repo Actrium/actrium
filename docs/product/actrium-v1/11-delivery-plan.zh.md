@@ -64,7 +64,7 @@ flowchart LR
 
 - `actr://` Realm 链接的测试向量；
 - Publisher Profile schema；
-- Actrium manifest extension schema；
+- 签名 Program Release 记录的结构与发现规则。
 - Realm 签名 key（authority descriptor 的 `realm_signing_keys` 成员与 core relation `realms`，已在 Actr Authority Discovery §4.3–4.4 定义）与 Realm Profile schema；
 - persistent Actor identity lifecycle ADR；
 - Front–Service session proto；
@@ -129,8 +129,8 @@ flowchart LR
 - domain/IDNA normalizer；
 - key history/rotation store；
 - package digest pinning；
-- Actrium manifest extension；
-- Guest/contract/assets 纳入 `.actr` resource hash；
+- 绑定 Front 和 Service 包的签名 Program Release 记录。
+- Guest、契约和资源由签名的 `[[files]]` 文件表绑定。
 - content-addressed cache；
 - zip safety policy；
 - Marketplace metadata adapter；
@@ -138,16 +138,16 @@ flowchart LR
 
 ### Actr package 改动
 
-- publisher 字段允许规范化 Publisher 域名；
-- manifest 增加向后兼容的 `[actrium]` section；
-- verifier 输出 typed Actrium metadata；
-- binary 只允许支持 kind；
-- resource hash、lock 和 proto 保持；
-- package signing key id 对接 Publisher Profile。
+- `actor.publisher` 保存规范化 Publisher 域名。
+- Service 与 Front 各使用一份 `actr-package/2` 清单，分别描述一个 Workload。
+- 验证器检查各自的包清单和绑定两个包的发布记录。
+- 加载器验证每个包的 Workload Profile 后装载其入口。
+- `[[files]]` 绑定 Guest、契约、资源和随包分发的依赖锁。
+- `signature.key-id` 对接 Publisher Profile。
 
 ### 退出条件
 
-- 按 Realm Profile 的 `package` 可下载并验证一个 `.actr`；
+- Realm Profile 固定 Service 包。匹配的签名发布记录确定独立验证的 Front 包。
 - 同版本异包被稳定检测；
 - 离线缓存可重新验证；
 - package 中无法替换 Front Host。
@@ -390,7 +390,7 @@ flowchart LR
 1. macOS；
 2. 本机 Realm；
 3. 一个签名 `.actr` WASM Service；
-4. 包内一个 Keel JS Guest；
+4. 一个与 Service 发布版本配套的独立签名 Keel JS Guest `.actr` 包。
 5. managed Workspace；
 6. 从本地包新建实例；
 7. 地址栏显示 Realm 链接；

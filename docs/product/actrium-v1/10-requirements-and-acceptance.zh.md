@@ -20,7 +20,7 @@
 | ID | 需求 |
 |---|---|
 | FR-URI-001 | 必须支持 Realm 链接 `actr://<Realm 域名>/<realm_id>[/<页面路径>][?…][#…]`；RealmId 之后的部分原样交给应用。 |
-| FR-URI-002 | 打开 Realm 链接必须取得并验证 Realm Profile，按其 `package` 下载并验证包，再在该 Realm 内按包的 Actor 类型找到 Service 并 Attach。 |
+| FR-URI-002 | 打开 Realm 链接必须验证 Realm Profile、其中指定的 Service 包、匹配的 Program Release 记录及 Front 包。随后在该 Realm 内按 Service 的 Actor 类型找到实例并 Attach。 |
 | FR-URI-003 | Attach 失败不得 LB、降级版本、换 Realm 或创建替代实例。 |
 | FR-URI-004 | Service 的 Actor 类型必须与 Realm Profile 所指包声明的 Actor 类型一致。 |
 | FR-URI-005 | Realm 链接不得包含 credential、session secret、Workspace secret 或 bearer invite。 |
@@ -34,19 +34,19 @@
 | ID | 需求 |
 |---|---|
 | FR-PKG-001 | Program Catalog 与 Service Inventory 必须分开。 |
-| FR-PKG-002 | package 必须来自 Realm Profile 的 `package` 或用户选定的来源，并核对 SHA-256。 |
-| FR-PKG-003 | 每个 Program Release 必须固定 package digest。 |
-| FR-PKG-004 | `.actr` 必须校验 Publisher key、manifest signature 和所有文件 hash。 |
+| FR-PKG-002 | 发布版本必须提供 Publisher 签名记录，绑定两个包的类型和摘要。通过 Realm 打开时，记录中的 Service 包必须匹配 Realm Profile 的 `package`。 |
+| FR-PKG-003 | 每个 Program Release 必须固定 Service 和 Front 两个包的摘要。 |
+| FR-PKG-004 | 每份 `.actr` 清单必须声明一个 Actor 类型和一个 Workload，并校验 Publisher key、清单签名和所有文件哈希。 |
 | FR-PKG-005 | 必须拒绝 zip traversal、超限文件数、解压总量和压缩炸弹。 |
 | FR-PKG-006 | 第三方 package 不得包含 Front Host/native plugin。 |
 | FR-PKG-007 | Guest 必须从已验证本地 bytes 加载，不得由 Keel 直接信任远端 URL。 |
-| FR-PKG-008 | 同一 Program Release 出现不同 digest 必须 hard fail。 |
-| FR-PKG-009 | 仍被 Service 引用的 package digest 不得被缓存清理。 |
+| FR-PKG-008 | 同一 Program Release 的 Service 或 Front 包出现不同摘要时必须拒绝。 |
+| FR-PKG-009 | Service 实例仍在引用时，必须保留 Service 和 Front 包的缓存。 |
 | FR-PKG-010 | Marketplace metadata 不得覆盖 Publisher package identity。 |
 | FR-PKG-011 | 必须支持本地 `.actr` 和明确标记的开发来源。 |
 | FR-PKG-012 | 必须支持 Advisory/Block new/Quarantine/Critical block 撤销等级。 |
 | FR-PKG-013 | Publisher bootstrap 必须固定 HTTPS 443；Publisher Profile 必须有规范化签名、序号/时效和回滚保护。 |
-| FR-PKG-014 | 官方发布工具必须支持 build、validate、sign，并回读验证已发布包的 SHA-256 与签名。 |
+| FR-PKG-014 | 官方发布工具必须构建、验证并签名两个包，发布签名记录，再回读核对两个包的 SHA-256 与签名。 |
 
 ### 1.4 Front/Keel
 
@@ -270,7 +270,7 @@
 
 **Given** 用户在 Program Catalog 选中未安装的 `notes.example/team-notes@1.4.2`<br>
 **When** 新建实例并确认权限/Workspace<br>
-**Then** Actrium 验证 package、只创建一个 Realm 与一个 Service、获得持久 ActorId、地址栏显示该实例的 Realm 链接、Attach 并显示 Guest。
+**Then** Actrium 分别验证 Service 包和 Front 包，只创建一个 Realm 与一个 Service，获得持久 ActorId，地址栏显示该实例的 Realm 链接，Attach 并显示已验证的 Guest。
 
 ### AC-002：刷新不重复创建
 

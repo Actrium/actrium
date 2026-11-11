@@ -178,7 +178,7 @@ Tab、Front Actor、Guest 都可以重建；Workspace 绑定、业务状态与�
 
 ### 7.4 精确版本不可变
 
-`publisher/program@version` 一旦被 Actrium 接受，就必须永久对应同一 package digest。
+`publisher/program@version` 一旦被 Actrium 接受，该发布版本的 Service 与 Front 包摘要即固定。
 
 ### 7.5 默认最小能力
 

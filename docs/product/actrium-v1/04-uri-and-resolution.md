@@ -35,8 +35,9 @@ actr://acme.com/k7m2q9xh/today?view=week#item-3
 
 ## 3. Opening
 
-Actrium opens links per Actr URI §4: obtain and verify the Realm Profile → download and verify
-the package per its `package` field → start the front end → connect to the instance's Service.
+Actrium opens links per Actr URI §4. It verifies the Realm Profile and the Service package in its
+`package` field, then verifies the matching Program Release record and its Front package. It creates the
+Front Actor from the verified Front manifest and Attaches to the instance's Service.
 
 Product-level requirements:
 
@@ -45,8 +46,8 @@ Product-level requirements:
   program name, version) after download and verification; first-time trust of a Realm domain must
   be confirmed. When the Realm domain equals or belongs to the Actr Facility Provider ID, the trust root
   is displayed as that Actr Facility Provider.
-- **Fail closed**: if the Realm Profile cannot be fetched, fails verification, or is retired, or
-  the package's SHA-256 or signature does not match, opening stops; Actrium does not fall back to
+- **Fail closed**: opening stops when the Realm Profile or matching release record is unavailable
+  or fails verification, the Realm is retired, or either package's digest or signature fails verification. Actrium does not fall back to
   another Actr Facility Provider, does not swap packages, and does not create a new instance.
 - **No membership yet**: enter the join flow (e.g., a Realm invitation) instead of failing
   silently.

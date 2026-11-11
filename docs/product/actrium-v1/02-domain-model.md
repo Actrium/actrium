@@ -47,16 +47,9 @@ An immutable version of a program:
 ProgramReleaseId = publisher/program@version
 ```
 
-It must resolve to a fixed `.actr` package digest. A Program Release describes:
-
-- the Service workload;
-- the Keel Guest entry point;
-- the Front–Service contract;
-- the requested capabilities and components;
-- the Keel/Actrium/Actr ABI compatibility range;
-- resource quotas;
-- the Workspace mode;
-- Publisher signing information.
+The Publisher-signed release record pins the Service and Front package digests. The packages
+carry their respective Workloads, contracts, and Host requirements. Actrium applies the
+Workspace, quota, and other instance policies through deployment and authorization.
 
 ### 2.3 Service
 
@@ -76,7 +69,7 @@ Service is not a "program type", nor a load-balancing candidate that can be free
 
 The short-lived interactive Actor for one resident app Tab:
 
-- its workload is fixed by Actrium;
+- its Actor type and Keel Guest Workload come from the verified Front package;
 - contains the Keel Host, the Actr client, the capability broker, and lifecycle management;
 - loads a verified Keel Guest;
 - holds only the restricted capability bound to the Service;
@@ -172,14 +165,7 @@ So the simplest model is not "the two lifecycles locked together", but:
 
 ### 3.3 Exclusive vs. shared
 
-The Program Manifest declares:
-
-```toml
-[actrium.session]
-attachment_policy = "exclusive"
-```
-
-v1 only commits to `exclusive`:
+Actrium's v1 session policy uses `exclusive`.
 
 - when the same Service is already open locally, opening the same Realm link focuses the existing Tab;
 - when another device requests a connection, the Service may refuse, wait for the lease to expire, or trigger a user-confirmed takeover;
@@ -276,7 +262,7 @@ Three actions must be kept separate:
 
 Creating an instance is a local Actrium operation; it is never triggered by a link:
 
-1. the user picks a package from the Program Catalog, Marketplace, a local file, or a package address; Actrium checks the digest and verifies the package signature;
+1. the user selects a Program Release or provides both packages for local development. Actrium verifies the Service and Front packages.
 2. choose a Realm domain (a local Realm is created by default), generate a random RealmId (the user may explicitly change it to a readable name), and choose a Workspace;
 3. create a new Realm under that Realm domain: a local Realm only creates a local record on the device; any other Realm requires authorization from the holder of that Realm domain's Realm signing key, and its Realm Profile's `package` records the chosen package's address and SHA-256;
 4. create the Service inside that Realm and obtain its durable ActorId;
@@ -288,7 +274,9 @@ A new instance always means a new Realm. When a Service is upgraded to a new Pro
 
 ### 6.2 Open instance
 
-Opening a Realm link `actr://<domain>/<realm_id>[…]`: obtain and verify the Realm Profile, download and verify the package per `package`, then find the Service inside that Realm by the package's Actor type and Attach:
+To open a Realm link `actr://<domain>/<realm_id>[…]`, verify the Realm Profile and the Service package
+identified by `package`, then verify the Front package pinned by the matching Program Release record.
+Find the Service inside the Realm by the Service package's Actor type and Attach.
 
 - no load balancing, no switching to another Realm;
 - never creates a new instance because of offline;

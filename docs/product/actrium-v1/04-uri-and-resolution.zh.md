@@ -24,15 +24,15 @@ actr://acme.com/k7m2q9xh/today?view=week#item-3
 
 ## 3. 打开
 
-Actrium 按 Actr URI 第 4 节打开链接：取得并验证 Realm Profile → 按其中的 `package` 下载并验证
-包 → 启动前台 → 连接该实例的 Service。
+Actrium 按 Actr URI 第 4 节打开链接。先验证 Realm Profile 和其中 `package` 指定的 Service 包，
+再验证匹配的 Program Release 记录及其 Front 包。Actrium 按已验证的 Front 清单创建 Front Actor，并 Attach 到该实例的 Service。
 
 产品层面的要求：
 
 - **先确认，后联网**：来自网页、二维码、邮件或其他 App 的链接，先显示 Realm 域名、
   `display_name`，下载验证后再显示程序（Publisher、程序名、版本）；首次信任某个 Realm 域名
   必须确认。Realm 域名等于或属于 Actr Facility Provider ID 时，信任根显示为该 Actr Facility Provider。
-- **失败即停**：Realm Profile 取不到、验不过或已退役，包的 SHA-256 或签名不符，都停止打开，
+- **失败即停**：Realm Profile 或匹配的发布记录取不到或验不过、Realm 已退役，或任一包的摘要或签名不符，都停止打开，
   不改用其他 Actr Facility Provider，不换包，不新建实例。
 - **没有成员身份时**：进入加入流程（例如 Realm 邀请），不静默失败。
 - 用户可以选择「在浏览器中打开」外部 https 链接；在同一域名的网页内跳转时，Actrium 不强制接管。

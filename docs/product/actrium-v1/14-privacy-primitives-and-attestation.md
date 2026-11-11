@@ -176,26 +176,26 @@ The Contract freezes at least:
 - output/declassification rules;
 - the action to take on unknown or invalid evidence.
 
-Illustration:
+The example binds a standalone Privacy Contract to the finished package digest.
 
 ```toml
-[actrium.privacy_contract]
+[privacy_contract]
 schema_version = 1
 contract_id = "notes.example/team-notes@1.4.2#privacy"
 package_digest = "sha256:..."
 
-[[actrium.privacy_contract.actor_role]]
+[[privacy_contract.actor_role]]
 role = "service"
-actr_type = "notes.example/team-notes-service@1.4.2"
+actr_type = "notes.example/team-notes@1.4.2"
 cardinality = "1"
 required = true
 
-[[actrium.privacy_contract.actor_role]]
+[[privacy_contract.actor_role]]
 role = "ai-inference"
 cardinality = "0..n"
 required_assurance_profile = "confidential-ai-v1"
 
-[[actrium.privacy_contract.edge]]
+[[privacy_contract.edge]]
 source = "service"
 target = "ai-inference"
 data_classes = ["private"]
@@ -284,7 +284,7 @@ An unchanged graph doesn't mean the conclusion never changes. Evidence expiry, V
 Illustration:
 
 ```toml
-[[actrium.privacy.data_policy]]
+[[data_policy]]
 class = "public"
 required = [
   "identity",
@@ -293,7 +293,7 @@ required = [
   "egress_closure"
 ]
 
-[[actrium.privacy.data_policy]]
+[[data_policy]]
 class = "private"
 required = [
   "identity",
@@ -304,7 +304,7 @@ required = [
   "egress_closure"
 ]
 
-[[actrium.privacy.data_policy]]
+[[data_policy]]
 class = "secret"
 required = [
   "identity",
@@ -663,7 +663,7 @@ If policy requires confidential compute:
 A server retaining audit logs must itself be an explicit storage/audit sink in the static Contract:
 
 ```toml
-[[actrium.privacy_contract.audit_sink]]
+[[privacy_contract.audit_sink]]
 kind = "security-audit"
 fields = ["actor-pseudonym", "operation", "decision", "timestamp"]
 payload = false

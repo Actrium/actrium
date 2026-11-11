@@ -81,11 +81,11 @@ https://notes.example/.well-known/actr
 }
 ```
 
-`publisher.signature` 对象本身不进入 payload；`publisher` 成员的其余 JSON 按 RFC 8785 JCS 规范化后做 detached Ed25519 验证。`sequence` 必须单调递增。descriptor 中 `publisher` 以外的部分不签名，不参与 Publisher 信任判断。`profile_signing_keys` 与可选的 `rotations` 的格式、接受与轮换规则同 `realm_signing_keys`（Actr Authority Discovery §4.4）。包签名 key 的 `id` 由公钥算出，与 manifest `signing_key_id` 相同；`keys` 至多 8 项、其中 `active` 至多 2 项，轮换时先发布新 key、至少 24 小时后再用它签包（[Actor Package](../../../actr/protocols/actor-package.zh.md) §6.8）。
+`publisher.signature` 对象本身不进入 payload；`publisher` 成员的其余 JSON 按 RFC 8785 JCS 规范化后做 detached Ed25519 验证。`sequence` 必须单调递增。descriptor 中 `publisher` 以外的部分不签名，不参与 Publisher 信任判断。`profile_signing_keys` 与可选的 `rotations` 的格式、接受与轮换规则同 `realm_signing_keys`（Actr Authority Discovery §4.4）。包签名 key 的 `id` 由公钥算出，与 manifest `signature.key-id` 相同；`keys` 至多 8 项、其中 `active` 至多 2 项，轮换时先发布新 key、至少 24 小时后再用它签包（[Actor Package](../../../actr/protocols/actor-package.zh.md) §6.8）。
 
 ## 3. 包下载
 
-实例运行哪个包，写在其 Realm Profile 的 `package` 中（样例见 §6.2）：
+Realm Profile 的 `package` 指定实例的 Service 包（样例见 §6.2）。
 
 ```json
 "package": {
@@ -97,144 +97,123 @@ https://notes.example/.well-known/actr
 
 Actrium 按 [Realm Profile 协议](../../../actr/protocols/realm-profile.zh.md)第 6 节下载 `href`（不带 credential 的 HTTPS GET）、核对 `sha256`，再用 Publisher Profile（§2）中的包签名 key 验证 manifest 签名；manifest 声明的 Actor 类型即该实例的程序。下载地址可以在任何位置（Publisher CDN、Loran 包托管、对象存储），不是信任源。
 
+Actrium 按 Service 包摘要匹配 Publisher 签名的 Program Release 记录，再独立验证该记录固定的 Front 包。
+
 ## 4. `.actr` Manifest
 
-示意：
+Team Notes 为每个 Workload 分发一个独立签名的 `actr-package/2` 包。文件大小、摘要和 key id 为示例值。
+
+### 4.1 Service 包
+
+WASM Component 是该包的 Workload。示例中的唯一 Proto 是 Service 的 RPC 契约。
 
 ```toml
+format = "actr-package/2"
+
+[actor]
 publisher = "notes.example"
 name = "team-notes"
 version = "1.4.2"
-signature_algorithm = "ed25519"
-signing_key_id = "actr-pub-3f9a1c0d2b7e4a61"
 
-[binary]
+[workload]
+profile = "actr.component/1"
+entry = "bin/service.wasm"
+
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = []
+optional-capabilities = []
+
+[signature]
+algorithm = "ed25519"
+key-id = "actr-pub-3f9a1c0d2b7e4a61"
+
+[[files]]
 path = "bin/service.wasm"
-target = "wasm32-wasip2"
-kind = "component"
-hash = "<sha256>"
+role = "workload"
+media-type = "application/wasm"
 size = 1832000
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
-[metadata]
-description = "Workspace-bound team notes"
-license = "Apache-2.0"
-
-[actrium]
-schema_version = 1
-min_actrium_version = "1.0.0"
-front_host_api = "^1.0"
-service_host_api = "^1.0"
-
-[actrium.front]
-guest_runtime = "keel-js"
-guest_entry = "ui/guest.bundle.js"
-keel_api = "^1.0"
-contract_manifest = "ui/capability-manifest.json"
-contract_digest = "sha256:<digest>"
-
-[actrium.service]
-contract = "proto/service.proto"
-protocol_fingerprint = "sha256:<digest>"
-
-[actrium.service.workspace]
-requirement = "required"
-provisioning = "user-selected"
-access = "read-write"
-providers = ["managed-store", "local-folder", "cloud-drive"]
-lease = "exclusive-writer"
-
-[actrium.session]
-attachment_policy = "exclusive"
-lease_seconds = 45
-heartbeat_seconds = 15
-
-[actrium.privacy]
-schema_version = 1
-data_classes = ["public", "private", "secret"]
-default_unknown_action = "block-private-and-secret"
-
-[[actrium.privacy.actor_egress]]
-actr_type = "notes.example/index-worker@1.4.2"
-required = false
-data_classes = ["private"]
-
-[actrium.permissions.front]
-capabilities = [
-  "service",
-  "host:clipboard.write",
-  "host:notifications"
-]
-
-[actrium.permissions.service]
-capabilities = [
-  "workspace:read-write",
-  "net:https://api.notes.example",
-  "actor:call:notes.example:index-worker:1"
-]
-
-[actrium.components]
-allow = [
-  "View",
-  "Text",
-  "ScrollView",
-  "TextInput",
-  "Button",
-  "FlatList",
-  "ImageAsset"
-]
-
-[actrium.resources.front]
-heap_bytes = 67108864
-js_turn_timeout_ms = 100
-max_render_nodes = 10000
-max_batch_ops = 5000
-max_rpc_concurrency = 32
-
-[actrium.resources.service]
-memory_bytes = 268435456
-max_mailbox = 4096
-max_rpc_concurrency = 128
-max_workspace_bytes = 10737418240
-
-[[resources]]
-path = "ui/guest.bundle.js"
-hash = "<sha256>"
-
-[[resources]]
-path = "ui/capability-manifest.json"
-hash = "<sha256>"
-
-[[resources]]
-path = "assets/icon.png"
-hash = "<sha256>"
-
-[[proto_files]]
-name = "service.proto"
+[[files]]
 path = "proto/service.proto"
-hash = "<sha256>"
-
-[lock_file]
-path = "manifest.lock.toml"
-hash = "<sha256>"
+role = "contract"
+media-type = "text/plain"
+size = 1204
+sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
 ```
 
-正式 schema 需要决定如何让 Actr 基础 manifest 保持向后兼容，并确保 `[actrium]` 字段也位于 manifest signature 覆盖范围内。
+### 4.2 Front 包
 
-Native Capsule workload 另需：
+Keel Guest 是该包的 Workload。`workload.keel.contract` 指向 Guest 自身的 Keel 契约。
+`dependencies.service.contract` 指向生成 Service RPC 编解码代码时使用的 Proto。
 
 ```toml
-[actrium.native_capsule]
-profile = "privacy-closed-v1"
-network = "broker-only"
-workspace = "broker-only"
-child_process = false
-ptrace = false
-shared_writable_memory = false
-dynamic_libraries = "sealed"
-ipc = ["actr.capability.v1"]
+format = "actr-package/2"
+
+[actor]
+publisher = "notes.example"
+name = "team-notes-front"
+version = "1.4.2"
+
+[workload]
+profile = "keel.guest/1"
+entry = "workload/guest.js"
+
+[workload.keel]
+runtime = "js"
+guest-api = "keel.guest/1"
+capabilities = "workload/capabilities.json"
+contract = "contracts/notes.json"
+
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = ["actor.call", "ui.render"]
+optional-capabilities = []
+
+[dependencies.service]
+actor = "notes.example/team-notes"
+version = "=1.4.2"
+contract = "proto/service.proto"
+required = true
+
+[signature]
+algorithm = "ed25519"
+key-id = "actr-pub-3f9a1c0d2b7e4a61"
+
+[[files]]
+path = "workload/guest.js"
+role = "workload"
+media-type = "text/javascript"
+size = 18432
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[files]]
+path = "workload/capabilities.json"
+role = "profile"
+media-type = "application/json"
+size = 746
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[files]]
+path = "contracts/notes.json"
+role = "contract"
+media-type = "application/json"
+size = 512
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[files]]
+path = "proto/service.proto"
+role = "contract"
+media-type = "text/plain"
+size = 1204
+sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
 ```
 
-同进程 `NativeCdylib` 不使用该 profile，也不能因此评为 `CONTROLLED`。
+两个示例使用同一份 `proto/service.proto`。每个归档各自包含 `manifest.sig`。
+Realm、信令与信任等部署参数由 `actr.toml` 提供。
 
 ## 5. Keel Capability Manifest
 
@@ -242,7 +221,7 @@ ipc = ["actr.capability.v1"]
 {
   "schemaVersion": 1,
   "keelApi": "1.0",
-  "guestEntry": "ui/guest.bundle.js",
+  "guestEntry": "workload/guest.js",
   "imports": [
     "react",
     "react/jsx-runtime",

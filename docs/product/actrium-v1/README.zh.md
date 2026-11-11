@@ -52,11 +52,11 @@ Tab
 | D-003 | 「1:1」是 live Front 视角的唯一绑定，不是 Service 与历史 Tab 的永久双射；Service 独立存活并可被新 Front 重连。 |
 | D-004 | v1 默认采用独占交互会话；同一实例的链接在本机再次打开时优先聚焦已有 Tab。共享会话是后续显式能力。 |
 | D-005 | Service 绑定零个或一个 Workspace；需要多 Actor 的程序由 Service 在同一 Realm 内编排。 |
-| D-006 | Front workload 由 Actrium 原生提供，Publisher 不能替换 Actr Host；Publisher 只能提供 Keel Guest、资源、声明与 Service workload。 |
+| D-006 | Actrium 提供原生 Front Host。Publisher 提供 Keel Guest 和 Service Workload，以及各自的资源和声明。 |
 | D-007 | v1 第三方 Front Guest 只开放 Keel JS Guest，并固定使用具备硬超时和堆上限的 QuickJS 后端。 |
-| D-008 | 一个 Actrium Program Release 是一个签名 `.actr` 包：Service workload 是可执行主体，Keel Guest 是受签名保护的包资源。 |
+| D-008 | 签名 Program Release 记录绑定独立的 Service 包和 Front 包。每个 `.actr` 使用 `actr-package/2`，声明一个 Actor 类型和一个 Workload。Front 清单声明其 Service 依赖。 |
 | D-009 | 链接只指向实例，且只使用 `actr://<Realm 域名>/<realm_id>` 形式；打开链接只连接该实例，不得失败后偷偷新建。新建实例是 Actrium 内的本地操作，不是链接。 |
-| D-010 | Publisher 身份是规范化域名，不含端口；Publisher Profile 只用来验证包签名，下载地址不属于 Publisher 身份，可以在任何位置。 |
+| D-010 | Publisher 身份是无端口的规范化域名。Publisher Profile 提供公钥，用于验证从任意分发渠道取得的发布记录和包。 |
 | D-011 | Marketplace 是发现、审核与撤销信息源，不是 Publisher 命名权威；域名与包签名才是来源链。 |
 | D-012 | v1 ActorId 必须包含可验证的 Realm 名（`<realm_id>@<domain>`，如 `notes@acme.com`），程序类型不在 ActorId 中；它是公开地址和密码学身份，不是 bearer token，知道地址不等于有权连接。 |
 | D-013 | Realm 是逻辑信任域，对应一个应用实例，可委派多个信令/TURN 服务；Realm 与某个物理信令进程不是一回事，一个 Actr Facility Provider 承载多个 Realm；Realm 在创建时绑定一个 Actr Facility Provider，此后不可更换。 |

@@ -88,8 +88,8 @@ Actrium 首次启动完成以下配置：
 
 1. 用户打开程序详情；
 2. Actrium 显示 Publisher、版本、digest、权限、Workspace 模式和市场审核状态；
-3. Actrium 按 Marketplace 或 Publisher 给出的包地址下载 `.actr`；
-4. 校验 HTTPS、Publisher key、包签名、digest、兼容性和压缩包限制；
+3. Actrium 取得并验证 Publisher 签名的 Program Release 记录。
+4. 按发布记录验证两个包的身份、签名、摘要、兼容性和压缩包限制。
 5. 记录 Program Release；
 6. 只缓存程序，不自动创建 Service，除非用户点击「创建实例」。
 
@@ -97,11 +97,11 @@ Actrium 首次启动完成以下配置：
 
 ### 4.2 打开链接时
 
-包尚未安装时按 [04 §3](04-uri-and-resolution.zh.md) 处理：先确认、再下载验证；取消则不产生 Service 或 Front Actor。
+发布版本尚未安装时按 [04 §3](04-uri-and-resolution.zh.md) 处理。用户确认后，验证匹配的发布记录和两个包。用户取消时，在创建 Actor 前结束安装。
 
 ### 4.3 本地导入
 
-本地 `.actr` 包：
+本地导入接受配套的 Service 与 Front `.actr` 文件。导入已发布的版本时，两个包必须匹配已验证的发布记录。
 
 - 仍必须通过结构、hash 和签名检查；
 - 签名 key 不属于已验证域名时标记为「本地开发身份」；
@@ -123,8 +123,8 @@ sequenceDiagram
     participant F as Front Actor
 
     U->>A: 在 Program Catalog 点「创建实例」（或导入包、输入包地址）
-    A->>P: 下载并验证包
-    P-->>A: package digest + manifest
+    A->>P: 验证发布记录和两个包
+    P-->>A: Service digest 和两份已验证清单
     A->>U: 权限、Realm 域名与 RealmId、Workspace 确认
     U-->>A: 确认创建
     A->>M: Create(idempotency_key, package, workspace, domain, realm_id, display_name)
@@ -136,7 +136,7 @@ sequenceDiagram
     S-->>M: stable ActorId
     M-->>A: Service record + ActorId
     A->>A: 地址栏换成新实例的 Realm 链接（replace）
-    A->>F: 启动固定 Native Front workload
+    A->>F: 按已验证清单创建 Front Actor
     F->>S: Attach handshake
     S-->>F: session lease + contract
     F->>F: 加载已验证 Keel Guest
@@ -198,7 +198,7 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 
 1. 解析 Realm 链接，得到 Realm 名；
 2. 获取该域名的 Realm 签名 key 与 Realm Profile 并验证签名；
-3. 按 Realm Profile 的 `package` 确保包已安装且 digest 一致；
+3. 验证 Realm Profile 固定的 Service 包，以及匹配的发布记录固定的 Front 包。
 4. 经 Realm Profile 指定的 Actr Facility Provider，在该 Realm 内找到 Actor 类型与包相同的 Service；
 5. 完成双方身份和 challenge 验证；
 6. 协商 Front–Service contract；
@@ -490,10 +490,10 @@ actrium init
 → 编写 Keel Guest、Service Component 与 contract
 → build
 → validate（schema、capability、hash、沙箱兼容性）
-→ sign
+→ 分别签名 Front 包和 Service 包
 → 生成/更新 Publisher Profile
-→ 上传 package
-→ 按包地址回读，核对 digest 与签名
+→ 发布两个包及绑定其摘要的签名发布记录
+→ 回读两个包并核对 digest 与签名
 → 可选提交 Marketplace 审核
 ```
 

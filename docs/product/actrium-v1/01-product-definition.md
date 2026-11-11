@@ -178,7 +178,7 @@ The Tab, the Front Actor and the Guest can all be rebuilt; the Workspace binding
 
 ### 7.4 An exact version is immutable
 
-Once Actrium accepts `publisher/program@version`, it must permanently correspond to the same package digest.
+Once Actrium accepts `publisher/program@version`, the Service and Front package digests are fixed for that release.
 
 ### 7.5 Minimal capability by default
 

@@ -88,8 +88,8 @@ First launch creates no Realm; each local instance gets its own local Realm when
 
 1. The user opens the program's detail page;
 2. Actrium shows the Publisher, version, digest, permissions, Workspace mode and marketplace review status;
-3. Actrium downloads the `.actr` from the package address given by the Marketplace or Publisher;
-4. Verifies HTTPS, the Publisher key, the package signature, the digest, compatibility and archive limits;
+3. Actrium obtains and verifies the Publisher-signed Program Release record.
+4. It verifies both packages against the record, including identities, signatures, digests, compatibility, and archive limits.
 5. Records the Program Release;
 6. Only caches the program; it does not automatically create a Service unless the user clicks "Create instance".
 
@@ -97,11 +97,11 @@ The download address is not the trust source; Actrium relies on the package sign
 
 ### 4.2 When opening a link
 
-If the package is not yet installed, handle it per [04 §3](04-uri-and-resolution.md): confirm first, then download and verify; canceling produces no Service or Front Actor.
+For an uninstalled release, follow [04 §3](04-uri-and-resolution.md). After confirmation, verify the matching release record and both packages. Canceling ends installation before either Actor is created.
 
 ### 4.3 Local import
 
-For a local `.actr` package:
+Local import accepts the Service and Front `.actr` files as a pair. Match them to the verified release record when importing a published release.
 
 - It must still pass structure, hash and signature checks;
 - If the signing key does not belong to a verified domain, mark it "local development identity";
@@ -123,8 +123,8 @@ sequenceDiagram
     participant F as Front Actor
 
     U->>A: Click "Create instance" in Program Catalog (or import a package, or enter a package address)
-    A->>P: Download and verify the package
-    P-->>A: package digest + manifest
+    A->>P: Verify the release record and both packages
+    P-->>A: Service digest and both verified manifests
     A->>U: Confirm permissions, Realm domain and RealmId, and Workspace
     U-->>A: Confirm creation
     A->>M: Create(idempotency_key, package, workspace, domain, realm_id, display_name)
@@ -136,7 +136,7 @@ sequenceDiagram
     S-->>M: stable ActorId
     M-->>A: Service record + ActorId
     A->>A: Replace the address bar with the new instance's Realm link
-    A->>F: Start the fixed Native Front workload
+    A->>F: Create the Front Actor from its verified manifest
     F->>S: Attach handshake
     S-->>F: session lease + contract
     F->>F: Load the verified Keel Guest
@@ -198,7 +198,7 @@ Creation proceeds in the order "holder authorization → pending Realm → sign 
 
 1. Resolve the Realm link to get the Realm name;
 2. Fetch that domain's Realm signing key and Realm Profile and verify the signature;
-3. Per the Realm Profile's `package`, ensure the package is installed and the digest matches;
+3. Verify the Service package pinned by the Realm Profile and the Front package pinned by the matching release record.
 4. Via the Actr Facility Provider specified by the Realm Profile, find within that Realm the Service whose Actor type matches the package;
 5. Complete mutual identity and challenge verification;
 6. Negotiate the Front–Service contract;
@@ -490,10 +490,10 @@ actrium init
 → write the Keel Guest, Service Component and contract
 → build
 → validate (schema, capability, hash, sandbox compatibility)
-→ sign
+→ sign the Front and Service packages
 → generate/update the Publisher Profile
-→ upload the package
-→ read it back from the package address and check the digest and signature
+→ publish both packages and the signed release record that binds their digests
+→ read both packages back and check their digests and signatures
 → optionally submit for Marketplace review
 ```
 

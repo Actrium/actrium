@@ -75,47 +75,54 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 
 ## 3. 包从哪来
 
-平台不负责「按程序名找包」。包只有两个来源：
+Publisher 签名的 Program Release 记录绑定 Front 和 Service 两个包的下载地址、SHA-256 与 Actor 类型。
+Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证两个包。
 
-- **打开实例**：Realm Profile 的 `package` 给出下载地址、SHA-256 与 Actor 类型（[Actr Realm Profile](../../../actr/protocols/realm-profile.zh.md)）；
-- **新建实例**：用户在 Program Catalog、Marketplace、本地文件或一个包地址中选定。发现程序、查询新版本属于 Marketplace 与 Publisher 自己的渠道。
+- **打开实例。** Realm Profile 的 `package` 固定 Service 包。按该包的 Actor 类型和摘要匹配已验证的
+  Program Release 记录，取得 Front 包。Actrium 可使用已安装记录，或从 Publisher、Marketplace 取得记录。
+  见 [Actr Realm Profile](../../../actr/protocols/realm-profile.zh.md)。
+- **新建实例。** 用户从 Program Catalog、Marketplace 或 Publisher 渠道选定发布版本。
+  本地开发时，Actrium 可按本地信任策略验证并记录用户显式提供的两个归档。
 
-无论来源，验证都一样：核对 SHA-256，再用 Publisher Profile 的包签名 key 验证包签名（第 8 节）。下载地址放在哪里都不影响安全。
+## 4. Service 包与 Front 包
 
-## 4. 一个 Program Release，一个 `.actr` 包
+### 4.1 包的边界
 
-### 4.1 包的职责
+每个 Program Release 绑定两个独立签名的 `actr-package/2` 包。每份清单按
+[Actor Package 协议](../../../actr/protocols/actor-package.zh.md)声明一个 Actor 类型和一个 Workload。
 
-Actrium Program Release 直接复用 Actr `.actr` 包：
+- **Service 包。** `[workload]` 选择 Service 可执行文件。Realm Profile 的 `package` 指向该归档。
+- **Front 包。** `[workload]` 以 `keel.guest/1` 选择 Keel Guest。
+  `[workload.keel]` 声明其运行时、能力清单和 Keel 契约。
+  `[dependencies.service]` 声明所需的 Service Actor 类型、版本和契约。
 
-- 可执行主体是 Service workload；
-- Keel Guest 作为签名包资源；
-- Front–Service proto/contract 作为签名包资源；
-- 图标、静态资源、默认配置进入资源区；
-- Actrium 扩展字段声明前台入口、权限、组件、Workspace 与兼容范围。
-
-Actrium 不再发明一个套在 `.actr` 外面的第二层安装包。
+每个包的入口使用角色 `workload`。Guest 能力清单使用 `profile`，Keel 和 Proto 契约使用 `contract`，
+图标和静态资源使用 `resource`。
 
 ### 4.2 推荐目录
 
 ```text
-package.actr
+team-notes.actr
 ├── manifest.toml
 ├── manifest.sig
-├── manifest.lock.toml
 ├── bin/
 │   └── service.wasm
-├── ui/
-│   ├── guest.bundle.js
-│   └── capability-manifest.json
-├── proto/
-│   └── service.proto
-└── assets/
-    ├── icon.png
-    └── ...
+└── proto/
+    └── service.proto
+
+team-notes-front.actr
+├── manifest.toml
+├── manifest.sig
+├── workload/
+│   ├── guest.js
+│   └── capabilities.json
+├── contracts/
+│   └── notes.json
+└── proto/
+    └── service.proto
 ```
 
-Manifest 签名必须绑定所有资源 hash，因此替换 Guest、contract 或图标都会改变 package digest。
+每份清单的签名绑定本包载荷的哈希。发布记录将两个包的摘要绑定到 Program Release。
 
 ### 4.3 包内不允许什么
 
@@ -129,7 +136,7 @@ Manifest 签名必须绑定所有资源 hash，因此替换 Guest、contract 或
 - 未在 manifest 中列出的可执行脚本；
 - 运行时从网络替换的 Guest 入口。
 
-Publisher 只能提供 Guest 与声明；Actr Host 实现永远随 Actrium 客户端发布。
+Actrium 客户端提供 Front Host。Publisher 在 Front 包中提供 Keel Guest Workload 及其声明。
 
 ## 5. Service workload 政策
 
@@ -180,61 +187,22 @@ v1 不引入「没有 Service 的页面应用」特例。工具链为 UI-only �
 
 因此所有 app Tab 仍统一 Attach 一个 Service，差别只在它是否包含自定义逻辑。
 
-## 6. Actrium Manifest 扩展
+## 6. 包清单字段
 
-Actr 基础 manifest 继续提供：
+Actr 基础清单提供以下表。
 
-- publisher；
-- name/program；
-- version；
-- binary target/kind/hash；
-- Ed25519 signature 和 key id；
-- resources；
-- proto files；
-- dependency lock。
+- `[actor]` 声明 Publisher、程序名和发布版本。
+- `[workload]` 声明各自的 profile 和入口，`[host]` 声明 Host API 版本范围和能力要求。
+- `[dependencies.<alias>]` 声明 Actor 依赖的类型、版本约束和契约路径。
+- `[signature]` 声明签名算法和 `key-id`。
+- `[[files]]` 记录包内文件的角色、大小和 SHA-256，也包含随包分发的依赖锁。
 
-Actrium 增加：
+Front 包携带 `dependencies.service.contract` 指定的 Proto，作为构建时所用的 Service 契约。
+Service 包将对外 RPC 契约登记为角色 `contract` 的文件。存在多个契约文件时，由 Workload Profile
+定义主契约的选择规则。Host 根据已验证的 Proto 契约计算 Attach 使用的协议指纹。
+Realm、信令与信任等节点部署配置写在 `actr.toml` 中。
 
-```toml
-[actrium]
-schema_version = 1
-min_actrium_version = "1.0.0"
-front_host_api = "^1.0"
-service_host_api = "^1.0"
-
-[actrium.front]
-guest_runtime = "keel-js"
-guest_entry = "ui/guest.bundle.js"
-keel_api = "^1.0"
-contract_manifest = "ui/capability-manifest.json"
-contract_digest = "sha256:..."
-
-[actrium.service]
-contract = "proto/service.proto"
-protocol_fingerprint = "sha256:..."
-
-[actrium.service.workspace]
-requirement = "required"
-provisioning = "user-selected"
-access = "read-write"
-providers = ["managed-store", "local-folder", "cloud-drive"]
-lease = "exclusive-writer"
-
-[actrium.session]
-attachment_policy = "exclusive"
-
-[actrium.privacy]
-schema_version = 1
-data_classes = ["public", "private", "secret"]
-default_unknown_action = "block-private-and-secret"
-
-[[actrium.privacy.actor_egress]]
-actr_type = "notes.example/index-worker@1.4.2"
-required = false
-data_classes = ["private"]
-```
-
-完整示例见[参考协议](12-reference-spec.md)。
+两份完整清单见[参考协议](12-reference-spec.zh.md#4-actr-manifest)。
 
 ## 7. 权限、组件和配额声明
 
@@ -249,7 +217,8 @@ effective capabilities =
   ∩ current session scope
 ```
 
-Manifest 至少声明：
+Actr Host 按产品策略评估以下内容。包的能力要求来自 `[host]`，Guest 的声明来自其签名保护的 Keel 能力清单，
+实例设置来自部署配置和授权流程。
 
 - Front capability；
 - Service capability；
@@ -269,14 +238,9 @@ Privacy Declaration 是静态 allowlist 和安装说明，不是运行时隐私�
 ## 8. 下载与验证流水线
 
 ```text
-Realm Profile package / 用户选定的包
-  → HTTPS download
-  → package digest
-  → package signature/key history
-  → ZIP structural limits
-  → manifest identity
-  → every file hash
-  → ABI/contract/import validation
+Realm Profile package / 用户选定的发布版本
+  → 验证 Program Release 记录及其 Service 包
+  → 验证 Front 包及其 Service 依赖
   → policy + permission review
   → content-addressed cache
   → Service Runtime / verified Guest bytes
@@ -284,19 +248,22 @@ Realm Profile package / 用户选定的包
 
 ### 8.1 检查顺序
 
+每个归档都执行以下检查。两个包的 Actor 类型和 SHA-256 必须匹配签名发布记录，
+Front 的 `dependencies.service` 以已验证的 Service 包为准解析。
+
 1. 校验 Publisher DNS/IDNA；
 2. TLS 和 hostname；
 3. 下载大小上限；
 4. package SHA-256；
-5. manifest 声明的 publisher 的 Publisher Profile；
-6. Ed25519 key id 和签名；
-7. ZIP path、文件数、压缩比和解压总量；
-8. manifest 的 publisher/program/version；
-9. binary kind/target；
-10. 每个 resource/proto/lock hash；
+5. ZIP 路径、STORE 方法、文件数和大小上限。
+6. `actr-package/2` 格式和 `signature.key-id`。
+7. 清单声明的 Publisher 对应的 Publisher Profile。
+8. Ed25519 签名。
+9. 本包签名清单中的 Actor 身份、Workload Profile 和入口。
+10. ZIP 文件清单、大小和 SHA-256 与 `[[files]]` 精确匹配。
 11. Guest 静态依赖和 capability manifest；
 12. Service WASM imports；
-13. Host API、Keel API 与 contract 兼容性；
+13. Host API、Keel API，以及 Front 所需契约与 Service 包的兼容性；
 14. 本地/组织安全策略。
 
 任何一步失败都不得把部分内容交给 Keel 或 Service runtime。
@@ -305,7 +272,7 @@ Realm Profile package / 用户选定的包
 
 Keel `Engine.loadBundle(URL)` 只是加载机制，不是安装信任机制。Actrium 必须：
 
-1. 自行下载并验证 package；
+1. 独立验证 Program Release 记录固定的 Front 包。
 2. 从 content-addressed cache 读取已验证 Guest bytes；
 3. 把本地 bytes/code 交给 Keel；
 4. 禁止 Guest 在启动时指定替代 URL。
@@ -318,14 +285,16 @@ Actrium 本地以以下联合键保存：
 (publisher, program, version, package_digest)
 ```
 
+联合键使用 Service 包 digest，Program Release 记录同时固定 Front 包 digest。
+
 规则：
 
 - 第一次接受后固定 digest；
-- 同一 Program Release 出现不同 digest = `PACKAGE_EQUIVOCATION`；
+- 同一 Program Release 的 Service 或 Front 包出现不同 digest 时报告 `PACKAGE_EQUIVOCATION`。
 - 不能用「Publisher 更新了文件」覆盖缓存；
 - 更新必须使用新 SemVer；
 - Service 实例固定其 package digest；
-- 缓存清理不能删除仍被 Service 引用的 digest；
+- Service 实例仍引用时，保留 Service 和 Front 两个包的缓存；
 - 重新下载必须再次验证后与固定 digest 比较。
 
 本地 first-seen pin 只能保护当前安装；Marketplace 可以帮助多个客户端比对已见 digest。要对所有客户端提供全局 non-equivocation，需要后续引入公开 append-only transparency log。v1 不把单机 pin 夸大成全局透明性。

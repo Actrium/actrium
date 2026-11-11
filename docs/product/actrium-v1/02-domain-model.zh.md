@@ -47,16 +47,8 @@ notes.example/team-notes
 ProgramReleaseId = publisher/program@version
 ```
 
-它必须解析到一个固定 `.actr` package digest。Program Release 描述：
-
-- Service workload；
-- Keel Guest 入口；
-- Front–Service 契约；
-- 申请的能力和组件；
-- Keel/Actrium/Actr ABI 兼容范围；
-- 资源配额；
-- Workspace 模式；
-- Publisher 签名信息。
+Publisher 签名的发布记录固定 Service 和 Front 两个包的摘要。两个包分别声明自己的
+Workload、契约和 Host 要求。Actrium 通过部署与授权应用 Workspace、配额等实例策略。
 
 ### 2.3 Service
 
@@ -76,7 +68,7 @@ Service 不是「程序类型」，也不是可随意替换的负载均衡候选
 
 一个 resident app Tab 对应的短生命周期交互 Actor：
 
-- workload 由 Actrium 固定；
+- Actor 类型和 Keel Guest Workload 来自已验证的 Front 包；
 - 内含 Keel Host、Actr client、capability broker 和生命周期管理；
 - 加载经过验证的 Keel Guest；
 - 只持有绑定 Service 的受限 capability；
@@ -175,14 +167,7 @@ Service 1 ── 0..1 Workspace
 
 ### 3.3 独占与共享
 
-Program Manifest 声明：
-
-```toml
-[actrium.session]
-attachment_policy = "exclusive"
-```
-
-v1 只承诺 `exclusive`：
+Actrium v1 的会话策略为 `exclusive`。
 
 - 本机已打开同一 Service 时，打开相同 Realm 链接聚焦已有 Tab；
 - 另一设备请求连接时，Service 可拒绝、等待租约到期或触发用户确认的接管；
@@ -279,7 +264,7 @@ Actrium 本地数据库可以有纯存储用途的 `record_id`，但它不是网
 
 新建实例是 Actrium 的本地操作，不由链接触发：
 
-1. 用户从 Program Catalog、Marketplace、本地文件或包地址选择一个包，Actrium 核对 digest 并验证包签名；
+1. 用户选定 Program Release，或为本地开发提供两个包。Actrium 验证 Service 和 Front 包。
 2. 选择 Realm 域名（默认创建本机 Realm）、生成随机 RealmId（用户可显式改为可读名）并选择 Workspace；
 3. 在该 Realm 域名下新建一个 Realm：本机 Realm 只在本机建立本地 record；其他 Realm 须经该 Realm 域名的 Realm 签名 key 持有方授权，其 Realm Profile 的 `package` 写入所选包的地址与 SHA-256；
 4. 在该 Realm 内创建 Service，获得持久 ActorId；
@@ -291,7 +276,8 @@ Actrium 本地数据库可以有纯存储用途的 `record_id`，但它不是网
 
 ### 6.2 打开实例
 
-打开 Realm 链接 `actr://<domain>/<realm_id>[…]`：取得并验证 Realm Profile，按 `package` 下载并验证包，再在该 Realm 内按包的 Actor 类型找到 Service 并 Attach：
+打开 Realm 链接 `actr://<domain>/<realm_id>[…]` 时，验证 Realm Profile 和 `package` 指定的 Service 包，
+再验证匹配的 Program Release 记录固定的 Front 包。按 Service 包的 Actor 类型在该 Realm 内找到 Service 并 Attach。
 
 - 不做 LB，不换到其他 Realm；
 - 不因为 offline 而创建新实例；

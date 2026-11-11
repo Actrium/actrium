@@ -20,7 +20,7 @@
 | ID | Requirement |
 |---|---|
 | FR-URI-001 | Realm links of the form `actr://<Realm domain>/<realm_id>[/<page path>][?…][#…]` MUST be supported; everything after the RealmId is passed to the application as-is. |
-| FR-URI-002 | Opening a Realm link MUST fetch and verify the Realm Profile, download and verify the package per its `package` field, then locate the Service by the package's Actor type within that Realm and Attach. |
+| FR-URI-002 | Opening a Realm link MUST verify the Realm Profile, its Service package, the matching Program Release record, and the Front package. Actrium then locates the Service by its Actor type within that Realm and Attaches. |
 | FR-URI-003 | An Attach failure MUST NOT trigger load balancing, downgrading to another version, switching Realm, or creating a substitute instance. |
 | FR-URI-004 | The Service's Actor type MUST match the Actor type declared by the package the Realm Profile points to. |
 | FR-URI-005 | A Realm link MUST NOT contain a credential, session secret, Workspace secret or bearer invite. |
@@ -34,19 +34,19 @@
 | ID | Requirement |
 |---|---|
 | FR-PKG-001 | The Program Catalog and the Service Inventory MUST be kept separate. |
-| FR-PKG-002 | A package MUST come from the Realm Profile's `package` field or a source the user selected, and its SHA-256 MUST be checked. |
-| FR-PKG-003 | Every Program Release MUST pin a fixed package digest. |
-| FR-PKG-004 | A `.actr` file MUST have its Publisher key, manifest signature and every file's hash verified. |
+| FR-PKG-002 | A published release MUST supply a Publisher-signed record that binds both package types and digests. On Realm entry, the record's Service package MUST match the Realm Profile's `package`. |
+| FR-PKG-003 | Every Program Release MUST pin fixed Service and Front package digests. |
+| FR-PKG-004 | Each `.actr` manifest MUST declare one Actor type and one Workload. Verify its Publisher key, manifest signature, and every file's hash. |
 | FR-PKG-005 | Zip traversal, an excessive file count, an excessive total extracted size and zip bombs MUST be rejected. |
 | FR-PKG-006 | A third-party package MUST NOT contain a Front Host/native plugin. |
 | FR-PKG-007 | The Guest MUST load from verified local bytes; Keel MUST NOT trust a remote URL directly. |
-| FR-PKG-008 | A different digest appearing for the same Program Release MUST hard fail. |
-| FR-PKG-009 | A package digest still referenced by a Service MUST NOT be cache-cleaned. |
+| FR-PKG-008 | A different Service or Front package digest for the same Program Release MUST hard fail. |
+| FR-PKG-009 | Service and Front packages MUST remain cached while a Service instance references them. |
 | FR-PKG-010 | Marketplace metadata MUST NOT override the Publisher's package identity. |
 | FR-PKG-011 | Local `.actr` files and clearly marked development sources MUST be supported. |
 | FR-PKG-012 | Advisory/Block-new/Quarantine/Critical-block revocation levels MUST be supported. |
 | FR-PKG-013 | Publisher bootstrap MUST be pinned to HTTPS 443; the Publisher Profile MUST have a normalized signature, a sequence number/freshness, and rollback protection. |
-| FR-PKG-014 | The official publishing tool MUST support build, validate and sign, and MUST read back the SHA-256 and signature of the published package to verify it. |
+| FR-PKG-014 | The official publishing tool MUST build, validate, and sign both packages and publish their signed release record. It MUST read both packages back to verify their SHA-256 digests and signatures. |
 
 ### 1.4 Front/Keel
 
@@ -270,7 +270,7 @@ Any increase MUST still be bounded by the platform's cap and permission policy.
 
 **Given** a user selects the uninstalled `notes.example/team-notes@1.4.2` in the Program Catalog<br>
 **When** they create an instance and confirm permissions/Workspace<br>
-**Then** Actrium verifies the package, creates exactly one Realm and one Service, obtains a persistent ActorId, shows that instance's Realm link in the address bar, Attaches, and displays the Guest.
+**Then** Actrium verifies the separate Service and Front packages, creates exactly one Realm and one Service, obtains a persistent ActorId, shows that instance's Realm link in the address bar, Attaches, and displays the verified Guest.
 
 ### AC-002: Refresh does not duplicate creation
 

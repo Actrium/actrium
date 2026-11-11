@@ -210,6 +210,10 @@ version 时 **MUST** 拒绝，不能猜测其字段含义。`actr-package/1` 已
 需改用 `actr-package/2` 与 `publisher` 字段的错误；旧字段名不作为别名接受（历史字段名见
 [术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）。
 
+Actrium Product v1 的 Service 和 Keel Guest 分别使用独立的 `actr-package/2` 包，各自声明一个
+Workload。清单和依赖示例见
+[Product v1 参考清单](../../docs/product/actrium-v1/12-reference-spec.zh.md#4-actr-manifest)。
+
 ### 6.2 `[actor]`
 
 `[actor]` 必须包含：
