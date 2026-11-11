@@ -6,7 +6,7 @@ import {
   Text as NativeText,
   View as NativeView,
 } from 'react-native';
-import { HostHttpHandler } from 'askit/host-events';
+import { EventHandler, HostHttpHandler } from 'askit/host-events';
 import { Engine, type ComponentMap } from 'keel/host';
 import {
   FlatList,
@@ -59,7 +59,8 @@ const hostComponents: ComponentMap = {
     Record<string, unknown>
   >,
   FlatList: FlatList as unknown as React.ComponentType<Record<string, unknown>>,
-  // v1 exposes images as `ImageAsset`; the preset component is `Image`.
+  // v1 exposes images as `ImageAsset`; the guest SDK still emits `Image`.
+  Image: Image as unknown as React.ComponentType<Record<string, unknown>>,
   ImageAsset: Image as unknown as React.ComponentType<Record<string, unknown>>,
   ScrollView: ScrollView as React.ComponentType<Record<string, unknown>>,
   Switch: Switch as unknown as React.ComponentType<Record<string, unknown>>,
@@ -147,6 +148,65 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setContent(next as React.ReactElement | null);
     };
     const unsubscribeUpdate = engine.on('update', update);
+    // Legacy event-bridge path kept for the echo demo. New Guests use
+    // host:service.call; remove this handler after the echo demo migrates.
+    const unsubscribeEvents = EventHandler.setup(engine, {
+      tabId: tab.id,
+      onLog: (direction, event) => {
+        logToNative(`[StandaloneGuestApp] ${direction}: ${event}`);
+      },
+      handlers: {
+        ACTR_CALL: {
+          responseEvent: 'ACTR_CALL_RESULT',
+          handle: async (payload: {
+            requestId?: string;
+            routeKey?: unknown;
+            payloadBase64?: unknown;
+            timeoutMs?: unknown;
+          }) => {
+            const requestId = payload?.requestId;
+            if (!hasServiceCapability) {
+              return {
+                requestId,
+                success: false,
+                error:
+                  'The application does not declare the service capability.',
+              };
+            }
+            if (
+              typeof payload?.routeKey !== 'string' ||
+              typeof payload?.payloadBase64 !== 'string'
+            ) {
+              return {
+                requestId,
+                success: false,
+                error: 'ACTR_CALL requires routeKey and payloadBase64 strings.',
+              };
+            }
+
+            logToNative(`[StandaloneGuestApp] ACTR_CALL ${payload.routeKey}`);
+            const response = await callActor({
+              requestId: requestId ?? `actr-${Date.now()}`,
+              route: payload.routeKey,
+              payloadBase64: payload.payloadBase64,
+              timeoutMs:
+                typeof payload.timeoutMs === 'number'
+                  ? payload.timeoutMs
+                  : 30_000,
+            });
+            logToNative(
+              `[StandaloneGuestApp] ACTR_CALL completed: ${response.success ? 'success' : 'failure'}`,
+            );
+            return {
+              requestId,
+              success: response.success,
+              payloadBase64: response.payloadBase64,
+              error: response.message,
+            };
+          },
+        },
+      },
+    });
 
     void engine
       .loadBundle(guestScript, { containerHeight, containerWidth })
@@ -166,6 +226,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
     return () => {
       disposed = true;
+      unsubscribeEvents();
       unsubscribeUpdate();
       engine.destroy();
     };
@@ -175,6 +236,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     // reloadKey still forces a clean reload when the package changes.
     guestScript,
     hasServiceCapability,
+    tab.id,
     tab.reloadKey,
   ]);
 
