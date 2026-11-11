@@ -131,7 +131,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     }
 
     let disposed = false;
-    const callActor: ActorCall = async ({
+    const callLegacyActor: ActorCall = async ({
       requestId,
       route,
       payloadBase64,
@@ -140,7 +140,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       const gatewayUrl =
         globalThis.__ACTRIUM_ACTR_GATEWAY_URL__ ??
         'http://127.0.0.1:8391/v1/call';
-      logToNative(`[StandaloneGuestApp] actor call ${route}`);
+      logToNative(`[StandaloneGuestApp] legacy actor call ${route}`);
       const result = await HostHttpHandler.handleRequest<ActorCallResult>({
         requestId,
         url: gatewayUrl,
@@ -153,7 +153,37 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         message: result.data?.error ?? result.message,
       };
     };
-    const hostModules = createHostModules({ hasServiceCapability, callActor });
+    const callServiceActor: ActorCall = async ({
+      requestId,
+      route,
+      payloadBase64,
+      timeoutMs,
+    }) => {
+      // The global echo gateway is legacy-bridge only. New service calls must
+      // target the tab's attached Service actor.
+      if (!tab.serviceCallUrl) {
+        return {
+          success: false,
+          message: 'Service actor context is unavailable for this tab.',
+        };
+      }
+      logToNative(`[StandaloneGuestApp] service call ${route}`);
+      const result = await HostHttpHandler.handleRequest<ActorCallResult>({
+        requestId,
+        url: tab.serviceCallUrl,
+        method: 'POST',
+        body: { routeKey: route, payloadBase64, timeoutMs },
+      });
+      return {
+        success: result.success && result.data?.success === true,
+        payloadBase64: result.data?.payloadBase64,
+        message: result.data?.error ?? result.message,
+      };
+    };
+    const hostModules = createHostModules({
+      hasServiceCapability,
+      callActor: callServiceActor,
+    });
     const engine = new Engine({ debug: false, contract, hostModules });
     engine.register(hostComponents);
     engine.createReceiver();
@@ -201,7 +231,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
             }
 
             logToNative(`[StandaloneGuestApp] ACTR_CALL ${payload.routeKey}`);
-            const response = await callActor({
+            const response = await callLegacyActor({
               requestId: requestId ?? `actr-${Date.now()}`,
               route: payload.routeKey,
               payloadBase64: payload.payloadBase64,

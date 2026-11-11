@@ -33,6 +33,8 @@ export type TabConfig = {
   id: string;
   title: string;
   url?: string;
+  /** Per-tab Service actor endpoint supplied by the Host after Attach. */
+  serviceCallUrl?: string;
   htmlContent?: string;
   reloadKey?: number;
   contract?: {
