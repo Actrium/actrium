@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isAllowedImageSource } from './image-asset';
+import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 
 describe('isAllowedImageSource', () => {
   test('allows package asset ids', () => {
@@ -18,5 +18,27 @@ describe('isAllowedImageSource', () => {
       })
     ).toBe(false);
     expect(isAllowedImageSource(undefined)).toBe(false);
+  });
+
+  test('forwards only display props', () => {
+    expect(
+      pickGuestImageProps({
+        source: 42,
+        style: { width: 10 },
+        testID: 'guest-image',
+        src: 'https://example.com/image.png',
+        srcSet: 'https://example.com/image.png 2x',
+        crossOrigin: 'use-credentials',
+        referrerPolicy: 'no-referrer-when-downgrade',
+        defaultSource: { uri: 'https://example.com/default.png' },
+        loadingIndicatorSource: {
+          uri: 'https://example.com/loading.png',
+        },
+      })
+    ).toEqual({
+      source: 42,
+      style: { width: 10 },
+      testID: 'guest-image',
+    });
   });
 });

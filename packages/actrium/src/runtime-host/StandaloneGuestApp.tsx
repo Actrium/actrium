@@ -21,7 +21,7 @@ import {
 import { hasDeclaredCapability } from './capabilities';
 import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
-import { isAllowedImageSource } from './image-asset';
+import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import type { TabConfig } from './types';
 
 type GuestButtonProps = {
@@ -61,7 +61,11 @@ const GuestImage: React.FC<React.ComponentProps<typeof NativeImage>> = (
   if (!isAllowedImageSource(props.source)) {
     return null;
   }
-  return <NativeImage {...props} />;
+  return (
+    <NativeImage
+      {...(pickGuestImageProps(props as Record<string, unknown>) as React.ComponentProps<typeof NativeImage>)}
+    />
+  );
 };
 
 const hostComponents: ComponentMap = {
