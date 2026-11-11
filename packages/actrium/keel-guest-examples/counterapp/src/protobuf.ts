@@ -86,6 +86,16 @@ export function decodeEchoResponse(payloadBase64: string): {
         throw new Error('Invalid protobuf field length');
       }
       cursor += length.value;
+    } else if (wireType === 1) {
+      if (cursor + 8 > bytes.length) {
+        throw new Error('Invalid protobuf field length');
+      }
+      cursor += 8;
+    } else if (wireType === 5) {
+      if (cursor + 4 > bytes.length) {
+        throw new Error('Invalid protobuf field length');
+      }
+      cursor += 4;
     } else {
       throw new Error(`Unsupported protobuf wire type: ${wireType}`);
     }

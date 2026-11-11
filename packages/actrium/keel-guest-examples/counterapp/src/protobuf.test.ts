@@ -22,6 +22,20 @@ describe('echo protobuf codec', () => {
     });
   });
 
+  test('ignores unknown fixed64 fields', () => {
+    expect(decodeEchoResponse('CgVoZWxsbxkBAAAAAAAAAA==')).toEqual({
+      reply: 'hello',
+      timestamp: 0,
+    });
+  });
+
+  test('ignores unknown fixed32 fields', () => {
+    expect(decodeEchoResponse('CgVoZWxsbyUCAAAA')).toEqual({
+      reply: 'hello',
+      timestamp: 0,
+    });
+  });
+
   test('rejects a field length that exceeds the payload', () => {
     expect(() => decodeEchoResponse('CgVoaQ==')).toThrow();
   });
