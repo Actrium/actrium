@@ -347,12 +347,12 @@ export default function App() {
 import { call } from 'host:service';
 import { View } from 'keel/guest';
 
-export function send() {
+function send() {
   return call({ route: 'echo.EchoService.Echo', payloadBase64: '' });
 }
 
 export default function App() {
-  return <View />;
+  return <View onLayout={() => void send()} />;
 }
 `
       );
@@ -394,12 +394,12 @@ export default function App() {
 import { call } from 'host:service';
 import { View } from 'keel/guest';
 
-export function send(route: string) {
+function send(route: string) {
   return call({ route, payloadBase64: '' });
 }
 
 export default function App() {
-  return <View />;
+  return <View onLayout={() => void send('echo.EchoService.Echo')} />;
 }
 `
       );
