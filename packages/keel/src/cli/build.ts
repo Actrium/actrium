@@ -983,6 +983,9 @@ export async function build(options: BuildOptions): Promise<void> {
       }
       const analysisCode = (await Promise.all(jsOutputs.map((output) => output.text()))).join('\n');
       analysisComponents = analyzeBundleComponents(analysisCode);
+      if (!/import_guest\d*/.test(analysisCode) && analysisCode.includes('keel/guest')) {
+        console.warn('  ⚠ Component analysis could not resolve keel/guest bindings');
+      }
     }
     const loweredComponents = analyzeBundleComponents(bundleCode);
     bundleComponents = [
