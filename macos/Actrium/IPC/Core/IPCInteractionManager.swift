@@ -492,7 +492,7 @@ public final class IPCInteractionManager: ObservableObject {
     /// XPC services report their state changes via DistributedNotification
     private func setupServiceStateListener() {
         let hostProcessId = configuration.hostProcessId
-        let notificationName = "com.actro.serviceState.\(hostProcessId)"
+        let notificationName = "io.actrium.serviceState.\(hostProcessId)"
 
         serviceStateObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(notificationName),
@@ -773,7 +773,7 @@ public final class IPCInteractionManager: ObservableObject {
             return
         }
 
-        let notificationName = "com.actro.tabConfig.\(configuration.hostProcessId).\(serviceId)"
+        let notificationName = "io.actrium.tabConfig.\(configuration.hostProcessId).\(serviceId)"
 
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name(notificationName),
@@ -839,7 +839,7 @@ public final class IPCInteractionManager: ObservableObject {
             return
         }
 
-        let notificationName = "com.actro.containerSizeChanged.\(configuration.hostProcessId).\(serviceId)"
+        let notificationName = "io.actrium.containerSizeChanged.\(configuration.hostProcessId).\(serviceId)"
 
         NSLog("📤 [IPC] sendContainerSizeChanged: notificationName=%@ size=%.0fx%.0f", notificationName, size.width, size.height)
 

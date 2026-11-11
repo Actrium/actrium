@@ -12,16 +12,16 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>io.actrium.actro</string>
+			<string>io.actrium</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>actro</string>
+				<string>actr</string>
 			</array>
 		</dict>
 	</array>
 	<key>MachServices</key>
 	<dict>
-		<key>group.io.actrium.actro.broker</key>
+		<key>group.io.actrium.broker</key>
 		<true/>
 	</dict>
 	<key>NSAppTransportSecurity</key>

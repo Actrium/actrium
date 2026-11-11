@@ -39,7 +39,7 @@ class StartPageModule: NSObject {
         NSLog("[StartPageModule] Opening URL: \(urlString)")
 
         NativeHostTransport.post(
-            name: "com.actro.openURLFromStartPage",
+            name: "io.actrium.openURLFromStartPage",
             userInfo: ["url": urlString]
         )
     }
@@ -71,7 +71,7 @@ class HistoryModule: NSObject {
         NSLog("[HistoryModule] Opening history item: \(itemId), url: \(urlString)")
 
         NativeHostTransport.post(
-            name: "com.actro.openHistoryItem",
+            name: "io.actrium.openHistoryItem",
             userInfo: ["itemId": itemId, "url": urlString]
         )
     }
@@ -81,7 +81,7 @@ class HistoryModule: NSObject {
         NSLog("[HistoryModule] Delete history item: \(itemId)")
 
         NativeHostTransport.post(
-            name: "com.actro.deleteHistoryItem",
+            name: "io.actrium.deleteHistoryItem",
             userInfo: ["itemId": itemId]
         )
     }
@@ -91,7 +91,7 @@ class HistoryModule: NSObject {
         NSLog("[HistoryModule] Restore group: \(groupId)")
 
         NativeHostTransport.post(
-            name: "com.actro.restoreHistoryGroup",
+            name: "io.actrium.restoreHistoryGroup",
             userInfo: ["groupId": groupId]
         )
     }
@@ -100,7 +100,7 @@ class HistoryModule: NSObject {
     func clearHistory() {
         NSLog("[HistoryModule] Clear all history")
 
-        NativeHostTransport.post(name: "com.actro.clearHistory")
+        NativeHostTransport.post(name: "io.actrium.clearHistory")
     }
 
     @objc
@@ -130,7 +130,7 @@ class BookmarksModule: NSObject {
         NSLog("[BookmarksModule] Opening bookmark: \(bookmarkId), url: \(urlString)")
 
         NativeHostTransport.post(
-            name: "com.actro.openBookmark",
+            name: "io.actrium.openBookmark",
             userInfo: ["bookmarkId": bookmarkId, "url": urlString]
         )
     }
@@ -140,7 +140,7 @@ class BookmarksModule: NSObject {
         NSLog("[BookmarksModule] Delete bookmark: \(bookmarkId)")
 
         NativeHostTransport.post(
-            name: "com.actro.deleteBookmark",
+            name: "io.actrium.deleteBookmark",
             userInfo: ["bookmarkId": bookmarkId]
         )
     }
@@ -202,7 +202,7 @@ class NativeLogger: NSObject {
         }
         // Send log to host process for DevTools Console
         DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.xpcLog"),
+            NSNotification.Name("io.actrium.xpcLog"),
             object: nil,
             userInfo: [
                 "level": level,

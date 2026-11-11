@@ -11,7 +11,7 @@ import os
 /// sync once the device has been unlocked after boot, and never migrated to
 /// another device via backup or restore.
 public struct KeychainStore {
-    private static let logger = Logger(subsystem: "io.actrium.actro", category: "KeychainStore")
+    private static let logger = Logger(subsystem: "io.actrium", category: "KeychainStore")
 
     public let service: String
 

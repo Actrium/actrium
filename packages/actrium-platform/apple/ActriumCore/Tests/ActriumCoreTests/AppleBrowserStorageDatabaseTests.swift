@@ -7,7 +7,7 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
         let contract = try jsonObject(browserStorageSyncCloudProviderAdapterContractJson())
         XCTAssertEqual(contract["planType"] as? String, "cloudProviderAdapterPlan")
         let objectSpace = contract["objectSpace"] as? [String: Any]
-        XCTAssertEqual(objectSpace?["rootPath"] as? String, "Actro/BrowserSync")
+        XCTAssertEqual(objectSpace?["rootPath"] as? String, "Actrium/BrowserSync")
         XCTAssertTrue((contract["operationBoundary"] as? String ?? "").contains("coarse rounds"))
 
         let localFolderCapabilities = browserStorageSyncCloudLocalFolderCapabilitiesJson()
@@ -22,9 +22,9 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
         XCTAssertEqual(ready["shouldAllowSync"] as? Bool, true)
         XCTAssertEqual(ready["shouldBlockSync"] as? Bool, false)
         let objectLayout = ready["objectLayout"] as? [String: Any]
-        XCTAssertEqual(objectLayout?["manifestPath"] as? String, "Actro/BrowserSync/manifest.json")
+        XCTAssertEqual(objectLayout?["manifestPath"] as? String, "Actrium/BrowserSync/manifest.json")
         let prefixes = ready["requiredPrefixes"] as? [[String: Any]] ?? []
-        XCTAssertTrue(prefixes.contains { $0["prefix"] as? String == "Actro/BrowserSync/logs/" })
+        XCTAssertTrue(prefixes.contains { $0["prefix"] as? String == "Actrium/BrowserSync/logs/" })
 
         let setup = try jsonObject(browserStorageSyncCloudProviderAdapterPlanJson(
             adapterSnapshotJson: """
@@ -49,7 +49,7 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
         ))
         XCTAssertEqual(setup["classification"] as? String, "providerSetupRequired")
         XCTAssertEqual(setup["shouldBlockSync"] as? Bool, true)
-        XCTAssertEqual(setup["rootPathAction"] as? String, "configureActroBrowserSyncRoot")
+        XCTAssertEqual(setup["rootPathAction"] as? String, "configureActriumBrowserSyncRoot")
     }
 
     func testCloudProviderConnectionStatusPolicyContract() throws {
@@ -132,7 +132,7 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
                     {
                         "operationIndex": 1,
                         "operationType": "writeManifest",
-                        "path": "Actro/BrowserSync/manifest.json",
+                        "path": "Actrium/BrowserSync/manifest.json",
                         "providerStatusCode": 412,
                         "message": "etag mismatch"
                     }
@@ -568,7 +568,7 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
         )
         XCTAssertEqual((seedResult["observabilityEvent"] as? [String: Any])?["redactedExportAllowed"] as? Bool, true)
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: cloudRootURL.appendingPathComponent("Actro/BrowserSync/manifest.json").path
+            atPath: cloudRootURL.appendingPathComponent("Actrium/BrowserSync/manifest.json").path
         ))
 
         let localDatabase = try AppleBrowserStorageDatabase(path: localDatabaseURL.path)
@@ -672,7 +672,7 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
             "1"
         )
 
-        let manifestURL = cloudRootURL.appendingPathComponent("Actro/BrowserSync/manifest.json")
+        let manifestURL = cloudRootURL.appendingPathComponent("Actrium/BrowserSync/manifest.json")
         var manifest = try jsonObject(String(data: Data(contentsOf: manifestURL), encoding: .utf8) ?? "{}")
         manifest["storageSchemaVersion"] = AppleBrowserStorageDatabase.schemaVersion + 1
         try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]).write(to: manifestURL)
@@ -823,10 +823,10 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
             "join"
         )
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: cloudRootURL.appendingPathComponent("Actro/BrowserSync/manifest.json").path
+            atPath: cloudRootURL.appendingPathComponent("Actrium/BrowserSync/manifest.json").path
         ))
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: cloudRootURL.appendingPathComponent("Actro/BrowserSync/devices/device-apple.json").path
+            atPath: cloudRootURL.appendingPathComponent("Actrium/BrowserSync/devices/device-apple.json").path
         ))
 
         let revokeRequestJson = try jsonString([
@@ -891,7 +891,7 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
             "revoked"
         )
 
-        let manifestURL = cloudRootURL.appendingPathComponent("Actro/BrowserSync/manifest.json")
+        let manifestURL = cloudRootURL.appendingPathComponent("Actrium/BrowserSync/manifest.json")
         var manifest = try jsonObject(String(contentsOf: manifestURL, encoding: .utf8))
         let revokedDevice = (manifest["devices"] as? [[String: Any]])?.contains { device in
             device["deviceId"] as? String == "device-apple"
@@ -982,7 +982,7 @@ final class AppleBrowserStorageDatabaseTests: XCTestCase {
             false
         )
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: cloudRootURL.appendingPathComponent("Actro/BrowserSync/devices/device-apple-2.json").path
+            atPath: cloudRootURL.appendingPathComponent("Actrium/BrowserSync/devices/device-apple-2.json").path
         ))
     }
 

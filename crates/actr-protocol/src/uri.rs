@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn rejects_invalid_scheme() {
         assert_eq!(code("https://acme.com/k7m2q9xh"), "URI_SCHEME_INVALID");
-        assert_eq!(code("actro://acme.com"), "URI_SCHEME_INVALID");
+        assert_eq!(code("ftp://acme.com"), "URI_SCHEME_INVALID");
     }
 
     #[test]

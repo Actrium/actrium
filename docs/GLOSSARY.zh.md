@@ -196,7 +196,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 
 | 规范名 | 历史名 | 说明 |
 | --- | --- | --- |
-| Actrium（用户端产品） | Actro | 用户端产品改用项目名；已安装应用的 bundle id、Keychain 服务名等为兼容升级保留旧值 |
+| Actrium（用户端产品） | 旧名（已退役） | 用户端产品改用项目名；已安装应用的 bundle id、Keychain 服务名等为兼容升级保留旧值 |
 | Issuer | Authority、AIS（Actor Identity Service） | 目录 `crates/loran-ais` → `crates/loran-issuer`；当前包 `loran-issuer`；路由 `/ais` → `/issuer`；配置 `[services.ais]` → `[services.issuer]`；Actr.toml `ais_endpoint` → `issuer_endpoint`；表 `ais_renewal_token`、`ais_reissue_response_cache` → `issuer_renewal_token`、`issuer_reissue_response_cache`（schema v2 离线迁移）；`ais_manufacturer_auth_nonce`（曾改名 `issuer_publisher_auth_nonce`）随 Publisher 私钥注册证明一并删除；管理路由 `/admin/api/services/ais/keys` 与 key 存储 `ais_keys.db` 随全局轮换 key 删除（改用每个 Realm 的 `issuer:<realm>` key） |
 | Issuer Signer | KS、Key Server | gRPC 包 `ks.v1` → `signer.v1`；配置 `[services.ks]`、`dependencies.ks` → `[services.signer]`、`dependencies.signer`；当前环境变量 `LORAN_SIGNER_KEK`；示例 `ks.db` → `signer.db`；Postgres 默认库 `loran_signer`；指标 static `KS_*` → `SIGNER_*`（导出的指标名前缀为 `loran_`） |
 | publisher | manufacturer | 包清单 `actr-package/1` 与 proto `ActrType` 曾用此字段名；`actr-package/2` 起统一为 `publisher`（proto 字段编号不变），旧键被拒绝并提示改名；Actor 类型字符串旧形式 `publisher:name:version`（曾写作 `manufacturer:name:version`）→ `publisher/program@version`，旧形式被拒绝，已存数据由 schema v2 离线工具改写；CLI 用户配置 `[mfr] manufacturer` → `[publisher] name` |

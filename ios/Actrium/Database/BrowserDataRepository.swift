@@ -247,7 +247,7 @@ final class BrowserDataRepository {
     private static func databasePath() -> String {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("Actro", isDirectory: true)
+        let appFolder = ApplePersistentStoragePaths.applicationDirectory(in: appSupport)
         if !fileManager.fileExists(atPath: appFolder.path) {
             try? fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
         }
@@ -302,7 +302,7 @@ final class BrowserDataRepository {
 
     private func stableIdentifierBytes(for value: String) -> [UInt8] {
         let first = fnv1a64(value.utf8)
-        let second = fnv1a64(("actro:" + value).utf8)
+        let second = fnv1a64(("actrium:" + value).utf8)
         var bytes = [UInt8](repeating: 0, count: 16)
         for index in 0..<8 {
             bytes[index] = UInt8((first >> UInt64((7 - index) * 8)) & 0xff)

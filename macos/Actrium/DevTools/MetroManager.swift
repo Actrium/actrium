@@ -2,7 +2,7 @@ import Foundation
 import Combine
 import os.log
 
-private let logger = OSLog(subsystem: "com.actro.devtools", category: "Metro")
+private let logger = OSLog(subsystem: "io.actrium.devtools", category: "Metro")
 
 enum ActriumRuntimePaths {
     static var runtimePath: String {
@@ -463,7 +463,7 @@ class MetroManager: ObservableObject {
     }
 
     /// App Group for shared Metro config (XPC Service can read on startup)
-    private static let appGroupId = "group.io.actrium.actro"
+    private static let appGroupId = "group.io.actrium"
     private static let metroHostKey = "metro.host"
     private static let metroPortKey = "metro.port"
 
@@ -487,7 +487,7 @@ class MetroManager: ObservableObject {
         ]
 
         DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.metro.config"),
+            NSNotification.Name("io.actrium.metro.config"),
             object: nil,
             userInfo: config,
             deliverImmediately: true

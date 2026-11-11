@@ -31,7 +31,7 @@ export APPLE_ID="your-apple-id@example.com"
 
 编辑 `Scripts/ExportOptions.plist`，替换：
 - `YOUR_TEAM_ID` → 你的 Team ID
-- `com.actrium.actro` → 你的 Bundle ID
+- `com.example.actrium` → 你的 Bundle ID
 
 编辑 `Scripts/upload-testflight.sh` 第 165 行：
 - `DEVELOPMENT_TEAM="YOUR_TEAM_ID"` → 你的 Team ID

@@ -21,7 +21,7 @@ enum KeychainError: LocalizedError {
 }
 
 struct KeychainHelper {
-    private static let service = "com.actro.vault"
+    private static let service = "io.actrium.vault"
     private static let account = "master-password"
 
     /// Save master password to standard Keychain (no biometric access control)

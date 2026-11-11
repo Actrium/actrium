@@ -2205,7 +2205,7 @@ mod tests {
             assert_eq!(actrium_core_browser_storage_schema_version(), 6);
             assert_eq!(
                 CStr::from_ptr(actrium_core_browser_storage_database_name()).to_str(),
-                Ok("actro_browser.db")
+                Ok("actrium_browser.db")
             );
             assert_eq!(actrium_core_browser_history_max_items(), 500);
             assert_eq!(actrium_core_browser_bookmark_max_items(), 500);
@@ -2213,15 +2213,15 @@ mod tests {
             assert_eq!(actrium_core_browser_data_max_title_length(), 160);
             assert_eq!(
                 CStr::from_ptr(actrium_core_browser_home_address()).to_str(),
-                Ok("actro://home")
+                Ok("about:home")
             );
             assert_eq!(
                 CStr::from_ptr(actrium_core_browser_history_address()).to_str(),
-                Ok("actro://history")
+                Ok("about:history")
             );
             assert_eq!(
                 CStr::from_ptr(actrium_core_browser_bookmarks_address()).to_str(),
-                Ok("actro://bookmarks")
+                Ok("about:bookmarks")
             );
 
             let input = c"{\"version\":99,\"items\":[{\"title\":\"\",\"address\":\"https://example.com/docs\",\"visitedAtUnixSeconds\":-1,\"visitCount\":0}]}";
@@ -2248,7 +2248,7 @@ mod tests {
             let output = CStr::from_ptr(buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"createdAtUnixSeconds\":253402300799"));
 
-            let input = c"{\"version\":99,\"activeTabIndex\":9,\"tabs\":[{\"title\":\"\",\"address\":\"ACTRO://HISTORY\"}]}";
+            let input = c"{\"version\":99,\"activeTabIndex\":9,\"tabs\":[{\"title\":\"\",\"address\":\"ABOUT:HISTORY\"}]}";
             let required = actrium_core_browser_session_snapshot_normalize_json(
                 input.as_ptr(),
                 buffer.as_mut_ptr(),
@@ -2258,13 +2258,13 @@ mod tests {
             let output = CStr::from_ptr(buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"activeTabIndex\":0"));
             assert!(output.contains("\"title\":\"New Tab\""));
-            assert!(output.contains("\"address\":\"actro://history\""));
+            assert!(output.contains("\"address\":\"about:history\""));
 
             let required =
                 actrium_core_browser_session_home_snapshot_json(buffer.as_mut_ptr(), buffer.len());
             assert!(required > 0);
             let output = CStr::from_ptr(buffer.as_ptr()).to_str().unwrap();
-            assert!(output.contains("\"address\":\"actro://home\""));
+            assert!(output.contains("\"address\":\"about:home\""));
 
             let mut storage_buffer = [0 as c_char; 32768];
             let required = actrium_core_browser_storage_schema_statements_json(
@@ -2469,7 +2469,7 @@ mod tests {
             assert!(output.contains("\"orderedTabIds\":[\"tab-a\",\"tab-b\"]"));
 
             let required = actrium_core_browser_storage_session_tab_id_plan_json(
-                c"[{\"id\":\"\",\"index\":0,\"address\":\"actro://home\"},{\"id\":\"tab-a\",\"index\":1,\"address\":\"https://example.com/a\"}]"
+                c"[{\"id\":\"\",\"index\":0,\"address\":\"about:home\"},{\"id\":\"tab-a\",\"index\":1,\"address\":\"https://example.com/a\"}]"
                     .as_ptr(),
                 storage_buffer.as_mut_ptr(),
                 storage_buffer.len(),
@@ -2478,7 +2478,7 @@ mod tests {
             let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"policy\":\"browserStorageSessionTabId\""));
             assert!(
-                output.contains("\"tabIds\":[\"fa3d824d-efbc-593f-b327-a463b5e0973c\",\"tab-a\"]")
+                output.contains("\"tabIds\":[\"d1cf82a6-21b1-5f7b-a0fe-927c04728a08\",\"tab-a\"]")
             );
 
             let required = actrium_core_browser_storage_session_active_tab_consistency_policy_json(
@@ -2696,7 +2696,7 @@ mod tests {
             );
             assert!(required > 0);
             let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
-            assert!(output.contains("\"rootPath\":\"Actro/BrowserSync\""));
+            assert!(output.contains("\"rootPath\":\"Actrium/BrowserSync\""));
             assert!(output.contains("\"operation\":\"write\""));
             assert!(output.contains("expectedRevision"));
 
@@ -2710,7 +2710,7 @@ mod tests {
             assert!(output.contains("coarse rounds"));
 
             let required = actrium_core_browser_storage_sync_cloud_provider_adapter_plan_json(
-                c"{\"providerKind\":\"localFolder\",\"rootPath\":\"Actro/BrowserSync\",\"revisionKind\":\"contentHash\",\"supportsPrefixList\":true,\"supportsPagedList\":true,\"supportsConditionalWrite\":true,\"supportsConditionalDelete\":true,\"supportsReadIfChanged\":true,\"supportsAtomicRename\":false,\"supportsAppFolder\":true,\"backgroundSync\":\"platformScheduled\",\"conflictResolution\":\"optimisticRevision\",\"maxObjectBytes\":8388608,\"maxPageSize\":1000}".as_ptr(),
+                c"{\"providerKind\":\"localFolder\",\"rootPath\":\"Actrium/BrowserSync\",\"revisionKind\":\"contentHash\",\"supportsPrefixList\":true,\"supportsPagedList\":true,\"supportsConditionalWrite\":true,\"supportsConditionalDelete\":true,\"supportsReadIfChanged\":true,\"supportsAtomicRename\":false,\"supportsAppFolder\":true,\"backgroundSync\":\"platformScheduled\",\"conflictResolution\":\"optimisticRevision\",\"maxObjectBytes\":8388608,\"maxPageSize\":1000}".as_ptr(),
                 90,
                 storage_buffer.as_mut_ptr(),
                 storage_buffer.len(),
@@ -2799,7 +2799,7 @@ mod tests {
 
             let required =
                 actrium_core_browser_storage_sync_cloud_store_capability_preflight_json(
-                    c"{\"providerKind\":\"memory\",\"rootPath\":\"Actro/BrowserSync\",\"revisionKind\":\"monotonicCounter\",\"supportsPrefixList\":true,\"supportsPagedList\":true,\"supportsConditionalWrite\":true,\"supportsConditionalDelete\":true,\"supportsReadIfChanged\":true,\"supportsAtomicRename\":false,\"supportsAppFolder\":true,\"backgroundSync\":\"testControlled\",\"conflictResolution\":\"optimisticRevision\",\"maxObjectBytes\":8388608,\"maxPageSize\":1000}".as_ptr(),
+                    c"{\"providerKind\":\"memory\",\"rootPath\":\"Actrium/BrowserSync\",\"revisionKind\":\"monotonicCounter\",\"supportsPrefixList\":true,\"supportsPagedList\":true,\"supportsConditionalWrite\":true,\"supportsConditionalDelete\":true,\"supportsReadIfChanged\":true,\"supportsAtomicRename\":false,\"supportsAppFolder\":true,\"backgroundSync\":\"testControlled\",\"conflictResolution\":\"optimisticRevision\",\"maxObjectBytes\":8388608,\"maxPageSize\":1000}".as_ptr(),
                     4,
                     storage_buffer.as_mut_ptr(),
                     storage_buffer.len(),
@@ -2900,7 +2900,7 @@ mod tests {
             assert!(output.contains("\"shouldWrite\":true"));
 
             let required = actrium_core_browser_storage_sync_cloud_compatibility_preflight_json(
-                c"[{\"path\":\"Actro/BrowserSync/manifest.json\",\"document\":{\"version\":1,\"storageSchemaVersion\":6,\"scope\":\"profile\",\"updatedAtUnixSeconds\":1,\"writerDeviceId\":\"device-a\",\"devices\":[],\"collections\":[],\"retention\":{\"retainLogSequences\":8,\"retainSnapshots\":2,\"compactWhenLogSequencesExceed\":8},\"compatibility\":{\"minStorageSchemaVersion\":6,\"maxStorageSchemaVersion\":6,\"minCloudDataModelVersion\":1,\"maxCloudDataModelVersion\":1,\"unsupportedClientAction\":\"upgradeClient\"}}}]".as_ptr(),
+                c"[{\"path\":\"Actrium/BrowserSync/manifest.json\",\"document\":{\"version\":1,\"storageSchemaVersion\":6,\"scope\":\"profile\",\"updatedAtUnixSeconds\":1,\"writerDeviceId\":\"device-a\",\"devices\":[],\"collections\":[],\"retention\":{\"retainLogSequences\":8,\"retainSnapshots\":2,\"compactWhenLogSequencesExceed\":8},\"compatibility\":{\"minStorageSchemaVersion\":6,\"maxStorageSchemaVersion\":6,\"minCloudDataModelVersion\":1,\"maxCloudDataModelVersion\":1,\"unsupportedClientAction\":\"upgradeClient\"}}}]".as_ptr(),
                 3,
                 storage_buffer.as_mut_ptr(),
                 storage_buffer.len(),
@@ -2990,7 +2990,7 @@ mod tests {
 
             let required = actrium_core_browser_storage_sync_cloud_membership_result_plan_json(
                 membership_plan_c.as_ptr(),
-                c"[{\"operationIndex\":0,\"operationType\":\"writeDevice\",\"path\":\"Actro/BrowserSync/devices/device-a.json\",\"success\":true,\"providerRevision\":\"device-r1\"},{\"operationIndex\":1,\"operationType\":\"writeManifest\",\"path\":\"Actro/BrowserSync/manifest.json\",\"success\":true,\"providerRevision\":\"manifest-r1\"}]".as_ptr(),
+                c"[{\"operationIndex\":0,\"operationType\":\"writeDevice\",\"path\":\"Actrium/BrowserSync/devices/device-a.json\",\"success\":true,\"providerRevision\":\"device-r1\"},{\"operationIndex\":1,\"operationType\":\"writeManifest\",\"path\":\"Actrium/BrowserSync/manifest.json\",\"success\":true,\"providerRevision\":\"manifest-r1\"}]".as_ptr(),
                 4,
                 storage_buffer.as_mut_ptr(),
                 storage_buffer.len(),
@@ -3081,8 +3081,8 @@ mod tests {
             assert_eq!(output, "null");
 
             let required = actrium_core_browser_storage_sync_cloud_pull_continuation_plan_json(
-                c"{\"version\":1,\"storageSchemaVersion\":6,\"cloudDataModelVersion\":1,\"planType\":\"pullRead\",\"scope\":\"profile\",\"deviceId\":\"device-a\",\"generatedAtUnixSeconds\":1,\"manifestPath\":\"Actro/BrowserSync/manifest.json\",\"collections\":[{\"collection\":\"bookmarks\",\"localCursor\":\"\",\"remoteHighWatermarkCursor\":\"3\",\"latestLogSequence\":3,\"snapshotPath\":\"Actro/BrowserSync/snapshots/bookmarks.json\",\"snapshotRevision\":0,\"shouldReadSnapshot\":false,\"shouldListLogs\":true,\"logsPrefix\":\"Actro/BrowserSync/logs/bookmarks/\",\"maxLogObjects\":1}],\"operations\":[{\"operationIndex\":0,\"operationType\":\"listLogs\",\"prefix\":\"Actro/BrowserSync/logs/bookmarks/\",\"collection\":\"bookmarks\",\"maxObjects\":1,\"required\":true,\"resultContract\":\"BrowserStorageSyncCloudListResult\",\"conflictAction\":\"rereadManifestMergeAndRetry\"}],\"maxLogObjectsPerCollection\":1,\"resultPolicy\":\"test\",\"conflictPolicy\":\"rereadManifestMergeAndRetry\"}".as_ptr(),
-                c"[{\"operationIndex\":0,\"operationType\":\"listLogs\",\"path\":\"Actro/BrowserSync/logs/bookmarks/\",\"collection\":\"bookmarks\",\"success\":true,\"exists\":true,\"objectCount\":1,\"nextCursor\":\"Actro/BrowserSync/logs/bookmarks/device-b-0000000000000001.json\"}]".as_ptr(),
+                c"{\"version\":1,\"storageSchemaVersion\":6,\"cloudDataModelVersion\":1,\"planType\":\"pullRead\",\"scope\":\"profile\",\"deviceId\":\"device-a\",\"generatedAtUnixSeconds\":1,\"manifestPath\":\"Actrium/BrowserSync/manifest.json\",\"collections\":[{\"collection\":\"bookmarks\",\"localCursor\":\"\",\"remoteHighWatermarkCursor\":\"3\",\"latestLogSequence\":3,\"snapshotPath\":\"Actrium/BrowserSync/snapshots/bookmarks.json\",\"snapshotRevision\":0,\"shouldReadSnapshot\":false,\"shouldListLogs\":true,\"logsPrefix\":\"Actrium/BrowserSync/logs/bookmarks/\",\"maxLogObjects\":1}],\"operations\":[{\"operationIndex\":0,\"operationType\":\"listLogs\",\"prefix\":\"Actrium/BrowserSync/logs/bookmarks/\",\"collection\":\"bookmarks\",\"maxObjects\":1,\"required\":true,\"resultContract\":\"BrowserStorageSyncCloudListResult\",\"conflictAction\":\"rereadManifestMergeAndRetry\"}],\"maxLogObjectsPerCollection\":1,\"resultPolicy\":\"test\",\"conflictPolicy\":\"rereadManifestMergeAndRetry\"}".as_ptr(),
+                c"[{\"operationIndex\":0,\"operationType\":\"listLogs\",\"path\":\"Actrium/BrowserSync/logs/bookmarks/\",\"collection\":\"bookmarks\",\"success\":true,\"exists\":true,\"objectCount\":1,\"nextCursor\":\"Actrium/BrowserSync/logs/bookmarks/device-b-0000000000000001.json\"}]".as_ptr(),
                 2,
                 storage_buffer.as_mut_ptr(),
                 storage_buffer.len(),
@@ -3091,7 +3091,7 @@ mod tests {
             let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"planType\":\"pullContinuation\""));
             assert!(output.contains(
-                "\"pageCursor\":\"Actro/BrowserSync/logs/bookmarks/device-b-0000000000000001.json\""
+                "\"pageCursor\":\"Actrium/BrowserSync/logs/bookmarks/device-b-0000000000000001.json\""
             ));
 
             let required = actrium_core_browser_storage_sync_cloud_cycle_status_policy_json(
@@ -3119,7 +3119,7 @@ mod tests {
             let schedule_state_c = std::ffi::CString::new(output.to_string()).unwrap();
 
             let required = actrium_core_browser_storage_sync_cloud_provider_diagnostics_json(
-                c"{\"planType\":\"cloudStoreCapabilityPreflight\",\"providerKind\":\"localfolder\",\"rootPath\":\"Actro/BrowserSync\",\"classification\":\"ready\",\"shouldBlockSync\":false,\"clientAction\":\"continueCloudSync\",\"providerAction\":\"continueProviderSync\",\"userAction\":\"none\"}".as_ptr(),
+                c"{\"planType\":\"cloudStoreCapabilityPreflight\",\"providerKind\":\"localfolder\",\"rootPath\":\"Actrium/BrowserSync\",\"classification\":\"ready\",\"shouldBlockSync\":false,\"clientAction\":\"continueCloudSync\",\"providerAction\":\"continueProviderSync\",\"userAction\":\"none\"}".as_ptr(),
                 c"".as_ptr(),
                 c"".as_ptr(),
                 cycle_status_policy_c.as_ptr(),

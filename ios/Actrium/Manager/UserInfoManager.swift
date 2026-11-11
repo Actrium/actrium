@@ -34,7 +34,7 @@ class UserInfoManager: ObservableObject {
     static let shared = UserInfoManager()
     
     // UserDefaults key
-    private let userInfoKey = "com.actrium.actro.userInfo"
+    private let userInfoKey = "io.actrium.userInfo"
     private let userDefaults = UserDefaults.standard
 
     private init() {

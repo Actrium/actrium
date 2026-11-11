@@ -146,7 +146,7 @@ final class IPCServer {
     private var listener: IPCSocket?
     private var client: IPCSocket?
     private nonisolated let outgoing = IPCSocketSlot()
-    private let queue = DispatchQueue(label: "io.actrium.actro.ipc.server")
+    private let queue = DispatchQueue(label: "io.actrium.ipc.server")
 
     var onMessage: ((Data) -> Void)?
     var onConnected: (() -> Void)?
@@ -265,7 +265,7 @@ final class IPCClient {
     private var inheritedSocket: IPCSocket?
     private var connection: IPCSocket?
     private nonisolated let outgoing = IPCSocketSlot()
-    private let queue = DispatchQueue(label: "io.actrium.actro.ipc.client")
+    private let queue = DispatchQueue(label: "io.actrium.ipc.client")
 
     var onMessage: ((Data) -> Void)?
     var onDisconnected: (() -> Void)?

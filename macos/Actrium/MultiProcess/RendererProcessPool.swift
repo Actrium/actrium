@@ -516,19 +516,19 @@ final class RendererProcessPool: ObservableObject {
         worker.connection.onHostEvent = { name, userInfoJSON, _ in
             let localName: Notification.Name
             switch name {
-            case "com.actro.openBookmark":
+            case "io.actrium.openBookmark":
                 localName = XPCNotificationBridge.openBookmark
-            case "com.actro.openHistoryItem":
+            case "io.actrium.openHistoryItem":
                 localName = XPCNotificationBridge.openHistoryItem
-            case "com.actro.deleteBookmark":
+            case "io.actrium.deleteBookmark":
                 localName = XPCNotificationBridge.deleteBookmark
-            case "com.actro.deleteHistoryItem":
+            case "io.actrium.deleteHistoryItem":
                 localName = XPCNotificationBridge.deleteHistoryItem
-            case "com.actro.restoreHistoryGroup":
+            case "io.actrium.restoreHistoryGroup":
                 localName = XPCNotificationBridge.restoreHistoryGroup
-            case "com.actro.clearHistory":
+            case "io.actrium.clearHistory":
                 localName = XPCNotificationBridge.clearHistory
-            case "com.actro.openURLFromStartPage":
+            case "io.actrium.openURLFromStartPage":
                 localName = XPCNotificationBridge.openURLFromStartPage
             default:
                 NSLog("Renderer host event rejected: %@", name)

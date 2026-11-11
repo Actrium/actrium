@@ -5,7 +5,7 @@ using System.Text;
 namespace Actrium.Windows;
 
 /// <summary>
-/// Shared stylesheet for internal (actro://) documents: one :root block of
+/// Shared stylesheet for internal (about:) documents: one :root block of
 /// CSS custom properties built from the light palette plus a
 /// prefers-color-scheme override built from the dark palette. Every generated
 /// document embeds <see cref="RootCss"/> exactly once, so the 12-color CSS

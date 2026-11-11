@@ -114,7 +114,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   through `browser_session_snapshot_normalize_json` before writing rows.
 - Browser history/bookmark/session storage schema also has a Rust-owned v6
   contract in `crates/actrium-core/src/browser_data.rs`. It defines the
-  `actro_browser.db` table set: `browser_history_pages`,
+  `actrium_browser.db` table set: `browser_history_pages`,
   `browser_history_visits`, `browser_bookmark_folders`, `browser_bookmarks`,
   `browser_sessions`, `browser_session_tabs`, and `browser_sync_cursors`, plus
   baseline repository SQL for importing/querying history, bookmarks, and
@@ -341,7 +341,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   `browserStorageSyncCloudProviderAdapterContractJson` and
   `browserStorageSyncCloudProviderAdapterPlanJson` turn a selected provider
   kind, adapter family, root path, capabilities, or capability preflight into
-  the canonical `Actro/BrowserSync` layout, required objects/prefixes, coarse
+  the canonical `Actrium/BrowserSync` layout, required objects/prefixes, coarse
   operation groups, production-readiness flags, root setup actions, and
   adapter-emulation decisions. This is intentionally a batched plan above
   provider IO; concrete SDK calls still run in native/OpenDAL/Apple adapters, so
@@ -358,7 +358,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   Rust also owns `browserStorageSyncCloudRecoverySnapshotPlanJson` for the
   explicit migration/repair recovery snapshot batch. It consumes the cloud schema
   migration playbook plus the same compatibility preflight and returns ordered
-  `writeRecoveryCopy` operations under `Actro/BrowserSync/recovery/...`; provider
+  `writeRecoveryCopy` operations under `Actrium/BrowserSync/recovery/...`; provider
   adapters execute the read/write copies through their existing object-store
   layer instead of adding per-file copy FFI or independently choosing backup
   paths. `browserStorageSyncCloudRecoverySnapshotResultPlanJson` consumes the
@@ -700,9 +700,9 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   the existing macOS UI, deduping by browser address so old local rows remain
   the richer source for tags, notes, app IDs, and app history. On first launch
   after the migration, the view models also backfill existing local http/https
-  history/bookmarks into `actro_browser.db` with idempotent upserts and
+  history/bookmarks into `actrium_browser.db` with idempotent upserts and
   platform-scoped meta flags. Full native tab state still serves system tabs,
-  ACTR tabs, and tab groups. Do not store `actro://`, ACTR package, or system
+  ACTR tabs, and tab groups. Do not store `actr://`, ACTR package, or system
   tabs in the browser page schema.
 - iOS now has the matching first product call path through
   `ios/Actrium/Database/BrowserDataRepository.swift`. It records
@@ -710,7 +710,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   session snapshots from `BrowserViewModel.saveTabs()`, projects the current
   native tab `isBookmarked` snapshot into browser bookmarks, and merges shared
   browser history rows back into `HistoryViewModel`. iOS also backfills existing
-  local http/https history rows into `actro_browser.db` once, tracked through a
+  local http/https history rows into `actrium_browser.db` once, tracked through a
   platform-scoped meta flag. When `UserDefaults.persistedTabs` is absent or
   empty, iOS can restore http/https tabs from the shared browser session as a
   fallback and immediately persist that fallback back into the local tab store.
@@ -738,7 +738,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   app bookmarks are follow-ups.
 - Windows browser history and bookmark UI workflow remains local. Recording
   successful non-private external navigations, rendering generated
-  `actro://history` / `actro://bookmarks` documents, filtering/removing entries
+  `about:history` / `about:bookmarks` documents, filtering/removing entries
   from those local pages, host-bridge dispatch, clearing local history, honoring
   private-window rules, and active-tab bookmark menu state are WebView2 shell
   behavior. Rust owns the durable snapshot schema, not the browser event timing
@@ -774,7 +774,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   browser-domain contract needs durable non-UI error classification.
 - Windows native home-page document generation lives in
   `windows/src/BrowserHomeDocumentPolicy.cs` and `MainForm.cs`.
-  Generated `actro://home` HTML, safe status text rendering, and the decision to
+  Generated `about:home` HTML, safe status text rendering, and the decision to
   show the document are WebView2 shell UX. Rust only supplies stable core
   metadata through the local `ActriumCore.cs` adapter.
 - Windows WebView2 process-failure handling lives in
@@ -1457,7 +1457,7 @@ The generated UniFFI Kotlin expects `libuniffi_actrium_core.so` and
 `libuniffi_actrium_vault.so`, so the scripts copy those loader-name aliases next
 to the canonical Cargo outputs.
 
-The stable `io.actrium.app.rust.ActroCore` facade also exposes ACTR integrity
+The stable `io.actrium.app.rust.ActriumCore` facade also exposes ACTR integrity
 plan and normalization helpers. Android does not currently have a separate
 native ACTR package loader; ACTR package loading runs through the shared RN
 runtime, which already consumes the Rust-generated TypeScript contract.

@@ -9,17 +9,17 @@ license = "Apache-2.0"
 tags = ["dev", "client"]
 
 [package.actr_type]
-publisher = "actro"
-name = "actro"
+publisher = "actrium"
+name = "actrium"
 
 [dependencies]
-bot = { actr_type = "actro+app_server" }
+bot = { actr_type = "actrium+app_server" }
 
 [system.signaling]
 url = "wss://loran.example.com:443/signaling/ws"
 
 [system.deployment]
-realm = "actro@example.com"
+realm = "actrium@example.com"
 
 [system.discovery]
 visible = true
@@ -43,4 +43,4 @@ test = "xcodebuild test"
 
 [[acl.rules]]
 permission = "allow"
-types = ["actro+app_server"]
+types = ["actrium+app_server"]

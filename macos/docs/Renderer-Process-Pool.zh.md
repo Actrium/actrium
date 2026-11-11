@@ -199,7 +199,7 @@ Bundle 中；主程序不再链接 RN/Hermes。运行 N 个实例时，磁盘仍
 ## 10. 签名与平台边界
 
 本机开发证书可对 Helper 与主程序做嵌套签名并运行验证。Xcode 自动签名仍需要为新
-Bundle ID `io.actrium.actro.renderer` 创建 provisioning profile；这是账号侧准备项，
+Bundle ID `io.actrium.renderer` 创建 provisioning profile；这是账号侧准备项，
 不影响手动开发签名或架构本身。
 
 `CAContext`、`CALayerHost` 与当前 ViewBridge 一样属于 macOS 私有框架能力，不适合

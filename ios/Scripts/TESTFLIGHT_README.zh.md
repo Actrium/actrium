@@ -54,7 +54,7 @@ export APPLE_ID="your-apple-id@example.com"
 
 <key>provisioningProfiles</key>
 <dict>
-    <key>com.actrium.actro</key>  <!-- 改为你的 Bundle ID -->
+    <key>com.example.actrium</key>  <!-- 改为你的 Bundle ID -->
     <string>YOUR_PROVISIONING_PROFILE_NAME</string>  <!-- 改为你的 Provisioning Profile 名称 -->
 </dict>
 ```

@@ -12,10 +12,10 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>io.actrium.actro.ios</string>
+			<string>io.actrium.ios</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>actro</string>
+				<string>actr</string>
 			</array>
 		</dict>
 		<dict>

@@ -872,6 +872,7 @@ apple_allowed_actriumcore_import_files=(
   "macos/Actrium/Models/TabRuntimeBridge.swift"
   "macos/Actrium/Models/TagCoreBridge.swift"
   "macos/Actrium/Settings/Sync/BrowserSyncCredentialsProvider.swift"
+  "macos/Actrium/Settings/Sync/BrowserSyncProviderSettingsStore.swift"
   "macos/Actrium/Settings/Sync/BrowserSyncProviderConnectionPlanner.swift"
 )
 

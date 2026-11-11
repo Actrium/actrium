@@ -97,7 +97,7 @@ android {
 
     namespace = "io.actrium.app"
     defaultConfig {
-        applicationId = "io.actrium.actro"
+        applicationId = "io.actrium"
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
         versionCode = 1_28_00

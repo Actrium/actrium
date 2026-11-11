@@ -4,7 +4,7 @@ package io.actrium.app.generated
 // Do not edit by hand. Run scripts/actrium/build-actrium-rust-bindings.sh android.
 
 object ActriumAndroidPersistenceContract {
-    const val DATABASE_NAME = "actro_database"
+    const val DATABASE_NAME = "actrium_database"
     const val DATABASE_VERSION = 1
 
     object ActiveList {

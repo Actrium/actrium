@@ -418,7 +418,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     /**
      * Parsing deeplink And send the data to React Native
      * Example of Link Format:
-     *   actro://chat/123?token=abc
+     *   actr://example.com/chat/123?token=abc
      *   https://app.actrium.example/chat/123?token=abc
      */
     private fun handleDeepLink(intent: Intent?) {

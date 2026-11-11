@@ -679,7 +679,7 @@ struct WorkspaceMainView: View {
                 }()
 
                 if shouldNotifyDismiss {
-                    NotificationCenter.default.post(name: NSNotification.Name("com.actro.dismissAddressBarFocus"), object: nil)
+                    NotificationCenter.default.post(name: NSNotification.Name("io.actrium.dismissAddressBarFocus"), object: nil)
                 }
 
                 // Old logic:SwiftUI toolbar Address Bar
@@ -733,7 +733,7 @@ struct WorkspaceMainView: View {
         // ━━━━ Mode Switching Trigger #4: Double finger. (Distributive Notifications Interception) ━━━━
         // See MARK: - Mode Switching (Unified entrance)
         .onReceive(
-            DistributedNotificationCenter.default().publisher(for: Notification.Name("com.actro.pinchToOverview"))
+            DistributedNotificationCenter.default().publisher(for: Notification.Name("io.actrium.pinchToOverview"))
         ) { _ in
             guard case .focus = viewModel.actriumMode else { return }
             fputs("🤏 Received pinchToOverview → exitToOverview()\n", stderr)

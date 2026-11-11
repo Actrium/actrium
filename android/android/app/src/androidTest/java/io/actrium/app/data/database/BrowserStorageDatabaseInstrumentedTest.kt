@@ -42,7 +42,7 @@ class BrowserStorageDatabaseInstrumentedTest {
     fun plansCloudProviderAdapterObjectSpaceThroughRust() {
         val contract = JSONObject(ActriumCore.browserStorageSyncCloudProviderAdapterContractJson())
         assertEquals("cloudProviderAdapterPlan", contract.getString("planType"))
-        assertEquals("Actro/BrowserSync", contract.getJSONObject("objectSpace").getString("rootPath"))
+        assertEquals("Actrium/BrowserSync", contract.getJSONObject("objectSpace").getString("rootPath"))
         assertTrue(contract.getString("operationBoundary").contains("coarse rounds"))
 
         val localFolderCapabilities = ActriumCore.browserStorageSyncCloudLocalFolderCapabilitiesJson()
@@ -59,14 +59,14 @@ class BrowserStorageDatabaseInstrumentedTest {
         assertTrue(ready.getBoolean("shouldAllowSync"))
         assertFalse(ready.getBoolean("shouldBlockSync"))
         assertEquals(
-            "Actro/BrowserSync/manifest.json",
+            "Actrium/BrowserSync/manifest.json",
             ready.getJSONObject("objectLayout").getString("manifestPath"),
         )
         assertTrue(
             (0 until ready.getJSONArray("requiredPrefixes").length()).any { index ->
                 ready.getJSONArray("requiredPrefixes")
                     .getJSONObject(index)
-                    .getString("prefix") == "Actro/BrowserSync/logs/"
+                    .getString("prefix") == "Actrium/BrowserSync/logs/"
             },
         )
 
@@ -93,7 +93,7 @@ class BrowserStorageDatabaseInstrumentedTest {
         )
         assertEquals("providerSetupRequired", setup.getString("classification"))
         assertTrue(setup.getBoolean("shouldBlockSync"))
-        assertEquals("configureActroBrowserSyncRoot", setup.getString("rootPathAction"))
+        assertEquals("configureActriumBrowserSyncRoot", setup.getString("rootPathAction"))
     }
 
     @Test
@@ -181,7 +181,7 @@ class BrowserStorageDatabaseInstrumentedTest {
                                 JSONObject()
                                     .put("operationIndex", 1)
                                     .put("operationType", "writeManifest")
-                                    .put("path", "Actro/BrowserSync/manifest.json")
+                                    .put("path", "Actrium/BrowserSync/manifest.json")
                                     .put("providerStatusCode", 412)
                                     .put("message", "etag mismatch"),
                             ),
@@ -691,7 +691,7 @@ class BrowserStorageDatabaseInstrumentedTest {
                 seedResult.getJSONObject("observabilityEvent").getString("classification"),
             )
             assertTrue(seedResult.getJSONObject("observabilityEvent").getBoolean("redactedExportAllowed"))
-            assertTrue(File(cloudRoot, "Actro/BrowserSync/manifest.json").exists())
+            assertTrue(File(cloudRoot, "Actrium/BrowserSync/manifest.json").exists())
 
             val localDatabase = BrowserStorageDatabase.createAtPath(localDatabaseFile.absolutePath)
             val localClient = BrowserStorageSyncClient(localDatabase)
@@ -796,7 +796,7 @@ class BrowserStorageDatabaseInstrumentedTest {
                 ),
             )
 
-            val manifestFile = File(cloudRoot, "Actro/BrowserSync/manifest.json")
+            val manifestFile = File(cloudRoot, "Actrium/BrowserSync/manifest.json")
             val manifest = JSONObject(manifestFile.readText())
                 .put("storageSchemaVersion", ActriumCore.browserStorageSchemaVersion().toLong() + 1)
             manifestFile.writeText(manifest.toString())
@@ -980,8 +980,8 @@ class BrowserStorageDatabaseInstrumentedTest {
                 "join",
                 joinResult.getJSONObject("membershipRound").getString("membershipAction"),
             )
-            assertTrue(File(cloudRoot, "Actro/BrowserSync/manifest.json").exists())
-            assertTrue(File(cloudRoot, "Actro/BrowserSync/devices/device-android.json").exists())
+            assertTrue(File(cloudRoot, "Actrium/BrowserSync/manifest.json").exists())
+            assertTrue(File(cloudRoot, "Actrium/BrowserSync/devices/device-android.json").exists())
 
             val revokeRequestJson = JSONObject()
                 .put("scope", "profile")
@@ -1070,7 +1070,7 @@ class BrowserStorageDatabaseInstrumentedTest {
                 revokeResult.getJSONObject("membershipRound").getString("memberStatus"),
             )
 
-            val manifest = JSONObject(File(cloudRoot, "Actro/BrowserSync/manifest.json").readText())
+            val manifest = JSONObject(File(cloudRoot, "Actrium/BrowserSync/manifest.json").readText())
             val devices = manifest.getJSONArray("devices")
             var foundRevokedDevice = false
             for (index in 0 until devices.length()) {
@@ -1085,7 +1085,7 @@ class BrowserStorageDatabaseInstrumentedTest {
             assertTrue(foundRevokedDevice)
 
             manifest.put("storageSchemaVersion", ActriumCore.browserStorageSchemaVersion().toLong() + 1)
-            File(cloudRoot, "Actro/BrowserSync/manifest.json").writeText(manifest.toString())
+            File(cloudRoot, "Actrium/BrowserSync/manifest.json").writeText(manifest.toString())
             val blockedJoinRequestJson = JSONObject()
                 .put("scope", "profile")
                 .put("actorDeviceId", "device-android")
@@ -1194,7 +1194,7 @@ class BrowserStorageDatabaseInstrumentedTest {
             assertTrue(blockedMembershipRecoveryRound.getBoolean("completed"))
             assertEquals("upgradeClient", blockedMembershipRecoveryRound.getString("clientAction"))
             assertFalse(blockedMembershipRecoveryRound.getJSONObject("resultPlan").getBoolean("snapshotRequested"))
-            assertFalse(File(cloudRoot, "Actro/BrowserSync/devices/device-android-2.json").exists())
+            assertFalse(File(cloudRoot, "Actrium/BrowserSync/devices/device-android-2.json").exists())
         } finally {
             deleteDatabaseFiles(databaseFile)
             testRoot.deleteRecursively()
@@ -1412,7 +1412,7 @@ class BrowserStorageDatabaseInstrumentedTest {
         )
         val store = BrowserStorageSyncCredentialStore(
             context,
-            preferencesName = "actro_browser_sync_credentials_test",
+            preferencesName = "actrium_browser_sync_credentials_test",
         )
         store.clearSession()
         store.saveSession(
@@ -1546,7 +1546,7 @@ class BrowserStorageDatabaseInstrumentedTest {
 
             // The membership marker is now persisted so later runs skip the join.
             assertNotNull(providerStore.load().membershipJoinedAtUnixSeconds)
-            assertTrue(File(cloudRoot, "Actro/BrowserSync/manifest.json").exists())
+            assertTrue(File(cloudRoot, "Actrium/BrowserSync/manifest.json").exists())
 
             // Second run: membership active, routes straight to the cycle round.
             val secondResult = JSONObject(

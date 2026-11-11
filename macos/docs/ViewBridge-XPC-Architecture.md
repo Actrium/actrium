@@ -110,12 +110,12 @@ viewportSize.height / cardHeight = scale
 
 | Name of notice | Orientation | Purpose |
 |----------|------|------|
-| `com.actro.xpcServiceReady` | XPC → Host | XPC Service Ready, acceptable configuration |
-| `com.actro.tabConfig.<bundleId>` | Host → XPC | Send Tab ConfiguretabId, systemAppType Wait |
-| `com.actro.metro.config` | Host → XPC | Radio Metro Configurehost, port) |
-| `com.actro.containerSizeChanged` | Host → XPC | Notification of changes in packaging size |
-| `com.actro.openBookmark` | XPC → Host | User Click Bookmarks |
-| `com.actro.openHistoryItem` | XPC → Host | User Click History |
+| `io.actrium.xpcServiceReady` | XPC → Host | XPC Service Ready, acceptable configuration |
+| `io.actrium.tabConfig.<bundleId>` | Host → XPC | Send Tab ConfiguretabId, systemAppType Wait |
+| `io.actrium.metro.config` | Host → XPC | Radio Metro Configurehost, port) |
+| `io.actrium.containerSizeChanged` | Host → XPC | Notification of changes in packaging size |
+| `io.actrium.openBookmark` | XPC → Host | User Click Bookmarks |
+| `io.actrium.openHistoryItem` | XPC → Host | User Click History |
 
 ### 4.2 Tab Config Structure
 
@@ -306,7 +306,7 @@ sequenceDiagram
 ### 6.1 Configure
 
 - **Pool Size**: 4 individual slot (RCTViewService0 - RCTViewService3)
-- **Bundle ID Format**: `io.actrium.actro.rctviewservice{N}`
+- **Bundle ID Format**: `io.actrium.rctviewservice{N}`
 
 ### 6.2 Distribution Policy
 
@@ -345,7 +345,7 @@ sequenceDiagram
 
 **Problem**: ViewBridge Private API Zero-syncs unstable.
 
-**Resolve**: Add DistributedNotificationCenter Alternative mechanisms (`com.actro.containerSizeChanged`)
+**Resolve**: Add DistributedNotificationCenter Alternative mechanisms (`io.actrium.containerSizeChanged`)
 
 ## 8. Outstanding issues:Focus Mode Rendering
 
@@ -582,7 +582,7 @@ log show --predicate 'eventMessage contains "Metro"' --last 1m
 ### 11.2 Ghen analysis
 
 1) **Tab Configure path missing“Connect dimensions”**
-   - Host → Service ..and only for the broadcast. `com.actro.tabConfig.<bundleId>`No one with whom. NSRemoteViewController/Connect to request this configuration.
+   - Host → Service ..and only for the broadcast. `io.actrium.tabConfig.<bundleId>`No one with whom. NSRemoteViewController/Connect to request this configuration.
    - Service Side `assignPendingEntry(tabId:)` It's... FIFO The strategy will be received. `tabId` ♪ Tie it to the“The oldest one. pending entry”——The earliest. `loadView` - The connection.
    - When Same Process Slot (inslot0It's in there. StartPage/Bookmarks/History When three connections are made, just“Connection creation order”and“Configure Send Order”Not in line, it'll be TabA It's... config ♪ Tie it to the TabB , there is a misdirection of content.
 

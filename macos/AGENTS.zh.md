@@ -18,7 +18,7 @@ System bundle（包含 StartPage/History/Bookmarks/Debug，同时也包含 `Runt
 
 启动后自动打开 CounterApp（推荐用于验证 keel/Bundle 是否匹配）：
 
-`open -a "$(xcodebuild -workspace Actrium.xcworkspace -scheme Actrium -showBuildSettings 2>/dev/null | awk '/BUILT_PRODUCTS_DIR/ {print $3; exit}')/Actrium.app" --args --url "actro://$(cd ../../../packages/actrium/keel-guest-examples/counterapp && pwd)"`
+`open -a "$(xcodebuild -workspace Actrium.xcworkspace -scheme Actrium -showBuildSettings 2>/dev/null | awk '/BUILT_PRODUCTS_DIR/ {print $3; exit}')/Actrium.app" --args --url "$(cd ../../../packages/actrium/keel-guest-examples/counterapp && pwd)"`
 
 ## 5) 查看日志
 IPC 调试日志：

@@ -38,7 +38,7 @@ final class XPCNotificationBridge {
 
         // Open bookmark
         observers.append(DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.openBookmark"),
+            forName: NSNotification.Name("io.actrium.openBookmark"),
             object: nil,
             queue: .main
         ) { notification in
@@ -47,7 +47,7 @@ final class XPCNotificationBridge {
 
         // Open history item
         observers.append(DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.openHistoryItem"),
+            forName: NSNotification.Name("io.actrium.openHistoryItem"),
             object: nil,
             queue: .main
         ) { notification in
@@ -56,7 +56,7 @@ final class XPCNotificationBridge {
 
         // Delete bookmark
         observers.append(DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.deleteBookmark"),
+            forName: NSNotification.Name("io.actrium.deleteBookmark"),
             object: nil,
             queue: .main
         ) { notification in
@@ -65,7 +65,7 @@ final class XPCNotificationBridge {
 
         // Delete history item
         observers.append(DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.deleteHistoryItem"),
+            forName: NSNotification.Name("io.actrium.deleteHistoryItem"),
             object: nil,
             queue: .main
         ) { notification in
@@ -74,7 +74,7 @@ final class XPCNotificationBridge {
 
         // Restore history group
         observers.append(DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.restoreHistoryGroup"),
+            forName: NSNotification.Name("io.actrium.restoreHistoryGroup"),
             object: nil,
             queue: .main
         ) { notification in
@@ -83,7 +83,7 @@ final class XPCNotificationBridge {
 
         // Clear history
         observers.append(DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.clearHistory"),
+            forName: NSNotification.Name("io.actrium.clearHistory"),
             object: nil,
             queue: .main
         ) { notification in
@@ -92,7 +92,7 @@ final class XPCNotificationBridge {
 
         // Open URL from Start Page
         observers.append(DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.openURLFromStartPage"),
+            forName: NSNotification.Name("io.actrium.openURLFromStartPage"),
             object: nil,
             queue: .main
         ) { notification in
@@ -101,7 +101,7 @@ final class XPCNotificationBridge {
 
         // XPC Log (forward to DevTools)
         observers.append(DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.xpcLog"),
+            forName: NSNotification.Name("io.actrium.xpcLog"),
             object: nil,
             queue: .main
         ) { notification in
@@ -229,12 +229,12 @@ struct ActriumApp: App {
     /// Start of the resolution from the command line parameter URL
     static var launchURL: URL? = {
         let args = CommandLine.arguments
-        NSLog("🚀 Actro: Command line args: \(args)")
+        NSLog("🚀 Actrium: Command line args: \(args)")
         if let urlIndex = args.firstIndex(where: { $0 == "--url" || $0 == "-url" }),
            urlIndex + 1 < args.count {
             let urlString = args[urlIndex + 1]
             if let url = URL(string: urlString) {
-                NSLog("🚀 Actro: Launch URL from command line: \(urlString)")
+                NSLog("🚀 Actrium: Launch URL from command line: \(urlString)")
                 return url
             }
         }
@@ -513,7 +513,7 @@ struct ActriumApp: App {
     private func openHistoryItem(_ item: HistoryItem) {
         guard let vm = focusedViewModel else { return }
         if let url = item.appURL {
-            // Use navigateCurrentTab which handles all URL schemes (actro://, http://, about:, etc.)
+            // Use navigateCurrentTab which handles all URL schemes (actr://, http://, about:, etc.)
             vm.navigateCurrentTab(to: url.absoluteString)
             historyVM.recordVisit(item: item)
         }
