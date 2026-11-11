@@ -207,6 +207,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
         <ErrorBoundary>
           <React.Suspense fallback={<LoadingFallback />}>
             <StandaloneGuestApp
+              key={tab.id}
               tab={tab}
               containerWidth={containerWidth}
               containerHeight={containerHeight}
