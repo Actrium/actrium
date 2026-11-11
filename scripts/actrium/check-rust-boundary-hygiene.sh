@@ -866,6 +866,7 @@ apple_allowed_actriumcore_import_files=(
   "macos/Actrium/Database/HistoryRepository.swift"
   "macos/Actrium/Database/TagRepository.swift"
   "macos/Actrium/Models/ActriumAppIdentityCoreBridge.swift"
+  "macos/Actrium/Models/ActriumTrustedProgramCoreBridge.swift"
   "macos/Actrium/Models/ActrPackageManifestReader.swift"
   "macos/Actrium/Models/BrowserSearchEngineCoreBridge.swift"
   "macos/Actrium/Models/InstalledActriumAppCoreBridge.swift"
