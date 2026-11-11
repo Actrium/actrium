@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator as NativeActivityIndicator,
+  Image as NativeImage,
   NativeModules,
   Pressable as NativePressable,
   Text as NativeText,
@@ -10,7 +11,6 @@ import { EventHandler, HostHttpHandler } from 'askit/host-events';
 import { Engine, type ComponentMap } from 'keel/host';
 import {
   FlatList,
-  Image,
   ScrollView,
   Switch,
   Text,
@@ -21,6 +21,7 @@ import {
 import { hasDeclaredCapability } from './capabilities';
 import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
+import { isAllowedImageSource } from './image-asset';
 import type { TabConfig } from './types';
 
 type GuestButtonProps = {
@@ -54,14 +55,25 @@ const GuestButton: React.FC<GuestButtonProps> = ({
   </NativePressable>
 );
 
+const GuestImage: React.FC<React.ComponentProps<typeof NativeImage>> = (
+  props
+) => {
+  if (!isAllowedImageSource(props.source)) {
+    return null;
+  }
+  return <NativeImage {...props} />;
+};
+
 const hostComponents: ComponentMap = {
   Button: GuestButton as unknown as React.ComponentType<
     Record<string, unknown>
   >,
   FlatList: FlatList as unknown as React.ComponentType<Record<string, unknown>>,
   // v1 exposes images as `ImageAsset`; the guest SDK still emits `Image`.
-  Image: Image as unknown as React.ComponentType<Record<string, unknown>>,
-  ImageAsset: Image as unknown as React.ComponentType<Record<string, unknown>>,
+  Image: GuestImage as unknown as React.ComponentType<Record<string, unknown>>,
+  ImageAsset: GuestImage as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
   ScrollView: ScrollView as React.ComponentType<Record<string, unknown>>,
   Switch: Switch as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as React.ComponentType<Record<string, unknown>>,
