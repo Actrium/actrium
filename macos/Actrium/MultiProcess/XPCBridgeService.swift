@@ -33,6 +33,7 @@ struct XPCTabConfig {
     let systemAppType: String?
     let unifiedScript: String?
     let capabilityManifestJSON: String?
+    let capabilitySnapshotJSON: String?
     let leftPanelScript: String?
     let leftPanelVisible: Bool
     let rightPanelVisible: Bool
@@ -65,6 +66,9 @@ struct XPCTabConfig {
         }
         if let capabilityManifestJSON = capabilityManifestJSON {
             dict["capabilityManifestJSON"] = capabilityManifestJSON
+        }
+        if let capabilitySnapshotJSON = capabilitySnapshotJSON {
+            dict["capabilitySnapshotJSON"] = capabilitySnapshotJSON
         }
         if let leftPanelScript = leftPanelScript {
             dict["leftPanelScript"] = leftPanelScript
