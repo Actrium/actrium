@@ -31,6 +31,17 @@ describe('runtime capability manifest verification', () => {
     expect(result).toEqual({ ok: true, details: [] });
   });
 
+  test('accepts the implemented clipboard method when it is declared', () => {
+    const result = verifyRuntimeCapabilityManifestJSON(
+      manifestJSON({
+        imports: ['host:clipboard'],
+        hostModules: { 'host:clipboard': { rpc: ['writeText'] } },
+      }),
+      ['host:clipboard.write']
+    );
+    expect(result).toEqual({ ok: true, details: [] });
+  });
+
   test('rejects usage that is not declared by the package', () => {
     const result = verifyRuntimeCapabilityManifestJSON(manifestJSON(), []);
     expect(result.ok).toBe(false);
@@ -41,10 +52,10 @@ describe('runtime capability manifest verification', () => {
   test('rejects a module without a real Host implementation', () => {
     const result = verifyRuntimeCapabilityManifestJSON(
       manifestJSON({
-        imports: ['host:clipboard'],
-        hostModules: { 'host:clipboard': { rpc: ['writeText'] } },
+        imports: ['host:camera'],
+        hostModules: { 'host:camera': { rpc: ['capturePhoto'] } },
       }),
-      ['host:clipboard']
+      ['host:camera']
     );
     expect(result.ok).toBe(false);
     expect(result.code).toBe('unknown_capability');

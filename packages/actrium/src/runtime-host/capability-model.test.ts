@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { FRONT_CAPABILITIES } from './capabilities';
+import { FRONT_CAPABILITIES, type FrontCapability } from './capabilities';
 import {
   computeFrontCapabilities,
   computeServiceCapabilities,
   FRONT_CAPABILITY_DEFINITIONS,
+  HOST_SUPPORTED_CAPABILITIES,
   PLATFORM_PERMISSION_MAP,
+  type CapabilityDefinition,
+  type FrontCapabilityDefinitions,
   type FrontCapabilityInput,
 } from './capability-model';
 
@@ -20,22 +23,122 @@ const base: FrontCapabilityInput = {
   audience: 'third_party',
 };
 
+function withDefinitions(
+  patches: Partial<Record<FrontCapability, Partial<CapabilityDefinition>>>
+): FrontCapabilityDefinitions {
+  const definitions = { ...FRONT_CAPABILITY_DEFINITIONS };
+  for (const [capability, patch] of Object.entries(patches)) {
+    const key = capability as FrontCapability;
+    definitions[key] = { ...definitions[key], ...patch };
+  }
+  return definitions;
+}
+
+/**
+ * Policy tests need capabilities that are actually implemented; the Host's
+ * real table only marks `service.call` and `host:clipboard.write` so. Override
+ * a copy instead of mutating the production definitions.
+ */
+function withImplemented(
+  ...capabilities: FrontCapability[]
+): FrontCapabilityDefinitions {
+  return withDefinitions(
+    Object.fromEntries(
+      capabilities.map((capability) => [capability, { implemented: true }])
+    )
+  );
+}
+
 describe('computeFrontCapabilities', () => {
-  test('keeps declared capabilities with no grant requirement', () => {
-    expect(computeFrontCapabilities(base)).toEqual(['service', 'host:assets']);
+  test('expands module shorthands to method-level capabilities', () => {
+    expect(
+      computeFrontCapabilities(base, withImplemented('host:assets.read'))
+    ).toEqual(['service.call', 'host:assets.read']);
   });
 
   test('drops capabilities that require a grant until granted', () => {
+    const definitions = withImplemented('host:clipboard.write');
     expect(
-      computeFrontCapabilities({ ...base, declared: ['host:clipboard'] })
+      computeFrontCapabilities(
+        { ...base, declared: ['host:clipboard.write'] },
+        definitions
+      )
     ).toEqual([]);
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['host:clipboard.write'],
+          grants: new Set(['host:clipboard.write']),
+        },
+        definitions
+      )
+    ).toEqual(['host:clipboard.write']);
+    // A module grant covers its methods.
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['host:clipboard'],
+          grants: new Set(['host:clipboard']),
+        },
+        definitions
+      )
+    ).toEqual(['host:clipboard.write']);
+  });
+
+  test('accepts a method grant for a module shorthand', () => {
     expect(
       computeFrontCapabilities({
         ...base,
         declared: ['host:clipboard'],
-        grants: new Set(['host:clipboard']),
+        grants: new Set(['host:clipboard.write']),
       })
-    ).toEqual(['host:clipboard']);
+    ).toEqual(['host:clipboard.write']);
+  });
+
+  test('a grant for one method does not authorize another method', () => {
+    const definitions = withDefinitions({
+      'service.tell': {
+        implemented: true,
+        requiresGrant: 'user',
+        defaultEnabled: false,
+      },
+    });
+
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['service'],
+          grants: new Set(['service.call']),
+        },
+        definitions
+      )
+    ).toEqual(['service.call']);
+
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['service'],
+          grants: new Set(['service.tell']),
+        },
+        definitions
+      )
+    ).toEqual(['service.call', 'service.tell']);
+
+    // A module grant covers every method.
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['service'],
+          grants: new Set(['service']),
+        },
+        definitions
+      )
+    ).toEqual(['service.call', 'service.tell']);
   });
 
   test('drops capabilities the host does not support', () => {
@@ -65,16 +168,16 @@ describe('computeFrontCapabilities', () => {
     ).toEqual([]);
   });
 
-  test('maps the legacy actor.call alias to service', () => {
+  test('maps the legacy actor.call alias to service.call', () => {
     expect(
       computeFrontCapabilities({ ...base, declared: ['actor.call'] })
-    ).toEqual(['service']);
+    ).toEqual(['service.call']);
   });
 
   test('deduplicates a capability declared through aliases', () => {
     expect(
       computeFrontCapabilities({ ...base, declared: ['service', 'actor.call'] })
-    ).toEqual(['service']);
+    ).toEqual(['service.call']);
   });
 
   test('accepts contract module ids in hostSupported', () => {
@@ -84,7 +187,7 @@ describe('computeFrontCapabilities', () => {
         declared: ['service'],
         hostSupported: new Set(['host:service']),
       })
-    ).toEqual(['service']);
+    ).toEqual(['service.call']);
   });
 
   test('silently drops unknown capabilities', () => {
@@ -100,7 +203,7 @@ describe('computeFrontCapabilities', () => {
         declared: ['service'],
         audience: 'system',
       })
-    ).toEqual(['service']);
+    ).toEqual(['service.call']);
   });
 });
 
@@ -111,38 +214,106 @@ describe('capability model data', () => {
     }
   });
 
-  test('host:net is default-off and broker-mediated', () => {
-    expect(FRONT_CAPABILITY_DEFINITIONS['host:net'].defaultEnabled).toBe(false);
-    expect(FRONT_CAPABILITY_DEFINITIONS['host:net'].requiresBroker).toBe(true);
+  test('host:net.request is default-off and broker-mediated', () => {
+    expect(
+      FRONT_CAPABILITY_DEFINITIONS['host:net.request'].defaultEnabled
+    ).toBe(false);
+    expect(FRONT_CAPABILITY_DEFINITIONS['host:net.request'].requiresBroker).toBe(
+      true
+    );
   });
 
   test('clipboard has a platform permission mapping', () => {
     expect(PLATFORM_PERMISSION_MAP['host:clipboard']).toBe('os:clipboard');
   });
 
-  test('host:navigate is available without a grant', () => {
-    expect(FRONT_CAPABILITY_DEFINITIONS['host:navigate'].defaultEnabled).toBe(
-      true
-    );
+  test('host:navigate.navigate is available without a grant', () => {
     expect(
-      computeFrontCapabilities({ ...base, declared: ['host:navigate'] })
-    ).toEqual(['host:navigate']);
+      FRONT_CAPABILITY_DEFINITIONS['host:navigate.navigate'].defaultEnabled
+    ).toBe(true);
+    expect(
+      computeFrontCapabilities(
+        { ...base, declared: ['host:navigate.navigate'] },
+        withImplemented('host:navigate.navigate')
+      )
+    ).toEqual(['host:navigate.navigate']);
   });
 
-  test('host:external-link requires a user grant', () => {
+  test('host:external-link.open requires a user grant', () => {
     expect(
-      FRONT_CAPABILITY_DEFINITIONS['host:external-link'].requiresGrant
+      FRONT_CAPABILITY_DEFINITIONS['host:external-link.open'].requiresGrant
     ).toBe('user');
+    const definitions = withImplemented('host:external-link.open');
     expect(
-      computeFrontCapabilities({ ...base, declared: ['host:external-link'] })
+      computeFrontCapabilities(
+        { ...base, declared: ['host:external-link.open'] },
+        definitions
+      )
     ).toEqual([]);
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['host:external-link.open'],
+          grants: new Set(['host:external-link.open']),
+        },
+        definitions
+      )
+    ).toEqual(['host:external-link.open']);
+  });
+
+  test('only implemented capabilities count as host-supported', () => {
+    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(2);
+    expect(HOST_SUPPORTED_CAPABILITIES.has('service.call')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES.has('host:clipboard.write')).toBe(true);
+    for (const capability of FRONT_CAPABILITIES) {
+      if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;
+      expect(FRONT_CAPABILITY_DEFINITIONS[capability].implemented).toBe(false);
+    }
+  });
+
+  test('placeholder capabilities never enter the effective set', () => {
+    const placeholders = FRONT_CAPABILITIES.filter(
+      (capability) => !FRONT_CAPABILITY_DEFINITIONS[capability].implemented
+    );
+
+    // A caller that reports everything as host-supported still cannot make a
+    // placeholder callable; `implemented` is enforced by the function itself.
     expect(
       computeFrontCapabilities({
         ...base,
-        declared: ['host:external-link'],
-        grants: new Set(['host:external-link']),
+        declared: [...placeholders, 'host:clipboard.write'],
+        hostSupported: all,
+        grants: new Set([...placeholders, 'host:clipboard.write']),
       })
-    ).toEqual(['host:external-link']);
+    ).toEqual(['host:clipboard.write']);
+  });
+
+  test('third-party effective sets never include system capabilities', () => {
+    const definitions = withImplemented('system:diagnostics.view');
+
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['system:diagnostics.view', 'system:diagnostics'],
+          grants: new Set(['system:diagnostics.view']),
+        },
+        definitions
+      )
+    ).toEqual([]);
+
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['system:diagnostics.view'],
+          grants: new Set(['system:diagnostics.view']),
+          audience: 'system',
+        },
+        definitions
+      )
+    ).toEqual(['system:diagnostics.view']);
   });
 });
 

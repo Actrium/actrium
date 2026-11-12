@@ -1,7 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import { createHostModules } from './host-modules';
+import { createHostModuleDispatch } from 'keel/contract';
+
+import { contract } from './contract';
+import { createHostModules, type HostModules } from './host-modules';
 
 const input = { route: 'echo.EchoService.Echo', payloadBase64: 'AAEC' };
+
+function createTestHostModules(options?: {
+  hasServiceCapability?: boolean;
+  hasClipboardCapability?: boolean;
+  hasClipboardGrant?: boolean;
+  writeClipboardText?: (text: string) => Promise<void>;
+}): HostModules {
+  return createHostModules({
+    hasServiceCapability: options?.hasServiceCapability ?? true,
+    callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+    hasClipboardCapability: options?.hasClipboardCapability ?? true,
+    hasClipboardGrant: options?.hasClipboardGrant ?? true,
+    writeClipboardText: options?.writeClipboardText ?? (async () => {}),
+  });
+}
 
 describe('host:service implementation', () => {
   test('rejects calls when the service capability is not declared', async () => {
@@ -12,6 +30,9 @@ describe('host:service implementation', () => {
         called = true;
         return { success: true, payloadBase64: 'AAEC' };
       },
+      hasClipboardCapability: true,
+      hasClipboardGrant: true,
+      writeClipboardText: async () => {},
     });
 
     await expect(hostModules['host:service'].call(input)).rejects.toThrow(
@@ -32,6 +53,9 @@ describe('host:service implementation', () => {
         captured = request;
         return { success: true, payloadBase64: 'AAEC' };
       },
+      hasClipboardCapability: true,
+      hasClipboardGrant: true,
+      writeClipboardText: async () => {},
     });
 
     await expect(hostModules['host:service'].call(input)).resolves.toEqual({
@@ -47,6 +71,9 @@ describe('host:service implementation', () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
       callActor: async () => ({ success: false, message: 'gateway down' }),
+      hasClipboardCapability: true,
+      hasClipboardGrant: true,
+      writeClipboardText: async () => {},
     });
 
     await expect(hostModules['host:service'].call(input)).rejects.toThrow(
@@ -58,6 +85,9 @@ describe('host:service implementation', () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
       callActor: () => new Promise(() => {}),
+      hasClipboardCapability: true,
+      hasClipboardGrant: true,
+      writeClipboardText: async () => {},
     });
 
     await expect(
@@ -69,6 +99,9 @@ describe('host:service implementation', () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
       callActor: async () => ({ success: true }),
+      hasClipboardCapability: true,
+      hasClipboardGrant: true,
+      writeClipboardText: async () => {},
     });
 
     await expect(hostModules['host:service'].call(input)).rejects.toThrow(
@@ -77,10 +110,7 @@ describe('host:service implementation', () => {
   });
 
   test('fails closed for tell and on until implemented', async () => {
-    const hostModules = createHostModules({
-      hasServiceCapability: true,
-      callActor: async () => ({ success: true }),
-    });
+    const hostModules = createTestHostModules();
 
     await expect(hostModules['host:service'].tell(input)).rejects.toThrow(
       'not implemented'
@@ -89,4 +119,149 @@ describe('host:service implementation', () => {
       'not implemented'
     );
   });
+});
+
+describe('host:clipboard implementation', () => {
+  test('writes text through the host adapter', async () => {
+    let written = '';
+    const hostModules = createTestHostModules({
+      writeClipboardText: async (text) => {
+        written = text;
+      },
+    });
+
+    await hostModules['host:clipboard'].writeText({ text: 'hello' });
+    expect(written).toBe('hello');
+  });
+
+  test('rejects writes when the capability is not declared', async () => {
+    let called = false;
+    const hostModules = createTestHostModules({
+      hasClipboardCapability: false,
+      writeClipboardText: async () => {
+        called = true;
+      },
+    });
+
+    await expect(
+      hostModules['host:clipboard'].writeText({ text: 'hello' })
+    ).rejects.toThrow('host:clipboard.write');
+    expect(called).toBe(false);
+  });
+
+  test('rejects writes when the capability is declared but not granted', async () => {
+    let called = false;
+    const hostModules = createTestHostModules({
+      hasClipboardCapability: true,
+      hasClipboardGrant: false,
+      writeClipboardText: async () => {
+        called = true;
+      },
+    });
+
+    await expect(
+      hostModules['host:clipboard'].writeText({ text: 'hello' })
+    ).rejects.toThrow('not been granted');
+    expect(called).toBe(false);
+  });
+
+  test('dispatches through the contract boundary', async () => {
+    let written = '';
+    const dispatch = createHostModuleDispatch(
+      contract,
+      createTestHostModules({
+        writeClipboardText: async (text) => {
+          written = text;
+        },
+      })
+    );
+
+    await dispatch['host:clipboard'].writeText({ text: 'hello' });
+    expect(written).toBe('hello');
+    expect(() => dispatch['host:clipboard'].writeText({ text: 1 })).toThrow(
+      'Boundary input validation failed'
+    );
+  });
+});
+
+describe('placeholder host modules', () => {
+  const placeholderCalls: ReadonlyArray<{
+    capability: string;
+    call: (hostModules: HostModules) => unknown;
+  }> = [
+    {
+      capability: 'host:assets.read',
+      call: (hostModules) =>
+        hostModules['host:assets'].read({ path: 'assets/a.png' }),
+    },
+    {
+      capability: 'host:notifications.show',
+      call: (hostModules) =>
+        hostModules['host:notifications'].show({ title: 'Hi' }),
+    },
+    {
+      capability: 'host:camera.capturePhoto',
+      call: (hostModules) => hostModules['host:camera'].capturePhoto(),
+    },
+    {
+      capability: 'host:microphone.record',
+      call: (hostModules) =>
+        hostModules['host:microphone'].record({ durationMs: 1000 }),
+    },
+    {
+      capability: 'host:location.getCurrentPosition',
+      call: (hostModules) =>
+        hostModules['host:location'].getCurrentPosition(),
+    },
+    {
+      capability: 'host:external-link.open',
+      call: (hostModules) =>
+        hostModules['host:external-link'].open({
+          url: 'https://example.com',
+        }),
+    },
+    {
+      capability: 'host:navigate.navigate',
+      call: (hostModules) =>
+        hostModules['host:navigate'].navigate({ path: '/settings' }),
+    },
+    {
+      capability: 'host:file-import.pick',
+      call: (hostModules) => hostModules['host:file-import'].pick({}),
+    },
+    {
+      capability: 'host:file-export.save',
+      call: (hostModules) =>
+        hostModules['host:file-export'].save({
+          name: 'notes.txt',
+          base64: 'AAEC',
+        }),
+    },
+    {
+      capability: 'host:share.share',
+      call: (hostModules) => hostModules['host:share'].share({ text: 'hello' }),
+    },
+    {
+      capability: 'host:net.request',
+      call: (hostModules) =>
+        hostModules['host:net'].request({ url: 'https://example.com' }),
+    },
+  ];
+
+  test('the implementation map matches the active contract', () => {
+    expect(() =>
+      createHostModuleDispatch(contract, createTestHostModules())
+    ).not.toThrow();
+  });
+
+  for (const { capability, call } of placeholderCalls) {
+    test(`${capability} throws instead of resolving`, async () => {
+      const hostModules = createTestHostModules();
+      // The stubs reject asynchronously; wrapping also lets the type stay
+      // honest for implementations that are allowed to return synchronously.
+      await expect(Promise.resolve().then(() => call(hostModules))).rejects.toThrow(
+        `${capability} is not implemented`
+      );
+    });
+  }
 });
