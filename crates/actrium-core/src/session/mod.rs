@@ -6,7 +6,7 @@
 //! # Relationship to Tab and Service lifecycles
 //!
 //! From `docs/product/actrium-v1/08-workspace-lifecycle-and-storage.md` §5
-//! ("Tab 与 Service 生命周期分离"), the invariant is: **Tab events operate on
+//! ("Tab and Service lifecycle separation"), the invariant is: **Tab events operate on
 //! Front sessions; they do not change the Service lifecycle state.**
 //!
 //! | Tab event         | Front operation   | Service lifecycle |

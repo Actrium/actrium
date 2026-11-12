@@ -1,7 +1,7 @@
 //! Mutual-authentication channel types and handshake messages.
 //!
 //! Covers the protocol described in `16-mutual-authentication-and-attach-flow.md`
-//! §5 ("双向认证") and `rfcs/actr/0563-secure-actor-channels.md`.
+//! §5 ("Mutual authentication") and `rfcs/actr/0563-secure-actor-channels.md`.
 //!
 //! # Architecture
 //!
