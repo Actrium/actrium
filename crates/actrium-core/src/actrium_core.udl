@@ -1627,3 +1627,9 @@ enum ActrPackageVerificationError {
     "InvalidPublicKey",
     "InvalidPackage",
 };
+
+[Error]
+enum ActrPackageVerificationError {
+    "InvalidPublicKey",
+    "InvalidPackage",
+};
