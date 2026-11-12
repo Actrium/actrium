@@ -97,11 +97,9 @@ no `requester`.
 | `set_role` | `member_id`, `role` (`editor`/`viewer`) | The owner (not for itself) | Changes only the role |
 | `transfer_owner` | `member_id`, optional `previous_owner_role` (default `editor`) | The owner | Atomically hands ownership to another active member that has at least one unrevoked client key; the previous owner takes the given role |
 | `leave` | none | A member other than the owner | Removes itself, with the effect of `remove_member` |
-| `update_realm` | optional complete `primary_package` + `packages` selection, legacy `package`, `display_name`, or `status: "retired"` | The owner; only for Realms under the Actr Facility Provider's domain | The AFP validates and signs a higher-sequence Profile under Realm Profile Sections 4, 7.2 and 7.4; responds `{realm, sequence}` |
+| `update_realm` | optional complete selection (`primary_package` and `packages`), `display_name`, or `status: "retired"` | Owner of a Realm under the AFP domain | The AFP validates and signs a higher-sequence Profile and returns `{realm, sequence}` (Realm Profile Sections 7.2 and 7.4). |
 
-Selection updates follow [Realm Profile Sections 4 and 7.2](realm-profile.md#41-application-instance-package-selection).
-Compare the resulting Profile's complete selection; an old AFP ignoring fields
-is not a successful multi-package update.
+After a selection update, the caller verifies the signed Profile and compares the primary reference and complete map with its request. See [Realm Profile Section 7.2](realm-profile.md#72-updates).
 
 In a `join` request, `signature.key_id` **MUST** equal the `key_id` computed
 from `public_key`; the signature is the proof of possession. For every other
@@ -214,10 +212,8 @@ The Issuer issues only when all of the following hold:
    Actor private key can move its Actor to another of its clients). Relay
    identity enrollment also requires the currently bound key and an unexpired
    renewal token;
-3. at registration, resolve `packages[primary_package]` under Realm Profile
-   Section 4.3 (the in-memory view for legacy documents). An invalid reference,
-   conflicting projection or missing valid primary **MUST** be rejected, not
-   used to skip the Service-owner check. If the Actor type's publisher and
+3. at registration, resolve `packages[primary_package]` from the verified Profile.
+   The Issuer **MUST** reject an invalid primary reference. If the Actor type's publisher and
    program name equal those of this primary's `type` (in any version, that is, the
    instance's Service and its upgrades), the signing key belongs to the owner.
    Renewal and reissue do not check the role again, so an ownership transfer

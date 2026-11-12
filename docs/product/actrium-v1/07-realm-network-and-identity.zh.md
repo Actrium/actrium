@@ -142,7 +142,7 @@ Realm Profile 至少包含：
 - schema（`actr.realm/v1`）；
 - `realm.name`（完整 Realm 名）与显示名；
 - `status`：`active` 或 `retired`；
-- `active` Realm 的 `primary_package` 与 `packages` 声明实例包选择，并在签名前派生 v1 兼容 `package`；旧格式按 Realm Profile §4.3 接受。
+- `active` Profile 必须同时提供 `packages` 和 `primary_package`，后者指向默认 Service 的条目。见 [Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式)。
 - 单调 `sequence` 与签发时间 `issued_at`（Realm Profile 不设过期时间）；
 - issuer URL、Realm issuer keys/key ids（Actor credential 的 issuer 即 Realm 名）；
 - Actr Facility Provider ID、signaling endpoints、STUN/TURN endpoints；
@@ -170,12 +170,6 @@ Actrium 只凭一个可判定条件区分两条路径：在规范化 A-label 上
 域名所有者委托 Actr Facility Provider 代持 Realm 签名 key 时，公开文档中没有任何字段表明这一点，Actrium 仍显示信任根为该 Realm 域名；受托的 Actr Facility Provider 以持有方身份提供签名服务。这种代持对用户不可见，是已接受的限制。
 
 由 Realm 签名 key 签发受限的「创建委派 key」（限定 RealmId 前缀、配额、有效期）属于后续能力。
-
-#### 3.2.1 实例包选择及兼容
-
-`primary_package` + `packages` 固定实例选包，不声明运行实例或授予权限；字段、签名、更新及兼容规则见
-[Realm Profile §4–7](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置)。
-新 v1 Profile 在签名前派生旧 `package`；旧实现读主包成功，不代表支持多包管理或部署。
 
 ### 3.3 ActorId 如何携带 Realm
 

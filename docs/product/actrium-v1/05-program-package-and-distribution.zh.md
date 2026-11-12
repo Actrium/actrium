@@ -84,10 +84,8 @@ Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证�
 - **新建实例。** 用户从 Program Catalog、Marketplace 或 Publisher 渠道选定发布版本。
   本地开发时，Actrium 可按本地信任策略验证并记录用户显式提供的两个归档。
 
-### 3.1 实例选择与发布约束
-
-Host 从 Profile 解析主包，再按签名发布记录验证 Front；其他选定包也须逐包验证，不得覆盖发布记录和依赖锁。
-选择变化按 [Realm Profile §4、§7.2](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置) 重签，旧主包更新保留其他条目。
+Host 逐个验证选用的辅助包的 Publisher 签名，并核对其 manifest 类型和摘要是否符合相应发布记录与依赖锁。
+见 [Realm Profile §6](../../../actr/protocols/realm-profile.zh.md#6-使用-realm)。
 
 ## 4. Service 包与 Front 包
 

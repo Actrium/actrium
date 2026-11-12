@@ -53,7 +53,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | 术语 | 定义 |
 | --- | --- |
 | Actor | 运行中的程序实体，由 ActorId 标识；安全模型中唯一的规范节点和宏观通信、执行边界。 |
-| Service | 实例的 Service：每个 Realm 恰好一个，随 Realm 创建；有持久 ActorId，固定运行 Realm Profile 所指的 Service 包，持有实例状态与 Workspace，生命周期独立于 Tab，可本地或远端运行。Front 只连它；它是本 Realm 内唯一与包同类型的 Actor，Front 按类型找到它。同一 Realm 内的其他 Actor 由它编排，不另设类别名。 |
+| Service | 实例的 Service：每个 Realm 恰好一个，随 Realm 创建；有持久 ActorId，运行 Realm Profile 中 `packages[primary_package]` 指定的 Service 包，持有实例状态与 Workspace，生命周期独立于 Tab，可本地或远端运行。Front 只连它；它是本 Realm 内唯一与主包同类型的 Actor，Front 按类型找到它。同一 Realm 内的其他 Actor 由它编排，不另设类别名。 |
 | Front Actor | 每个 resident app Tab 的短生命周期 Actor，类型和 Keel Guest Workload 来自已验证的 Front 包，由 Actrium 的原生 Front Host 装载。 |
 | Front Host | Front Actor 的受信原生宿主部分：随 Actrium 发布，Publisher 不可替换或扩展；负责 Actor 注册、身份、连接、会话、Keel Engine 与 Host capability，Keel Guest 运行其上。 |
 | Keel Guest | Publisher 唯一可定制的前台代码，运行于 Keel。 |
@@ -91,7 +91,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Realm 签名 key 轮换链（`rotations`） | 旧 key 签名 `{from, to, public_key, sequence}` 认可新 key 的记录；没有轮换链的 key 变化视为身份变化，需重新确认信任。 |
 | `realms` relation | authority descriptor 中指向 Realm Profile 存放位置的链接：`GET <href>/<realm_id>`。 |
 | `realm-management` relation | Actr Facility Provider 自身 authority descriptor 中的 Realm 管理请求端点（`POST`，protocol `actr-realm-management/1`）。 |
-| Realm Profile（`actr.realm/v1`） | 每个 Realm 一份的公开文档，由 Realm 签名 key 签名：`realm.name`、状态、该实例运行的包（`package`：下载地址、SHA-256 与 Actor 类型）、Realm issuer key、Actr Facility Provider 与端点。放在哪都行（`realms` 位置、Actr Facility Provider、Realm 邀请内嵌），存放方不成为信任根，有效性只看签名；不过期，回滚保护只靠 Realm Profile sequence；`provider.id` 在 Realm 生命周期内不可变。签名 key 被移除后，回退到仍在 `keys` 中的 key 签署的最近一份。 |
+| Realm Profile（`actr.realm/v1`） | 每个 Realm 一份的公开文档，由 Realm 签名 key 签名：`realm.name`、状态、实例选用的包（`packages` 记录下载地址、SHA-256 与 Actor 类型，`primary_package` 指定默认 Service）、Realm issuer key、Actr Facility Provider 与端点。放在哪都行（`realms` 位置、Actr Facility Provider、Realm 邀请内嵌），存放方不成为信任根，有效性只看签名；不过期，回滚保护只靠 Realm Profile sequence；`provider.id` 在 Realm 生命周期内不可变。签名 key 被移除后，回退到仍在 `keys` 中的 key 签署的最近一份。 |
 | 退役 Realm Profile | `status: retired` 的 Realm Profile，由 Realm 签名 key 签署，永久有效，Realm 名不再复用。退役只有这一条路径。 |
 | Realm issuer key | Issuer 为每个 Realm 持有的签名 key：私钥在 Actr Facility Provider 的 Issuer Signer 中，公钥列在 Realm Profile。 |
 | Actor credential | Issuer 签发给 Actor 的短期凭证：issuer 字段即 Realm 名，绑定 ActorId、Actor key、Actor 类型、Realm、有效期、principal/client binding（成员 id、Realm 客户端 key id）与签发时的角色。它证明 Actor key、身份与 claims，不单独证明对端实际运行的代码。 |
@@ -130,7 +130,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | 术语 | 定义 |
 | --- | --- |
 | Realm 链接（`actr://` URI） | 应用实例或其中某个 Actor 的地址：`actr://<Realm 域名>/<realm_id>[/<页面路径>]` 指向实例，`actr://<Realm 域名>/<serial>.<realm_id>[…]` 指向该 ActorId 的 Actor（第一段即 Realm 名或 ActorId 在 `@` 左边的部分）。页面路径、query、fragment 原样交给应用。https 形式是 `https://<Realm 域名><links 前缀>…`，设备上没有 Actr Host 时打开普通网页；本机 Realm 没有 https 形式。URI 不携带任何秘密。 |
-| 新建实例（Create） | Actrium 内的本地操作：从 Program Catalog、Marketplace、本地文件或包地址选包，选 Realm 域名 → 持有方授权 → pending Realm → 签名 Realm Profile（含 `package`）并以 `publish_profile` 提交（Actr Facility Provider 域名下的 Realm 无需此步）→ active Realm → 创建 Service。成功后地址栏显示该实例的 Realm 链接。 |
+| 新建实例（Create） | Actrium 内的本地操作：从 Program Catalog、Marketplace、本地文件或包地址选包，选 Realm 域名 → 持有方授权 → pending Realm → 签名 Realm Profile（含 `primary_package` 和完整 `packages`）并以 `publish_profile` 提交（Actr Facility Provider 域名下的 Realm 无需此步）→ active Realm → 创建 Service。成功后地址栏显示该实例的 Realm 链接。 |
 | Create 幂等键（`idempotency_key`） | 新建实例的本地持久化标识：重试时继续同一个 pending Realm 与同一 RealmId。Actr Facility Provider 侧幂等键为 `(realm, 请求方)`，请求方是 Actr 管理信封中的 `requester`。 |
 | Realm 邀请 | 加入某个实例 Realm 的一次性 secret：带角色（邀请新成员）或指向已有成员（为其添加客户端），可过期、签发者可在兑换前撤销；兑换时由新 Realm 客户端 key 签名并原子消耗。文本形式 `ri_…`（携带 Realm 名，可内嵌 Realm Profile），只经带外渠道交付，不进入 URI。过期、已使用、已撤销与 Realm 不匹配是不同错误。 |
 
@@ -223,5 +223,5 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Service | Primary Service、Service Actor | 产品文档早期用语；Realm 即实例后不再区分主次 |
 | Realm 内的其他 Actor | Auxiliary Actor | 产品文档早期用语 |
 | Realm 链接 | Create URI、Attach URI、`actr://<publisher>/<program>@<version>`、`service`/`domain`/`realm` 链接参数 | 产品文档早期用语；新建实例改为 Actrium 本地操作 |
-| （已删除） | Package Resolution、`packages` relation、`program_resolver`、`actr-packages/1` | 程序从哪来改由 Realm Profile 的 `package` 给出 |
+| （已删除） | Package Resolution、`packages` relation、`program_resolver`、`actr-packages/1` | 实例所选包的下载地址见 Realm Profile 的 `packages[ref].href` |
 | Actor Grant | Capability（安全模型中的签名授权） | 安全模型早期用语；形式模型代码类 `Capability` → `ActorGrant` |

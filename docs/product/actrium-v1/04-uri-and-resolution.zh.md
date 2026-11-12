@@ -9,9 +9,8 @@
 - 地址里没有秘密，知道地址不等于有权进入；
 - 程序从哪里下载由 Realm Profile 决定，不写在地址里。
 
-包选择校验与旧格式内存视图遵循 [Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式)。
-主包引用不存在或兼容投影冲突时以 `REALM_PROFILE_INVALID` 停止打开，不选第一个包兜底。
-读取辅助包目录不表示在客户端启动所有 Actor；链接语法和 Service 精确绑定规则保持不变。
+打开链接时，Actrium 验证 Profile，从 `packages[primary_package]` 取得 Service 包。
+包选择无效时，以 `REALM_PROFILE_INVALID` 停止打开。见 [Realm Profile §4.2](../../../actr/protocols/realm-profile.zh.md#42-包选择校验)。
 
 ## 2. 链接形式
 

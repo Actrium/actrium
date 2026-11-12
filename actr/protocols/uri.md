@@ -94,12 +94,7 @@ When an Actr Host opens `actr://<domain>/<realm_id>[…]` (an instance), it:
    Profile; otherwise obtains and validates the Realm Profile of
    `<realm_id>@<domain>` as in [Actr Realm Profile](realm-profile.md),
    Sections 3 and 5.
-3. Resolves `packages[primary_package]` under Realm Profile Section 4.3
-   (normalizing legacy documents only after signature verification), checks
-   the type and `sha256`, and verifies the primary archive as in
-   [Actor Package](actor-package.zh.md) (Chinese only). Its Actor type is
-   the instance's program. A missing reference or conflicting projection
-   stops opening.
+3. Resolves `packages[primary_package]`, downloads the Service archive and verifies its `sha256`, manifest type and Publisher signature. An invalid primary reference stops opening. See [Actor Package](actor-package.zh.md).
 4. Obtains and verifies the foreground according to the application's
    product contract, then passes it the rest of the path, query and fragment.
    Actrium Product v1 obtains its separate Front package from the signed

@@ -27,11 +27,10 @@ What is really missing are product-level invariants and several key semantics:
 9. per-instance storage;
 10. an honest lifecycle on mobile.
 
-### Package-selection extension
+### Realm package selection
 
-Realm Profile defines the contract. Implement schema/SDK, AFP/CLI, Host/deployment
-and client support in that order. Validate formats, Service loading and business
-Ready separately; primary read compatibility does not establish multi-package deployment.
+Implement the schema and SDK first, then AFP and CLI management, followed by Host deployment and
+client support. Verify Profile validation, Service loading and application readiness separately.
 
 ## 2. Key dependency graph
 

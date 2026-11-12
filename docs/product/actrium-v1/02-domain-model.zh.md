@@ -129,10 +129,8 @@ Realm 名 = <realm_id>@<domain>                      # 联网，如 k7m2q9xh@acm
 Publisher 域名命名程序（谁发布），Realm 域名命名部署（谁运营）；同一 Program
 Release 可以运行在 `notes@acme.com`，也可以运行在 `notes@foo.org`。
 
-#### Realm 的包选择配置
-
-`packages` 固定实例选用的归档，`primary_package` 指向默认 Service；Publisher 负责发布与定位，Host 负责部署。
-包引用名不是 ActorId 或权限。校验与兼容规则见 [Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式)。
+Realm 签名方用 `packages` 列出实例选用的包，用 `primary_package` 指定默认 Service。
+Publisher 为每个包签名，获授权的部署配置决定运行哪些 Actor。见 [Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式)。
 
 ## 3. 「Tab–Service 1:1」的精确定义
 
@@ -280,7 +278,7 @@ Actrium 本地数据库可以有纯存储用途的 `record_id`，但它不是网
 第 3–4 步是一个以 `idempotency_key` 为幂等键的事务，严格按序执行：取得持有方授权 → Actr Facility Provider 创建 pending Realm → 签名 Realm Profile 并以 `publish_profile` 提交 → Realm 变为 active → 兑换 owner 邀请，成为 owner → 创建 Service 并取得 ActorId。Actr Facility Provider 域名下的 Realm 在 v1 由其运营者代建，Actrium 从兑换 owner 邀请开始。任一步失败都不创建 Service；pending Realm 过期由 Actr Facility Provider 自动清理；随机 RealmId 只生成一次，用同一 `idempotency_key` 重试时沿用它；Actr Facility Provider 幂等键为 `(realm, 请求方)`，继续同一个 pending Realm，不重复创建；不同请求方同名或命中已有 active Realm 或 Actr Facility Provider tombstone 时返回冲突。本机 Realm 只有本地 record 与 Service 两步。
 
 新实例总是新 Realm。Service 升级为新 Program Release 时，在同一 Realm 创建新 Service，成员与应用权限延续，
-ActorId 按迁移规则变化。确认切换后，Realm 更新主包条目并发布更高 sequence 的完整签名 Profile，保留其他包选择。
+ActorId 按迁移规则变化。确认切换后，Realm 在更高 `sequence` 的签名 Profile 中发布完整包选择，主包条目指向升级后的 Service 包。
 匹配的发布记录固定配套的 Front 包。
 
 ### 6.2 打开实例

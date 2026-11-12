@@ -4,12 +4,6 @@
 
 状态：初始草案。
 
-包选择扩展为文档约定，SDK、CLI、AFP 和 Schema 尚待同步。
-
-本文定义 `primary_package` + `packages` 包选择扩展。
-本次仅更新文档；现有 SDK、CLI、AFP 和机器可读 Schema 尚未实现全部新校验与多包部署行为。
-保留旧 `package` 字段只兼容主包读取，不表示旧实现支持本扩展。
-
 本文定义 Actr Host 或 Actr Facility Provider（AFP）如何把 Realm 名解析为经过验证的 Realm Profile、
 `actr.realm/v1` Realm Profile 格式，以及 Actr Facility Provider 接受的 Realm 管理请求。
 
@@ -114,11 +108,6 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
       "type": "notes.example/notes-index@1.0.0"
     }
   },
-  "package": {
-    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-    "type": "notes.example/team-notes@1.4.2"
-  },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
@@ -156,11 +145,10 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `realm.display_name` | 人类可读名称，不是标识符。 |
 | `realm.status` | `active` 或 `retired`。 |
 | `primary_package` | `packages` 中的一个引用名，指定本实例的默认主 Service 包。 |
-| `packages` | 本应用实例显式选定的包引用映射；不是 Publisher 目录或运行中 Actor 列表。 |
+| `packages` | 本应用实例选定的包引用映射。 |
 | `packages[ref].href` | 该归档的 HTTPS 下载地址，可以在任何位置。 |
 | `packages[ref].sha256` | 该归档全部字节的 SHA-256（64 位小写十六进制）。 |
 | `packages[ref].type` | 该归档 manifest 声明的精确 Actor 类型 `publisher/program@version`。 |
-| `package` | v1 兼容投影，必须等于 `packages[primary_package]`；仅旧文档可单独使用，见 §4.3。 |
 | `issuer.url` | Issuer 的注册与验证端点。 |
 | `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥，1 至 3 项（第 6.1 节）。 |
 | `provider.id` | Actr Facility Provider ID：Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
@@ -170,12 +158,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `issued_at` | Realm Profile 的签署时间（RFC 3339），仅供参考；Realm Profile 不过期。 |
 | `signature` | Realm 签名 key 的 detached 签名。 |
 
-`realm.status` 为 `active` 时，支持本扩展的 Profile 发布方 **MUST** 提供
-`primary_package`、非空 `packages` 及其 `package` 兼容投影。仅含 `package` 的旧文档
-按 §4.3 接受。本扩展仍使用 `actr.realm/v1`，不删除 active v1 文档原有的 `package` 必填条件。
-
-所有端点 **MUST** 包含非空 host。每个 `packages[ref].href`、兼容字段 `package.href`
-和 `issuer.url` **MUST** 使用 HTTPS，
+所有端点 **MUST** 包含非空 host。每个 `packages[ref].href` 和 `issuer.url` **MUST** 使用 HTTPS。
 `provider.signaling[].url` **MUST** 使用 WSS。每个 `provider.ice[].urls` 列表
 **MUST** 非空，并包含遵循 [RFC 7064](https://www.rfc-editor.org/rfc/rfc7064) 或
 [RFC 7065](https://www.rfc-editor.org/rfc/rfc7065) 的 STUN/TURN 地址：
@@ -200,47 +183,27 @@ Actr Host **MUST** 忽略未知 member。
 
 ### 4.2 包选择校验
 
-接收方 **MUST** 检查以下规则；第 2–6 项只用于显式选择，旧格式按 §4.3 接受。
-
-1. `primary_package` 与 `packages` 同时出现或同时缺省，不得遇错回退旧字段。
-2. 映射含 1–32 项；引用名为 1–63 个小写字母、数字或连字符，首尾非连字符。拒绝重复 JSON member。
-3. `primary_package` 是精确匹配映射键的字符串。
-4. 每项含 HTTPS `href`、64 位小写十六进制 `sha256`、精确 `publisher/program@version` 类型；不接受范围或 `latest`。
-5. 同一精确类型不得绑定不同摘要；本扩展不定义多平台归档矩阵。
-6. `package` 必须与选中的引用为相同 JSON object（忽略 member 顺序，不忽略字段或字符串差异）；冲突即拒绝。
-7. 完整 Profile（包括签名）最多 64 KiB；其他传输和包验证限额不变。
-
-退役文档可保留有效选择，或省略选择及兼容字段；携带的字段仍须合法，且不能据此继续启动 Actor。
-
-### 4.3 v1 兼容与归一化
-
-- 仅旧 `package` 的 active 文档仍可接受。验签后可在内存中视为
-  `primary_package = "main"`、`packages.main = package`，不改写原文。
-- 新发布方以映射和主引用为唯一编辑来源，**MUST** 在签名前生成兼容 `package`；
-  active v1 仍须包含它。代理和读接口不得在签名后补写、修改或裁剪字段。
-- 验签与同 sequence 比较使用原文的完整 JCS 签名 payload，持久化保留原文；
-  空白和 member 顺序不构成变化，不得先归一化或删除未知字段再验签。
-- 接受显式选择后，**MUST NOT** 接受更高 sequence 的 active 旧格式降级；退役例外。
-  删包应提交新的完整映射，不靠省略新字段清空清单。
-- 旧读端仅兼容主包；多包管理、签署和部署需要新写端、AFP、Host。
-  旧写端只改投影导致冲突时拒绝。未来删除兼容字段须另行版本迁移。
+1. `active` Profile **MUST** 同时提供 `primary_package` 和 `packages`。`retired` Profile 可省略两项。只提供一项时，接收方 **MUST** 拒绝该 Profile。
+2. `packages` 是含 1–32 项的 JSON object。键为 1–63 个 ASCII 小写字母、数字或连字符，首尾须为字母或数字。
+3. `primary_package` 是精确匹配映射键的字符串。`packages[primary_package]` 给出主 Service 的包引用。
+4. 每项 **MUST** 包含 HTTPS `href`、整包 `sha256`（64 位小写十六进制）和精确 `type`（`publisher/program@version`）。同一精确类型只能绑定一个摘要。接收方 **MUST** 拒绝版本范围和 `latest`。
+5. 完整签名 Profile 最多 64 KiB。接收方 **MUST** 拒绝超限文档和重复的 JSON member。
 
 ## 5. 验证
 
 `signature` 是对去掉 `signature` member 后的 Realm Profile 按 RFC 8785 JCS 规范化结果所做
 的 detached Ed25519 签名。Realm 签名 key 持有方 **MUST** 使用 `active` Realm 签名 key。
-签名覆盖 `primary_package`、`packages` 的全部引用和兼容字段。接收方验证收到的完整 payload，
-再建立 §4.3 的内存视图；Realm 签名确认实例选择，不替代任何包的 Publisher 签名。
+`primary_package`、`packages` 中的每一项和未知 member 均进入签名 payload。
+接收方保存收到的签名文档，并用其完整 JCS payload 验签。
 
 Actr Host 或 Actr Facility Provider 只在以下条件全部满足时接受 Realm Profile：
 
 1. `schema` 为 `actr.realm/v1`，且 `realm.name` 与正在解析的 Realm 名一致；
 2. `signature.key_id` 指向该 Realm 域名已接受的 `realm_signing_keys` member 中列出的 key
    （Actr Authority Discovery 第 4.4 节），且用该 key 验签通过；
-3. 包选择及兼容投影通过 §4.2–4.3 校验，并符合 §7.2 的更新约束；
+3. 包选择满足 §4.2 的字段校验和 §7.2 的更新规则。
 4. 若此前已接受过该 Realm 的 Realm Profile：
-   - Realm Profile sequence 不低于已接受的最高值，等于时内容必须与已接受的 Realm Profile
-     完全相同；
+   - Realm Profile sequence 不低于已接受的最高值，相等时完整 JCS payload 必须一致；
    - `provider.id` 与已接受的 Realm Profile 相同；
    - 已接受的 Realm Profile 不是已退役状态。
 
@@ -252,18 +215,14 @@ Provider 不是信任根。
 
 ## 6. 使用 Realm
 
-Actr Host 从已验证的包选择中解析 `packages[primary_package]`（旧文档使用 §4.3 内存视图）。
-下载选中的归档时，以不带 credential 的 HTTPS GET 获取 `href`，**MUST** 核对 `sha256`，
-并按 [Actor Package](actor-package.zh.md) 验证 Publisher、包签名、manifest 类型、载荷、
-Workload Profile、Host/ABI 和平台策略。manifest 的 Actor 类型 **MUST** 等于引用的 `type`；
-任一失败即不运行。此规则同样用于部署配置选中的每个辅助包，不因先前验过主包而跳过。
-不能从类型名拼接下载 URL，也不能以 Publisher 返回的其他版本或 digest 静默替换。
-主包的类型即该实例的程序：实例的 Service 是本 Realm 内 Actor 类型与之
-相同的那个 Actor，恰好一个；零个或多于一个都是错误。
+Actr Host 从已验证 Profile 的 `packages[primary_package]` 取得 Service 包。
+下载时 **MUST** 以不带凭据的 HTTPS GET 获取指定的 `href`。加载主包或辅助包前，Host **MUST**
+核对整包 `sha256`、Publisher 签名和 manifest 中的 Actor 类型 `type`，
+并检查载荷、Workload Profile、Host/ABI 与平台策略。见 [Actor Package](actor-package.zh.md)。
 
-读取清单本身不启动其中全部 Actor。Host 按本地或受管的授权部署配置，选择引用、分配独立
-身份和状态、启动实例并建立业务连接。包选择变化不自动停止进程、删除状态或撤销凭据；
-这些动作须通过部署、成员或撤销流程明确执行。
+主包的 Actor 类型标识实例的 Service。Realm 中该类型的 Actor 数量必须恰好为一。
+授权部署配置决定还要运行哪些包、由哪个 Host 启动，以及每个 Actor 的身份和状态。
+停止 Actor、删除状态和撤销凭据均须单独执行。
 
 Actr Host 只通过已接受 Realm Profile 指定的 Issuer 和 Actr Facility Provider 访问 Realm。该 Realm
 的 Actor credential 以该 Realm 名为 issuer，用 `issuer.keys` 中的 Realm issuer key 验证（第 6.1 节）。
@@ -335,13 +294,12 @@ Actr Facility Provider 由 Actr Host、用户或 key 持有方的策略选定。
 
 ### 7.2 更新
 
-包引用、主引用名、类型、摘要或地址变化均 **MUST** 增加 `sequence` 并重签；同序列号比较完整 JCS payload。
-主包 publisher/程序名及 `provider.id` 不可改变；程序版本可升级，不可给同一不可变发布更换摘要。
-镜像地址可变，但仍须重签。Issuer key、端点、显示名和 `policy` 也按更高 sequence 更新。
+变更包选择 **MUST** 同时提交 `primary_package` 与完整的 `packages`，整体替换。
+任何变更（含更换下载地址）都须递增 `sequence` 并重新签名。
+主包的 Publisher、程序名及 `provider.id` 固定。程序可升级版本，每个不可变发布的摘要固定。
 
-提交 `packages` 时 **MUST** 同时给出主引用并完整替换；未提交选择的更新、草稿和 key 轮换须保留全部条目。
-旧式主包输入由支持扩展的签名方只替换当前主包条目，保留其余项，再派生投影。
-接收方不得修复已签名文档。删包不自动停进程、删状态或撤销凭据。
+Issuer key、端点、`display_name` 和 `policy` 也可在更高序号更新。
+仅变更元数据或轮换密钥时，草稿和签名 Profile **MUST** 保留已接受的包选择。
 
 新 Realm Profile 同样以 `publish_profile` 提交给 Actr Facility Provider（持有方可先用 `draft_profile`
 取得含 Actr Facility Provider 当前 issuer 与端点的草案）；`realms` 位置不在 Actr Facility
@@ -384,10 +342,10 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 
 | `op` | 用途 |
 | --- | --- |
-| `create_realm` | 创建 pending Realm，返回首个草稿；从请求取得包选择并在签名前生成兼容投影。旧式单包输入按 §4.3 归一化。 |
+| `create_realm` | 请求包含 `primary_package` 和完整 `packages`。AFP 创建 pending Realm，在未签名的首份草稿中返回该选择。 |
 | `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 owner 邀请（`owner_invite`）；之后提交 sequence 更高的版本即更新（含退役）。 |
 | `reissue_owner_invite` | 签发新的 owner 邀请（响应 `owner_invite`），并使该 Realm 此前未用的 owner 邀请失效；用于 owner 丢失全部客户端时的恢复（Actr Realm Membership 第 5 节）。 |
-| `draft_profile` | 只用于 Actr Facility Provider 域名以外的 Realm：返回下一份草稿，sequence 加一；完整保留包映射、主包引用及其兼容投影、`display_name`、`policy`，刷新 issuer 与 provider（含 §6.1 的 key 轮换）。旧记录可在草稿阶段显式迁移；不改写已接受原文或改变 Realm。 |
+| `draft_profile` | 对 AFP 域外的 Realm，返回 `sequence` 加一的草稿。未签名草稿沿用已接受的包选择、`display_name` 和 `policy`，使用 AFP 当前的 `issuer` 和 `provider`（§6.1）。发布须单独执行。 |
 
 Realm 管理请求只用于 Actr Facility Provider 域名以外的 Realm（第 7.3 节）。每个请求都是 Actr 管理信封：
 下述 payload 加上该 Realm 域名一把 `active` Realm 签名 key 的签名。
@@ -403,7 +361,6 @@ Realm 管理请求只用于 Actr Facility Provider 域名以外的 Realm（第 7
     "notes": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "type": "notes.example/team-notes@1.4.2" },
     "index": { "href": "https://cdn.notes.example/notes-index-1.0.0.actr", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "type": "notes.example/notes-index@1.0.0" }
   },
-  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "type": "notes.example/team-notes@1.4.2" },
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",
@@ -412,8 +369,7 @@ Realm 管理请求只用于 Actr Facility Provider 域名以外的 Realm（第 7
 }
 ```
 
-`create_realm` 的两个选择字段必须成对；输入可省略投影，由 AFP 在草稿签名前派生。
-调用方须核对完整选择再激活，不能把旧 AFP 忽略字段视为成功。幂等重试只返回已有状态；差异按 §7.2 更新。
+签署首次激活前，调用方 **MUST** 核对草稿中的主包引用和完整包表与请求一致。幂等重试返回已有状态。修改选择使用 §7.2 的更新流程。
 
 其他操作使用同一信封与各自的 `op` 和字段。`requester` 可选：key 持有方的签名服务把它设为
 所代签者的不透明标识。其他规范 **MAY** 以自己的 `op` 复用 Actr 管理信封，例如 Actr
@@ -463,12 +419,8 @@ Authority Discovery 第 4.5 节用它登记 publisher，Actr Realm Membership �
 
 ## 10. 待完成工作
 
-- 同步包选择的 SDK/AFP/CLI、Schema 与签名向量；旧 Schema 允许未知字段，不代表已验证新语义。
-- Host 分别跟踪包格式验证、执行和业务 Ready 的支持范围。
-
-- 为 Realm 管理请求定义机器可读的 JSON Schema 与签名 test vector；Realm Profile 的
-  Schema 与互操作向量已提供于 [`contracts/actr`](../../contracts/actr/README.md#realm-profile)，
-  结构校验不替代签名、信任与后继 Profile 检查；
+- 在 [`contracts/actr`](../../contracts/actr/README.md#realm-profile) 的 Realm Profile Schema 与互操作测试向量中加入包选择，并在 SDK、AFP 和 CLI 实现校验。
+- 为 Realm 管理请求定义 JSON Schema 与签名测试向量。
 - 定义限定 RealmId 前缀与有效期的创建委派 key；
 - Actr Facility Provider 域名下由用户以 Actr Facility Provider 账号（例如 OAuth 2.0 授权码 + PKCE）自助创建与
   管理 Realm，并按账号计配额。

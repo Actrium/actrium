@@ -176,8 +176,7 @@ When opening a Realm, the record's `service.type` and `service.sha256` must matc
 conflicting package or Privacy Contract bindings for an accepted release. See
 [05 §3](05-program-package-and-distribution.md#3-where-a-package-comes-from) for package selection.
 
-Selection and its projection follow [Realm Profile Sections 4 and 7.2](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection); see the full sample in Section 6.2.
-These fields still need implementation and are not existing CLI options.
+Section 6.2 shows the complete Realm Profile for this release.
 
 ## 4. `.actr` Manifest
 
@@ -461,11 +460,6 @@ Sample:
       "type": "notes.example/notes-index@1.0.0"
     }
   },
-  "package": {
-    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-    "type": "notes.example/team-notes@1.4.2"
-  },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
@@ -522,7 +516,7 @@ higher `sequence`. A Realm Profile carries no expiry; rollback protection relies
 `sequence`. `provider.id` is the Actr Facility Provider's normalized DNS authority and is immutable for the
 life of the Realm. Multiple signaling endpoints sharing a `control_plane_id` are replicas or
 failover entry points of the same Actr Facility Provider presence/control plane, not v1 federation.
-`packages[primary_package]` pins the default Service archive; `packages` fixes the instance's other explicit selections (§3). Any reference change requires a complete signed Profile at a higher `sequence`, with `package` derived consistently. Rotating the Realm issuer key or
+Changing the primary reference or any entry in `packages` requires a newly signed Profile at a higher `sequence`. Rotating the Realm issuer key or
 changing endpoints under the same Actr Facility Provider likewise means publishing a Realm Profile with a
 higher `sequence`; retiring publishes a new Realm Profile with `status` set to `retired`, valid
 forever after.

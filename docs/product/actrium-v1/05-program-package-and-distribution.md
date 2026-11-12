@@ -88,12 +88,8 @@ trusted keys and verifies each package independently. See the
   or a Publisher source. For local development, Actrium can verify and record the pair of
   archives explicitly supplied by the user under local trust policy.
 
-### 3.1 Instance selection and release constraints
-
-Resolve the primary from the Profile and verify its Front through the signed release
-record. Verify other selected archives independently; selection cannot override
-release records or locks. Re-sign changes and retain other entries during legacy
-primary updates as in [Realm Profile Sections 4 and 7.2](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
+For each selected auxiliary archive, the Host verifies the Publisher signature and checks the manifest
+type and archive digest against applicable release records and dependency locks. See [Realm Profile §6](../../../actr/protocols/realm-profile.md#6-using-a-realm).
 
 ## 4. Service and Front packages
 

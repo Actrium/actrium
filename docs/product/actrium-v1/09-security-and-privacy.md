@@ -21,11 +21,10 @@ Actrium must guarantee:
 
 ### 1.1 Package-selection trust boundaries
 
-Realm signatures confirm instance selection; Publisher signatures establish provenance.
-Every package still satisfies releases, locks and local policy. Reject projection
-conflicts, invalid primaries and format downgrades without bypassing owner checks.
-Catalog entries grant no capability, execution proof or green assurance and do not
-replace identity revocation.
+The Realm signature authenticates the instance's package selection. The Host verifies each loaded
+archive against its Publisher signature, release, dependency locks and local policy. Registration
+of the primary program requires a valid primary reference and an owner client. Capability grants
+and identity revocation follow their own authorization rules.
 
 ## 2. Trust boundary
 

@@ -6,8 +6,6 @@
 > Scope: the next stage of product and protocol design for Actrium, Actr and Keel<br>
 > Principle: define the ideal model first, then adjust the existing implementation; this document does not assume compatibility with the current implementation
 
-> Package selection remains to be implemented; fields and compatibility follow [Realm Profile Section 4](../../../actr/protocols/realm-profile.md#4-profile-format).
-
 ## 1. One-sentence definition
 
 Actrium is the "program browser" of the Actrium world: users run native UI described by a Keel Guest inside a resident app Tab; each resident app Tab is hosted by a trusted Front Actor, which accesses the program's state, Workspace and Actor network through that instance's Service.
@@ -86,7 +84,7 @@ But it depends on three foundational capabilities that must be completed first:
 | D-035 | Color can auto-recover when it has not weakened; when it weakens, blocking is maintained and risk acceptance is requested (this does not change the color); the user cannot override an invalid channel or a platform hard floor. |
 | D-036 | A trusted Verifier may package an internal Actor subgraph as a Certified Privacy Domain and provide it through an Assured Actor Edge with scope, validity and revocation; a self-signed declaration is invalid. |
 | D-037 | Audit logs are an explicit storage/audit sink and must declare fields, data class, target, reading party and retention; LLM/GPU attestation by itself cannot prove that the server keeps no separate log. |
-| D-038 | `primary_package` + `packages` select instance archives and the default Service; derive legacy `package` before signing. Selection replaces neither Publisher checks nor deployment authorization. |
+| D-038 | `packages` lists the archives selected for the instance. `primary_package` names the default Service entry. [Realm Profile §4](../../../actr/protocols/realm-profile.md#4-profile-format) |
 
 ## 4. Document navigation
 

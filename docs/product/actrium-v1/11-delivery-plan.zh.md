@@ -27,10 +27,10 @@
 9. per-instance storage；
 10. 移动端诚实的生命周期。
 
-### 包选择扩展
+### Realm 包选择
 
-文档约定见 Realm Profile；后续依次实现 Schema/SDK、AFP/CLI、Host/部署器和客户端。
-格式验证、Service 加载与业务 Ready 分别验收，旧主包兼容不代表多包部署已完成。
+先实现 Schema 和 SDK，再实现 AFP 和 CLI 管理接口，最后支持 Host 部署和客户端。
+分别验收 Profile 校验、Service 加载和业务就绪。
 
 ## 2. 关键依赖图
 

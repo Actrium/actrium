@@ -140,7 +140,7 @@ A Realm Profile contains at least:
 - schema (`actr.realm/v1`);
 - `realm.name` (the full Realm name) and a display name;
 - `status`: `active` or `retired`;
-- An `active` Realm declares selection with `primary_package` + `packages`, deriving v1 `package` before signing; legacy documents follow Realm Profile Section 4.3.
+- An `active` Profile requires both `packages` and `primary_package`. The latter names the default Service entry. See [Realm Profile §4](../../../actr/protocols/realm-profile.md#4-profile-format).
 - a monotonic `sequence` and issue time `issued_at` (a Realm Profile does not expire);
 - the issuer URL and Realm issuer keys/key ids (the Actor credential's issuer is the Realm name);
 - the Actr Facility Provider ID, signaling endpoints, STUN/TURN endpoints;
@@ -168,13 +168,6 @@ Actrium tells the two paths apart by a single decidable condition: comparing nor
 When a domain owner delegates custody of its Realm signing key to an Actr Facility Provider, nothing in the public documents states this, and Actrium still shows the Realm domain as the trust root; the delegated Actr Facility Provider provides the signing service as the holder. Such custody is invisible to users; this is an accepted limitation.
 
 A restricted "creation delegation key" issued by a Realm signing key (limited by RealmId prefix, quota and validity) is a later capability.
-
-#### 3.2.1 Instance selection and compatibility
-
-`primary_package` + `packages` pin instance selection, not live instances or grants.
-Fields, signatures, updates and compatibility follow [Realm Profile Sections 4–7](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
-New v1 Profiles derive legacy `package` before signing; primary-only success in old
-software does not establish multi-package management or deployment.
 
 ### 3.3 How an ActorId carries a Realm
 

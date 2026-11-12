@@ -430,9 +430,8 @@ Old Service ActorId + v1 Workspace
 升级会更换 Service 的 ActorId，并延续原有 Realm 链接、成员和应用权限。其他设备打开该链接时，
 验证 Realm Profile 固定的新 Service 包，通过匹配的发布记录取得 Front 包，再按 Actor 类型 Attach 到新 Service。
 
-升级主程序时仅更新对应包条目，并保留其他包引用；有意调整辅助包时提交完整包选择。
-这些变化按 Realm Profile §7.2 增加 sequence 并重新签名，不原地改写旧签名。
-包引用名不是持久 ActorId，变更引用不自动完成身份/Workspace 迁移、停止进程或删除状态。
+升级 Service 或调整辅助包时，须提交 `primary_package` 和完整的 `packages`，递增 `sequence` 并重新签名。
+身份与 Workspace 迁移、停止进程和删除状态均由部署流程单独执行。
 
 ## 12. Service 迁移设备
 

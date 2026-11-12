@@ -12,10 +12,9 @@ are defined in [Actr URI](../../../actr/protocols/uri.md) and are not repeated h
 - Where the program is downloaded from is decided by the Realm Profile, not written into the
   address.
 
-Selection validation and legacy views follow [Realm Profile Section 4](../../../actr/protocols/realm-profile.md#4-profile-format).
-A missing primary or conflicting projection stops opening as `REALM_PROFILE_INVALID`,
-never by selecting the first entry. Reading auxiliaries does not start all Actors on
-the client. Link syntax and exact Service binding remain unchanged.
+When opening a link, Actrium verifies the Profile and resolves the Service from
+`packages[primary_package]`. An invalid selection stops the open with `REALM_PROFILE_INVALID`.
+See [Realm Profile §4.2](../../../actr/protocols/realm-profile.md#42-package-selection-validation).
 
 ## 2. Link forms
 

@@ -126,11 +126,8 @@ Realm name = <realm_id>@<domain>                      # networked, e.g. k7m2q9xh
 
 A Publisher domain names a program (who publishes it); a Realm domain names a deployment (who operates it). The same Program Release can run at `notes@acme.com` and also at `notes@foo.org`.
 
-#### Realm package-selection configuration
-
-`packages` pins instance-selected archives; `primary_package` selects the default
-Service. Publishers publish/locate code; Hosts deploy it. References are not ActorIds
-or grants. Validation and compatibility follow [Realm Profile Section 4](../../../actr/protocols/realm-profile.md#4-profile-format).
+The Realm signing key holder selects the instance's archives in `packages` and names its default
+Service with `primary_package`. The Publisher signs each archive. Authorized deployment configuration determines which Actors run. See [Realm Profile §4](../../../actr/protocols/realm-profile.md#4-profile-format).
 
 ## 3. The precise definition of "Tab–Service 1:1"
 
@@ -279,8 +276,8 @@ Steps 3–4 form one transaction keyed by `idempotency_key`, executed strictly i
 
 A new instance always means a new Realm. An upgrade creates a new Service in the same Realm with
 the existing membership and application permissions. Its ActorId changes according to the migration
-rules. After confirming the switch, the Realm publishes a Profile whose resolved primary points to the new
-Service archive. The matching release record pins its Front package.
+rules. After confirming the switch, the Realm publishes the complete package selection in a newly signed,
+higher-sequence Profile. Its primary entry identifies the upgraded Service archive. The matching release record pins its Front package.
 
 ### 6.2 Open instance
 

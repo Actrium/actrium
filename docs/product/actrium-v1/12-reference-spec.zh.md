@@ -145,8 +145,7 @@ Actrium 可使用已验证的本地记录，或从 Publisher、Marketplace 取�
 安装正式发布版本需要已验证且匹配的发布记录。已接受的发布版本出现冲突的包或 Privacy Contract 绑定时，Actrium 必须拒绝。
 包的选择流程见[第 05 章 §3](05-program-package-and-distribution.zh.md#3-包从哪来)。
 
-包选择与兼容字段遵循 [Realm Profile §4、§7.2](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置)；完整示例见 §6.2。
-新字段尚待实现，不能直接当作现有 CLI 参数。
+该发布版本的完整 Realm Profile 示例见 §6.2。
 
 ## 4. `.actr` Manifest
 
@@ -414,11 +413,6 @@ https://realms.provider.example/acme.com/k7m2q9xh
       "type": "notes.example/notes-index@1.0.0"
     }
   },
-  "package": {
-    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-    "type": "notes.example/team-notes@1.4.2"
-  },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
@@ -468,7 +462,7 @@ https://realms.provider.example/acme.com/k7m2q9xh
 }
 ```
 
-`signature` 由 `realm_signing_keys` 中的 `active` key 签署；Actor credential 的 issuer 即 `realm.name`，存放位置不影响有效性；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Actr Facility Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。`packages[primary_package]` 固定默认 Service 包，`packages` 固定本实例显式选定的其他归档（§3）。改变任何包引用均须发布更高 `sequence` 的完整签名 Profile，兼容 `package` 同步派生。同一 Actr Facility Provider 下轮换 Realm issuer key 或变更端点时同样发布更高 `sequence` 的 Realm Profile；退役时发布 `status` 为 `retired` 的新 Realm Profile，永久有效。
+`signature` 由 `realm_signing_keys` 中的 `active` key 签署；Actor credential 的 issuer 即 `realm.name`，存放位置不影响有效性；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Actr Facility Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。更改主包引用或 `packages` 中任一条目时，必须递增 `sequence` 并重新签名。同一 Actr Facility Provider 下轮换 Realm issuer key 或变更端点时同样发布更高 `sequence` 的 Realm Profile；退役时发布 `status` 为 `retired` 的新 Realm Profile，永久有效。
 
 ## 7. Service Inventory Record
 

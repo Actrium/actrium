@@ -47,15 +47,15 @@
 | FR-PKG-012 | Advisory/Block-new/Quarantine/Critical-block revocation levels MUST be supported. |
 | FR-PKG-013 | Publisher bootstrap MUST be pinned to HTTPS 443; the Publisher Profile MUST have a normalized signature, a sequence number/freshness, and rollback protection. |
 | FR-PKG-014 | The official publishing tool MUST build, validate, and sign both packages and publish their signed release record. It MUST read both packages back to verify their SHA-256 digests and signatures. |
-| FR-PKG-015 | New Profiles MUST select instance archives with `primary_package` + `packages`; references are not identities or grants. |
+| FR-PKG-015 | `packages` pins the archives selected for the application instance. `primary_package` MUST name its default Service entry. |
 | FR-PKG-016 | Selection MUST pass Realm Profile Section 4.2 structural, count, size and consistency checks. |
-| FR-PKG-017 | Verification and equal-sequence checks MUST use the complete source JCS payload; normalize only afterward, retain the source and reject duplicate keys. |
-| FR-PKG-018 | Legacy documents follow Section 4.3. New v1 Profiles MUST derive `package` before signing and reject conflicts or active legacy downgrades. |
+| FR-PKG-017 | Receivers MUST reject duplicate JSON members, retain the signed Profile and use the complete JCS payload for signature verification and equal-sequence comparisons. |
+| FR-PKG-018 | An `active` Profile MUST contain both selection fields. A `retired` Profile MAY omit both. Any supplied selection MUST pass validation. |
 | FR-PKG-019 | Selection MUST satisfy releases, contracts, version constraints and exact locks; do not substitute latest or guessed URLs. |
 | FR-PKG-020 | Verify every executed archive independently. Listing MUST NOT automatically start, authorize or revoke Actors. |
-| FR-PKG-021 | Changes MUST be re-signed under Section 7.2; replacements, primary-only edits, drafts and rotations preserve the intended entries. |
-| FR-PKG-022 | Only owner clients register the primary program; invalid references MUST NOT bypass the check. |
-| FR-PKG-023 | Legacy primary compatibility MUST NOT be reported as multi-package management, deployment or business Ready; compare complete selection. |
+| FR-PKG-021 | A selection update MUST replace both fields together, increase `sequence` and re-sign the Profile. Drafts for metadata changes or key rotation MUST preserve the accepted selection. |
+| FR-PKG-022 | The AFP MUST resolve the primary entry and restrict registration of that program, at any version, to owner clients. |
+| FR-PKG-023 | On creation or update, the caller MUST verify that the signed Profile contains the requested primary reference and complete map. |
 | FR-PKG-024 | The primary program identity stays fixed. An immutable release cannot change digest; mirror changes still require re-signing. |
 
 ### 1.4 Front/Keel
@@ -114,7 +114,7 @@
 | FR-NET-015 | A Realm domain's bootstrap (`https://<domain>/.well-known/actr`) MUST be pinned to HTTPS 443, and rollback MUST be prevented by the Realm signing key rotation chain plus the Realm Profile's sequence number (a Realm Profile does not expire). |
 | FR-NET-016 | Actrium MUST provide flows for trusting a domain, joining an instance's Realm via a Realm invitation, adding a client, re-authentication, client revocation, member management (owner only), leaving, owner recovery, and handling Realm signing key changes. |
 | FR-NET-017 | Creating an instance MUST create a new Realm under the chosen domain; the RealmId is unique within the domain, immutable after creation, and never reused after retirement. |
-| FR-NET-018 | When a Service is upgraded to a new Program Release, the Realm MUST publish a higher-sequence signed Realm Profile whose resolved primary selects the new archive and whose other selections are preserved, and the new Service MUST be created in the same Realm; migrating to a different Realm MUST produce a new ActorId. |
+| FR-NET-018 | A Service upgrade MUST publish the complete selection with the new primary archive in a higher-sequence signed Profile and create the Service in the same Realm. Migration to another Realm MUST produce a new ActorId. |
 | FR-NET-019 | When the Realm Profile cannot be fetched, fails verification, or is retired, Actrium MUST NOT use any Actr Facility Provider other than the one specified in the Realm Profile to communicate with that Realm (including services listed in the authority descriptor's `services`). |
 | FR-NET-020 | The Realm domain chosen for creating an instance MUST already be trusted, or first trust MUST be established on the creation confirmation page; no domain means no Realm is assigned (except the local Realm); creation MUST be authorized by the holder of that Realm domain's Realm signing key: for any other Realm domain, the holder's signing service signs an Actr management envelope and the confirmation page shows that Realm domain as the trust root; when the Realm domain equals or belongs to the Actr Facility Provider ID, in v1 only that Actr Facility Provider's operator creates the Realm, the user joins with the owner invite the operator hands over, and the confirmation page shows the Actr Facility Provider as the trust root. |
 | FR-NET-021 | Each networked Realm MUST have exactly one owner (its creator or whoever received ownership by transfer); an ownership transfer MUST be atomic, with the previous owner becoming an editor by default; the owner MUST transfer before leaving and MUST NOT revoke its own last client; multiple owners are not part of v1. |
@@ -733,16 +733,13 @@ Telemetry defaults to off. Release metrics are obtained primarily through local 
 
 ## 8. Package-selection acceptance targets
 
-These are implementation acceptance requirements, not runtime tests performed by
-this documentation revision.
-
 | Scenario | Required result |
 | --- | --- |
-| Legacy and explicit selection | Verify the legacy source before building its view; consistently read the primary and every auxiliary in a new Profile. |
-| Invalid or mixed input | Reject a lone selection field, empty map, dangling primary, invalid key, duplicate member, entry/size overflow, invalid URL/type/digest, conflicting type/digest or unequal projection. |
-| Signatures and rollback | Auxiliary tampering fails verification; equal-sequence content changes and active legacy-only downgrades after selection are rejected; retirement remains terminal. |
-| Complete updates | Auxiliary edits, mirrors, legacy primary upgrades, drafts, rotations and endpoint changes preserve the intended entries, explicitly increase sequence and never rewrite old signed sources. |
-| Publisher constraints | Reject release/lock type or digest conflicts; never execute a tampered archive. A verified digest cache can be reused subject to trust-policy rechecks. |
-| Authority | Only owner clients register the primary program at any version; invalid primary data cannot bypass this check. Catalog membership grants no member, capability or Actor-credential authority. |
-| Multiple Actors | Authorized deployment starts the primary Service and two different auxiliary packages with independent identities/state and actual RPC. A rerun creates no duplicate, and registration is not business Ready. |
-| Legacy servers and format gaps | An old AFP ignoring fields is not reported as multi-package success. Reject unsupported formats/workloads explicitly; signature support is not execution support. |
+| One or more packages | Resolve the named Service from a one-entry or multi-entry map and read every auxiliary by its own key. |
+| Invalid selection | Reject missing required fields, dangling primaries, empty or oversized maps, oversized Profiles, invalid keys or archive fields, duplicate keys, and conflicting digests for one type. |
+| Signatures and rollback | Reject a tampered entry, a lower sequence, or a different payload at the same sequence. Retirement is terminal. |
+| Updates | A Service upgrade, mirror change or auxiliary edit returns the full requested selection at a higher signed sequence. An endpoint update or key rotation preserves the selection. |
+| Publisher verification | Reject a tampered archive or a type or digest that conflicts with the release or locks. Recheck trust policy when reusing a verified digest from cache. |
+| Registration | Only an owner client can register any version of the primary program. An unresolved primary fails registration. Archive selection grants no membership or capabilities. |
+| Multiple Actors | An authorized deployment starts the Service and two auxiliary Actors with separate identities and state. They complete an RPC, and rerunning deployment creates no duplicates. |
+| Host support | The Host rejects an unsupported archive format or workload before execution. |

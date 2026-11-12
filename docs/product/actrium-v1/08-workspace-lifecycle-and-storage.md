@@ -432,11 +432,9 @@ application permissions. When another device opens that link, it verifies the ne
 pinned by the Realm Profile, finds the Front package through the matching release record, and
 Attaches to the new Service by its Actor type.
 
-A primary upgrade updates its selected entry while retaining other references;
-an intentional auxiliary change submits complete selection. These changes increase
-sequence and are re-signed under Realm Profile Section 7.2, never edited in place.
-A reference is not a persistent ActorId; changing it does not itself migrate identity
-or Workspace, stop a process or delete state.
+To upgrade the Service or change an auxiliary package, submit `primary_package` and the complete
+`packages` map, increase `sequence`, and sign the Profile again. Identity and Workspace migration,
+process shutdown and state removal require separate deployment actions.
 
 ## 12. Migrating a Service to another device
 

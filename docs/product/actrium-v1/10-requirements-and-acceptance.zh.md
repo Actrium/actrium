@@ -47,15 +47,15 @@
 | FR-PKG-012 | 必须支持 Advisory/Block new/Quarantine/Critical block 撤销等级。 |
 | FR-PKG-013 | Publisher bootstrap 必须固定 HTTPS 443；Publisher Profile 必须有规范化签名、序号/时效和回滚保护。 |
 | FR-PKG-014 | 官方发布工具必须构建、验证并签名两个包，发布签名记录，再回读核对两个包的 SHA-256 与签名。 |
-| FR-PKG-015 | 新 Profile 以 `primary_package` + `packages` 声明实例选包；引用名不是实例身份或权限。 |
+| FR-PKG-015 | `packages` 固定应用实例选用的包，`primary_package` 必须指向默认 Service 的条目。 |
 | FR-PKG-016 | 选择字段及归档引用必须通过 Realm Profile §4.2 的结构、数量、大小和一致性校验。 |
-| FR-PKG-017 | 验签与同 sequence 比较使用完整原文的 JCS payload；归一化只在验签后进行，保存原文并拒绝重复键。 |
-| FR-PKG-018 | 旧单包文档按 §4.3 兼容；新 v1 Profile 在签名前派生 `package`，拒绝投影冲突和 active 旧格式降级。 |
+| FR-PKG-017 | 接收方必须拒绝重复 JSON 键，保存已签名的 Profile，并用完整 JCS payload 验签和比较相同 `sequence` 的内容。 |
+| FR-PKG-018 | `active` Profile 必须同时包含两个选包字段。`retired` Profile 可同时省略两项，提供时须通过完整校验。 |
 | FR-PKG-019 | 选包须符合发布记录、contract、版本约束和精确锁；不得取 latest 或猜测 URL 替代。 |
 | FR-PKG-020 | 每个执行包独立验证；清单不自动启动、授权或撤销 Actor。 |
-| FR-PKG-021 | 所有选择变更按 §7.2 重签；完整替换、旧式主包更新及草稿/key 轮换均保留应保留的条目。 |
-| FR-PKG-022 | 主程序注册仍限 owner；无效主引用不得绕过校验。 |
-| FR-PKG-023 | 旧端主包兼容不代表支持多包管理、部署或业务 Ready；调用方须核对完整选择。 |
+| FR-PKG-021 | 变更包选择必须整体替换两项、递增 `sequence` 并重签 Profile。仅修改元数据或轮换密钥时，草稿必须保留已接受的选择。 |
+| FR-PKG-022 | AFP 必须先解析主包条目。该程序的任意版本都只允许 owner 客户端注册。 |
+| FR-PKG-023 | 创建或更新后，调用方必须核对已签名 Profile 的主包引用和完整包表与请求一致。 |
 | FR-PKG-024 | 主包程序身份保持不变；升级不允许同一不可变发布换摘要，镜像变化仍需重签。 |
 
 ### 1.4 Front/Keel
@@ -114,7 +114,7 @@
 | FR-NET-015 | Realm 域名 bootstrap（`https://<domain>/.well-known/actr`）必须固定 HTTPS 443，并以 Realm 签名 key 轮换链与 Realm Profile 序号防回滚（Realm Profile 不设过期时间）。 |
 | FR-NET-016 | Actrium 必须提供域名信任、经 Realm 邀请加入实例 Realm、添加客户端、重新认证、客户端撤销、成员管理（仅 owner）、离开、owner 恢复和 Realm 签名 key 变化处置流程。 |
 | FR-NET-017 | 新建实例必须在所选域名下新建一个 Realm；RealmId 在域名内唯一、创建后不可修改、退役后不复用。 |
-| FR-NET-018 | Service 升级为新 Program Release 时，Realm 必须更新解析后的主包条目、保留其他包选择并发布更高 sequence 的完整签名 Profile，新 Service 必须创建在同一 Realm；迁移到另一个 Realm 必须产生新 ActorId。 |
+| FR-NET-018 | Service 升级时，须在更高 `sequence` 的签名 Profile 中发布含新主包的完整包选择，并在同一 Realm 创建 Service。迁移到其他 Realm 必须产生新 ActorId。 |
 | FR-NET-019 | 取不到、验不过或已退役的 Realm Profile 时，Actrium 不得使用 Realm Profile 以外的任何 Actr Facility Provider（包括 authority descriptor `services` 中的服务）与该 Realm 通信。 |
 | FR-NET-020 | 新建实例所选的 Realm 域名必须已受信，或在新建确认页完成首次信任；没有域名不分配 Realm（本机 Realm 除外）；创建须经该 Realm 域名的 Realm 签名 key 持有方授权：其他 Realm 域名由持有方的签名服务签署 Actr 管理信封，确认页显示信任根为该 Realm 域名；Realm 域名等于或属于 Actr Facility Provider ID 时，v1 只由该 Actr Facility Provider 的运营者创建，用户以其交付的 owner 邀请加入，确认页显示其为信任根。 |
 | FR-NET-021 | 每个联网 Realm 必须恰好一个 owner（创建者或经转让得到者）；owner 转让必须原子完成，原 owner 默认改为 editor；owner 离开前必须先转让，且不能撤销自己最后一个客户端；多 owner 不属于 v1。 |
@@ -731,17 +731,15 @@ Linux/通用服务器宿主、云端自动调度、浏览器 Web 版和跨 Realm
 | Guest 可运行但不越界 | FR-FRONT-002—010、NFR-SEC-001—004 | AC-006、AC-007 | P2-A、P4 |
 | 应用实例隐私快照与动态图重评 | FR-SEC-014—059、NFR-SEC-007—014 | AC-024—050 | P0、P1-A、P2、P3-A、P4 |
 
-## 8. 包选择扩展验收（规范目标）
-
-以下是待实现的验收要求，不是本轮执行过的运行时测试。
+## 8. 包选择验收
 
 | 场景 | 必须满足的结果 |
 | --- | --- |
-| 旧单包及新多包 | 旧原文验签后产生内存视图；新 Profile 的主包和全部辅助引用可一致读取。 |
-| 非法或混合输入 | 单独新字段、空表、悬空主引用、非法引用名、重复键、超过条目/文档大小、非法 URL/type/digest、冲突 type/digest 或兼容投影不同均拒绝。 |
-| 签名与回滚 | 改任一辅助引用使验签失败；同 sequence 内容变化拒绝；新选择后的 active 旧格式降级拒绝；退役仍终态。 |
-| 完整更新 | 辅助包增删改、镜像更新、旧式主包升级、草稿、key 轮换及端点更新保留应保留的条目，明确更高 sequence，不回写旧签名。 |
-| Publisher 约束 | 类型/摘要与发布记录或依赖锁不符时拒绝；篡改实际归档时不执行；相同 digest 可复用验过的缓存并按信任策略复核。 |
-| 权限 | 主程序任意版本仍只由 owner 注册；无效主引用不绕过检查；包目录不是成员、capability 或 Actor credential 授权。 |
-| 多 Actor | 授权部署配置分别启动主 Service 和两个不同包的 Actor，身份与状态独立，完成实际 RPC；重跑不重复创建，不把注册成功等同业务 Ready。 |
-| 旧服务与格式缺口 | 旧 AFP 忽略输入不能被报告为多包成功；不支持的包格式或 workload 明确拒绝，不因能验签而声称能运行。 |
+| 单包与多包 | 单项和多项清单都能按引用名解析默认 Service，多项清单还可按各自的引用名读取辅助包。 |
+| 无效包选择 | 缺少必填字段、主引用悬空、清单为空、条目数或文档大小超限、引用名或包字段非法、键重复、同一类型的摘要冲突，均拒绝。 |
+| 签名与回滚 | 拒绝条目被篡改、序号回退或同序号内容不同的 Profile。退役是终态。 |
+| 更新 | 升级 Service、更换下载地址或增删改辅助包后，签名 Profile 含完整的新选择且序号递增。仅更换端点或轮换密钥时保留原选择。 |
+| Publisher 验证 | 拒绝被篡改的包，以及类型或摘要与发布记录或依赖锁冲突的包。复用已验证摘要的缓存时须复核信任策略。 |
+| 注册 | 主程序的任意版本仅允许 owner 客户端注册。主引用无效时拒绝注册。成员身份和能力授权单独校验。 |
+| 多 Actor | 按授权配置启动 Service 和两个不同包的辅助 Actor，各自持有独立身份和状态，能完成 RPC。重复部署不产生重复实例。 |
+| Host 支持 | Host 在执行前拒绝不支持的包格式或 workload。 |
