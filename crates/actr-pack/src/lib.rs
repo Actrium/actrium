@@ -30,6 +30,7 @@ pub mod pack;
 pub mod registration;
 pub mod verify;
 
+mod runtime;
 mod util;
 
 pub use actor_package::{
@@ -55,6 +56,11 @@ pub use registration::{MAX_REGISTRATION_MANIFEST_BYTES, RegistrationManifest};
 pub use verify::{
     DEFAULT_MAX_VERIFIED_ENTRIES, DEFAULT_MAX_VERIFIED_ENTRY_BYTES, PackageVerificationLimits,
     VerifiedPackage, verify, verify_bounded, verify_with_limits,
+};
+
+pub use runtime::{
+    RuntimePackageManifest, VerifiedRuntimePackage, read_runtime_manifest,
+    verify_runtime_package_bounded,
 };
 
 /// Compute deterministic key_id from Ed25519 public key bytes.
