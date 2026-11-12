@@ -171,26 +171,10 @@ A restricted "creation delegation key" issued by a Realm signing key (limited by
 
 #### 3.2.1 Instance selection and compatibility
 
-`packages` maps archives explicitly selected for this instance; `primary_package`
-selects its default Service. Field definitions, 1–32 entry and 64 KiB limits,
-reference checks, signatures and updates follow
-[Realm Profile Sections 4–7](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
-Publisher-supplied locations do not remove Realm confirmation of selection, and a
-Realm signature cannot override release records or dependency locks.
-
-The map is neither a live-Actor inventory nor an admission allowlist. Deployment
-configuration chooses counts and placement; membership, Publisher trust, capabilities
-and ACLs remain separate. Auxiliaries need not route through the Service; being the
-primary does not grant Realm-management authority.
-
-New v1 producers derive legacy `package` from `packages[primary_package]` before
-signing. Receivers verify the complete source before creating a view and reject
-conflicting representations. A legacy document can expose `packages.main` in memory,
-without rewriting its signature or equal-sequence content. Once explicit selection is
-accepted, reject an active legacy-only downgrade. Drafting, issuer-key rotation and
-endpoint-only updates preserve the map; auxiliary changes also increase sequence and
-are re-signed. SDK, AFP, CLI, schema and deployment support remains to be implemented;
-a legacy reader's primary-only success does not establish multi-package support.
+`primary_package` + `packages` pin instance selection, not live instances or grants.
+Fields, signatures, updates and compatibility follow [Realm Profile Sections 4–7](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
+New v1 Profiles derive legacy `package` before signing; primary-only success in old
+software does not establish multi-package management or deployment.
 
 ### 3.3 How an ActorId carries a Realm
 

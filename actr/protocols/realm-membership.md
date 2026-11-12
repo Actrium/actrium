@@ -99,19 +99,9 @@ no `requester`.
 | `leave` | none | A member other than the owner | Removes itself, with the effect of `remove_member` |
 | `update_realm` | optional complete `primary_package` + `packages` selection, legacy `package`, `display_name`, or `status: "retired"` | The owner; only for Realms under the Actr Facility Provider's domain | The AFP validates and signs a higher-sequence Profile under Realm Profile Sections 4, 7.2 and 7.4; responds `{realm, sequence}` |
 
-Selection follows [Realm Profile Sections 4.1–4.3 and 7.2](realm-profile.md#41-application-instance-package-selection):
-the new fields are submitted together and replace the entire map; omission
-preserves all entries. Legacy `package` input changes only the resolved
-primary entry, retaining the others; a supporting AFP derives the projection
-before signing. If both representations are supplied, they must agree.
-The caller must fetch and verify the resulting Profile and compare the
-complete selection; `{realm, sequence}` from an old AFP that ignored fields
+Selection updates follow [Realm Profile Sections 4 and 7.2](realm-profile.md#41-application-instance-package-selection).
+Compare the resulting Profile's complete selection; an old AFP ignoring fields
 is not a successful multi-package update.
-
-This authorizes only AFP-domain updates. An ordinary Realm owner's client
-key does not become an external domain's Profile-signing key; external
-domains still publish through their Realm signing key holder. The selection
-extension is not yet implemented; see Realm Profile's implementation status.
 
 In a `join` request, `signature.key_id` **MUST** equal the `key_id` computed
 from `public_key`; the signature is the proof of possession. For every other
@@ -233,10 +223,7 @@ The Issuer issues only when all of the following hold:
    Renewal and reissue do not check the role again, so an ownership transfer
    does not affect a running Service.
 
-A package reference is not a member role. Listing an auxiliary package does
-not grant registration, invocation or Host-management authority, nor make
-another Actor an owner. Omission is not credential revocation. Membership,
-Publisher trust, connection ACLs and deployment authorization remain separate checks.
+Package selection does not change membership or Actor-admission rules.
 
 A connection ACL carried by a registration applies only to the registering
 Actor's own type; since only the owner can register the Service's program,

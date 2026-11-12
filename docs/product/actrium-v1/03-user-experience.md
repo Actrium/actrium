@@ -37,8 +37,6 @@ Answers "What have I already created?":
 
 Program and Service must be kept separate in the UI and the data model. Installing a program does not mean an instance has been created; deleting a program's cache does not mean deleting the Workspace.
 
-Opening or creating an instance uses verified `primary_package` + `packages` selection. The resolved primary supplies the default Service; verify the Front through the matching signed release record. UI must not treat reference names as ActorIds or start local code merely because it is listed. A primary-only legacy implementation must report that boundary rather than claim multi-package deployment.
-
 ## 2. Address bar
 
 The address bar shows the instance address (Realm link, see [04](04-uri-and-resolution.md)) and answers three questions:

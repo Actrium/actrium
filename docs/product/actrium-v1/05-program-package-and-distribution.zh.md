@@ -86,16 +86,8 @@ Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证�
 
 ### 3.1 实例选择与发布约束
 
-Realm Profile 的 `primary_package` + `packages` 是应用实例的包选择配置，既不是 Publisher
-全量目录，也不是安装器无条件执行的任务列表。通过已验证 Profile 取得选择后，Host 按每项
-固定的类型与 digest 从 Publisher 或镜像获取字节，逐包验签；获取地址不是信任源。
-包内签名依赖锁、版本约束、contract 与 Program Release 绑定仍有效，冲突时拒绝，不取 `latest` 替代。
-主包必须匹配发布记录的 `service.type` 与 `service.sha256`；Front 仍按该记录独立验证。
-
-新格式 active v1 Profile 同时包含 `primary_package`、`packages` 和从主包派生的 `package`。
-选择、镜像地址或辅助包变化均增加 `sequence` 并重新签名；原始签名文档保持完整。
-支持本扩展的旧式主包更新只替换选中的条目，保留辅助引用；完整映射更新显式替换。
-详见 [Realm Profile §4、§7.2](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置)。
+Host 从 Profile 解析主包，再按签名发布记录验证 Front；其他选定包也须逐包验证，不得覆盖发布记录和依赖锁。
+选择变化按 [Realm Profile §4、§7.2](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置) 重签，旧主包更新保留其他条目。
 
 ## 4. Service 包与 Front 包
 

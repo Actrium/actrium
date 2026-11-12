@@ -47,16 +47,16 @@
 | FR-PKG-012 | 必须支持 Advisory/Block new/Quarantine/Critical block 撤销等级。 |
 | FR-PKG-013 | Publisher bootstrap 必须固定 HTTPS 443；Publisher Profile 必须有规范化签名、序号/时效和回滚保护。 |
 | FR-PKG-014 | 官方发布工具必须构建、验证并签名两个包，发布签名记录，再回读核对两个包的 SHA-256 与签名。 |
-| FR-PKG-015 | active Realm 的新 Profile 发布方必须以 `primary_package` + `packages` 声明实例选定的包集合；主引用必须存在，引用名不是 ActorId、依赖 alias 或权限。 |
-| FR-PKG-016 | 选择字段须成对出现；映射含 1–32 项、引用名为 1–63 字符的小写 DNS label；每项须有 HTTPS href、64 位小写 digest 和精确 type，同 type 不得有冲突摘要；完整 Profile 不超过 64 KiB。 |
-| FR-PKG-017 | 完整原文对应的 JCS 签名 payload（含选择和兼容投影）用于验签及同 sequence 比较，持久化保留原文；空白或 object 顺序不是内容差异。不得验签前归一化、裁剪未知字段或修复冲突；重复 JSON member 必须拒绝。 |
-| FR-PKG-018 | v1 新 Profile 必须在签名前派生相等的 `package` 投影；旧单包文档仅在验签后视为 `packages.main`。已接受新选择后不得接受 active 的旧格式降级；删除投影需另行版本迁移。 |
-| FR-PKG-019 | 所选包必须符合已验证的发布记录、contract、版本约束与精确依赖锁；Profile 不能覆盖 Publisher 固定绑定，不得取 latest 或猜测 URL 替代。 |
-| FR-PKG-020 | 每个实际执行的辅助包都须独立下载验签并检查平台/Host/ABI。清单不自动启动进程、分配身份、授予权限或构成强制注册白名单；删除条目不自动撤销凭据。 |
-| FR-PKG-021 | 任何包选择或位置变化均须 sequence 增加并重签。完整映射成对替换；未提交选择的更新、草稿和 key 轮换保留全部选择。旧式主包更新仅改选中条目并重新派生投影。 |
-| FR-PKG-022 | 主 Service 的 owner 注册限制按解析后主包的 publisher/程序名执行，覆盖全部版本；无效主引用必须拒绝，不能因缺少旧字段而跳过权限检查。 |
-| FR-PKG-023 | 旧读端只保证主包兼容；调用方必须核对新建或更新后的完整选择。HTTP 成功、能验包或能解析投影都不能冒充多包管理、格式加载或业务 Ready。 |
-| FR-PKG-024 | 更改主引用不允许把既有实例换成另一 publisher/程序；主程序升级可改变版本，同一不可变发布不能换 digest；镜像位置变化仍须重签。 |
+| FR-PKG-015 | 新 Profile 以 `primary_package` + `packages` 声明实例选包；引用名不是实例身份或权限。 |
+| FR-PKG-016 | 选择字段及归档引用必须通过 Realm Profile §4.2 的结构、数量、大小和一致性校验。 |
+| FR-PKG-017 | 验签与同 sequence 比较使用完整原文的 JCS payload；归一化只在验签后进行，保存原文并拒绝重复键。 |
+| FR-PKG-018 | 旧单包文档按 §4.3 兼容；新 v1 Profile 在签名前派生 `package`，拒绝投影冲突和 active 旧格式降级。 |
+| FR-PKG-019 | 选包须符合发布记录、contract、版本约束和精确锁；不得取 latest 或猜测 URL 替代。 |
+| FR-PKG-020 | 每个执行包独立验证；清单不自动启动、授权或撤销 Actor。 |
+| FR-PKG-021 | 所有选择变更按 §7.2 重签；完整替换、旧式主包更新及草稿/key 轮换均保留应保留的条目。 |
+| FR-PKG-022 | 主程序注册仍限 owner；无效主引用不得绕过校验。 |
+| FR-PKG-023 | 旧端主包兼容不代表支持多包管理、部署或业务 Ready；调用方须核对完整选择。 |
+| FR-PKG-024 | 主包程序身份保持不变；升级不允许同一不可变发布换摘要，镜像变化仍需重签。 |
 
 ### 1.4 Front/Keel
 

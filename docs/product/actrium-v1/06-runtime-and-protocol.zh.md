@@ -40,18 +40,9 @@ flowchart TB
 
 ### 1.1 包选择与运行实例
 
-先验证 Realm Profile，再解析 `packages[primary_package]` 作为默认 Service，按配套发布记录
-验证独立 Front。其余显式包引用只声明本实例选用的归档；部署器依据授权配置决定哪些 Host
-执行哪些引用、创建几个实例。读取 Profile 不会在客户端自动启动所有辅助 Actor。
-
-每个实际启动的包都核对 digest、Publisher 签名、manifest 类型、Workload Profile、Host API、
-ABI、平台策略和已有 contract/依赖锁。任何包校验失败都不能交给执行器。进程存在、注册成功、
-网络可达和业务 Ready 分开报告；required 依赖未满足时不开放相应业务。清单不推导启动顺序或 RPC 路由。
-
-包选择不等于 Actor/成员身份或准入白名单。各 Actor 使用同一目标 Realm 的合法客户端证明，
-拥有独立 ActorId 与状态；主 Service 程序仍只允许 owner 注册。包引用变更不自动迁移 ActorId、
-停止进程、删除 Workspace 或撤销凭据。声明支持本扩展的部署器应记录引用、digest、ActorId 和运行状态，
-避免重复创建，并保留故障诊断；这些实现不因本轮文档更新而视为已交付。
+部署配置从 Profile 选择包引用，为各 Actor 提供独立身份、状态和启动参数；读取清单不自动执行全部包。
+每包先验签并检查平台/Host/ABI；注册成功不等于业务 Ready。主 Service 仍限 owner 注册。
+包选择不替代部署授权或业务依赖，也不自动迁移身份、停止进程或删除数据。
 
 ## 2. Front Actor
 

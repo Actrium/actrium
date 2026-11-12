@@ -109,29 +109,6 @@ Chinese only).
 
 The Realm Profile's resolved primary `packages[primary_package]` identifies the instance's Service package (sample in §6.2).
 
-```json
-{
-  "primary_package": "notes",
-  "packages": {
-    "notes": {
-      "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-      "type": "notes.example/team-notes@1.4.2"
-    },
-    "index": {
-      "href": "https://cdn.notes.example/notes-index-1.0.0.actr",
-      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
-      "type": "notes.example/notes-index@1.0.0"
-    }
-  },
-  "package": {
-    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-    "type": "notes.example/team-notes@1.4.2"
-  }
-}
-```
-
 Actrium downloads `href` per [Realm Profile protocol](../../../actr/protocols/realm-profile.md) §6
 (an HTTPS GET without credentials), checks `sha256`, and then verifies the manifest signature with
 the package signing key from the Publisher Profile (§2); the Actor type the manifest declares is
@@ -199,16 +176,8 @@ When opening a Realm, the record's `service.type` and `service.sha256` must matc
 conflicting package or Privacy Contract bindings for an accepted release. See
 [05 §3](05-program-package-and-distribution.md#3-where-a-package-comes-from) for package selection.
 
-The `primary_package` + `packages` contract follows
-[Realm Profile Sections 4.1–4.3 and 7.2](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
-The sample `package` is a v1 projection derived before signing, not an independently
-editable choice. Reject mismatches, missing primary references, invalid URLs/digests/types
-and conflicting release bindings. Legacy documents normalize to `packages.main` only
-after verification; keep the source for persistence, equal-sequence comparison and
-signature checks. Selection edits, issuer/endpoint updates and replacements follow
-the re-signing, preservation and anti-downgrade rules. Verify auxiliaries independently;
-deployment and membership manage instance counts, identities and authority. This is a
-documentation contract, not completed Schema/SDK/CLI/AFP implementation or new CLI support.
+Selection and its projection follow [Realm Profile Sections 4 and 7.2](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection); see the full sample in Section 6.2.
+These fields still need implementation and are not existing CLI options.
 
 ## 4. `.actr` Manifest
 

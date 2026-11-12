@@ -21,22 +21,11 @@ Actrium must guarantee:
 
 ### 1.1 Package-selection trust boundaries
 
-A Realm-domain signature confirms instance selection; a Publisher signature
-establishes code provenance. Execution also requires release/lock consistency
-and local policy. Tampering with `primary_package` or any `packages` entry changes
-the signed payload. Derive the compatibility `package` before signing and reject
-mismatches rather than apply a precedence fallback.
-
-Verify and compare rollback state against the original payload; normalize only
-in memory. A higher-sequence active legacy document must not silently erase an
-accepted explicit selection. An invalid primary is rejected, never treated as a
-reason to skip owner checks. Bound entry count and Profile size and independently
-validate every download, ZIP and payload. The public catalog contains no private
-keys or member-specific data.
-
-This extension does not itself change admission, Actor credentials or the Privacy
-Contract. Listing code yields no capability, proof of remote execution or green
-assurance. Deleting a reference is not process shutdown or identity revocation.
+Realm signatures confirm instance selection; Publisher signatures establish provenance.
+Every package still satisfies releases, locks and local policy. Reject projection
+conflicts, invalid primaries and format downgrades without bypassing owner checks.
+Catalog entries grant no capability, execution proof or green assurance and do not
+replace identity revocation.
 
 ## 2. Trust boundary
 

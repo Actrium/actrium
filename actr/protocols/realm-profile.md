@@ -4,11 +4,7 @@ Language: **English** | [简体中文](realm-profile.zh.md)
 
 Status: initial draft.
 
-Implementation status (2026-11-12): this document defines the
-`primary_package` + `packages` selection extension. This change updates
-documentation only; SDKs, CLI, AFPs and machine-readable schemas do not yet
-implement all new checks or multi-package deployment behavior. Keeping the
-legacy `package` field provides primary-package read compatibility only.
+Package-selection support in SDKs, CLI, AFP and schemas remains to be implemented.
 
 This document defines how an Actr Host or Actr Facility Provider (AFP)
 resolves a Realm name to a verified Realm Profile, the `actr.realm/v1` format,
@@ -219,96 +215,59 @@ members.
 
 ### 4.1 Application-instance package selection
 
-`packages` fixes the archives explicitly selected for this instance. The
-Publisher publishes and signs packages, declares dependencies and supplies
-download locations; the Realm signing key holder confirms the instance's
-choice of exact archives. A Publisher-supplied location neither prevents
-recording that choice in the Profile nor makes the location a trust source.
+`packages` declares selected archives; `primary_package` selects the default
+Service. Publishers publish and locate code; the Realm signing key holder
+confirms instance selection. References are local configuration names, not
+ProgramIds, ActorIds, member roles or dependency aliases. Other Actors need
+not route through the Service.
 
-A reference name is local to this Realm configuration. It is not a
-ProgramId, ActorId, member role or dependency alias, and grants no authority
-to the code. `primary_package` selects the default Service, without forcing
-other Actors to route through it. Selection does not specify replica count,
-Host placement, startup order, PIDs, state directories or live ActorIds;
-authorized deployment configuration and Hosts manage these separately.
-One archive may serve multiple authorized Actor instances.
+Selection **MUST** satisfy verified releases, dependency versions, contracts
+and exact locks. Verify the companion Front through the primary Service's
+Program Release record; a listed Front must have the same type and digest.
+The map need not enumerate code in cross-Realm dependencies.
 
-Selected packages **MUST** satisfy verified Publisher release records,
-dependency version constraints, contracts and exact dependency locks.
-Conflicts **MUST** be rejected; a valid Realm signature cannot override a
-Publisher-pinned digest. Product v1's matching signed Program Release record
-still pins the companion Front. If `packages` also lists that Front, its
-type and digest **MUST** agree with the record. Omitting the redundant Front
-entry does not remove that binding. Runtime dependencies do not imply the
-same Realm (Actor Package Section 6.5), so this map need not enumerate code
-in other Realms.
-
-This extension is not an Actor-registration allowlist. Listing a package
-does not replace membership proofs, Publisher trust, connection ACLs,
-capabilities or deployment authorization. Omission alone does not revoke
-existing Actors. A mandatory admission policy needs a separately defined,
-negotiated and enforced rule; unknown fields ignored by legacy software
-cannot enforce a security restriction.
+Deployment configuration manages Hosts, counts, identities, state and startup.
+One package may create multiple authorized instances. The catalog is not an
+admission allowlist and grants no membership, Publisher trust, ACL, capability
+or deployment authority; omission is not revocation.
 
 ### 4.2 Package-selection validation
 
-Receivers implementing this extension **MUST** check:
+Receivers **MUST** enforce these rules. Checks 2–6 apply to explicit selection;
+legacy documents follow Section 4.3.
 
-Checks 2–6 apply to documents carrying explicit selection; legacy documents
-are accepted under Section 4.3. Check 7 applies to every Profile.
+1. Both selection fields are present or both absent; invalid selection never falls back.
+2. The map has 1–32 entries. Keys have 1–63 lowercase letters, digits or hyphens,
+   without leading/trailing hyphens. Reject duplicate JSON members.
+3. `primary_package` is a string exactly matching a map key.
+4. Each entry has HTTPS `href`, 64 lowercase hex `sha256`, and exact
+   `publisher/program@version` type, not a range or `latest`.
+5. One exact type cannot bind different digests; no multi-platform archive matrix is defined.
+6. `package` equals the selected JSON object, ignoring member order but not
+   fields or string differences. Reject conflicts.
+7. The complete Profile, including signature, is at most 64 KiB. Other transport
+   and package-validation limits are unchanged.
 
-1. `primary_package` and `packages` are both present or both absent. If only
-   one occurs, the receiver must not fall back to legacy `package`.
-2. `packages` is an object with 1 to 32 entries. Each reference name is 1 to
-   63 lowercase letters, digits or hyphens, with no leading or trailing
-   hyphen. Duplicate JSON members **MUST** be rejected.
-3. `primary_package` is a string exactly matching a map key. It is not
-   interpreted as an ActorId or a guessed download location.
-4. Every entry includes `href`, `sha256` and `type`, validated as HTTPS,
-   64 lowercase hexadecimal digits, and exact `publisher/program@version`,
-   respectively. A version range or `latest` cannot replace an exact version.
-5. One exact `type` cannot bind two different digests. This extension does
-   not define a multi-platform archive matrix for the same type.
-6. In an explicit-selection document, `package` is the same JSON object as
-   the selected reference, disregarding object-member order but not fields
-   or string differences. A mismatch is rejected, not resolved by picking
-   one of the two copies.
-7. The complete public Profile, including its signature, is at most 64 KiB.
-   The entry limit does not relax transport, ZIP or payload limits.
-
-A retired document may retain the last valid selection or omit selection
-and compatibility fields; it authorizes no further Actor starts. Present
-selection fields must still satisfy their structural and consistency
-checks. Invalid selection makes the Realm Profile invalid.
+A retired document may retain valid selection or omit selection and projection.
+Present fields must remain valid; retirement permits no further Actor starts.
 
 ### 4.3 v1 compatibility and normalization
 
-- When both new fields are absent, an active legacy document still needs
-  `package`. After verifying its signature, a receiver may expose an
-  in-memory view with `primary_package = "main"` and
-  `packages.main = package`; this neither modifies nor re-signs the source.
-- New producers **MUST** edit the map and primary reference as the sole
-  source of truth, derive `package` before signing, and sign it with the
-  complete document. Proxies and read endpoints must not add, rewrite or
-  strip fields after signing.
-- Verification and equal-sequence comparison use the complete JCS signing
-  payload of the received source; persistence keeps that source. Whitespace
-  and object-member order are not content changes. Do not normalize, add
-  fields or discard unknown members and then treat generated JSON as the
-  received payload.
-- After accepting explicit selection, a receiver **MUST NOT** accept a
-  subsequent active legacy-only document, even at a higher sequence,
-  silently losing the catalog. Remove entries with an explicit complete
-  replacement. Retirement is exempt from this representation downgrade rule.
-- Legacy readers can continue primary-package behavior through `package`;
-  this does not promise auxiliary management, download, deployment or
-  preservation during re-signing. Multi-package management, signing and
-  deployment require supporting writers, AFPs and Hosts. A legacy writer's
-  signed edit that changes only the projection and creates a mismatch
-  **MUST** be rejected.
-
-Removing the compatibility field requires a separate version migration.
-This extension does not define an active v1 document without `package`.
+- Active legacy-only documents remain valid. After verification, expose
+  `primary_package = "main"`, `packages.main = package` in memory without rewriting the source.
+- New producers edit the map/reference and **MUST** derive `package` before
+  signing; active v1 still requires it. Proxies/read endpoints cannot add,
+  alter or strip fields after signing.
+- Verification and equal-sequence checks use the source's complete JCS signing
+  payload; persist the source. Whitespace/member order is immaterial. Never
+  normalize or discard unknown fields before verification.
+- After explicit selection, **MUST NOT** accept an active legacy-only downgrade,
+  even at a higher sequence; retirement is exempt. Remove entries with an
+  explicit replacement, not by omitting selection fields.
+- Legacy readers support only the primary. Multi-package management, signing
+  and deployment need supporting writers, AFPs and Hosts. Reject a legacy
+  writer's conflicting projection edit. Removing the projection requires a
+  separate version migration.
 
 ## 5. Verification
 
@@ -465,30 +424,17 @@ pending Realm that is not activated in time expires and is removed.
 
 ### 7.2 Updates
 
-A higher-sequence Realm Profile may change package selection (upgrading the
-program or changing this instance's auxiliary packages),
-the Realm issuer keys, the Actr Facility Provider's endpoints, `display_name`, and
-`policy`. It **MUST NOT** change
-`provider.id`.
+Any reference, primary key, type, digest or location change **MUST** increase
+`sequence` and be re-signed; equal-sequence checks compare the complete JCS payload.
+The primary publisher/program and `provider.id` stay fixed. Versions may upgrade;
+an immutable release cannot change digest. Mirror changes still require re-signing.
 
-Every change to a reference, the primary key, digest, type or location
-**MUST** increase `sequence` and be re-signed, even if the primary is
-unchanged. Equal in-memory views cannot hide different original JCS signing
-payloads at an equal sequence. Selecting another map key does not relax the existing
-instance-upgrade boundary: the resolved primary's publisher and program
-name **MUST** stay the same. Its version may change; another program needs
-a new instance. An accepted immutable release cannot acquire a different
-digest. A mirror-location change preserving type and digest is allowed,
-but still requires a new signed Profile.
-
-Supplying `packages` is a complete replacement, not an implicit merge, and
-**MUST** also supply `primary_package`. Updates only to issuer keys,
-endpoints or title **MUST** preserve all selection fields. A supporting
-signer handles legacy primary-only update input by replacing the selected
-entry, retaining the others, and regenerating the projection before
-signing. A receiver of signed `publish_profile` must not repair a mismatch.
-Retirement and member authorization are unchanged; deleting a reference is
-not a substitute for stopping an Actor or revoking its identity.
+Supplying `packages` **MUST** supply the primary key and replace the full map.
+Updates omitting selection, drafts and key rotations preserve every entry.
+A supporting signer applies legacy primary-only input to that entry, retaining
+others, then derives the projection. Receivers never repair signed documents.
+Omission does not stop processes, delete state or revoke credentials.
+A higher-sequence Profile may also update issuer keys, endpoints, title and policy.
 
 A new Realm Profile is likewise submitted to the Actr Facility Provider with
 `publish_profile` (the holder may first obtain a draft with the Actr Facility
@@ -579,15 +525,10 @@ The payload of a `create_realm` request is:
 }
 ```
 
-Explicit-selection `create_realm` input carries both selection fields.
-It may omit input `package`; the AFP must derive it before the draft is
-signed. If supplied, the projection must agree. An active **signed Profile**
-still requires it in v1. A newly created draft **MUST** preserve the complete
-requested selection, and the caller must compare it before signing activation.
-An old AFP ignoring fields and returning only the primary is not a successful
-multi-package create. An idempotent retry may return an already-existing
-selection and state; it does not apply this request as an update. Do not
-automatically sign or overwrite a mismatch; updates use Section 7.2.
+`create_realm` carries selection as a pair and may omit input `package`, which
+the AFP derives before draft signing. Compare complete selection before activation;
+ignored fields are not success. Idempotent retries return existing state; apply
+changes through Section 7.2.
 
 Other operations use the same envelope with their own `op` and fields.
 `requester` is optional: a key holder's signing service sets it to an opaque
@@ -662,15 +603,10 @@ quotas per Realm domain and per Realm.
 
 ## 10. Open work
 
-- Implement selection support in SDKs/AFPs/CLI, machine-readable schemas and
-  signing vectors: legacy and explicit forms, conflicting projections,
-  invalid references, complete payloads, update preservation and downgrade
-  rejection. Existing schemas allow unknown fields, so passing one does not
-  establish that the new semantics were checked.
-- Give deployers and Hosts explicit supported-format/Workload Profile
-  boundaries, verify each archive, run independent instances and report
-  actual status. Parsing selection or verifying an `actr-package/2`
-  signature does not establish native Service execution support.
+- Implement selection in SDKs/AFPs/CLI, schemas and signing vectors; an old
+  schema allowing unknown fields does not validate the new semantics.
+- Track format verification, execution and business Ready support separately.
+
 - Define machine-readable JSON Schemas and signing test vectors for Realm
   management requests. The Realm Profile schema and interoperability vectors
   are available in [`contracts/actr`](../../contracts/actr/README.md#realm-profile);

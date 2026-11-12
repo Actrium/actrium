@@ -87,29 +87,6 @@ https://notes.example/.well-known/actr
 
 Realm Profile 解析的主包 `packages[primary_package]` 指定实例的 Service 包（样例见 §6.2）。
 
-```json
-{
-  "primary_package": "notes",
-  "packages": {
-    "notes": {
-      "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-      "type": "notes.example/team-notes@1.4.2"
-    },
-    "index": {
-      "href": "https://cdn.notes.example/notes-index-1.0.0.actr",
-      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
-      "type": "notes.example/notes-index@1.0.0"
-    }
-  },
-  "package": {
-    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-    "type": "notes.example/team-notes@1.4.2"
-  }
-}
-```
-
 Actrium 按 [Realm Profile 协议](../../../actr/protocols/realm-profile.zh.md)第 6 节下载 `href`（不带 credential 的 HTTPS GET）、核对 `sha256`，再用 Publisher Profile（§2）中的包签名 key 验证 manifest 签名；manifest 声明的 Actor 类型即该实例的程序。下载地址可以在任何位置（Publisher CDN、Loran 包托管、对象存储），不是信任源。
 
 Actrium 按 Service 包的 Actor 类型和 SHA-256 匹配 Publisher 签名的 Program Release 记录，
@@ -168,14 +145,8 @@ Actrium 可使用已验证的本地记录，或从 Publisher、Marketplace 取�
 安装正式发布版本需要已验证且匹配的发布记录。已接受的发布版本出现冲突的包或 Privacy Contract 绑定时，Actrium 必须拒绝。
 包的选择流程见[第 05 章 §3](05-program-package-and-distribution.zh.md#3-包从哪来)。
 
-本章的 `primary_package` + `packages` 遵循
-[Realm Profile §4.1–4.3、§7.2](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置)。
-示例中的 `package` 是签名前派生的 v1 兼容投影，不是第二份独立配置。
-两种表示不一致、缺失主引用、非法 URL/digest/type 或冲突发布绑定均拒绝。
-旧文档仅在验签后映射为 `packages.main`；持久化、同 sequence 比较及验签保留原文。
-新格式的增删改、issuer key/端点更新及完整替换均保留协议的重签和防降级规则。
-辅助包仍逐包验证，实例数、身份和权限由部署与成员流程管理。此扩展目前仅有文档约定，
-现有 Schema/SDK/CLI/AFP 尚未完成相应实现；不能把下面字段直接当成现成命令支持。
+包选择与兼容字段遵循 [Realm Profile §4、§7.2](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置)；完整示例见 §6.2。
+新字段尚待实现，不能直接当作现有 CLI 参数。
 
 ## 4. `.actr` Manifest
 

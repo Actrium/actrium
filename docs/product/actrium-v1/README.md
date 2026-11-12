@@ -6,7 +6,7 @@
 > Scope: the next stage of product and protocol design for Actrium, Actr and Keel<br>
 > Principle: define the ideal model first, then adjust the existing implementation; this document does not assume compatibility with the current implementation
 
-> Package-selection revision (2026-11-12): `primary_package` + `packages` describe an application instance's selected archives; v1 `package` is a projection derived before signing. [Realm Profile Section 4](../../../actr/protocols/realm-profile.md#4-profile-format) is normative. This revision changes protocol/product documentation only; SDKs, CLI, AFP, machine-readable schemas and multi-package deployment still need implementation.
+> Package selection remains to be implemented; fields and compatibility follow [Realm Profile Section 4](../../../actr/protocols/realm-profile.md#4-profile-format).
 
 ## 1. One-sentence definition
 
@@ -86,7 +86,7 @@ But it depends on three foundational capabilities that must be completed first:
 | D-035 | Color can auto-recover when it has not weakened; when it weakens, blocking is maintained and risk acceptance is requested (this does not change the color); the user cannot override an invalid channel or a platform hard floor. |
 | D-036 | A trusted Verifier may package an internal Actor subgraph as a Certified Privacy Domain and provide it through an Assured Actor Edge with scope, validity and revocation; a self-signed declaration is invalid. |
 | D-037 | Audit logs are an explicit storage/audit sink and must declare fields, data class, target, reading party and retention; LLM/GPU attestation by itself cannot prove that the server keeps no separate log. |
-| D-038 | Realm Profile declares instance-specific archive selection with `primary_package` + `packages`; the primary selects the default Service. Each archive still satisfies Publisher signatures, release records and dependency locks. References are not ActorIds or grants, and listing does not start instances. Legacy `package` is only a projection derived before signing. |
+| D-038 | `primary_package` + `packages` select instance archives and the default Service; derive legacy `package` before signing. Selection replaces neither Publisher checks nor deployment authorization. |
 
 ## 4. Document navigation
 

@@ -173,19 +173,9 @@ Actrium 只凭一个可判定条件区分两条路径：在规范化 A-label 上
 
 #### 3.2.1 实例包选择及兼容
 
-`packages` 是本实例显式选用的归档映射，`primary_package` 选择默认 Service；字段定义、
-1–32 项与 64 KiB 限制、引用校验、签名及更新规则统一遵循
+`primary_package` + `packages` 固定实例选包，不声明运行实例或授予权限；字段、签名、更新及兼容规则见
 [Realm Profile §4–7](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置)。
-Publisher 提供下载位置不改变 Realm 对实例选择的确认，也不能用 Realm 签名覆盖发布记录和依赖锁。
-
-包映射不是运行 Actor 清单或权限白名单。Host 部署配置决定实例数量和放置，成员、Publisher、
-capability 与 ACL 分别验证。辅助包不必经主 Service 转发；主 Service 也不因主包引用获得 Realm 管理权。
-
-v1 新 Profile 发布方在签名前生成与 `packages[primary_package]` 相同的旧 `package`。接收方先验完整
-原文，再建立内存视图；混合字段冲突即拒绝。旧单包文档可视为 `packages.main`，但不得改写
-原签名或同 sequence 内容。已接受新选择后，不接受 active 的旧格式降级。
-草稿生成、issuer key 轮换和仅端点更新保留完整选择；辅助引用变化也须增加 sequence 并重签。
-包选择扩展尚待 SDK、AFP、CLI、Schema 和部署器实现，旧实现成功读取主包不代表支持多包部署。
+新 v1 Profile 在签名前派生旧 `package`；旧实现读主包成功，不代表支持多包管理或部署。
 
 ### 3.3 ActorId 如何携带 Realm
 

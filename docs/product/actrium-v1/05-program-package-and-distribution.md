@@ -90,21 +90,10 @@ trusted keys and verifies each package independently. See the
 
 ### 3.1 Instance selection and release constraints
 
-Realm Profile's `primary_package` + `packages` configure this application's
-instance-specific archive selection, not a complete Publisher catalog or an
-unconditional execution list. After verifying the Profile, Hosts obtain bytes
-from Publishers or mirrors using pinned types and digests and verify each package;
-a location is not a trust source. Signed dependency locks, version constraints,
-contracts and Program Release bindings still apply. Reject conflicts rather than
-substitute `latest`. The primary must match the record's `service.type` and
-`service.sha256`; verify its Front separately through that record.
-
-An explicit-selection active v1 Profile includes `primary_package`, `packages` and
-the primary-derived `package`. Any reference, mirror or auxiliary selection change
-increases `sequence` and is re-signed; preserve the complete signed source. A
-supporting primary-only legacy update replaces the selected entry while retaining
-auxiliaries; a full map update explicitly replaces the map. See
-[Realm Profile Sections 4 and 7.2](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
+Resolve the primary from the Profile and verify its Front through the signed release
+record. Verify other selected archives independently; selection cannot override
+release records or locks. Re-sign changes and retain other entries during legacy
+primary updates as in [Realm Profile Sections 4 and 7.2](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
 
 ## 4. Service and Front packages
 

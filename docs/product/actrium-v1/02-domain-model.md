@@ -128,19 +128,9 @@ A Publisher domain names a program (who publishes it); a Realm domain names a de
 
 #### Realm package-selection configuration
 
-A Realm Profile declares both instance trust/infrastructure delegation and
-application-instance package selection. `packages` maps local names to exact
-`{href, sha256, type}` references; `primary_package` selects the default Service.
-Publishers still publish, sign and locate code. One archive can create several
-authorized Actors; a reference is not an instance identity. Verify the companion
-Front through the Publisher-signed Program Release record; a redundant catalog
-entry must agree. Selection must satisfy verified releases and dependency locks,
-not use a Realm signature to authorize an incompatible mix.
-
-Authorized deployment configuration manages replica counts, placement, identities,
-credentials, state and startup. The Profile neither lists process status nor grants
-member, Actor or Host privileges merely by listing code. v1 projections and legacy
-in-memory views follow [Realm Profile Section 4](../../../actr/protocols/realm-profile.md#4-profile-format).
+`packages` pins instance-selected archives; `primary_package` selects the default
+Service. Publishers publish/locate code; Hosts deploy it. References are not ActorIds
+or grants. Validation and compatibility follow [Realm Profile Section 4](../../../actr/protocols/realm-profile.md#4-profile-format).
 
 ## 3. The precise definition of "Tab–Service 1:1"
 

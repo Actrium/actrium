@@ -6,7 +6,7 @@
 > 适用范围：Actrium、Actr、Keel 的下一阶段产品与协议设计<br>
 > 原则：先定义理想模型，再调整现有实现；本文不以兼容历史实现为前提
 
-> 包选择修订（2026-11-12）：`primary_package` + `packages` 定义应用实例的包选择配置；v1 的旧 `package` 仅作签名前派生的兼容投影。规范以 [Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式) 为准。本轮仅更新协议与产品文档，SDK、CLI、AFP、机器可读 Schema 和多包部署器仍待同步。
+> 包选择扩展尚待实现，字段与兼容规则见 [Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式)。
 
 ## 1. 一句话定义
 
@@ -86,7 +86,7 @@ Tab
 | D-035 | 颜色未减弱可自动恢复；变弱则保持阻断并请求风险接受（不改颜色）；通道无效或触碰平台硬底线时用户不能覆盖。 |
 | D-036 | 受信 Verifier 可以把内部 Actor 子图封装为 Certified Privacy Domain，并通过 Assured Actor Edge 提供有 scope、有效期和撤销的 aggregate；自签声明无效。 |
 | D-037 | 审计日志是显式 storage/audit sink，必须声明字段、数据类别、目标、读取主体和 retention；LLM/GPU Attestation 本身不能证明 Server 没有另行留存日志。 |
-| D-038 | Realm Profile 以 `primary_package` + `packages` 声明实例选定的包集合，主包指向默认 Service；包仍逐个验证 Publisher 签名，并满足发布记录与依赖锁。包引用名不是 ActorId 或权限，清单不自动启动实例；旧 `package` 仅为签名前派生的兼容投影。 |
+| D-038 | `primary_package` + `packages` 声明实例选包；主包为默认 Service，旧 `package` 为签前派生投影。包选择不替代 Publisher 验证或部署授权。 |
 
 ## 4. 文档导航
 

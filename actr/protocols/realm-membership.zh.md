@@ -76,14 +76,8 @@ Actr Host 以 HTTPS `POST <issuer.url>/membership` 发送 membership 请求（pr
 | `leave` | 无 | 非 owner 成员 | 移除自己，效果同 `remove_member` |
 | `update_realm` | 可选的 `primary_package` + `packages` 完整选择、旧式 `package`、`display_name`，或 `status: "retired"` | owner；只用于 Actr Facility Provider 域名下的 Realm | Actr Facility Provider 按 Realm Profile §4、§7.2、§7.4 校验并签署更高 sequence 的 Profile；响应 `{realm, sequence}` |
 
-包选择沿用 [Realm Profile §4.1–4.3、§7.2](realm-profile.zh.md#41-应用实例的包选择配置)：
-两个新字段必须成对提交，提交映射时完整替换；不提交时保留全部条目。旧式 `package` 输入
-只更新解析后的主包条目，保留其他包，由支持扩展的 AFP 在签名前生成兼容投影。若同时提交
-新旧字段，数据必须一致。调用方须重新取得并验证 Profile，核对完整选择，不能把旧 AFP
-忽略新字段后返回 `{realm, sequence}` 视为多包更新成功。
-
-此处只授权 AFP 自有域名的更新，不赋予普通 Realm owner 客户端 key 签署外部域名 Profile
-的权力；外部域名仍经 Realm 签名 key 持有方发布。包选择扩展尚未实装，见 Realm Profile 的实现状态。
+包选择按 [Realm Profile §4、§7.2](realm-profile.zh.md#41-应用实例的包选择配置) 更新。
+调用方须核对返回 Profile 的完整选择；旧 AFP 忽略新字段不算更新成功。
 
 `join` 请求中 `signature.key_id` **MUST** 等于由 `public_key` 算出的 `key_id`，签名即持有证明。其他请求的签名
 key **MUST** 是该 Realm 已登记、未撤销、属于 `active` 成员的 Realm 客户端 key。
@@ -165,8 +159,7 @@ Issuer 只在以下条件都满足时签发：
    若 Actor 类型的 publisher 与程序名等于该主包 `type` 的（不论版本，即该实例的
    Service 及其升级版本），签名 key 属于 owner。续期与重签不再检查角色，owner 转让不影响运行中的 Service。
 
-包引用名不是成员角色。把辅助包列入 `packages` 不授予注册、调用或 Host 管理权限，也不把
-其他 Actor 自动变成 owner；未列入不是凭据撤销规则。成员、Publisher、连接 ACL 和部署授权仍分别验证。
+包选择不改变成员权限和 Actor 准入规则。
 
 注册携带的连接 ACL 只作用于所注册 Actor 自己的类型；Service 的程序只有 owner 能注册，其他成员因此不能改写
 Service 的 ACL。

@@ -131,15 +131,8 @@ Release 可以运行在 `notes@acme.com`，也可以运行在 `notes@foo.org`。
 
 #### Realm 的包选择配置
 
-Realm Profile 同时承担实例信任/基础设施委派和应用实例包选择两项职责。
-`packages` 以局部引用名记录明确选用的 `{href, sha256, type}`，`primary_package` 指向默认主 Service；
-Publisher 仍负责代码发布、签名和定位。一个包可以创建多个获准 Actor，引用名不等于实例身份。
-配套 Front 按 Publisher 签名的 Program Release 记录验证；若目录重复列出它，绑定必须一致。
-包集合必须满足已验证发布记录与依赖锁，不能因为 Realm 签名有效就混配不兼容版本。
-
-Host 的实例数量、放置、身份、凭据、状态和启动动作由授权部署配置管理；Profile 不列进程状态，
-也不因包在目录中就授予成员、Actor 或 Host 权限。v1 兼容投影和旧文档内存视图以
-[Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式) 为准。
+`packages` 固定实例选用的归档，`primary_package` 指向默认 Service；Publisher 负责发布与定位，Host 负责部署。
+包引用名不是 ActorId 或权限。校验与兼容规则见 [Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式)。
 
 ## 3. 「Tab–Service 1:1」的精确定义
 

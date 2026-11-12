@@ -540,25 +540,16 @@ Package 只声明 Actr Host contract 和 capability 要求，不以普通 Actor 
 
 ## 10. 分发与依赖组合
 
-用户打开 Realm 链接时，Actr Host 从已验证的 Realm Profile 解析
-`packages[primary_package]`，取得默认主 Service 的根归档；旧单包文档按
-[Realm Profile §4.3](realm-profile.zh.md#43-v1-兼容与归一化) 在验签后建立内存视图。
-每个实际装载的包都独立核对整包 SHA-256、Publisher 签名、类型、载荷和 Host 要求。
+打开 Realm 时，从已验证 Profile 的 `packages[primary_package]` 取得主 Service 包；
+旧格式处理见 [Realm Profile §4.3](realm-profile.zh.md#43-v1-兼容与归一化)。
+每个包独立验签并满足发布记录和依赖锁；实例数量、身份和启动由授权部署配置决定。
 
-Realm Profile 的 `packages` 是应用实例显式选用的归档配置；Publisher 的依赖声明与锁描述
-发布约束，下载服务提供定位信息。三者不是互相覆盖的信任源：Profile 选择与已验证的发布
-记录、版本范围、contract 或精确锁冲突时必须拒绝。主包仍须满足 Product v1 的 Service/Front
-配套记录；Realm 配置中的包引用名既不是运行中 ActorId，也不等于 workload 的依赖 alias。
-
-包选择只决定代码归档，不决定启动拓扑或授权。部署方按经过授权的配置指定 Host、实例数、
-身份、状态目录和启动动作；不能因为 Profile 列出某包就自动启动或授予注册权限。
-读取 Realm 链接也不要求客户端预取、执行服务侧所有辅助包。本扩展尚无完整实现，状态以
-Realm Profile 文档为准；包格式本身不增加 `primary` 或 `is_primary` 标记。
+独立 Installer 可以从任意包解析依赖。下面是 Guest 根包的安装示例，不表示 Product v1 的 Service 包布局。
 
 用户可以只取得一个根 `.actr`。Installer 根据其 lock file 递归取得所需 Actor Package：
 
 ```text
-notes.actr                 actr.component/1（Realm 主 Service）
+notes.actr                 keel.guest/1
 ├── dependency: sync  ──> notes-sync.actr
 └── dependency: index ──> notes-index.actr
 ```

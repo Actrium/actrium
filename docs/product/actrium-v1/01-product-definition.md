@@ -20,8 +20,6 @@ Developers see a constrained small-app platform:
 - the background Service can use the Actor model to compose more complex services;
 - an exact-version package can be downloaded over HTTPS, verified, cached and reproduced.
 
-The Realm Profile also declares instance-specific package selection: `packages` fixes selected archives and `primary_package` selects the default Service. Publishers publish and locate code; Hosts deploy instances under authorized configuration. The catalog neither grants authority nor starts all Actors. v1 projection and migration follow the Realm Profile protocol.
-
 ## 2. Current issues
 
 Without first freezing the model, Actrium can easily end up carrying the semantics of a browser, a plugin system, a remote desktop, a native application container and an Actor debugger all at once, which eventually leads to the following problems:

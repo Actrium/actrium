@@ -4,7 +4,9 @@
 
 状态：初始草案。
 
-实现状态（2026-11-12）：本文定义 `primary_package` + `packages` 包选择扩展。
+包选择扩展为文档约定，SDK、CLI、AFP 和 Schema 尚待同步。
+
+本文定义 `primary_package` + `packages` 包选择扩展。
 本次仅更新文档；现有 SDK、CLI、AFP 和机器可读 Schema 尚未实现全部新校验与多包部署行为。
 保留旧 `package` 字段只兼容主包读取，不表示旧实现支持本扩展。
 
@@ -186,61 +188,42 @@ Actr Host **MUST** 忽略未知 member。
 
 ### 4.1 应用实例的包选择配置
 
-`packages` 固定本实例显式选择的代码归档。Publisher 负责发布包、签名、依赖声明和提供
-下载位置；Realm 签名 key 持有方确认本实例采用哪些精确归档。下载地址来自 Publisher
-不影响把该选择写入 Realm Profile，也不使下载位置成为信任源。
+`packages` 声明实例选用的归档，`primary_package` 选择默认 Service。Publisher 发布代码并提供
+下载位置，Realm 签名 key 持有方确认实例选择。引用名只在本配置内有效，不是 ProgramId、ActorId、
+成员角色或依赖 alias；它不要求其他 Actor 经主 Service 转发。
 
-引用名只在这一份 Realm 配置中有意义；它不是 ProgramId、ActorId、成员角色、依赖 alias，
-也不授予所引用代码任何权限。`primary_package` 只选定默认 Service 包，不要求其他 Actor
-经它转发通信。包选择不决定实例数量、Host 放置、启动顺序、PID、状态目录或运行中 ActorId；
-这些由经过授权的部署配置和 Host 管理。同一归档可用于多个获准 Actor 实例。
+所选包 **MUST** 符合已验证的发布记录、依赖版本、contract 和精确锁。配套 Front 仍按主 Service
+的 Program Release 记录验证；若也列入清单，其类型和摘要必须一致。清单不必枚举跨 Realm 依赖的代码。
 
-选中的包 **MUST** 满足已验证的 Publisher 发布记录、依赖版本约束、契约和精确依赖锁；
-冲突时 **MUST** 拒绝，不能因 Realm Profile 的签名有效就覆盖 Publisher 固定的摘要。
-Product v1 的配套 Front 仍由匹配主 Service 的签名 Program Release 记录固定；若 `packages`
-也列出该 Front，其类型和摘要 **MUST** 与记录一致。未重复列出 Front 不撤销这条配套关系。
-运行依赖不隐含同 Realm（Actor Package §6.5），因此本映射也不要求枚举其他 Realm 的全部代码。
-
-本扩展不是 Actor 注册白名单。列入包清单不替代成员证明、Publisher 信任、连接 ACL、
-capability 或部署授权；未列入也不单独构成撤销已有 Actor 的理由。把清单用作强制准入策略
-需要另行定义可协商、可执行的策略，不能依靠旧实现忽略的新字段来实现安全限制。
+部署配置管理 Host、实例数、身份、状态和启动动作。同一包可创建多个获准实例。
+清单不是准入白名单，不替代成员、Publisher、ACL、capability 或部署授权；未列入也不等于撤销。
 
 ### 4.2 包选择校验
 
-支持本扩展的接收方 **MUST** 检查：
+接收方 **MUST** 检查以下规则；第 2–6 项只用于显式选择，旧格式按 §4.3 接受。
 
-以下第 2–6 项针对携带显式选择字段的文档；旧格式按 §4.3 接受。第 7 项适用于所有 Profile。
+1. `primary_package` 与 `packages` 同时出现或同时缺省，不得遇错回退旧字段。
+2. 映射含 1–32 项；引用名为 1–63 个小写字母、数字或连字符，首尾非连字符。拒绝重复 JSON member。
+3. `primary_package` 是精确匹配映射键的字符串。
+4. 每项含 HTTPS `href`、64 位小写十六进制 `sha256`、精确 `publisher/program@version` 类型；不接受范围或 `latest`。
+5. 同一精确类型不得绑定不同摘要；本扩展不定义多平台归档矩阵。
+6. `package` 必须与选中的引用为相同 JSON object（忽略 member 顺序，不忽略字段或字符串差异）；冲突即拒绝。
+7. 完整 Profile（包括签名）最多 64 KiB；其他传输和包验证限额不变。
 
-1. `primary_package` 与 `packages` 同时出现或同时缺省；出现其中一项时不得回退到旧 `package`。
-2. `packages` 是含 1 至 32 项的 object；引用名为 1 至 63 个小写字母、数字或连字符，
-   首尾不是连字符。重复 JSON member **MUST** 拒绝。
-3. `primary_package` 是字符串，精确匹配一个映射键；不把它当作 ActorId 或下载地址猜测。
-4. 每项包含 `href`、`sha256`、`type`，分别满足 HTTPS、64 位小写十六进制和精确
-   `publisher/program@version` 的校验。不得用版本范围或 `latest` 代替精确版本。
-5. 同一精确 `type` 不得绑定两个不同摘要。本扩展不定义同类型多平台归档矩阵。
-6. 新格式文档的 `package` 与选中的包引用为相同 JSON object，忽略 object member 顺序，
-   不忽略字段或字符串差异；不一致时拒绝，不能选择其中一份继续。
-7. 整份公开 Profile（包括签名）不超过 64 KiB；限制包数不放宽传输、ZIP 或包载荷限制。
-
-退役文档可以保留最后一份有效选择，或省略选择与兼容字段；它不允许继续启动 Actor。
-只要携带选择字段，就仍须通过相应结构与一致性校验。非法选择按无效 Realm Profile 处理。
+退役文档可保留有效选择，或省略选择及兼容字段；携带的字段仍须合法，且不能据此继续启动 Actor。
 
 ### 4.3 v1 兼容与归一化
 
-- 旧文档同时缺省两个新字段时，active 文档的 `package` 仍为必填。验签后，接收方可在内存中
-  视为 `primary_package = "main"`、`packages.main = package`；这不是修改或重新签署原文。
-- 新 Profile 发布方 **MUST** 以包映射和主包引用为唯一编辑来源，在签名前生成兼容 `package`，
-  随整份原始文档一起签名。不得由代理或读接口在签名后添加、改写或剥离字段。
-- 签名和同 sequence 比较使用收到原文所对应的完整 JCS 签名 payload，持久化保留原文。
-  空白和 object member 顺序不构成内容变化。不得先归一化、补字段或丢弃未知 member，
-  再把生成的 JSON 当成收到的签名文档。
-- 已接受显式包选择的接收方 **MUST NOT** 接受其后 active 的仅旧字段文档，以免较高
-  sequence 静默丢失包目录。删除包应显式提交新的完整映射；退役不受此格式降级限制。
-- 旧接收方只能从兼容 `package` 继续主包行为；这不保证它会管理、下载、部署辅助包，
-  或在重签时保留清单。多包管理、签署与部署要求支持本扩展的写端、AFP 和 Host。
-  旧写端只改兼容字段而使两份数据不一致的签名文档 **MUST** 被拒绝。
-
-未来删除兼容字段需要另行版本迁移；本扩展不定义没有 `package` 的纯新格式 v1 active 文档。
+- 仅旧 `package` 的 active 文档仍可接受。验签后可在内存中视为
+  `primary_package = "main"`、`packages.main = package`，不改写原文。
+- 新发布方以映射和主引用为唯一编辑来源，**MUST** 在签名前生成兼容 `package`；
+  active v1 仍须包含它。代理和读接口不得在签名后补写、修改或裁剪字段。
+- 验签与同 sequence 比较使用原文的完整 JCS 签名 payload，持久化保留原文；
+  空白和 member 顺序不构成变化，不得先归一化或删除未知字段再验签。
+- 接受显式选择后，**MUST NOT** 接受更高 sequence 的 active 旧格式降级；退役例外。
+  删包应提交新的完整映射，不靠省略新字段清空清单。
+- 旧读端仅兼容主包；多包管理、签署和部署需要新写端、AFP、Host。
+  旧写端只改投影导致冲突时拒绝。未来删除兼容字段须另行版本迁移。
 
 ## 5. 验证
 
@@ -352,20 +335,13 @@ Actr Facility Provider 由 Actr Host、用户或 key 持有方的策略选定。
 
 ### 7.2 更新
 
-sequence 更高的 Realm Profile 可以更改包选择（升级程序或调整本实例的辅助包）、Realm issuer key、Actr Facility
-Provider 端点、`display_name` 与 `policy`，**MUST NOT** 更改 `provider.id`。
+包引用、主引用名、类型、摘要或地址变化均 **MUST** 增加 `sequence` 并重签；同序列号比较完整 JCS payload。
+主包 publisher/程序名及 `provider.id` 不可改变；程序版本可升级，不可给同一不可变发布更换摘要。
+镜像地址可变，但仍须重签。Issuer key、端点、显示名和 `policy` 也按更高 sequence 更新。
 
-任何引用、主包引用名、摘要、类型或下载位置的变化都 **MUST** 增加 `sequence` 并重新签名，
-即使主包未变。相同 sequence 下不能用等价内存视图掩盖原文 JCS 签名 payload 的差异。
-改变主包引用不放宽现有实例升级边界：更新前后解析出的主包 publisher 与程序名 **MUST**
-相同；版本可以变化，换成另一个程序需新建实例。已接受的不可变发布版本不得换 digest；
-仅改变镜像地址且保持同一类型与摘要可以接受，但也要重签 Profile。
-
-提交 `packages` 时采用完整替换而非隐式合并，**MUST** 同时给出 `primary_package`。
-未提交包选择的 issuer key/端点/显示名更新 **MUST** 保留原有全部选择字段。
-仅主包三元组的旧式更新输入由支持本扩展的签名方在签名前替换当前主包条目、保留其余条目，
-再生成兼容字段；不得在接收已签名 `publish_profile` 时修复不一致的数据。
-退役和成员授权语义不因包目录改变；删除条目不是停止 Actor 或撤销身份的替代操作。
+提交 `packages` 时 **MUST** 同时给出主引用并完整替换；未提交选择的更新、草稿和 key 轮换须保留全部条目。
+旧式主包输入由支持扩展的签名方只替换当前主包条目，保留其余项，再派生投影。
+接收方不得修复已签名文档。删包不自动停进程、删状态或撤销凭据。
 
 新 Realm Profile 同样以 `publish_profile` 提交给 Actr Facility Provider（持有方可先用 `draft_profile`
 取得含 Actr Facility Provider 当前 issuer 与端点的草案）；`realms` 位置不在 Actr Facility
@@ -436,11 +412,8 @@ Realm 管理请求只用于 Actr Facility Provider 域名以外的 Realm（第 7
 }
 ```
 
-新格式 `create_realm` 输入带两个选择字段；`package` 在兼容输入中可以省略，AFP 必须在草稿
-签名前生成它。若输入同时携带兼容投影，则必须一致。**已签名 Profile** 的 active v1 文档
-仍必须携带该字段。新建草稿 **MUST** 保留请求的完整选择；调用方在签署激活前必须核对。
-不得因为旧 AFP 忽略了新字段，就把仅含主包的响应当作多包创建成功。幂等重试可返回此前
-已存在的选择与状态，不表示按本次输入更新；不一致时不得自动签署或覆盖，更新使用 §7.2。
+`create_realm` 的两个选择字段必须成对；输入可省略投影，由 AFP 在草稿签名前派生。
+调用方须核对完整选择再激活，不能把旧 AFP 忽略字段视为成功。幂等重试只返回已有状态；差异按 §7.2 更新。
 
 其他操作使用同一信封与各自的 `op` 和字段。`requester` 可选：key 持有方的签名服务把它设为
 所代签者的不透明标识。其他规范 **MAY** 以自己的 `op` 复用 Actr 管理信封，例如 Actr
@@ -490,11 +463,9 @@ Authority Discovery 第 4.5 节用它登记 publisher，Actr Realm Membership �
 
 ## 10. 待完成工作
 
-- 为包选择扩展同步 SDK/AFP/CLI、机器可读 Schema 与签名向量：覆盖旧格式、新格式、
-  混合表示冲突、非法引用、完整 payload、更新保留和防降级。现有结构 Schema 允许未知字段，
-  因而能通过旧 Schema 不表示新语义已被校验。
-- 部署器和 Host 明确支持的包格式及 Workload Profile，逐包验证、独立运行并报告真实状态；
-  不把能解析清单或验证 `actr-package/2` 签名等同于已支持其 Service 执行。
+- 同步包选择的 SDK/AFP/CLI、Schema 与签名向量；旧 Schema 允许未知字段，不代表已验证新语义。
+- Host 分别跟踪包格式验证、执行和业务 Ready 的支持范围。
+
 - 为 Realm 管理请求定义机器可读的 JSON Schema 与签名 test vector；Realm Profile 的
   Schema 与互操作向量已提供于 [`contracts/actr`](../../contracts/actr/README.md#realm-profile)，
   结构校验不替代签名、信任与后继 Profile 检查；

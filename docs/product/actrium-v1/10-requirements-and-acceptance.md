@@ -47,16 +47,16 @@
 | FR-PKG-012 | Advisory/Block-new/Quarantine/Critical-block revocation levels MUST be supported. |
 | FR-PKG-013 | Publisher bootstrap MUST be pinned to HTTPS 443; the Publisher Profile MUST have a normalized signature, a sequence number/freshness, and rollback protection. |
 | FR-PKG-014 | The official publishing tool MUST build, validate, and sign both packages and publish their signed release record. It MUST read both packages back to verify their SHA-256 digests and signatures. |
-| FR-PKG-015 | New producers of active Realm Profiles MUST declare instance selection with `primary_package` + `packages`. The primary reference must exist; references are not ActorIds, dependency aliases or privileges. |
-| FR-PKG-016 | Selection fields MUST occur together; the map contains 1–32 entries with 1–63-character lowercase DNS-label keys. Each entry has HTTPS href, 64 lowercase hex digest and exact type, with no conflicting digests for one type. The complete Profile is at most 64 KiB. |
-| FR-PKG-017 | Verification and equal-sequence comparison MUST use the complete source's JCS signing payload, including selection and projection; persist the source. Whitespace or object order is not a content difference. Do not normalize, strip unknown fields or repair conflicts before verifying; reject duplicate JSON members. |
-| FR-PKG-018 | New v1 Profiles MUST derive an equal `package` projection before signing. Normalize legacy-only documents to `packages.main` only in memory after verification. After accepting selection, reject an active legacy-only downgrade; projection removal requires a separate version migration. |
-| FR-PKG-019 | Selected archives MUST satisfy verified release records, contracts, version constraints and exact locks. A Profile cannot override Publisher-pinned bindings, substitute latest or guess a URL. |
-| FR-PKG-020 | Every auxiliary actually executed MUST independently pass download/signature and platform/Host/ABI checks. The catalog starts no process, allocates no identity, grants no authority and is not an admission allowlist; omission is not revocation. |
-| FR-PKG-021 | Any selection or location change MUST increase sequence and be re-signed. Replace complete selection as a pair; updates omitting it, drafts and key rotations preserve it. A legacy primary-only input replaces only the selected entry and regenerates its projection. |
-| FR-PKG-022 | The primary Service owner-registration rule MUST resolve its publisher/program across all versions. Reject an invalid primary; a missing legacy field must never bypass the authorization check. |
-| FR-PKG-023 | Legacy readers provide primary-only compatibility. Callers MUST compare complete selection after create/update. HTTP success, package verification or projection parsing does not establish multi-package management, format loading or business Ready. |
-| FR-PKG-024 | Changing the primary key MUST NOT switch the instance to another publisher/program. Upgrades may change version; an immutable release cannot change digest. Mirror-location changes still require re-signing. |
+| FR-PKG-015 | New Profiles MUST select instance archives with `primary_package` + `packages`; references are not identities or grants. |
+| FR-PKG-016 | Selection MUST pass Realm Profile Section 4.2 structural, count, size and consistency checks. |
+| FR-PKG-017 | Verification and equal-sequence checks MUST use the complete source JCS payload; normalize only afterward, retain the source and reject duplicate keys. |
+| FR-PKG-018 | Legacy documents follow Section 4.3. New v1 Profiles MUST derive `package` before signing and reject conflicts or active legacy downgrades. |
+| FR-PKG-019 | Selection MUST satisfy releases, contracts, version constraints and exact locks; do not substitute latest or guessed URLs. |
+| FR-PKG-020 | Verify every executed archive independently. Listing MUST NOT automatically start, authorize or revoke Actors. |
+| FR-PKG-021 | Changes MUST be re-signed under Section 7.2; replacements, primary-only edits, drafts and rotations preserve the intended entries. |
+| FR-PKG-022 | Only owner clients register the primary program; invalid references MUST NOT bypass the check. |
+| FR-PKG-023 | Legacy primary compatibility MUST NOT be reported as multi-package management, deployment or business Ready; compare complete selection. |
+| FR-PKG-024 | The primary program identity stays fixed. An immutable release cannot change digest; mirror changes still require re-signing. |
 
 ### 1.4 Front/Keel
 
