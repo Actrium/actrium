@@ -35,6 +35,9 @@
 pub mod dynclib_abi;
 pub mod vtable;
 
+/// Component Model contract used by the guest bindings and package validation.
+pub const WASM_WORKLOAD_WIT: &str = include_str!("../../wit-v2/actr-workload.wit");
+
 /// Decode a dynclib `WebRtcPeerStatus` discriminant (see
 /// [`dynclib_abi::webrtc_peer_status`]) into the framework enum. Used by the
 /// `entry!` macro when materialising [`crate::PeerEvent`] from `PeerEventV1`.

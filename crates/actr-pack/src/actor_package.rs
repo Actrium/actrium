@@ -177,6 +177,14 @@ fn reject_legacy_manifest(source: &str) -> Result<(), PackError> {
 const LEGACY_PUBLISHER_KEY: &str = "manufacturer";
 
 impl ActorPackageManifest {
+    /// Check the supported Workload Profile of an already verified package.
+    #[cfg(feature = "profile-validation")]
+    pub fn validate_workload_payload(&self, bytes: &[u8]) -> Result<(), PackError> {
+        crate::profiles::validate_workload(self, |path| {
+            self.read_declared_file(bytes, path, DEFAULT_MAX_VERIFIED_ENTRY_BYTES)
+        })
+    }
+
     pub fn from_toml(source: &str) -> Result<Self, PackError> {
         reject_legacy_manifest(source)?;
         let manifest: Self = toml::from_str(source)
@@ -607,6 +615,7 @@ fn check_central_directory(
     Ok(())
 }
 
+/// Verify the signature and declared contents of one actor package.
 pub fn verify_actor_package(
     bytes: &[u8],
     public_key: &VerifyingKey,
@@ -759,6 +768,134 @@ mod tests {
         assert_eq!(
             read_actor_workload(&package, &verified).unwrap(),
             b"globalThis.echo = true;"
+        );
+    }
+
+    #[cfg(feature = "profile-validation")]
+    #[test]
+    fn validates_product_v1_proto_imports_in_signed_archives() {
+        let key = SigningKey::generate(&mut OsRng);
+        let verify_profile = |package: &[u8]| {
+            verify_actor_package(package, &key.verifying_key())?
+                .manifest
+                .validate_workload_payload(package)
+        };
+        let mut manifest = manifest();
+        manifest.workload.keel.as_mut().unwrap().capabilities =
+            Some("workload/capabilities.json".into());
+        manifest.dependencies.insert(
+            "service".into(),
+            ActorDependency {
+                actor: "example.com/echo".into(),
+                version: "=1.0.0".into(),
+                contract: Some("contracts/service.proto".into()),
+                required: true,
+            },
+        );
+        for (path, role, media_type) in [
+            ("workload/capabilities.json", "profile", "application/json"),
+            ("contracts/service.proto", "contract", "text/plain"),
+            ("contracts/shared.proto", "contract", "text/plain"),
+        ] {
+            manifest.files.push(PackageFileEntry {
+                path: path.into(),
+                role: role.into(),
+                media_type: media_type.into(),
+                size: 0,
+                sha256: "0".repeat(64),
+            });
+        }
+        let mut options = ActorPackOptions {
+            manifest,
+            signing_key: key.clone(),
+            payloads: BTreeMap::from([
+                ("workload/guest.js".into(), b"globalThis.echo = true;".to_vec()),
+                (
+                    "workload/capabilities.json".into(),
+                    br#"{"schemaVersion":1,"keelApi":"1.0","guestEntry":"workload/guest.js","imports":["host:service"]}"#.to_vec(),
+                ),
+                (
+                    "contracts/shared.proto".into(),
+                    br#"syntax = "proto3"; package shared; message Request {}"#.to_vec(),
+                ),
+            ]),
+        };
+
+        // Import-like text in comments must not reject a self-contained contract.
+        options.payloads.insert(
+            "contracts/service.proto".into(),
+            br#"syntax = "proto3";
+// import "unused.proto";
+message Request {}
+service Echo { rpc Echo(Request) returns (Request); }
+"#
+            .to_vec(),
+        );
+        let package = pack_actor_package(&options).unwrap();
+        verify_profile(&package).unwrap();
+
+        // Import-free syntax can still contain unresolved RPC or field types.
+        for source in [
+            r#"syntax = "proto3"; service Echo { rpc Echo(Missing) returns (Missing); }"#,
+            r#"syntax = "proto3"; message Request { Missing value = 1; }
+service Echo { rpc Echo(Request) returns (Request); }"#,
+        ] {
+            options
+                .payloads
+                .insert("contracts/service.proto".into(), source.as_bytes().to_vec());
+            let package = pack_actor_package(&options).unwrap();
+            let error = verify_profile(&package).unwrap_err().to_string();
+            assert!(error.contains("invalid Service Proto"), "{error}");
+        }
+
+        // The imported file is present and signed, but the profile requires one
+        // self-contained RPC Proto. Inline and public/weak imports also count.
+        for import in [
+            r#"import "shared.proto";"#,
+            r#"import public "shared.proto";"#,
+            r#"import weak "shared.proto";"#,
+        ] {
+            let source = format!(
+                r#"syntax = "proto3"; /* dependency */ {import}
+service Echo {{ rpc Echo(shared.Request) returns (shared.Request); }}
+"#
+            );
+            options
+                .payloads
+                .insert("contracts/service.proto".into(), source.into_bytes());
+            let package = pack_actor_package(&options).unwrap();
+            let error = verify_profile(&package).unwrap_err().to_string();
+            assert!(error.contains("imports are unsupported"), "{error}");
+            assert!(error.contains("contracts/service.proto"), "{error}");
+        }
+
+        // Declaring the Service dependency is enough to require validation,
+        // including Guests that do not import the host:service module.
+        options.payloads.insert(
+            "workload/capabilities.json".into(),
+            br#"{"schemaVersion":1,"keelApi":"1.0","guestEntry":"workload/guest.js","imports":[]}"#
+                .to_vec(),
+        );
+        let package = pack_actor_package(&options).unwrap();
+        assert!(
+            verify_profile(&package)
+                .unwrap_err()
+                .to_string()
+                .contains("imports are unsupported")
+        );
+        options
+            .manifest
+            .workload
+            .keel
+            .as_mut()
+            .unwrap()
+            .capabilities = None;
+        let package = pack_actor_package(&options).unwrap();
+        assert!(
+            verify_profile(&package)
+                .unwrap_err()
+                .to_string()
+                .contains("imports are unsupported")
         );
     }
 
