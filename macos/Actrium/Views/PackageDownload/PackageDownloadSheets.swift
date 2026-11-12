@@ -11,7 +11,7 @@ struct PackageDownloadConfirmSheet: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("下载 Actrium 程序包")
+                Text("Download Actrium Package")
                     .font(.headline)
                 Spacer()
                 Button(action: onCancel) {
@@ -28,7 +28,7 @@ struct PackageDownloadConfirmSheet: View {
             VStack(alignment: .leading, spacing: 14) {
                 // Domain — the trust root the user is asked to confirm
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("来源域名")
+                    Text("Source Domain")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text(pending.host)
@@ -38,7 +38,7 @@ struct PackageDownloadConfirmSheet: View {
 
                 // Target — file name + full URL
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("目标文件")
+                    Text("Target File")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text(pending.filename)
@@ -52,7 +52,7 @@ struct PackageDownloadConfirmSheet: View {
                 }
 
                 Label {
-                    Text("连接前需确认：确认后将开始下载（大小上限 \(pending.sizeLimitText)）")
+                    Text("Confirm before connecting: the download starts after confirmation (size cap \(pending.sizeLimitText))")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } icon: {
@@ -66,9 +66,9 @@ struct PackageDownloadConfirmSheet: View {
 
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
+                Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("下载", action: onConfirm)
+                Button("Download", action: onConfirm)
                     .keyboardShortcut(.defaultAction)
             }
             .padding()
@@ -86,7 +86,7 @@ struct ActivePackageDownloadSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("正在下载：\(active.pending.filename)")
+                Text("Downloading: \(active.pending.filename)")
                     .font(.headline)
                 Spacer()
                 if active.phase != .failed {
@@ -108,7 +108,7 @@ struct ActivePackageDownloadSheet: View {
                     HStack(spacing: 10) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("正在从 \(active.pending.host) 下载…")
+                        Text("Downloading from \(active.pending.host)…")
                             .foregroundColor(.secondary)
                     }
                     Text(active.pending.url.absoluteString)
@@ -120,18 +120,18 @@ struct ActivePackageDownloadSheet: View {
                     HStack(spacing: 10) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("正在计算 SHA-256 校验值…")
+                        Text("Computing SHA-256 checksum…")
                             .foregroundColor(.secondary)
                     }
                 case .failed:
                     Label {
-                        Text(active.errorMessage ?? "下载失败")
+                        Text(active.errorMessage ?? "Download failed")
                             .foregroundColor(.primary)
                     } icon: {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
                     }
-                    Text("请检查网络与地址后重试。")
+                    Text("Check the network and address, then retry.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -144,12 +144,12 @@ struct ActivePackageDownloadSheet: View {
             HStack {
                 Spacer()
                 if active.phase == .failed {
-                    Button("取消", action: onCancel)
+                    Button("Cancel", action: onCancel)
                         .keyboardShortcut(.cancelAction)
-                    Button("重试", action: onRetry)
+                    Button("Retry", action: onRetry)
                         .keyboardShortcut(.defaultAction)
                 } else {
-                    Button("取消下载", action: onCancel)
+                    Button("Cancel Download", action: onCancel)
                         .keyboardShortcut(.cancelAction)
                 }
             }
@@ -170,7 +170,7 @@ struct PackageInstanceConfirmSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("创建应用实例")
+                Text("Create App Instance")
                     .font(.headline)
                 Spacer()
                 Button(action: onCancel) {
@@ -186,7 +186,7 @@ struct PackageInstanceConfirmSheet: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("程序包")
+                    Text("Package")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text(pending.packageTitle)
@@ -197,13 +197,13 @@ struct PackageInstanceConfirmSheet: View {
                         .textSelection(.enabled)
                 }
 
-                // Declared permissions (创建确认页的权限声明展示, 03 §5)
+                // Declared permissions shown on the creation confirm sheet (03 §5)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("权限声明")
+                    Text("Declared Permissions")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     if pending.permissions.isEmpty {
-                        Text("未声明任何权限")
+                        Text("No permissions declared")
                             .font(.body)
                             .foregroundColor(.secondary)
                     } else {
@@ -221,7 +221,7 @@ struct PackageInstanceConfirmSheet: View {
 
                 if let instanceURL = pending.proposedInstanceURL {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("创建后地址将替换为实例地址")
+                        Text("After creation the address is replaced by the instance address")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text(instanceURL.absoluteString)
@@ -238,9 +238,9 @@ struct PackageInstanceConfirmSheet: View {
 
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
+                Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("创建实例", action: onConfirm)
+                Button("Create Instance", action: onConfirm)
                     .keyboardShortcut(.defaultAction)
             }
             .padding()
@@ -259,7 +259,7 @@ struct ActrUriNoticeSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Actrium 实例地址")
+                Text("Actrium Instance Address")
                     .font(.headline)
                 Spacer()
                 Button(action: onDismiss) {
@@ -286,8 +286,8 @@ struct ActrUriNoticeSheet: View {
                 if let detail = notice.detail {
                     Text(detail)
                 } else {
-                    Text("正式实例地址（域名 \(notice.domain.isEmpty ? "未知" : notice.domain)）需要 Realm Profile 解析，当前原型暂未支持。")
-                    Text("原型期可使用包直链（https 地址，以 .actr 结尾）或本地 .actr 文件路径。")
+                    Text("Formal instance addresses (domain \(notice.domain.isEmpty ? "unknown" : notice.domain)) require Realm Profile resolution, which the prototype does not support yet.")
+                    Text("During the prototype, use a package direct link (an https URL ending in .actr) or a local .actr file path.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -299,7 +299,7 @@ struct ActrUriNoticeSheet: View {
 
             HStack {
                 Spacer()
-                Button("知道了", action: onDismiss)
+                Button("Got It", action: onDismiss)
                     .keyboardShortcut(.defaultAction)
             }
             .padding()
@@ -308,8 +308,9 @@ struct ActrUriNoticeSheet: View {
     }
 }
 
-/// 邀请码兑换弹窗(临时方案):地址栏输入 actr:// 链接后先弹出本弹窗填写
-/// 邀请码;点击「兑换」后由 Rust 提供的方法接管后续流程。
+/// Invite-code redeem sheet (temporary flow): an actr:// link entered in the
+/// address bar first presents this sheet for the invite code; "Redeem" hands
+/// over to the Rust-provided method for the follow-up flow.
 struct InviteCodeRedeemSheet: View {
     let pending: PendingInviteRedeem
     let onConfirm: (String) -> Void
@@ -325,7 +326,7 @@ struct InviteCodeRedeemSheet: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("邀请码兑换")
+                Text("Invite Code Redemption")
                     .font(.headline)
                 Spacer()
                 Button(action: onCancel) {
@@ -342,17 +343,17 @@ struct InviteCodeRedeemSheet: View {
             VStack(alignment: .leading, spacing: 14) {
                 // Domain — the trust root shown for confirmation (04 §3)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("来源域名")
+                    Text("Source Domain")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text(pending.domain.isEmpty ? "未知" : pending.domain)
+                    Text(pending.domain.isEmpty ? "unknown" : pending.domain)
                         .font(.title3.weight(.semibold))
                         .textSelection(.enabled)
                 }
 
                 // Target — the actr:// link being redeemed
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("目标地址")
+                    Text("Target Address")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text(pending.uri)
@@ -365,10 +366,10 @@ struct InviteCodeRedeemSheet: View {
 
                 // Invite code input
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("邀请码")
+                    Text("Invite Code")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    TextField("请输入邀请码", text: $inviteCode)
+                    TextField("Enter invite code", text: $inviteCode)
                         .textFieldStyle(.roundedBorder)
                         .font(.body.monospaced())
                         .autocorrectionDisabled()
@@ -376,7 +377,7 @@ struct InviteCodeRedeemSheet: View {
                 }
 
                 Label {
-                    Text("打开该地址需要邀请码。点击「兑换」后由 Actrium 校验邀请码并继续打开。")
+                    Text("Opening this address requires an invite code. After you choose Redeem, Actrium verifies the invite and continues opening.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } icon: {
@@ -390,9 +391,9 @@ struct InviteCodeRedeemSheet: View {
 
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
+                Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("兑换", action: confirm)
+                Button("Redeem", action: confirm)
                     .keyboardShortcut(.defaultAction)
                     .disabled(trimmedCode.isEmpty)
             }

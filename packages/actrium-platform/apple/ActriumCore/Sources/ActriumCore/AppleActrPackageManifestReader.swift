@@ -38,12 +38,12 @@ public enum AppleActrPackageSignatureError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .signatureMissing:
-            return "程序包缺少 manifest.sig 签名（PACKAGE_SIGNATURE_INVALID）"
+            return "The package is missing its manifest.sig signature (PACKAGE_SIGNATURE_INVALID)"
         case .noTrustedKeys:
-            return "没有可用的可信公钥，无法验证程序包签名（PACKAGE_SIGNATURE_INVALID）。"
-                + "请运行 actr pkg keygen 或配置可信公钥后重试"
+            return "No trusted public keys are available to verify the package signature (PACKAGE_SIGNATURE_INVALID). "
+                + "Run actr pkg keygen or configure trusted public keys and retry"
         case .signatureInvalid:
-            return "程序包签名验证失败（PACKAGE_SIGNATURE_INVALID），已拒绝打开"
+            return "Package signature verification failed (PACKAGE_SIGNATURE_INVALID); opening refused"
         }
     }
 }
@@ -87,7 +87,7 @@ public enum AppleActrPackageManifestReader {
     ///
     /// Trusted key sourcing is platform-specific and stays with the host app;
     /// the long-term target is a unified verifyActrPackage FFI on actr-ffi
-    /// (15 号计划 IF-1).
+    /// (plan 15 IF-1).
     ///
     /// - Parameter trustedKeys: raw 32-byte Ed25519 public keys; any match accepts.
     public static func verifyManifestSignature(fromRoot root: URL, trustedKeys: [Data]) throws {

@@ -767,7 +767,7 @@ struct WorkspaceMainView: View {
                 viewModel.actrUriNotice = nil
             }
         }
-        // ━━━━ Invite-code redeem sheet (临时方案) ━━━━
+        // ━━━━ Invite-code redeem sheet (temporary flow) ━━━━
         .sheet(item: $viewModel.pendingInviteRedeem) { pending in
             InviteCodeRedeemSheet(
                 pending: pending,

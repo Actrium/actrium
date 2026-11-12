@@ -110,17 +110,17 @@ enum ActrServiceInstanceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .idempotencyConflict:
-            return "创建请求冲突（IDEMPOTENCY_CONFLICT）"
+            return "Create request conflict (IDEMPOTENCY_CONFLICT)"
         case .instanceNotFound(let actorId):
-            return "实例不存在（SERVICE_NOT_FOUND）：\(actorId)"
+            return "Instance not found (SERVICE_NOT_FOUND): \(actorId)"
         case .digestMismatch(let expected, let actual):
-            return "包指纹不一致（PACKAGE_DIGEST_MISMATCH）：期望 \(expected.prefix(12))…，实际 \(actual.prefix(12))…"
+            return "Package digest mismatch (PACKAGE_DIGEST_MISMATCH): expected \(expected.prefix(12))…, actual \(actual.prefix(12))…"
         }
     }
 }
 
 /// Host-side service-instance operations consumed by the shell (15-B B6/B7).
-/// Signature mirrors A's actr-ffi surface (15 号计划 IF-1) so switching to
+/// Signature mirrors A's actr-ffi surface (plan 15 IF-1) so switching to
 /// the real FFI backend is a one-line change for the shell.
 protocol ActrServiceInstanceProviding: Sendable {
     /// Creates a local Realm instance for a cached, verified package.
@@ -144,7 +144,8 @@ protocol ActrServiceInstanceProviding: Sendable {
     func knownDigest(actorId: String) -> String?
 }
 
-/// Prototype mock (15 号 §5:模拟 ActorId 骨架为主线，接口与真 ID 完全一致)。
+/// Prototype mock (15 §5: the mock ActorId skeleton is the mainline; the
+/// interface matches the real ID exactly).
 /// Local persistent ActorIds with create/recover semantics; A's actr-ffi
 /// skeleton replaces this class when delivered (shell code unchanged).
 final class MockActrServiceInstanceStore: ActrServiceInstanceProviding {
@@ -189,7 +190,7 @@ final class MockActrServiceInstanceStore: ActrServiceInstanceProviding {
         idempotencyKey: String
     ) async throws -> ActrServiceHandle {
         try queue.sync {
-            // Idempotent retry returns the same instance (15 号计划 §5).
+            // Idempotent retry returns the same instance (15 §5).
             if let actorId = store.pendingCreates[idempotencyKey],
                let record = store.instances.first(where: { $0.actorId == actorId }) {
                 return ActrServiceHandle(

@@ -901,9 +901,9 @@ pub fn accept_authority_descriptor(
         .href
         .clone();
 
-    let member = value.get("realm_signing_keys").ok_or_else(|| {
-        invalid("descriptor carries no realm_signing_keys".to_string())
-    })?;
+    let member = value
+        .get("realm_signing_keys")
+        .ok_or_else(|| invalid("descriptor carries no realm_signing_keys".to_string()))?;
     let (keys, _outcome) =
         authority::RealmSigningKeys::accept(member, None).map_err(CoreError::from)?;
 
@@ -959,18 +959,18 @@ pub fn accept_realm_profile(
     realm_name: String,
     signing_keys_json: String,
 ) -> Result<RealmProfileInfo, CoreError> {
-    let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json)
-        .map_err(|error| {
-            CoreError::RealmProfileInvalid(format!("malformed signing keys: {error}"))
-        })?;
+    let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json).map_err(|error| {
+        CoreError::RealmProfileInvalid(format!("malformed signing keys: {error}"))
+    })?;
     let profile = RealmProfile::verify(body.as_bytes(), &realm_name, &keys)?;
     if profile.realm.status != RealmStatus::Active {
         return Err(CoreError::RealmRetired(profile.realm.name.clone()));
     }
     // `RealmProfile::check` guarantees an active Realm carries a package.
-    let package = profile.package.as_ref().ok_or_else(|| {
-        CoreError::RealmProfileInvalid("active Realm has no package".to_string())
-    })?;
+    let package = profile
+        .package
+        .as_ref()
+        .ok_or_else(|| CoreError::RealmProfileInvalid("active Realm has no package".to_string()))?;
 
     Ok(RealmProfileInfo {
         realm_name: profile.realm.name.clone(),
@@ -5226,9 +5226,11 @@ mod tests {
 
     #[test]
     fn accept_authority_descriptor_extracts_keys_and_realms_href() {
-        let info =
-            accept_authority_descriptor(AUTHORITY_DESCRIPTOR.to_string(), "acme.example".to_string())
-                .unwrap();
+        let info = accept_authority_descriptor(
+            AUTHORITY_DESCRIPTOR.to_string(),
+            "acme.example".to_string(),
+        )
+        .unwrap();
         assert_eq!(info.realms_href, "https://acme.example/realms");
         assert_eq!(info.keys_sequence, 1);
         assert_eq!(info.signing_keys.len(), 1);
@@ -5343,7 +5345,7 @@ mod tests {
             "": "BMP",
             "😀": "astral",
             "numbers": [1, 1.5],
-            "text": "café"
+            "text": "cafe"
         },
         "signature": {
             "key_id": "rs-a",
@@ -5364,7 +5366,10 @@ mod tests {
         assert_eq!(info.display_name, "Acme Notes");
         assert_eq!(info.status, "active");
         assert_eq!(info.sequence, 31);
-        assert_eq!(info.package_href, "https://cdn.notes.example/team-notes-1.4.2.actr");
+        assert_eq!(
+            info.package_href,
+            "https://cdn.notes.example/team-notes-1.4.2.actr"
+        );
         assert_eq!(
             info.package_sha256,
             "abababababababababababababababababababababababababababababababab"
@@ -5391,8 +5396,7 @@ mod tests {
     #[test]
     fn accept_realm_profile_rejects_tampered_document() {
         // A changed display name is covered by the signature.
-        let tampered =
-            REALM_PROFILE_ACTIVE.replacen("Acme Notes", "Evil Notes", 1);
+        let tampered = REALM_PROFILE_ACTIVE.replacen("Acme Notes", "Evil Notes", 1);
         let error = accept_realm_profile(
             tampered,
             "k7m2q9xh@acme.com".to_string(),
@@ -5480,7 +5484,7 @@ mod tests {
             "": "BMP",
             "😀": "astral",
             "numbers": [1, 1.5],
-            "text": "café"
+            "text": "cafe"
         },
         "signature": {
             "key_id": "rs-a",
@@ -5565,8 +5569,7 @@ mod tests {
             "services": []
         })
         .to_string();
-        let error =
-            accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
+        let error = accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
         assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
     }
 
@@ -5578,8 +5581,7 @@ mod tests {
             "publisher": {"schema": "actr.publisher/v1", "domain": "notes.example"}
         })
         .to_string();
-        let error =
-            accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
+        let error = accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
         assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
     }
 }

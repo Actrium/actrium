@@ -421,7 +421,7 @@ final class BrowserDataRepository {
         // persists snapshots containing actr:// / actro:// tabs verbatim
         // (AppleBrowserStorageDatabase.coreNormalizedSessionSnapshot returns
         // nil) so instance addresses survive restarts (15-B B7). Extending the
-        // Core whitelist itself still belongs to the Rust side (A/组外).
+        // Core whitelist itself still belongs to the Rust side (team A, out of scope here).
         if database?.saveSession(snapshot: snapshot) == true {
             scheduleSyncAfterLocalChange()
         }

@@ -13,7 +13,7 @@ import CryptoKit
 ///    (05 §14 local development signing key), field `public_key` (base64).
 ///
 /// Long-term target: unified verifyActrPackage FFI on actr-ffi + Publisher Registry
-/// (15 号计划 IF-1).
+/// (plan 15 IF-1).
 enum ActrPackageTrustStore {
     struct TrustedKey {
         /// Raw 32-byte Ed25519 public key.

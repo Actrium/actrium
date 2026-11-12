@@ -69,9 +69,9 @@ struct ActrUriNotice: Identifiable {
     var detail: String? = nil
 }
 
-/// Pending invite-code redemption (临时方案): an actr:// link entered in the
-/// address bar waits for an invite code first; on 「兑换」 the Rust-provided
-/// method takes over the follow-up flow (FFI not wired yet).
+/// Pending invite-code redemption (temporary flow): an actr:// link entered in
+/// the address bar waits for an invite code first; on "Redeem" the
+/// Rust-provided method takes over the follow-up flow.
 struct PendingInviteRedeem: Identifiable {
     let id = UUID()
     let uri: String
@@ -87,11 +87,11 @@ enum ActrPackageDownloadError: LocalizedError {
         switch self {
         case .sizeExceeded(let maxBytes):
             let limit = ByteCountFormatter.string(fromByteCount: maxBytes, countStyle: .file)
-            return "包大小超过上限 \(limit)，已停止下载"
+            return "Package exceeds the size limit \(limit); download stopped"
         case .cancelled:
             return nil
         case .failed(let reason):
-            return "下载失败：\(reason)"
+            return "Download failed: \(reason)"
         }
     }
 }
@@ -131,7 +131,7 @@ enum ActrPackageDownloadService {
               finalURL.host?.lowercased() == url.host?.lowercased(),
               finalURL.scheme?.lowercased() == url.scheme?.lowercased()
         else {
-            throw ActrPackageDownloadError.failed(reason: "重定向目标与确认的地址不一致")
+            throw ActrPackageDownloadError.failed(reason: "Redirect target does not match the confirmed address")
         }
 
         // Pre-check via declared Content-Length when the server provides it.
@@ -143,7 +143,7 @@ enum ActrPackageDownloadService {
             .appendingPathComponent("actr-pkg-\(UUID().uuidString).actr")
         _ = FileManager.default.createFile(atPath: destination.path, contents: nil)
         guard let handle = FileHandle(forWritingAtPath: destination.path) else {
-            throw ActrPackageDownloadError.failed(reason: "无法创建下载临时文件")
+            throw ActrPackageDownloadError.failed(reason: "Could not create the download temporary file")
         }
 
         var written: Int64 = 0

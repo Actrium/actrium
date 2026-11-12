@@ -65,7 +65,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Notice for formal actr:// addresses (realm resolution pending in prototype).
     @Published var actrUriNotice: ActrUriNotice?
 
-    /// actr:// link awaiting invite-code redemption (临时方案 sheet presented).
+    /// actr:// link awaiting invite-code redemption (temporary-flow sheet presented).
     @Published var pendingInviteRedeem: PendingInviteRedeem?
 
     /// Realms this installation has already redeemed an invite for. Opening
@@ -86,14 +86,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private var packageDownloadTask: Task<Void, Never>?
 
     // MARK: - Instance Creation (15-B B6)
-    // Confirm → serviceCreate → URI replace (非 push; history keeps only the
+    // Confirm → serviceCreate → URI replace (replace, not push; history keeps only the
     // final instance address; on failure the package URL stays unchanged).
 
     /// Package import awaiting instance-creation confirmation (confirm sheet).
     @Published var pendingInstanceCreation: PendingInstanceCreation?
 
-    /// Prototype instance store (15 号 §5:模拟 ActorId 骨架,接口与真 ID 一致;
-    /// A 的 actr-ffi 骨架交付后切换真实后端,壳层调用点不变)。
+    /// Prototype instance store (15 §5: the mock ActorId skeleton keeps the
+    /// interface identical to the real ID; switch to the real actr-ffi
+    /// backend once delivered — shell call sites unchanged).
     private let serviceInstanceStore: ActrServiceInstanceProviding = MockActrServiceInstanceStore()
 
     // MARK: - Grid Slot Position Management
@@ -733,8 +734,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 uri: trimmed,
                 installationId: InstallationIdProvider.getOrCreate()
             )
-            // 临时方案:打开任何 actr:// 链接前先要求邀请码;已兑换过的 Realm
-            // 直接放行(join 的 RealmMembership 身份已在 Keychain 中)。
+            // Temporary flow: opening any actr:// link first requires an invite
+            // code; a Realm already redeemed goes straight through (its
+            // RealmMembership identity is already in the Keychain).
             let realmName = [info.realmId, info.domain].compactMap { $0 }.joined(separator: "@")
             guard pendingInviteRedeem == nil else { return }
             guard !redeemedRealms.contains(realmName) else {
@@ -926,16 +928,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         pendingInstanceCreation = nil
     }
 
-    // MARK: - Invite Code Redemption (临时方案)
-    // Address-bar actr:// links are gated behind an invite-code sheet; 兑换
+    // MARK: - Invite Code Redemption (temporary flow)
+    // Address-bar actr:// links are gated behind an invite-code sheet; redeem
     // hands over to the Rust-provided method for the follow-up flow.
 
     func cancelInviteRedeem() {
         pendingInviteRedeem = nil
     }
 
-    /// 兑换:调用 RealmJoinService 完成完整兑换流程(解码 → ②③验证 → 设备
-    /// 身份 → join),成功后标记 Realm 已兑换并自动打开实例链接。
+    /// Redeem: run the full redemption flow through RealmJoinService (decode
+    /// → verify → device identity → join); on success mark the Realm as
+    /// redeemed and open the instance link automatically.
     func confirmInviteRedeem(code: String) {
         guard let pending = pendingInviteRedeem else { return }
         pendingInviteRedeem = nil
@@ -950,7 +953,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 )
                 markRedeemed(result.realmName)
                 logger.notice("🎟️ [InviteRedeem] joined \(result.realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
-                // 已兑换集合命中后,这里不会再弹邀请码 sheet,直接走 ①—④。
+                // On a redeemed-realm hit the invite sheet is skipped and the link opens directly.
                 navigateCurrentTab(to: result.instanceURL.absoluteString)
             } catch {
                 logger.warning("⚠️ [InviteRedeem] redemption failed: \(error)")
@@ -963,7 +966,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard let pending = pendingInstanceCreation else { return }
         pendingInstanceCreation = nil
         // The idempotency key covers retries within this single create; pressing
-        // 「创建」 again later means a new instance = a new key (15 号计划 §5).
+        // Creating again later means a new instance = a new key (15 §5).
         let idempotencyKey = UUID().uuidString
         Task { [weak self] in
             guard let self else { return }
@@ -983,7 +986,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
     }
 
-    /// URI replace (非 push,04 §4): the address bar swaps to the instance
+    /// URI replace (replace, not push, 04 §4): the address bar swaps to the instance
     /// address; back does not return to the confirm page (the shell address is
     /// state, not a navigation stack); history records only the final address.
     private func applyInstanceAddress(pending: PendingInstanceCreation, handle: ActrServiceHandle) {
@@ -1195,7 +1198,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 actrUriNotice = ActrUriNotice(
                     uri: input,
                     domain: info.domain,
-                    detail: "本机实例未找到或已被清除（SERVICE_NOT_FOUND），无法打开该地址。"
+                    detail: "The local instance was not found or has been cleared (SERVICE_NOT_FOUND); the address cannot be opened."
                 )
             }
             return
@@ -1956,11 +1959,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let suggestion: String
         switch error {
         case .signatureMissing:
-            suggestion = "程序包缺少 manifest.sig 签名。请重新下载；若为本地包，请使用 actr pkg pack 重新打包。"
+            suggestion = "The package is missing its manifest.sig signature. Re-download it; for a local package, re-pack it with actr pkg pack."
         case .noTrustedKeys:
-            suggestion = "没有可用的可信公钥。请运行 actr pkg keygen 生成密钥，或在 Actrium/trusted-keys.json 中配置可信公钥后重试。"
+            suggestion = "No trusted public keys are available. Run actr pkg keygen to generate a key, or configure trusted public keys in Actrium/trusted-keys.json and retry."
         case .signatureInvalid:
-            suggestion = "签名验证失败：包可能被篡改，或由其他密钥签名。请重新下载或联系发布者。"
+            suggestion = "Signature verification failed: the package may be tampered with or signed by another key. Re-download it or contact the publisher."
         }
         return """
         <!DOCTYPE html>
@@ -2001,7 +2004,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         <body>
             <div class="card">
                 <div class="code">PACKAGE_SIGNATURE_INVALID</div>
-                <h1>无法验证程序包签名</h1>
+                <h1>Package signature verification failed</h1>
                 <div class="message">\(error.localizedDescription)</div>
                 <div class="suggestion">\(suggestion)</div>
                 <div class="path">\(escapeHTML(sourcePath))</div>
