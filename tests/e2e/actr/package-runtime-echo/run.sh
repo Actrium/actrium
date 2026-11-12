@@ -388,6 +388,7 @@ PY
     cp "$SCRIPT_DIR/proto/echo.proto" "$payload/contracts/echo.proto"
 
     SERVICE_VERSION="1.0.0"
+    SERVICE_PUBLIC_KEY="$PROVISIONED_PUBLIC_KEY"
     SERVICE_PACKAGE="$DIST_DIR/echo-v2.actr"
     cat >"$payload/manifest.toml" <<EOF
 format = "actr-package/2"

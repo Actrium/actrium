@@ -90,6 +90,53 @@ pub(crate) fn read_v2_lock(
                     entry.actr_type, entry.alias
                 )));
             }
+            if entry.fingerprint.trim().is_empty() {
+                return Err(HyperError::InvalidManifest(format!(
+                    "dependency `{}` is missing its service fingerprint",
+                    entry.alias
+                )));
+            }
+            if let Some(path) = &declared.contract {
+                let [locked_proto] = entry.files.as_slice() else {
+                    return Err(HyperError::InvalidManifest(format!(
+                        "dependency `{}` must lock one self-contained RPC Proto",
+                        entry.alias
+                    )));
+                };
+                let content = manifest
+                    .read_declared_file(bytes, path, max_bytes)
+                    .map_err(|e| HyperError::InvalidManifest(e.to_string()))?;
+                let content = String::from_utf8(content).map_err(|e| {
+                    HyperError::InvalidManifest(format!("read contract `{path}`: {e}"))
+                })?;
+                let spec = actr_service_compat::build_self_contained_service_spec(
+                    &entry.name,
+                    actr_service_compat::ProtoFile {
+                        name: locked_proto
+                            .path
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&locked_proto.path)
+                            .to_owned(),
+                        content,
+                        path: None,
+                    },
+                )
+                .map_err(|e| {
+                    HyperError::InvalidManifest(format!(
+                        "dependency `{}` contract: {e}",
+                        entry.alias
+                    ))
+                })?;
+                if spec.fingerprint != entry.fingerprint
+                    || spec.protobufs[0].fingerprint != locked_proto.fingerprint
+                {
+                    return Err(HyperError::InvalidManifest(format!(
+                        "dependency `{}` contract does not match its signed lock fingerprints",
+                        entry.alias
+                    )));
+                }
+            }
         }
     }
     for (alias, dependency) in &manifest.dependencies {
@@ -104,4 +151,134 @@ pub(crate) fn read_v2_lock(
         }
     }
     Ok(lock)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actr_pack::{ActorPackOptions, PackageFileEntry, SignatureDescriptor, WorkloadDescriptor};
+    use actr_service_compat::{ProtoFile, build_self_contained_service_spec};
+    use std::collections::BTreeMap;
+
+    const CONTRACT: &str = r#"syntax = "proto3";
+package echo;
+message Request { string message = 1; }
+service Echo { rpc Echo(Request) returns (Request); }
+"#;
+
+    fn fixture_lock() -> LockFile {
+        let spec = build_self_contained_service_spec(
+            "Echo",
+            ProtoFile {
+                name: "echo.proto".into(),
+                content: CONTRACT.into(),
+                path: None,
+            },
+        )
+        .unwrap();
+        LockFile::from_str(&format!(
+            r#"
+[metadata]
+version = 2
+generated_at = "2026-11-12T00:00:00Z"
+[[dependency]]
+name = "Echo"
+alias = "echo"
+actr_type = "example.com/Echo@1.0.0"
+fingerprint = "{}"
+cached_at = "2026-11-12T00:00:00Z"
+files = [{{ path = "echo/echo.proto", fingerprint = "{}" }}]
+"#,
+            spec.fingerprint, spec.protobufs[0].fingerprint
+        ))
+        .unwrap()
+    }
+
+    fn verify_lock(lock: LockFile) -> HyperResult<Option<LockFile>> {
+        let payloads = BTreeMap::from([
+            ("workload/main.wasm".to_owned(), Vec::new()),
+            (
+                "contracts/dependency.proto".to_owned(),
+                CONTRACT.as_bytes().to_vec(),
+            ),
+            (
+                "manifest.lock.toml".to_owned(),
+                toml::to_string(&lock).unwrap().into_bytes(),
+            ),
+        ]);
+        let manifest = ActorPackageManifest {
+            format: actr_pack::ACTOR_PACKAGE_FORMAT_V2.into(),
+            actor: actr_pack::ActorDescriptor {
+                publisher: "example.com".into(),
+                name: "Caller".into(),
+                version: "1.0.0".into(),
+            },
+            workload: WorkloadDescriptor {
+                profile: "actr.component/1".into(),
+                entry: "workload/main.wasm".into(),
+                keel: None,
+            },
+            host: actr_pack::HostRequirements {
+                profile: "actr.host/1".into(),
+                api: "^1.0.0".into(),
+                required_capabilities: vec![],
+                optional_capabilities: vec![],
+            },
+            dependencies: BTreeMap::from([(
+                "echo".into(),
+                actr_pack::ActorDependency {
+                    actor: "example.com/Echo".into(),
+                    version: "^1.0.0".into(),
+                    contract: Some("contracts/dependency.proto".into()),
+                    required: true,
+                },
+            )]),
+            extensions: Default::default(),
+            signature: SignatureDescriptor {
+                algorithm: "ed25519".into(),
+                key_id: "test".into(),
+            },
+            files: [
+                ("workload/main.wasm", "workload"),
+                ("contracts/dependency.proto", "contract"),
+                ("manifest.lock.toml", "lock"),
+            ]
+            .into_iter()
+            .map(|(path, role)| PackageFileEntry {
+                path: path.into(),
+                role: role.into(),
+                media_type: "application/octet-stream".into(),
+                size: 0,
+                sha256: "0".repeat(64),
+            })
+            .collect(),
+        };
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let bytes = actr_pack::pack_actor_package(&ActorPackOptions {
+            manifest,
+            payloads,
+            signing_key: key.clone(),
+        })
+        .unwrap();
+        let verified = actr_pack::verify_actor_package(&bytes, &key.verifying_key()).unwrap();
+        read_v2_lock(
+            &bytes,
+            &verified.manifest,
+            actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+        )
+    }
+
+    #[test]
+    fn binds_dependency_contract_to_locked_fingerprints() {
+        // The package may rename the contract while retaining its logical lock filename.
+        assert!(verify_lock(fixture_lock()).unwrap().is_some());
+        for fingerprint in ["", "service_semantic:stale"] {
+            let mut lock = fixture_lock();
+            lock.dependencies[0].fingerprint = fingerprint.into();
+            assert!(verify_lock(lock).is_err());
+        }
+        let mut lock = fixture_lock();
+        lock.dependencies[0].files[0].fingerprint = "semantic:stale".into();
+        assert!(verify_lock(lock).is_err());
+    }
 }
