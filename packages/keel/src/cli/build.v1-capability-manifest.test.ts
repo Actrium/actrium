@@ -566,6 +566,50 @@ export default function App() {
     );
   });
 
+  it('records the effective route for duplicate keys', async () => {
+    const manifest = await buildManifest(`
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+function send() {
+  return call({
+    route: 'allowed.Route',
+    route: 'private.Route',
+    payloadBase64: '',
+  });
+}
+
+export default function App() {
+  return <View onLayout={() => void send()} />;
+}
+`);
+
+    expect(manifest.hostModules.service).toEqual({
+      rpc: ['private.Route'],
+      events: [],
+    });
+  });
+
+  it('fails closed when a spread can override the service route', async () => {
+    await expectBuildFailure(
+      `
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+const override = { route: 'private.Route' };
+
+function send() {
+  return call({ route: 'allowed.Route', payloadBase64: '', ...override });
+}
+
+export default function App() {
+  return <View onLayout={() => void send()} />;
+}
+`,
+      'host:service'
+    );
+  });
+
   it('records literal subscription events', async () => {
     const manifest = await buildManifest(`
 import { on } from 'host:service';

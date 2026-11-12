@@ -1166,6 +1166,38 @@ function analyzeServiceUsage(code) {
     return (argument.properties ?? []).find((property) => propertyName(property) === key);
   };
 
+  // Resolve the effective value of a string property while respecting object
+  // evaluation order. A spread after the key or a dynamic computed key can
+  // override it, so those cases fail closed.
+  const effectiveStringProperty = (argument, key) => {
+    if (!argument || argument.type !== 'ObjectExpression') return undefined;
+    let value;
+    let seenKey = false;
+    for (const property of argument.properties ?? []) {
+      if (property.type === 'SpreadElement' || property.type === 'SpreadProperty') {
+        if (seenKey) {
+          throw new Error(`host:service input cannot use a spread after "${key}"`);
+        }
+        continue;
+      }
+      const name = propertyName(property);
+      if (name === undefined && property.computed) {
+        throw new Error(`host:service input cannot use a computed key next to "${key}"`);
+      }
+      if (name !== key) continue;
+      seenKey = true;
+      const propertyValue = property.value;
+      if (
+        !(propertyValue?.type === 'StringLiteral' || propertyValue?.type === 'Literal') ||
+        typeof propertyValue.value !== 'string'
+      ) {
+        throw new Error(`host:service input requires a literal "${key}"`);
+      }
+      value = propertyValue.value;
+    }
+    return value;
+  };
+
   const result = oxc.parseSync(code, { sourceFilename: 'bundle.js' });
   const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
 
@@ -1261,14 +1293,9 @@ function analyzeServiceUsage(code) {
         events.add(argument.value);
         return;
       }
-      const eventProperty = firstProperty(argument, 'event');
-      const eventValue = eventProperty?.value;
-      if (
-        eventProperty &&
-        (eventValue?.type === 'StringLiteral' || eventValue?.type === 'Literal') &&
-        typeof eventValue.value === 'string'
-      ) {
-        events.add(eventValue.value);
+      const event = effectiveStringProperty(argument, 'event');
+      if (event) {
+        events.add(event);
         return;
       }
       throw new Error('host:service.on requires a statically known event name');
@@ -1277,16 +1304,11 @@ function analyzeServiceUsage(code) {
     if (!argument || argument.type !== 'ObjectExpression') {
       throw new Error(`host:service.${method} requires an object literal`);
     }
-    const routeProperty = firstProperty(argument, 'route');
-    const routeValue = routeProperty?.value;
-    if (
-      !routeProperty ||
-      !(routeValue?.type === 'StringLiteral' || routeValue?.type === 'Literal') ||
-      typeof routeValue.value !== 'string'
-    ) {
+    const route = effectiveStringProperty(argument, 'route');
+    if (!route) {
       throw new Error(`host:service.${method} requires a literal "route"`);
     }
-    rpc.add(routeValue.value);
+    rpc.add(route);
   });
 
   return { rpc: Array.from(rpc).sort(), events: Array.from(events).sort() };
