@@ -58,10 +58,7 @@ enum RealmJoinService {
         guard let discoveryURL = URL(string: "https://\(domain)/.well-known/actr") else {
             throw joinError("The Realm domain in the invite is invalid.")
         }
-        let (descriptorBody, descriptorResponse) =
-            try await URLSession.shared.data(from: discoveryURL)
-        try requireHTTPS(descriptorResponse)
-        try requireSuccess(descriptorResponse)
+        let descriptorBody = try await fetchBoundedDocument(discoveryURL)
         guard let descriptorText = String(data: descriptorBody, encoding: .utf8) else {
             throw joinError("The authority information is not valid text.")
         }
@@ -78,9 +75,7 @@ enum RealmJoinService {
         guard let profileURL = URL(string: profilePath) else {
             throw joinError("The Realm Profile location is invalid.")
         }
-        let (profileBody, profileResponse) = try await URLSession.shared.data(from: profileURL)
-        try requireHTTPS(profileResponse)
-        try requireSuccess(profileResponse)
+        let profileBody = try await fetchBoundedDocument(profileURL)
         guard let profileText = String(data: profileBody, encoding: .utf8) else {
             throw joinError("The Realm Profile is not valid text.")
         }
@@ -152,5 +147,22 @@ enum RealmJoinService {
                     "The Realm information was served over an insecure connection.",
                     comment: "Actr join insecure transport error")])
         }
+    }
+
+    /// Bounded fetch for the join flow's discovery documents: HTTPS, 2xx, and
+    /// a size cap so a hostile endpoint cannot exhaust memory.
+    private static func fetchBoundedDocument(_ url: URL) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try requireHTTPS(response)
+        try requireSuccess(response)
+        let maxBytes = 4 * 1024 * 1024
+        guard data.count <= maxBytes else {
+            throw NSError(
+                domain: "ActrJoin", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                    "The Realm information exceeds the size limit.",
+                    comment: "Actr join document size error")])
+        }
+        return data
     }
 }

@@ -13,59 +13,15 @@ enum ActrBindingsAvailability {
     static var actrNodeType: ActrNode.Type { ActrNode.self }
 }
 
-// MARK: - Installation identity (local realm address prefix, 04 §2)
-
-/// Shell-owned local installation identity (26-char base32, a-z 2-7 —
-/// validateInstallationId format). Generated once, persisted in App Support;
-/// prefix of the local-realm instance addresses (actr://<installation>.actr.alt/…).
-enum ActrInstallationIdentity {
-    static var installationId: String {
-        if let cached = loadCached() {
-            return cached
-        }
-        let generated = generate()
-        persist(generated)
-        return generated
-    }
-
-    private static var identityFile: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        return (support ?? FileManager.default.temporaryDirectory)
-            .appendingPathComponent("Actrium", isDirectory: true)
-            .appendingPathComponent("installation-id", isDirectory: false)
-    }
-
-    private static let alphabet = Array("abcdefghijklmnopqrstuvwxyz234567")
-
-    private static func generate() -> String {
-        String((0..<26).map { _ in alphabet.randomElement()! })
-    }
-
-    private static func loadCached() -> String? {
-        guard let raw = try? String(contentsOf: identityFile, encoding: .utf8),
-              isValid(raw)
-        else { return nil }
-        return raw
-    }
-
-    /// Format check (26 chars, base32 a-z/2-7) mirroring validateInstallationId.
-    static func isValid(_ id: String) -> Bool {
-        id.count == 26 && id.allSatisfy(alphabet.contains)
-    }
-
-    private static func persist(_ id: String) {
-        try? FileManager.default.createDirectory(
-            at: identityFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? id.data(using: .utf8)?.write(to: identityFile, options: .atomic)
-    }
-}
-
 // MARK: - Instance address (04 §2 local realm form)
 
 /// Local realm instance address form: `actr://<installation-id>.actr.alt/<realm-id>`.
+/// The installation id comes from the unified provider
+/// (`InstallationIdProvider.getOrCreate`), the same identity the parser uses
+/// for its local-Realm ownership check.
 enum ActrInstanceAddress {
     static func instanceURL(actorId: String) -> URL? {
-        let install = ActrInstallationIdentity.installationId
+        let install = InstallationIdProvider.getOrCreate()
         // Short, shareable label derived from the persistent ActorId.
         let short = String(actorId.suffix(12))
         return URL(string: "actr://\(install).actr.alt/\(short)")

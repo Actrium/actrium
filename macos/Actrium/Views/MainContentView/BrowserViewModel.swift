@@ -725,30 +725,41 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // 0. Realm link resolution — the address bar only accepts actr://
-        // links; the core parser owns that decision (case-insensitive scheme,
-        // format rules, local-Realm ownership) and every other input is
-        // rejected as invalid.
-        do {
-            let info = try ActriumCore.parseActrUri(
-                uri: trimmed,
-                installationId: InstallationIdProvider.getOrCreate()
-            )
-            // Temporary flow: opening any actr:// link first requires an invite
-            // code; a Realm already redeemed goes straight through (its
-            // RealmMembership identity is already in the Keychain).
-            let realmName = [info.realmId, info.domain].compactMap { $0 }.joined(separator: "@")
-            guard pendingInviteRedeem == nil else { return }
-            guard !redeemedRealms.contains(realmName) else {
-                handleResolvedRealmLink(info, input: trimmed, tabIndex: index)
+        // 0. actr:// Realm links — the core parser owns the decision
+        // (case-insensitive scheme, format rules, local-Realm ownership).
+        // Only actr-scheme input enters this branch; every other input falls
+        // through to the existing navigation handlers below (local paths,
+        // about:, web, package direct links).
+        if trimmed.lowercased().hasPrefix("actr://") {
+            do {
+                let info = try ActriumCore.parseActrUri(
+                    uri: trimmed,
+                    installationId: InstallationIdProvider.getOrCreate()
+                )
+                // Local instance links skip the invite gate: there is no remote
+                // issuer to redeem with for a local Realm, and the parser has
+                // already validated that the address belongs to this
+                // installation (UriLocalRealmForeign otherwise).
+                if info.isLocal {
+                    handleResolvedRealmLink(info, input: trimmed, tabIndex: index)
+                    return
+                }
+                // Temporary flow: opening a remote actr:// link first requires
+                // an invite code; a Realm already redeemed goes straight
+                // through (its RealmMembership identity is in the Keychain).
+                let realmName = [info.realmId, info.domain].compactMap { $0 }.joined(separator: "@")
+                guard pendingInviteRedeem == nil else { return }
+                guard !redeemedRealms.contains(realmName) else {
+                    handleResolvedRealmLink(info, input: trimmed, tabIndex: index)
+                    return
+                }
+                pendingInviteRedeem = PendingInviteRedeem(uri: trimmed, domain: info.domain)
+                return
+            } catch {
+                logger.warning("⚠️ [navigateCurrentTab] actr:// input rejected: \(error)")
+                presentRealmLinkError(error)
                 return
             }
-            pendingInviteRedeem = PendingInviteRedeem(uri: trimmed, domain: info.domain)
-            return
-        } catch {
-            logger.warning("⚠️ [navigateCurrentTab] input rejected: \(error)")
-            presentRealmLinkError(error)
-            return
         }
 
         // 1. Check for local file path
@@ -1231,9 +1242,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Realm discovery (verification-funnel layer 1) followed by Realm
     /// Profile discovery (layer 2): fetch the authority descriptor, validate
     /// it, then fetch and verify the Realm Profile it points to. The package
-    /// target that comes out feeds package acquisition; the package is cached
-    /// and handed to the import pipeline in the originating tab (same-tab
-    /// replace). Publisher-key signature verification still hooks in here (B3).
+    /// target that comes out feeds package acquisition: the archive digest is
+    /// compared against the profile's authenticated `packageSha256` and the
+    /// manifest signature is verified with the publisher keys from the
+    /// profile funnel (15-B B3) before the package is cached, imported in the
+    /// originating tab (same-tab replace) and its publisher keys pinned for
+    /// restart restore.
     private func discoverAuthority(
         url: URL,
         domain: String,
@@ -1242,28 +1256,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     ) {
         Task { @MainActor in
             do {
-                let (data, response) = try await URLSession.shared.data(from: url)
-                guard let http = response as? HTTPURLResponse,
-                      (200 ..< 300).contains(http.statusCode) else {
-                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: String(
-                            format: NSLocalizedString(
-                                "The authority information for this domain is unavailable (HTTP %ld).",
-                                comment: "Actr authority fetch failure"),
-                            status)])
-                }
-                // Every hop of a redirect chain must stay on HTTPS; the
-                // default session follows redirects, so checking the final
-                // response URL is the minimal enforcement here.
-                guard let finalURL = response.url, finalURL.scheme?.lowercased() == "https" else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 2,
-                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                            "The authority information was served over an insecure connection.",
-                            comment: "Actr authority insecure transport error")])
-                }
+                let data = try await Self.fetchBoundedDocument(
+                    from: url,
+                    insecureMessage: NSLocalizedString(
+                        "The authority information was served over an insecure connection.",
+                        comment: "Actr authority insecure transport error"))
                 guard let body = String(data: data, encoding: .utf8) else {
                     throw NSError(
                         domain: "ActrDiscovery", code: 3,
@@ -1292,27 +1289,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                                 comment: "Actr realm profile URL error"),
                             profilePath)])
                 }
-                let (profileData, profileResponse) =
-                    try await URLSession.shared.data(from: profileURL)
-                guard let profileHTTP = profileResponse as? HTTPURLResponse,
-                      (200 ..< 300).contains(profileHTTP.statusCode) else {
-                    let status = (profileResponse as? HTTPURLResponse)?.statusCode ?? -1
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 5,
-                        userInfo: [NSLocalizedDescriptionKey: String(
-                            format: NSLocalizedString(
-                                "The Realm Profile for this instance is unavailable (HTTP %ld).",
-                                comment: "Actr realm profile fetch failure"),
-                            status)])
-                }
-                guard let profileFinal = profileResponse.url,
-                      profileFinal.scheme?.lowercased() == "https" else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 6,
-                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                            "The Realm Profile was served over an insecure connection.",
-                            comment: "Actr realm profile insecure transport error")])
-                }
+                let profileData = try await Self.fetchBoundedDocument(
+                    from: profileURL,
+                    insecureMessage: NSLocalizedString(
+                        "The Realm Profile was served over an insecure connection.",
+                        comment: "Actr realm profile insecure transport error"))
                 guard let profileBody = String(data: profileData, encoding: .utf8) else {
                     throw NSError(
                         domain: "ActrDiscovery", code: 7,
@@ -1343,11 +1324,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                                 comment: "Actr publisher domain error"),
                             profile.packageType)])
                 }
-                let (publisherData, publisherResponse) =
-                    try await URLSession.shared.data(from: publisherURL)
-                try Self.requireSuccess(publisherResponse, insecureMessage: NSLocalizedString(
-                    "The publisher information was served over an insecure connection.",
-                    comment: "Actr publisher insecure transport error"))
+                let publisherData = try await Self.fetchBoundedDocument(
+                    from: publisherURL,
+                    insecureMessage: NSLocalizedString(
+                        "The publisher information was served over an insecure connection.",
+                        comment: "Actr publisher insecure transport error"))
                 guard let publisherBody = String(data: publisherData, encoding: .utf8) else {
                     throw NSError(
                         domain: "ActrDiscovery", code: 9,
@@ -1371,18 +1352,23 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             "The package location is invalid.",
                             comment: "Actr package URL error")])
                 }
-                let downloadedURL = try await Self.downloadPackage(
-                    from: packageURL,
-                    expectedSha256: profile.packageSha256
-                )
-                logger.notice("📦 [navigateCurrentTab] Package downloaded to \(downloadedURL.path)")
-
-                // 15-B B3 verification (SHA-256 against the Realm Profile digest
-                // plus the publisher Ed25519 signature) is intentionally skipped
-                // for now. Continue straight to the digest cache and import
-                // pipeline (B2/B4/B6); the verification step will hook in here.
-                logger.notice("ℹ️ [navigateCurrentTab] Package verification skipped (expected sha256=\(profile.packageSha256.prefix(12))…, \(activePackageKeys.count) publisher key(s))")
+                // 15-B B3: the package is downloaded through the streaming
+                // path (64 MiB abort, redirect-host guard), then verified
+                // before anything is cached or executed.
+                let downloadedURL = try await ActrPackageDownloadService.download(from: packageURL)
                 let digest = try await ActrPackageDownloadService.sha256Digest(of: downloadedURL)
+                // 04 §3: fail closed when the bytes do not match the digest
+                // authenticated by the Realm Profile.
+                guard digest == profile.packageSha256.lowercased() else {
+                    throw NSError(
+                        domain: "ActrDiscovery", code: 25,
+                        userInfo: [NSLocalizedDescriptionKey: String(
+                            format: NSLocalizedString(
+                                "The downloaded package does not match the digest in the Realm Profile (PACKAGE_DIGEST_MISMATCH): expected %@…, got %@…",
+                                comment: "Actr package digest mismatch"),
+                            String(profile.packageSha256.prefix(12)),
+                            String(digest.prefix(12)))])
+                }
                 let cachedArchiveURL = try ActrPackageCache.installArchive(
                     at: downloadedURL,
                     digest: digest
@@ -1390,13 +1376,45 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 try? FileManager.default.removeItem(at: downloadedURL)
                 ActrPackageCache.rememberDownloadURL(packageURL, digest: digest)
 
+                // Verify the manifest signature with the publisher keys the
+                // profile funnel authenticated, then pin them per publisher
+                // domain so a restart restore re-verifies with the same keys.
+                let publisherKeys: [Data] = activePackageKeys.compactMap { key in
+                    guard let data = Data(base64Encoded: key.publicKeyBase64),
+                          data.count == 32
+                    else { return nil }
+                    return data
+                }
+                _ = try ActrPackageCache.extractArchiveIfNeeded(cachedArchiveURL, digest: digest) {
+                    try self.validateExtractedPackage(
+                        at: $0,
+                        requireSignature: true,
+                        additionalTrustedKeys: publisherKeys
+                    )
+                }
+                ActrPackageTrustStore.recordVerifiedPublisherKeys(
+                    domain: publisherDomain,
+                    keys: activePackageKeys.compactMap { key in
+                        guard let data = Data(base64Encoded: key.publicKeyBase64),
+                              data.count == 32
+                        else { return nil }
+                        return ActrPackageTrustStore.TrustedKey(
+                            publicKey: data,
+                            keyId: key.id,
+                            origin: "discovery:\(publisherDomain)"
+                        )
+                    }
+                )
+                logger.notice("🔐 [navigateCurrentTab] Package verified: digest matches the Realm Profile, manifest signature verified with \(publisherKeys.count) publisher key(s)")
+
                 // Hand over to the import pipeline: digest cache → manifest →
                 // render Guest → offer instance creation (URI replace to the
                 // instance address, 15-B B6).
                 importACTRPackage(
                     from: cachedArchiveURL,
                     knownDigest: digest,
-                    requireSignature: false,
+                    requireSignature: true,
+                    additionalTrustedKeys: publisherKeys,
                     replacingTabId: replacingTabId
                 )
             } catch {
@@ -1426,46 +1444,24 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
     }
 
-    /// Download the `.actr` package into an isolated temp directory. Size is
-    /// capped at 64 MiB (Content-Length pre-check plus a post-download
-    /// check); digest and signature verification happen in the next funnel
-    /// step.
-    private static func downloadPackage(from url: URL, expectedSha256: String) async throws -> URL {
-        let maxBytes = 64 * 1024 * 1024
+    /// Small bounded fetch for discovery documents (authority descriptor,
+    /// Realm Profile, Publisher Profile): 2xx + HTTPS via `requireSuccess`,
+    /// and a size cap so a hostile endpoint cannot exhaust memory.
+    private static func fetchBoundedDocument(
+        from url: URL,
+        insecureMessage: String
+    ) async throws -> Data {
         let (data, response) = try await URLSession.shared.data(from: url)
-        guard response.url?.scheme?.lowercased() == "https" else {
+        try requireSuccess(response, insecureMessage: insecureMessage)
+        let maxBytes = 4 * 1024 * 1024
+        guard data.count <= maxBytes else {
             throw NSError(
-                domain: "ActrDiscovery", code: 22,
+                domain: "ActrDiscovery", code: 26,
                 userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                    "The package was served over an insecure connection.",
-                    comment: "Actr package insecure transport error")])
+                    "The discovery document exceeds the size limit.",
+                    comment: "Actr discovery document size error")])
         }
-        guard let http = response as? HTTPURLResponse,
-              (200 ..< 300).contains(http.statusCode) else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw NSError(
-                domain: "ActrDiscovery", code: 23,
-                userInfo: [NSLocalizedDescriptionKey: String(
-                    format: NSLocalizedString(
-                        "The package download failed (HTTP %ld).",
-                        comment: "Actr package fetch failure"),
-                    status)])
-        }
-        if http.expectedContentLength > maxBytes || data.count > maxBytes {
-            throw NSError(
-                domain: "ActrDiscovery", code: 24,
-                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                    "The package exceeds the download size limit.",
-                    comment: "Actr package size error")])
-        }
-
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("actr-packages", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let destination = directory
-            .appendingPathComponent("\(expectedSha256)-\(UUID().uuidString).actr")
-        try data.write(to: destination, options: .atomic)
-        return destination
+        return data
     }
 
     /// Surface a rejected actr:// link with variant-specific copy.
@@ -1757,6 +1753,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         knownDigest: String? = nil,
         presentInstanceCreation: Bool = true,
         requireSignature: Bool = true,
+        additionalTrustedKeys: [Data] = [],
         replacingTabId: UUID? = nil
     ) -> Tab? {
         let resolvedURL = fileURL.standardizedFileURL
@@ -1784,7 +1781,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let digest = try knownDigest ?? ActrPackageDownloadService.sha256FileSync(at: resolvedURL)
                 let archiveURL = try ActrPackageCache.installArchive(at: resolvedURL, digest: digest)
                 rootDir = try ActrPackageCache.extractArchiveIfNeeded(archiveURL, digest: digest) {
-                    try self.validateExtractedPackage(at: $0, requireSignature: requireSignature)
+                    try self.validateExtractedPackage(
+                        at: $0,
+                        requireSignature: requireSignature,
+                        additionalTrustedKeys: additionalTrustedKeys
+                    )
                 }
                 packageDigest = digest
                 cachedArchiveURL = archiveURL
@@ -1797,7 +1798,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         do {
             let manifestInfo = try readPackageManifest(
                 fromRoot: rootDir,
-                requireSignature: !isDirectory.boolValue && requireSignature
+                requireSignature: !isDirectory.boolValue && requireSignature,
+                additionalTrustedKeys: additionalTrustedKeys
             )
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
@@ -2426,9 +2428,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private func readPackageManifest(
         fromRoot root: URL,
-        requireSignature: Bool = false
+        requireSignature: Bool = false,
+        additionalTrustedKeys: [Data] = []
     ) throws -> ActrPackageManifestInfo {
-        try ActrPackageManifestReader.read(fromRoot: root, requireSignature: requireSignature)
+        try ActrPackageManifestReader.read(
+            fromRoot: root,
+            requireSignature: requireSignature,
+            additionalTrustedKeys: additionalTrustedKeys
+        )
     }
 
     /// Escapes text interpolated into the static HTML error/info pages.
@@ -2444,8 +2451,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Validates a staging extraction before it enters the digest cache
     /// (05 §15): manifest signature (actr-package/2) plus per-file SHA-256
     /// integrity. Throws on failure so the cache never keeps unverified bytes.
-    private func validateExtractedPackage(at root: URL, requireSignature: Bool = true) throws {
-        _ = try readPackageManifest(fromRoot: root, requireSignature: requireSignature)
+    private func validateExtractedPackage(
+        at root: URL,
+        requireSignature: Bool = true,
+        additionalTrustedKeys: [Data] = []
+    ) throws {
+        _ = try readPackageManifest(
+            fromRoot: root,
+            requireSignature: requireSignature,
+            additionalTrustedKeys: additionalTrustedKeys
+        )
     }
 
     /// Universal script reading method

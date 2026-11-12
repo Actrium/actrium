@@ -796,9 +796,7 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
                 }
                 return
             }
-            let ok = window.makeFirstResponder(textField)
-            NSLog("🩺 [SelfDrawnAddressInputField] focus after \(attempt) retry(ies): makeFR=%@",
-                  ok ? "ok" : "FAIL")
+            let _ = window.makeFirstResponder(textField)
             textField.currentEditor()?.selectAll(nil)
             coordinator.startObservingFirstResponder()
         }
@@ -844,8 +842,6 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
             let isFieldEditor = (firstResponder as? NSTextView)?.delegate === textField
 
             if !isOurTextField && !isFieldEditor {
-                NSLog("🩺 [SelfDrawnAddressInputField] KVO blur: firstResponder=%@",
-                      String(describing: firstResponder))
                 DispatchQueue.main.async {
                     self.parent.onBlur()
                 }
@@ -858,7 +854,6 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
-            NSLog("🩺 [SelfDrawnAddressInputField] beginEditing: keyboard input reached field editor")
             startObservingFirstResponder()
             parent.onInputActivity?()
         }

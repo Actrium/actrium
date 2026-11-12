@@ -24,16 +24,28 @@ enum ActrPackageCache {
 
     // MARK: - Paths
 
+    /// Digests reach the cache from user-writable state (URL memo, instance
+    /// store) and are interpolated into filesystem paths, so only the exact
+    /// lowercase-hex sha256 form is accepted.
+    private static let digestPattern = try! NSRegularExpression(pattern: "^[0-9a-f]{64}$")
+
+    static func isValidDigest(_ digest: String) -> Bool {
+        let range = NSRange(digest.startIndex..., in: digest)
+        return digestPattern.firstMatch(in: digest, range: range) != nil
+    }
+
     /// Digest-addressed path of the archived package.
     static func archiveURL(forDigest digest: String) -> URL {
-        root
+        precondition(isValidDigest(digest), "cache paths require a 64-char lowercase hex digest")
+        return root
             .appendingPathComponent("packages/sha256/\(digest)", isDirectory: true)
             .appendingPathComponent("package.actr")
     }
 
     /// Digest-addressed extraction directory.
     static func extractedURL(forDigest digest: String) -> URL {
-        root.appendingPathComponent("extracted/sha256/\(digest)", isDirectory: true)
+        precondition(isValidDigest(digest), "cache paths require a 64-char lowercase hex digest")
+        return root.appendingPathComponent("extracted/sha256/\(digest)", isDirectory: true)
     }
 
     // MARK: - Archive install

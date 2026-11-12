@@ -7501,9 +7501,11 @@ public func acceptAuthorityDescriptor(body: String, domain: String)throws  -> Au
 })
 }
 /**
- * Validate the descriptor served by a publisher domain and verify its
- * inline Publisher Profile; extract the package signing keys that
- * verify the `.actr` package signature.
+ * Validate the well-known document served by a publisher domain and
+ * extract its package signing keys. The document itself is not
+ * signature-verified here; callers authenticate the keys through the
+ * authority/Realm Profile chain and verify the `.actr` package
+ * signature with them.
  */
 public func acceptPublisherProfile(body: String, domain: String)throws  -> PublisherProfileInfo  {
     return try  FfiConverterTypePublisherProfileInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {

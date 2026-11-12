@@ -25,9 +25,17 @@ enum ActrPackageManifestReader {
     /// - Parameter requireSignature: verify manifest.sig (Ed25519) before reading.
     ///   Set for package archives (15-B B3); local dev directories are explicitly
     ///   trusted and pass false.
-    static func read(fromRoot root: URL, requireSignature: Bool = false) throws -> ActrPackageManifestInfo {
+    /// - Parameter additionalTrustedKeys: raw 32-byte Ed25519 public keys to
+    ///   verify against in addition to the trust-store keys (e.g. the publisher
+    ///   keys authenticated by the discovery funnel).
+    static func read(
+        fromRoot root: URL,
+        requireSignature: Bool = false,
+        additionalTrustedKeys: [Data] = []
+    ) throws -> ActrPackageManifestInfo {
         if requireSignature {
-            let trustedKeys = ActrPackageTrustStore.trustedKeys().map(\.publicKey)
+            var trustedKeys = ActrPackageTrustStore.trustedKeys().map(\.publicKey)
+            trustedKeys.append(contentsOf: additionalTrustedKeys)
             if !trustedKeys.isEmpty {
                 actrManifestLogger.notice(
                     "[ActrPackageManifestReader] verifying signature with \(trustedKeys.count) trusted key(s)"

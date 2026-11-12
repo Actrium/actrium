@@ -24,8 +24,14 @@ enum ActrPackageLinkPolicy {
         }
     }
 
+    /// Exact loopback match: `127.0.0.1` is matched literally so names like
+    /// `127.0.0.1.evil.com` are not treated as loopback.
     static func isLoopbackHost(_ host: String) -> Bool {
-        host == "localhost" || host == "::1" || host == "[::1]" || host.hasPrefix("127.")
+        host == "localhost"
+            || host == "::1"
+            || host == "[::1]"
+            || host == "127.0.0.1"
+            || host == "[0:0:0:0:0:0:0:1]"
     }
 }
 

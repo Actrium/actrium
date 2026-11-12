@@ -83,15 +83,19 @@ public enum AppleActrPackageManifestReader {
 
     /// Verifies manifest.sig (64-byte Ed25519 over the raw manifest.toml bytes,
     /// actr-package/2) against a set of trusted raw public keys. Mirrors
-    /// actr_pack::verify_actor_package: fail-closed on a signed package.
+    /// actr_pack::verify_actor_package: the verifying key is bound to the
+    /// manifest's `signature.key_id` and the `signature.algorithm` must be
+    /// ed25519; fail-closed on a signed package.
     ///
     /// Trusted key sourcing is platform-specific and stays with the host app;
     /// the long-term target is a unified verifyActrPackage FFI on actr-ffi
     /// (plan 15 IF-1).
     ///
-    /// - Parameter trustedKeys: raw 32-byte Ed25519 public keys; any match accepts.
+    /// - Parameter trustedKeys: raw 32-byte Ed25519 public keys; the manifest's
+    ///   `signature.key_id` selects the verifying key.
     public static func verifyManifestSignature(fromRoot root: URL, trustedKeys: [Data]) throws {
-        guard let manifestURL = findManifest(in: root) else {
+        let manifestURL = root.appendingPathComponent("manifest.toml", isDirectory: false)
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
             // read(fromRoot:) reports the missing manifest with code 1.
             return
         }
@@ -109,15 +113,62 @@ public enum AppleActrPackageManifestReader {
         }
 
         let manifestBytes = try Data(contentsOf: manifestURL)
+        // Bind the verifying key to signature.key-id and require the declared
+        // algorithm (actr_pack::verify_actor_package).
+        let manifestToml = String(data: manifestBytes, encoding: .utf8) ?? ""
+        let signatureFields = manifestSignatureFields(manifestToml)
+        guard signatureFields.algorithm?.lowercased() == "ed25519",
+              let expectedKeyId = signatureFields.keyId,
+              !expectedKeyId.isEmpty
+        else {
+            throw AppleActrPackageSignatureError.signatureInvalid
+        }
         for keyData in trustedKeys {
             guard keyData.count == 32,
-                  let key = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData)
+                  let key = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData),
+                  keyId(for: keyData) == expectedKeyId
             else { continue }
             if key.isValidSignature(signature, for: manifestBytes) {
                 return
             }
         }
         throw AppleActrPackageSignatureError.signatureInvalid
+    }
+
+    /// `actr-pub-<sha256(pubkey)[..16]>` (actr_pack::compute_key_id).
+    private static func keyId(for publicKey: Data) -> String {
+        let hex = SHA256.hash(data: publicKey).map { String(format: "%02x", $0) }.joined()
+        return "actr-pub-\(hex.prefix(16))"
+    }
+
+    /// The `signature` table of the manifest TOML (`key_id`, `algorithm`).
+    /// The package manifest is produced by `actr pkg pack`; the flat
+    /// single-line string values this reads are the only forms it writes.
+    private static func manifestSignatureFields(_ manifestToml: String) -> (keyId: String?, algorithm: String?) {
+        var inSignature = false
+        var keyId: String?
+        var algorithm: String?
+        for rawLine in manifestToml.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") {
+                inSignature = line == "[signature]"
+                continue
+            }
+            guard inSignature else { continue }
+            if let value = tomlStringValue(line, key: "key_id") { keyId = value }
+            if let value = tomlStringValue(line, key: "algorithm") { algorithm = value }
+        }
+        return (keyId, algorithm)
+    }
+
+    private static func tomlStringValue(_ line: String, key: String) -> String? {
+        guard let equals = line.firstIndex(of: "=") else { return nil }
+        let name = line[..<equals].trimmingCharacters(in: .whitespaces)
+        guard name == key else { return nil }
+        var value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+        if value.hasSuffix("\"") { value.removeLast() }
+        if value.hasPrefix("\"") { value.removeFirst() }
+        return value
     }
 
     private static func verifyPayloads(
@@ -170,21 +221,13 @@ public enum AppleActrPackageManifestReader {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
+    /// The package manifest is only accepted at the extraction root; a
+    /// manifest.toml found only in a subdirectory is rejected (aligned with
+    /// actr-pack, which reads the archive-root manifest).
     private static func findManifest(in root: URL) -> URL? {
         let direct = root.appendingPathComponent("manifest.toml", isDirectory: false)
-        if FileManager.default.fileExists(atPath: direct.path) {
-            return direct
-        }
-        if let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: nil
-        ) {
-            for case let fileURL as URL in enumerator
-            where fileURL.lastPathComponent == "manifest.toml" {
-                return fileURL
-            }
-        }
-        return nil
+        guard FileManager.default.fileExists(atPath: direct.path) else { return nil }
+        return direct
     }
 
     private static func packageError(code: Int, message: String) -> NSError {

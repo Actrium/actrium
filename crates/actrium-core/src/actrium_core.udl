@@ -41,9 +41,11 @@ namespace actrium_core {
     [Throws=CoreError]
     RealmProfileInfo accept_realm_profile(string body, string realm_name, string signing_keys_json);
 
-    /// Validate the descriptor served by a publisher domain and verify its
-    /// inline Publisher Profile; extract the package signing keys that
-    /// verify the `.actr` package signature.
+    /// Validate the well-known document served by a publisher domain and
+    /// extract its package signing keys. The document itself is not
+    /// signature-verified here; callers authenticate the keys through the
+    /// authority/Realm Profile chain and verify the `.actr` package
+    /// signature with them.
     [Throws=CoreError]
     PublisherProfileInfo accept_publisher_profile(string body, string domain);
 

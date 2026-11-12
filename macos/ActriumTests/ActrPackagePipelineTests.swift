@@ -292,8 +292,11 @@ struct ActrPackagePipelineTests {
         return (MockActrServiceInstanceStore(storeURL: storeURL), storeURL)
     }
 
+    /// 64-char lowercase hex, the shape of a real sha256 digest (cache paths
+    /// validate it).
     private func uniqueDigest() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let hex: (UUID) -> String = { $0.uuidString.replacingOccurrences(of: "-", with: "").lowercased() }
+        return hex(UUID()) + hex(UUID())
     }
 
     private func makeArchive() throws -> URL {
