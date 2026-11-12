@@ -545,10 +545,9 @@ Package 只声明 Actr Host contract 和 capability 要求，不以普通 Actor 
 
 ## 10. 分发与依赖组合
 
-用户打开 Realm 链接时，Actr Host 按该 Realm 的 Realm Profile 中 `package` 给出的地址取得根
-`.actr`，核对 SHA-256 后按本规范验证（[Actr Realm Profile](realm-profile.zh.md) 第 6 节）。
+Realm Profile 选定 Service 和 Front。Host 核对每个加载包的整包摘要、包内 `manifest.sig` 和依赖锁。见 [Realm Profile §6](realm-profile.zh.md#6-使用-realm)。
 
-用户可以只取得一个根 `.actr`。Installer 根据其 lock file 递归取得所需 Actor Package：
+独立安装时，Installer 从根包的 lock file 递归获取依赖。下例以 Guest 包 `notes.actr` 为根。
 
 ```text
 notes.actr                 keel.guest/1
