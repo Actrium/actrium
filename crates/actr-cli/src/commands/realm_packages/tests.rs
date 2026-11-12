@@ -15,6 +15,7 @@ const PROTO: &[u8] = b"syntax = \"proto3\"; package echo; service Echo {}";
 const OTHER_PROTO: &[u8] = b"syntax = \"proto3\"; package other; service Other {}";
 const FRONT_CONTRACT: &str = "contracts/service.proto";
 const SERVICE_EXPORT: &str = "contracts/export.proto";
+const EXTRA_TYPE: &str = "publisher.example/extra@1.0.0";
 type Documents = RefCell<HashMap<String, Vec<u8>>>;
 
 fn key(id: &str, key: &SigningKey) -> Value {
@@ -164,6 +165,17 @@ async fn from_fixture(args: &FetchArgs, docs: &Documents) -> Result<Value> {
     .await
 }
 
+fn publish_profile(docs: &Documents, signer: &SigningKey, profile: &mut Value, sequence: u64) {
+    profile["sequence"] = sequence.into();
+    sign_document(profile, "realm-test", signer);
+    docs.borrow_mut()
+        .insert(REALM_URL.into(), serde_json::to_vec(profile).unwrap());
+}
+
+fn extra_package() -> Value {
+    json!({"type": EXTRA_TYPE, "sha256": "a".repeat(64), "href": "https://cdn.example/extra.actr"})
+}
+
 #[test]
 fn native_and_linked_services_match_exports_but_not_imported_contracts() {
     let signer = SigningKey::from_bytes(&rand::random());
@@ -213,10 +225,7 @@ async fn fetches_a_signed_pair_and_rechecks_cached_archives() {
             .to_string()
             .contains("digest mismatch")
     );
-    profile["sequence"] = 0.into();
-    sign_document(&mut profile, "realm-test", &rk);
-    docs.borrow_mut()
-        .insert(REALM_URL.into(), serde_json::to_vec(&profile).unwrap());
+    publish_profile(&docs, &rk, &mut profile, 0);
     assert!(
         from_fixture(&args, &docs)
             .await
@@ -224,6 +233,80 @@ async fn fetches_a_signed_pair_and_rechecks_cached_archives() {
             .to_string()
             .contains("sequence")
     );
+}
+
+#[tokio::test]
+async fn pins_an_unrequested_package_across_removal_and_reintroduction() {
+    let (docs, signer, mut profile) = fixture(PROTO);
+    let dir = tempfile::tempdir().unwrap();
+    let args = FetchArgs {
+        realm: REALM.into(),
+        additional: vec![],
+        output: dir.path().into(),
+    };
+    let state = dir.path().join("state.json");
+    let extra = extra_package();
+    profile["packages"]["extra"] = extra.clone();
+    publish_profile(&docs, &signer, &mut profile, 1);
+    let result = from_fixture(&args, &docs).await.unwrap();
+    assert!(result["packages"].get("extra").is_none());
+
+    profile["packages"].as_object_mut().unwrap().remove("extra");
+    publish_profile(&docs, &signer, &mut profile, 2);
+    from_fixture(&args, &docs).await.unwrap();
+    let accepted = std::fs::read(&state).unwrap();
+
+    profile["packages"]["renamed"] = extra.clone();
+    profile["packages"]["renamed"]["sha256"] = "b".repeat(64).into();
+    publish_profile(&docs, &signer, &mut profile, 3);
+    let error = from_fixture(&args, &docs).await.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("PACKAGE_EQUIVOCATION for {EXTRA_TYPE}")
+    );
+    assert_eq!(std::fs::read(&state).unwrap(), accepted);
+
+    profile["packages"]["renamed"] = extra;
+    publish_profile(&docs, &signer, &mut profile, 3);
+    assert_eq!(from_fixture(&args, &docs).await.unwrap()["sequence"], 3);
+}
+
+#[tokio::test]
+async fn recovers_missing_pins_before_replacing_a_cached_profile() {
+    let (docs, signer, mut profile) = fixture(PROTO);
+    let dir = tempfile::tempdir().unwrap();
+    let args = FetchArgs {
+        realm: REALM.into(),
+        additional: vec![],
+        output: dir.path().into(),
+    };
+    let state = dir.path().join("state.json");
+    let read_cache = || serde_json::from_slice::<Cache>(&std::fs::read(&state).unwrap()).unwrap();
+    let extra = extra_package();
+    profile["packages"]["extra"] = extra.clone();
+    publish_profile(&docs, &signer, &mut profile, 1);
+
+    // Profile acceptance must survive a failed archive download.
+    let url = profile["packages"]["svc"]["href"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let archive = docs.borrow_mut().remove(&url).unwrap();
+    let error = from_fixture(&args, &docs).await.unwrap_err();
+    assert_eq!(error.to_string(), format!("unexpected fetch {url}"));
+    let mut cache = read_cache();
+    assert_eq!(
+        cache.digests.remove(EXTRA_TYPE).as_deref(),
+        extra["sha256"].as_str()
+    );
+
+    // Simulate a cache that retained the signed Profile but missed the auxiliary digest.
+    std::fs::write(&state, serde_json::to_vec(&cache).unwrap()).unwrap();
+    docs.borrow_mut().insert(url, archive);
+    profile["packages"].as_object_mut().unwrap().remove("extra");
+    publish_profile(&docs, &signer, &mut profile, 2);
+    assert_eq!(from_fixture(&args, &docs).await.unwrap()["sequence"], 2);
+    assert_eq!(read_cache().digests[EXTRA_TYPE], extra["sha256"]);
 }
 
 #[tokio::test]

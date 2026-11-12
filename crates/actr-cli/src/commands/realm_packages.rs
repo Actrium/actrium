@@ -166,20 +166,50 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn check_previous(cache: &Cache, keys: &RealmSigningKeys, next: &RealmProfile) -> Result<()> {
-    if let Some(old) = &cache.profile {
-        // Removing a Realm signing key also removes the baseline it signed.
-        let value = actr_protocol::signed_json::parse(old.as_bytes())?;
-        if keys
-            .keys
-            .iter()
-            .any(|k| value["signature"]["key_id"].as_str() == Some(&k.id))
-        {
-            let previous = RealmProfile::verify(old.as_bytes(), &cache.realm, keys)?;
-            previous.check_successor(next)?;
+impl Cache {
+    fn pin_package_digests(&mut self, profile: &RealmProfile) -> Result<()> {
+        if let Some(selection) = &profile.selection {
+            for package in selection.packages.values() {
+                let pinned = self
+                    .digests
+                    .entry(package.r#type.clone())
+                    .or_insert_with(|| package.sha256.clone());
+                ensure!(
+                    *pinned == package.sha256,
+                    "PACKAGE_EQUIVOCATION for {}",
+                    package.r#type
+                );
+            }
         }
+        Ok(())
     }
-    Ok(())
+
+    fn accept_profile(
+        &mut self,
+        next: &RealmProfile,
+        keys: &RealmSigningKeys,
+        pins: KeyPins,
+        path: &Path,
+    ) -> Result<()> {
+        if let Some(old) = &self.profile {
+            // Removing a Realm signing key also removes the baseline it signed.
+            let value = actr_protocol::signed_json::parse(old.as_bytes())?;
+            if keys
+                .keys
+                .iter()
+                .any(|k| value["signature"]["key_id"].as_str() == Some(&k.id))
+            {
+                let previous = RealmProfile::verify(old.as_bytes(), &self.realm, keys)?;
+                previous.check_successor(next)?;
+                // Older caches pinned only downloaded archives. Recover the rest before replacing the Profile.
+                self.pin_package_digests(&previous)?;
+            }
+        }
+        self.pin_package_digests(next)?;
+        self.realm_keys = Some(pins);
+        self.profile = Some(std::str::from_utf8(next.document())?.to_owned());
+        write_atomic(path, &serde_json::to_vec(self)?)
+    }
 }
 
 pub async fn fetch(args: &FetchArgs) -> Result<Value> {
@@ -226,10 +256,7 @@ where
         cache.realm_keys.as_ref(),
     )
     .await?;
-    check_previous(&cache, &keys, &profile)?;
-    cache.realm_keys = Some(pins);
-    cache.profile = Some(std::str::from_utf8(profile.document())?.to_owned());
-    write_atomic(&path, &serde_json::to_vec(&cache)?)?;
+    cache.accept_profile(&profile, &keys, pins, &path)?;
     if profile.realm.status == RealmStatus::Retired {
         bail!("Realm {} is retired", args.realm);
     }
@@ -252,14 +279,6 @@ where
             .packages
             .get(name)
             .with_context(|| format!("unknown package reference {name:?}"))?;
-        ensure!(
-            cache
-                .digests
-                .get(&entry.r#type)
-                .is_none_or(|digest| digest == &entry.sha256),
-            "PACKAGE_EQUIVOCATION for {}",
-            entry.r#type
-        );
         let domain = entry.actr_type().map_err(anyhow::Error::msg)?.publisher;
         let keys = match publishers.entry(domain.clone()) {
             std::collections::btree_map::Entry::Occupied(slot) => slot.into_mut(),
@@ -298,21 +317,16 @@ where
                 );
             }
         }
-        cache
-            .digests
-            .insert(entry.r#type.clone(), entry.sha256.clone());
         if !destination.exists() {
             write_atomic(&destination, &bytes)?;
         }
         manifests.insert(name.clone(), manifest);
         files.insert(name.clone(), destination);
     }
-    // Only commit and return a usable selection once both verified manifests agree.
     check_realm_pair(
         &manifests[&selection.primary_package],
         &manifests[&selection.front_package],
     )?;
-    write_atomic(&path, &serde_json::to_vec(&cache)?)?;
     Ok(
         json!({"realm":args.realm,"sequence":profile.sequence,"service":files[&selection.primary_package],"front":files[&selection.front_package],"packages":files,"privacy_contract_sha256":privacy_contract}),
     )
