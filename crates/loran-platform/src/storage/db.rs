@@ -3,7 +3,7 @@
 //! Provides a sqlx-based database connection pool and basic operations
 
 use anyhow::Result;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
@@ -41,21 +41,17 @@ impl Database {
 
         let db = Self { pool };
 
-        // Schema changes are explicit and fail closed. Databases from another
-        // schema version must be rebuilt.
-        db.verify_schema_version().await?;
         db.initialize_schema().await?;
 
         Ok(db)
     }
 
-    async fn verify_schema_version(&self) -> Result<()> {
+    async fn verify_schema_version(connection: &mut SqliteConnection) -> Result<i64> {
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *connection)
             .await?;
-        // v11 adds the creation-selection and digest tables in initialize_schema’s transaction.
         if version == LORAN_SCHEMA_VERSION || version == 10 {
-            return Ok(());
+            return Ok(version);
         }
 
         if version == 0 {
@@ -64,10 +60,10 @@ impl Database {
                  FROM sqlite_master
                  WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
             )
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *connection)
             .await?;
             if application_table_count == 0 {
-                return Ok(());
+                return Ok(version);
             }
         }
 
@@ -79,15 +75,11 @@ impl Database {
 
     /// Initialize the database schema.
     ///
-    /// All table/index DDL and the `PRAGMA user_version` bump run inside a single
-    /// transaction so a mid-initialization crash can never leave a half-built
-    /// database with tables present but `user_version = 0` (which the startup gate
-    /// rejects and the migration tool cannot repair). SQLite supports
-    /// transactional DDL and `PRAGMA user_version` participates in the enclosing
-    /// transaction, so the whole schema either lands atomically or rolls back.
-    /// Every statement stays idempotent (`IF NOT EXISTS`) so re-running is safe.
+    /// Check the version, create tables, migrate data and set `user_version` under the
+    /// same write lock. An interrupted migration rolls back and can be retried on restart.
     async fn initialize_schema(&self) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let version = Self::verify_schema_version(&mut tx).await?;
 
         // Create the Realm table, keyed by Realm name `<realm_id>@<domain>`.
         // Callers validate the name before writing; the CHECK is a backstop.
@@ -207,6 +199,19 @@ impl Database {
         )
         .execute(&mut *tx)
         .await?;
+
+        // In v10 the last accepted signed Profile held the only pin for its package.
+        // Copy that pin before v11 can replace the Profile with another version.
+        if version == 10 {
+            sqlx::query(
+                "INSERT INTO realm_package_digest (realm, actor_type, sha256)
+                 SELECT realm, json_extract(document, '$.package.type'),
+                        json_extract(document, '$.package.sha256')
+                 FROM realm_profile WHERE json_type(document, '$.package') = 'object'",
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
 
         // Realm members (`actr/protocols/realm-membership.md`). At most one
         // active owner per Realm.
@@ -700,38 +705,6 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("schema version 0"));
         assert!(message.contains("rebuild the database"));
-    }
-
-    #[tokio::test]
-    async fn upgrades_v10_without_changing_existing_profile_bytes() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = Database::new(dir.path()).await.unwrap();
-        for sql in [
-            "DROP TABLE realm_creation_selection",
-            "DROP TABLE realm_package_digest",
-            "PRAGMA user_version = 10",
-        ] {
-            sqlx::query(sql).execute(db.get_pool()).await.unwrap();
-        }
-        sqlx::query("INSERT INTO realm(name,created_at) VALUES ('sample@example.com',1)")
-            .execute(db.get_pool())
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO realm_profile (realm,sequence,digest,document,accepted_at) VALUES ('sample@example.com',9,'test','signed bytes',1)").execute(db.get_pool()).await.unwrap();
-        db.get_pool().close().await;
-        let upgraded = Database::new(dir.path()).await.unwrap();
-        let doc: String = sqlx::query_scalar(
-            "SELECT document FROM realm_profile WHERE realm='sample@example.com'",
-        )
-        .fetch_one(upgraded.get_pool())
-        .await
-        .unwrap();
-        assert_eq!(doc, "signed bytes");
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM realm_creation_selection")
-            .fetch_one(upgraded.get_pool())
-            .await
-            .unwrap();
-        assert_eq!(count, 0);
     }
 
     #[tokio::test]

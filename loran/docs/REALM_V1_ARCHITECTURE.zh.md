@@ -487,7 +487,7 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议和�
 
 ## 8. 数据与升级
 
-当前 schema v11 使用 SQLite `PRAGMA user_version = 11`，从 v10 打开时在事务内添加选包记录表。Loran 遇到其他不支持的 schema
+当前 schema v11 使用 SQLite `PRAGMA user_version = 11`。从 v10 升级时，在同一事务中建表并从各 Realm 已接受的 Profile 复制包类型和摘要。Loran 遇到其他不支持的 schema
 直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3（新增
 `issuer_control_attempt`）、v3 → v4（以 Realm 名取代数值 Realm id）与 v4 → v5（去掉单
 Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `realm_domain`、
