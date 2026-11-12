@@ -38,6 +38,28 @@ flowchart TB
     CB -->|"Typed Service capability"| SW
 ```
 
+### 1.1 Package selection and runtime instances
+
+Verify the Realm Profile, resolve `packages[primary_package]` as the default
+Service, and verify its separate Front through the matching release record.
+Other explicit references select archives for the instance. Authorized deployment
+configuration determines which Hosts execute which references and how many
+instances to create. Reading a Profile does not start all auxiliary Actors on a client.
+
+For every package actually started, check its digest, Publisher signature,
+manifest type, Workload Profile, Host API, ABI, platform policy and existing
+contracts/locks before execution. Process existence, registration, connectivity
+and business Ready are distinct observations; unmet required dependencies do not
+permit the affected business to open. The catalog infers neither startup order nor RPC routing.
+
+Selection is not Actor/member identity or an admission allowlist. Actors use valid
+client proofs for the target Realm and have separate ActorIds and state. Only the
+owner still registers the primary Service's program. Changing references does not
+implicitly migrate identities, stop processes, delete Workspaces or revoke credentials.
+A supporting deployer should record references, digests, ActorIds and runtime status,
+avoid duplicate creation and retain diagnostics. This documentation revision does not
+claim these implementation tasks are delivered.
+
 ## 2. Front Actor
 
 ### 2.1 Native Front Host and Keel Guest Workload

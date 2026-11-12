@@ -415,7 +415,7 @@ Old Service ActorId + v1 Workspace
   → import/migrate
   → Workspace lease handoff
   → user verification
-  → the Realm Profile's package points to the new Service package
+  → the Realm Profile's resolved primary selects the new Service archive
   → Old archived
 ```
 
@@ -431,6 +431,12 @@ The upgrade changes the Service's ActorId and carries over the Realm link, membe
 application permissions. When another device opens that link, it verifies the new Service package
 pinned by the Realm Profile, finds the Front package through the matching release record, and
 Attaches to the new Service by its Actor type.
+
+A primary upgrade updates its selected entry while retaining other references;
+an intentional auxiliary change submits complete selection. These changes increase
+sequence and are re-signed under Realm Profile Section 7.2, never edited in place.
+A reference is not a persistent ActorId; changing it does not itself migrate identity
+or Workspace, stop a process or delete state.
 
 ## 12. Migrating a Service to another device
 

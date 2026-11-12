@@ -19,6 +19,19 @@ Actrium 必须保证：
 11. 每条网络 Actor edge 的 payload 对 signaling、TURN 和普通 relay 保密，并绑定到真实 Actor/runtime。
 12. private/secret 明文只进入当前 policy 接受且证据新鲜的执行、存储与算力边界。
 
+### 1.1 包选择的信任边界
+
+Realm 域名签名确认本应用实例选择哪些包，Publisher 签名确认代码来源；两者都通过并满足
+已签名发布记录、依赖锁和本地策略后才可运行。`primary_package` 或任一 `packages` 条目被
+篡改都会改变签名 payload。兼容 `package` 必须在签名前派生，冲突时拒绝，不使用优先级回退。
+
+原始 payload 用于验签和回滚比较，归一化只建立内存视图；已接受的新格式不能被更高 sequence
+的 active 旧格式静默清空。主包引用无效时必须拒绝，不能因找不到旧字段而跳过 owner 检查。
+限制引用数量和 Profile 大小，每个包独立执行下载、ZIP 和载荷验证；目录不泄露私钥或成员数据。
+
+本扩展不自动改变准入、Actor credential 或 Privacy Contract，包被列出不产生 capability、
+远端代码执行证明或隐私绿色结论；删除引用不等于停进程或撤销身份。
+
 ## 2. 信任边界
 
 ```mermaid
@@ -105,7 +118,7 @@ flowchart LR
 | Actor 冒充 | Actor credential、Actor key proof、challenge |
 | Realm 邀请泄露 | 一次性、可过期，兑换时须用新 Realm 客户端 key 签名并原子消耗；签发者可撤销未用邀请，owner 可移除误入成员；邀请不进入 URI |
 | 客户端丢失或被盗 | 每个客户端独立的 Realm 客户端 key，成员或 owner 可单独撤销；撤销立即拒绝新 Actor credential 并断开其 signaling/TURN；owner 丢失全部客户端时经 Realm 签名 key 持有方或 Actr Facility Provider 运营者签发的 owner 邀请恢复 |
-| 低权限成员冒充 Service 或改写其连接 ACL | 该实例程序（Realm Profile `package.type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 客户端注册；注册携带的连接 ACL 只作用于所注册 Actor 自己的类型 |
+| 低权限成员冒充 Service 或改写其连接 ACL | 该实例程序（Realm Profile `packages[primary_package].type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 客户端注册；注册携带的连接 ACL 只作用于所注册 Actor 自己的类型 |
 | 伪造或回滚 Realm Profile | Realm Profile 必须由已固定的 Realm 签名 key 签名；首次信任经 Web PKI 或企业 pin；Realm 签名 key 变化须有有效轮换链；`sequence` 单调、`provider.id` 不可变、已退役 Realm 拒绝；Realm Profile 不过期，客户端定期刷新；取不到、验不过或已退役的 Realm Profile 时不得使用 Realm Profile 以外的任何 Actr Facility Provider |
 | 客户端伪装成官方 Actrium Front | Actor credential 不证明对端代码；平台提供可选的 platform/runtime attestation |
 | 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Actr Host 闭合 |

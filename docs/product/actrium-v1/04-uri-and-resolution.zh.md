@@ -9,6 +9,10 @@
 - 地址里没有秘密，知道地址不等于有权进入；
 - 程序从哪里下载由 Realm Profile 决定，不写在地址里。
 
+包选择校验与旧格式内存视图遵循 [Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式)。
+主包引用不存在或兼容投影冲突时以 `REALM_PROFILE_INVALID` 停止打开，不选第一个包兜底。
+读取辅助包目录不表示在客户端启动所有 Actor；链接语法和 Service 精确绑定规则保持不变。
+
 ## 2. 链接形式
 
 ```text
@@ -24,7 +28,7 @@ actr://acme.com/k7m2q9xh/today?view=week#item-3
 
 ## 3. 打开
 
-Actrium 按 Actr URI 第 4 节打开链接。先验证 Realm Profile 和其中 `package` 指定的 Service 包，
+Actrium 按 Actr URI 第 4 节打开链接。先验证 Realm Profile 并解析 `packages[primary_package]` 指定的 Service 包，
 再验证匹配的 Program Release 记录及其 Front 包。Actrium 按已验证的 Front 清单创建 Front Actor，并 Attach 到该实例的 Service。
 
 产品层面的要求：

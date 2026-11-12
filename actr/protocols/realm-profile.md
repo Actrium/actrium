@@ -4,6 +4,12 @@ Language: **English** | [简体中文](realm-profile.zh.md)
 
 Status: initial draft.
 
+Implementation status (2026-11-12): this document defines the
+`primary_package` + `packages` selection extension. This change updates
+documentation only; SDKs, CLI, AFPs and machine-readable schemas do not yet
+implement all new checks or multi-package deployment behavior. Keeping the
+legacy `package` field provides primary-package read compatibility only.
+
 This document defines how an Actr Host or Actr Facility Provider (AFP)
 resolves a Realm name to a verified Realm Profile, the `actr.realm/v1` format,
 and the Realm management requests an Actr Facility Provider accepts.
@@ -15,8 +21,9 @@ application instance creates a new Realm. A Realm is named `<realm_id>@<domain>`
 for example `k7m2q9xh@acme.com`; the syntax is defined in
 [Actr URI](uri.md), Section 5.1.
 
-A Realm Profile is a signed, public document that says which package the
-instance runs and which Issuer and which Actr Facility Provider serve the Realm. A Realm signing key of the Realm domain signs
+A Realm Profile is a signed, public document that declares the application's
+instance-specific package selection, its default Service package, and which
+Issuer and Actr Facility Provider serve the Realm. A Realm signing key of the Realm domain signs
 it, so the Realm Profile can be stored anywhere: on the domain's own static
 hosting, at an Actr Facility Provider, or embedded in a Realm invitation. Where it was
 fetched from does not affect its validity.
@@ -120,9 +127,22 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
     "display_name": "Acme Notes",
     "status": "active"
   },
+  "primary_package": "notes",
+  "packages": {
+    "notes": {
+      "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "type": "notes.example/team-notes@1.4.2"
+    },
+    "index": {
+      "href": "https://cdn.notes.example/notes-index-1.0.0.actr",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "type": "notes.example/notes-index@1.0.0"
+    }
+  },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-    "sha256": "<64 hex>",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "type": "notes.example/team-notes@1.4.2"
   },
   "issuer": {
@@ -161,9 +181,12 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `realm.name` | The Realm name. It **MUST** equal the name being resolved. |
 | `realm.display_name` | Human-readable title. It is not an identifier. |
 | `realm.status` | `active` or `retired`. |
-| `package.href` | HTTPS download address of the package the instance runs; it may be anywhere. |
-| `package.sha256` | SHA-256 of all bytes of that package, in lowercase hexadecimal. |
-| `package.type` | The Actor type `publisher/program@version` declared by that package's manifest, that is, the type of the instance's Service. |
+| `primary_package` | A key in `packages` selecting the instance's default Service package. |
+| `packages` | Explicit package-reference selection for this application instance, not a Publisher catalog or a list of running Actors. |
+| `packages[ref].href` | HTTPS download address of that archive; it may be anywhere. |
+| `packages[ref].sha256` | SHA-256 of all archive bytes, as 64 lowercase hexadecimal digits. |
+| `packages[ref].type` | Exact Actor type `publisher/program@version` declared by that archive's manifest. |
+| `package` | v1 compatibility projection equal to `packages[primary_package]`; only legacy documents use it alone (Section 4.3). |
 | `issuer.url` | Registration and verification endpoint of the Issuer. |
 | `issuer.keys` | Realm issuer public keys used to verify Actor credentials, 1 to 3 entries (Section 6.1). |
 | `provider.id` | Actr Facility Provider ID: the Actr Facility Provider's canonical DNS authority. It never changes during the Realm's life. |
@@ -173,9 +196,14 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `issued_at` | RFC 3339 time the Realm Profile was signed. It is informational; Realm Profiles do not expire. |
 | `signature` | Detached signature by a Realm signing key. |
 
-When `realm.status` is `active`, the Realm Profile **MUST** include `package`.
+When `realm.status` is `active`, producers implementing this extension **MUST**
+provide `primary_package`, nonempty `packages`, and the `package` projection.
+Legacy documents carrying only `package` are accepted as in Section 4.3.
+This extension retains `actr.realm/v1` and the existing requirement that every
+active v1 document includes `package`.
 
-Every endpoint **MUST** contain a nonempty host. `package.href` and `issuer.url`
+Every endpoint **MUST** contain a nonempty host. Each `packages[ref].href`,
+the compatibility `package.href`, and `issuer.url`
 **MUST** use HTTPS; `provider.signaling[].url` **MUST** use WSS. Each
 `provider.ice[].urls` list **MUST** be nonempty and contain STUN/TURN addresses
 following [RFC 7064](https://www.rfc-editor.org/rfc/rfc7064) or
@@ -189,11 +217,108 @@ A Realm Profile **MUST NOT** contain secrets, private keys, access tokens,
 member lists, or user-specific data. Actr Hosts **MUST** ignore unknown
 members.
 
+### 4.1 Application-instance package selection
+
+`packages` fixes the archives explicitly selected for this instance. The
+Publisher publishes and signs packages, declares dependencies and supplies
+download locations; the Realm signing key holder confirms the instance's
+choice of exact archives. A Publisher-supplied location neither prevents
+recording that choice in the Profile nor makes the location a trust source.
+
+A reference name is local to this Realm configuration. It is not a
+ProgramId, ActorId, member role or dependency alias, and grants no authority
+to the code. `primary_package` selects the default Service, without forcing
+other Actors to route through it. Selection does not specify replica count,
+Host placement, startup order, PIDs, state directories or live ActorIds;
+authorized deployment configuration and Hosts manage these separately.
+One archive may serve multiple authorized Actor instances.
+
+Selected packages **MUST** satisfy verified Publisher release records,
+dependency version constraints, contracts and exact dependency locks.
+Conflicts **MUST** be rejected; a valid Realm signature cannot override a
+Publisher-pinned digest. Product v1's matching signed Program Release record
+still pins the companion Front. If `packages` also lists that Front, its
+type and digest **MUST** agree with the record. Omitting the redundant Front
+entry does not remove that binding. Runtime dependencies do not imply the
+same Realm (Actor Package Section 6.5), so this map need not enumerate code
+in other Realms.
+
+This extension is not an Actor-registration allowlist. Listing a package
+does not replace membership proofs, Publisher trust, connection ACLs,
+capabilities or deployment authorization. Omission alone does not revoke
+existing Actors. A mandatory admission policy needs a separately defined,
+negotiated and enforced rule; unknown fields ignored by legacy software
+cannot enforce a security restriction.
+
+### 4.2 Package-selection validation
+
+Receivers implementing this extension **MUST** check:
+
+Checks 2–6 apply to documents carrying explicit selection; legacy documents
+are accepted under Section 4.3. Check 7 applies to every Profile.
+
+1. `primary_package` and `packages` are both present or both absent. If only
+   one occurs, the receiver must not fall back to legacy `package`.
+2. `packages` is an object with 1 to 32 entries. Each reference name is 1 to
+   63 lowercase letters, digits or hyphens, with no leading or trailing
+   hyphen. Duplicate JSON members **MUST** be rejected.
+3. `primary_package` is a string exactly matching a map key. It is not
+   interpreted as an ActorId or a guessed download location.
+4. Every entry includes `href`, `sha256` and `type`, validated as HTTPS,
+   64 lowercase hexadecimal digits, and exact `publisher/program@version`,
+   respectively. A version range or `latest` cannot replace an exact version.
+5. One exact `type` cannot bind two different digests. This extension does
+   not define a multi-platform archive matrix for the same type.
+6. In an explicit-selection document, `package` is the same JSON object as
+   the selected reference, disregarding object-member order but not fields
+   or string differences. A mismatch is rejected, not resolved by picking
+   one of the two copies.
+7. The complete public Profile, including its signature, is at most 64 KiB.
+   The entry limit does not relax transport, ZIP or payload limits.
+
+A retired document may retain the last valid selection or omit selection
+and compatibility fields; it authorizes no further Actor starts. Present
+selection fields must still satisfy their structural and consistency
+checks. Invalid selection makes the Realm Profile invalid.
+
+### 4.3 v1 compatibility and normalization
+
+- When both new fields are absent, an active legacy document still needs
+  `package`. After verifying its signature, a receiver may expose an
+  in-memory view with `primary_package = "main"` and
+  `packages.main = package`; this neither modifies nor re-signs the source.
+- New producers **MUST** edit the map and primary reference as the sole
+  source of truth, derive `package` before signing, and sign it with the
+  complete document. Proxies and read endpoints must not add, rewrite or
+  strip fields after signing.
+- Verification and equal-sequence comparison use the complete JCS signing
+  payload of the received source; persistence keeps that source. Whitespace
+  and object-member order are not content changes. Do not normalize, add
+  fields or discard unknown members and then treat generated JSON as the
+  received payload.
+- After accepting explicit selection, a receiver **MUST NOT** accept a
+  subsequent active legacy-only document, even at a higher sequence,
+  silently losing the catalog. Remove entries with an explicit complete
+  replacement. Retirement is exempt from this representation downgrade rule.
+- Legacy readers can continue primary-package behavior through `package`;
+  this does not promise auxiliary management, download, deployment or
+  preservation during re-signing. Multi-package management, signing and
+  deployment require supporting writers, AFPs and Hosts. A legacy writer's
+  signed edit that changes only the projection and creates a mismatch
+  **MUST** be rejected.
+
+Removing the compatibility field requires a separate version migration.
+This extension does not define an active v1 document without `package`.
+
 ## 5. Verification
 
 `signature` is a detached Ed25519 signature over the RFC 8785 JCS canonical
 form of the Realm Profile with the `signature` member removed. The Realm
 signing key holder **MUST** use an `active` Realm signing key.
+The signature covers `primary_package`, every reference in `packages`, and
+the compatibility field. Verify the complete received payload before
+creating the Section 4.3 view. The Realm signature confirms instance
+selection; it does not replace any package's Publisher signature.
 
 An Actr Host or Actr Facility Provider accepts a Realm Profile only when all of the
 following hold:
@@ -203,7 +328,9 @@ following hold:
 2. `signature.key_id` names a key listed in the accepted `realm_signing_keys`
    member of the Realm's domain (Actr Authority Discovery, Section 4.4), and
    the signature verifies with that key;
-3. if a Realm Profile for this Realm was accepted before:
+3. selection and compatibility checks in Sections 4.2–4.3 pass, along with
+   the update constraints in Section 7.2;
+4. if a Realm Profile for this Realm was accepted before:
    - its Realm Profile sequence is not lower than the highest accepted one,
      and if equal, the Realm Profile is identical to the accepted one;
    - `provider.id` equals that of the accepted Realm Profile;
@@ -218,14 +345,26 @@ it, an Actr Host **MUST** stop using the Realm.
 
 ## 6. Using a Realm
 
-An Actr Host downloads `package.href` with an HTTPS GET that carries no
-credentials, **MUST** check `package.sha256`, and verifies the package
-signature as in [Actor Package](actor-package.zh.md) (Chinese only); the
-Actor type declared in the package manifest **MUST** equal `package.type`. If
-any check fails, it does not run the package. That type is the instance's
-program: the instance's Service is the one
+An Actr Host resolves `packages[primary_package]` from verified selection
+(using the Section 4.3 view for legacy documents). For each selected archive
+it downloads `href` with a credential-free HTTPS GET, **MUST** check `sha256`,
+and verifies the Publisher, package signature, manifest type, payloads,
+Workload Profile, Host/ABI and platform policy as in
+[Actor Package](actor-package.zh.md) (Chinese only). The manifest's Actor
+type **MUST** equal the reference's `type`; a failure prevents execution.
+The same checks apply to every auxiliary package selected by deployment;
+verifying the primary does not waive them. Never guess a URL from a type or
+silently substitute another Publisher-supplied version or digest.
+The primary type is the instance's program: its Service is the one
 Actor in this Realm with that Actor type; finding none or more than one is an
 error.
+
+Reading the catalog does not start all its Actors. Hosts use authorized
+local or managed deployment configuration to select references, allocate
+separate identities and state, start instances and establish business
+connections. A selection change does not itself stop processes, delete
+state or revoke credentials; deployment, membership or revocation workflows
+perform those operations explicitly.
 
 An Actr Host reaches a Realm only through the Issuer and Actr Facility Provider named
 by its accepted Realm Profile. Actor credentials for the Realm name the Realm
@@ -326,16 +465,36 @@ pending Realm that is not activated in time expires and is removed.
 
 ### 7.2 Updates
 
-A higher-sequence Realm Profile may change `package` (upgrading the program),
+A higher-sequence Realm Profile may change package selection (upgrading the
+program or changing this instance's auxiliary packages),
 the Realm issuer keys, the Actr Facility Provider's endpoints, `display_name`, and
 `policy`. It **MUST NOT** change
 `provider.id`.
+
+Every change to a reference, the primary key, digest, type or location
+**MUST** increase `sequence` and be re-signed, even if the primary is
+unchanged. Equal in-memory views cannot hide different original JCS signing
+payloads at an equal sequence. Selecting another map key does not relax the existing
+instance-upgrade boundary: the resolved primary's publisher and program
+name **MUST** stay the same. Its version may change; another program needs
+a new instance. An accepted immutable release cannot acquire a different
+digest. A mirror-location change preserving type and digest is allowed,
+but still requires a new signed Profile.
+
+Supplying `packages` is a complete replacement, not an implicit merge, and
+**MUST** also supply `primary_package`. Updates only to issuer keys,
+endpoints or title **MUST** preserve all selection fields. A supporting
+signer handles legacy primary-only update input by replacing the selected
+entry, retaining the others, and regenerating the projection before
+signing. A receiver of signed `publish_profile` must not repair a mismatch.
+Retirement and member authorization are unchanged; deleting a reference is
+not a substitute for stopping an Actor or revoking its identity.
 
 A new Realm Profile is likewise submitted to the Actr Facility Provider with
 `publish_profile` (the holder may first obtain a draft with the Actr Facility
 Provider's current issuer and endpoints through `draft_profile`); if the `realms` location is not at the Actr Facility Provider, the
 holder also publishes it there. For a Realm under the Actr Facility Provider's domain,
-the Actr Facility Provider changes `package` or `display_name` at the owner's
+the Actr Facility Provider changes selection or `display_name` at the owner's
 `update_realm` request (Actr Realm Membership, Section 4) and signs the new
 Realm Profile.
 
@@ -390,10 +549,10 @@ Discovery, Section 4.3):
 
 | `op` | Purpose |
 | --- | --- |
-| `create_realm` | Create a pending Realm and return its unsigned first Realm Profile (its `package` taken from the request). |
+| `create_realm` | Create a pending Realm and return its first draft, preserving requested selection and deriving the compatibility projection before signing. Legacy single-package input is normalized as in Section 4.3. |
 | `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries an owner invite (`owner_invite`) once; later submissions with a higher sequence are updates (including retirement). |
 | `reissue_owner_invite` | Issue a new owner invite (response `owner_invite`) and invalidate the Realm's earlier unused owner invites; used to recover when the owner has lost all its clients (Actr Realm Membership, Section 5). |
-| `draft_profile` | Only for Realms outside the Actr Facility Provider's domain: return the next unsigned Realm Profile draft. Its sequence is the accepted one plus one; `package`, `display_name`, and `policy` come from the accepted Realm Profile, and `issuer` and `provider` are the Actr Facility Provider's current values (including a Realm issuer key being rotated in, Section 6.1). It does not change the Realm. |
+| `draft_profile` | Only for Realms outside the Actr Facility Provider's domain: return the next draft at accepted sequence plus one, preserving the complete package map, primary reference, projection, title and policy while refreshing issuer and provider (including Section 6.1 key rotation). A legacy record can be explicitly migrated in this draft; neither the accepted source nor the Realm is changed. |
 
 Realm management requests are used only for Realms outside the Actr Facility
 Provider's domain (Section 7.3). Each request is an Actr management envelope:
@@ -406,7 +565,12 @@ The payload of a `create_realm` request is:
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
-  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>", "type": "notes.example/team-notes@1.4.2" },
+  "primary_package": "notes",
+  "packages": {
+    "notes": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "type": "notes.example/team-notes@1.4.2" },
+    "index": { "href": "https://cdn.notes.example/notes-index-1.0.0.actr", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "type": "notes.example/notes-index@1.0.0" }
+  },
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "type": "notes.example/team-notes@1.4.2" },
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",
@@ -414,6 +578,16 @@ The payload of a `create_realm` request is:
   "expires_at": "2026-07-29T00:05:00Z"
 }
 ```
+
+Explicit-selection `create_realm` input carries both selection fields.
+It may omit input `package`; the AFP must derive it before the draft is
+signed. If supplied, the projection must agree. An active **signed Profile**
+still requires it in v1. A newly created draft **MUST** preserve the complete
+requested selection, and the caller must compare it before signing activation.
+An old AFP ignoring fields and returning only the primary is not a successful
+multi-package create. An idempotent retry may return an already-existing
+selection and state; it does not apply this request as an update. Do not
+automatically sign or overwrite a mismatch; updates use Section 7.2.
 
 Other operations use the same envelope with their own `op` and fields.
 `requester` is optional: a key holder's signing service sets it to an opaque
@@ -488,6 +662,15 @@ quotas per Realm domain and per Realm.
 
 ## 10. Open work
 
+- Implement selection support in SDKs/AFPs/CLI, machine-readable schemas and
+  signing vectors: legacy and explicit forms, conflicting projections,
+  invalid references, complete payloads, update preservation and downgrade
+  rejection. Existing schemas allow unknown fields, so passing one does not
+  establish that the new semantics were checked.
+- Give deployers and Hosts explicit supported-format/Workload Profile
+  boundaries, verify each archive, run independent instances and report
+  actual status. Parsing selection or verifying an `actr-package/2`
+  signature does not establish native Service execution support.
 - Define machine-readable JSON Schemas and signing test vectors for Realm
   management requests. The Realm Profile schema and interoperability vectors
   are available in [`contracts/actr`](../../contracts/actr/README.md#realm-profile);

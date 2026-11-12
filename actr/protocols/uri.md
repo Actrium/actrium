@@ -94,12 +94,17 @@ When an Actr Host opens `actr://<domain>/<realm_id>[…]` (an instance), it:
    Profile; otherwise obtains and validates the Realm Profile of
    `<realm_id>@<domain>` as in [Actr Realm Profile](realm-profile.md),
    Sections 3 and 5.
-3. Gets the package named by `package`, checks `sha256`, and verifies the
-   package signature as in [Actor Package](actor-package.zh.md) (Chinese
-   only); the Actor type declared in the package
-   is the instance's program.
-4. Starts the foreground part of the package and passes it the rest of the
-   path, the query, and the fragment.
+3. Resolves `packages[primary_package]` under Realm Profile Section 4.3
+   (normalizing legacy documents only after signature verification), checks
+   the type and `sha256`, and verifies the primary archive as in
+   [Actor Package](actor-package.zh.md) (Chinese only). Its Actor type is
+   the instance's program. A missing reference or conflicting projection
+   stops opening.
+4. Obtains and verifies the foreground according to the application's
+   product contract, then passes it the rest of the path, query and fragment.
+   Actrium Product v1 obtains its separate Front package from the signed
+   Program Release record matching the primary Service. Reading `packages`
+   does not start every auxiliary Actor on the device opening the link.
 5. Connects to the instance's Service through the Actr Facility Provider named in the
    Realm Profile: there is exactly one Actor in this Realm whose Actor type
    equals the package's; finding none or more than one is an error, and the

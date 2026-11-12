@@ -56,7 +56,7 @@ Actrium 通过部署与授权应用准备方式、实际授权、配额等实例
 实例的 Service：每个 Realm 恰好一个，随 Realm 创建：
 
 - 有持久 `ActorId`；
-- 固定运行 Realm Profile `package` 所指的包；
+- 固定运行 Realm Profile 主包引用 `packages[primary_package]` 所指的包；
 - 持有 Workspace capability；
 - 持有实例配置和访问控制；
 - 生命周期独立于 Tab；
@@ -121,13 +121,25 @@ Realm 名 = <realm_id>@<domain>                      # 联网，如 k7m2q9xh@acm
 - Realm 域名归域名所有者，只用作天然唯一、归属可验证的名字，不承载基础设施；本机 Realm 使用
   伪域名 `<installation-id>.actr.alt`（安装时随机生成，永不经 DNS 解析），归该 Actrium 安装；
 - 域名的 Realm 签名 key 是该域名下所有 Realm 的长期信任根，逐个签发 Realm Profile。
-  Realm Profile 的 `package` 写明 Service 包的下载地址、SHA-256 与 Actor 类型。
+  Realm Profile 解析的主包 `packages[primary_package]` 写明 Service 包的下载地址、SHA-256 与 Actor 类型。
 - RealmId 在域名内唯一、创建后不可修改、退役后永不复用；
 - 一个 Actr Facility Provider（信令、TURN、Issuer）承载大量 Realm；Realm 在创建时绑定一个 Actr Facility Provider，此后不可更换；
 - 联网 Realm 的成员由 Actr Facility Provider 记录：恰好一个 owner（创建者，可转让），其余为 editor 或 viewer；成员凭一次性 Realm 邀请加入，每个客户端登记一把 Realm 客户端 key。本机 Realm 没有成员。
 
 Publisher 域名命名程序（谁发布），Realm 域名命名部署（谁运营）；同一 Program
 Release 可以运行在 `notes@acme.com`，也可以运行在 `notes@foo.org`。
+
+#### Realm 的包选择配置
+
+Realm Profile 同时承担实例信任/基础设施委派和应用实例包选择两项职责。
+`packages` 以局部引用名记录明确选用的 `{href, sha256, type}`，`primary_package` 指向默认主 Service；
+Publisher 仍负责代码发布、签名和定位。一个包可以创建多个获准 Actor，引用名不等于实例身份。
+配套 Front 按 Publisher 签名的 Program Release 记录验证；若目录重复列出它，绑定必须一致。
+包集合必须满足已验证发布记录与依赖锁，不能因为 Realm 签名有效就混配不兼容版本。
+
+Host 的实例数量、放置、身份、凭据、状态和启动动作由授权部署配置管理；Profile 不列进程状态，
+也不因包在目录中就授予成员、Actor 或 Host 权限。v1 兼容投影和旧文档内存视图以
+[Realm Profile §4](../../../actr/protocols/realm-profile.zh.md#4-realm-profile-格式) 为准。
 
 ## 3. 「Tab–Service 1:1」的精确定义
 
@@ -268,19 +280,19 @@ Actrium 本地数据库可以有纯存储用途的 `record_id`，但它不是网
 
 1. 用户选定 Program Release，或为本地开发提供两个包。Actrium 验证 Service 和 Front 包。
 2. 选择 Realm 域名（默认创建本机 Realm）、生成随机 RealmId（用户可显式改为可读名）并选择 Workspace；
-3. 在该 Realm 域名下新建 Realm。本机 Realm 在设备上建立本地记录。其他 Realm 需要 Realm 签名 key 持有方授权。Realm Profile 的 `package` 记录已验证 Service 包的地址、SHA-256 与 Actor 类型。
+3. 在该 Realm 域名下新建 Realm。本机 Realm 在设备上建立本地记录。其他 Realm 需要 Realm 签名 key 持有方授权。Realm Profile 解析的主包 `packages[primary_package]` 记录已验证 Service 包的地址、SHA-256 与 Actor 类型。
 4. 在该 Realm 内创建 Service，获得持久 ActorId；
 5. 用它创建 Front 会话，地址栏显示该实例的 Realm 链接。
 
 第 3–4 步是一个以 `idempotency_key` 为幂等键的事务，严格按序执行：取得持有方授权 → Actr Facility Provider 创建 pending Realm → 签名 Realm Profile 并以 `publish_profile` 提交 → Realm 变为 active → 兑换 owner 邀请，成为 owner → 创建 Service 并取得 ActorId。Actr Facility Provider 域名下的 Realm 在 v1 由其运营者代建，Actrium 从兑换 owner 邀请开始。任一步失败都不创建 Service；pending Realm 过期由 Actr Facility Provider 自动清理；随机 RealmId 只生成一次，用同一 `idempotency_key` 重试时沿用它；Actr Facility Provider 幂等键为 `(realm, 请求方)`，继续同一个 pending Realm，不重复创建；不同请求方同名或命中已有 active Realm 或 Actr Facility Provider tombstone 时返回冲突。本机 Realm 只有本地 record 与 Service 两步。
 
 新实例总是新 Realm。Service 升级为新 Program Release 时，在同一 Realm 创建新 Service，成员与应用权限延续，
-ActorId 按迁移规则变化。确认切换后，Realm 发布 `package` 指向新 Service 包的 Realm Profile。
+ActorId 按迁移规则变化。确认切换后，Realm 更新主包条目并发布更高 sequence 的完整签名 Profile，保留其他包选择。
 匹配的发布记录固定配套的 Front 包。
 
 ### 6.2 打开实例
 
-打开 Realm 链接 `actr://<domain>/<realm_id>[…]` 时，验证 Realm Profile 和 `package` 指定的 Service 包，
+打开 Realm 链接 `actr://<domain>/<realm_id>[…]` 时，验证 Realm Profile，解析 `packages[primary_package]` 并验证选中的 Service 包，
 再验证匹配的 Program Release 记录固定的 Front 包。按 Service 包的 Actor 类型在该 Realm 内找到 Service 并 Attach。
 
 - 不做 LB，不换到其他 Realm；

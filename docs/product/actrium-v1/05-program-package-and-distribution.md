@@ -80,13 +80,31 @@ address, SHA-256 digest, and Actor type. Actrium verifies the record against the
 trusted keys and verifies each package independently. See the
 [signed record example](12-reference-spec.md#31-signed-program-release-record).
 
-- **Opening an instance.** The Realm Profile's `package` pins the Service package. Match its
+- **Opening an instance.** The Realm Profile's resolved primary `packages[primary_package]` pins the Service package. Match its
   Actor type and digest to a verified Program Release record to find the Front package.
   Actrium uses the installed record or obtains it from the Publisher or a Marketplace.
   See the [Actr Realm Profile](../../../actr/protocols/realm-profile.md).
 - **Creating an instance.** The user selects a release from the Program Catalog, the Marketplace,
   or a Publisher source. For local development, Actrium can verify and record the pair of
   archives explicitly supplied by the user under local trust policy.
+
+### 3.1 Instance selection and release constraints
+
+Realm Profile's `primary_package` + `packages` configure this application's
+instance-specific archive selection, not a complete Publisher catalog or an
+unconditional execution list. After verifying the Profile, Hosts obtain bytes
+from Publishers or mirrors using pinned types and digests and verify each package;
+a location is not a trust source. Signed dependency locks, version constraints,
+contracts and Program Release bindings still apply. Reject conflicts rather than
+substitute `latest`. The primary must match the record's `service.type` and
+`service.sha256`; verify its Front separately through that record.
+
+An explicit-selection active v1 Profile includes `primary_package`, `packages` and
+the primary-derived `package`. Any reference, mirror or auxiliary selection change
+increases `sequence` and is re-signed; preserve the complete signed source. A
+supporting primary-only legacy update replaces the selected entry while retaining
+auxiliaries; a full map update explicitly replaces the map. See
+[Realm Profile Sections 4 and 7.2](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
 
 ## 4. Service and Front packages
 
@@ -98,7 +116,7 @@ declares one Actor type and one Workload under the
 During verification, the record's `service` and `front` members select the expected package role
 and the Host checks the Workload Profile against that role and the distribution policy.
 
-- **Service package.** `[workload]` selects the Service executable. The Realm Profile's `package`
+- **Service package.** `[workload]` selects the Service executable. The Realm Profile's resolved primary `packages[primary_package]`
   points to this archive. A Marketplace Service uses `actr.component/1`.
 - **Front package.** `[workload]` selects the Keel Guest under `keel.guest/1`.
   `[workload.keel]` names its runtime, capability manifest, and Keel contract.
@@ -263,7 +281,7 @@ The Privacy Declaration is a static allowlist and installation notice, not the a
 ## 8. Download and verification pipeline
 
 ```text
-Realm Profile package / user-selected release
+Realm Profile primary selection / user-selected release
   → verify the Program Release and its Service package
   → verify the Front package and its Service dependency
   → policy + permission review
@@ -408,7 +426,7 @@ v1 upgrade:
 3. the old Service produces a migration snapshot;
 4. explicitly hand off the Workspace lease;
 5. the new Service imports and verifies;
-6. the user confirms the switch, after which a Realm Profile with `package` pointing at the new package is published via `publish_profile`;
+6. the user confirms the switch, after which a Realm Profile whose resolved primary selects the new Service archive is published via `publish_profile`;
 7. the old Service is archived after a rollback window; rolling back means publishing another Realm Profile, with a higher `sequence`, that points back at the old package.
 
 This avoids a mismatch between the version in an ActorId and the workload actually running, and keeps a failed rollback explainable.

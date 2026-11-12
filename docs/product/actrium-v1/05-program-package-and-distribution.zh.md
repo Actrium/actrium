@@ -78,11 +78,24 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 Publisher 签名的 Program Release 记录绑定 Front 和 Service 两个包的下载地址、SHA-256 与 Actor 类型。
 Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证两个包。见[签名记录示例](12-reference-spec.zh.md#31-签名-program-release-记录)。
 
-- **打开实例。** Realm Profile 的 `package` 固定 Service 包。按该包的 Actor 类型和摘要匹配已验证的
+- **打开实例。** Realm Profile 解析的主包 `packages[primary_package]` 固定 Service 包。按该包的 Actor 类型和摘要匹配已验证的
   Program Release 记录，取得 Front 包。Actrium 可使用已安装记录，或从 Publisher、Marketplace 取得记录。
   见 [Actr Realm Profile](../../../actr/protocols/realm-profile.zh.md)。
 - **新建实例。** 用户从 Program Catalog、Marketplace 或 Publisher 渠道选定发布版本。
   本地开发时，Actrium 可按本地信任策略验证并记录用户显式提供的两个归档。
+
+### 3.1 实例选择与发布约束
+
+Realm Profile 的 `primary_package` + `packages` 是应用实例的包选择配置，既不是 Publisher
+全量目录，也不是安装器无条件执行的任务列表。通过已验证 Profile 取得选择后，Host 按每项
+固定的类型与 digest 从 Publisher 或镜像获取字节，逐包验签；获取地址不是信任源。
+包内签名依赖锁、版本约束、contract 与 Program Release 绑定仍有效，冲突时拒绝，不取 `latest` 替代。
+主包必须匹配发布记录的 `service.type` 与 `service.sha256`；Front 仍按该记录独立验证。
+
+新格式 active v1 Profile 同时包含 `primary_package`、`packages` 和从主包派生的 `package`。
+选择、镜像地址或辅助包变化均增加 `sequence` 并重新签名；原始签名文档保持完整。
+支持本扩展的旧式主包更新只替换选中的条目，保留辅助引用；完整映射更新显式替换。
+详见 [Realm Profile §4、§7.2](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置)。
 
 ## 4. Service 包与 Front 包
 
@@ -92,7 +105,7 @@ Actrium 使用已信任的 Publisher 公钥验证发布记录，并独立验证�
 [Actor Package 协议](../../../actr/protocols/actor-package.zh.md)声明一个 Actor 类型和一个 Workload。
 验证时按发布记录的 `service` 和 `front` 成员确定预期包角色，Host 检查 Workload Profile 是否符合该角色和分发策略。
 
-- **Service 包。** `[workload]` 选择 Service 可执行文件。Realm Profile 的 `package` 指向该归档。
+- **Service 包。** `[workload]` 选择 Service 可执行文件。Realm Profile 解析的主包 `packages[primary_package]` 指向该归档。
   Marketplace Service 使用 `actr.component/1`。
 - **Front 包。** `[workload]` 以 `keel.guest/1` 选择 Keel Guest。
   `[workload.keel]` 声明其运行时、能力清单和 Keel 契约。
@@ -251,7 +264,7 @@ Privacy Declaration 是静态 allowlist 和安装说明，不是运行时隐私�
 ## 8. 下载与验证流水线
 
 ```text
-Realm Profile package / 用户选定的发布版本
+Realm Profile primary selection / 用户选定的发布版本
   → 验证 Program Release 记录及其 Service 包
   → 验证 Front 包及其 Service 依赖
   → policy + permission review
@@ -395,7 +408,7 @@ v1 升级：
 3. 旧 Service 生成迁移快照；
 4. 显式交接 Workspace lease；
 5. 新 Service 导入并验证；
-6. 用户确认切换，随后以 `publish_profile` 发布 `package` 指向新包的 Realm Profile；
+6. 用户确认切换，随后以 `publish_profile` 发布主包引用指向新 Service 归档的 Realm Profile；
 7. 旧 Service 保留回滚窗口后归档；回滚即再发布一份指回旧包、`sequence` 更高的 Realm Profile。
 
 这样避免 ActorId 中版本与实际 workload 不一致，也让失败回滚可解释。

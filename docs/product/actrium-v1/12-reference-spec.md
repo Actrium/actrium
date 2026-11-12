@@ -107,10 +107,23 @@ Chinese only).
 
 ## 3. Package download
 
-The Realm Profile's `package` identifies the instance's Service package (sample in §6.2).
+The Realm Profile's resolved primary `packages[primary_package]` identifies the instance's Service package (sample in §6.2).
 
 ```json
 {
+  "primary_package": "notes",
+  "packages": {
+    "notes": {
+      "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "type": "notes.example/team-notes@1.4.2"
+    },
+    "index": {
+      "href": "https://cdn.notes.example/notes-index-1.0.0.actr",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "type": "notes.example/notes-index@1.0.0"
+    }
+  },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
     "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
@@ -182,9 +195,20 @@ governed by that contract. See [14 §4.2](14-privacy-primitives-and-attestation.
 
 Actrium can use a verified local record or obtain a record from the Publisher or Marketplace.
 When opening a Realm, the record's `service.type` and `service.sha256` must match
-`Realm Profile.package`. Installing a published release requires a verified matching record. Actrium rejects
+`Realm Profile.packages[primary_package]`. Installing a published release requires a verified matching record. Actrium rejects
 conflicting package or Privacy Contract bindings for an accepted release. See
 [05 §3](05-program-package-and-distribution.md#3-where-a-package-comes-from) for package selection.
+
+The `primary_package` + `packages` contract follows
+[Realm Profile Sections 4.1–4.3 and 7.2](../../../actr/protocols/realm-profile.md#41-application-instance-package-selection).
+The sample `package` is a v1 projection derived before signing, not an independently
+editable choice. Reject mismatches, missing primary references, invalid URLs/digests/types
+and conflicting release bindings. Legacy documents normalize to `packages.main` only
+after verification; keep the source for persistence, equal-sequence comparison and
+signature checks. Selection edits, issuer/endpoint updates and replacements follow
+the re-signing, preservation and anti-downgrade rules. Verify auxiliaries independently;
+deployment and membership manage instance counts, identities and authority. This is a
+documentation contract, not completed Schema/SDK/CLI/AFP implementation or new CLI support.
 
 ## 4. `.actr` Manifest
 
@@ -455,6 +479,19 @@ Sample:
     "display_name": "Acme Notes",
     "status": "active"
   },
+  "primary_package": "notes",
+  "packages": {
+    "notes": {
+      "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "type": "notes.example/team-notes@1.4.2"
+    },
+    "index": {
+      "href": "https://cdn.notes.example/notes-index-1.0.0.actr",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "type": "notes.example/notes-index@1.0.0"
+    }
+  },
   "package": {
     "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
     "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
@@ -516,8 +553,7 @@ higher `sequence`. A Realm Profile carries no expiry; rollback protection relies
 `sequence`. `provider.id` is the Actr Facility Provider's normalized DNS authority and is immutable for the
 life of the Realm. Multiple signaling endpoints sharing a `control_plane_id` are replicas or
 failover entry points of the same Actr Facility Provider presence/control plane, not v1 federation.
-`package` pins the instance's Service archive (§3). Upgrading the program means publishing a Realm
-Profile with a different `package` and a higher `sequence`. Rotating the Realm issuer key or
+`packages[primary_package]` pins the default Service archive; `packages` fixes the instance's other explicit selections (§3). Any reference change requires a complete signed Profile at a higher `sequence`, with `package` derived consistently. Rotating the Realm issuer key or
 changing endpoints under the same Actr Facility Provider likewise means publishing a Realm Profile with a
 higher `sequence`; retiring publishes a new Realm Profile with `status` set to `retired`, valid
 forever after.

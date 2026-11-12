@@ -12,6 +12,11 @@ are defined in [Actr URI](../../../actr/protocols/uri.md) and are not repeated h
 - Where the program is downloaded from is decided by the Realm Profile, not written into the
   address.
 
+Selection validation and legacy views follow [Realm Profile Section 4](../../../actr/protocols/realm-profile.md#4-profile-format).
+A missing primary or conflicting projection stops opening as `REALM_PROFILE_INVALID`,
+never by selecting the first entry. Reading auxiliaries does not start all Actors on
+the client. Link syntax and exact Service binding remain unchanged.
+
 ## 2. Link forms
 
 ```text
@@ -35,8 +40,9 @@ actr://acme.com/k7m2q9xh/today?view=week#item-3
 
 ## 3. Opening
 
-Actrium opens links per Actr URI §4. It verifies the Realm Profile and the Service package in its
-`package` field, then verifies the matching Program Release record and its Front package. It creates the
+Actrium opens links per Actr URI §4. It verifies the Realm Profile, resolves
+`packages[primary_package]` and verifies that Service archive, then verifies
+the matching Program Release record and its Front package. It creates the
 Front Actor from the verified Front manifest and Attaches to the instance's Service.
 
 Product-level requirements:

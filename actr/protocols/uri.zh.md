@@ -76,9 +76,12 @@ Actr Host 打开 `actr://<domain>/<realm_id>[…]`（实例）时：
    Realm Profile；否则按
    [Actr Realm Profile](realm-profile.zh.md) 第 3、5 节取得并验证 `<realm_id>@<domain>` 的
    Realm Profile。
-3. 按 `package` 取得包，核对 `sha256`，再按
-   [Actor Package](actor-package.zh.md) 验证包签名；包中声明的 Actor 类型即该实例的程序。
-4. 启动包中的前台部分，把 path 余下部分、query 和 fragment 交给它。
+3. 按 Realm Profile §4.3 解析 `packages[primary_package]`（旧文档仅在验签后归一化），
+   核对类型、`sha256`，并按 [Actor Package](actor-package.zh.md) 验证该主包。
+   包中声明的 Actor 类型即该实例的程序；引用缺失或兼容投影冲突时停止打开。
+4. 按应用产品约定取得并验证前台，再把 path 余下部分、query 和 fragment 交给它。
+   Actrium Product v1 通过匹配主 Service 的签名 Program Release 记录取得独立 Front 包。
+   读取 `packages` 不意味着在打开链接的设备上启动其中所有辅助 Actor。
 5. 经 Realm Profile 指定的 Actr Facility Provider 连接该实例的 Service：本 Realm 内 Actor 类型与包
    相同的 Actor 恰好一个；找到零个或多于一个都是错误，Actr Host 不做选择。连接需要 Realm
    membership；没有时进入加入流程（例如 Realm 邀请）。

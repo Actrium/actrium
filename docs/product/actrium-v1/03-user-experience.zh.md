@@ -37,6 +37,8 @@ Actrium Shell
 
 Program 与 Service 必须在 UI 和数据模型中分开。安装一个程序不等于已经创建实例；删除程序缓存也不等于删除 Workspace。
 
+打开或创建实例时，包确认针对已验证的 `primary_package` + `packages` 配置；默认 Service 来自解析后的主包，Front 仍按匹配的签名发布记录验证。界面不能把包引用名当 ActorId，不能因为清单里出现包就在本机自动运行。旧实现只支持兼容主包时应明确能力边界，不报告多包部署成功。
+
 ## 2. 地址栏
 
 地址栏显示的是实例地址（Realm 链接，见 [04](04-uri-and-resolution.zh.md)），回答三个问题：

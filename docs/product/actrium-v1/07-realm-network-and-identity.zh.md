@@ -46,7 +46,7 @@ v1 中多个 signaling endpoint 必须属于同一个逻辑控制面，使用共
 
 Realm 是一个应用实例的逻辑信任和治理域。在 Actrium 中，新建实例就是在所选域名下创建一个新 Realm。
 该实例的 Service、它编排的其他 Actor，以及 Attach 到它的 Front，都属于这个 Realm。
-Realm Profile 的 `package` 固定 Service 包。
+Realm Profile 解析的主包 `packages[primary_package]` 固定 Service 包。
 
 Realm 不跟程序走：同一个 `notes.example/team-notes` 被 A 组织创建一次、被 B 组织创建一次，就是两个 Realm。Realm 也不是组织级成员域：一个组织运营多少个应用实例，就有多少个 Realm。
 
@@ -142,7 +142,7 @@ Realm Profile 至少包含：
 - schema（`actr.realm/v1`）；
 - `realm.name`（完整 Realm 名）与显示名；
 - `status`：`active` 或 `retired`；
-- `active` Realm 必须声明 `package`，记录 Service 包的下载地址、SHA-256 和 Actor 类型。
+- `active` Realm 的 `primary_package` 与 `packages` 声明实例包选择，并在签名前派生 v1 兼容 `package`；旧格式按 Realm Profile §4.3 接受。
 - 单调 `sequence` 与签发时间 `issued_at`（Realm Profile 不设过期时间）；
 - issuer URL、Realm issuer keys/key ids（Actor credential 的 issuer 即 Realm 名）；
 - Actr Facility Provider ID、signaling endpoints、STUN/TURN endpoints；
@@ -155,7 +155,7 @@ Realm Profile 使用 RFC 8785 JCS 规范化 payload 和 detached Ed25519 签名�
 生命周期：
 
 - 创建与激活：Realm 管理请求以 `POST` 发往 Actr Facility Provider 自身 authority descriptor（`https://<provider_id>/.well-known/actr`）的 `realm-management` link。`create_realm` 请求 Actr Facility Provider 创建 pending Realm，响应返回待签 Realm Profile payload；Realm 签名 key 持有方签名后以 `publish_profile` 提交，其响应即激活响应，一次性返回 owner 邀请（见 7.4；Actr Facility Provider 域名下的 Realm 由该 Actr Facility Provider 的运营者创建，自签与激活在其内部完成，owner 邀请在创建时交给运营者）。Actr Facility Provider 幂等键为 `(realm, 请求方)`：同一请求方对自己的 pending 或 active Realm 重试返回其状态（不返回 owner 邀请）；不同请求方命中同名 Realm，或任何请求命中 Actr Facility Provider tombstone，一律冲突；重复 `publish_profile` 返回冲突，丢失或过期的 owner 邀请用 `reissue_owner_invite` 重新签发；
-- 更新：同一 Actr Facility Provider 下升级程序（`package`）、轮换 Realm issuer key、变更端点、修改 `display_name` 或加入策略，均发布 Realm Profile sequence 更高的新 Realm Profile；
+- 更新：同一 Actr Facility Provider 下更新包选择（主包或辅助包）、轮换 Realm issuer key、变更端点、修改 `display_name` 或加入策略，均发布 Realm Profile sequence 更高的新 Realm Profile；
 - 退役：退役只有一条路径，即 Realm 签名 key 持有方发布 `status = retired` 的退役 Realm Profile（保持相同 `provider.id`、sequence 更高），永久有效；Actr Facility Provider 通过周期刷新得知并写入 Actr Facility Provider tombstone；若 Actr Facility Provider 已停服，域名所有者把 `realms` href 改指自控存放位置并在那里发布退役 Realm Profile；域名本身属于已停服 Actr Facility Provider 时，其中的 Realm 无法退役，只能在别处新建；
 - Realm 签名 key 全部丢失且没有可用轮换链时，该 Realm 域名下的既有 Realm 都无法再签发后续 Realm Profile。域名所有者只能发布新的 Realm 签名 key（客户端按身份变化处理、重新确认信任），并在新 RealmId 下重建实例。
 
@@ -170,6 +170,22 @@ Actrium 只凭一个可判定条件区分两条路径：在规范化 A-label 上
 域名所有者委托 Actr Facility Provider 代持 Realm 签名 key 时，公开文档中没有任何字段表明这一点，Actrium 仍显示信任根为该 Realm 域名；受托的 Actr Facility Provider 以持有方身份提供签名服务。这种代持对用户不可见，是已接受的限制。
 
 由 Realm 签名 key 签发受限的「创建委派 key」（限定 RealmId 前缀、配额、有效期）属于后续能力。
+
+#### 3.2.1 实例包选择及兼容
+
+`packages` 是本实例显式选用的归档映射，`primary_package` 选择默认 Service；字段定义、
+1–32 项与 64 KiB 限制、引用校验、签名及更新规则统一遵循
+[Realm Profile §4–7](../../../actr/protocols/realm-profile.zh.md#41-应用实例的包选择配置)。
+Publisher 提供下载位置不改变 Realm 对实例选择的确认，也不能用 Realm 签名覆盖发布记录和依赖锁。
+
+包映射不是运行 Actor 清单或权限白名单。Host 部署配置决定实例数量和放置，成员、Publisher、
+capability 与 ACL 分别验证。辅助包不必经主 Service 转发；主 Service 也不因主包引用获得 Realm 管理权。
+
+v1 新 Profile 发布方在签名前生成与 `packages[primary_package]` 相同的旧 `package`。接收方先验完整
+原文，再建立内存视图；混合字段冲突即拒绝。旧单包文档可视为 `packages.main`，但不得改写
+原签名或同 sequence 内容。已接受新选择后，不接受 active 的旧格式降级。
+草稿生成、issuer key 轮换和仅端点更新保留完整选择；辅助引用变化也须增加 sequence 并重签。
+包选择扩展尚待 SDK、AFP、CLI、Schema 和部署器实现，旧实现成功读取主包不代表支持多包部署。
 
 ### 3.3 ActorId 如何携带 Realm
 
@@ -388,7 +404,7 @@ membership 与实例授权是两层：Realm membership 只决定能否进入该�
 
 1. Actr Host 生成或读取 Actor长期 key；
 2. 请求新 ActorId 或 reclaim 已有 ActorId；
-3. Issuer 验证请求由已登记、未撤销的 Realm 客户端 key 签名（Realm membership）、Actor 类型和允许的 claim；该实例程序（`package.type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 的客户端注册；需要受管 runtime 时另验 platform attestation；
+3. Issuer 验证请求由已登记、未撤销的 Realm 客户端 key 签名（Realm membership）、Actor 类型和允许的 claim；该实例程序（`packages[primary_package].type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 的客户端注册；需要受管 runtime 时另验 platform attestation；
 4. Issuer 签发短期 Actor credential，携带 ActorId、Actor 类型、成员 id、Realm 客户端 key id 与角色；
 5. Actor 使用短期 ticket 连接 signaling；
 6. signaling 验证 issuer、audience、ActorId 和 proof。
@@ -507,7 +523,7 @@ Realm Profile 可以声明多个 endpoint：
 |---|---|
 | `actr://` URI（Realm 链接） | 不允许端口 |
 | Publisher Profile bootstrap | 固定 Publisher 域名的 HTTPS 443 |
-| Realm Profile 的 `package.href`、Issuer | 可显式端口，必须 HTTPS |
+| Realm Profile 的 `packages[ref].href`、Issuer | 可显式端口，必须 HTTPS |
 | Realm 签名 key（authority descriptor `/.well-known/actr`） | 固定 Realm 域名的 HTTPS 443 |
 | Realm Profile | `realms` relation 声明的 HTTPS 位置，可显式端口 |
 | Signaling WSS | 可显式端口 |

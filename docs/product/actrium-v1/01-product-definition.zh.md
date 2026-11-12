@@ -20,6 +20,8 @@ Actrium 要把 Actor 程序变成普通用户可以理解、安装、创建、�
 - 后台 Service 可以使用 Actor 模型组合更复杂的服务；
 - 一个精确版本的包可以经 HTTPS 下载、验证、缓存和复现。
 
+Realm Profile 同时声明该应用实例的包选择：`packages` 固定所选归档，`primary_package` 选择默认 Service。Publisher 负责发布与下载定位，Host 按授权配置部署实例；清单本身不授予权限或启动所有 Actor。旧 `package` 的 v1 投影与迁移遵循 Realm Profile 协议。
+
 ## 2. 当前问题
 
 如果不先冻结模型，Actrium 很容易同时承担浏览器、插件系统、远程桌面、原生应用容器和 Actor 调试器等多套语义，最终出现以下问题：

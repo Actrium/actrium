@@ -27,6 +27,25 @@ What is really missing are product-level invariants and several key semantics:
 9. per-instance storage;
 10. an honest lifecycle on mobile.
 
+### Package-selection delivery steps (2026-11-12)
+
+This revision delivers protocol/product documentation only. The following are
+implementation work, not completed functionality:
+
+1. SDK/schema/vectors: common primary resolution, full-payload verification,
+   legacy views, representation conflicts and anti-downgrade checks.
+2. AFP/management/CLI: full-map input, original-document persistence, preservation
+   during drafting/key rotation, and primary-only updates retaining auxiliaries.
+3. Hosts/deployment: independent download/verification, identity/state, idempotent
+   starts, membership/owner checks and an explicit supported-format boundary.
+4. Clients: match Service/Front release bindings through the resolved primary;
+   opening a link does not unconditionally start auxiliary Actors.
+
+Active v1 Profiles still emit legacy `package` during migration. Reading that
+projection does not prove multi-package selection/deployment support. Removing it
+requires a separate version migration. Track package-format/Service-loader gaps
+separately from reference-field migration.
+
 ## 2. Key dependency graph
 
 ```mermaid
