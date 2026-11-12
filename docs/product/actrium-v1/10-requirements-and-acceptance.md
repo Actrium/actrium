@@ -574,7 +574,7 @@ Any increase MUST still be bounded by the platform's cap and permission policy.
 
 **Given** the user has already trusted the domain `team.example`<br>
 **When** they select `notes.example/team-notes@1.4.2`, create an instance with `team.example` as the Realm domain, and confirm<br>
-**Then** a new Realm is created under `team.example` (e.g. `k7m2q9xh@team.example`) whose Realm Profile 主包引用 `packages[primary_package]` points to the selected package, and the address bar shows `actr://team.example/k7m2q9xh`; creating again yields another Realm rather than reusing the first.
+**Then** a new Realm is created under `team.example` (e.g. `k7m2q9xh@team.example`) whose Realm Profile resolves `packages[primary_package]` to the selected package, and the address bar shows `actr://team.example/k7m2q9xh`; creating again yields another Realm rather than reusing the first.
 
 ### AC-052: A Realm is bound to its Actr Facility Provider
 
