@@ -116,6 +116,29 @@ bunx keel build src/guest.tsx --no-minify --sourcemap
 bunx keel analyze dist/bundle.js
 ```
 
+### Actrium Product v1 Guest
+
+Build from the package payload root with a Keel contract and the v1 manifest option.
+
+```sh
+bunx keel build src/guest.tsx -o workload/guest.js \
+  --contract contract.ts --v1-capability-manifest workload/capabilities.json
+```
+
+Use named imports from `keel/guest` and `host:*`. The manifest includes all acquired
+component and Host bindings, including bindings that are used only conditionally.
+Acquire a fixed Service route through its named import.
+
+```ts
+import { call as echo } from 'host:service/echo.v1.EchoService.Echo';
+
+await echo({ payloadBase64: '' });
+```
+
+The Actrium Host supplies the route from the verified binding. The Guest supplies
+the payload and optional timeout. Product v1 uses the default Keel footer and
+strict dependency validation.
+
 ## Architecture
 
 ```
