@@ -54,7 +54,7 @@ TLS/mTLS；Management 即使共享 listener 也必须经过独立认证中间件
 | 连接 ACL 更新中途失败产生半策略 | 目标 Actor type 的连接 ACL 在单一事务中整体替换；无规则默认拒绝 |
 | 连接 ACL wildcard 覆盖不确定 | 精确 source Realm 优先于 wildcard；策略坐标唯一 |
 | Guest workload 自行扩权 | Realm 客户端 key 只在 Actr Host 中，Guest 不得接触；注册与续期须以该 key 签名 |
-| 低权限成员冒充 Service 或改写其连接 ACL | 该实例程序（Realm Profile `package.type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 客户端注册；注册携带的 ACL 只作用于所注册 Actor 自己的类型。残余风险：成员可改写自己也注册的其他类型（如 Front）的 ACL，影响限于本 Realm |
+| 低权限成员冒充 Service 或改写其连接 ACL | 该实例程序（Realm Profile `packages[primary_package].type` 的 publisher 与程序名，不论版本）的 Actor 只接受 owner 客户端注册；注册携带的 ACL 只作用于所注册 Actor 自己的类型。残余风险：成员可改写自己也注册的其他类型（如 Front）的 ACL，影响限于本 Realm |
 | Realm 邀请泄露或被重放 | 邀请一次性、有过期时间，签发者可撤销；兑换时须用新 Realm 客户端 key 签名，与登记 key 在同一事务中原子消耗，并发兑换只成功一个；Loran 只存 secret 哈希；邀请不进入 URI；owner 可在成员列表中移除误入者 |
 | 客户端丢失或被盗、成员被移除后继续使用 | 每个客户端独立 key，可单独撤销；撤销在一个事务中撤销该 key 及其签发的未用邀请，随后关闭绑定它的 Actor 的 signaling 连接与 TURN allocation；Issuer 签发、Signaling upgrade 与 TURN 认证拒绝绑定 key 已撤销的 Actor。renewal token 保留，但续期须用绑定 key、重签须用同一成员的另一把未撤销 key，偷走设备的人两者都没有；已签发 credential 在 Loran 之外到期失效（默认 1 小时）。残余风险：已建立的 P2P 会话持续到 credential 到期 |
 | owner 失去全部客户端或 owner key 被盗 | Realm 签名 key 持有方（`reissue_owner_invite`）或运营者签发新的 owner 邀请；兑换后撤销 owner 原有全部客户端 key；新签发使此前未用的 owner 邀请失效。持有方与运营者因此在 Realm 信任边界内 |

@@ -19,7 +19,9 @@
 //! own (`actr/protocols/authority-discovery.md` section 4.5).
 
 use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
-use actr_protocol::realm_profile::{RealmPackage, sign_document};
+use actr_protocol::realm_profile::{
+    MAX_REALM_PROFILE_BYTES, RealmPackageSelection, RealmProfile, sign_document,
+};
 use actr_protocol::{KeyStatus, RealmSigningKey, RealmSigningKeys, SIGNATURE_ALGORITHM};
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -71,6 +73,10 @@ pub enum RealmCommand {
     /// Create an invite: a new member (owner, `--role`) or a new client of a
     /// member (`--member`).
     Invite(InviteArgs),
+    /// Replace the selection of a Realm under its Provider domain as its owner
+    Update(realm_members::UpdateArgs),
+    /// Download and verify the selected Service and Front into a new directory
+    FetchPackages(super::realm_packages::FetchArgs),
     /// List members, clients and open invites (a non-owner sees its own).
     Members(KeyArgs),
     /// Revoke an unused invite.
@@ -111,15 +117,9 @@ pub struct CreateRequestArgs {
     /// Actr Facility Provider ID of the receiving Actr Facility Provider
     #[arg(long, value_name = "ID")]
     pub provider: String,
-    /// HTTPS URL of the package the Realm runs
-    #[arg(long, value_name = "URL")]
-    pub package_href: String,
-    /// Lowercase hex SHA-256 of the package
-    #[arg(long, value_name = "HEX")]
-    pub package_sha256: String,
-    /// Actor type of the package manifest, `publisher/program@version`
-    #[arg(long, value_name = "TYPE")]
-    pub package_type: String,
+    /// JSON file containing primary_package, front_package and the complete packages map
+    #[arg(long, value_name = "FILE")]
+    pub selection: PathBuf,
     /// Opaque id of whom the request is signed for
     #[arg(long, value_name = "ID")]
     pub requester: Option<String>,
@@ -137,15 +137,9 @@ pub struct SignProfileArgs {
     /// New display name
     #[arg(long, value_name = "NAME")]
     pub display_name: Option<String>,
-    /// New package URL (with --package-sha256 and --package-type)
-    #[arg(long, value_name = "URL", requires_all = ["package_sha256", "package_type"])]
-    pub package_href: Option<String>,
-    /// New package SHA-256 (with --package-href)
-    #[arg(long, value_name = "HEX", requires = "package_href")]
-    pub package_sha256: Option<String>,
-    /// New package Actor type `publisher/program@version` (with --package-href)
-    #[arg(long, value_name = "TYPE", requires = "package_href")]
-    pub package_type: Option<String>,
+    /// Expected selection for first activation, or a complete replacement for an update
+    #[arg(long, value_name = "FILE")]
+    pub selection: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -228,25 +222,14 @@ impl Command for RealmArgs {
                 let (key_id, key) = RealmKeyFile::load(&args.key)?;
                 let mut request =
                     new_request(ManagementOp::CreateRealm, &args.realm, &args.provider);
-                request.package = Some(RealmPackage {
-                    href: args.package_href.clone(),
-                    sha256: args.package_sha256.clone(),
-                    r#type: args.package_type.clone(),
-                });
+                request.selection = Some(read_selection(&args.selection)?);
                 request.requester = args.requester.clone();
                 request.sign(&key_id, &key)
             }
             RealmCommand::SignProfile(args) => {
-                let package = match (&args.package_href, &args.package_sha256, &args.package_type) {
-                    (Some(href), Some(sha256), Some(r#type)) => Some(RealmPackage {
-                        href: href.clone(),
-                        sha256: sha256.clone(),
-                        r#type: r#type.clone(),
-                    }),
-                    _ => None,
-                };
+                let selection = args.selection.as_deref().map(read_selection).transpose()?;
                 let profile = read_profile(&args.profile)?;
-                sign_profile(&args.key, profile, args.display_name.as_deref(), package)?
+                sign_profile(&args.key, profile, args.display_name.as_deref(), selection)?
             }
             RealmCommand::Retire(args) => retire(&args.key, read_profile(&args.profile)?)?,
             RealmCommand::ReissueRequest(args) => {
@@ -265,6 +248,8 @@ impl Command for RealmArgs {
             }
             RealmCommand::RegisterPublisher(args) => register_publisher(args).await?,
             RealmCommand::Join(args) => realm_members::join(args).await?,
+            RealmCommand::Update(args) => realm_members::update(args).await?,
+            RealmCommand::FetchPackages(args) => super::realm_packages::fetch(args).await?,
             RealmCommand::Invite(args) => realm_members::invite(args).await?,
             RealmCommand::Members(args) => realm_members::members(args).await?,
             RealmCommand::RevokeInvite(args) => realm_members::revoke_invite(args).await?,
@@ -411,6 +396,19 @@ async fn realm_management_endpoint(provider: &str) -> Result<String> {
 
 /// The Realm Profile in `path`, or the `profile` member of a `create_realm`
 /// reply.
+pub(super) fn read_selection(path: &Path) -> Result<RealmPackageSelection> {
+    let bytes =
+        std::fs::read(path).with_context(|| format!("read selection {}", path.display()))?;
+    anyhow::ensure!(
+        bytes.len() <= MAX_REALM_PROFILE_BYTES,
+        "package selection exceeds 64 KiB"
+    );
+    let selection: RealmPackageSelection =
+        serde_json::from_value(actr_protocol::signed_json::parse(&bytes)?)?;
+    selection.check().map_err(anyhow::Error::msg)?;
+    Ok(selection)
+}
+
 fn read_profile(path: &Path) -> Result<Value> {
     let text = if path == Path::new("-") {
         std::io::read_to_string(std::io::stdin())?
@@ -418,7 +416,8 @@ fn read_profile(path: &Path) -> Result<Value> {
         std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?
     };
-    let mut value: Value = serde_json::from_str(&text).context("Realm Profile is not JSON")?;
+    let mut value: Value =
+        actr_protocol::signed_json::parse(text.as_bytes()).context("invalid Realm Profile JSON")?;
     if value.get("schema").is_none()
         && let Some(profile) = value.get_mut("profile")
     {
@@ -437,19 +436,38 @@ fn sign_profile(
     key_path: &Path,
     mut profile: Value,
     display_name: Option<&str>,
-    package: Option<RealmPackage>,
+    selection: Option<RealmPackageSelection>,
 ) -> Result<Value> {
     if profile.get("signature").is_some() {
         let sequence = profile["sequence"]
             .as_u64()
             .context("Realm Profile has no sequence")?;
-        profile["sequence"] = (sequence + 1).into();
+        profile["sequence"] = sequence
+            .checked_add(1)
+            .context("Realm Profile sequence overflow")?
+            .into();
     }
     if let Some(name) = display_name {
         profile["realm"]["display_name"] = name.into();
     }
-    if let Some(package) = package {
-        profile["package"] = serde_json::to_value(package)?;
+    if profile["sequence"] == 1 && profile.get("signature").is_none() {
+        let expected = selection
+            .as_ref()
+            .context("first activation requires --selection to check the draft")?;
+        let drafted: RealmPackageSelection = serde_json::from_value(profile.clone())?;
+        anyhow::ensure!(
+            expected == &drafted,
+            "first draft differs from the requested package selection"
+        );
+    }
+    if let Some(selection) = selection {
+        selection.check().map_err(anyhow::Error::msg)?;
+        if let Some(fields) = profile.as_object_mut() {
+            fields.remove("package");
+        }
+        profile["primary_package"] = selection.primary_package.into();
+        profile["front_package"] = selection.front_package.into();
+        profile["packages"] = serde_json::to_value(selection.packages)?;
     }
     profile["issued_at"] = chrono::Utc::now()
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
@@ -465,6 +483,15 @@ fn sign_profile(
         .context("Realm Profile has no provider.id")?
         .to_string();
     sign_document(&mut profile, &key_id, &key);
+    let bytes = serde_json::to_vec(&profile)?;
+    anyhow::ensure!(
+        bytes.len() <= MAX_REALM_PROFILE_BYTES,
+        "Realm Profile exceeds 64 KiB"
+    );
+    let checked: RealmProfile = serde_json::from_value(profile.clone())?;
+    checked
+        .validate_fields(&realm)
+        .map_err(anyhow::Error::msg)?;
     let mut request = new_request(ManagementOp::PublishProfile, &realm, &provider);
     request.profile = Some(profile);
     Ok(request.sign(&key_id, &key))
@@ -478,7 +505,9 @@ fn retire(key_path: &Path, mut profile: Value) -> Result<Value> {
     }
     profile["realm"]["status"] = "retired".into();
     if let Value::Object(members) = &mut profile {
-        members.remove("package");
+        for field in ["primary_package", "front_package", "packages", "package"] {
+            members.remove(field);
+        }
     }
     sign_profile(key_path, profile, None, None)
 }
@@ -486,7 +515,6 @@ fn retire(key_path: &Path, mut profile: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::realm_profile::RealmProfile;
     use serde_json::json;
 
     fn draft() -> Value {
@@ -494,9 +522,14 @@ mod tests {
             "schema": "actr.realm/v1",
             "sequence": 1,
             "realm": { "name": "k7m2q9xh@acme.com", "display_name": "k7m2q9xh", "status": "active" },
-            "package": {
+            "primary_package": "service",
+            "front_package": "ui",
+            "packages": {
+                "service": {
                 "href": "https://cdn.example/a.actr", "sha256": "ab".repeat(32),
                 "type": "acme.com/notes@1.0.0",
+            },
+                "ui": {"href":"https://cdn.example/front.actr", "sha256":"cd".repeat(32), "type":"acme.com/ui@1.0.0"}
             },
             "issuer": { "url": "https://p.example/issuer", "keys": [{
                 "id": "7", "algorithm": "Ed25519", "status": "active",
@@ -525,7 +558,8 @@ mod tests {
         let reply_path = dir.path().join("reply.json");
         std::fs::write(&reply_path, reply.to_string()).unwrap();
         let profile = read_profile(&reply_path).unwrap();
-        let request = sign_profile(&key_path, profile, Some("Notes"), None).unwrap();
+        let expected = serde_json::from_value(profile.clone()).unwrap();
+        let request = sign_profile(&key_path, profile, Some("Notes"), Some(expected)).unwrap();
 
         let parsed = ManagementRequest::parse(request.to_string().as_bytes()).unwrap();
         parsed.verify(&keys.keys).unwrap();
@@ -550,7 +584,7 @@ mod tests {
         .unwrap();
         first.check_successor(&last).unwrap();
         assert_eq!(last.sequence, 2);
-        assert!(last.package.is_none());
+        assert!(last.selection.is_none());
 
         // The key file is not overwritten by accident.
         assert!(

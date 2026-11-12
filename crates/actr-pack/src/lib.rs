@@ -27,6 +27,7 @@ pub mod identity;
 pub mod load;
 pub mod manifest;
 pub mod pack;
+pub mod realm;
 pub mod registration;
 pub mod verify;
 

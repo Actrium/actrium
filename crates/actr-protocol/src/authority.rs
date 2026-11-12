@@ -663,6 +663,34 @@ pub struct PackageSigningKey {
     pub status: KeyStatus,
 }
 
+impl PackageSigningKey {
+    /// Decode a listed package key for verification, respecting its validity window.
+    /// Retired keys may verify archives while still listed by the Publisher.
+    pub fn verification_key(&self) -> Result<ed25519_dalek::VerifyingKey, String> {
+        let time = |text: &String| DateTime::parse_from_rfc3339(text).map_err(|e| e.to_string());
+        let now = Utc::now();
+        if self
+            .not_before
+            .as_ref()
+            .map(time)
+            .transpose()?
+            .is_some_and(|start| now < start)
+            || self
+                .not_after
+                .as_ref()
+                .map(time)
+                .transpose()?
+                .is_some_and(|end| now >= end)
+        {
+            return Err(format!(
+                "package signing key {} is outside its validity window",
+                self.id
+            ));
+        }
+        decode_key(&self.public_key)
+    }
+}
+
 /// The key members of a Publisher Profile (`docs/product/actrium-v1` 05
 /// section 2.2 and 12 section 2), returned by [`PublisherProfile::verify`].
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

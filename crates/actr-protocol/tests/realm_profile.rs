@@ -241,3 +241,37 @@ fn credential_key_ids_resolve_active_and_retired_issuer_keys() {
         assert_eq!(&status, expected, "{key_id}");
     }
 }
+
+#[test]
+fn published_echo_example_selects_service_and_front() {
+    let bytes = include_bytes!("../../../actr/protocols/examples/realm-profile.json");
+    let key = actr_protocol::RealmSigningKey {
+        id: "rs-demo-minimal-1".into(),
+        algorithm: "Ed25519".into(),
+        status: actr_protocol::KeyStatus::Active,
+        public_key: "MwhxEhQQQtS1V6jX0bfHvy+wPND44QXNlEFg9frdHlc=".into(),
+    };
+    // As in a host with a preconfigured Realm trust root.
+    let mut trusted = keys(&vectors(), "initial");
+    trusted.signature.key_id = key.id.clone();
+    trusted.keys = vec![key];
+    let checked = RealmProfile::verify(bytes, "echo@realm.example", &trusted).unwrap();
+    let (service, front) = checked.selection.as_ref().unwrap().selected().unwrap();
+    assert_eq!(service.r#type, "publisher.example/echo@0.1.1");
+    assert_eq!(front.r#type, "publisher.example/echo-ui@0.1.1");
+    assert!(schema().is_valid(&serde_json::from_slice(bytes).unwrap()));
+    let text = std::str::from_utf8(bytes).unwrap();
+    for invalid in [
+        text.replace(
+            "\"primary_package\":",
+            "\"primary_package\":\"ui\",\"primary_package\":",
+        ),
+        text.replace(
+            "\"href\":",
+            "\"href\":\"https://other.example/x\",\"href\":",
+        ),
+        format!("{}{}", " ".repeat(65536), text),
+    ] {
+        assert!(RealmProfile::verify(invalid.as_bytes(), "echo@realm.example", &trusted).is_err());
+    }
+}
