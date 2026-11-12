@@ -46,6 +46,10 @@ MODE=rotation bash tests/e2e/actr/package-runtime-echo/run.sh
 
 ## Signed v2 Component
 
+The combined Host/Issuer matrix and reproduction commands are in
+[JOINT-ACCEPTANCE.md](JOINT-ACCEPTANCE.md). Its joint runner also checks real
+Issuer renewal/reissue using the Component bytes from the successful RPC run.
+
 With Issuer support for `actr-package/2` and the Rust `wasm32-wasip2` target
 installed, run:
 

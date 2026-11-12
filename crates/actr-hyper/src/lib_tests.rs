@@ -363,6 +363,74 @@ async fn preregistered_credentials_keep_the_workload_recovery_context() {
     }
 }
 
+/// Exercise the actual Host request/context builder with public material from
+/// the same v2 packer/verifier and fixture consumed by the real Issuer tests.
+#[tokio::test]
+async fn v2_registration_preserves_original_material_for_credential_recovery() {
+    use crate::lifecycle::credential_manager::RegistrationContext;
+    use actr_pack::{ActorPackOptions, ActorPackageManifest};
+    use std::collections::BTreeMap;
+
+    let key = SigningKey::generate(&mut OsRng);
+    let source = include_str!("../../actr-pack/tests/fixtures/registration-v2.toml");
+    let package = actr_pack::pack_actor_package(&ActorPackOptions {
+        manifest: ActorPackageManifest::from_toml(source).unwrap(),
+        payloads: BTreeMap::from([("workload/echo.wasm".into(), b"\0asm\x0d\0\x01\0".to_vec())]),
+        signing_key: key.clone(),
+    })
+    .unwrap();
+    let verified = actr_pack::verify_runtime_package_bounded(
+        &package,
+        &key.verifying_key(),
+        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+    )
+    .unwrap();
+    let mut server = mockito::Server::new_async().await;
+    let received = Arc::new(std::sync::Mutex::new(None));
+    let captured = received.clone();
+    let mock = server
+        .mock("POST", "/register")
+        .match_request(move |request| {
+            let request = RegisterRequest::decode(request.body().unwrap().as_slice()).unwrap();
+            *captured.lock().unwrap() = Some(request);
+            true
+        })
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(fake_register_response_bytes())
+        .expect(1)
+        .create_async()
+        .await;
+    let dir = TempDir::new().unwrap();
+    let mut attached = registration_test_node(&dir, false).await;
+    attached.attachment.as_mut().unwrap().verified = Some(verified.clone());
+    attached.attachment.as_mut().unwrap().package_bytes = package.into();
+    let registered = attached.register(&server.url()).await.unwrap();
+    mock.assert_async().await;
+    let node = registered.attachment.unwrap().node;
+    let Some(RegistrationContext::Package { request: saved }) =
+        node.preregistered_registration_context
+    else {
+        panic!("v2 package must retain package-mode recovery context");
+    };
+    assert_eq!(saved, received.lock().unwrap().take().unwrap());
+    assert_eq!(saved.actr_type, verified.manifest.actor_type());
+    assert_eq!(
+        saved.manifest_raw.as_deref(),
+        Some(verified.manifest_raw.as_slice())
+    );
+    assert_eq!(
+        saved.publisher_signature.as_deref(),
+        Some(verified.sig_raw.as_slice())
+    );
+    assert_eq!(
+        saved.signing_public_key.as_deref(),
+        Some(key.verifying_key().as_bytes().as_slice())
+    );
+    assert_eq!(saved.target, None);
+    assert_eq!(saved.auth_mode, Some(RegisterAuthMode::Package as i32));
+}
+
 #[tokio::test]
 async fn with_actor_type_overrides_pending_runtime_metadata() {
     let dir = TempDir::new().unwrap();

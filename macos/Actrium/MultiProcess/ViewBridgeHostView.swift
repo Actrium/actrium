@@ -938,7 +938,10 @@ final class ViewBridgeCoordinator {
                 config[RuntimeBridgeContract.systemAppType] = systemAppType
             }
             if let script = tabConfig.unifiedScript { config["unifiedScript"] = script }
-            if let script = tabConfig.leftPanelScript { config["leftPanelScript"] = script }
+            if let leftPanelScript = tabConfig.leftPanelScript { config["leftPanelScript"] = leftPanelScript }
+            if let serviceCallUrl = tabConfig.serviceCallUrl { config["serviceCallUrl"] = serviceCallUrl }
+            if let appId = tabConfig.appId { config["appId"] = appId }
+            if tabConfig.legacyActorBridge { config["legacyActorBridge"] = true }
             config["leftPanelVisible"] = tabConfig.leftPanelVisible
             config["rightPanelVisible"] = tabConfig.rightPanelVisible
             config["permissions"] = tabConfig.permissions
@@ -2253,6 +2256,8 @@ struct UnifiedReactNativeLayer: View {
             coordinator.isOverviewMode = !isFocused
             coordinator.tabConfig = XPCTabConfig(
                 tabId: tab.id,
+                appId: tab.appId,
+                legacyActorBridge: tab.legacyActorBridge,
                 title: tab.title,
                 backgroundColor: tab.backgroundColor,
                 containerSize: isFocused ? viewportSize : cardSize,
@@ -2264,7 +2269,8 @@ struct UnifiedReactNativeLayer: View {
                 permissions: tab.permissions,
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
-                reloadKey: tab.reloadNonce
+                reloadKey: tab.reloadNonce,
+                serviceCallUrl: tab.serviceCallUrl
             )
             coordinator.currentViewportSize = currentSize
             ipcLog("📱 UnifiedReactNativeLayer.onAppear: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
@@ -2300,6 +2306,8 @@ struct UnifiedReactNativeLayer: View {
             // 🔑 Reload Trigger: Force new sending config(includes reloadKey)
             coordinator.tabConfig = XPCTabConfig(
                 tabId: tab.id,
+                appId: tab.appId,
+                legacyActorBridge: tab.legacyActorBridge,
                 title: tab.title,
                 backgroundColor: tab.backgroundColor,
                 containerSize: isFocused ? viewportSize : cardSize,
@@ -2311,7 +2319,8 @@ struct UnifiedReactNativeLayer: View {
                 permissions: tab.permissions,
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
-                reloadKey: tab.reloadNonce
+                reloadKey: tab.reloadNonce,
+                serviceCallUrl: tab.serviceCallUrl
             )
             coordinator.lastSentConfigSize = nil
             coordinator.lastSentReloadKey = nil
@@ -2344,6 +2353,15 @@ struct UnifiedReactNativeLayer: View {
         }
         if let leftPanelScript = tab.leftPanelScript {
             config["leftPanelScript"] = leftPanelScript
+        }
+        if let serviceCallUrl = tab.serviceCallUrl {
+            config["serviceCallUrl"] = serviceCallUrl
+        }
+        if let appId = tab.appId {
+            config["appId"] = appId
+        }
+        if tab.legacyActorBridge {
+            config["legacyActorBridge"] = true
         }
         return config
     }
@@ -2534,6 +2552,15 @@ struct UnifiedReactNativeLayer: View {
         }
         if !tab.permissions.isEmpty {
             tabConfig["permissions"] = tab.permissions
+        }
+        if let serviceCallUrl = tab.serviceCallUrl {
+            tabConfig["serviceCallUrl"] = serviceCallUrl
+        }
+        if let appId = tab.appId {
+            tabConfig["appId"] = appId
+        }
+        if tab.legacyActorBridge {
+            tabConfig["legacyActorBridge"] = true
         }
 
         // Add system app data (for StartPageApp)
