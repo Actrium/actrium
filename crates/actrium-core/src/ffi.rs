@@ -1,3 +1,4 @@
+use ed25519_dalek::{PUBLIC_KEY_LENGTH, VerifyingKey};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -65,6 +66,21 @@ impl From<ActrPackageManifest> for ActrPackageManifestInfo {
             theme_color: extension.and_then(|value| value.theme_color.clone()),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct VerifiedActrPackageInfo {
+    pub manifest: ActrPackageManifestInfo,
+    pub workload_profile: String,
+    pub workload_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Error)]
+pub enum ActrPackageVerificationError {
+    #[error("invalid Ed25519 public key: {0}")]
+    InvalidPublicKey(String),
+    #[error(transparent)]
+    InvalidPackage(#[from] actr_pack::PackError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -700,6 +716,29 @@ pub fn validate_actr_package_manifest(source: String) -> Result<(), CoreError> {
     actr_package::parse_manifest_toml(&source)
         .map(|_| ())
         .map_err(CoreError::from)
+}
+
+pub fn verify_actr_package(
+    archive: Vec<u8>,
+    trusted_public_key: Vec<u8>,
+) -> Result<VerifiedActrPackageInfo, ActrPackageVerificationError> {
+    let public_key_bytes = <&[u8; PUBLIC_KEY_LENGTH]>::try_from(trusted_public_key.as_slice())
+        .map_err(|_| {
+            ActrPackageVerificationError::InvalidPublicKey(format!(
+                "expected {PUBLIC_KEY_LENGTH} bytes, got {}",
+                trusted_public_key.len()
+            ))
+        })?;
+    let public_key = VerifyingKey::from_bytes(public_key_bytes)
+        .map_err(|error| ActrPackageVerificationError::InvalidPublicKey(error.to_string()))?;
+
+    let verified = actr_pack::verify_actor_package(&archive, &public_key)?;
+    let workload_bytes = actr_pack::read_actor_workload(&archive, &verified)?;
+    Ok(VerifiedActrPackageInfo {
+        workload_profile: verified.manifest.workload.profile.clone(),
+        manifest: verified.manifest.into(),
+        workload_bytes,
+    })
 }
 
 pub fn evaluate_contract(name: Option<String>, version: u32) -> ContractGateInfo {
@@ -2886,12 +2925,12 @@ pub fn post_process_zh_asr_segments(text: String, segments: Vec<AsrSegmentInfo>)
 
 #[cfg(test)]
 mod tests {
+    use ed25519_dalek::SigningKey;
+    use std::collections::BTreeMap;
+
     use super::*;
 
-    #[test]
-    fn ffi_manifest_info_flattens_host_fields() {
-        let info = parse_actr_package_manifest(
-            r##"
+    const FFI_TEST_MANIFEST: &str = r##"
                 format = "actr-package/2"
                 [actor]
                 publisher = "demo"
@@ -2926,10 +2965,11 @@ mod tests {
                 media-type = "application/json"
                 size = 1
                 sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            "##
-            .to_string(),
-        )
-        .unwrap();
+            "##;
+
+    #[test]
+    fn ffi_manifest_info_flattens_host_fields() {
+        let info = parse_actr_package_manifest(FFI_TEST_MANIFEST.to_string()).unwrap();
 
         assert_eq!(info.app_id.as_deref(), Some("demo/app@1.0.0"));
         assert_eq!(info.theme_color.as_deref(), Some("#111111"));
@@ -2940,6 +2980,59 @@ mod tests {
             Some("ui/capability-manifest.json")
         );
         assert_eq!(info.system_app_type, None);
+    }
+
+    fn signed_test_package(key: SigningKey, workload: &[u8]) -> Vec<u8> {
+        let manifest = ActrPackageManifest::from_toml(FFI_TEST_MANIFEST).unwrap();
+        actr_pack::pack_actor_package(&actr_pack::ActorPackOptions {
+            manifest,
+            payloads: BTreeMap::from([
+                ("workload/guest.js".into(), workload.to_vec()),
+                ("ui/capability-manifest.json".into(), b"{}".to_vec()),
+            ]),
+            signing_key: key,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn ffi_verify_actr_package_returns_verified_workload() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let public_key = key.verifying_key().to_bytes().to_vec();
+        let workload = b"globalThis.echo = true;";
+        let archive = signed_test_package(key, workload);
+
+        let result = verify_actr_package(archive, public_key).unwrap();
+
+        assert_eq!(result.manifest.entry, "workload/guest.js");
+        assert_eq!(
+            result.manifest.capabilities.as_deref(),
+            Some("ui/capability-manifest.json")
+        );
+        assert_eq!(result.workload_profile, "keel.guest/1");
+        assert_eq!(result.workload_bytes, workload);
+    }
+
+    #[test]
+    fn ffi_verify_actr_package_rejects_wrong_key() {
+        let archive =
+            signed_test_package(SigningKey::from_bytes(&[7; 32]), b"globalThis.echo = true;");
+        let wrong_key = SigningKey::from_bytes(&[8; 32]).verifying_key();
+
+        assert!(matches!(
+            verify_actr_package(archive, wrong_key.to_bytes().to_vec()),
+            Err(ActrPackageVerificationError::InvalidPackage(
+                actr_pack::PackError::SignatureVerificationFailed(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn ffi_verify_actr_package_rejects_invalid_key_length() {
+        assert!(matches!(
+            verify_actr_package(Vec::new(), vec![0; 31]),
+            Err(ActrPackageVerificationError::InvalidPublicKey(_))
+        ));
     }
 
     #[test]

@@ -1217,6 +1217,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1737,6 +1739,8 @@ fun uniffi_actrium_core_checksum_func_tts_bridge_contract(
 fun uniffi_actrium_core_checksum_func_user_info_bridge_contract(
 ): Short
 fun uniffi_actrium_core_checksum_func_validate_actr_package_manifest(
+): Short
+fun uniffi_actrium_core_checksum_func_verify_actr_package(
 ): Short
 fun ffi_actrium_core_uniffi_contract_version(
 ): Int
@@ -2289,6 +2293,8 @@ fun uniffi_actrium_core_fn_func_user_info_bridge_contract(uniffi_out_err: Uniffi
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_validate_actr_package_manifest(`source`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
+fun uniffi_actrium_core_fn_func_verify_actr_package(`archive`: RustBuffer.ByValue,`trustedPublicKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun ffi_actrium_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_actrium_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -3174,6 +3180,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_validate_actr_package_manifest() != 38515.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_func_verify_actr_package() != 49733.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
 }
 
 /**
@@ -3422,6 +3431,25 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
         val byteBuf = toUtf8(value)
         buf.putInt(byteBuf.limit())
         buf.put(byteBuf)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
+    override fun read(buf: ByteBuffer): ByteArray {
+        val len = buf.getInt()
+        val byteArr = ByteArray(len)
+        buf.get(byteArr)
+        return byteArr
+    }
+    override fun allocationSize(value: ByteArray): ULong {
+        return 4UL + value.size.toULong()
+    }
+    override fun write(value: ByteArray, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        buf.put(value)
     }
 }
 
@@ -3927,6 +3955,7 @@ data class ActrPackageManifestInfo (
     var `contractName`: kotlin.String?,
     var `contractVersion`: kotlin.UInt?,
     var `permissions`: List<kotlin.String>,
+    var `capabilities`: kotlin.String?,
     var `systemAppType`: kotlin.String?,
     var `themeColor`: kotlin.String?
 ) {
@@ -3953,6 +3982,7 @@ public object FfiConverterTypeActrPackageManifestInfo: FfiConverterRustBuffer<Ac
             FfiConverterSequenceString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -3968,6 +3998,7 @@ public object FfiConverterTypeActrPackageManifestInfo: FfiConverterRustBuffer<Ac
             FfiConverterOptionalString.allocationSize(value.`contractName`) +
             FfiConverterOptionalUInt.allocationSize(value.`contractVersion`) +
             FfiConverterSequenceString.allocationSize(value.`permissions`) +
+            FfiConverterOptionalString.allocationSize(value.`capabilities`) +
             FfiConverterOptionalString.allocationSize(value.`systemAppType`) +
             FfiConverterOptionalString.allocationSize(value.`themeColor`)
     )
@@ -3984,6 +4015,7 @@ public object FfiConverterTypeActrPackageManifestInfo: FfiConverterRustBuffer<Ac
             FfiConverterOptionalString.write(value.`contractName`, buf)
             FfiConverterOptionalUInt.write(value.`contractVersion`, buf)
             FfiConverterSequenceString.write(value.`permissions`, buf)
+            FfiConverterOptionalString.write(value.`capabilities`, buf)
             FfiConverterOptionalString.write(value.`systemAppType`, buf)
             FfiConverterOptionalString.write(value.`themeColor`, buf)
     }
@@ -5987,6 +6019,91 @@ public object FfiConverterTypeUserInfoBridgeContractInfo: FfiConverterRustBuffer
             FfiConverterString.write(value.`keyRequestContext`, buf)
             FfiConverterString.write(value.`keyIsLoggedIn`, buf)
     }
+}
+
+
+
+data class VerifiedActrPackageInfo (
+    var `manifest`: ActrPackageManifestInfo,
+    var `workloadProfile`: kotlin.String,
+    var `workloadBytes`: kotlin.ByteArray
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVerifiedActrPackageInfo: FfiConverterRustBuffer<VerifiedActrPackageInfo> {
+    override fun read(buf: ByteBuffer): VerifiedActrPackageInfo {
+        return VerifiedActrPackageInfo(
+            FfiConverterTypeActrPackageManifestInfo.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VerifiedActrPackageInfo) = (
+            FfiConverterTypeActrPackageManifestInfo.allocationSize(value.`manifest`) +
+            FfiConverterString.allocationSize(value.`workloadProfile`) +
+            FfiConverterByteArray.allocationSize(value.`workloadBytes`)
+    )
+
+    override fun write(value: VerifiedActrPackageInfo, buf: ByteBuffer) {
+            FfiConverterTypeActrPackageManifestInfo.write(value.`manifest`, buf)
+            FfiConverterString.write(value.`workloadProfile`, buf)
+            FfiConverterByteArray.write(value.`workloadBytes`, buf)
+    }
+}
+
+
+
+
+
+sealed class ActrPackageVerificationException(message: String): kotlin.Exception(message) {
+
+        class InvalidPublicKey(message: String) : ActrPackageVerificationException(message)
+
+        class InvalidPackage(message: String) : ActrPackageVerificationException(message)
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<ActrPackageVerificationException> {
+        override fun lift(error_buf: RustBuffer.ByValue): ActrPackageVerificationException = FfiConverterTypeActrPackageVerificationError.lift(error_buf)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeActrPackageVerificationError : FfiConverterRustBuffer<ActrPackageVerificationException> {
+    override fun read(buf: ByteBuffer): ActrPackageVerificationException {
+
+            return when(buf.getInt()) {
+            1 -> ActrPackageVerificationException.InvalidPublicKey(FfiConverterString.read(buf))
+            2 -> ActrPackageVerificationException.InvalidPackage(FfiConverterString.read(buf))
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+
+    }
+
+    override fun allocationSize(value: ActrPackageVerificationException): ULong {
+        return 4UL
+    }
+
+    override fun write(value: ActrPackageVerificationException, buf: ByteBuffer) {
+        when(value) {
+            is ActrPackageVerificationException.InvalidPublicKey -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ActrPackageVerificationException.InvalidPackage -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
 }
 
 
@@ -9544,6 +9661,20 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
         FfiConverterString.lower(`source`),_status)
 }
 
+
+
+        /**
+         * Verify one actr-package/2 archive using a trusted public key in raw 32-byte Ed25519 form.
+         * Return the manifest info and workload bytes read from that verified archive.
+         */
+    @Throws(ActrPackageVerificationException::class) fun `verifyActrPackage`(`archive`: kotlin.ByteArray, `trustedPublicKey`: kotlin.ByteArray): VerifiedActrPackageInfo {
+            return FfiConverterTypeVerifiedActrPackageInfo.lift(
+    uniffiRustCallWithError(ActrPackageVerificationException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_verify_actr_package(
+        FfiConverterByteArray.lower(`archive`),FfiConverterByteArray.lower(`trustedPublicKey`),_status)
+}
+    )
+    }
 
 
 
