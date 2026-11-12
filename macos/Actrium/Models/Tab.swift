@@ -86,6 +86,10 @@ struct Tab: Identifiable {
     var title: String
     var url: URL?
     var appId: String?
+    /// Per-tab Service actor endpoint supplied after Attach.
+    var serviceCallUrl: String?
+    /// Host-designated permission to use the legacy ACTR_CALL bridge.
+    var legacyActorBridge: Bool = false
     var htmlContent: String?
 
     /// System tab type (nil for regular tabs, set for built-in pages like History/Bookmarks)
@@ -132,6 +136,8 @@ struct Tab: Identifiable {
         title: String,
         url: URL? = nil,
         appId: String? = nil,
+        serviceCallUrl: String? = nil,
+        legacyActorBridge: Bool = false,
         htmlContent: String? = nil,
         systemTabType: SystemTabType? = nil,
         groupId: UUID? = nil,
@@ -151,6 +157,8 @@ struct Tab: Identifiable {
         self.title = title
         self.url = url
         self.appId = appId
+        self.serviceCallUrl = serviceCallUrl
+        self.legacyActorBridge = legacyActorBridge
         self.htmlContent = htmlContent
         self.systemTabType = systemTabType
         self.groupId = groupId

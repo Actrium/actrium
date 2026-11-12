@@ -33,6 +33,10 @@ export type TabConfig = {
   id: string;
   title: string;
   url?: string;
+  /** Per-tab Service actor endpoint supplied by the Host after Attach. */
+  serviceCallUrl?: string;
+  /** Host-designated permission to use the legacy ACTR_CALL bridge. */
+  legacyActorBridge?: boolean;
   htmlContent?: string;
   reloadKey?: number;
   contract?: {
@@ -62,8 +66,6 @@ export type TabConfig = {
 export type RuntimeProps = {
   tabs: TabConfig[];
   currentTabId?: string;
-  isLeftPanelVisible: boolean;
-  isRightPanelVisible?: boolean;
   // Native Size of the container passed (when ensuring window shrinks) RN I can feel it.
   containerWidth?: number;
   containerHeight?: number;

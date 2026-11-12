@@ -253,6 +253,41 @@ without a key binding are refused; clients obtain bound credentials by renewal.
 A Realm client key is a capability of the Actr Host and **MUST NOT** be given
 to Guest workloads.
 
+### 6.1 Package manifest registration
+
+Package-mode `RegisterRequest` carries the original `manifest.toml` bytes in
+`manifest_raw` and the original 64-byte `manifest.sig` in `publisher_signature`.
+The Host **MUST NOT** reserialize the manifest, inject legacy fields, or replace
+the Publisher signature. Its Realm client proof signs the exact Protobuf body.
+The same registration material is retained for `/issuer/reissue`.
+
+| Manifest | Identity and signing key | Request `target` |
+| --- | --- | --- |
+| `format = "actr-package/2"` | `actor.publisher/name/version`, `signature.key-id`, Ed25519 | **MUST** be absent; an empty string is also rejected |
+| Existing unversioned binary manifest | Top-level `publisher/name/version/signing_key_id` | Required, nonempty, and equal to signed `binary.target` |
+
+A format declaration or versioned `actor/workload/host/signature` table selects
+the versioned parser exclusively. Unsupported versions, `actr-package/1`, mixed
+schemas and invalid v2 documents **MUST NOT** fall back to the unversioned or
+linked path. The manifest is bounded to 1 MiB. The requested Actor type must
+exactly equal the signed type, and the key id must identify the Ed25519 key that
+verifies the original bytes. Format/target-shape failures are rejected as invalid
+requests (Protobuf error code 400); identity/signature failures are rejected as
+unverified provenance (403).
+
+For v2, execution requirements come from the signed workload/Host profiles.
+The Host checks payload hashes, entry points, ABI and capabilities. Issuer
+validates the manifest schema, signature, Publisher provenance and Realm
+authorization; it does not receive the ZIP or attest to remotely executed code.
+Supplying a public key does not grant trusted Publisher provenance. The Host
+needs its own Realm client key and public package material, not the Publisher
+private key or a package-publication record.
+
+Renewal keeps the existing member/client/Realm/Publisher checks. Reissue verifies
+the original package-mode request and the Actor possession/member/type binding,
+and preserves ActorId. A v2 registration records a null legacy target; a successful
+v2 reissue clears any previous legacy target atomically with its response.
+
 ## 7. Security and privacy considerations
 
 - Each Realm uses its own Realm client keys, so Realms cannot correlate one

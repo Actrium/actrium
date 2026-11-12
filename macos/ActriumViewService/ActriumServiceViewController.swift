@@ -447,6 +447,7 @@ final class ServiceReactNativeHost {
     private var factory: RCTReactNativeFactory?
     private var tabConfigObserver: NSObjectProtocol?
     private var hostCreated = false
+    private var surfaceMountObserverInstalled = false
 
     /// Cached RCTHost instance for event emission (bridgeless mode)
     private var _reactHost: AnyObject?
@@ -1423,6 +1424,13 @@ final class ServiceReactNativeHost {
             tabDict["permissions"] = permissions
         }
         if let reloadKey = config["reloadKey"] { tabDict["reloadKey"] = reloadKey }
+        if let appId = config["appId"] as? String { tabDict["appId"] = appId }
+        if let serviceCallUrl = config["serviceCallUrl"] as? String {
+            tabDict["serviceCallUrl"] = serviceCallUrl
+        }
+        if config["legacyActorBridge"] as? Bool == true {
+            tabDict["legacyActorBridge"] = true
+        }
 
         // System app data
         if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }
@@ -1469,6 +1477,26 @@ final class ServiceReactNativeHost {
 
     // MARK: - Root View Creation (Bridgeless Mode)
 
+    /// Install the Fabric mount observer once the RCTHost exists. The
+    /// observer re-commits the matching Renderer surface after mount, which
+    /// is required for reloads that reuse the same CAContext.
+    private func installSurfaceMountObserverIfNeeded() {
+        guard !surfaceMountObserverInstalled else { return }
+        guard let host = reactHost,
+              let presenter = (host as AnyObject).value(
+                forKey: "surfacePresenter"
+              ) as? NSObject else {
+            return
+        }
+
+        presenter.perform(
+            NSSelectorFromString("addObserver:"),
+            with: RendererSurfaceMountObserver.shared
+        )
+        surfaceMountObserverInstalled = true
+        ipcLog("🔧 installed Fabric surface mount observer")
+    }
+
     /// Create a new root view for a specific Tab
     /// Returns RCTSurfaceHostingProxyRootView (bridgeless mode)
     func createRootView(for entry: TabViewControllerEntry, initialProperties: [String: Any]) -> NSView? {
@@ -1492,6 +1520,7 @@ final class ServiceReactNativeHost {
         )
 
         ipcLog("📦 createRootView: got \(type(of: view)) frame=\(view.frame)")
+        installSurfaceMountObserverIfNeeded()
 
         if view.responds(to: NSSelectorFromString("setSizeFlexibility:")) {
             view.setValue(0, forKey: "sizeFlexibility")  // 0 = .none
@@ -1893,6 +1922,13 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         tabDict["permissions"] = permissions
     }
     if let reloadKey = config["reloadKey"] { tabDict["reloadKey"] = reloadKey }
+    if let appId = config["appId"] as? String { tabDict["appId"] = appId }
+    if let serviceCallUrl = config["serviceCallUrl"] as? String {
+        tabDict["serviceCallUrl"] = serviceCallUrl
+    }
+    if config["legacyActorBridge"] as? Bool == true {
+        tabDict["legacyActorBridge"] = true
+    }
     // Copy other tab properties
     if let historyItems = config["historyItems"] { tabDict["historyItems"] = historyItems }
     if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }

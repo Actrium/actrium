@@ -91,6 +91,9 @@ interface SystemAppProps {
   singleTabMode?: boolean;
   tab?: {
     id: string;
+    appId?: string;
+    serviceCallUrl?: string;
+    legacyActorBridge?: boolean;
     title?: string;
     systemAppType?: string;
     unifiedScript?: string;  // ACTR app script
@@ -112,19 +115,14 @@ interface SystemAppProps {
   isRightPanelVisible?: boolean;
 }
 
-const SystemAppContent: React.FC<{
-  appType: string;
-  tab: NonNullable<SystemAppProps['tab']>;
-  containerWidth?: number;
-  containerHeight?: number;
-  isOverviewMode?: boolean;
-}> = ({
-  appType,
-  tab,
-  containerWidth,
-  containerHeight,
-  isOverviewMode,
-}) => {
+const SystemPlaceholder: React.FC<{ appType: string }> = ({ appType }) => (
+  <View style={styles.loading}>
+    <Text style={styles.loadingTitle}>{appType}</Text>
+    <Text style={styles.loadingSubtitle}>System page placeholder</Text>
+  </View>
+);
+
+const SystemAppContent: React.FC<{ appType: string }> = ({ appType }) => {
   switch (appType) {
     case 'loading':
       return (
@@ -133,37 +131,12 @@ const SystemAppContent: React.FC<{
           <Text style={styles.loadingSubtitle}>Waiting for tab config...</Text>
         </View>
       );
-    case 'history': {
-      const HistoryApp = require('./src/system-apps/HistoryApp').default;
-      return (
-        <HistoryApp
-          items={tab.historyItems ?? []}
-          groups={tab.historyGroups ?? []}
-          containerWidth={containerWidth}
-          containerHeight={containerHeight}
-          isOverviewMode={isOverviewMode}
-        />
-      );
-    }
-    case 'bookmarks': {
-      const BookmarksApp =
-        require('./src/system-apps/bookmarks/BookmarksApp').default;
-      return <BookmarksApp />;
-    }
-    case 'bookmarkTags': {
-      const BookmarkTagsApp =
-        require('./src/system-apps/BookmarkTagsApp').default;
-      return <BookmarkTagsApp />;
-    }
-    case 'settings': {
-      const SettingsApp = require('./src/system-apps/SettingsApp').default;
-      return <SettingsApp />;
-    }
-    case 'globalSearch': {
-      const GlobalSearchApp =
-        require('./src/system-apps/globalsearch/GlobalSearchApp').default;
-      return <GlobalSearchApp />;
-    }
+    case 'history':
+    case 'bookmarks':
+    case 'bookmarkTags':
+    case 'settings':
+    case 'globalSearch':
+      return <SystemPlaceholder appType={appType} />;
     default:
       return (
         <View style={styles.loading}>
@@ -208,9 +181,18 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
     return () => subscription.remove();
   }, []);
 
-  // 🔑 Container size: prefer onLayout (live) > initial props
-  const containerWidth = layoutSize?.width ?? initialProps?.containerWidth;
-  const containerHeight = layoutSize?.height ?? initialProps?.containerHeight;
+  // Prefer the first real layout, but fall back to the initial props when
+  // they already carry a valid size. Waiting for onLayout splits the first
+  // frame into an empty surface followed by a later content commit.
+  const initialWidth = initialProps?.containerWidth ?? 0;
+  const initialHeight = initialProps?.containerHeight ?? 0;
+  const hasInitialSize = initialWidth > 0 && initialHeight > 0;
+  if (!layoutSize && !hasInitialSize) {
+    return <View style={styles.container} onLayout={handleLayout} />;
+  }
+
+  const containerWidth = layoutSize?.width ?? initialWidth;
+  const containerHeight = layoutSize?.height ?? initialHeight;
 
   // Merge initial props with dynamic updates (except size which comes from onLayout)
   const props = { ...initialProps, ...dynamicProps };
@@ -228,6 +210,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
         <ErrorBoundary>
           <React.Suspense fallback={<LoadingFallback />}>
             <StandaloneGuestApp
+              key={tab.id}
               tab={tab}
               containerWidth={containerWidth}
               containerHeight={containerHeight}
@@ -250,13 +233,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
   return (
     <View style={styles.container} onLayout={handleLayout}>
       <ErrorBoundary>
-        <SystemAppContent
-          appType={tab.systemAppType}
-          tab={tab}
-          containerWidth={containerWidth}
-          containerHeight={containerHeight}
-          isOverviewMode={isOverviewMode}
-        />
+        <SystemAppContent appType={tab.systemAppType} />
       </ErrorBoundary>
     </View>
   );

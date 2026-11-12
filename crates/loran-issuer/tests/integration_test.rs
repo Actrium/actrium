@@ -42,6 +42,8 @@ use tonic::transport::Server;
 use tower::ServiceExt;
 
 const TEST_REALM: &str = "test@example.com";
+mod device_membership;
+mod v2_package;
 const ROUTE_KEY_LABEL: &str = "test-route-realm-client-key";
 const PROVIDER_ID: &str = "provider.example";
 /// Label of the owner key a Realm is seeded with when a test names none.

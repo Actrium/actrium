@@ -218,6 +218,8 @@ private struct ContentAreaView: View {
             let tab = Tab(
                 title: title,
                 url: url,
+                appId: tabData["appId"] as? String,
+                legacyActorBridge: tabData["legacyActorBridge"] as? Bool ?? false,
                 htmlContent: tabData["htmlContent"] as? String,
                 systemTabType: systemTabType,
                 guestScript: tabData["guestScript"] as? String,
