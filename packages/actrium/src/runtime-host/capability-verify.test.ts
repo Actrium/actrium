@@ -235,4 +235,115 @@ describe('verifyCapabilityManifest', () => {
       }).ok
     ).toBe(true);
   });
+
+  test('accepts a method-level declaration for a used host module', () => {
+    const clipboardManifest: CapabilityManifestV1 = {
+      ...manifest,
+      imports: ['host:clipboard'],
+      hostModules: { clipboard: { rpc: ['writeText'] } },
+    };
+    const clipboardOptions = {
+      ...options,
+      hostSupportedModules: new Set(['host:clipboard']),
+      contractKinds: { 'host:clipboard': { writeText: 'rpc' as const } },
+    };
+
+    expect(
+      verifyCapabilityManifest(clipboardManifest, {
+        ...clipboardOptions,
+        declaredCapabilities: ['host:clipboard.write'],
+      }).ok
+    ).toBe(true);
+    expect(
+      verifyCapabilityManifest(clipboardManifest, {
+        ...clipboardOptions,
+        declaredCapabilities: ['host:clipboard'],
+      }).ok
+    ).toBe(true);
+  });
+
+  test('rejects a known contract method that the package did not declare', () => {
+    const result = verifyCapabilityManifest(
+      { ...manifest, hostModules: { service: { rpc: ['tell'] } } },
+      {
+        ...options,
+        contractKinds: {
+          'host:service': { call: 'rpc' as const, tell: 'rpc' as const },
+        },
+        declaredCapabilities: ['service.call'],
+      }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+  });
+
+  test('accepts a module declaration that covers the used method', () => {
+    expect(
+      verifyCapabilityManifest(
+        { ...manifest, hostModules: { service: { rpc: ['tell'] } } },
+        {
+          ...options,
+          contractKinds: {
+            'host:service': { call: 'rpc' as const, tell: 'rpc' as const },
+          },
+          declaredCapabilities: ['service'],
+        }
+      ).ok
+    ).toBe(true);
+  });
+
+  test('rejects a declaration from a different host module', () => {
+    const clipboardManifest: CapabilityManifestV1 = {
+      ...manifest,
+      imports: ['host:clipboard'],
+      hostModules: { clipboard: { rpc: ['writeText'] } },
+    };
+
+    const result = verifyCapabilityManifest(clipboardManifest, {
+      ...options,
+      hostSupportedModules: new Set(['host:clipboard']),
+      contractKinds: { 'host:clipboard': { writeText: 'rpc' as const } },
+      declaredCapabilities: ['host:share.share'],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+  });
+
+  test('rejects business routes declared with only service.on', () => {
+    const result = verifyCapabilityManifest(
+      {
+        ...manifest,
+        hostModules: { service: { rpc: ['notes.save'], events: [] } },
+      },
+      { ...options, declaredCapabilities: ['service.on'] }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+    expect(result.details.join('\n')).toContain('service.call');
+  });
+
+  test('rejects business routes declared with only service.tell', () => {
+    const result = verifyCapabilityManifest(
+      {
+        ...manifest,
+        hostModules: { service: { rpc: ['notes.save'], events: [] } },
+      },
+      { ...options, declaredCapabilities: ['service.tell'] }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+    expect(result.details.join('\n')).toContain('service.call');
+  });
+
+  test('accepts business routes with an exact service.call declaration', () => {
+    expect(
+      verifyCapabilityManifest(
+        {
+          ...manifest,
+          hostModules: { service: { rpc: ['notes.save'], events: [] } },
+        },
+        { ...options, declaredCapabilities: ['service.call'] }
+      )
+    ).toEqual({ ok: true, details: [] });
+  });
 });
