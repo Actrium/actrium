@@ -526,6 +526,24 @@ fileprivate struct FfiConverterString: FfiConverter {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
+    typealias SwiftType = Data
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        let len: Int32 = try readInt(&buf)
+        return Data(try readBytes(&buf, count: Int(len)))
+    }
+
+    public static func write(_ value: Data, into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        writeBytes(&buf, value)
+    }
+}
+
 
 public struct ActiveTabInfo {
     public var id: String
@@ -5938,6 +5956,168 @@ public func FfiConverterTypeUserInfoBridgeContractInfo_lower(_ value: UserInfoBr
     return FfiConverterTypeUserInfoBridgeContractInfo.lower(value)
 }
 
+
+public struct VerifiedActrPackageInfo {
+    public var manifest: ActrPackageManifestInfo
+    public var workloadProfile: String
+    public var workloadBytes: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(manifest: ActrPackageManifestInfo, workloadProfile: String, workloadBytes: Data) {
+        self.manifest = manifest
+        self.workloadProfile = workloadProfile
+        self.workloadBytes = workloadBytes
+    }
+}
+
+#if compiler(>=6)
+extension VerifiedActrPackageInfo: Sendable {}
+#endif
+
+
+extension VerifiedActrPackageInfo: Equatable, Hashable {
+    public static func ==(lhs: VerifiedActrPackageInfo, rhs: VerifiedActrPackageInfo) -> Bool {
+        if lhs.manifest != rhs.manifest {
+            return false
+        }
+        if lhs.workloadProfile != rhs.workloadProfile {
+            return false
+        }
+        if lhs.workloadBytes != rhs.workloadBytes {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(manifest)
+        hasher.combine(workloadProfile)
+        hasher.combine(workloadBytes)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVerifiedActrPackageInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VerifiedActrPackageInfo {
+        return
+            try VerifiedActrPackageInfo(
+                manifest: FfiConverterTypeActrPackageManifestInfo.read(from: &buf),
+                workloadProfile: FfiConverterString.read(from: &buf),
+                workloadBytes: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VerifiedActrPackageInfo, into buf: inout [UInt8]) {
+        FfiConverterTypeActrPackageManifestInfo.write(value.manifest, into: &buf)
+        FfiConverterString.write(value.workloadProfile, into: &buf)
+        FfiConverterData.write(value.workloadBytes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVerifiedActrPackageInfo_lift(_ buf: RustBuffer) throws -> VerifiedActrPackageInfo {
+    return try FfiConverterTypeVerifiedActrPackageInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVerifiedActrPackageInfo_lower(_ value: VerifiedActrPackageInfo) -> RustBuffer {
+    return FfiConverterTypeVerifiedActrPackageInfo.lower(value)
+}
+
+
+public enum ActrPackageVerificationError: Swift.Error {
+
+
+
+    case InvalidPublicKey(message: String)
+
+    case InvalidPackage(message: String)
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeActrPackageVerificationError: FfiConverterRustBuffer {
+    typealias SwiftType = ActrPackageVerificationError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrPackageVerificationError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+
+
+
+        case 1: return .InvalidPublicKey(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 2: return .InvalidPackage(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ActrPackageVerificationError, into buf: inout [UInt8]) {
+        switch value {
+
+
+
+
+        case .InvalidPublicKey(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+        case .InvalidPackage(_ /* message is ignored*/):
+            writeInt(&buf, Int32(2))
+
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeActrPackageVerificationError_lift(_ buf: RustBuffer) throws -> ActrPackageVerificationError {
+    return try FfiConverterTypeActrPackageVerificationError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeActrPackageVerificationError_lower(_ value: ActrPackageVerificationError) -> RustBuffer {
+    return FfiConverterTypeActrPackageVerificationError.lower(value)
+}
+
+
+extension ActrPackageVerificationError: Equatable, Hashable {}
+
+
+
+
+extension ActrPackageVerificationError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
+
+
+
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
@@ -9026,6 +9206,18 @@ public func validateActrPackageManifest(source: String)throws   {try rustCallWit
     )
 }
 }
+/**
+ * Verify one actr-package/2 archive using a trusted public key in raw 32-byte Ed25519 form.
+ * Return the manifest info and workload bytes read from that verified archive.
+ */
+public func verifyActrPackage(archive: Data, trustedPublicKey: Data)throws  -> VerifiedActrPackageInfo  {
+    return try  FfiConverterTypeVerifiedActrPackageInfo_lift(try rustCallWithError(FfiConverterTypeActrPackageVerificationError_lift) {
+    uniffi_actrium_core_fn_func_verify_actr_package(
+        FfiConverterData.lower(archive),
+        FfiConverterData.lower(trustedPublicKey),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -9799,6 +9991,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_validate_actr_package_manifest() != 38515) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_verify_actr_package() != 49733) {
         return InitializationResult.apiChecksumMismatch
     }
 

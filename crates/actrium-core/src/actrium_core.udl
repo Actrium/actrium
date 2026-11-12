@@ -7,6 +7,11 @@ namespace actrium_core {
     [Throws=CoreError]
     void validate_actr_package_manifest(string source);
 
+    /// Verify one actr-package/2 archive using a trusted public key in raw 32-byte Ed25519 form.
+    /// Return the manifest info and workload bytes read from that verified archive.
+    [Throws=ActrPackageVerificationError]
+    VerifiedActrPackageInfo verify_actr_package(bytes archive, bytes trusted_public_key);
+
     /// Evaluate a contract tuple using the current Actrium host compatibility rules.
     ContractGateInfo evaluate_contract(string? name, u32 version);
 
@@ -965,6 +970,12 @@ dictionary ActrPackageManifestInfo {
     string? theme_color;
 };
 
+dictionary VerifiedActrPackageInfo {
+    ActrPackageManifestInfo manifest;
+    string workload_profile;
+    bytes workload_bytes;
+};
+
 enum ContractGateStatus {
     "Ok",
     "Compat",
@@ -1467,4 +1478,10 @@ enum CoreError {
     "UnknownSystemAppType",
     "UnknownAppSourceType",
     "InvalidActrActorType",
+};
+
+[Error]
+enum ActrPackageVerificationError {
+    "InvalidPublicKey",
+    "InvalidPackage",
 };
