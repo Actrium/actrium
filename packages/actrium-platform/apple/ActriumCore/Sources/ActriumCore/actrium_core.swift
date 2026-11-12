@@ -1539,12 +1539,13 @@ public struct ActrPackageManifestInfo {
     public var contractName: String?
     public var contractVersion: UInt32?
     public var permissions: [String]
+    public var capabilities: String?
     public var systemAppType: String?
     public var themeColor: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(name: String, version: String, description: String?, appId: String?, icon: String?, entry: String, leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, contractName: String?, contractVersion: UInt32?, permissions: [String], systemAppType: String?, themeColor: String?) {
+    public init(name: String, version: String, description: String?, appId: String?, icon: String?, entry: String, leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, contractName: String?, contractVersion: UInt32?, permissions: [String], capabilities: String?, systemAppType: String?, themeColor: String?) {
         self.name = name
         self.version = version
         self.description = description
@@ -1556,6 +1557,7 @@ public struct ActrPackageManifestInfo {
         self.contractName = contractName
         self.contractVersion = contractVersion
         self.permissions = permissions
+        self.capabilities = capabilities
         self.systemAppType = systemAppType
         self.themeColor = themeColor
     }
@@ -1601,6 +1603,9 @@ extension ActrPackageManifestInfo: Equatable, Hashable {
         if lhs.permissions != rhs.permissions {
             return false
         }
+        if lhs.capabilities != rhs.capabilities {
+            return false
+        }
         if lhs.systemAppType != rhs.systemAppType {
             return false
         }
@@ -1622,6 +1627,7 @@ extension ActrPackageManifestInfo: Equatable, Hashable {
         hasher.combine(contractName)
         hasher.combine(contractVersion)
         hasher.combine(permissions)
+        hasher.combine(capabilities)
         hasher.combine(systemAppType)
         hasher.combine(themeColor)
     }
@@ -1647,6 +1653,7 @@ public struct FfiConverterTypeActrPackageManifestInfo: FfiConverterRustBuffer {
                 contractName: FfiConverterOptionString.read(from: &buf),
                 contractVersion: FfiConverterOptionUInt32.read(from: &buf),
                 permissions: FfiConverterSequenceString.read(from: &buf),
+                capabilities: FfiConverterOptionString.read(from: &buf),
                 systemAppType: FfiConverterOptionString.read(from: &buf),
                 themeColor: FfiConverterOptionString.read(from: &buf)
         )
@@ -1664,6 +1671,7 @@ public struct FfiConverterTypeActrPackageManifestInfo: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.contractName, into: &buf)
         FfiConverterOptionUInt32.write(value.contractVersion, into: &buf)
         FfiConverterSequenceString.write(value.permissions, into: &buf)
+        FfiConverterOptionString.write(value.capabilities, into: &buf)
         FfiConverterOptionString.write(value.systemAppType, into: &buf)
         FfiConverterOptionString.write(value.themeColor, into: &buf)
     }
