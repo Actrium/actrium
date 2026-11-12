@@ -4,7 +4,7 @@
 
 import type { HostModuleImplementationMap, KeelContractShape } from '../../contract';
 import type { RuntimeCollectorConfig } from '../../devtools/runtime';
-import type { Receiver, ReceiverStats } from '../receiver';
+import type { Receiver, ReceiverOptions, ReceiverStats } from '../receiver';
 import type { ComponentMap, ComponentRegistry } from '../registry';
 import type { TenantConfig } from '../tenant-manager/types';
 import type { BridgeValueObject, OperationBatch, SerializedOperationBatch } from '../types';
@@ -104,6 +104,9 @@ export interface EngineOptions {
 
   /** Reject CREATE operations outside the per-Guest registry. */
   restrictToRegisteredComponents?: boolean;
+
+  /** Render implicit text without registering a Guest-visible Text component. */
+  textNodeRenderer?: ReceiverOptions['textNodeRenderer'];
 
   /**
    * Diagnostics parameters (for Host-side Task Manager/Resource Monitor)

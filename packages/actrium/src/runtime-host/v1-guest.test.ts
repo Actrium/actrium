@@ -77,7 +77,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
       import { writeText } from 'host:clipboard';
       import { call as echo } from 'host:service/${route}';
       void echo({ payloadBase64: '' }).then(() => writeText({ text: 'Echo received' }));
-      export default function App() { return <View />; }
+      export default function App() { return <><View>Hello</View>{'Standalone text'}</>; }
     `);
     const command = [
       Bun.argv[0], keelCli, 'build', 'guest.tsx',
@@ -93,6 +93,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     const signedProfile = await Bun.file(path.join(root, 'workload/capabilities.json')).text();
     const verified = verifyV1RuntimeGuest(bundle, signedProfile, declarations);
     if (!verified.ok) throw new Error(verified.details.join(' '));
+    expect(verified.manifest.components).toEqual(['View']);
 
     const calls: string[] = [];
     const clipboard = Promise.withResolvers<string>();
@@ -106,10 +107,13 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
       authorizeCapability: authorize,
       writeClipboardText: async (text) => clipboard.resolve(text),
     });
+    // Stand in for the Host's native renderer without registering a Text component.
+    const ProtocolText = () => null;
     engine = new Engine({
       sandbox: 'node-vm',
       ...bindV1HostModules(verified.linkage, implementations, authorize),
       restrictToRegisteredComponents: true,
+      textNodeRenderer: ProtocolText,
       requireWhitelist: verified.manifest.imports.filter((id) => !id.startsWith('host:')),
     });
     engine.register({ View: () => null });
@@ -117,13 +121,24 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     await engine.loadBundle(bundle);
     expect(await clipboard.promise).toBe('Echo received');
     expect(calls).toEqual([route]);
-    expect(receiver.getStats().rootChildrenCount).toBe(1);
+    // Check rendered children, since protocol text nodes can exist without a renderer.
+    expect(receiver.render()).toMatchObject({
+      props: {
+        children: [
+          { props: { children: { type: ProtocolText, props: { children: 'Hello' } } } },
+          { type: ProtocolText, props: { children: 'Standalone text' } },
+        ],
+      },
+    });
     expect(receiver.applyBatch({
       version: 1,
       batchId: 99,
-      operations: [{ op: 'CREATE', id: 999, type: 'Modal', props: {} }],
-    }).failed).toBe(1);
-    expect(receiver.getStats().nodeCount).toBe(1);
+      operations: [
+        { op: 'CREATE', id: 998, type: 'Modal', props: {} },
+        { op: 'CREATE', id: 999, type: 'Text', props: {} },
+      ],
+    }).failed).toBe(2);
+    expect(receiver.getStats().nodeCount).toBe(3);
   } finally {
     engine?.destroy();
     fs.rmSync(root, { recursive: true, force: true });

@@ -290,6 +290,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
           ),
           requireWhitelist: linked.manifest.imports.filter((id) => !id.startsWith('host:')),
           restrictToRegisteredComponents: true,
+          // Implicit text needs a renderer even when Text is absent from the manifest.
+          textNodeRenderer: Text,
         })
       : new Engine({ debug: false, contract, hostModules });
     engine.register(

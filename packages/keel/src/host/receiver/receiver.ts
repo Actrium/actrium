@@ -66,6 +66,8 @@ export class Receiver {
     maxBatchSize: number;
     /** Reject unknown component types before they enter the retained tree. */
     restrictToRegisteredComponents: boolean;
+    /** Host component used only for protocol text nodes. */
+    textNodeRenderer?: ReceiverOptions['textNodeRenderer'];
     debug: boolean;
   };
 
@@ -103,6 +105,7 @@ export class Receiver {
       onMetric: options?.onMetric,
       maxBatchSize: options?.maxBatchSize ?? 5000,
       restrictToRegisteredComponents: options?.restrictToRegisteredComponents ?? false,
+      textNodeRenderer: options?.textNodeRenderer,
       debug: options?.debug ?? false,
     };
 
@@ -756,10 +759,13 @@ export class Receiver {
 
     // Handle text node
     if (node.type === '__TEXT__') {
-      // React Native needs a real Text component instance, not a string tag
-      // Reason: React module structure unknown, Text component may or may not exist
+      // React Native needs a Text renderer. Hosts without a dedicated renderer
+      // retain the existing lookup through their component registry.
       const TextComponent =
-        this.registry.get('Text') ?? (React as unknown as { Text?: unknown }).Text;
+        this.opts.textNodeRenderer ??
+        this.registry.get('Text') ??
+        // Reason: Some React hosts provide a Text export outside the standard type definitions.
+        (React as unknown as { Text?: unknown }).Text;
       if (!TextComponent) {
         console.error('[keel] Text component not registered; cannot render text node');
         return null;
