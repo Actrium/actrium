@@ -192,7 +192,7 @@ impl Fixture {
         }
     }
 
-    fn attach_request(&self, channel: &VerifiedChannel, id: &str, nonce: u8) -> AttachRequest {
+    fn attach_request(&self, channel: &VerifiedChannel, id: &str) -> AttachRequest {
         let mut request = AttachRequest {
             attach_id: id.into(),
             front_actor_id: "front".into(),
@@ -204,7 +204,7 @@ impl Fixture {
             guest_digest: test_digest("guest"),
             runtime: runtime(),
             protocol_fingerprint: test_digest("protocol"),
-            tab_session_nonce: test_digest(&format!("attach-nonce:{nonce}")),
+            tab_session_nonce: test_digest(&format!("attach-nonce:{id}")),
             requested_lease: LeaseMode::Exclusive,
             requested_capabilities: vec![READ.into()],
             challenge_response: vec![],
@@ -325,7 +325,7 @@ async fn continuous_unique_requests_are_bounded_and_evicted_replays_stay_rejecte
     let channel = fixture.channel("channel-a");
     let outcome = fixture
         .service
-        .attach(fixture.attach_request(&channel, "attach-a", 1), &channel)
+        .attach(fixture.attach_request(&channel, "attach-a"), &channel)
         .await
         .unwrap();
     let first = fixture.business(&outcome, &channel, "request-0", fixture.clock.now());
@@ -388,7 +388,7 @@ async fn attach_detach_and_resume_loops_do_not_retain_unbounded_history() {
         let outcome = fixture
             .service
             .attach(
-                fixture.attach_request(&channel, &format!("attach-{index}"), index as u8 + 1),
+                fixture.attach_request(&channel, &format!("attach-{index}")),
                 &channel,
             )
             .await
@@ -412,7 +412,7 @@ async fn attach_detach_and_resume_loops_do_not_retain_unbounded_history() {
     let mut outcome = fixture
         .service
         .attach(
-            fixture.attach_request(&initial_channel, "attach-resume", 100),
+            fixture.attach_request(&initial_channel, "attach-resume"),
             &initial_channel,
         )
         .await
@@ -461,7 +461,7 @@ async fn ttl_reclaims_closed_sessions_without_touching_the_active_session() {
     let old = fixture
         .service
         .attach(
-            fixture.attach_request(&old_channel, "old-attach", 1),
+            fixture.attach_request(&old_channel, "old-attach"),
             &old_channel,
         )
         .await
@@ -482,7 +482,7 @@ async fn ttl_reclaims_closed_sessions_without_touching_the_active_session() {
     let active = fixture
         .service
         .attach(
-            fixture.attach_request(&active_channel, "active-attach", 2),
+            fixture.attach_request(&active_channel, "active-attach"),
             &active_channel,
         )
         .await
@@ -513,7 +513,7 @@ async fn ttl_reclaims_closed_sessions_without_touching_the_active_session() {
 async fn invalidate_all_releases_sessions_but_keeps_bounded_attach_tombstones() {
     let fixture = Fixture::new();
     let channel = fixture.channel("channel");
-    let attach = fixture.attach_request(&channel, "attach-original", 1);
+    let attach = fixture.attach_request(&channel, "attach-original");
     let outcome = fixture
         .service
         .attach(attach.clone(), &channel)
@@ -551,8 +551,7 @@ async fn invalidate_all_releases_sessions_but_keeps_bounded_attach_tombstones() 
     assert_eq!(replay.code, AttachErrorCode::PermissionDenied);
 
     for index in 0..10 {
-        let attach =
-            fixture.attach_request(&channel, &format!("fresh-attach-{index}"), index as u8 + 10);
+        let attach = fixture.attach_request(&channel, &format!("fresh-attach-{index}"));
         fixture.service.attach(attach, &channel).await.unwrap();
         fixture.service.invalidate_all().await;
         fixture.assert_bounded(fixture.service.registry().retention_stats().await);

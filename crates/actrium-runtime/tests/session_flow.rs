@@ -364,12 +364,7 @@ fn channel_with_runtime(
     }
 }
 
-fn attach_request(
-    front: &Front,
-    channel: &VerifiedChannel,
-    attach_id: &str,
-    nonce: u8,
-) -> AttachRequest {
+fn attach_request(front: &Front, channel: &VerifiedChannel, attach_id: &str) -> AttachRequest {
     let mut request = AttachRequest {
         attach_id: attach_id.into(),
         front_actor_id: front.actor_id.clone(),
@@ -381,7 +376,7 @@ fn attach_request(
         guest_digest: test_digest("guest"),
         runtime: runtime(),
         protocol_fingerprint: test_digest("protocol"),
-        tab_session_nonce: test_digest(&format!("attach-nonce:{nonce}")),
+        tab_session_nonce: test_digest(&format!("attach-nonce:{attach_id}")),
         requested_lease: LeaseMode::Exclusive,
         requested_capabilities: vec![READ.into(), WRITE.into()],
         challenge_response: Vec::new(),
@@ -446,7 +441,7 @@ async fn independent_identity_attach_and_service_proof() {
     let front = Front::new("alice");
     let fixture = Fixture::new(std::slice::from_ref(&front));
     let channel = make_channel(&front, "a", 2_000);
-    let request = attach_request(&front, &channel, "attach-a", 1);
+    let request = attach_request(&front, &channel, "attach-a");
     let outcome = fixture
         .service
         .attach(request.clone(), &channel)
@@ -489,7 +484,7 @@ async fn attach_is_idempotent_but_attach_id_conflicts_are_rejected() {
     let front = Front::new("alice");
     let fixture = Fixture::new(std::slice::from_ref(&front));
     let channel = make_channel(&front, "a", 2_000);
-    let request = attach_request(&front, &channel, "same-attach", 1);
+    let request = attach_request(&front, &channel, "same-attach");
     let first = fixture
         .service
         .attach(request.clone(), &channel)
@@ -507,7 +502,7 @@ async fn attach_is_idempotent_but_attach_id_conflicts_are_rejected() {
         replay.response.service_challenge
     );
 
-    let mut conflict = attach_request(&front, &channel, "same-attach", 2);
+    let mut conflict = attach_request(&front, &channel, "same-attach");
     conflict.requested_capabilities = vec![READ.into()];
     sign_attach_request(&mut conflict, &front.key);
     assert_code(
@@ -524,16 +519,13 @@ async fn occupied_returns_safe_lease_metadata() {
     let alice_channel = make_channel(&alice, "a", 2_000);
     fixture
         .service
-        .attach(
-            attach_request(&alice, &alice_channel, "a1", 1),
-            &alice_channel,
-        )
+        .attach(attach_request(&alice, &alice_channel, "a1"), &alice_channel)
         .await
         .unwrap();
     let bob_channel = make_channel(&bob, "b", 2_000);
     let error = match fixture
         .service
-        .attach(attach_request(&bob, &bob_channel, "b1", 2), &bob_channel)
+        .attach(attach_request(&bob, &bob_channel, "b1"), &bob_channel)
         .await
     {
         Err(error) => error,
@@ -559,12 +551,7 @@ async fn concurrent_attach_has_exactly_one_exclusive_lease() {
             fixture
                 .service
                 .attach(
-                    attach_request(
-                        &front,
-                        &channel,
-                        &format!("attach-{index}"),
-                        index as u8 + 1,
-                    ),
+                    attach_request(&front, &channel, &format!("attach-{index}")),
                     &channel,
                 )
                 .await
@@ -608,14 +595,11 @@ async fn unauthorized_takeover_leaves_old_session_usable() {
     let alice_channel = make_channel(&alice, "a", 2_000);
     let old = fixture
         .service
-        .attach(
-            attach_request(&alice, &alice_channel, "a1", 1),
-            &alice_channel,
-        )
+        .attach(attach_request(&alice, &alice_channel, "a1"), &alice_channel)
         .await
         .unwrap();
     let bob_channel = make_channel(&bob, "b", 2_000);
-    let attach = attach_request(&bob, &bob_channel, "b1", 2);
+    let attach = attach_request(&bob, &bob_channel, "b1");
     let takeover = takeover_request(&bob, &old, &attach);
     assert_code(
         fixture
@@ -644,14 +628,11 @@ async fn authorized_takeover_invalidates_old_session_and_channel() {
     let alice_channel = make_channel(&alice, "a", 2_000);
     let old = fixture
         .service
-        .attach(
-            attach_request(&alice, &alice_channel, "a1", 1),
-            &alice_channel,
-        )
+        .attach(attach_request(&alice, &alice_channel, "a1"), &alice_channel)
         .await
         .unwrap();
     let bob_channel = make_channel(&bob, "b", 2_000);
-    let attach = attach_request(&bob, &bob_channel, "b1", 2);
+    let attach = attach_request(&bob, &bob_channel, "b1");
     let takeover = takeover_request(&bob, &old, &attach);
     let new = fixture
         .service
@@ -688,7 +669,7 @@ async fn heartbeat_does_not_extend_credential_or_refresh_role_without_reauthenti
     let channel = make_channel(&front, "a", 1_100);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     fixture
@@ -742,7 +723,7 @@ async fn renewed_credential_rereads_role_and_advances_channel_epoch() {
     let channel = make_channel(&front, "a", 1_100);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     fixture
@@ -793,7 +774,7 @@ async fn resume_requires_new_channel_and_old_session_proof_and_rejects_old_epoch
     let channel = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     fixture
@@ -847,7 +828,7 @@ async fn old_channel_cannot_impersonate_the_resumed_channel_or_dequeue() {
     let attached = fixture
         .service
         .attach(
-            attach_request(&front, &channel_c1, "attach-c1", 1),
+            attach_request(&front, &channel_c1, "attach-c1"),
             &channel_c1,
         )
         .await
@@ -918,7 +899,7 @@ async fn guard_rejects_transcript_runtime_and_expiry_forgery() {
     let channel = make_channel(&front, "c1", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "attach-c1", 1), &channel)
+        .attach(attach_request(&front, &channel, "attach-c1"), &channel)
         .await
         .unwrap();
 
@@ -987,7 +968,7 @@ async fn expiry_and_queued_dequeue_recheck_prevent_execution() {
     let channel = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     let queued = fixture
@@ -1013,7 +994,7 @@ async fn guard_revocation_and_dequeue_recheck_are_enforced() {
     let channel = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     let queued = fixture
@@ -1050,7 +1031,7 @@ async fn guard_checks_route_scope_proof_and_replay_before_dispatch() {
     let channel = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
 
@@ -1106,7 +1087,7 @@ async fn detach_releases_lease_without_stopping_service() {
     let channel = make_channel(&alice, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&alice, &channel, "a1", 1), &channel)
+        .attach(attach_request(&alice, &channel, "a1"), &channel)
         .await
         .unwrap();
     fixture
@@ -1132,7 +1113,7 @@ async fn detach_releases_lease_without_stopping_service() {
     let bob_channel = make_channel(&bob, "b", 2_000);
     fixture
         .service
-        .attach(attach_request(&bob, &bob_channel, "b1", 2), &bob_channel)
+        .attach(attach_request(&bob, &bob_channel, "b1"), &bob_channel)
         .await
         .unwrap();
 }
@@ -1144,7 +1125,7 @@ async fn delayed_heartbeat_cannot_resurrect_a_grace_session() {
     let channel = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     fixture
@@ -1184,7 +1165,7 @@ async fn crash_grace_expires_before_a_new_attach_is_allowed() {
     let channel = make_channel(&alice, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&alice, &channel, "a1", 1), &channel)
+        .attach(attach_request(&alice, &channel, "a1"), &channel)
         .await
         .unwrap();
     fixture
@@ -1210,7 +1191,7 @@ async fn crash_grace_expires_before_a_new_attach_is_allowed() {
     let bob_channel = make_channel(&bob, "b", 2_000);
     fixture
         .service
-        .attach(attach_request(&bob, &bob_channel, "b1", 2), &bob_channel)
+        .attach(attach_request(&bob, &bob_channel, "b1"), &bob_channel)
         .await
         .unwrap();
 }
@@ -1222,7 +1203,7 @@ async fn service_restart_invalidates_all_sessions_and_requires_new_runtime_chann
     let channel = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     assert_code(
@@ -1262,14 +1243,14 @@ async fn service_restart_invalidates_all_sessions_and_requires_new_runtime_chann
     assert_code(
         fixture
             .service
-            .attach(attach_request(&front, &channel, "a2", 2), &channel)
+            .attach(attach_request(&front, &channel, "a2"), &channel)
             .await,
         AttachErrorCode::ChannelTargetMismatch,
     );
     let new_channel = channel_with_runtime(&front, "b", 2_000, "runtime-2");
     let current = fixture
         .service
-        .attach(attach_request(&front, &new_channel, "a3", 3), &new_channel)
+        .attach(attach_request(&front, &new_channel, "a3"), &new_channel)
         .await
         .unwrap();
     assert_code(
@@ -1293,14 +1274,14 @@ async fn signature_compatibility_privacy_and_quota_fail_closed_before_lease() {
     let fixture = Fixture::new(std::slice::from_ref(&front));
     let channel = make_channel(&front, "a", 2_000);
 
-    let mut bad_signature = attach_request(&front, &channel, "bad-signature", 1);
+    let mut bad_signature = attach_request(&front, &channel, "bad-signature");
     bad_signature.challenge_response[0] ^= 1;
     assert_code(
         fixture.service.attach(bad_signature, &channel).await,
         AttachErrorCode::PermissionDenied,
     );
 
-    let mut bad_target = attach_request(&front, &channel, "bad-target", 2);
+    let mut bad_target = attach_request(&front, &channel, "bad-target");
     bad_target.service_actor_id = "service:other".into();
     sign_attach_request(&mut bad_target, &front.key);
     assert_code(
@@ -1308,7 +1289,7 @@ async fn signature_compatibility_privacy_and_quota_fail_closed_before_lease() {
         AttachErrorCode::ChannelTargetMismatch,
     );
 
-    let mut bad_guest = attach_request(&front, &channel, "bad-guest", 3);
+    let mut bad_guest = attach_request(&front, &channel, "bad-guest");
     bad_guest.guest_digest[0] ^= 1;
     sign_attach_request(&mut bad_guest, &front.key);
     assert_code(
@@ -1316,7 +1297,7 @@ async fn signature_compatibility_privacy_and_quota_fail_closed_before_lease() {
         AttachErrorCode::PackageDigestMismatch,
     );
 
-    let mut bad_protocol = attach_request(&front, &channel, "bad-protocol", 4);
+    let mut bad_protocol = attach_request(&front, &channel, "bad-protocol");
     bad_protocol.protocol_fingerprint[0] ^= 1;
     sign_attach_request(&mut bad_protocol, &front.key);
     assert_code(
@@ -1332,7 +1313,7 @@ async fn signature_compatibility_privacy_and_quota_fail_closed_before_lease() {
     assert_code(
         fixture
             .service
-            .attach(attach_request(&front, &channel, "privacy", 5), &channel)
+            .attach(attach_request(&front, &channel, "privacy"), &channel)
             .await,
         AttachErrorCode::PrivacyPolicyUnsatisfied,
     );
@@ -1349,7 +1330,7 @@ async fn signature_compatibility_privacy_and_quota_fail_closed_before_lease() {
     assert_code(
         fixture
             .service
-            .attach(attach_request(&front, &channel, "quota", 6), &channel)
+            .attach(attach_request(&front, &channel, "quota"), &channel)
             .await,
         AttachErrorCode::RateLimited,
     );
@@ -1362,10 +1343,7 @@ async fn signature_compatibility_privacy_and_quota_fail_closed_before_lease() {
     assert_code(
         fixture
             .service
-            .attach(
-                attach_request(&front, &channel, "authorization", 7),
-                &channel,
-            )
+            .attach(attach_request(&front, &channel, "authorization"), &channel)
             .await,
         AttachErrorCode::PermissionDenied,
     );
@@ -1377,7 +1355,7 @@ async fn signature_compatibility_privacy_and_quota_fail_closed_before_lease() {
     fixture
         .service
         .attach(
-            attach_request(&front, &channel, "success-after-denials", 8),
+            attach_request(&front, &channel, "success-after-denials"),
             &channel,
         )
         .await
@@ -1395,7 +1373,7 @@ async fn renewal_and_resume_reject_historical_channels_without_consuming_failed_
     let channel_a = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel_a, "a1", 1), &channel_a)
+        .attach(attach_request(&front, &channel_a, "a1"), &channel_a)
         .await
         .unwrap();
     let channel_b = make_channel(&front, "b", 2_000);
@@ -1509,7 +1487,7 @@ async fn empty_capability_ceiling_stays_empty_across_renewal_and_resume() {
     let channel_a = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel_a, "a1", 1), &channel_a)
+        .attach(attach_request(&front, &channel_a, "a1"), &channel_a)
         .await
         .unwrap();
 
@@ -1577,7 +1555,7 @@ async fn guard_rejects_idempotency_key_reuse_but_allows_original_dequeue() {
     let channel = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     let first = business(&outcome, &channel, "first-request", READ);
@@ -1627,7 +1605,7 @@ async fn expired_status_closes_session_and_releases_exclusive_lease() {
     let channel = make_channel(&alice, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&alice, &channel, "a1", 1), &channel)
+        .attach(attach_request(&alice, &channel, "a1"), &channel)
         .await
         .unwrap();
     fixture.clock.set(1_030);
@@ -1652,7 +1630,7 @@ async fn expired_status_closes_session_and_releases_exclusive_lease() {
     let bob_channel = make_channel(&bob, "b", 2_000);
     fixture
         .service
-        .attach(attach_request(&bob, &bob_channel, "b1", 2), &bob_channel)
+        .attach(attach_request(&bob, &bob_channel, "b1"), &bob_channel)
         .await
         .unwrap();
 }
@@ -1674,7 +1652,7 @@ async fn attach_rechecks_credential_expiry_at_commit() {
     // sample to 2000. The Attach must not allocate a lease with the stale sample.
     assert_code(
         service
-            .attach(attach_request(&front, &channel, "a1", 1), &channel)
+            .attach(attach_request(&front, &channel, "a1"), &channel)
             .await,
         AttachErrorCode::ChannelExpired,
     );
@@ -1687,7 +1665,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
     let fixture = Fixture::new(std::slice::from_ref(&front));
     let channel = make_channel(&front, "a", 2_000);
 
-    let mut wrong_front = attach_request(&front, &channel, "wrong-front", 1);
+    let mut wrong_front = attach_request(&front, &channel, "wrong-front");
     wrong_front.front_actor_id = "front:other".into();
     sign_attach_request(&mut wrong_front, &front.key);
     assert_code(
@@ -1701,14 +1679,14 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
         fixture
             .service
             .attach(
-                attach_request(&front, &wrong_type, "wrong-type", 2),
+                attach_request(&front, &wrong_type, "wrong-type"),
                 &wrong_type,
             )
             .await,
         AttachErrorCode::ServiceActorTypeMismatch,
     );
 
-    let mut wrong_channel = attach_request(&front, &channel, "wrong-channel", 3);
+    let mut wrong_channel = attach_request(&front, &channel, "wrong-channel");
     wrong_channel.channel_id = "another-channel".into();
     sign_attach_request(&mut wrong_channel, &front.key);
     assert_code(
@@ -1716,7 +1694,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
         AttachErrorCode::ChannelIdentityMismatch,
     );
 
-    let mut wrong_transcript = attach_request(&front, &channel, "wrong-transcript", 4);
+    let mut wrong_transcript = attach_request(&front, &channel, "wrong-transcript");
     wrong_transcript.channel_transcript_digest = test_digest("wrong-transcript");
     sign_attach_request(&mut wrong_transcript, &front.key);
     assert_code(
@@ -1724,7 +1702,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
         AttachErrorCode::ChannelTranscriptMismatch,
     );
 
-    let mut short_nonce = attach_request(&front, &channel, "short-nonce", 5);
+    let mut short_nonce = attach_request(&front, &channel, "short-nonce");
     short_nonce.tab_session_nonce = test_digest("short-nonce")[..8].to_vec();
     sign_attach_request(&mut short_nonce, &front.key);
     assert_code(
@@ -1732,7 +1710,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
         AttachErrorCode::PermissionDenied,
     );
 
-    let mut wrong_program = attach_request(&front, &channel, "wrong-program", 6);
+    let mut wrong_program = attach_request(&front, &channel, "wrong-program");
     wrong_program.program.version = "2.0.0".into();
     sign_attach_request(&mut wrong_program, &front.key);
     assert_code(
@@ -1740,7 +1718,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
         AttachErrorCode::ProgramReleaseMismatch,
     );
 
-    let mut wrong_package = attach_request(&front, &channel, "wrong-package", 7);
+    let mut wrong_package = attach_request(&front, &channel, "wrong-package");
     wrong_package.package_digest[0] ^= 1;
     sign_attach_request(&mut wrong_package, &front.key);
     assert_code(
@@ -1748,7 +1726,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
         AttachErrorCode::PackageDigestMismatch,
     );
 
-    let mut wrong_runtime = attach_request(&front, &channel, "wrong-runtime", 8);
+    let mut wrong_runtime = attach_request(&front, &channel, "wrong-runtime");
     wrong_runtime.runtime.actrium_version = "0.12".into();
     sign_attach_request(&mut wrong_runtime, &front.key);
     assert_code(
@@ -1761,7 +1739,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
         fixture
             .service
             .attach(
-                attach_request(&front, &expired_channel, "expired", 9),
+                attach_request(&front, &expired_channel, "expired"),
                 &expired_channel,
             )
             .await,
@@ -1775,12 +1753,13 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
     let outcome = fixture
         .service
         .attach(
-            attach_request(&front, &channel, "success-after-validation", 10),
+            attach_request(&front, &channel, "success-after-validation"),
             &channel,
         )
         .await
         .unwrap();
-    let mut replayed_nonce = attach_request(&front, &channel, "different-attach-id", 10);
+    let mut replayed_nonce = attach_request(&front, &channel, "different-attach-id");
+    replayed_nonce.tab_session_nonce = test_digest("attach-nonce:success-after-validation");
     sign_attach_request(&mut replayed_nonce, &front.key);
     assert_code(
         fixture.service.attach(replayed_nonce, &channel).await,
@@ -1807,7 +1786,7 @@ async fn requested_capabilities_are_bounded_before_lease_allocation() {
     let fixture = Fixture::new(std::slice::from_ref(&front));
     let channel = make_channel(&front, "a", 2_000);
 
-    let mut outside_program = attach_request(&front, &channel, "outside-program", 1);
+    let mut outside_program = attach_request(&front, &channel, "outside-program");
     outside_program.requested_capabilities = vec!["documents.admin".into()];
     sign_attach_request(&mut outside_program, &front.key);
     assert_code(
@@ -1819,7 +1798,7 @@ async fn requested_capabilities_are_bounded_before_lease_allocation() {
         .policies
         .membership
         .set_role(&front, MemberRole::Viewer);
-    let mut outside_role = attach_request(&front, &channel, "outside-role", 2);
+    let mut outside_role = attach_request(&front, &channel, "outside-role");
     outside_role.requested_capabilities = vec![WRITE.into()];
     sign_attach_request(&mut outside_role, &front.key);
     assert_code(
@@ -1832,7 +1811,7 @@ async fn requested_capabilities_are_bounded_before_lease_allocation() {
         .membership
         .set_role(&front, MemberRole::Owner);
     *fixture.policies.attach.capabilities.lock().unwrap() = BTreeSet::from([READ.into()]);
-    let mut outside_application = attach_request(&front, &channel, "outside-application", 3);
+    let mut outside_application = attach_request(&front, &channel, "outside-application");
     outside_application.requested_capabilities = vec![WRITE.into()];
     sign_attach_request(&mut outside_application, &front.key);
     assert_code(
@@ -1840,7 +1819,7 @@ async fn requested_capabilities_are_bounded_before_lease_allocation() {
         AttachErrorCode::PermissionDenied,
     );
 
-    let mut duplicate = attach_request(&front, &channel, "duplicate-capability", 4);
+    let mut duplicate = attach_request(&front, &channel, "duplicate-capability");
     duplicate.requested_capabilities = vec![READ.into(), READ.into()];
     sign_attach_request(&mut duplicate, &front.key);
     assert_code(
@@ -1848,7 +1827,7 @@ async fn requested_capabilities_are_bounded_before_lease_allocation() {
         AttachErrorCode::PermissionDenied,
     );
 
-    let mut empty = attach_request(&front, &channel, "empty-capability", 5);
+    let mut empty = attach_request(&front, &channel, "empty-capability");
     empty.requested_capabilities = vec![String::new()];
     sign_attach_request(&mut empty, &front.key);
     assert_code(
@@ -1860,7 +1839,7 @@ async fn requested_capabilities_are_bounded_before_lease_allocation() {
         0
     );
 
-    let mut allowed = attach_request(&front, &channel, "allowed-capability", 6);
+    let mut allowed = attach_request(&front, &channel, "allowed-capability");
     allowed.requested_capabilities = vec![READ.into()];
     sign_attach_request(&mut allowed, &front.key);
     let outcome = fixture.service.attach(allowed, &channel).await.unwrap();
@@ -1878,7 +1857,7 @@ async fn dequeue_rechecks_reduced_role_capability() {
     let channel = make_channel(&front, "a", 2_000);
     let outcome = fixture
         .service
-        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .attach(attach_request(&front, &channel, "a1"), &channel)
         .await
         .unwrap();
     let queued = fixture

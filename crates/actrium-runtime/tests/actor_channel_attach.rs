@@ -274,12 +274,7 @@ fn service_config(service_key: SigningKey) -> ServiceConfig {
     }
 }
 
-fn attach_request(
-    channel: &VerifiedChannel,
-    key: &SigningKey,
-    attach_id: &str,
-    nonce: u8,
-) -> AttachRequest {
+fn attach_request(channel: &VerifiedChannel, key: &SigningKey, attach_id: &str) -> AttachRequest {
     let mut request = AttachRequest {
         attach_id: attach_id.into(),
         front_actor_id: channel.peer_actor_id.clone(),
@@ -299,7 +294,7 @@ fn attach_request(
             keel_api: "1".into(),
         },
         protocol_fingerprint: test_digest("protocol"),
-        tab_session_nonce: test_digest(&format!("attach-nonce:{nonce}")),
+        tab_session_nonce: test_digest(&format!("attach-nonce:{attach_id}")),
         requested_lease: LeaseMode::Exclusive,
         requested_capabilities: vec![READ.into(), WRITE.into()],
         challenge_response: vec![],
@@ -380,7 +375,7 @@ async fn noise_authenticated_front_attaches_and_uses_session_guarded_rpc() {
     )
     .unwrap();
 
-    let request = attach_request(&channel, &front_key, "attach-1", 1);
+    let request = attach_request(&channel, &front_key, "attach-1");
     let request_digest = attach_request_digest(&request);
     let outcome = service.attach(request, &channel).await.unwrap();
     verify_attach_response(
@@ -410,7 +405,7 @@ async fn noise_authenticated_front_attaches_and_uses_session_guarded_rpc() {
 
     let occupied = match service
         .attach(
-            attach_request(&channel, &front_key, "attach-occupied", 2),
+            attach_request(&channel, &front_key, "attach-occupied"),
             &channel,
         )
         .await
@@ -420,7 +415,7 @@ async fn noise_authenticated_front_attaches_and_uses_session_guarded_rpc() {
     };
     assert_eq!(occupied.code, AttachErrorCode::SessionOccupied);
 
-    let next_attach = attach_request(&channel, &front_key, "attach-takeover", 3);
+    let next_attach = attach_request(&channel, &front_key, "attach-takeover");
     let mut takeover = TakeoverRequest {
         session_id: outcome.response.session_id.clone(),
         lease_epoch: outcome.response.lease_epoch,
