@@ -963,6 +963,25 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         Task { @MainActor in
             do {
+                // The invite must name the same Realm as the requested link:
+                // join sends this device's public key and the invite secret to
+                // the Realm's issuer, so a mismatched code would leak both to
+                // the wrong Realm before any server-side check fires.
+                let invite = try ActriumCore.decodeActrInvite(inviteText: trimmedCode)
+                let requested = try ActriumCore.parseActrUri(
+                    uri: pending.uri,
+                    installationId: InstallationIdProvider.getOrCreate()
+                )
+                let requestedRealm = [requested.realmId, requested.domain]
+                    .compactMap { $0 }.joined(separator: "@")
+                guard invite.realmName == requestedRealm else {
+                    throw NSError(
+                        domain: "ActrJoin", code: 4,
+                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                            "This invite belongs to another Realm.",
+                            comment: "Actr join realm mismatch error")])
+                }
+
                 let result = try await RealmJoinService.joinWithInvite(
                     inviteText: trimmedCode,
                     label: Host.current().localizedName ?? "Mac"
@@ -1164,6 +1183,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
             tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
+
+            // Replace any previous package's extracted guest source: the
+            // renderer must only execute bytes from the newly loaded package
+            // (same shape as the archive/dev-directory branch above).
+            tabs[tabIndex].guestExtractedPath = isDirectory.boolValue ? nil : rootDir.path
+            tabs[tabIndex].guestEntry = manifestInfo.unifiedScript
 
             // Update panel visibility
             leftPanelVisibility[tabs[tabIndex].id] = manifestInfo.leftPanelDefaultVisible

@@ -167,7 +167,7 @@ public enum AppleActrPackageManifestReader {
         return "actr-pub-\(hex.prefix(16))"
     }
 
-    /// The `signature` table of the manifest TOML (`key_id`, `algorithm`).
+    /// The `signature` table of the manifest TOML (`key-id`, `algorithm`).
     /// The package manifest is produced by `actr pkg pack`; the flat
     /// single-line string values this reads are the only forms it writes.
     private static func manifestSignatureFields(_ manifestToml: String) -> (keyId: String?, algorithm: String?) {
@@ -181,7 +181,7 @@ public enum AppleActrPackageManifestReader {
                 continue
             }
             guard inSignature else { continue }
-            if let value = tomlStringValue(line, key: "key_id") { keyId = value }
+            if let value = tomlStringValue(line, key: "key-id") { keyId = value }
             if let value = tomlStringValue(line, key: "algorithm") { algorithm = value }
         }
         return (keyId, algorithm)
