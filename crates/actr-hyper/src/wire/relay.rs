@@ -259,6 +259,15 @@ pub(crate) struct RelayClient {
     actor_identity: RwLock<Option<Arc<ActorChannelIdentity>>>,
     actor_storage_root: Option<std::path::PathBuf>,
     actor_key_namespace: Option<String>,
+    reissue: Option<crate::lifecycle::credential_manager::CredentialManager>,
+    /// Issuers observed to never mint Actor channel certificates. Their
+    /// channels run the legacy relay security until the identity expires and
+    /// enrollment is retried.
+    actor_legacy_issuers: RwLock<HashSet<u32>>,
+    /// Credential digests already tried against the Actor-key-binding heal,
+    /// so a persistent enrollment rejection cannot rotate credentials in a
+    /// loop.
+    heal_attempted: std::sync::Mutex<HashSet<[u8; 32]>>,
     runtime_instance_id: String,
     session: SessionState,
     gate: Arc<WebSocketGate>,
@@ -286,6 +295,7 @@ impl RelayClient {
         shutdown: CancellationToken,
         actor_storage_root: Option<std::path::PathBuf>,
         actor_key_namespace: Option<String>,
+        reissue: Option<crate::lifecycle::credential_manager::CredentialManager>,
     ) -> Arc<Self> {
         super::ensure_tls_provider();
         let (status, _) = watch::channel(Status::Discovering);
@@ -298,6 +308,9 @@ impl RelayClient {
             actor_identity: RwLock::new(None),
             actor_storage_root,
             actor_key_namespace,
+            reissue,
+            actor_legacy_issuers: RwLock::new(HashSet::new()),
+            heal_attempted: std::sync::Mutex::new(HashSet::new()),
             runtime_instance_id: runtime_instance_id().to_owned(),
             session,
             gate,
@@ -1236,21 +1249,28 @@ fn secure_http_client() -> NetworkResult<reqwest::Client> {
 async fn bounded_json<T: serde::de::DeserializeOwned>(
     request: reqwest::RequestBuilder,
 ) -> NetworkResult<T> {
-    let mut response = request
-        .send()
+    bounded_json_with_status(request)
         .await
-        .map_err(|_| closed())?
-        .error_for_status()
-        .map_err(|_| closed())?;
+        .map_err(|_| closed())
+}
+
+/// Like [`bounded_json`] but reports the HTTP status of rejected requests so
+/// callers can distinguish recoverable rejections (e.g. the 403 enrollment
+/// race healed by a credential reissue) from transport failures.
+async fn bounded_json_with_status<T: serde::de::DeserializeOwned>(
+    request: reqwest::RequestBuilder,
+) -> Result<T, Option<u16>> {
+    let response = request.send().await.map_err(|_| None)?;
+    let status = response.status().as_u16();
+    let mut response = response.error_for_status().map_err(|_| Some(status))?;
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| closed())? {
+    while let Some(chunk) = response.chunk().await.map_err(|_| None)? {
         if bytes.len() + chunk.len() > MAX_CONTROL_BYTES {
-            return Err(closed());
+            return Err(None);
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes)
-        .map_err(|_| NetworkError::DeserializationError("Invalid trusted Issuer response".into()))
+    serde_json::from_slice(&bytes).map_err(|_| None)
 }
 
 impl RelayClient {
@@ -1259,147 +1279,219 @@ impl RelayClient {
         endpoint: &str,
         _proof: &[u8],
     ) -> NetworkResult<(Arc<LocalIdentity>, Option<Arc<ActorChannelIdentity>>)> {
-        // Bind the cache to the exact credential and generation. A hard rebind
-        // may retain the endpoint and actor key, but must never reuse the Actor
-        // certificate issued for the previous credential generation.
-        let snapshot = self.session.snapshot().await;
-        let actor_binding = self.actor_storage_root.as_ref().map(|_| {
-            let credential = snapshot.credential.encode_to_vec();
-            let credential_digest = actr_relay_security::actor_credential_digest(&credential);
-            let mut state_input = credential_digest.to_vec();
-            state_input.extend_from_slice(&snapshot.generation.to_be_bytes());
-            let state_digest = sha2::Sha256::digest(&state_input).into();
-            (credential, credential_digest, state_digest)
-        });
-        if let Some(identity) = self
-            .local_identity
-            .read()
-            .await
-            .as_ref()
-            .filter(|identity| {
-                identity.endpoint == endpoint && identity.expires_at > now_secs() + 30
-            })
-            .cloned()
-        {
-            let actor = if let Some((_, credential_digest, state_digest)) = &actor_binding {
-                self.actor_identity
+        // A legacy Issuer (or a mock) never mints Actor channel certificates,
+        // and the first enrollment attempt may be rejected with 403 while the
+        // Actor key binding is still absent (identities registered before
+        // Actor keys existed). Neither may fail the relay channel forever:
+        // an unbound key is healed by reissuing the credential (which binds
+        // the local Actor key Issuer-side), and a certificate-less Issuer is
+        // the trust anchor deciding the legacy downgrade.
+        for attempt in 0..2u8 {
+            // Bind the cache to the exact credential and generation. A hard rebind
+            // may retain the endpoint and actor key, but must never reuse the Actor
+            // certificate issued for the previous credential generation.
+            let snapshot = self.session.snapshot().await;
+            let actor_binding = self.actor_storage_root.as_ref().map(|_| {
+                let credential = snapshot.credential.encode_to_vec();
+                let credential_digest = actr_relay_security::actor_credential_digest(&credential);
+                let mut state_input = credential_digest.to_vec();
+                state_input.extend_from_slice(&snapshot.generation.to_be_bytes());
+                let state_digest = sha2::Sha256::digest(&state_input).into();
+                (credential, credential_digest, state_digest)
+            });
+            if let Some(identity) = self
+                .local_identity
+                .read()
+                .await
+                .as_ref()
+                .filter(|identity| {
+                    identity.endpoint == endpoint && identity.expires_at > now_secs() + 30
+                })
+                .cloned()
+            {
+                let actor = if let Some((_, credential_digest, state_digest)) = &actor_binding {
+                    self.actor_identity
+                        .read()
+                        .await
+                        .as_ref()
+                        .filter(|actor| {
+                            actor.claims().actor_credential_digest == *credential_digest
+                                && actor.claims().actor_state_digest == *state_digest
+                                && actor.expires_at() > now_secs() + 30
+                        })
+                        .cloned()
+                } else {
+                    None
+                };
+                let legacy_issuer = self
+                    .actor_legacy_issuers
                     .read()
                     .await
-                    .as_ref()
-                    .filter(|actor| {
-                        actor.claims().actor_credential_digest == *credential_digest
-                            && actor.claims().actor_state_digest == *state_digest
-                            && actor.expires_at() > now_secs() + 30
-                    })
-                    .cloned()
-            } else {
-                None
-            };
-            if actor_binding.is_none() || actor.is_some() {
-                return Ok((identity, actor));
+                    .contains(&identity.issued.issuer.key_id);
+                if actor_binding.is_none() || actor.is_some() || legacy_issuer {
+                    return Ok((identity, actor));
+                }
             }
-        }
-        let key = IdentityKey::generate().map_err(secure_error)?;
-        let noise_for_actor = key.clone();
-        let actor_material =
-            if let (Some(storage_root), Some((credential, credential_digest, state_digest))) =
-                (&self.actor_storage_root, &actor_binding)
-            {
-                let claims =
-                    actr_protocol::IdentityClaims::decode(snapshot.credential.claims.as_ref())
-                        .map_err(|_| closed())?;
-                let signer = crate::issuer_client::actor_signer_for_scoped(
-                    storage_root,
-                    &claims.realm,
-                    &claims.actor_type,
-                    self.actor_key_namespace.as_deref(),
-                )
-                .map_err(|_| closed())?;
-                let policy_digest = sha2::Sha256::digest(
-                    format!(
-                        "actrium.channel.policy.v1:{}",
-                        claims.actor_type.to_string_repr()
+            let key = IdentityKey::generate().map_err(secure_error)?;
+            let noise_for_actor = key.clone();
+            let actor_material =
+                if let (Some(storage_root), Some((credential, credential_digest, state_digest))) =
+                    (&self.actor_storage_root, &actor_binding)
+                {
+                    let claims =
+                        actr_protocol::IdentityClaims::decode(snapshot.credential.claims.as_ref())
+                            .map_err(|_| closed())?;
+                    let signer = crate::issuer_client::actor_signer_for_scoped(
+                        storage_root,
+                        &claims.realm,
+                        &claims.actor_type,
+                        self.actor_key_namespace.as_deref(),
                     )
-                    .as_bytes(),
-                );
-                let enrollment = ActorChannelEnrollment {
-                    policy_digest: policy_digest.into(),
-                    actor_state_digest: *state_digest,
-                    runtime_instance_id: self.runtime_instance_id.clone(),
-                    actor_credential: credential.clone(),
-                    actor_credential_digest: *credential_digest,
+                    .map_err(|_| closed())?;
+                    let policy_digest = sha2::Sha256::digest(
+                        format!(
+                            "actrium.channel.policy.v1:{}",
+                            claims.actor_type.to_string_repr()
+                        )
+                        .as_bytes(),
+                    );
+                    let enrollment = ActorChannelEnrollment {
+                        policy_digest: policy_digest.into(),
+                        actor_state_digest: *state_digest,
+                        runtime_instance_id: self.runtime_instance_id.clone(),
+                        actor_credential: credential.clone(),
+                        actor_credential_digest: *credential_digest,
+                    };
+                    Some((signer.actor_identity_key(), enrollment))
+                } else {
+                    None
                 };
-                Some((signer.actor_identity_key(), enrollment))
-            } else {
-                None
+            let client = secure_http_client()?;
+            let body = serde_json::to_vec(&IdentityRequest {
+                endpoint: endpoint.to_owned(),
+                renewal_token: snapshot.renewal_token.to_vec(),
+                public_key: key.public,
+                admission_commitment: key.admission_commitment(),
+                actor: actor_material
+                    .as_ref()
+                    .map(|(_, enrollment)| enrollment.clone()),
+            })
+            .map_err(|_| closed())?;
+            let actor = ActrId::from_string_repr(endpoint).map_err(|_| closed())?;
+            let mut request = client
+                .post(self.ais_url("relay-identity")?)
+                .header(reqwest::header::CONTENT_TYPE, "application/json");
+            if let Some(key) = &self.client_key {
+                let proof = key
+                    .proof(
+                        actr_protocol::realm_membership::ProofOp::RelayIdentity,
+                        &actor.realm,
+                        &body,
+                    )
+                    .map_err(|_| {
+                        NetworkError::ConnectionError("Realm client signer unavailable".into())
+                    })?;
+                request =
+                    request.header(actr_protocol::realm_membership::CLIENT_PROOF_HEADER, proof);
+            }
+            let issued: IssuedIdentity = match bounded_json_with_status(request.body(body)).await {
+                Ok(issued) => issued,
+                Err(Some(403)) if attempt == 0 && actor_material.is_some() => {
+                    self.heal_actor_key_binding(&actor).await?;
+                    continue;
+                }
+                Err(_) => return Err(closed()),
             };
-        let client = secure_http_client()?;
-        let body = serde_json::to_vec(&IdentityRequest {
-            endpoint: endpoint.to_owned(),
-            renewal_token: snapshot.renewal_token.to_vec(),
-            public_key: key.public,
-            admission_commitment: key.admission_commitment(),
-            actor: actor_material
-                .as_ref()
-                .map(|(_, enrollment)| enrollment.clone()),
-        })
-        .map_err(|_| closed())?;
-        let actor = ActrId::from_string_repr(endpoint).map_err(|_| closed())?;
-        let mut request = client
-            .post(self.ais_url("relay-identity")?)
-            .header(reqwest::header::CONTENT_TYPE, "application/json");
-        if let Some(key) = &self.client_key {
-            let proof = key
-                .proof(
-                    actr_protocol::realm_membership::ProofOp::RelayIdentity,
-                    &actor.realm,
-                    &body,
-                )
-                .map_err(|_| {
-                    NetworkError::ConnectionError("Realm client signer unavailable".into())
-                })?;
-            request = request.header(actr_protocol::realm_membership::CLIENT_PROOF_HEADER, proof);
-        }
-        let issued: IssuedIdentity = bounded_json(request.body(body)).await?;
-        let actor_certificate = issued.actor_certificate.clone();
-        let identity = Arc::new(
-            key.certify(issued, endpoint, now_secs())
-                .map_err(secure_error)?,
-        );
-        let actor_identity = match (actor_material, actor_certificate) {
-            (Some((actor_key, _)), Some(certificate)) => Some(Arc::new(
-                ActorChannelIdentity::certify(
-                    noise_for_actor,
-                    actor_key,
-                    certificate,
-                    identity.issued.issuer.clone(),
-                    &actor.realm,
-                    endpoint,
-                    now_secs(),
-                )
-                .map_err(secure_error)?,
-            )),
-            (None, _) => None,
-            (Some(_), None) => {
-                return Err(NetworkError::ConnectionError(
-                    "Issuer omitted the requested Actor channel certificate".into(),
-                ));
-            }
-        };
-        {
-            let mut keys = self.issuers.write().await;
-            keys.retain(|_, key| key.expires_at > now_secs());
-            if keys.len() >= 256 && !keys.contains_key(&identity.issued.issuer.key_id) {
-                return Err(closed());
-            }
-            keys.insert(
-                identity.issued.issuer.key_id,
-                identity.issued.issuer.clone(),
+            let actor_certificate = issued.actor_certificate.clone();
+            let identity = Arc::new(
+                key.certify(issued, endpoint, now_secs())
+                    .map_err(secure_error)?,
             );
+            let actor_identity = match (actor_material, actor_certificate) {
+                (Some((actor_key, _)), Some(certificate)) => Some(Arc::new(
+                    ActorChannelIdentity::certify(
+                        noise_for_actor,
+                        actor_key,
+                        certificate,
+                        identity.issued.issuer.clone(),
+                        &actor.realm,
+                        endpoint,
+                        now_secs(),
+                    )
+                    .map_err(secure_error)?,
+                )),
+                (None, _) => None,
+                (Some(_), None) => {
+                    // The Issuer does not issue Actor channel certificates (a
+                    // mock or a deployment predating Actor channels). Degrade
+                    // this issuer to the legacy relay channel instead of
+                    // failing every peer connection; the marker is re-checked
+                    // each identity lifetime so an upgraded Issuer is picked
+                    // up without a restart.
+                    tracing::warn!(
+                        issuer_key_id = identity.issued.issuer.key_id,
+                        "Issuer returned no Actor channel certificate; using the legacy relay channel for it"
+                    );
+                    self.actor_legacy_issuers
+                        .write()
+                        .await
+                        .insert(identity.issued.issuer.key_id);
+                    None
+                }
+            };
+            if actor_identity.is_some() {
+                self.actor_legacy_issuers
+                    .write()
+                    .await
+                    .remove(&identity.issued.issuer.key_id);
+            }
+            {
+                let mut keys = self.issuers.write().await;
+                keys.retain(|_, key| key.expires_at > now_secs());
+                if keys.len() >= 256 && !keys.contains_key(&identity.issued.issuer.key_id) {
+                    return Err(closed());
+                }
+                keys.insert(
+                    identity.issued.issuer.key_id,
+                    identity.issued.issuer.clone(),
+                );
+            }
+            *self.local_identity.write().await = Some(identity.clone());
+            *self.actor_identity.write().await = actor_identity.clone();
+            return Ok((identity, actor_identity));
         }
-        *self.local_identity.write().await = Some(identity.clone());
-        *self.actor_identity.write().await = actor_identity.clone();
-        Ok((identity, actor_identity))
+        Err(closed())
+    }
+
+    /// Bind the local Actor identity key Issuer-side by reissuing the
+    /// credential. `/reissue` establishes the binding when the actor has none
+    /// and mints a credential carrying the key claim the relay-identity
+    /// enrollment requires. Attempted at most once per credential generation
+    /// so a persistent rejection cannot rotate credentials in a loop.
+    async fn heal_actor_key_binding(&self, actor: &ActrId) -> NetworkResult<()> {
+        let Some(reissue) = &self.reissue else {
+            return Err(closed());
+        };
+        let snapshot = self.session.snapshot().await;
+        let digest =
+            actr_relay_security::actor_credential_digest(&snapshot.credential.encode_to_vec());
+        if !self.heal_attempted.lock().unwrap().insert(digest) {
+            return Err(closed());
+        }
+        tracing::warn!(
+            actor_id = %actor.to_string_repr(),
+            "Relay Actor enrollment rejected (unbound Actor key); reissuing the credential to establish the binding"
+        );
+        match reissue.reissue_now().await {
+            crate::lifecycle::credential_manager::ReacquireOutcome::Renewed(_) => Ok(()),
+            outcome => {
+                tracing::warn!(
+                    outcome = ?outcome,
+                    "Relay Actor key-binding heal failed"
+                );
+                Err(closed())
+            }
+        }
     }
     fn ais_url(&self, path: &str) -> NetworkResult<url::Url> {
         let mut url = url::Url::parse(&self.ais_endpoint).map_err(|_| closed())?;
@@ -1739,6 +1831,7 @@ mod identity_cache_review_tests {
             CancellationToken::new(),
             Some(root.path().to_path_buf()),
             Some("tab-cache".into()),
+            None,
         );
         let another_client = RelayClient::new(
             "ws://unused".into(),
@@ -1749,6 +1842,7 @@ mod identity_cache_review_tests {
             CancellationToken::new(),
             Some(root.path().to_path_buf()),
             Some("tab-cache".into()),
+            None,
         );
         assert!(!client.runtime_instance_id.is_empty());
         assert_eq!(

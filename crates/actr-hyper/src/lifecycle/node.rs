@@ -3649,6 +3649,7 @@ impl Inner {
                 self.shutdown_token.clone(),
                 Some(actor_storage_root.clone()),
                 self.actor_key_namespace.clone(),
+                Some(credential_manager.clone()),
             );
             relay_gate.set_handover(handover.clone());
             let wire_builder = Arc::new(

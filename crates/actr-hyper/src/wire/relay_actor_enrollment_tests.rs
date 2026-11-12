@@ -1,5 +1,7 @@
 use super::*;
 use crate::issuer_client::ActorKeySigner as _;
+use crate::lifecycle::credential_manager::{CredentialManager, RegistrationContext};
+use actr_protocol::{TurnCredential, register_response};
 
 #[tokio::test]
 async fn certified_identity_enrolls_actor_certificate_from_issuer() {
@@ -123,6 +125,7 @@ async fn certified_identity_enrolls_actor_certificate_from_issuer() {
         CancellationToken::new(),
         Some(root.path().to_path_buf()),
         Some("tab-1".into()),
+        None,
     );
 
     let (_, actor) = client
@@ -142,4 +145,354 @@ async fn certified_identity_enrolls_actor_certificate_from_issuer() {
         .unwrap();
     assert!(cached.is_some());
     mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn certified_identity_falls_back_when_issuer_omits_actor_certificate() {
+    let root = tempfile::tempdir().unwrap();
+    let actor_type = ActrType::from_string_repr("actrium/actrium-front@1.0.0").unwrap();
+    let realm = "test@example.com".to_string();
+    let signer = crate::issuer_client::actor_signer_for_scoped(
+        root.path(),
+        &realm,
+        &actor_type,
+        Some("tab-1"),
+    )
+    .unwrap();
+    let local = ActrId::from_string_repr("2.test@example.com").unwrap();
+    let endpoint = local.to_string_repr();
+    let now = now_secs();
+    let issuer_signing = SigningKey::from_bytes(&[7; 32]);
+    let issuer_public = IssuerKey {
+        key_id: 1,
+        public_key: issuer_signing.verifying_key().to_bytes(),
+        expires_at: now + 600,
+    };
+    let mut server = mockito::Server::new_async().await;
+    let response_type = actor_type.clone();
+    let mock = server
+        .mock("POST", "/relay-identity")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body_from_request(move |request| {
+            let enrollment: IdentityRequest =
+                serde_json::from_slice(request.body().unwrap()).unwrap();
+            let relay_claims = serde_json::to_vec(&IdentityClaims {
+                domain: CERTIFICATE_DOMAIN.into(),
+                endpoint: enrollment.endpoint.clone(),
+                actor_type: response_type.to_string_repr(),
+                client_key: "fixture-client".into(),
+                public_key: enrollment.public_key,
+                admission_commitment: enrollment.admission_commitment,
+                expires_at: now + 120,
+            })
+            .unwrap();
+            let signature = issuer_signing
+                .sign(&signing_bytes(&relay_claims))
+                .to_bytes()
+                .to_vec();
+            serde_json::to_vec(&IssuedIdentity {
+                certificate: Certificate {
+                    key_id: 1,
+                    claims: relay_claims,
+                    signature,
+                },
+                issuer: issuer_public.clone(),
+                actor_certificate: None,
+            })
+            .unwrap()
+        })
+        .expect(1)
+        .create_async()
+        .await;
+
+    let claims = actr_protocol::IdentityClaims {
+        realm: realm.clone(),
+        actor_id: endpoint.clone(),
+        expires_at: now + 600,
+        protocol_version: 1,
+        issuer: realm.clone(),
+        provider: "provider.example".into(),
+        audience: "actr.signaling".into(),
+        actor_type: actor_type.clone(),
+        member: "member-1".into(),
+        client_key: "fixture-client".into(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: Some(false),
+        actor_public_key: Some(signer.public_key().to_vec().into()),
+    };
+    let credential = actr_protocol::AIdCredential {
+        key_id: 1,
+        claims: claims.encode_to_vec().into(),
+        signature: bytes::Bytes::from_static(&[0; 64]),
+    };
+    let mut snapshot = SessionSnapshot::empty_with_id(local.clone(), 1);
+    snapshot.credential = credential;
+    snapshot.renewal_token = bytes::Bytes::from_static(&[3; 32]);
+    let session = SessionState::new(snapshot);
+    let gate = Arc::new(WebSocketGate::new_relay(
+        Arc::new(RpcCorrelation::new()),
+        Arc::new(DataChunkRegistry::new()),
+        PeerTypes::default(),
+    ));
+    let client = RelayClient::new(
+        "ws://unused".into(),
+        server.url(),
+        None,
+        session,
+        gate,
+        CancellationToken::new(),
+        Some(root.path().to_path_buf()),
+        Some("tab-1".into()),
+        None,
+    );
+
+    // The Issuer silently skipped the requested Actor certificate: the client
+    // must keep the relay channel usable via the legacy identity instead of
+    // failing the peer forever, and remember the issuer so the cached identity
+    // is reused rather than re-enrolled per connection.
+    let (identity, actor) = client
+        .certified_identity(&endpoint, &[3; 32])
+        .await
+        .unwrap();
+    assert!(actor.is_none(), "legacy fallback without an Actor channel");
+    assert_eq!(identity.endpoint, endpoint);
+    let (_, cached_actor) = client
+        .certified_identity(&endpoint, &[3; 32])
+        .await
+        .unwrap();
+    assert!(cached_actor.is_none());
+    mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn certified_identity_heals_unbound_actor_key_via_reissue() {
+    let root = tempfile::tempdir().unwrap();
+    let actor_type = ActrType::from_string_repr("actrium/actrium-front@1.0.0").unwrap();
+    let realm = "test@example.com".to_string();
+    let signer = crate::issuer_client::actor_signer_for_scoped(
+        root.path(),
+        &realm,
+        &actor_type,
+        Some("tab-1"),
+    )
+    .unwrap();
+    let local = ActrId::from_string_repr("2.test@example.com").unwrap();
+    let endpoint = local.to_string_repr();
+    let now = now_secs();
+    let issuer_signing = SigningKey::from_bytes(&[7; 32]);
+    let issuer_public = IssuerKey {
+        key_id: 1,
+        public_key: issuer_signing.verifying_key().to_bytes(),
+        expires_at: now + 600,
+    };
+    let mut server = mockito::Server::new_async().await;
+
+    // The Issuer returns 403 for the first enrollment (Actor key not yet
+    // bound), then serves the certificate once the client reissued its
+    // credential. The requests are told apart by the renewal token: the
+    // reissue response rotates it from [3; 32] to [4; 32].
+    let response_issuer = issuer_public.clone();
+    let response_type = actor_type.clone();
+    let response_signer = signer.clone();
+    let response_realm = realm.clone();
+    let response_issuer_signing = issuer_signing.clone();
+    let issued_mock = server
+        .mock(
+            "POST",
+            mockito::Matcher::Regex("/relay-identity".to_string()),
+        )
+        .match_body(mockito::Matcher::Regex(
+            "\"renewal_token\":\\[4,".to_string(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body_from_request(move |request| {
+            let enrollment: IdentityRequest =
+                serde_json::from_slice(request.body().unwrap()).unwrap();
+            let actor_enrollment = enrollment.actor.clone().expect("Actor enrollment");
+            let relay_claims = serde_json::to_vec(&IdentityClaims {
+                domain: CERTIFICATE_DOMAIN.into(),
+                endpoint: enrollment.endpoint.clone(),
+                actor_type: response_type.to_string_repr(),
+                client_key: "fixture-client".into(),
+                public_key: enrollment.public_key,
+                admission_commitment: enrollment.admission_commitment,
+                expires_at: now + 120,
+            })
+            .unwrap();
+            let signature = response_issuer_signing
+                .sign(&signing_bytes(&relay_claims))
+                .to_bytes()
+                .to_vec();
+            let actor_claims = ActorChannelClaims {
+                realm: response_realm.clone(),
+                actor_id: enrollment.endpoint.clone(),
+                actor_type: response_type.to_string_repr(),
+                member: "member-1".into(),
+                client_key: "fixture-client".into(),
+                role: "owner".into(),
+                actor_public_key: response_signer.public_key(),
+                noise_public_key: enrollment.public_key,
+                actor_credential_digest: actor_enrollment.actor_credential_digest,
+                policy_digest: actor_enrollment.policy_digest,
+                actor_state_digest: actor_enrollment.actor_state_digest,
+                issuer: response_realm.clone(),
+                provider: "provider.example".into(),
+                audience: ACTOR_CHANNEL_AUDIENCE.into(),
+                expires_at: now + 120,
+                runtime_instance_id: actor_enrollment.runtime_instance_id,
+            };
+            let actor_certificate =
+                ActorChannelCertificate::issue(&actor_claims, 1, &response_issuer_signing).unwrap();
+            serde_json::to_vec(&IssuedIdentity {
+                certificate: Certificate {
+                    key_id: 1,
+                    claims: relay_claims,
+                    signature,
+                },
+                issuer: response_issuer.clone(),
+                actor_certificate: Some(actor_certificate),
+            })
+            .unwrap()
+        })
+        .expect(1)
+        .create_async()
+        .await;
+    let rejected_mock = server
+        .mock(
+            "POST",
+            mockito::Matcher::Regex("/relay-identity".to_string()),
+        )
+        .match_body(mockito::Matcher::Regex(
+            "\"renewal_token\":\\[3,".to_string(),
+        ))
+        .with_status(403)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let reissue_ok = actr_protocol::RegisterResponse {
+        result: Some(register_response::Result::Success(
+            register_response::RegisterOk {
+                actr_id: local.clone(),
+                credential: {
+                    let claims = actr_protocol::IdentityClaims {
+                        realm: realm.clone(),
+                        actor_id: endpoint.clone(),
+                        expires_at: now + 600,
+                        protocol_version: 1,
+                        issuer: realm.clone(),
+                        provider: "provider.example".into(),
+                        audience: "actr.signaling".into(),
+                        actor_type: actor_type.clone(),
+                        member: "member-1".into(),
+                        client_key: "fixture-client".into(),
+                        role: actr_protocol::MemberRole::Owner as i32,
+                        development: Some(false),
+                        actor_public_key: Some(signer.public_key().to_vec().into()),
+                    };
+                    actr_protocol::AIdCredential {
+                        key_id: 1,
+                        claims: claims.encode_to_vec().into(),
+                        signature: bytes::Bytes::from_static(&[0; 64]),
+                    }
+                },
+                turn_credential: TurnCredential {
+                    protocol_version: 1,
+                    realm: realm.clone(),
+                    provider: "provider.example".to_string(),
+                    audience: "actr.turn".to_string(),
+                    username: format!("1000:{endpoint}"),
+                    password: "turn-password".to_string(),
+                    expires_at: now + 600,
+                },
+                credential_expires_at: Some(prost_types::Timestamp {
+                    seconds: (now + 600) as i64,
+                    nanos: 0,
+                }),
+                signaling_heartbeat_interval_secs: 30,
+                signing_pubkey: bytes::Bytes::from(vec![1; 32]),
+                signing_key_id: 1,
+                renewal_token: Some(bytes::Bytes::from_static(&[4; 32])),
+                renewal_token_expires_at: Some(prost_types::Timestamp {
+                    seconds: (now + 1200) as i64,
+                    nanos: 0,
+                }),
+            },
+        )),
+    };
+    let reissue_mock = server
+        .mock("POST", "/reissue")
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(reissue_ok.encode_to_vec())
+        .expect(1)
+        .create_async()
+        .await;
+
+    let claims = actr_protocol::IdentityClaims {
+        realm: realm.clone(),
+        actor_id: endpoint.clone(),
+        expires_at: now + 600,
+        protocol_version: 1,
+        issuer: realm.clone(),
+        provider: "provider.example".into(),
+        audience: "actr.signaling".into(),
+        actor_type: actor_type.clone(),
+        member: "member-1".into(),
+        client_key: "fixture-client".into(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: Some(false),
+        actor_public_key: Some(signer.public_key().to_vec().into()),
+    };
+    let credential = actr_protocol::AIdCredential {
+        key_id: 1,
+        claims: claims.encode_to_vec().into(),
+        signature: bytes::Bytes::from_static(&[0; 64]),
+    };
+    let mut snapshot = SessionSnapshot::empty_with_id(local.clone(), 1);
+    snapshot.credential = credential;
+    snapshot.renewal_token = bytes::Bytes::from_static(&[3; 32]);
+    let session = SessionState::new(snapshot);
+    let gate = Arc::new(WebSocketGate::new_relay(
+        Arc::new(RpcCorrelation::new()),
+        Arc::new(DataChunkRegistry::new()),
+        PeerTypes::default(),
+    ));
+    let credential_manager = CredentialManager::new(
+        session.clone(),
+        RegistrationContext::linked_for_test(actr_protocol::RegisterRequest {
+            realm: realm.clone(),
+            actr_type: actor_type.clone(),
+            ..Default::default()
+        }),
+        server.url(),
+        None,
+    );
+    let client = RelayClient::new(
+        "ws://unused".into(),
+        server.url(),
+        None,
+        session,
+        gate,
+        CancellationToken::new(),
+        Some(root.path().to_path_buf()),
+        Some("tab-1".into()),
+        Some(credential_manager),
+    );
+
+    let (_, actor) = client
+        .certified_identity(&endpoint, &[3; 32])
+        .await
+        .unwrap();
+    let actor = actor.expect("Actor identity after the reissue heal");
+    assert_eq!(actor.claims().actor_id, endpoint);
+    assert_eq!(actor.claims().actor_credential_digest, {
+        let snapshot = client.session.snapshot().await;
+        actr_relay_security::actor_credential_digest(&snapshot.credential.encode_to_vec())
+    });
+    rejected_mock.assert_async().await;
+    reissue_mock.assert_async().await;
+    issued_mock.assert_async().await;
 }

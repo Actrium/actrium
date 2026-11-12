@@ -46,6 +46,7 @@ async fn unavailable_platform_signer_never_sends_relay_identity_request() {
         fixture.shutdown.clone(),
         None,
         None,
+        None,
     );
     let error = client
         .certified_identity(&fixture.local.to_string_repr(), b"fixture renewal proof")
@@ -201,6 +202,7 @@ impl Fixture {
             session,
             gate,
             shutdown.clone(),
+            None,
             None,
             None,
         );

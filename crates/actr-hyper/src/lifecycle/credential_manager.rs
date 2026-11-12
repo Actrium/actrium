@@ -249,6 +249,32 @@ impl CredentialManager {
         .await
     }
 
+    /// Force a stable-identity credential reissue, skipping the soft renew.
+    ///
+    /// `/reissue` establishes the Actor-key binding Issuer-side when the actor
+    /// has none (identities registered before Actor keys existed), so this is
+    /// the heal for a relay-identity enrollment rejected with 403. Shares the
+    /// `renewing` single-flight with [`Self::trigger_renewal`].
+    pub(crate) async fn reissue_now(&self) -> ReacquireOutcome {
+        if self.renewing.swap(true, Ordering::AcqRel) {
+            return ReacquireOutcome::Deferred("credential renewal in flight".to_string());
+        }
+        let handles = self.hard_rebind_handles.lock().await.clone();
+        let hook_callback = self.hook_callback.lock().await.clone();
+        let outcome = run_credential_only_hard_rebind(
+            self.session.clone(),
+            self.issuer_endpoint.clone(),
+            self.client_key.clone(),
+            self.registration_ctx.clone(),
+            handles,
+            hook_callback,
+            self.pending_control_attempts.clone(),
+        )
+        .await;
+        self.renewing.store(false, Ordering::Release);
+        outcome
+    }
+
     /// Entry point for all renewal triggers. Returns immediately if a
     /// renewal is already in flight (single-flight).
     pub(crate) fn trigger_renewal(&self) {
