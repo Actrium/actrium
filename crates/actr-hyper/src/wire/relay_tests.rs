@@ -3,6 +3,7 @@ use crate::inbound::DataChunkRegistry;
 use crate::lifecycle::{node::PeerTypes, session_state::SessionSnapshot};
 use crate::transport::correlation::RpcCorrelation;
 use actr_relay_security::{
+    ACTOR_CHANNEL_AUDIENCE, ActorChannelCertificate, ActorChannelClaims, ActorIdentityKey,
     CERTIFICATE_DOMAIN, Certificate, IdentityClaims, IssuedIdentity, signing_bytes,
 };
 use actr_runtime_mailbox::{Mailbox, MailboxStats, MessagePriority, MessageRecord, StorageResult};
@@ -43,6 +44,8 @@ async fn unavailable_platform_signer_never_sends_relay_identity_request() {
         fixture.client.session.clone(),
         fixture.client.gate.clone(),
         fixture.shutdown.clone(),
+        None,
+        None,
     );
     let error = client
         .certified_identity(&fixture.local.to_string_repr(), b"fixture renewal proof")
@@ -105,8 +108,54 @@ fn identity(endpoint: &str, now: u64) -> LocalIdentity {
             public_key: *signer.verifying_key().as_bytes(),
             expires_at: now + 600,
         },
+        actor_certificate: None,
     };
     key.certify(issued, endpoint, now).unwrap()
+}
+
+fn actor_identity(actor_id: &ActrId, actor_type: &str, now: u64) -> ActorChannelIdentity {
+    let noise = IdentityKey::generate().unwrap();
+    let actor = ActorIdentityKey::generate().unwrap();
+    let endpoint = actor_id.to_string_repr();
+    let claims = ActorChannelClaims {
+        realm: actor_id.realm.clone(),
+        actor_id: endpoint.clone(),
+        actor_type: actor_type.into(),
+        member: "member-1".into(),
+        client_key: "fixture-client".into(),
+        role: "editor".into(),
+        actor_public_key: actor.public,
+        noise_public_key: noise.public,
+        actor_credential_digest: [1; 32],
+        policy_digest: [2; 32],
+        actor_state_digest: [3; 32],
+        issuer: "realm-issuer".into(),
+        provider: "provider.example".into(),
+        audience: ACTOR_CHANNEL_AUDIENCE.into(),
+        expires_at: now + 120,
+        runtime_instance_id: format!("{endpoint}-runtime"),
+    };
+    let signer = SigningKey::from_bytes(&[7; 32]);
+    let certificate = ActorChannelCertificate::issue(&claims, 1, &signer).unwrap();
+    ActorChannelIdentity::certify(
+        noise,
+        actor,
+        certificate,
+        IssuerKey {
+            key_id: 1,
+            public_key: signer.verifying_key().to_bytes(),
+            expires_at: now + 600,
+        },
+        &actor_id.realm,
+        &endpoint,
+        now,
+    )
+    .unwrap()
+}
+
+fn one_record(records: Vec<Vec<u8>>) -> Vec<u8> {
+    assert_eq!(records.len(), 1);
+    records.into_iter().next().unwrap()
 }
 
 struct Fixture {
@@ -152,6 +201,8 @@ impl Fixture {
             session,
             gate,
             shutdown.clone(),
+            None,
+            None,
         );
         client.issuers.write().await.insert(1, issuer.clone());
         let (tx, mut outgoing) =
@@ -177,6 +228,7 @@ impl Fixture {
             encryption_budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             cancel: shutdown.child_token(),
             identity: Arc::new(local_identity),
+            actor_identity: None,
         };
         client.status.send_replace(Status::Ready(transport.clone()));
         Self {
@@ -402,7 +454,12 @@ async fn closing_unverified_channel_interrupts_its_waiting_sink() {
     let mut fixture = Fixture::new().await;
     let entry = fixture
         .client
-        .install(42, fixture.remote.to_string_repr(), &fixture.transport)
+        .install(
+            42,
+            fixture.remote.to_string_repr(),
+            &fixture.transport,
+            true,
+        )
         .await
         .unwrap();
     let sink = entry.conn.sink();
@@ -528,6 +585,263 @@ async fn matching_outbound_peer_completes_handshake_and_carries_data() {
         .unwrap();
     assert_eq!(plaintext, [PayloadType::StreamReliable as u8, 0, 0, 0, 0]);
     assert!(connection.is_connected());
+}
+
+#[tokio::test]
+async fn actrium_front_channel_publishes_strict_verified_peer_context() {
+    let mut fixture = Fixture::new().await;
+    let remote_identity = actor_identity(&fixture.remote, "example/Service@1.0.0", fixture.now);
+    fixture.transport.actor_identity = Some(Arc::new(actor_identity(
+        &fixture.local,
+        "example/Front@1.0.0",
+        fixture.now,
+    )));
+    let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;
+    fixture.connected(Some(request)).await.unwrap();
+
+    // An Actor Front initiates immediately. Its raw connection remains strict
+    // and unusable until both Actor proofs and Noise confirmation complete.
+    let first = fixture.next_binary().await;
+    let entry = fixture.client.channels.read().await[&42].clone();
+    assert!(entry.actrium);
+    assert_eq!(
+        entry.conn.secure_channel_state(),
+        SecureChannelState::Handshaking
+    );
+    assert!(!entry.conn.secure_cell().is_io_sendable());
+    assert!(entry.conn.connect().await.is_err());
+
+    let mut remote = ActorChannelSession::new_service(
+        &remote_identity,
+        &fixture.local.to_string_repr(),
+        "42",
+        fixture.now,
+    )
+    .unwrap();
+    assert!(remote.start().unwrap().is_none());
+    let second = one_record(remote.receive(&first, None, fixture.now).unwrap().outbound);
+    fixture
+        .client
+        .receive_secure(
+            42,
+            Bytes::from(second),
+            &fixture.transport,
+            &Arc::new(Semaphore::new(QUEUE_BYTES)),
+        )
+        .await
+        .unwrap();
+    let third = fixture.next_binary().await;
+    let service_records = remote
+        .receive(&third, Some(&fixture.issuer), fixture.now)
+        .unwrap()
+        .outbound;
+    assert_eq!(service_records.len(), 2);
+
+    let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
+    fixture
+        .client
+        .receive_secure(
+            42,
+            Bytes::from(service_records[0].clone()),
+            &fixture.transport,
+            &budget,
+        )
+        .await
+        .unwrap();
+    assert!(!entry.conn.secure_cell().is_io_sendable());
+    fixture
+        .client
+        .receive_secure(
+            42,
+            Bytes::from(service_records[1].clone()),
+            &fixture.transport,
+            &budget,
+        )
+        .await
+        .unwrap();
+
+    let local_proof = fixture.next_binary().await;
+    let local_confirmation = fixture.next_binary().await;
+    assert!(
+        !remote
+            .receive(&local_proof, None, fixture.now)
+            .unwrap()
+            .became_ready
+    );
+    assert!(
+        remote
+            .receive(&local_confirmation, None, fixture.now)
+            .unwrap()
+            .became_ready
+    );
+
+    let (_, connection) = tokio::time::timeout(Duration::from_secs(3), dial)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        connection.secure_channel_state(),
+        SecureChannelState::Verified
+    );
+    connection.connect().await.unwrap();
+    let context = connection.secure_cell().verified_peer().unwrap();
+    assert_eq!(context.local_actor_id, fixture.local);
+    assert_eq!(context.peer_actor_id, fixture.remote);
+    assert_eq!(
+        context.peer_actor_type,
+        ActrType::from_string_repr("example/Service@1.0.0").unwrap()
+    );
+    assert_eq!(context.peer_member, "member-1");
+    assert_eq!(context.peer_client_key, "fixture-client");
+    assert_eq!(context.peer_role, "editor");
+    assert_eq!(
+        context.peer_actor_public_key,
+        remote_identity.actor_public_key()
+    );
+    assert_eq!(context.channel_id, "42");
+    assert_eq!(context.channel_generation, 42);
+    assert_eq!(context.transcript_digest.len(), 32);
+    assert_eq!(
+        context.local_runtime_instance_id,
+        format!("{}-runtime", fixture.local.to_string_repr())
+    );
+    assert_eq!(
+        context.peer_runtime_instance_id,
+        format!("{}-runtime", fixture.remote.to_string_repr())
+    );
+    assert_eq!(
+        context.peer_credential_expires_at_epoch_secs,
+        fixture.now + 120
+    );
+    assert_eq!(context.current_policy_binding, [2; 32]);
+    assert_eq!(context.current_state_binding, [3; 32]);
+
+    let exported = entry
+        .security
+        .lock()
+        .await
+        .verified_actor()
+        .unwrap()
+        .clone();
+    assert!(
+        actrium_peer_context(fixture.local.clone(), fixture.remote.clone(), 43, exported,).is_err(),
+        "a verified context cannot be rebound to another channel generation"
+    );
+
+    let lane = connection
+        .get_lane(PayloadType::StreamReliable)
+        .await
+        .unwrap();
+    lane.send(Bytes::from_static(b"strict Actor channel"))
+        .await
+        .unwrap();
+    let ciphertext = fixture.next_binary().await;
+    let plaintext = remote
+        .receive(&ciphertext, None, fixture.now)
+        .unwrap()
+        .application
+        .unwrap();
+    assert!(plaintext.ends_with(b"strict Actor channel"));
+}
+
+#[tokio::test]
+async fn actrium_service_channel_waits_for_front_proof_and_confirmation() {
+    let mut fixture = Fixture::new().await;
+    let remote_identity = actor_identity(&fixture.remote, "example/Front@1.0.0", fixture.now);
+    fixture.transport.actor_identity = Some(Arc::new(actor_identity(
+        &fixture.local,
+        "example/Service@1.0.0",
+        fixture.now,
+    )));
+    fixture
+        .client
+        .handle_control(
+            ServerControl::Incoming {
+                channel: 42,
+                peer: fixture.remote.to_string_repr(),
+                metadata: String::new(),
+            },
+            &fixture.transport,
+        )
+        .await
+        .unwrap();
+    let _accept = fixture.next_message().await;
+    fixture.connected(None).await.unwrap();
+    let entry = fixture.client.channels.read().await[&42].clone();
+    assert!(entry.actrium);
+
+    let mut remote = ActorChannelSession::new_front(
+        &remote_identity,
+        &fixture.local.to_string_repr(),
+        "42",
+        fixture.now,
+    )
+    .unwrap();
+    let first = remote.start().unwrap().unwrap();
+    let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
+    fixture
+        .client
+        .receive_secure(42, Bytes::from(first), &fixture.transport, &budget)
+        .await
+        .unwrap();
+    let second = fixture.next_binary().await;
+    let third = one_record(
+        remote
+            .receive(&second, Some(&fixture.issuer), fixture.now)
+            .unwrap()
+            .outbound,
+    );
+    fixture
+        .client
+        .receive_secure(42, Bytes::from(third), &fixture.transport, &budget)
+        .await
+        .unwrap();
+    let service_proof = fixture.next_binary().await;
+    let service_confirmation = fixture.next_binary().await;
+    assert!(!entry.conn.secure_cell().is_io_sendable());
+
+    assert!(
+        !remote
+            .receive(&service_proof, None, fixture.now)
+            .unwrap()
+            .became_ready
+    );
+    let front_records = remote
+        .receive(&service_confirmation, None, fixture.now)
+        .unwrap();
+    assert!(front_records.became_ready);
+    assert_eq!(front_records.outbound.len(), 2);
+    fixture
+        .client
+        .receive_secure(
+            42,
+            Bytes::from(front_records.outbound[0].clone()),
+            &fixture.transport,
+            &budget,
+        )
+        .await
+        .unwrap();
+    assert!(!entry.conn.secure_cell().is_io_sendable());
+    fixture
+        .client
+        .receive_secure(
+            42,
+            Bytes::from(front_records.outbound[1].clone()),
+            &fixture.transport,
+            &budget,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        entry.conn.secure_channel_state(),
+        SecureChannelState::Verified
+    );
+    let context = entry.conn.secure_cell().verified_peer().unwrap();
+    assert_eq!(context.local_actor_id, fixture.local);
+    assert_eq!(context.peer_actor_id, fixture.remote);
+    assert_eq!(context.channel_generation, 42);
 }
 
 #[tokio::test]
@@ -748,7 +1062,12 @@ async fn closing_a_relay_wire_preserves_a_concurrent_replacement() {
     let (_, connection) = dial.await.unwrap().unwrap();
     let replacement = fixture
         .client
-        .install(43, fixture.remote.to_string_repr(), &fixture.transport)
+        .install(
+            43,
+            fixture.remote.to_string_repr(),
+            &fixture.transport,
+            true,
+        )
         .await
         .unwrap()
         .conn
@@ -853,3 +1172,6 @@ async fn capacity_eviction_preserves_active_and_dialing_peers() {
     assert!(desired.contains(&peers[1]));
     assert!(!desired.contains(&peers[2]));
 }
+
+#[path = "relay_actor_enrollment_tests.rs"]
+mod actor_enrollment;

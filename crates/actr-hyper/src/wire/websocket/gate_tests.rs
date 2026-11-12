@@ -50,6 +50,7 @@ fn make_valid_credential(
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
         development: None,
+        actor_public_key: None,
     };
     let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
     let signature = sk.sign(&claims_bytes);
@@ -298,6 +299,7 @@ async fn verify_credential_realm_or_issuer_mismatch_returns_none() {
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
             development: None,
+            actor_public_key: None,
         };
         let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
         let credential = AIdCredential {
@@ -1445,6 +1447,47 @@ async fn send_response_falls_back_before_sending_when_channel_not_ready() {
     );
     assert_eq!(writes.load(Ordering::SeqCst), 0);
     // Registration is kept: the session is alive and may become sendable.
+    assert!(gate.inbound_sinks.read().await.contains_key(&peer));
+}
+
+#[tokio::test]
+async fn send_response_strict_cell_rejects_legacy_bypass_without_writing() {
+    let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        empty_pending(),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+    let peer = test_actor_id(316);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let observed = writes.clone();
+    let sink = futures_util::sink::unfold((), move |(), _: WsMessage| {
+        let observed = observed.clone();
+        async move {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, tokio_tungstenite::tungstenite::Error>(())
+        }
+    });
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
+    gate.inbound_sinks.write().await.insert(
+        peer.clone(),
+        (
+            sink,
+            SecureCell::new_actrium(SecureChannelState::LegacyBypass),
+        ),
+    );
+
+    let result = gate.send_response(&peer, RpcEnvelope::default()).await;
+    assert!(
+        matches!(result, Ok(false)),
+        "strict LegacyBypass is not Verified and must fall back: {result:?}"
+    );
+    assert_eq!(
+        writes.load(Ordering::SeqCst),
+        0,
+        "no application response may reach the raw WebSocket sink before Verified"
+    );
     assert!(gate.inbound_sinks.read().await.contains_key(&peer));
 }
 

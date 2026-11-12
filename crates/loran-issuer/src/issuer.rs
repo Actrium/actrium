@@ -52,7 +52,7 @@ use crate::sn::{AIdSerialNumberIssuer, SerialNumber};
 
 use actr_protocol::{
     AIdCredential, ActrId, ActrType, ErrorResponse, IdentityClaims, RegisterRequest,
-    RegisterResponse, register_response,
+    RegisterResponse, actor_key_proof::ActorKeyProofOperation, register_response,
 };
 use base64::prelude::*;
 use ed25519_dalek::VerifyingKey;
@@ -144,11 +144,15 @@ pub(crate) enum Provenance {
     Development,
 }
 
+type IssuedActorRow = (String, Option<i32>, bool, Option<Vec<u8>>);
+
 /// What Issuer recorded when it issued an Actor identity.
 pub(crate) struct IssuedActor {
     pub(crate) actor_type: ActrType,
     pub(crate) auth_mode: Option<i32>,
     pub(crate) development: bool,
+    /// `None` only for identities migrated from schema 10.
+    pub(crate) actor_public_key: Option<Vec<u8>>,
 }
 
 /// Reissue work prepared without writing identity state. The attempt journal
@@ -167,6 +171,11 @@ pub(crate) struct PreparedReissue {
     pub(crate) target: Option<String>,
     /// The key the Actor is bound to once the reissue commits.
     pub(crate) signer: Signer,
+    /// The same Actor key verified during preparation. For a schema-10 legacy
+    /// identity, `previous_actor_public_key` is `None` and this first reissue
+    /// explicitly establishes the binding.
+    pub(crate) actor_public_key: Vec<u8>,
+    pub(crate) previous_actor_public_key: Option<Vec<u8>>,
 }
 
 /// Result of preparing a reissue.
@@ -409,11 +418,30 @@ impl AIdIssuer {
             );
             return Err(AidError::InvalidFormat.into());
         }
+
+        let actor_public_key = Self::verify_actor_key(request, ActorKeyProofOperation::Reissue)?;
+        if issued
+            .actor_public_key
+            .as_deref()
+            .is_some_and(|bound| bound != actor_public_key)
+        {
+            platform::recording::warn!(
+                "Credential reissue rejected: Actor key changed for actor {}",
+                actor_id.to_string_repr()
+            );
+            return Err(AidError::Membership(
+                "actor_key_mismatch: reissue must use the originally registered Actor key"
+                    .to_string(),
+            )
+            .into());
+        }
         // The provenance class stays fixed: the recheck below refuses a
         // development identity whose publisher name is now in the registry,
         // and a Publisher identity whose publisher left it.
 
-        let register_ok = self.issue_credential_for_actor(actor_id, signer).await?;
+        let register_ok = self
+            .issue_credential_for_actor_with_key(actor_id, signer, Some(&actor_public_key))
+            .await?;
 
         // Reissue accepts proofs that already expired (anything inside the
         // binding grace window), so anchoring the successor on the proof's
@@ -432,6 +460,8 @@ impl AIdIssuer {
             package: provenance.is_some(),
             target: request.target.clone(),
             signer: signer.clone(),
+            actor_public_key: actor_public_key.to_vec(),
+            previous_actor_public_key: issued.actor_public_key,
         })
     }
 
@@ -522,6 +552,32 @@ impl AIdIssuer {
         })
     }
 
+    /// Verify possession of the independent long-term Actor key and return its
+    /// canonical 32-byte verifying key.
+    fn verify_actor_key(
+        request: &RegisterRequest,
+        operation: ActorKeyProofOperation,
+    ) -> Result<[u8; 32], AidError> {
+        actr_protocol::actor_key_proof::verify_actor_key_proof(request, operation).map_err(
+            |error| {
+                platform::recording::warn!(
+                    "Actor key proof rejected for realm={}, type={}: {}",
+                    request.realm,
+                    request.actr_type.to_string_repr(),
+                    error
+                );
+                AidError::InvalidFormat
+            },
+        )?;
+        let key = request
+            .actor_public_key
+            .as_ref()
+            .ok_or(AidError::InvalidFormat)?;
+        let mut actor_public_key = [0; 32];
+        actor_public_key.copy_from_slice(key);
+        Ok(actor_public_key)
+    }
+
     /// Internal processing logic (Ed25519 signing via the Signer Sign RPC).
     async fn issue_credential_inner(
         &self,
@@ -529,25 +585,16 @@ impl AIdIssuer {
         signer: &Signer,
     ) -> Result<register_response::RegisterOk, AidError> {
         // The handler's Realm client proof (single-use nonce) authorized the
-        // request; this verifies only where the workload comes from.
+        // request; this proves possession of the independent long-term Actor
+        // key before verifying where the workload comes from.
+        let actor_public_key = Self::verify_actor_key(request, ActorKeyProofOperation::Register)?;
         let provenance = self.verify_registration_identity(request).await?;
         let development = provenance == Some(Provenance::Development);
 
         // Reserve the identity and its optional legacy target. V2 manifests
         // describe execution through workload/host profiles and have no target.
         let actr_id = self
-            .generate_actr_id(
-                &request.actr_type,
-                &request.realm,
-                request.target.as_deref(),
-                if request.auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32) {
-                    actr_protocol::RegisterAuthMode::Linked
-                } else {
-                    actr_protocol::RegisterAuthMode::Package
-                },
-                development,
-                signer,
-            )
+            .generate_actr_id(request, development, signer, &actor_public_key)
             .await?;
 
         // Build IdentityClaims (proto type, plaintext).
@@ -566,6 +613,7 @@ impl AIdIssuer {
             client_key: signer.key_id.clone(),
             role: actr_protocol::MemberRole::from(signer.role) as i32,
             development: development.then_some(true),
+            actor_public_key: Some(Bytes::copy_from_slice(&actor_public_key)),
         };
 
         // Proto-encode the claims bytes.
@@ -876,13 +924,20 @@ impl AIdIssuer {
     /// Generate ActrId.
     async fn generate_actr_id(
         &self,
-        actr_type: &ActrType,
-        realm: &str,
-        target: Option<&str>,
-        auth_mode: actr_protocol::RegisterAuthMode,
+        request: &RegisterRequest,
         development: bool,
         signer: &Signer,
+        actor_public_key: &[u8; 32],
     ) -> Result<ActrId, AidError> {
+        let actr_type = &request.actr_type;
+        let realm = &request.realm;
+        let target = request.target.as_deref();
+        let auth_mode = if request.auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32)
+        {
+            actr_protocol::RegisterAuthMode::Linked
+        } else {
+            actr_protocol::RegisterAuthMode::Package
+        };
         let pool = platform::storage::db::get_database().get_pool();
         let issued_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -898,8 +953,8 @@ impl AIdIssuer {
             let reserved = sqlx::query(
                 "INSERT OR IGNORE INTO issued_actor_identity
                  (realm, serial_number, actor_type, target, issued_at, auth_mode,
-                  development, member_id, client_key_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  development, member_id, client_key_id, actor_public_key)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(realm)
             .bind(serial_number as i64)
@@ -910,6 +965,7 @@ impl AIdIssuer {
             .bind(development)
             .bind(&signer.member_id)
             .bind(&signer.key_id)
+            .bind(actor_public_key.as_slice())
             .execute(pool)
             .await
             .map_err(|error| {
@@ -1045,8 +1101,8 @@ impl AIdIssuer {
         conn: &mut sqlx::SqliteConnection,
         actor_id: &ActrId,
     ) -> Result<IssuedActor, AidError> {
-        let row: Option<(String, Option<i32>, bool)> = sqlx::query_as(
-            "SELECT actor_type, auth_mode, development FROM issued_actor_identity
+        let row: Option<IssuedActorRow> = sqlx::query_as(
+            "SELECT actor_type, auth_mode, development, actor_public_key FROM issued_actor_identity
              WHERE realm = ? AND serial_number = ?",
         )
         .bind(&actor_id.realm)
@@ -1054,7 +1110,7 @@ impl AIdIssuer {
         .fetch_optional(conn)
         .await
         .map_err(|e| AidError::GenerationFailed(format!("actor identity lookup failed: {e}")))?;
-        let Some((actor_type, auth_mode, development)) = row else {
+        let Some((actor_type, auth_mode, development, actor_public_key)) = row else {
             platform::recording::warn!(
                 "Credential issuance rejected: actor {} was not issued by this Realm",
                 actor_id.to_string_repr()
@@ -1068,6 +1124,7 @@ impl AIdIssuer {
             actor_type,
             auth_mode,
             development,
+            actor_public_key,
         })
     }
 
@@ -1226,6 +1283,20 @@ impl AIdIssuer {
         actor_id: &ActrId,
         signer: &Signer,
     ) -> Result<register_response::RegisterOk, AidError> {
+        self.issue_credential_for_actor_with_key(actor_id, signer, None)
+            .await
+    }
+
+    /// Issue for an existing Actor, optionally pinning the claims to the Actor
+    /// key whose reissue proof was just verified. Renewal passes `None` and
+    /// therefore keeps the persisted key; reissue passes the verified key so a
+    /// legacy NULL binding is included in its first newly signed credential.
+    async fn issue_credential_for_actor_with_key(
+        &self,
+        actor_id: &ActrId,
+        signer: &Signer,
+        verified_actor_public_key: Option<&[u8; 32]>,
+    ) -> Result<register_response::RegisterOk, AidError> {
         // Re-validate Realm and Publisher state and the revocation list
         // before signing (AIS-03 / AIS-04). Covers both /renew and /reissue,
         // which are the only callers of this method.
@@ -1247,6 +1318,9 @@ impl AIdIssuer {
             client_key: signer.key_id.clone(),
             role: actr_protocol::MemberRole::from(signer.role) as i32,
             development: issued.development.then_some(true),
+            actor_public_key: verified_actor_public_key
+                .map(|key| Bytes::copy_from_slice(key))
+                .or_else(|| issued.actor_public_key.map(Bytes::from)),
         };
 
         let claims_bytes = claims_proto.encode_to_vec();
@@ -1457,12 +1531,74 @@ async fn retire_realm_keys(
 
 impl AIdIssuer {
     /// Revalidate a Realm-bound actor before certifying its relay key.
+    pub(crate) async fn relay_actor_identity(
+        &self,
+        actor: &ActrId,
+        signer: &Signer,
+    ) -> Result<IssuedActor, AidError> {
+        Ok(self.recheck_existing_actor(actor, signer).await?)
+    }
+
     pub(crate) async fn relay_actor_type(
         &self,
         actor: &ActrId,
         signer: &Signer,
     ) -> Result<ActrType, AidError> {
-        Ok(self.recheck_existing_actor(actor, signer).await?.actor_type)
+        Ok(self.relay_actor_identity(actor, signer).await?.actor_type)
+    }
+
+    pub(crate) async fn mint_actor_channel_certificate(
+        &self,
+        enrollment: &actr_relay_security::ActorChannelEnrollment,
+        actor: &ActrId,
+        actor_type: &ActrType,
+        signer: &Signer,
+        actor_public_key: [u8; 32],
+        noise_public_key: [u8; 32],
+        proof_expires_at: u64,
+    ) -> Result<actr_relay_security::ActorChannelCertificate, AidError> {
+        let (key_id, _verifying_key) = self.realm_key(&actor.realm).await?;
+        let now = crate::renewal::now_secs() as u64;
+        let expires_at = now
+            .saturating_add(actr_relay_security::CERTIFICATE_TTL)
+            .min(proof_expires_at);
+        if expires_at <= now {
+            return Err(AidError::InvalidFormat);
+        }
+        let claims = actr_relay_security::ActorChannelClaims {
+            realm: actor.realm.clone(),
+            actor_id: actor.to_string_repr(),
+            actor_type: actor_type.to_string_repr(),
+            member: signer.member_id.clone(),
+            client_key: signer.key_id.clone(),
+            role: format!("{:?}", signer.role).to_lowercase(),
+            actor_public_key,
+            noise_public_key,
+            actor_credential_digest: enrollment.actor_credential_digest,
+            policy_digest: enrollment.policy_digest,
+            actor_state_digest: enrollment.actor_state_digest,
+            issuer: actor.realm.clone(),
+            provider: self.config.provider_id.clone(),
+            audience: actr_relay_security::ACTOR_CHANNEL_AUDIENCE.into(),
+            expires_at,
+            runtime_instance_id: enrollment.runtime_instance_id.clone(),
+        };
+        let signing_bytes = actr_relay_security::actor_channel_signing_bytes(&claims)
+            .map_err(|_| AidError::InvalidFormat)?;
+        let signature = self
+            .signer_client
+            .sign(key_id, &signing_bytes)
+            .await
+            .map_err(|error| {
+                AidError::GenerationFailed(format!(
+                    "Actor channel certificate signing failed: {error}"
+                ))
+            })?;
+        Ok(actr_relay_security::ActorChannelCertificate {
+            key_id,
+            claims: serde_json::to_vec(&claims).map_err(|_| AidError::InvalidFormat)?,
+            signature,
+        })
     }
 
     pub(crate) async fn mint_relay_identity(
@@ -1512,6 +1648,7 @@ impl AIdIssuer {
                 public_key: *verifying_key.as_bytes(),
                 expires_at: now.saturating_add(CERTIFICATE_TTL),
             },
+            actor_certificate: None,
         })
     }
 }

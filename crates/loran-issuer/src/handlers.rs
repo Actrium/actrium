@@ -1194,18 +1194,19 @@ async fn relay_identity(
     check_binding(&actor, &signer, true)
         .await
         .map_err(|_| StatusCode::FORBIDDEN)?;
-    let actor_type = state
+    let issued_actor = state
         .issuer
-        .relay_actor_type(&actor, &signer)
+        .relay_actor_identity(&actor, &signer)
         .await
         .map_err(|_| StatusCode::FORBIDDEN)?;
+    let actor_type = issued_actor.actor_type.clone();
     let hash = crate::renewal::hash_token(&request.renewal_token);
     let expires = crate::renewal::find_binding_token_expiry(&actor, &hash)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter(|expires| *expires > crate::renewal::now_secs())
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let issued = state
+    let mut issued = state
         .issuer
         .mint_relay_identity(
             &actor,
@@ -1217,6 +1218,39 @@ async fn relay_identity(
         )
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    let actor_public_key = if let Some(enrollment) = &request.actor {
+        if enrollment.runtime_instance_id.is_empty()
+            || enrollment.policy_digest == [0; 32]
+            || enrollment.actor_state_digest == [0; 32]
+            || enrollment.actor_credential_digest == [0; 32]
+        {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let key: [u8; 32] = issued_actor
+            .actor_public_key
+            .as_deref()
+            .ok_or(StatusCode::FORBIDDEN)?
+            .try_into()
+            .map_err(|_| StatusCode::FORBIDDEN)?;
+        issued.actor_certificate = Some(
+            state
+                .issuer
+                .mint_actor_channel_certificate(
+                    enrollment,
+                    &actor,
+                    &actor_type,
+                    &signer,
+                    key,
+                    request.public_key,
+                    expires as u64,
+                )
+                .await
+                .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?,
+        );
+        key
+    } else {
+        [0; 32]
+    };
     // Recheck after signer I/O so revocation and proof rotation fail closed.
     check_binding(&actor, &signer, true)
         .await
@@ -1228,6 +1262,21 @@ async fn relay_identity(
         .map_err(|_| StatusCode::FORBIDDEN)?;
     if current_type != actor_type {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if request.actor.is_some() {
+        let current_key = state
+            .issuer
+            .relay_actor_identity(&actor, &signer)
+            .await
+            .map_err(|_| StatusCode::FORBIDDEN)?
+            .actor_public_key
+            .as_deref()
+            .map(<[u8; 32]>::try_from)
+            .transpose()
+            .map_err(|_| StatusCode::FORBIDDEN)?;
+        if current_key != Some(actor_public_key) {
+            return Err(StatusCode::FORBIDDEN);
+        }
     }
     if crate::renewal::find_binding_token_expiry(&actor, &hash)
         .await
@@ -1290,6 +1339,8 @@ mod tests {
             target: None,
             auth_mode: Some(RegisterAuthMode::Package as i32),
             signing_public_key: None,
+            actor_public_key: None,
+            actor_key_proof: None,
         };
 
         // Encode
@@ -1507,6 +1558,8 @@ mod tests {
             target: None,
             auth_mode: Some(RegisterAuthMode::Package as i32),
             signing_public_key: None,
+            actor_public_key: None,
+            actor_key_proof: None,
         };
 
         // Encode-decode round-trip

@@ -249,7 +249,7 @@ impl WebSocketGate {
             }
             return Ok(false);
         }
-        if !state.is_sendable() {
+        if !secure.is_io_sendable() {
             return Ok(false);
         }
 
@@ -276,7 +276,7 @@ impl WebSocketGate {
                 Some(s) => {
                     // The session may have stopped being sendable while the
                     // shared writer was busy. No bytes have been attempted.
-                    if !secure.state().is_sendable() {
+                    if !secure.is_io_sendable() {
                         return Ok(false);
                     }
                     write_started = true;

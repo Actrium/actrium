@@ -84,12 +84,31 @@ pub(crate) enum RegistrationContext {
     Package {
         #[allow(dead_code)]
         request: actr_protocol::RegisterRequest,
+        signer: std::sync::Arc<dyn crate::issuer_client::ActorKeySigner>,
     },
     /// Source-linked registration — carries the request.
     Linked {
         #[allow(dead_code)]
         request: actr_protocol::RegisterRequest,
+        signer: std::sync::Arc<dyn crate::issuer_client::ActorKeySigner>,
     },
+}
+
+#[cfg(test)]
+impl RegistrationContext {
+    pub(crate) fn package_for_test(request: actr_protocol::RegisterRequest) -> Self {
+        Self::Package {
+            request,
+            signer: std::sync::Arc::new(ed25519_dalek::SigningKey::from_bytes(&[41; 32])),
+        }
+    }
+
+    pub(crate) fn linked_for_test(request: actr_protocol::RegisterRequest) -> Self {
+        Self::Linked {
+            request,
+            signer: std::sync::Arc::new(ed25519_dalek::SigningKey::from_bytes(&[41; 32])),
+        }
+    }
 }
 
 // ---- Credential Manager ----------------------------------------------------
@@ -562,7 +581,11 @@ async fn run_hard_rebind(
     // lapsed (403 possession failure) — the two regressions a `/reissue`-only
     // legacy path would introduce.
     let issuer = issuer_client(&issuer_endpoint, client_key.as_ref());
-    let registration = reissue_registration(registration_ctx);
+    let registration = registration_with_actor_proof(
+        registration_ctx,
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+    )
+    .map_err(|err| format!("hard rebind register signing failed before commit: {err}"))?;
 
     let response = issuer
         .register_with_manifest(registration)
@@ -713,12 +736,17 @@ async fn run_hard_rebind(
 
 // ---- Membership-controller re-acquire (credential-only) --------------------
 
-/// The registration payload a hard rebind sends again. It carries no
-/// single-use proof: the Realm client proof is minted per request.
-fn reissue_registration(registration_ctx: RegistrationContext) -> actr_protocol::RegisterRequest {
+/// Rebind the saved registration payload with a fresh operation-specific Actor
+/// proof. Fresh `/register` and stable-identity `/reissue` proofs are not
+/// interchangeable; the Realm client proof is minted separately per request.
+fn registration_with_actor_proof(
+    registration_ctx: RegistrationContext,
+    operation: actr_protocol::actor_key_proof::ActorKeyProofOperation,
+) -> crate::error::HyperResult<actr_protocol::RegisterRequest> {
     match registration_ctx {
-        RegistrationContext::Package { request } | RegistrationContext::Linked { request } => {
-            request
+        RegistrationContext::Package { request, signer }
+        | RegistrationContext::Linked { request, signer } => {
+            crate::issuer_client::sign_actor_request(request, signer.as_ref(), operation)
         }
     }
 }
@@ -951,7 +979,17 @@ async fn run_credential_only_hard_rebind(
     {
         request
     } else {
-        let registration = reissue_registration(registration_ctx.clone());
+        let registration = match registration_with_actor_proof(
+            registration_ctx.clone(),
+            actr_protocol::actor_key_proof::ActorKeyProofOperation::Reissue,
+        ) {
+            Ok(registration) => registration,
+            Err(error) => {
+                return ReacquireOutcome::Deferred(format!(
+                    "cannot sign Actor reissue proof: {error}"
+                ));
+            }
+        };
         let request = ReissueCredentialRequest {
             actr_id: old_snapshot.actor_id.clone(),
             registration,

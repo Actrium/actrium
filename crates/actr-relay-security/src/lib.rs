@@ -9,6 +9,14 @@ use snow::{HandshakeState, TransportState};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
+pub mod actor;
+pub use actor::{
+    ACTOR_CHANNEL_AUDIENCE, ACTOR_CHANNEL_CERTIFICATE_DOMAIN, ActorChannelCertificate,
+    ActorChannelClaims, ActorChannelEnrollment, ActorChannelIdentity, ActorChannelSession,
+    ActorIdentityKey, VerifiedActorChannel, actor_channel_signing_bytes,
+    verify_actor_channel_certificate,
+};
+
 pub const PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 pub const CERTIFICATE_DOMAIN: &str = "ACTR-RELAY-IDENTITY-V2";
 pub const CERTIFICATE_TTL: u64 = 300;
@@ -49,6 +57,9 @@ pub struct IdentityRequest {
     pub public_key: [u8; 32],
     /// A commitment to a private relay admission secret, not the secret itself.
     pub admission_commitment: [u8; 32],
+    /// Optional Actor channel enrollment. Legacy relay-only clients omit it.
+    #[serde(default)]
+    pub actor: Option<actor::ActorChannelEnrollment>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -119,6 +130,9 @@ pub struct IssuerKey {
 pub struct IssuedIdentity {
     pub certificate: Certificate,
     pub issuer: IssuerKey,
+    /// Present only when the enrollment requested an Actor channel certificate.
+    #[serde(default)]
+    pub actor_certificate: Option<actor::ActorChannelCertificate>,
 }
 
 /// Exact bytes signed by AIS, with domain separation from all other AIS uses.
@@ -203,6 +217,7 @@ fn noise<T>(result: std::result::Result<T, snow::Error>) -> Result<T> {
     result.map_err(|_| SecurityError("Noise authentication or state failure"))
 }
 
+#[derive(Clone)]
 pub struct IdentityKey {
     private: Zeroizing<Vec<u8>>,
     pub public: [u8; 32],
@@ -287,6 +302,7 @@ pub struct Received {
 
 pub struct SecureSession {
     state: Option<State>,
+    actor: Option<actor::ActorSessionState>,
     local_certificate: Vec<u8>,
     local_key_id: u32,
     peer: String,
@@ -344,7 +360,30 @@ impl SecureSession {
             prologue.extend_from_slice(endpoint.as_bytes());
         }
         prologue.extend_from_slice(&channel.to_be_bytes());
-        let b = noise(builder().local_private_key(&local.key.private))?;
+        let certificate = serde_json::to_vec(&local.issued.certificate)
+            .map_err(|_| SecurityError("invalid local certificate"))?;
+        Self::with_handshake(
+            &local.key.private,
+            certificate,
+            local.issued.certificate.key_id,
+            peer,
+            local.expires_at,
+            initiator,
+            prologue,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn with_handshake(
+        private_key: &[u8],
+        local_certificate: Vec<u8>,
+        local_key_id: u32,
+        peer: &str,
+        expires_at: u64,
+        initiator: bool,
+        prologue: Vec<u8>,
+    ) -> Result<Self> {
+        let b = noise(builder().local_private_key(private_key))?;
         let b = noise(b.prologue(&prologue))?;
         let state = if initiator {
             noise(b.build_initiator())?
@@ -353,15 +392,15 @@ impl SecureSession {
         };
         Ok(Self {
             state: Some(State::Handshake(Box::new(state))),
-            local_certificate: serde_json::to_vec(&local.issued.certificate)
-                .map_err(|_| SecurityError("invalid local certificate"))?,
-            local_key_id: local.issued.certificate.key_id,
+            actor: None,
+            local_certificate,
+            local_key_id,
             peer: peer.into(),
             peer_actor_type: None,
             initiator,
             started: false,
             ready: false,
-            expires_at: local.expires_at,
+            expires_at,
             partial: Vec::new(),
             partial_total: None,
         })
@@ -371,6 +410,14 @@ impl SecureSession {
     }
     pub fn peer_actor_type(&self) -> Option<&str> {
         self.peer_actor_type.as_deref()
+    }
+    /// Authenticated Actor context, available only after both the Actor proof
+    /// and bidirectional Noise key confirmation have completed.
+    pub fn verified_actor(&self) -> Option<&actor::VerifiedActorChannel> {
+        if !self.is_ready() {
+            return None;
+        }
+        self.actor.as_ref()?.verified_context()
     }
     pub fn expires_at(&self) -> u64 {
         self.expires_at
@@ -434,20 +481,46 @@ impl SecureSession {
                 let len = noise(handshake.read_message(&frame[HEADER..], &mut plain))?;
                 let remote = handshake.get_remote_static();
                 if let Some(remote) = remote {
-                    let certificate: Certificate = serde_json::from_slice(&plain[..len])
-                        .map_err(|_| SecurityError("missing peer certificate"))?;
-                    if id != Some(certificate.key_id) {
-                        return Err(SecurityError("issuer identifier mismatch"));
-                    }
-                    let issuer = issuer.ok_or(SecurityError("missing trusted issuer"))?;
-                    let claims = verify_certificate(&certificate, issuer, &self.peer, remote, now)?;
-                    self.peer_actor_type = Some(claims.actor_type);
+                    let (actor_type, certificate_expiry) = if let Some(actor_state) =
+                        self.actor.as_mut()
+                    {
+                        let certificate: actor::ActorChannelCertificate =
+                            serde_json::from_slice(&plain[..len])
+                                .map_err(|_| SecurityError("missing peer Actor certificate"))?;
+                        if id != Some(certificate.key_id) {
+                            return Err(SecurityError("issuer identifier mismatch"));
+                        }
+                        let issuer = issuer.ok_or(SecurityError("missing trusted Actor issuer"))?;
+                        let claims = actor::verify_actor_channel_certificate(
+                            &certificate,
+                            issuer,
+                            actor_state.realm(),
+                            &self.peer,
+                            remote,
+                            now,
+                        )?;
+                        let actor_type = claims.actor_type.clone();
+                        let expires_at = claims.expires_at;
+                        actor_state.set_peer_claims(claims);
+                        (actor_type, expires_at)
+                    } else {
+                        let certificate: Certificate = serde_json::from_slice(&plain[..len])
+                            .map_err(|_| SecurityError("missing peer certificate"))?;
+                        if id != Some(certificate.key_id) {
+                            return Err(SecurityError("issuer identifier mismatch"));
+                        }
+                        let issuer = issuer.ok_or(SecurityError("missing trusted issuer"))?;
+                        let claims =
+                            verify_certificate(&certificate, issuer, &self.peer, remote, now)?;
+                        (claims.actor_type, claims.expires_at)
+                    };
+                    self.peer_actor_type = Some(actor_type);
                     // A certificate may outlive a locally cached verification
                     // lease, but the session must not outlive either one.
                     self.expires_at = self
                         .expires_at
-                        .min(claims.expires_at)
-                        .min(issuer.expires_at);
+                        .min(certificate_expiry)
+                        .min(issuer.unwrap().expires_at);
                 } else if len != 0 || id.is_some() {
                     return Err(SecurityError("unexpected first handshake payload"));
                 }
@@ -459,8 +532,16 @@ impl SecureSession {
                         .push(wrap(1, self.local_key_id, &out[..len]));
                 }
                 if handshake.is_handshake_finished() {
+                    if let Some(actor) = self.actor.as_mut() {
+                        actor.finish_handshake(handshake.get_handshake_hash())?;
+                    }
                     let mut transport = Box::new(noise(handshake.into_transport_mode())?);
                     if !self.initiator {
+                        if self.actor.is_some() {
+                            received
+                                .outbound
+                                .push(self.actor_local_proof(&mut transport)?);
+                        }
                         received
                             .outbound
                             .push(encrypt(&mut transport, CONFIRM_RESPONDER)?);
@@ -480,6 +561,12 @@ impl SecureSession {
                 }
                 let plain = &plain[..len];
                 if !self.ready {
+                    if let Some(actor) = self.actor.as_mut() {
+                        if !actor.has_peer_proof() {
+                            actor.verify_peer_proof(plain)?;
+                            return Ok((State::Transport(transport), received));
+                        }
+                    }
                     let expected = if self.initiator {
                         CONFIRM_RESPONDER
                     } else {
@@ -489,9 +576,20 @@ impl SecureSession {
                         return Err(SecurityError("missing mutual key confirmation"));
                     }
                     if self.initiator {
+                        if self.actor.is_some() {
+                            received
+                                .outbound
+                                .push(self.actor_local_proof(&mut transport)?);
+                        }
                         received
                             .outbound
                             .push(encrypt(&mut transport, CONFIRM_INITIATOR)?);
+                    }
+                    if let Some(actor) = self.actor.as_mut() {
+                        if !actor.can_be_ready() {
+                            return Err(SecurityError("incomplete Actor channel authentication"));
+                        }
+                        actor.mark_ready(self.expires_at)?;
                     }
                     self.ready = true;
                     received.became_ready = true;

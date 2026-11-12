@@ -2,6 +2,7 @@
 //!
 //! Starts a temporary Signer gRPC service within the test process to verify the Issuer issuance and validation chain.
 
+use actr_protocol::actor_key_proof::{ActorKeyProofOperation, sign_actor_key_proof};
 use actr_protocol::realm_membership::{
     CLIENT_PROOF_HEADER, ClientProof, ProofOp, RealmInvite, Role, client_key_id, invite_secret_hash,
 };
@@ -322,8 +323,23 @@ fn default_issuer_config(temp_dir: &TempDir) -> IssuerConfig {
     }
 }
 
+fn test_actor_key(request: &RegisterRequest) -> ed25519_dalek::SigningKey {
+    use sha2::Digest as _;
+    let seed = sha2::Sha256::digest(format!(
+        "test-long-term-actor-key\0{}\0{}",
+        request.realm,
+        request.actr_type.to_program_identity()
+    ));
+    ed25519_dalek::SigningKey::from_bytes(&seed.into())
+}
+
+fn sign_test_actor_key(request: &mut RegisterRequest, operation: ActorKeyProofOperation) {
+    let key = test_actor_key(request);
+    sign_actor_key_proof(request, operation, &key);
+}
+
 fn linked_register_request() -> RegisterRequest {
-    RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             publisher: "linked-src".to_string(),
             name: "source-workload".to_string(),
@@ -339,7 +355,11 @@ fn linked_register_request() -> RegisterRequest {
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         signing_public_key: None,
-    }
+        actor_public_key: None,
+        actor_key_proof: None,
+    };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
+    request
 }
 
 /// Actor type signed into the credential claims of a registration.
@@ -369,7 +389,7 @@ fn package_register_request(
     manifest: Vec<u8>,
     manifest_signature: Option<Vec<u8>>,
 ) -> RegisterRequest {
-    RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             publisher: publisher.to_string(),
             name: name.to_string(),
@@ -385,7 +405,11 @@ fn package_register_request(
         target: Some(target.to_string()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
-    }
+        actor_public_key: None,
+        actor_key_proof: None,
+    };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
+    request
 }
 
 async fn create_test_router(env: &TestEnv) -> Router {
@@ -512,10 +536,20 @@ fn signed_package_request(
     request.signing_public_key = Some(prost::bytes::Bytes::from(
         signing_key.verifying_key().to_bytes().to_vec(),
     ));
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
     request
 }
 
 async fn post_register(
+    app: Router,
+    mut request: RegisterRequest,
+    key_label: Option<&str>,
+) -> RegisterResponse {
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
+    post_register_raw(app, request, key_label).await
+}
+
+async fn post_register_raw(
     app: Router,
     request: RegisterRequest,
     key_label: Option<&str>,
@@ -562,9 +596,10 @@ async fn post_register(
 
 async fn post_reissue(
     app: Router,
-    request: ReissueCredentialRequest,
+    mut request: ReissueCredentialRequest,
     key_label: Option<&str>,
 ) -> RegisterResponse {
+    sign_test_actor_key(&mut request.registration, ActorKeyProofOperation::Reissue);
     let (status, response) = post_reissue_raw(app, request, key_label).await;
     assert_eq!(status, StatusCode::OK);
     response
@@ -661,6 +696,162 @@ async fn test_register_route_linked_with_client_proof_succeeds() {
             panic!("linked /register with a client proof should succeed: {err:?}")
         }
     }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_actor_key_binds_registration_renew_and_reissue() {
+    let env = setup_test_environment().await;
+    let key_label = "actor-key-lifecycle-realm-key";
+    let realm = "actor-key-lifecycle@example.com";
+    let app = create_test_router(&env).await;
+    let (registration, initial) = register_linked_actor(&app, realm, key_label).await;
+
+    let actor_key = test_actor_key(&registration);
+    let expected_key = actor_key.verifying_key().to_bytes();
+    assert_ne!(
+        expected_key,
+        key_for(key_label).verifying_key().to_bytes(),
+        "the Actor key must not be the Realm client key"
+    );
+    let initial_claims = actr_protocol::IdentityClaims::decode(&initial.credential.claims[..])
+        .expect("initial claims");
+    assert_eq!(
+        initial_claims.actor_public_key.as_deref(),
+        Some(expected_key.as_slice())
+    );
+    let stored: Vec<u8> = sqlx::query_scalar(
+        "SELECT actor_public_key FROM issued_actor_identity WHERE realm = ? AND serial_number = ?",
+    )
+    .bind(realm)
+    .bind(initial.actr_id.serial_number as i64)
+    .fetch_one(platform::storage::db::get_database().get_pool())
+    .await
+    .unwrap();
+    assert_eq!(stored, expected_key);
+
+    let mut bad_proof = registration.clone();
+    sign_test_actor_key(&mut bad_proof, ActorKeyProofOperation::Register);
+    let mut signature = bad_proof.actor_key_proof.as_ref().unwrap().to_vec();
+    signature[0] ^= 1;
+    bad_proof.actor_key_proof = Some(signature.into());
+    let rejected = post_register_raw(app.clone(), bad_proof, Some(key_label)).await;
+    assert_eq!(error_code(&rejected), Some(400));
+
+    let initial_token = initial.renewal_token.clone().unwrap();
+    let renewed = post_renew(
+        app.clone(),
+        RenewCredentialRequest {
+            actr_id: initial.actr_id.clone(),
+            renewal_token: initial_token,
+            attempt_id: control_attempt_id(),
+        },
+    )
+    .await;
+    let renewed = match renewed.result.unwrap() {
+        renew_credential_response::Result::Success(ok) => ok,
+        renew_credential_response::Result::Error(error) => panic!("renew failed: {error:?}"),
+    };
+    let renewed_claims = actr_protocol::IdentityClaims::decode(&renewed.credential.claims[..])
+        .expect("renewed claims");
+    assert_eq!(
+        renewed_claims.actor_public_key.as_deref(),
+        Some(expected_key.as_slice())
+    );
+
+    // Simulate a schema-10 row on its first authenticated reissue. The
+    // credential and the persisted binding must both acquire the verified key.
+    sqlx::query(
+        "UPDATE issued_actor_identity SET actor_public_key = NULL
+         WHERE realm = ? AND serial_number = ?",
+    )
+    .bind(realm)
+    .bind(initial.actr_id.serial_number as i64)
+    .execute(platform::storage::db::get_database().get_pool())
+    .await
+    .unwrap();
+
+    let reissued = post_reissue(
+        app.clone(),
+        ReissueCredentialRequest {
+            actr_id: initial.actr_id.clone(),
+            registration: registration.clone(),
+            renewal_proof: renewed.renewal_token.clone(),
+            attempt_id: control_attempt_id(),
+        },
+        Some(key_label),
+    )
+    .await;
+    let reissued = match reissued.result.unwrap() {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(error) => panic!("reissue failed: {error:?}"),
+    };
+    assert_eq!(reissued.actr_id, initial.actr_id);
+    let reissued_claims = actr_protocol::IdentityClaims::decode(&reissued.credential.claims[..])
+        .expect("reissued claims");
+    assert_eq!(
+        reissued_claims.actor_public_key.as_deref(),
+        Some(expected_key.as_slice())
+    );
+
+    let other_actor_key = ed25519_dalek::SigningKey::from_bytes(&[0xA5; 32]);
+    let mut wrong_key_registration = registration.clone();
+    sign_actor_key_proof(
+        &mut wrong_key_registration,
+        ActorKeyProofOperation::Reissue,
+        &other_actor_key,
+    );
+    let wrong_key = post_reissue_raw(
+        app.clone(),
+        ReissueCredentialRequest {
+            actr_id: initial.actr_id.clone(),
+            registration: wrong_key_registration,
+            renewal_proof: reissued.renewal_token.clone(),
+            attempt_id: control_attempt_id(),
+        },
+        Some(key_label),
+    )
+    .await
+    .1;
+    let error = match wrong_key.result.unwrap() {
+        register_response::Result::Error(error) => error,
+        register_response::Result::Success(_) => panic!("Actor key rotation must be rejected"),
+    };
+    assert_eq!(error.code, 403);
+    assert!(error.message.contains("actor_key_mismatch"), "{error:?}");
+
+    let stored_after_rejection: Vec<u8> = sqlx::query_scalar(
+        "SELECT actor_public_key FROM issued_actor_identity WHERE realm = ? AND serial_number = ?",
+    )
+    .bind(realm)
+    .bind(initial.actr_id.serial_number as i64)
+    .fetch_one(platform::storage::db::get_database().get_pool())
+    .await
+    .unwrap();
+    assert_eq!(stored_after_rejection, expected_key);
+
+    // A rejected key-change attempt does not consume the renewal token or
+    // damage the original binding.
+    let renewed_after_rejection = post_renew(
+        app,
+        RenewCredentialRequest {
+            actr_id: initial.actr_id,
+            renewal_token: reissued.renewal_token.unwrap(),
+            attempt_id: control_attempt_id(),
+        },
+    )
+    .await;
+    let ok = match renewed_after_rejection.result.unwrap() {
+        renew_credential_response::Result::Success(ok) => ok,
+        renew_credential_response::Result::Error(error) => {
+            panic!("renew after rejected key change failed: {error:?}")
+        }
+    };
+    let claims = actr_protocol::IdentityClaims::decode(&ok.credential.claims[..]).unwrap();
+    assert_eq!(
+        claims.actor_public_key.as_deref(),
+        Some(expected_key.as_slice())
+    );
 }
 
 async fn register_error(env: &TestEnv, realm: &str, secret: Option<&str>) -> ErrorResponse {
@@ -1495,6 +1686,8 @@ async fn test_register_route_package_without_manifest_raw_is_rejected() {
         target: Some("wasm32-wasip1".to_string()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
     let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
@@ -1539,6 +1732,8 @@ async fn test_register_route_package_without_target_is_rejected() {
         target: None,
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
     let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
@@ -1778,6 +1973,8 @@ async fn test_register_route_unsigned_package_is_rejected() {
         target: Some("wasm32-wasip1".to_string()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
     let response = post_register(app, request, Some(ROUTE_KEY_LABEL)).await;
 
@@ -1848,7 +2045,7 @@ async fn test_unsigned_package_registration_is_rejected() {
     .await
     .expect("issuer");
 
-    let request = RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             publisher: "missing-publisher-for-package-auth-test".to_string(),
             name: "package-workload".to_string(),
@@ -1869,7 +2066,10 @@ async fn test_unsigned_package_registration_is_rejected() {
         target: Some("wasm32-wasip1".to_string()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
 
     let response = issuer
         .issue_credential(&request, &owner(&request.realm).await)
@@ -2051,7 +2251,7 @@ async fn test_issuer_creation_fails_with_wrong_shared_key() {
     .expect("issuer creation succeeds with lazy Signer connection");
 
     // Credential issuance should return an error response due to wrong shared key
-    let request = actr_protocol::RegisterRequest {
+    let mut request = actr_protocol::RegisterRequest {
         actr_type: actr_protocol::ActrType {
             publisher: "acme".to_string(),
             name: "bad-key-test".to_string(),
@@ -2067,7 +2267,10 @@ async fn test_issuer_creation_fails_with_wrong_shared_key() {
         target: None,
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
     let resp = issuer
         .issue_credential(&request, &owner(&request.realm).await)
         .await
@@ -2377,11 +2580,12 @@ async fn test_unregistered_publisher_package_runs_as_development_identity() {
         .to_vec();
     signature[0] ^= 0xFF;
     bad_signature.publisher_signature = Some(prost::bytes::Bytes::from(signature));
-    for (label, request) in [
+    for (label, mut request) in [
         ("missing_key", missing_key),
         ("wrong_key", wrong_key),
         ("bad_signature", bad_signature),
     ] {
+        sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
         let response = issuer
             .issue_credential(&request, &owner(realm).await)
             .await
@@ -2434,7 +2638,7 @@ hash = "0000000000000000000000000000000000000000000000000000000000000000"
     let manifest_bytes = manifest.into_bytes();
     let sig_bytes = key.sign(&manifest_bytes).to_bytes().to_vec();
 
-    let request = RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             publisher: "notargetpublisher".to_string(),
             name: "NoTargetService".to_string(),
@@ -2450,7 +2654,10 @@ hash = "0000000000000000000000000000000000000000000000000000000000000000"
         target: Some("wasm32-wasip1".to_string()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
 
     let response = issuer
         .issue_credential(&request, &owner(&request.realm).await)
@@ -2482,6 +2689,7 @@ async fn test_register_replay_is_rejected() {
 
     let mut request = linked_register_request();
     request.realm = realm.to_string();
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
     let body = request.encode_to_vec();
     let header = proof(ProofOp::Register, realm, &body, &key_for(key_label));
     let send = |app: Router| {
@@ -2574,7 +2782,7 @@ async fn test_retired_publisher_key_still_verifies() {
         "wasm32-wasip1",
     );
 
-    let request = RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             publisher: "histpublisher".to_string(),
             name: "HistService".to_string(),
@@ -2590,7 +2798,10 @@ async fn test_retired_publisher_key_still_verifies() {
         target: Some("wasm32-wasip1".to_string()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
 
     let response = issuer
         .issue_credential(&request, &owner(&request.realm).await)
@@ -2667,7 +2878,7 @@ async fn test_revoked_publisher_key_is_rejected() {
         "wasm32-wasip1",
     );
 
-    let request = RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             publisher: "revpublisher".to_string(),
             name: "RevService".to_string(),
@@ -2685,7 +2896,10 @@ async fn test_revoked_publisher_key_is_rejected() {
         signing_public_key: Some(prost::bytes::Bytes::from(
             key_revoked.verifying_key().to_bytes().to_vec(),
         )),
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
 
     let response = issuer
         .issue_credential(&request, &owner(&request.realm).await)
@@ -2739,7 +2953,7 @@ async fn test_manifest_identity_mismatch_rejected() {
         build_signed_manifest(&key, "spoofpublisher", "ServiceA", "1.0.0", "wasm32-wasip1");
 
     // But register as ServiceB — identity mismatch!
-    let request = RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             publisher: "spoofpublisher".to_string(),
             name: "ServiceB".to_string(), // ← does not match manifest
@@ -2755,7 +2969,10 @@ async fn test_manifest_identity_mismatch_rejected() {
         target: Some("wasm32-wasip1".to_string()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
 
     let response = issuer
         .issue_credential(&request, &owner(&request.realm).await)
@@ -2831,7 +3048,7 @@ async fn package_fixture(publisher: &str, name: &str, target: &str) -> PackageFi
 
 /// A `RegisterRequest` for the fixture's signed manifest.
 fn base_package_request(fx: &PackageFixture, realm: &str) -> RegisterRequest {
-    RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             publisher: fx.publisher.clone(),
             name: fx.name.clone(),
@@ -2849,7 +3066,11 @@ fn base_package_request(fx: &PackageFixture, realm: &str) -> RegisterRequest {
         signing_public_key: Some(prost::bytes::Bytes::from(
             fx.key.verifying_key().to_bytes().to_vec(),
         )),
-    }
+        actor_public_key: None,
+        actor_key_proof: None,
+    };
+    sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
+    request
 }
 
 async fn post_renew(app: Router, request: RenewCredentialRequest) -> RenewCredentialResponse {
@@ -3106,6 +3327,7 @@ async fn test_package_signature_matrix() {
     for (label, expect_success, mutation) in cases {
         let mut request = base_package_request(&fx, TEST_REALM);
         mutation(&mut request, &fx);
+        sign_test_actor_key(&mut request, ActorKeyProofOperation::Register);
 
         let response = fx
             .issuer
@@ -3608,12 +3830,13 @@ async fn test_reissue_proof_is_consumed_by_one_attempt() {
     let (registration, initial_ok) =
         register_linked_actor(&app, "linked-proof-consumed@example.com", key_label).await;
 
-    let request = ReissueCredentialRequest {
+    let mut request = ReissueCredentialRequest {
         actr_id: initial_ok.actr_id.clone(),
         registration,
         renewal_proof: initial_ok.renewal_token.clone(),
         attempt_id: control_attempt_id(),
     };
+    sign_test_actor_key(&mut request.registration, ActorKeyProofOperation::Reissue);
     let first = post_reissue(app.clone(), request.clone(), Some(key_label)).await;
     assert_eq!(error_code(&first), None, "first reissue must succeed");
 
@@ -3644,12 +3867,13 @@ async fn test_reissue_replay_requires_the_original_request() {
         register_response::Result::Success(ok) => ok,
         other => panic!("initial registration failed: {other:?}"),
     };
-    let request = ReissueCredentialRequest {
+    let mut request = ReissueCredentialRequest {
         actr_id: initial.actr_id.clone(),
         registration,
         renewal_proof: initial.renewal_token,
         attempt_id: control_attempt_id(),
     };
+    sign_test_actor_key(&mut request.registration, ActorKeyProofOperation::Reissue);
     let first = post_reissue(app.clone(), request.clone(), Some(DEFAULT_KEY_LABEL)).await;
     assert!(matches!(
         &first.result,
@@ -3702,12 +3926,13 @@ async fn test_reissue_attempt_id_body_mismatch_returns_conflict() {
     let key_label = "reissue-conflict-secret";
     let (registration, initial_ok) =
         register_linked_actor(&app, "reissue-conflict@example.com", key_label).await;
-    let request = ReissueCredentialRequest {
+    let mut request = ReissueCredentialRequest {
         actr_id: initial_ok.actr_id,
         registration,
         renewal_proof: initial_ok.renewal_token,
         attempt_id: control_attempt_id(),
     };
+    sign_test_actor_key(&mut request.registration, ActorKeyProofOperation::Reissue);
     let first = post_reissue(app.clone(), request.clone(), Some(key_label)).await;
     assert_eq!(error_code(&first), None);
 
@@ -3730,12 +3955,13 @@ async fn test_reissue_replay_after_response_expiry_returns_gone() {
     let key_label = "reissue-gone-secret";
     let (registration, initial_ok) =
         register_linked_actor(&app, "reissue-gone@example.com", key_label).await;
-    let request = ReissueCredentialRequest {
+    let mut request = ReissueCredentialRequest {
         actr_id: initial_ok.actr_id.clone(),
         registration,
         renewal_proof: initial_ok.renewal_token.clone(),
         attempt_id: control_attempt_id(),
     };
+    sign_test_actor_key(&mut request.registration, ActorKeyProofOperation::Reissue);
     let first = post_reissue(app.clone(), request.clone(), Some(key_label)).await;
     assert_eq!(error_code(&first), None);
 
@@ -5193,6 +5419,15 @@ async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
         renewal_token: ok.renewal_token.clone().unwrap().to_vec(),
         public_key: identity_key.public,
         admission_commitment: identity_key.admission_commitment(),
+        actor: Some(actr_relay_security::ActorChannelEnrollment {
+            policy_digest: [21; 32],
+            actor_state_digest: [22; 32],
+            runtime_instance_id: "runtime-integration".into(),
+            actor_credential_digest: <sha2::Sha256 as sha2::Digest>::digest(
+                ok.credential.encode_to_vec(),
+            )
+            .into(),
+        }),
     };
     async fn request(
         app: Router,
@@ -5243,6 +5478,7 @@ async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
         renewal_token: vec![9; 32],
         public_key: enrollment.public_key,
         admission_commitment: enrollment.admission_commitment,
+        actor: None,
     };
     assert_eq!(
         request(app.clone(), &invalid, Some(DEFAULT_KEY_LABEL))
@@ -5255,6 +5491,7 @@ async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
         renewal_token: enrollment.renewal_token.clone(),
         public_key: enrollment.public_key,
         admission_commitment: [0; 32],
+        actor: None,
     };
     assert_eq!(
         request(app.clone(), &invalid_commitment, Some(DEFAULT_KEY_LABEL))
@@ -5272,6 +5509,37 @@ async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
         claims.client_key,
         client_key_id(&key_for(DEFAULT_KEY_LABEL).verifying_key().to_bytes())
     );
+    let actor_certificate = issued.actor_certificate.clone().expect("Actor certificate");
+    let actor_claims = actr_relay_security::verify_actor_channel_certificate(
+        &actor_certificate,
+        &issued.issuer,
+        TEST_REALM,
+        &ok.actr_id.to_string_repr(),
+        &identity_key.public,
+        issuer::renewal::now_secs() as u64,
+    )
+    .unwrap();
+    assert_eq!(actor_claims.actor_id, ok.actr_id.to_string_repr());
+    assert_eq!(
+        actor_claims.actor_type,
+        registered_type(&ok).to_string_repr()
+    );
+    assert_eq!(actor_claims.runtime_instance_id, "runtime-integration");
+    assert_eq!(actor_claims.policy_digest, [21; 32]);
+    assert_eq!(actor_claims.actor_state_digest, [22; 32]);
+    let actor_key = actr_relay_security::ActorIdentityKey::from_bytes(
+        test_actor_key(&linked_register_request()).to_bytes(),
+    );
+    actr_relay_security::ActorChannelIdentity::certify(
+        identity_key.clone(),
+        actor_key,
+        actor_certificate,
+        issued.issuer.clone(),
+        TEST_REALM,
+        &ok.actr_id.to_string_repr(),
+        issuer::renewal::now_secs() as u64,
+    )
+    .unwrap();
     identity_key
         .certify(
             issued,

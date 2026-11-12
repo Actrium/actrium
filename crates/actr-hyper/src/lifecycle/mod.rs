@@ -8,6 +8,7 @@ pub(crate) mod credential_manager;
 pub(crate) mod dedup;
 mod heartbeat;
 pub(crate) mod hooks;
+mod incoming_guard;
 mod machine_docs;
 pub(crate) mod membership;
 mod network_event;
@@ -31,6 +32,11 @@ pub use recovery_supervisor::ConnectionFact;
 // deprecated legacy batch path; they are still re-exported for the migration
 // window, so this re-export intentionally allows the deprecation lint. Only
 // the RTC recovery reducer (and its tests) reads the threshold today.
+pub use incoming_guard::{
+    ACTRIUM_SESSION_V1_ROUTE_PREFIX, IncomingCaller, IncomingDispatchRequest, IncomingGuard,
+    IncomingGuardError, IncomingGuardErrorCode, IncomingMetadata, IncomingMetadataError,
+    IncomingMetadataErrorKind, route_requires_incoming_guard,
+};
 pub(crate) use network_event::LONG_BACKGROUND_RECONNECT_THRESHOLD_MS;
 #[cfg(feature = "test-utils")]
 pub(crate) use network_event::run_network_event_reconciler_with_channel_and_rtc_recovery_and_status;

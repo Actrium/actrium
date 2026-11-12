@@ -32,23 +32,26 @@ public final class ActrNode: Sendable {
         packagePath: String,
         observers: RuntimeObservers?,
         mobileLifecycleObservers: [any MobileLifecycleObserver],
-        membership: ActrBindings.RealmMembership? = nil
+        membership: ActrBindings.RealmMembership? = nil,
+        actorKeyNamespace: String? = nil
     ) async throws -> ActrNode {
         do {
             let wrapper: ActrBindings.ActrNode
             if let membership {
                 wrapper = try await ActrBindings.ActrNode.newFromPackageFileWithMembership(
-                    configPath: configPath, packagePath: packagePath, membership: membership, observers: observers?.bridge)
+                    configPath: configPath, packagePath: packagePath, membership: membership, observers: observers?.bridge, actorKeyNamespace: actorKeyNamespace)
             } else if let observers {
                 wrapper = try await ActrBindings.ActrNode.newFromPackageFileWithObservers(
                     configPath: configPath,
                     packagePath: packagePath,
-                    observers: observers.bridge
+                    observers: observers.bridge,
+                    actorKeyNamespace: actorKeyNamespace
                 )
             } else {
                 wrapper = try await ActrBindings.ActrNode.newFromPackageFile(
                     configPath: configPath,
-                    packagePath: packagePath
+                    packagePath: packagePath,
+                    actorKeyNamespace: actorKeyNamespace
                 )
             }
             let handle = try wrapper.createNetworkEventHandle()
@@ -123,16 +126,17 @@ public final class ActrNode: Sendable {
         type actorType: ActrType,
         workload: DynamicWorkload,
         mobileLifecycleObservers: [any MobileLifecycleObserver],
-        membership: ActrBindings.RealmMembership? = nil
+        membership: ActrBindings.RealmMembership? = nil,
+        actorKeyNamespace: String? = nil
     ) async throws -> ActrNode {
         do {
             let wrapper: ActrBindings.ActrNode
             if let membership {
                 wrapper = try await ActrBindings.ActrNode.newFromLinkedWorkloadWithMembership(
-                    configPath: configPath, actorType: actorType.bridge, workload: workload.bridge, membership: membership)
+                    configPath: configPath, actorType: actorType.bridge, workload: workload.bridge, membership: membership, actorKeyNamespace: actorKeyNamespace)
             } else {
                 wrapper = try await ActrBindings.ActrNode.newFromLinkedWorkload(
-                    configPath: configPath, actorType: actorType.bridge, workload: workload.bridge)
+                    configPath: configPath, actorType: actorType.bridge, workload: workload.bridge, actorKeyNamespace: actorKeyNamespace)
             }
             let handle = try wrapper.createNetworkEventHandle()
             let eventEmitter = MobileLifecycleEventEmitter(observers: mobileLifecycleObservers)

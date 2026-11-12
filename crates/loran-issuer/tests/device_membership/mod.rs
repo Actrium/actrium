@@ -147,9 +147,14 @@ async fn sdk_devices_join_retry_register_renew_reissue_and_revoke() {
     assert!(client_a.renew_credential(renew(&aa)).await.is_err());
     assert!(client_b.renew_credential(renew(&bb)).await.is_ok());
     assert!(client_b.register_linked(registration.clone()).await.is_ok());
+    let mut reissue_registration = registration;
+    crate::sign_test_actor_key(
+        &mut reissue_registration,
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Reissue,
+    );
     let reissue = ReissueCredentialRequest {
         actr_id: bb.actr_id.clone(),
-        registration,
+        registration: reissue_registration,
         renewal_proof: bb.renewal_token,
         attempt_id: control_attempt_id(),
     };

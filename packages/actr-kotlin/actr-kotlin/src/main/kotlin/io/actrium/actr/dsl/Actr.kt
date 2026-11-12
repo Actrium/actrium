@@ -146,9 +146,10 @@ class ActrNode private constructor(
             packagePath: String,
             observers: RuntimeObservers? = null,
             membership: io.actrium.actr.RealmMembership? = null,
+            actorKeyNamespace: String? = null,
         ): ActrNode {
-            val inner = if (membership == null) createPackageBackedNode(configPath, packagePath, observers)
-                else ActrNodeGenerated.newFromPackageFileWithMembership(configPath, packagePath, membership, observers)
+            val inner = if (membership == null) createPackageBackedNode(configPath, packagePath, observers, actorKeyNamespace)
+                else ActrNodeGenerated.newFromPackageFileWithMembership(configPath, packagePath, membership, observers, actorKeyNamespace)
             return ActrNode(inner, retainedObservers = observers)
         }
 
@@ -169,9 +170,10 @@ class ActrNode private constructor(
             onNetworkStatusLog: ((String) -> Unit)? = null,
             observers: RuntimeObservers? = null,
             membership: io.actrium.actr.RealmMembership? = null,
+            actorKeyNamespace: String? = null,
         ): ActrNode {
-            val inner = if (membership == null) createPackageBackedNode(configPath, packagePath, observers)
-                else ActrNodeGenerated.newFromPackageFileWithMembership(configPath, packagePath, membership, observers)
+            val inner = if (membership == null) createPackageBackedNode(configPath, packagePath, observers, actorKeyNamespace)
+                else ActrNodeGenerated.newFromPackageFileWithMembership(configPath, packagePath, membership, observers, actorKeyNamespace)
             return withNetworkMonitoring(
                 inner = inner,
                 retainedWorkload = null,
@@ -210,9 +212,10 @@ class ActrNode private constructor(
             actorType: ActrType,
             workload: DynamicWorkload,
             membership: io.actrium.actr.RealmMembership? = null,
+            actorKeyNamespace: String? = null,
         ): ActrNode {
-            val inner = if (membership == null) ActrNodeGenerated.newFromLinkedWorkload(configPath, actorType, workload)
-                else ActrNodeGenerated.newFromLinkedWorkloadWithMembership(configPath, actorType, workload, membership)
+            val inner = if (membership == null) ActrNodeGenerated.newFromLinkedWorkload(configPath, actorType, workload, actorKeyNamespace)
+                else ActrNodeGenerated.newFromLinkedWorkloadWithMembership(configPath, actorType, workload, membership, actorKeyNamespace)
             return ActrNode(inner, workload)
         }
 
@@ -230,9 +233,10 @@ class ActrNode private constructor(
             scope: CoroutineScope,
             onNetworkStatusLog: ((String) -> Unit)? = null,
             membership: io.actrium.actr.RealmMembership? = null,
+            actorKeyNamespace: String? = null,
         ): ActrNode {
-            val inner = if (membership == null) ActrNodeGenerated.newFromLinkedWorkload(configPath, actorType, workload)
-                else ActrNodeGenerated.newFromLinkedWorkloadWithMembership(configPath, actorType, workload, membership)
+            val inner = if (membership == null) ActrNodeGenerated.newFromLinkedWorkload(configPath, actorType, workload, actorKeyNamespace)
+                else ActrNodeGenerated.newFromLinkedWorkloadWithMembership(configPath, actorType, workload, membership, actorKeyNamespace)
             return withNetworkMonitoring(
                 inner = inner,
                 retainedWorkload = workload,
@@ -352,11 +356,12 @@ class ActrNode private constructor(
             configPath: String,
             packagePath: String,
             observers: RuntimeObservers?,
+            actorKeyNamespace: String?,
         ): ActrNodeGenerated =
             if (observers != null) {
-                ActrNodeGenerated.newFromPackageFileWithObservers(configPath, packagePath, observers)
+                ActrNodeGenerated.newFromPackageFileWithObservers(configPath, packagePath, observers, actorKeyNamespace)
             } else {
-                ActrNodeGenerated.newFromPackageFile(configPath, packagePath)
+                ActrNodeGenerated.newFromPackageFile(configPath, packagePath, actorKeyNamespace)
             }
 
         private suspend fun withNetworkMonitoring(

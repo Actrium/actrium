@@ -1563,7 +1563,7 @@ async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
 
 use crate::lifecycle::node::CredentialState;
 use actr_framework::Bytes as FrameworkBytes;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 /// Linked handle whose dispatch blocks until `release` flips to true,
 /// signalling entry through `entered_tx` for deterministic sequencing.
@@ -3168,4 +3168,209 @@ async fn a_peer_type_lasts_until_its_last_connection_closes() {
     shutdown.cancel();
     follow.await.unwrap();
     manager.close_all().await;
+}
+
+// ── generic incoming guard ordering and mailbox revocation ─────────────
+
+struct SwitchableIncomingGuard {
+    allowed: AtomicBool,
+    calls: AtomicUsize,
+}
+
+impl SwitchableIncomingGuard {
+    fn new(allowed: bool) -> Self {
+        Self {
+            allowed: AtomicBool::new(allowed),
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::lifecycle::IncomingGuard for SwitchableIncomingGuard {
+    async fn check(
+        &self,
+        _request: crate::lifecycle::IncomingDispatchRequest<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.allowed.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::Revoked,
+                "session revoked",
+            ))
+        }
+    }
+}
+
+fn install_incoming_guard(
+    harness: &mut TellDedupHarness,
+    guard: Arc<dyn crate::lifecycle::IncomingGuard>,
+) {
+    Arc::get_mut(&mut harness.inner)
+        .expect("the not-yet-started test node must be uniquely owned")
+        .incoming_guard = Some(guard);
+}
+
+async fn admit_test_envelope(inner: &Inner, envelope: RpcEnvelope) -> ActorResult<FrameworkBytes> {
+    match inner.handle_incoming(envelope, None, None, None).await {
+        IncomingOutcome::Replied(result) => result,
+        IncomingOutcome::Deferred => unreachable!("no EXPLICIT in incoming guard tests"),
+    }
+}
+
+#[tokio::test]
+async fn incoming_guard_runs_before_dedup_cache_lookup() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"cached"))).await;
+    h.release_tx.send(true).unwrap();
+    let guard = Arc::new(SwitchableIncomingGuard::new(true));
+    install_incoming_guard(&mut h, guard.clone());
+
+    let envelope = tell_envelope("guard-before-dedup");
+    assert_eq!(
+        admit_test_envelope(&h.inner, envelope.clone())
+            .await
+            .expect("the initially authorized call completes"),
+        FrameworkBytes::from_static(b"cached")
+    );
+    assert_eq!(h.runs.load(Ordering::SeqCst), 1);
+
+    // The successful result is now cached. Revocation must still reject the
+    // retry; looking up dedup first would incorrectly return `cached` without
+    // calling the guard.
+    guard.allowed.store(false, Ordering::SeqCst);
+    let error = admit_test_envelope(&h.inner, envelope)
+        .await
+        .expect_err("a cached success must not bypass current policy");
+    assert_eq!(protocol_error_to_code(&error), 10004);
+    assert!(matches!(error, ActrError::PermissionDenied(_)));
+    assert_eq!(guard.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        h.runs.load(Ordering::SeqCst),
+        1,
+        "the rejected retry must not dispatch the workload again"
+    );
+}
+
+#[tokio::test]
+async fn incoming_guard_rechecks_a_message_queued_before_revocation() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"ok"))).await;
+    h.release_tx.send(true).unwrap();
+    let guard = Arc::new(SwitchableIncomingGuard::new(true));
+    install_incoming_guard(&mut h, guard.clone());
+
+    let mailbox = h.inner.mailbox.clone();
+    let peer_types = PeerTypes::default();
+    let caller = acl_peer(42);
+    peer_types.record(caller.clone(), acl_client_type());
+    deliver_tell(&mailbox, &peer_types, &caller, "queued-before-revoke").await;
+
+    // Enqueueing is not authorization to execute forever. Revoke before the
+    // real SQLite record is dequeued and admitted by the mailbox path.
+    guard.allowed.store(false, Ordering::SeqCst);
+    let records = dequeue_by_request(&mailbox).await;
+    let error = admit_dequeued(&h.inner, &records["queued-before-revoke"])
+        .await
+        .expect_err("dequeue must re-run the guard after revocation");
+    assert_eq!(protocol_error_to_code(&error), 10004);
+    assert!(matches!(error, ActrError::PermissionDenied(_)));
+    assert_eq!(guard.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        h.runs.load(Ordering::SeqCst),
+        0,
+        "the revoked queued message must never reach the workload"
+    );
+}
+
+struct ChannelGenerationGuard {
+    current_generation: AtomicU64,
+}
+
+#[async_trait::async_trait]
+impl crate::lifecycle::IncomingGuard for ChannelGenerationGuard {
+    async fn check(
+        &self,
+        request: crate::lifecycle::IncomingDispatchRequest<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        let generation = request
+            .metadata
+            .get_u64("actrium.channel.generation")
+            .map_err(crate::lifecycle::IncomingGuardError::invalid_metadata)?
+            .ok_or_else(|| {
+                crate::lifecycle::IncomingGuardError::new(
+                    crate::lifecycle::IncomingGuardErrorCode::InvalidMetadata,
+                    "missing channel generation",
+                )
+            })?;
+        let current = self.current_generation.load(Ordering::SeqCst);
+        if generation != current {
+            return Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::StaleChannelGeneration,
+                format!("message generation {generation}, current generation {current}"),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn incoming_guard_rejects_an_old_channel_generation() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"ok"))).await;
+    h.release_tx.send(true).unwrap();
+    install_incoming_guard(
+        &mut h,
+        Arc::new(ChannelGenerationGuard {
+            current_generation: AtomicU64::new(2),
+        }),
+    );
+
+    let mut old = tell_envelope("old-channel-generation");
+    old.metadata.push(actr_protocol::MetadataEntry {
+        key: "actrium.channel.generation".to_string(),
+        value: "1".to_string(),
+    });
+    let error = admit_test_envelope(&h.inner, old)
+        .await
+        .expect_err("generation 1 is stale after channel generation 2 is installed");
+    assert_eq!(protocol_error_to_code(&error), 10004);
+    assert_eq!(
+        error.to_string(),
+        "permission denied: incoming_guard/v1:stale_channel_generation:message generation 1, current generation 2"
+    );
+
+    let mut current = tell_envelope("current-channel-generation");
+    current.metadata.push(actr_protocol::MetadataEntry {
+        key: "actrium.channel.generation".to_string(),
+        value: "2".to_string(),
+    });
+    assert_eq!(
+        admit_test_envelope(&h.inner, current)
+            .await
+            .expect("the current generation remains dispatchable"),
+        FrameworkBytes::from_static(b"ok")
+    );
+    assert_eq!(h.runs.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn actrium_session_system_route_bypasses_business_guard() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"ok"))).await;
+    h.release_tx.send(true).unwrap();
+    let guard = Arc::new(SwitchableIncomingGuard::new(false));
+    install_incoming_guard(&mut h, guard.clone());
+
+    let mut envelope = tell_envelope("session-system-route");
+    envelope.route_key = "actrium.session.v1.SessionRegistry.Heartbeat".to_string();
+    assert_eq!(
+        admit_test_envelope(&h.inner, envelope)
+            .await
+            .expect("the session registry route is not business RPC"),
+        FrameworkBytes::from_static(b"ok")
+    );
+    assert_eq!(
+        guard.calls.load(Ordering::SeqCst),
+        0,
+        "the business guard must not interpret the session protocol"
+    );
 }

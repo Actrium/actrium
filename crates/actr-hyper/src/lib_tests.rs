@@ -156,6 +156,7 @@ fn fake_register_response_bytes() -> Vec<u8> {
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
         development: None,
+        actor_public_key: None,
     };
     let claims_bytes = claims.encode_to_vec();
 
@@ -254,7 +255,10 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
 #[test]
 fn linked_register_request_uses_linked_auth_mode() {
     let dir = TempDir::new().unwrap();
-    let req = build_linked_register_request(&linked_runtime_config(&dir), test_service_spec());
+    let signer = SigningKey::from_bytes(&[9; 32]);
+    let req =
+        build_linked_register_request(&linked_runtime_config(&dir), test_service_spec(), &signer)
+            .unwrap();
 
     assert_eq!(req.auth_mode, Some(RegisterAuthMode::Linked as i32));
     assert_eq!(req.manifest_raw, None);
@@ -312,8 +316,8 @@ async fn registration_preserves_the_sent_request_for_credential_recovery() {
         assert!(node.preregistered_credential.is_some());
         let context = node.preregistered_registration_context.unwrap();
         let saved = match (package, context) {
-            (true, RegistrationContext::Package { request })
-            | (false, RegistrationContext::Linked { request }) => request,
+            (true, RegistrationContext::Package { request, .. })
+            | (false, RegistrationContext::Linked { request, .. }) => request,
             _ => panic!("credential recovery changed the workload's registration mode"),
         };
         assert_eq!(saved, received.lock().unwrap().take().unwrap());
@@ -348,13 +352,13 @@ async fn preregistered_credentials_keep_the_workload_recovery_context() {
         let node = registered.attachment.unwrap().node;
         assert_eq!(node.preregistered_credential, Some(ok));
         match (package, node.preregistered_registration_context.unwrap()) {
-            (true, RegistrationContext::Package { request }) => {
+            (true, RegistrationContext::Package { request, .. }) => {
                 assert_eq!(request.realm, "test7@example.com");
                 assert_eq!(request.auth_mode, Some(RegisterAuthMode::Package as i32));
                 assert_eq!(request.publisher_signature, Some(vec![0; 64].into()));
                 assert_eq!(request.signing_public_key, Some(vec![0; 32].into()));
             }
-            (false, RegistrationContext::Linked { request }) => {
+            (false, RegistrationContext::Linked { request, .. }) => {
                 assert_eq!(request.auth_mode, Some(RegisterAuthMode::Linked as i32));
                 assert_eq!(request.acl, test_acl());
             }
@@ -800,7 +804,8 @@ use actr_protocol::{ActrType, RegisterAuthMode};
 fn linked_registration_does_not_advertise_a_peer_websocket_endpoint() {
     let dir = TempDir::new().unwrap();
     let cfg = linked_runtime_config(&dir);
-    let req = build_linked_register_request(&cfg, None);
+    let signer = SigningKey::from_bytes(&[9; 32]);
+    let req = build_linked_register_request(&cfg, None, &signer).unwrap();
     assert_eq!(req.actr_type, cfg.actr_type().clone());
     assert_eq!(req.realm, cfg.realm);
     assert_eq!(req.auth_mode, Some(RegisterAuthMode::Linked as i32));

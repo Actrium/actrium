@@ -495,12 +495,29 @@ version = "0.0.0"
 dependencies = [
  "actr-pack",
  "actr-protocol",
+ "async-trait",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "uniffi 0.29.5",
  "url",
+]
+
+[[package]]
+name = "actrium-runtime"
+version = "0.0.0"
+dependencies = [
+ "actr-relay-security",
+ "actrium-core",
+ "async-trait",
+ "ed25519-dalek",
+ "hmac 0.12.1",
+ "rand 0.8.6",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

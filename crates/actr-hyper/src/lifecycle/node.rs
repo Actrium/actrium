@@ -15,6 +15,10 @@ use crate::lifecycle::credential_manager::{
     CredentialManager, HardRebindHandles, RegistrationContext,
 };
 use crate::lifecycle::dedup::{DEDUP_TTL, DedupOutcome, DedupState, DedupWaiter};
+pub use crate::lifecycle::incoming_guard::IncomingCaller;
+use crate::lifecycle::incoming_guard::{
+    IncomingDispatchRequest, IncomingGuard, route_requires_incoming_guard,
+};
 use crate::lifecycle::recovery_policy::translate::LifecycleProfile;
 use crate::lifecycle::session_state::{SessionSnapshot, SessionState};
 use crate::outbound::Gate;
@@ -190,10 +194,6 @@ impl PeerTypes {
         }
     }
 }
-
-/// The caller of an inbound message: its `ActrId` and, when known, the
-/// verified `ActrType` recorded when the message arrived.
-pub type IncomingCaller<'a> = (&'a ActrId, Option<&'a ActrType>);
 
 /// The sender type recorded with a mailbox message; an undecodable one
 /// counts as unknown.
@@ -836,6 +836,7 @@ impl Drop for DataChunkRegistryCleanupGuard {
 /// returned by `Node::start`.
 pub(crate) struct Inner {
     pub(crate) realm_client_key: Option<crate::issuer_client::RealmClientKey>,
+    pub(crate) actor_key_namespace: Option<String>,
     /// Runtime configuration
     pub(crate) config: actr_config::RuntimeConfig,
 
@@ -989,6 +990,10 @@ pub(crate) struct Inner {
 
     /// Verified Actor types of peers, read by the inbound ACL.
     pub(crate) peer_types: PeerTypes,
+
+    /// Optional current-policy authorization for business RPC. System session
+    /// routes bypass this hook and remain available to their registry.
+    pub(crate) incoming_guard: Option<Arc<dyn IncomingGuard>>,
 
     /// Handle to the per-actor serial command runner.
     ///
@@ -2133,7 +2138,30 @@ impl Inner {
             return ready_continuation(Err(denied));
         }
 
-        // 0.2. Deduplication: return cached response for retried request_ids.
+        // 0.2. Current-policy business authorization. This deliberately runs
+        // before dedup so a cached success cannot bypass a later revocation.
+        // Both immediate ingress and durable-mailbox dequeue arrive here, so a
+        // message queued before revocation is checked again when dispatched.
+        // Actrium session system routes belong to their registry and are not
+        // business RPC authorization decisions.
+        if route_requires_incoming_guard(&envelope.route_key)
+            && let Some(guard) = self.incoming_guard.as_ref()
+        {
+            let request = IncomingDispatchRequest::new(&envelope, caller);
+            if let Err(error) = guard.check(request).await {
+                tracing::warn!(
+                    severity = 5,
+                    error_category = "incoming_guard_denied",
+                    guard_code = error.code.as_str(),
+                    request_id = %envelope.request_id,
+                    route_key = %envelope.route_key,
+                    "incoming business RPC rejected by current policy"
+                );
+                return ready_continuation(Err(error.into_actr_error()));
+            }
+        }
+
+        // 0.3. Deduplication: return cached response for retried request_ids.
         //
         // TELL envelopes keep their dedup entry (retry protection for
         // RpcReliable's up-to-5 same-request_id attempts), but their
@@ -2746,9 +2774,11 @@ impl Inner {
             max_pending_replies: 1024,
             package_manifest,
             realm_client_key: None,
+            actor_key_namespace: None,
             preregistered_credential: None,
             preregistered_registration_context: None,
             peer_types: PeerTypes::default(),
+            incoming_guard: None,
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
             package_uses_explicit_reply_boundary,
@@ -2941,16 +2971,33 @@ impl Inner {
         // through `Hyper::register()`.
         let service_spec = None;
 
-        let register_request = RegisterRequest {
-            actr_type: actr_type.clone(),
-            realm: self.config.realm.clone(),
-            service_spec,
-            acl: self.config.acl.clone(),
-            service: None,
-            ws_address: None,
-            auth_mode: Some(RegisterAuthMode::Linked as i32),
-            ..Default::default()
-        };
+        let actor_storage_root = self
+            .config
+            .storage_root
+            .clone()
+            .unwrap_or_else(|| self.config.config_dir.join("storage"));
+        let actor_signer = crate::issuer_client::actor_signer_for_scoped(
+            &actor_storage_root,
+            &self.config.realm,
+            &actr_type,
+            self.actor_key_namespace.as_deref(),
+        )
+        .map_err(|error| ActrError::InvalidArgument(error.to_string()))?;
+        let register_request = crate::issuer_client::sign_actor_request(
+            RegisterRequest {
+                actr_type: actr_type.clone(),
+                realm: self.config.realm.clone(),
+                service_spec,
+                acl: self.config.acl.clone(),
+                service: None,
+                ws_address: None,
+                auth_mode: Some(RegisterAuthMode::Linked as i32),
+                ..Default::default()
+            },
+            actor_signer.as_ref(),
+            actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+        )
+        .map_err(|error| ActrError::InvalidArgument(error.to_string()))?;
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 1. Obtain registration info (Hyper pre-injected or Issuer HTTP)
@@ -3165,6 +3212,7 @@ impl Inner {
                 .take()
                 .unwrap_or_else(|| RegistrationContext::Linked {
                     request: register_request.clone(),
+                    signer: actor_signer.clone(),
                 });
             credential_manager = CredentialManager::new(
                 session_state.clone(),
@@ -3535,6 +3583,13 @@ impl Inner {
                 session_state.clone(),
                 relay_gate.clone(),
                 self.shutdown_token.clone(),
+                Some(
+                    self.config
+                        .storage_root
+                        .clone()
+                        .unwrap_or_else(|| self.config.config_dir.join("storage")),
+                ),
+                self.actor_key_namespace.clone(),
             );
             relay_gate.set_handover(handover.clone());
             let wire_builder = Arc::new(

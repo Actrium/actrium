@@ -314,7 +314,7 @@ internal inline fun<T, reified E: Throwable> uniffiTraitInterfaceCallWithError(
         }
     }
 }
-// Initial value and increment amount for handles. 
+// Initial value and increment amount for handles.
 // These ensure that Kotlin-generated handles always have the lowest bit set
 private const val UNIFFI_HANDLEMAP_INITIAL = 1.toLong()
 private const val UNIFFI_HANDLEMAP_DELTA = 2.toLong()
@@ -324,7 +324,7 @@ private const val UNIFFI_HANDLEMAP_DELTA = 2.toLong()
 // This is used pass an opaque 64-bit handle representing a foreign object to the Rust code.
 internal class UniffiHandleMap<T: Any> {
     private val map = ConcurrentHashMap<Long, T>()
-    // Start 
+    // Start
     private val counter = java.util.concurrent.atomic.AtomicLong(UNIFFI_HANDLEMAP_INITIAL)
 
     val size: Int
@@ -1146,16 +1146,16 @@ internal object IntegrityCheckingUniffiLib {
     external fun ffi_actr_uniffi_contract_version(
     ): Int
 
-        
+
 }
 
 internal object UniffiLib {
-    
+
     // The Cleaner for the whole library
     internal val CLEANER: UniffiCleaner by lazy {
         UniffiCleaner.create()
     }
-    
+
 
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "actr"))
@@ -1170,23 +1170,23 @@ internal object UniffiLib {
         uniffiCallbackInterfaceWebRtcObserverBridge.register(this)
         uniffiCallbackInterfaceWebSocketObserverBridge.register(this)
         uniffiCallbackInterfaceWorkloadLifecycleBridge.register(this)
-        
+
     }
-    external fun uniffi_actr_fn_clone_contextbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_actr_fn_clone_contextbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_free_contextbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_free_contextbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_actr_fn_method_contextbridge_add_media_track(`ptr`: Long,`target`: RustBuffer.ByValue,`trackId`: RustBuffer.ByValue,`codec`: RustBuffer.ByValue,`mediaType`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_call_raw(`ptr`: Long,`target`: RustBuffer.ByValue,`routeKey`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,`timeoutMs`: Long,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_caller_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_contextbridge_caller_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_contextbridge_claim_reply(`ptr`: Long,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_discover(`ptr`: Long,`targetType`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_log(`ptr`: Long,`level`: RustBuffer.ByValue,`msg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_contextbridge_log(`ptr`: Long,`level`: RustBuffer.ByValue,`msg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_actr_fn_method_contextbridge_register_media_track(`ptr`: Long,`trackId`: RustBuffer.ByValue,`callback`: Long,
 ): Long
@@ -1198,11 +1198,11 @@ external fun uniffi_actr_fn_method_contextbridge_reply_error(`ptr`: Long,`error`
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_reply_raw(`ptr`: Long,`payload`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_request_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_contextbridge_request_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_contextbridge_resolve_dependency(`ptr`: Long,`alias`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_self_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_contextbridge_self_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_contextbridge_send_data_chunk(`ptr`: Long,`target`: RustBuffer.ByValue,`chunk`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,
 ): Long
@@ -1214,15 +1214,15 @@ external fun uniffi_actr_fn_method_contextbridge_unregister_media_track(`ptr`: L
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_unregister_stream(`ptr`: Long,`streamId`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_clone_opusencoder(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_clone_opusencoder(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_free_opusencoder(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_free_opusencoder(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-external fun uniffi_actr_fn_constructor_opusencoder_new(`sampleRate`: Int,`channels`: Byte,`frameSize`: Short,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_constructor_opusencoder_new(`sampleRate`: Int,`channels`: Byte,`frameSize`: Short,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_method_opusencoder_encode(`ptr`: Long,`pcm`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_opusencoder_encode(`ptr`: Long,`pcm`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_method_opusencoder_frame_size(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_opusencoder_frame_size(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Short
 external fun uniffi_actr_fn_clone_realmmembership(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
@@ -1242,29 +1242,29 @@ external fun uniffi_actr_fn_method_realmmembership_revoke_client(`ptr`: Long,`ke
 ): Long
 external fun uniffi_actr_fn_method_realmmembership_revoke_invite(`ptr`: Long,`inviteId`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_clone_actrnode(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_clone_actrnode(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_free_actrnode(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_free_actrnode(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-external fun uniffi_actr_fn_constructor_actrnode_new_from_linked_workload(`configPath`: RustBuffer.ByValue,`actorType`: RustBuffer.ByValue,`workload`: Long,
+external fun uniffi_actr_fn_constructor_actrnode_new_from_linked_workload(`configPath`: RustBuffer.ByValue,`actorType`: RustBuffer.ByValue,`workload`: Long,`actorKeyNamespace`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_constructor_actrnode_new_from_linked_workload_with_membership(`configPath`: RustBuffer.ByValue,`actorType`: RustBuffer.ByValue,`workload`: Long,`membership`: Long,
+external fun uniffi_actr_fn_constructor_actrnode_new_from_linked_workload_with_membership(`configPath`: RustBuffer.ByValue,`actorType`: RustBuffer.ByValue,`workload`: Long,`membership`: Long,`actorKeyNamespace`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_constructor_actrnode_new_from_package_file(`configPath`: RustBuffer.ByValue,`packagePath`: RustBuffer.ByValue,
+external fun uniffi_actr_fn_constructor_actrnode_new_from_package_file(`configPath`: RustBuffer.ByValue,`packagePath`: RustBuffer.ByValue,`actorKeyNamespace`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_constructor_actrnode_new_from_package_file_with_membership(`configPath`: RustBuffer.ByValue,`packagePath`: RustBuffer.ByValue,`membership`: Long,`observers`: RustBuffer.ByValue,
+external fun uniffi_actr_fn_constructor_actrnode_new_from_package_file_with_membership(`configPath`: RustBuffer.ByValue,`packagePath`: RustBuffer.ByValue,`membership`: Long,`observers`: RustBuffer.ByValue,`actorKeyNamespace`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_constructor_actrnode_new_from_package_file_with_observers(`configPath`: RustBuffer.ByValue,`packagePath`: RustBuffer.ByValue,`observers`: Long,
+external fun uniffi_actr_fn_constructor_actrnode_new_from_package_file_with_observers(`configPath`: RustBuffer.ByValue,`packagePath`: RustBuffer.ByValue,`observers`: Long,`actorKeyNamespace`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_actrnode_create_network_event_handle(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_actrnode_create_network_event_handle(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun uniffi_actr_fn_method_actrnode_start(`ptr`: Long,
 ): Long
-external fun uniffi_actr_fn_clone_actrrefwrapper(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_clone_actrrefwrapper(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_free_actrrefwrapper(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_free_actrrefwrapper(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-external fun uniffi_actr_fn_method_actrrefwrapper_actor_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_actrrefwrapper_actor_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_actrrefwrapper_call(`ptr`: Long,`routeKey`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,`requestPayload`: RustBuffer.ByValue,`timeoutMs`: Long,
 ): Long
@@ -1272,13 +1272,13 @@ external fun uniffi_actr_fn_method_actrrefwrapper_discover(`ptr`: Long,`targetTy
 ): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_get_rtc_peer_status(`ptr`: Long,`peer`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_actrrefwrapper_is_shutting_down(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_actrrefwrapper_is_shutting_down(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 external fun uniffi_actr_fn_method_actrrefwrapper_list_rtc_peer_statuses(`ptr`: Long,
 ): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_resolve_dependency(`ptr`: Long,`alias`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_actrrefwrapper_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_method_actrrefwrapper_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_actr_fn_method_actrrefwrapper_subscribe_rtc_peer_status(`ptr`: Long,`peer`: RustBuffer.ByValue,`listener`: Long,
 ): Long
@@ -1286,9 +1286,9 @@ external fun uniffi_actr_fn_method_actrrefwrapper_tell(`ptr`: Long,`routeKey`: R
 ): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_wait_for_shutdown(`ptr`: Long,
 ): Long
-external fun uniffi_actr_fn_clone_networkeventhandlewrapper(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_clone_networkeventhandlewrapper(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_free_networkeventhandlewrapper(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_free_networkeventhandlewrapper(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_actr_fn_method_networkeventhandlewrapper_cleanup_connections(`ptr`: Long,`reason`: RustBuffer.ByValue,
 ): Long
@@ -1298,21 +1298,21 @@ external fun uniffi_actr_fn_method_networkeventhandlewrapper_handle_app_lifecycl
 ): Long
 external fun uniffi_actr_fn_method_networkeventhandlewrapper_handle_network_path_changed(`ptr`: Long,`snapshot`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_clone_rtcpeerstatesubscription(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_clone_rtcpeerstatesubscription(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_free_rtcpeerstatesubscription(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_free_rtcpeerstatesubscription(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-external fun uniffi_actr_fn_clone_dynamicworkload(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_clone_dynamicworkload(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_free_dynamicworkload(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_free_dynamicworkload(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-external fun uniffi_actr_fn_constructor_dynamicworkload_new(`lifecycle`: Long,`signaling`: RustBuffer.ByValue,`websocket`: RustBuffer.ByValue,`webrtc`: RustBuffer.ByValue,`credential`: RustBuffer.ByValue,`mailbox`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_constructor_dynamicworkload_new(`lifecycle`: Long,`signaling`: RustBuffer.ByValue,`websocket`: RustBuffer.ByValue,`webrtc`: RustBuffer.ByValue,`credential`: RustBuffer.ByValue,`mailbox`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_clone_runtimeobservers(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_clone_runtimeobservers(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
-external fun uniffi_actr_fn_free_runtimeobservers(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_free_runtimeobservers(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-external fun uniffi_actr_fn_constructor_runtimeobservers_new(`signaling`: RustBuffer.ByValue,`websocket`: RustBuffer.ByValue,`webrtc`: RustBuffer.ByValue,`credential`: RustBuffer.ByValue,`mailbox`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_constructor_runtimeobservers_new(`signaling`: RustBuffer.ByValue,`websocket`: RustBuffer.ByValue,`webrtc`: RustBuffer.ByValue,`credential`: RustBuffer.ByValue,`mailbox`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun uniffi_actr_fn_init_callback_vtable_datachunkcallback(`vtable`: UniffiVTableCallbackInterfaceDataChunkCallback,
 ): Unit
@@ -1336,9 +1336,9 @@ external fun uniffi_actr_fn_init_callback_vtable_websocketobserverbridge(`vtable
 ): Unit
 external fun uniffi_actr_fn_init_callback_vtable_workloadlifecyclebridge(`vtable`: UniffiVTableCallbackInterfaceWorkloadLifecycleBridge,
 ): Unit
-external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
-external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_func_actr_error_message(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1356,19 +1356,19 @@ external fun uniffi_actr_fn_func_realm_key_public(`seed`: RustBuffer.ByValue,uni
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_func_realm_key_sign(`seed`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_func_resolve_manifest_dependency(`manifestPath`: RustBuffer.ByValue,`dependencyAlias`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_resolve_manifest_dependency(`manifestPath`: RustBuffer.ByValue,`dependencyAlias`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_func_resolve_manifest_dependency_alias_list(`manifestPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_resolve_manifest_dependency_alias_list(`manifestPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_func_resolve_manifest_package_actr_type(`manifestPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_resolve_manifest_package_actr_type(`manifestPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-external fun ffi_actr_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-external fun ffi_actr_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-external fun ffi_actr_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-external fun ffi_actr_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun ffi_actr_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1376,7 +1376,7 @@ external fun ffi_actr_rust_future_cancel_u8(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_u8(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 external fun ffi_actr_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1384,7 +1384,7 @@ external fun ffi_actr_rust_future_cancel_i8(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_i8(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 external fun ffi_actr_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1392,7 +1392,7 @@ external fun ffi_actr_rust_future_cancel_u16(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_u16(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Short
 external fun ffi_actr_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1400,7 +1400,7 @@ external fun ffi_actr_rust_future_cancel_i16(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_i16(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Short
 external fun ffi_actr_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1408,7 +1408,7 @@ external fun ffi_actr_rust_future_cancel_u32(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_u32(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Int
 external fun ffi_actr_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1416,7 +1416,7 @@ external fun ffi_actr_rust_future_cancel_i32(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_i32(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Int
 external fun ffi_actr_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1424,7 +1424,7 @@ external fun ffi_actr_rust_future_cancel_u64(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_u64(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun ffi_actr_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1432,7 +1432,7 @@ external fun ffi_actr_rust_future_cancel_i64(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_i64(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 external fun ffi_actr_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1440,7 +1440,7 @@ external fun ffi_actr_rust_future_cancel_f32(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_f32(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Float
 external fun ffi_actr_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1448,7 +1448,7 @@ external fun ffi_actr_rust_future_cancel_f64(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_f64(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Double
 external fun ffi_actr_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1456,7 +1456,7 @@ external fun ffi_actr_rust_future_cancel_rust_buffer(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_rust_buffer(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun ffi_actr_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1464,10 +1464,10 @@ external fun ffi_actr_rust_future_cancel_void(`handle`: Long,
 ): Unit
 external fun ffi_actr_rust_future_free_void(`handle`: Long,
 ): Unit
-external fun ffi_actr_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun ffi_actr_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 
-    
+
 }
 
 private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
@@ -1658,19 +1658,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_constructor_realmmembership_new() != 44088.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_linked_workload() != 10568.toShort()) {
+    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_linked_workload() != 347.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_linked_workload_with_membership() != 32680.toShort()) {
+    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_linked_workload_with_membership() != 41676.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_package_file() != 59585.toShort()) {
+    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_package_file() != 52998.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_package_file_with_membership() != 42690.toShort()) {
+    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_package_file_with_membership() != 60074.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_package_file_with_observers() != 60905.toShort()) {
+    if (lib.uniffi_actr_checksum_constructor_actrnode_new_from_package_file_with_observers() != 4399.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_constructor_dynamicworkload_new() != 1634.toShort()) {
@@ -1955,7 +1955,7 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
         }
     }
 
-/** 
+/**
  * Placeholder object used to signal that we're constructing an interface with a FFI handle.
  *
  * This is the first argument for interface constructors that input a raw handle. It exists is that
@@ -1966,7 +1966,7 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
  * */
 object UniffiWithHandle
 
-/** 
+/**
  * Used to instantiate an interface without an actual pointer, for fakes in tests, mostly.
  *
  * @suppress
@@ -2405,7 +2405,7 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
  * Wrapper for a package-backed runtime before startup.
  */
 public interface ActrNodeInterface {
-    
+
     /**
      * Create a lifecycle-gated network event handle for platform callbacks.
      *
@@ -2414,12 +2414,12 @@ public interface ActrNodeInterface {
      * active recovery remains gated.
      */
     fun `createNetworkEventHandle`(): NetworkEventHandleWrapper
-    
+
     /**
      * Start the package-backed node and return a running actor reference.
      */
     suspend fun `start`(): ActrRefWrapper
-    
+
     companion object
 }
 
@@ -2522,7 +2522,7 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
         }
     }
 
-    
+
     /**
      * Create a lifecycle-gated network event handle for platform callbacks.
      *
@@ -2541,9 +2541,9 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
     }
     )
     }
-    
 
-    
+
+
     /**
      * Start the package-backed node and return a running actor reference.
      */
@@ -2554,7 +2554,7 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_actr_fn_method_actrnode_start(
                 uniffiHandle,
-                
+
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_u64(future, callback, continuation) },
@@ -2567,22 +2567,22 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
     )
     }
 
-    
-
-    
 
 
-    
+
+
+
+
     companion object {
-        
+
     /**
      * Create a linked/static runtime from a foreign-language workload.
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `newFromLinkedWorkload`(`configPath`: kotlin.String, `actorType`: ActrType, `workload`: DynamicWorkload) : ActrNode {
+     suspend fun `newFromLinkedWorkload`(`configPath`: kotlin.String, `actorType`: ActrType, `workload`: DynamicWorkload, `actorKeyNamespace`: kotlin.String?) : ActrNode {
         return uniffiRustCallAsync(
-        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_linked_workload(FfiConverterString.lower(`configPath`),FfiConverterTypeActrType.lower(`actorType`),FfiConverterTypeDynamicWorkload.lower(`workload`),),
+        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_linked_workload(FfiConverterString.lower(`configPath`),FfiConverterTypeActrType.lower(`actorType`),FfiConverterTypeDynamicWorkload.lower(`workload`),FfiConverterOptionalString.lower(`actorKeyNamespace`),),
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_u64(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_u64(future, continuation) },
         { future -> UniffiLib.ffi_actr_rust_future_free_u64(future) },
@@ -2593,15 +2593,15 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
     )
     }
 
-        
+
     /**
      * Linked workloads use the same platform signer for their full credential lifecycle.
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `newFromLinkedWorkloadWithMembership`(`configPath`: kotlin.String, `actorType`: ActrType, `workload`: DynamicWorkload, `membership`: RealmMembership) : ActrNode {
+     suspend fun `newFromLinkedWorkloadWithMembership`(`configPath`: kotlin.String, `actorType`: ActrType, `workload`: DynamicWorkload, `membership`: RealmMembership, `actorKeyNamespace`: kotlin.String?) : ActrNode {
         return uniffiRustCallAsync(
-        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_linked_workload_with_membership(FfiConverterString.lower(`configPath`),FfiConverterTypeActrType.lower(`actorType`),FfiConverterTypeDynamicWorkload.lower(`workload`),FfiConverterTypeRealmMembership.lower(`membership`),),
+        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_linked_workload_with_membership(FfiConverterString.lower(`configPath`),FfiConverterTypeActrType.lower(`actorType`),FfiConverterTypeDynamicWorkload.lower(`workload`),FfiConverterTypeRealmMembership.lower(`membership`),FfiConverterOptionalString.lower(`actorKeyNamespace`),),
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_u64(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_u64(future, continuation) },
         { future -> UniffiLib.ffi_actr_rust_future_free_u64(future) },
@@ -2618,9 +2618,9 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `newFromPackageFile`(`configPath`: kotlin.String, `packagePath`: kotlin.String) : ActrNode {
+     suspend fun `newFromPackageFile`(`configPath`: kotlin.String, `packagePath`: kotlin.String, `actorKeyNamespace`: kotlin.String?) : ActrNode {
         return uniffiRustCallAsync(
-        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_package_file(FfiConverterString.lower(`configPath`),FfiConverterString.lower(`packagePath`),),
+        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_package_file(FfiConverterString.lower(`configPath`),FfiConverterString.lower(`packagePath`),FfiConverterOptionalString.lower(`actorKeyNamespace`),),
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_u64(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_u64(future, continuation) },
         { future -> UniffiLib.ffi_actr_rust_future_free_u64(future) },
@@ -2631,15 +2631,15 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
     )
     }
 
-        
+
     /**
      * Create a package-backed runtime using an OS-managed Realm identity.
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `newFromPackageFileWithMembership`(`configPath`: kotlin.String, `packagePath`: kotlin.String, `membership`: RealmMembership, `observers`: RuntimeObservers?) : ActrNode {
+     suspend fun `newFromPackageFileWithMembership`(`configPath`: kotlin.String, `packagePath`: kotlin.String, `membership`: RealmMembership, `observers`: RuntimeObservers?, `actorKeyNamespace`: kotlin.String?) : ActrNode {
         return uniffiRustCallAsync(
-        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_package_file_with_membership(FfiConverterString.lower(`configPath`),FfiConverterString.lower(`packagePath`),FfiConverterTypeRealmMembership.lower(`membership`),FfiConverterOptionalTypeRuntimeObservers.lower(`observers`),),
+        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_package_file_with_membership(FfiConverterString.lower(`configPath`),FfiConverterString.lower(`packagePath`),FfiConverterTypeRealmMembership.lower(`membership`),FfiConverterOptionalTypeRuntimeObservers.lower(`observers`),FfiConverterOptionalString.lower(`actorKeyNamespace`),),
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_u64(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_u64(future, continuation) },
         { future -> UniffiLib.ffi_actr_rust_future_free_u64(future) },
@@ -2656,9 +2656,9 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `newFromPackageFileWithObservers`(`configPath`: kotlin.String, `packagePath`: kotlin.String, `observers`: RuntimeObservers) : ActrNode {
+     suspend fun `newFromPackageFileWithObservers`(`configPath`: kotlin.String, `packagePath`: kotlin.String, `observers`: RuntimeObservers, `actorKeyNamespace`: kotlin.String?) : ActrNode {
         return uniffiRustCallAsync(
-        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_package_file_with_observers(FfiConverterString.lower(`configPath`),FfiConverterString.lower(`packagePath`),FfiConverterTypeRuntimeObservers.lower(`observers`),),
+        UniffiLib.uniffi_actr_fn_constructor_actrnode_new_from_package_file_with_observers(FfiConverterString.lower(`configPath`),FfiConverterString.lower(`packagePath`),FfiConverterTypeRuntimeObservers.lower(`observers`),FfiConverterOptionalString.lower(`actorKeyNamespace`),),
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_u64(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_u64(future, continuation) },
         { future -> UniffiLib.ffi_actr_rust_future_free_u64(future) },
@@ -2669,9 +2669,9 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
     )
     }
 
-        
+
     }
-    
+
 }
 
 
@@ -2798,38 +2798,38 @@ public object FfiConverterTypeActrNode: FfiConverter<ActrNode, Long> {
  * Wrapper for a running actor reference.
  */
 public interface ActrRefWrapperInterface {
-    
+
     /**
      * Get the actor's ID.
      */
     fun `actorId`(): ActrId
-    
+
     /**
      * Call the local guest workload via RPC.
      */
     suspend fun `call`(`routeKey`: kotlin.String, `payloadType`: PayloadType, `requestPayload`: kotlin.ByteArray, `timeoutMs`: kotlin.Long): kotlin.ByteArray
-    
+
     /**
      * Discover actors of the specified type.
      */
     suspend fun `discover`(`targetType`: ActrType, `count`: kotlin.UInt): List<ActrId>
-    
+
     /**
      * Query one peer's current WebRTC state. Returns `None`
      * when the peer has no controller or RTC has not been initialized.
      */
     suspend fun `getRtcPeerStatus`(`peer`: ActrId): WebRtcPeerStateBridge?
-    
+
     /**
      * Check if shutdown is already in progress.
      */
     fun `isShuttingDown`(): kotlin.Boolean
-    
+
     /**
      * List every current peer's WebRTC state; empty when no peers are registered.
      */
     suspend fun `listRtcPeerStatuses`(): List<WebRtcPeerStateBridge>
-    
+
     /**
      * Resolve a dependency alias to its declared `ActrType`.
      *
@@ -2838,12 +2838,12 @@ public interface ActrRefWrapperInterface {
      * dependency alias before route discovery.
      */
     suspend fun `resolveDependency`(`alias`: kotlin.String): ActrType
-    
+
     /**
      * Trigger shutdown.
      */
     fun `shutdown`()
-    
+
     /**
      * Subscribe to one peer's WebRTC state changes. The
      * listener immediately receives the current state (initial replay).
@@ -2851,17 +2851,17 @@ public interface ActrRefWrapperInterface {
      * the peer has no controller or RTC has not been initialized.
      */
     suspend fun `subscribeRtcPeerStatus`(`peer`: ActrId, `listener`: RtcPeerStateListener): RtcPeerStateSubscription?
-    
+
     /**
      * Send a one-way message to the local guest workload.
      */
     suspend fun `tell`(`routeKey`: kotlin.String, `payloadType`: PayloadType, `messagePayload`: kotlin.ByteArray)
-    
+
     /**
      * Wait for shutdown to complete.
      */
     suspend fun `waitForShutdown`()
-    
+
     companion object
 }
 
@@ -2964,7 +2964,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         }
     }
 
-    
+
     /**
      * Get the actor's ID.
      */override fun `actorId`(): ActrId {
@@ -2978,9 +2978,9 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     }
     )
     }
-    
 
-    
+
+
     /**
      * Call the local guest workload via RPC.
      */
@@ -3004,7 +3004,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     )
     }
 
-    
+
     /**
      * Discover actors of the specified type.
      */
@@ -3028,7 +3028,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     )
     }
 
-    
+
     /**
      * Query one peer's current WebRTC state. Returns `None`
      * when the peer has no controller or RTC has not been initialized.
@@ -3052,7 +3052,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     )
     }
 
-    
+
     /**
      * Check if shutdown is already in progress.
      */override fun `isShuttingDown`(): kotlin.Boolean {
@@ -3066,9 +3066,9 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     }
     )
     }
-    
 
-    
+
+
     /**
      * List every current peer's WebRTC state; empty when no peers are registered.
      */
@@ -3078,7 +3078,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_actr_fn_method_actrrefwrapper_list_rtc_peer_statuses(
                 uniffiHandle,
-                
+
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -3091,7 +3091,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     )
     }
 
-    
+
     /**
      * Resolve a dependency alias to its declared `ActrType`.
      *
@@ -3119,11 +3119,11 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     )
     }
 
-    
+
     /**
      * Trigger shutdown.
      */override fun `shutdown`()
-        = 
+        =
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_method_actrrefwrapper_shutdown(
@@ -3131,10 +3131,10 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         _status)
 }
     }
-    
-    
 
-    
+
+
+
     /**
      * Subscribe to one peer's WebRTC state changes. The
      * listener immediately receives the current state (initial replay).
@@ -3160,7 +3160,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     )
     }
 
-    
+
     /**
      * Send a one-way message to the local guest workload.
      */
@@ -3195,7 +3195,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_actr_fn_method_actrrefwrapper_wait_for_shutdown(
                 uniffiHandle,
-                
+
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
@@ -3203,24 +3203,24 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         UniffiNullRustCallStatusErrorHandler,
     )
     }
 
-    
-
-    
 
 
-    
-    
+
+
+
+
+
     /**
      * @suppress
      */
     companion object
-    
+
 }
 
 
@@ -3347,12 +3347,12 @@ public object FfiConverterTypeActrRefWrapper: FfiConverter<ActrRefWrapper, Long>
  * Context provided to the workload
  */
 public interface ContextBridgeInterface {
-    
+
     /**
      * Add a media track to the WebRTC connection with the target
      */
     suspend fun `addMediaTrack`(`target`: ActrId, `trackId`: kotlin.String, `codec`: kotlin.String, `mediaType`: kotlin.String)
-    
+
     /**
      * Call a remote actor via RPC (simplified for FFI)
      *
@@ -3367,12 +3367,12 @@ public interface ContextBridgeInterface {
      * Response payload bytes (protobuf encoded)
      */
     suspend fun `callRaw`(`target`: ActrId, `routeKey`: kotlin.String, `payloadType`: PayloadType, `payload`: kotlin.ByteArray, `timeoutMs`: kotlin.Long): kotlin.ByteArray
-    
+
     /**
      * Caller actor ID when this context was created from an inbound actor call.
      */
     fun `callerId`(): ActrId?
-    
+
     /**
      * Claim responsibility for delivering this invocation's response later.
      *
@@ -3393,17 +3393,17 @@ public interface ContextBridgeInterface {
      * The ActrId of a discovered actor
      */
     suspend fun `discover`(`targetType`: ActrType): ActrId
-    
+
     /**
      * Emit a workload-scoped log record through the runtime's context logging hook.
      */
     fun `log`(`level`: LogLevel, `msg`: kotlin.String)
-    
+
     /**
      * Register a callback for incoming media track samples
      */
     suspend fun `registerMediaTrack`(`trackId`: kotlin.String, `callback`: MediaTrackCallback)
-    
+
     /**
      * Register a DataChunk callback for a stream ID.
      *
@@ -3413,12 +3413,12 @@ public interface ContextBridgeInterface {
      * constraint and reassembly rules.
      */
     suspend fun `registerStream`(`streamId`: kotlin.String, `callback`: DataChunkCallback)
-    
+
     /**
      * Remove a media track from the WebRTC connection with the target.
      */
     suspend fun `removeMediaTrack`(`target`: ActrId, `trackId`: kotlin.String)
-    
+
     /**
      * Deliver an error response through the current inbound RPC reply boundary.
      */
@@ -3433,17 +3433,17 @@ public interface ContextBridgeInterface {
      * Request ID associated with the current dispatch or lifecycle context.
      */
     fun `requestId`(): kotlin.String
-    
+
     /**
      * Resolve a declared dependency alias to its canonical actor type.
      */
     suspend fun `resolveDependency`(`alias`: kotlin.String): ActrType
-    
+
     /**
      * Current actor ID associated with this context.
      */
     fun `selfId`(): ActrId
-    
+
     /**
      * Send a DataChunk to a remote actor (Fast Path)
      *
@@ -3453,12 +3453,12 @@ public interface ContextBridgeInterface {
      * - `payload_type`: Stream lane selection for delivery guarantees.
      */
     suspend fun `sendDataChunk`(`target`: ActrId, `chunk`: DataChunk, `payloadType`: PayloadType)
-    
+
     /**
      * Send a media sample via WebRTC native RTP track
      */
     suspend fun `sendMediaSample`(`target`: ActrId, `trackId`: kotlin.String, `sample`: MediaSample)
-    
+
     /**
      * Send a one-way message to an actor (fire-and-forget)
      *
@@ -3469,17 +3469,17 @@ public interface ContextBridgeInterface {
      * - `payload`: Message payload bytes (protobuf encoded)
      */
     suspend fun `tellRaw`(`target`: ActrId, `routeKey`: kotlin.String, `payloadType`: PayloadType, `payload`: kotlin.ByteArray)
-    
+
     /**
      * Unregister a media track callback
      */
     suspend fun `unregisterMediaTrack`(`trackId`: kotlin.String)
-    
+
     /**
      * Unregister a DataChunk callback for a stream ID.
      */
     suspend fun `unregisterStream`(`streamId`: kotlin.String)
-    
+
     companion object
 }
 
@@ -3601,13 +3601,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
+
     /**
      * Call a remote actor via RPC (simplified for FFI)
      *
@@ -3641,7 +3641,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     )
     }
 
-    
+
     /**
      * Caller actor ID when this context was created from an inbound actor call.
      */override fun `callerId`(): ActrId? {
@@ -3655,9 +3655,9 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     }
     )
     }
-    
 
-    
+
+
     /**
      * Claim responsibility for delivering this invocation's response later.
      *
@@ -3717,11 +3717,11 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     )
     }
 
-    
+
     /**
      * Emit a workload-scoped log record through the runtime's context logging hook.
      */override fun `log`(`level`: LogLevel, `msg`: kotlin.String)
-        = 
+        =
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_method_contextbridge_log(
@@ -3729,10 +3729,10 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         FfiConverterTypeLogLevel.lower(`level`),FfiConverterString.lower(`msg`),_status)
 }
     }
-    
-    
 
-    
+
+
+
     /**
      * Register a callback for incoming media track samples
      */
@@ -3751,13 +3751,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
+
     /**
      * Register a DataChunk callback for a stream ID.
      *
@@ -3781,13 +3781,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
+
     /**
      * Remove a media track from the WebRTC connection with the target.
      */
@@ -3806,13 +3806,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
+
     /**
      * Deliver an error response through the current inbound RPC reply boundary.
      */
@@ -3876,9 +3876,9 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     }
     )
     }
-    
 
-    
+
+
     /**
      * Resolve a declared dependency alias to its canonical actor type.
      */
@@ -3902,7 +3902,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     )
     }
 
-    
+
     /**
      * Current actor ID associated with this context.
      */override fun `selfId`(): ActrId {
@@ -3916,9 +3916,9 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     }
     )
     }
-    
 
-    
+
+
     /**
      * Send a DataChunk to a remote actor (Fast Path)
      *
@@ -3942,13 +3942,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
+
     /**
      * Send a media sample via WebRTC native RTP track
      */
@@ -3967,13 +3967,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
+
     /**
      * Send a one-way message to an actor (fire-and-forget)
      *
@@ -3998,13 +3998,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
+
     /**
      * Unregister a media track callback
      */
@@ -4023,13 +4023,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
+
     /**
      * Unregister a DataChunk callback for a stream ID.
      */
@@ -4048,24 +4048,24 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
-
-    
 
 
-    
-    
+
+
+
+
+
     /**
      * @suppress
      */
     companion object
-    
+
 }
 
 
@@ -4196,7 +4196,7 @@ public object FfiConverterTypeContextBridge: FfiConverter<ContextBridge, Long> {
  * defaults when the hook fires.
  */
 public interface DynamicWorkloadInterface {
-    
+
     companion object
 }
 
@@ -4236,10 +4236,10 @@ open class DynamicWorkload: Disposable, AutoCloseable, DynamicWorkloadInterface
      * a variadic set of optional per-category observers.
      */
     constructor(`lifecycle`: WorkloadLifecycleBridge, `signaling`: SignalingObserverBridge?, `websocket`: WebSocketObserverBridge?, `webrtc`: WebRtcObserverBridge?, `credential`: CredentialObserverBridge?, `mailbox`: MailboxObserverBridge?) :
-        this(UniffiWithHandle, 
+        this(UniffiWithHandle,
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_constructor_dynamicworkload_new(
-    
+
         FfiConverterTypeWorkloadLifecycleBridge.lower(`lifecycle`),FfiConverterOptionalTypeSignalingObserverBridge.lower(`signaling`),FfiConverterOptionalTypeWebSocketObserverBridge.lower(`websocket`),FfiConverterOptionalTypeWebRtcObserverBridge.lower(`webrtc`),FfiConverterOptionalTypeCredentialObserverBridge.lower(`credential`),FfiConverterOptionalTypeMailboxObserverBridge.lower(`mailbox`),_status)
 }
     )
@@ -4315,18 +4315,18 @@ open class DynamicWorkload: Disposable, AutoCloseable, DynamicWorkloadInterface
         }
     }
 
-    
-
-    
 
 
-    
-    
+
+
+
+
+
     /**
      * @suppress
      */
     companion object
-    
+
 }
 
 
@@ -4453,27 +4453,27 @@ public object FfiConverterTypeDynamicWorkload: FfiConverter<DynamicWorkload, Lon
  * Wrapper for `NetworkEventHandle` - network lifecycle callbacks.
  */
 public interface NetworkEventHandleWrapperInterface {
-    
+
     /**
      * Cleanup all connections without reconnecting.
      */
     suspend fun `cleanupConnections`(`reason`: CleanupReason): NetworkEventResult
-    
+
     /**
      * Force cleanup and reconnect.
      */
     suspend fun `forceReconnect`(`reason`: ReconnectReason): NetworkEventResult
-    
+
     /**
      * Handle an app lifecycle change.
      */
     suspend fun `handleAppLifecycleChanged`(`state`: AppLifecycleState): NetworkEventResult
-    
+
     /**
      * Handle a full network path change.
      */
     suspend fun `handleNetworkPathChanged`(`snapshot`: NetworkSnapshot): NetworkEventResult
-    
+
     companion object
 }
 
@@ -4576,7 +4576,7 @@ open class NetworkEventHandleWrapper: Disposable, AutoCloseable, NetworkEventHan
         }
     }
 
-    
+
     /**
      * Cleanup all connections without reconnecting.
      */
@@ -4600,7 +4600,7 @@ open class NetworkEventHandleWrapper: Disposable, AutoCloseable, NetworkEventHan
     )
     }
 
-    
+
     /**
      * Force cleanup and reconnect.
      */
@@ -4624,7 +4624,7 @@ open class NetworkEventHandleWrapper: Disposable, AutoCloseable, NetworkEventHan
     )
     }
 
-    
+
     /**
      * Handle an app lifecycle change.
      */
@@ -4648,7 +4648,7 @@ open class NetworkEventHandleWrapper: Disposable, AutoCloseable, NetworkEventHan
     )
     }
 
-    
+
     /**
      * Handle a full network path change.
      */
@@ -4672,18 +4672,18 @@ open class NetworkEventHandleWrapper: Disposable, AutoCloseable, NetworkEventHan
     )
     }
 
-    
-
-    
 
 
-    
-    
+
+
+
+
+
     /**
      * @suppress
      */
     companion object
-    
+
 }
 
 
@@ -4810,14 +4810,14 @@ public object FfiConverterTypeNetworkEventHandleWrapper: FfiConverter<NetworkEve
  * Reusable Opus encoder for Swift audio capture.
  */
 public interface OpusEncoderInterface {
-    
+
     /**
      * Encode one PCM float frame into one Opus packet.
      */
     fun `encode`(`pcm`: List<kotlin.Float>): kotlin.ByteArray
-    
+
     fun `frameSize`(): kotlin.UShort
-    
+
     companion object
 }
 
@@ -4852,10 +4852,10 @@ open class OpusEncoder: Disposable, AutoCloseable, OpusEncoderInterface
      * Create an Opus encoder for fixed-size PCM float frames.
      */
     constructor(`sampleRate`: kotlin.UInt, `channels`: kotlin.UByte, `frameSize`: kotlin.UShort) :
-        this(UniffiWithHandle, 
+        this(UniffiWithHandle,
     uniffiRustCallWithError(ActrException) { _status ->
     UniffiLib.uniffi_actr_fn_constructor_opusencoder_new(
-    
+
         FfiConverterUInt.lower(`sampleRate`),FfiConverterUByte.lower(`channels`),FfiConverterUShort.lower(`frameSize`),_status)
 }
     )
@@ -4931,7 +4931,7 @@ open class OpusEncoder: Disposable, AutoCloseable, OpusEncoderInterface
         }
     }
 
-    
+
     /**
      * Encode one PCM float frame into one Opus packet.
      */
@@ -4946,7 +4946,7 @@ open class OpusEncoder: Disposable, AutoCloseable, OpusEncoderInterface
     }
     )
     }
-    
+
 
     override fun `frameSize`(): kotlin.UShort {
             return FfiConverterUShort.lift(
@@ -4959,20 +4959,20 @@ open class OpusEncoder: Disposable, AutoCloseable, OpusEncoderInterface
     }
     )
     }
-    
-
-    
-
-    
 
 
-    
-    
+
+
+
+
+
+
+
     /**
      * @suppress
      */
     companion object
-    
+
 }
 
 
@@ -5112,7 +5112,7 @@ public interface RealmMembershipInterface {
     suspend fun `revokeClient`(`keyId`: kotlin.String): kotlin.String
 
     suspend fun `revokeInvite`(`inviteId`: kotlin.String): kotlin.String
-    
+
     companion object
 }
 
@@ -5224,7 +5224,7 @@ open class RealmMembership: Disposable, AutoCloseable, RealmMembershipInterface
         }
     }
 
-    
+
     @Throws(RealmMembershipException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `inviteClient`(`memberId`: kotlin.String, `expiresAt`: kotlin.String) : kotlin.String {
@@ -5348,16 +5348,16 @@ open class RealmMembership: Disposable, AutoCloseable, RealmMembershipInterface
 
 
 
-    
 
 
-    
-    
+
+
+
     /**
      * @suppress
      */
     companion object
-    
+
 }
 
 
@@ -5775,7 +5775,7 @@ open class RuntimeObservers: Disposable, AutoCloseable, RuntimeObserversInterfac
         this(UniffiWithHandle,
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_constructor_runtimeobservers_new(
-    
+
         FfiConverterOptionalTypeSignalingObserverBridge.lower(`signaling`),FfiConverterOptionalTypeWebSocketObserverBridge.lower(`websocket`),FfiConverterOptionalTypeWebRtcObserverBridge.lower(`webrtc`),FfiConverterOptionalTypeCredentialObserverBridge.lower(`credential`),FfiConverterOptionalTypeMailboxObserverBridge.lower(`mailbox`),_status)
 }
     )
@@ -5851,18 +5851,18 @@ open class RuntimeObservers: Disposable, AutoCloseable, RuntimeObserversInterfac
         }
     }
 
-    
-
-    
 
 
-    
-    
+
+
+
+
+
     /**
      * @suppress
      */
     companion object
-    
+
 }
 
 
@@ -5899,15 +5899,15 @@ data class ActrId (
      * Realm name, `<realm_id>@<domain>`
      */
     var `realm`: kotlin.String
-    , 
+    ,
     var `serialNumber`: kotlin.ULong
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -5940,17 +5940,17 @@ public object FfiConverterTypeActrId: FfiConverterRustBuffer<ActrId> {
  */
 data class ActrType (
     var `publisher`: kotlin.String
-    , 
+    ,
     var `name`: kotlin.String
-    , 
+    ,
     var `version`: kotlin.String
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -5986,15 +5986,15 @@ public object FfiConverterTypeActrType: FfiConverterRustBuffer<ActrType> {
  */
 data class BackpressureEventBridge (
     var `queueLen`: kotlin.ULong
-    , 
+    ,
     var `threshold`: kotlin.ULong
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6027,13 +6027,13 @@ public object FfiConverterTypeBackpressureEventBridge: FfiConverterRustBuffer<Ba
  */
 data class ConnectionNotReadyInfo (
     var `retryAfterMs`: kotlin.ULong?
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6066,13 +6066,13 @@ data class CredentialEventBridge (
      * New credential expiry as milliseconds since UNIX epoch.
      */
     var `newExpiryMs`: kotlin.Long
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6110,33 +6110,33 @@ data class DataChunk (
      * Stream identifier (globally unique)
      */
     var `streamId`: kotlin.String
-    , 
+    ,
     /**
      * Sequence number for ordering
      */
     var `sequence`: kotlin.ULong
-    , 
+    ,
     /**
      * Payload data
      */
     var `payload`: kotlin.ByteArray
-    , 
+    ,
     /**
      * Optional metadata
      */
     var `metadata`: List<MetadataEntry>
-    , 
+    ,
     /**
      * Optional timestamp in milliseconds
      */
     var `timestampMs`: kotlin.Long?
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6185,28 +6185,28 @@ data class ErrorEventBridge (
      * Stringified underlying error (see [`actr_protocol::ActrError`]).
      */
     var `source`: kotlin.String
-    , 
+    ,
     /**
      * Error-domain classification.
      */
     var `category`: ErrorCategoryBridge
-    , 
+    ,
     /**
      * Free-form context (route key, handler name, stage).
      */
     var `context`: kotlin.String
-    , 
+    ,
     /**
      * Wall-clock timestamp (milliseconds since UNIX epoch).
      */
     var `timestampMs`: kotlin.Long
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6245,19 +6245,19 @@ public object FfiConverterTypeErrorEventBridge: FfiConverterRustBuffer<ErrorEven
  */
 data class MediaSample (
     var `data`: kotlin.ByteArray
-    , 
+    ,
     var `timestamp`: kotlin.UInt
-    , 
+    ,
     var `codec`: kotlin.String
-    , 
+    ,
     var `mediaType`: MediaType
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6296,15 +6296,15 @@ public object FfiConverterTypeMediaSample: FfiConverterRustBuffer<MediaSample> {
  */
 data class MetadataEntry (
     var `key`: kotlin.String
-    , 
+    ,
     var `value`: kotlin.String
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6337,19 +6337,19 @@ public object FfiConverterTypeMetadataEntry: FfiConverterRustBuffer<MetadataEntr
  */
 data class NetworkEventResult (
     var `event`: NetworkEvent
-    , 
+    ,
     var `success`: kotlin.Boolean
-    , 
+    ,
     var `error`: kotlin.String?
-    , 
+    ,
     var `durationMs`: kotlin.ULong
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6385,21 +6385,21 @@ public object FfiConverterTypeNetworkEventResult: FfiConverterRustBuffer<Network
 
 data class NetworkSnapshot (
     var `sequence`: kotlin.ULong
-    , 
+    ,
     var `availability`: NetworkAvailability
-    , 
+    ,
     var `transport`: NetworkTransportFlags
-    , 
+    ,
     var `isExpensive`: kotlin.Boolean
-    , 
+    ,
     var `isConstrained`: kotlin.Boolean
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6438,21 +6438,21 @@ public object FfiConverterTypeNetworkSnapshot: FfiConverterRustBuffer<NetworkSna
 
 data class NetworkTransportFlags (
     var `wifi`: kotlin.Boolean
-    , 
+    ,
     var `cellular`: kotlin.Boolean
-    , 
+    ,
     var `ethernet`: kotlin.Boolean
-    , 
+    ,
     var `vpn`: kotlin.Boolean
-    , 
+    ,
     var `other`: kotlin.Boolean
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6497,25 +6497,25 @@ data class PeerEventBridge (
      * Remote peer identity.
      */
     var `peer`: ActrId
-    , 
+    ,
     /**
      * `Some(true)` for WebRTC TURN-relayed, `Some(false)` for direct P2P,
      * `None` for WebSocket (not applicable).
      */
     var `relayed`: kotlin.Boolean?
-    , 
+    ,
     /**
      * Coarse WebRTC send-readiness state. `None` for WebSocket and old
      * compatibility paths where the status is not available.
      */
     var `status`: WebRtcPeerStatusBridge?
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6594,28 +6594,28 @@ data class RpcEnvelopeBridge (
      * Route key for the RPC method (e.g., "echo.EchoService.Echo")
      */
     var `routeKey`: kotlin.String
-    , 
+    ,
     /**
      * Request payload bytes (protobuf encoded)
      */
     var `payload`: kotlin.ByteArray
-    , 
+    ,
     /**
      * Request ID for correlation
      */
     var `requestId`: kotlin.String
-    , 
+    ,
     /**
      * Request deadline in milliseconds. Responses and tells carry zero.
      */
     var `timeoutMs`: kotlin.Long
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6659,50 +6659,50 @@ data class WebRtcPeerStateBridge (
      * Remote peer identity.
      */
     var `peer`: ActrId
-    , 
+    ,
     /**
      * Monotonic PeerConnection generation (bumps on Hard Recovery rebuilds).
      */
     var `pcGeneration`: kotlin.ULong
-    , 
+    ,
     /**
      * Monotonic snapshot revision (per-peer dedup key).
      */
     var `revision`: kotlin.ULong
-    , 
+    ,
     /**
      * Coarse lifecycle status.
      */
     var `status`: WebRtcPeerStatusBridge
-    , 
+    ,
     /**
      * Whether business sends are currently admitted.
      */
     var `sendable`: kotlin.Boolean
-    , 
+    ,
     /**
      * The selected ICE path (`Unknown` until stats resolve it).
      */
     var `networkPath`: WebRtcNetworkPathBridge
-    , 
+    ,
     /**
      * `Some(true)` TURN-relayed, `Some(false)` direct, `None` unresolved.
      * Derived from `network_path`; kept for one compatibility cycle — new
      * consumers should read `network_path`.
      */
     var `relayed`: kotlin.Boolean?
-    , 
+    ,
     /**
      * Stable reason the peer is unavailable, when it is.
      */
     var `unavailableReason`: WebRtcUnavailableReasonBridge?
-    
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -6789,95 +6789,95 @@ sealed class ActrException: kotlin.Exception() {
         }
     }
 
-    
+
     class Unavailable(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class ConnectionNotReady(
-        
+
         val `info`: ConnectionNotReadyInfo
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class TimedOut(
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class NotFound(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class PermissionDenied(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class InvalidArgument(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class UnknownRoute(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class DependencyNotFound(
-        
-        val `serviceName`: kotlin.String, 
-        
+
+        val `serviceName`: kotlin.String,
+
         val `detail`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class DecodeFailure(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class NotImplemented(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     class Internal(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
             get() = displayMessage()
     }
-    
+
     /**
      * Config file parsing / trust resolution failed before the runtime could
      * hand the request over to the protocol layer.
@@ -6886,7 +6886,7 @@ sealed class ActrException: kotlin.Exception() {
      * or runtime config.
      */
     class Config(
-        
+
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
@@ -6909,16 +6909,16 @@ sealed class ActrException: kotlin.Exception() {
         override val message
             get() = displayMessage()
     }
-    
 
-    
+
+
 
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<ActrException> {
         override fun lift(error_buf: RustBuffer.ByValue): ActrException = FfiConverterTypeActrError.lift(error_buf)
     }
 
-    
+
 }
 
 /**
@@ -6926,7 +6926,7 @@ sealed class ActrException: kotlin.Exception() {
  */
 public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> {
     override fun read(buf: ByteBuffer): ActrException {
-        
+
 
         return when(buf.getInt()) {
             1 -> ActrException.Unavailable(
@@ -7119,24 +7119,24 @@ public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> 
 
 
 sealed class AppLifecycleState {
-    
+
     object Background : AppLifecycleState()
-    
-    
+
+
     data class Foreground(
         val `backgroundDurationMs`: kotlin.ULong) : AppLifecycleState()
-        
+
     {
-        
+
 
         companion object
     }
-    
 
-    
 
-    
-    
+
+
+
+
 
 
     companion object
@@ -7193,13 +7193,13 @@ public object FfiConverterTypeAppLifecycleState : FfiConverterRustBuffer<AppLife
 
 
 enum class CleanupReason {
-    
+
     APP_TERMINATING,
     USER_LOGOUT,
     STALE_CONNECTION_SUSPECTED,
     MANUAL_RESET;
 
-    
+
 
 
     companion object
@@ -7233,14 +7233,14 @@ public object FfiConverterTypeCleanupReason: FfiConverterRustBuffer<CleanupReaso
  */
 
 enum class ErrorCategoryBridge {
-    
+
     HANDLER_PANIC,
     HANDLER_ERROR,
     SIGNALING_FAILURE,
     TRANSPORT_FAILURE,
     DATA_CHUNK_DELIVERY_UNCERTAIN;
 
-    
+
 
 
     companion object
@@ -7277,7 +7277,7 @@ public object FfiConverterTypeErrorCategoryBridge: FfiConverterRustBuffer<ErrorC
  */
 
 enum class ErrorKind {
-    
+
     /**
      * Environmental fluctuation — retry with exponential backoff.
      */
@@ -7296,7 +7296,7 @@ enum class ErrorKind {
      */
     CORRUPT;
 
-    
+
 
 
     companion object
@@ -7329,14 +7329,14 @@ public object FfiConverterTypeErrorKind: FfiConverterRustBuffer<ErrorKind> {
  */
 
 enum class LogLevel {
-    
+
     TRACE,
     DEBUG,
     INFO,
     WARN,
     ERROR;
 
-    
+
 
 
     companion object
@@ -7369,11 +7369,11 @@ public object FfiConverterTypeLogLevel: FfiConverterRustBuffer<LogLevel> {
  */
 
 enum class MediaType {
-    
+
     AUDIO,
     VIDEO;
 
-    
+
 
 
     companion object
@@ -7406,12 +7406,12 @@ public object FfiConverterTypeMediaType: FfiConverterRustBuffer<MediaType> {
  */
 
 enum class NetworkAvailability {
-    
+
     UNKNOWN,
     AVAILABLE,
     UNAVAILABLE;
 
-    
+
 
 
     companion object
@@ -7440,48 +7440,48 @@ public object FfiConverterTypeNetworkAvailability: FfiConverterRustBuffer<Networ
 
 
 sealed class NetworkEvent {
-    
+
     data class NetworkPathChanged(
         val `snapshot`: io.actrium.actr.NetworkSnapshot) : NetworkEvent()
-        
+
     {
-        
+
 
         companion object
     }
-    
+
     data class AppLifecycleChanged(
         val `state`: io.actrium.actr.AppLifecycleState) : NetworkEvent()
-        
+
     {
-        
+
 
         companion object
     }
-    
+
     data class CleanupConnections(
         val `reason`: io.actrium.actr.CleanupReason) : NetworkEvent()
-        
+
     {
-        
+
 
         companion object
     }
-    
+
     data class ForceReconnect(
         val `reason`: io.actrium.actr.ReconnectReason) : NetworkEvent()
-        
+
     {
-        
+
 
         companion object
     }
-    
 
-    
 
-    
-    
+
+
+
+
 
 
     companion object
@@ -7582,14 +7582,14 @@ public object FfiConverterTypeNetworkEvent : FfiConverterRustBuffer<NetworkEvent
  */
 
 enum class PayloadType {
-    
+
     RPC_RELIABLE,
     RPC_SIGNAL,
     STREAM_RELIABLE,
     STREAM_LATENCY_FIRST,
     MEDIA_RTP;
 
-    
+
 
 
     companion object
@@ -7737,14 +7737,14 @@ public object FfiConverterTypeRealmMembershipError : FfiConverterRustBuffer<Real
 
 
 enum class ReconnectReason {
-    
+
     NETWORK_PATH_CHANGED,
     LONG_BACKGROUND,
     PROBE_FAILED,
     MANUAL_RECONNECT,
     STALE_CONNECTION_SUSPECTED;
 
-    
+
 
 
     companion object
@@ -7778,7 +7778,7 @@ public object FfiConverterTypeReconnectReason: FfiConverterRustBuffer<ReconnectR
  */
 
 enum class WebRtcNetworkPathBridge {
-    
+
     /**
      * Stats have not resolved the selected pair yet.
      */
@@ -7792,7 +7792,7 @@ enum class WebRtcNetworkPathBridge {
      */
     RELAYED;
 
-    
+
 
 
     companion object
@@ -7822,13 +7822,13 @@ public object FfiConverterTypeWebRtcNetworkPathBridge: FfiConverterRustBuffer<We
 
 
 enum class WebRtcPeerStatusBridge {
-    
+
     IDLE,
     CONNECTING,
     CONNECTED,
     RECOVERING;
 
-    
+
 
 
     companion object
@@ -7862,7 +7862,7 @@ public object FfiConverterTypeWebRtcPeerStatusBridge: FfiConverterRustBuffer<Web
  */
 
 enum class WebRtcUnavailableReasonBridge {
-    
+
     CONNECTION_NOT_READY,
     PEER_CONNECTION_BUILD_FAILED,
     NEGOTIATION_FAILED,
@@ -7874,7 +7874,7 @@ enum class WebRtcUnavailableReasonBridge {
     CLOSED,
     PEER_UNAVAILABLE;
 
-    
+
 
 
     companion object
@@ -7908,11 +7908,11 @@ public object FfiConverterTypeWebRtcUnavailableReasonBridge: FfiConverterRustBuf
  * Optional observer for credential lifecycle events.
  */
 public interface CredentialObserverBridge {
-    
+
     suspend fun `onRenewed`(`ctx`: ContextBridge, `event`: CredentialEventBridge)
-    
+
     suspend fun `onExpiring`(`ctx`: ContextBridge, `event`: CredentialEventBridge)
-    
+
     companion object
 }
 
@@ -8037,12 +8037,12 @@ public object FfiConverterTypeCredentialObserverBridge: FfiConverterCallbackInte
  * can lose in-flight chunks.
  */
 public interface DataChunkCallback {
-    
+
     /**
      * Handle an incoming DataChunk.
      */
     suspend fun `onStream`(`chunk`: DataChunk, `sender`: ActrId)
-    
+
     companion object
 }
 
@@ -8128,7 +8128,7 @@ public object FfiConverterTypeDataChunkCallback: FfiConverterCallbackInterface<D
  * forwarded through this callback.
  */
 public interface LogCallback {
-    
+
     /**
      * Called for every tracing event emitted by the actr runtime.
      *
@@ -8139,7 +8139,7 @@ public interface LogCallback {
      * - `timestamp_ms`: wall-clock milliseconds since UNIX epoch.
      */
     fun `onLog`(`level`: kotlin.String, `target`: kotlin.String, `message`: kotlin.String, `timestampMs`: kotlin.Long)
-    
+
     companion object
 }
 
@@ -8203,9 +8203,9 @@ public object FfiConverterTypeLogCallback: FfiConverterCallbackInterface<LogCall
  * Optional observer for mailbox-backpressure events.
  */
 public interface MailboxObserverBridge {
-    
+
     suspend fun `onBackpressure`(`ctx`: ContextBridge, `event`: BackpressureEventBridge)
-    
+
     companion object
 }
 
@@ -8286,12 +8286,12 @@ public object FfiConverterTypeMailboxObserverBridge: FfiConverterCallbackInterfa
  * Callback interface for MediaTrack events.
  */
 public interface MediaTrackCallback {
-    
+
     /**
      * Handle an incoming media sample from a WebRTC native track.
      */
     suspend fun `onSample`(`sample`: MediaSample, `sender`: ActrId)
-    
+
     companion object
 }
 
@@ -8461,13 +8461,13 @@ public object FfiConverterTypeRealmClientSigner: FfiConverterCallbackInterface<R
  * Listener for per-peer WebRTC state updates.
  */
 public interface RtcPeerStateListener {
-    
+
     /**
      * Called with the peer's current state on subscribe (initial replay) and
      * on every subsequent state revision.
      */
     suspend fun `onState`(`state`: WebRtcPeerStateBridge)
-    
+
     companion object
 }
 
@@ -8547,13 +8547,13 @@ public object FfiConverterTypeRtcPeerStateListener: FfiConverterCallbackInterfac
  * Optional observer for signaling-layer events.
  */
 public interface SignalingObserverBridge {
-    
+
     suspend fun `onConnecting`(`ctx`: ContextBridge?)
-    
+
     suspend fun `onConnected`(`ctx`: ContextBridge?)
-    
+
     suspend fun `onDisconnected`(`ctx`: ContextBridge)
-    
+
     companion object
 }
 
@@ -8697,20 +8697,20 @@ public object FfiConverterTypeSignalingObserverBridge: FfiConverterCallbackInter
  * Optional observer for WebRTC P2P peer events.
  */
 public interface WebRtcObserverBridge {
-    
+
     suspend fun `onConnecting`(`ctx`: ContextBridge, `event`: PeerEventBridge)
-    
+
     suspend fun `onConnected`(`ctx`: ContextBridge, `event`: PeerEventBridge)
-    
+
     suspend fun `onDisconnected`(`ctx`: ContextBridge, `event`: PeerEventBridge)
-    
+
     /**
      * Unified per-revision state hook. Fires on
      * every snapshot revision; a late-registered workload receives the
      * current state on the first projection pass.
      */
     suspend fun `onStateChanged`(`ctx`: ContextBridge, `state`: WebRtcPeerStateBridge)
-    
+
     companion object
 }
 
@@ -8890,13 +8890,13 @@ public object FfiConverterTypeWebRtcObserverBridge: FfiConverterCallbackInterfac
  * Optional observer for WebSocket peer events.
  */
 public interface WebSocketObserverBridge {
-    
+
     suspend fun `onConnecting`(`ctx`: ContextBridge, `event`: PeerEventBridge)
-    
+
     suspend fun `onConnected`(`ctx`: ContextBridge, `event`: PeerEventBridge)
-    
+
     suspend fun `onDisconnected`(`ctx`: ContextBridge, `event`: PeerEventBridge)
-    
+
     companion object
 }
 
@@ -9047,32 +9047,32 @@ public object FfiConverterTypeWebSocketObserverBridge: FfiConverterCallbackInter
  * `dispatch` entry point.
  */
 public interface WorkloadLifecycleBridge {
-    
+
     /**
      * Called when the node has started.
      */
     suspend fun `onStart`(`ctx`: ContextBridge)
-    
+
     /**
      * Called when the node is ready to accept requests.
      */
     suspend fun `onReady`(`ctx`: ContextBridge)
-    
+
     /**
      * Called when the node receives a shutdown signal.
      */
     suspend fun `onStop`(`ctx`: ContextBridge)
-    
+
     /**
      * Called when the framework catches a runtime error.
      */
     suspend fun `onError`(`ctx`: ContextBridge, `event`: ErrorEventBridge)
-    
+
     /**
      * Dispatch an incoming RPC message and return the response bytes.
      */
     suspend fun `dispatch`(`ctx`: ContextBridge, `envelope`: RpcEnvelopeBridge): kotlin.ByteArray
-    
+
     companion object
 }
 
@@ -9978,12 +9978,12 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_is_retryable(
-    
+
         FfiConverterTypeActrError.lower(`err`),_status)
 }
     )
     }
-    
+
 
         /**
          * Fault-domain classification of `err` (see [`ErrorKind`]).
@@ -9991,12 +9991,12 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
             return FfiConverterTypeErrorKind.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_kind(
-    
+
         FfiConverterTypeActrError.lower(`err`),_status)
 }
     )
     }
-    
+
 
         /**
          * Rust Display text for an error, shared by SDK message properties.
@@ -10051,14 +10051,14 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * is locked during node initialization; calls after that point are ignored.
          * Pass `None` to disable forwarding.
          */ fun `setLogCallback`(`callback`: LogCallback?)
-        = 
+        =
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_func_set_log_callback(
-    
+
         FfiConverterOptionalTypeLogCallback.lower(`callback`),_status)
 }
-    
-    
+
+
 
         /**
          * Read public endpoint settings for an existing Host config. This does not
@@ -10124,12 +10124,12 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
             return FfiConverterTypeActrType.lift(
     uniffiRustCallWithError(ActrException) { _status ->
     UniffiLib.uniffi_actr_fn_func_resolve_manifest_dependency(
-    
+
         FfiConverterString.lower(`manifestPath`),FfiConverterString.lower(`dependencyAlias`),_status)
 }
     )
     }
-    
+
 
         /**
          * List all dependency aliases from a manifest.toml file.
@@ -10142,12 +10142,12 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
             return FfiConverterSequenceString.lift(
     uniffiRustCallWithError(ActrException) { _status ->
     UniffiLib.uniffi_actr_fn_func_resolve_manifest_dependency_alias_list(
-    
+
         FfiConverterString.lower(`manifestPath`),_status)
 }
     )
     }
-    
+
 
         /**
          * Resolve the package's own ActrType from a manifest.toml file.
@@ -10161,7 +10161,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
             return FfiConverterTypeActrType.lift(
     uniffiRustCallWithError(ActrException) { _status ->
     UniffiLib.uniffi_actr_fn_func_resolve_manifest_package_actr_type(
-    
+
         FfiConverterString.lower(`manifestPath`),_status)
 }
     )

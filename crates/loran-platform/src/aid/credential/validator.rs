@@ -238,6 +238,7 @@ mod tests {
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
             development: None,
+            actor_public_key: Some(vec![7; 32].into()),
         }
     }
 

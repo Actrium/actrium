@@ -267,3 +267,104 @@ fn renew_error_display_messages() {
     assert!(format!("{}", RenewError::RealmUnavailable).contains("unavailable"));
     assert!(format!("{}", RenewError::InvalidRequest("bad".into())).contains("bad"));
 }
+
+#[test]
+fn actor_signer_persists_independent_key_and_reissues_with_a_new_proof() {
+    let directory = tempfile::tempdir().unwrap();
+    let actor_type = actr_protocol::ActrType {
+        publisher: "example.com".into(),
+        name: "notes".into(),
+        version: "1.0.0".into(),
+    };
+    let first = actor_signer_for(directory.path(), "notes@example.com", &actor_type).unwrap();
+    let second = actor_signer_for(directory.path(), "notes@example.com", &actor_type).unwrap();
+    assert_eq!(first.public_key(), second.public_key());
+
+    let request = actr_protocol::RegisterRequest {
+        actr_type: actor_type,
+        realm: "notes@example.com".into(),
+        ..Default::default()
+    };
+    let registered = sign_actor_request(
+        request.clone(),
+        first.as_ref(),
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+    )
+    .unwrap();
+    let reissued = sign_actor_request(
+        request,
+        second.as_ref(),
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Reissue,
+    )
+    .unwrap();
+    actr_protocol::actor_key_proof::verify_actor_key_proof(
+        &registered,
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+    )
+    .unwrap();
+    actr_protocol::actor_key_proof::verify_actor_key_proof(
+        &reissued,
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Reissue,
+    )
+    .unwrap();
+    assert_ne!(registered.actor_key_proof, reissued.actor_key_proof);
+    assert_eq!(registered.actor_public_key, reissued.actor_public_key);
+}
+
+#[test]
+fn actor_signer_uses_distinct_keys_for_distinct_identities() {
+    let directory = tempfile::tempdir().unwrap();
+    let actor_type = actr_protocol::ActrType {
+        publisher: "example.com".into(),
+        name: "notes".into(),
+        version: "1.0.0".into(),
+    };
+    let _ = actor_signer_for(directory.path(), "notes@example.com", &actor_type).unwrap();
+    let other_realm = actr_protocol::ActrType {
+        publisher: "example.com".into(),
+        name: "notes".into(),
+        version: "1.0.0".into(),
+    };
+    let result = actor_signer_for(directory.path(), "other@example.com", &other_realm);
+    // Different identities get different files rather than sharing a key.
+    assert!(result.is_ok());
+    let first = actor_signer_for(directory.path(), "notes@example.com", &actor_type).unwrap();
+    let second = actor_signer_for(directory.path(), "other@example.com", &other_realm).unwrap();
+    assert_ne!(first.public_key(), second.public_key());
+}
+
+#[test]
+fn actrium_front_requires_an_instance_namespace_and_separates_tab_keys() {
+    let directory = tempfile::tempdir().unwrap();
+    let front_type = actr_protocol::ActrType {
+        publisher: "actrium".into(),
+        name: "actrium-front".into(),
+        version: "1.0.0".into(),
+    };
+    assert!(
+        actor_signer_for_scoped(directory.path(), "notes@example.com", &front_type, None).is_err()
+    );
+    let first = actor_signer_for_scoped(
+        directory.path(),
+        "notes@example.com",
+        &front_type,
+        Some("tab-1"),
+    )
+    .unwrap();
+    let second = actor_signer_for_scoped(
+        directory.path(),
+        "notes@example.com",
+        &front_type,
+        Some("tab-2"),
+    )
+    .unwrap();
+    assert_ne!(first.public_key(), second.public_key());
+    let reloaded = actor_signer_for_scoped(
+        directory.path(),
+        "notes@example.com",
+        &front_type,
+        Some("tab-1"),
+    )
+    .unwrap();
+    assert_eq!(first.public_key(), reloaded.public_key());
+}

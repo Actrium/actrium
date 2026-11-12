@@ -23,10 +23,40 @@ use super::error::{NetworkError, NetworkResult};
 #[cfg(test)]
 use super::lane::DeliveryProgress;
 use super::lane::{DataLane, SendAttemptResult};
+use actr_protocol::{ActrId, ActrType};
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
+
+/// Trusted output of a completed mutual-authentication exchange.
+///
+/// This is runtime evidence, not a credential or a bearer token. Hyper stores
+/// and forwards these values without interpreting Actrium member roles. The
+/// handshake implementation must construct the complete value before asking
+/// [`SecureCell::publish_verified`] to expose application I/O. In particular,
+/// a new channel generation must publish a new value rather than inheriting
+/// the preceding generation's identity or policy/state binding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerifiedPeerContext {
+    pub local_actor_id: ActrId,
+    pub peer_actor_id: ActrId,
+    pub peer_actor_type: ActrType,
+    pub peer_member: String,
+    pub peer_client_key: String,
+    /// Opaque role claim from the verified credential. Hyper has no role enum.
+    pub peer_role: String,
+    pub peer_actor_public_key: Vec<u8>,
+    pub channel_id: String,
+    pub channel_generation: u64,
+    pub transcript_digest: Vec<u8>,
+    pub local_runtime_instance_id: String,
+    pub peer_runtime_instance_id: String,
+    pub peer_credential_expires_at_epoch_secs: u64,
+    /// Current policy and state bindings captured by the same verification.
+    pub current_policy_binding: Vec<u8>,
+    pub current_state_binding: Vec<u8>,
+}
 
 /// Secure-channel state for a physical `WireHandle` session. See RFC-0563 §1.
 ///
@@ -146,14 +176,45 @@ pub(crate) struct SecureCell {
     state: Arc<AtomicU8>,
     secure_epoch: Arc<AtomicU64>,
     changed: Arc<tokio::sync::Notify>,
+    /// Actrium strict cells require this context and `Verified` for every I/O.
+    /// Legacy cells retain their pre-Actrium compatibility behavior while their
+    /// handshake lacks the full binding above.
+    verified_only: bool,
+    verified_peer: Arc<RwLock<Option<Arc<VerifiedPeerContext>>>>,
 }
 
 impl SecureCell {
     pub(crate) fn new(initial: SecureChannelState) -> Self {
+        Self::with_policy(initial, false)
+    }
+
+    /// Start an Actrium strict cell. No application I/O is possible until
+    /// [`Self::publish_verified`] installs a complete peer context.
+    pub(crate) fn new_actrium(initial: SecureChannelState) -> Self {
+        assert_ne!(
+            initial,
+            SecureChannelState::Verified,
+            "use new_actrium_verified to publish an authenticated context"
+        );
+        Self::with_policy(initial, true)
+    }
+
+    /// Construct an already-verified strict session. The context is installed
+    /// before the externally visible cell (and its `Verified` state) exists.
+    #[cfg(test)]
+    pub(crate) fn new_actrium_verified(context: VerifiedPeerContext) -> Self {
+        let cell = Self::with_policy(SecureChannelState::Handshaking, true);
+        assert!(cell.publish_verified(SecureChannelState::Handshaking, context));
+        cell
+    }
+
+    fn with_policy(initial: SecureChannelState, verified_only: bool) -> Self {
         Self {
             state: Arc::new(AtomicU8::new(initial.as_u8())),
             secure_epoch: Arc::new(AtomicU64::new(0)),
             changed: Arc::new(tokio::sync::Notify::new()),
+            verified_only,
+            verified_peer: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -167,6 +228,66 @@ impl SecureCell {
         self.secure_epoch.load(Ordering::Acquire)
     }
 
+    /// Immutable verified identity and binding for this channel generation.
+    pub(crate) fn verified_peer(&self) -> Option<Arc<VerifiedPeerContext>> {
+        self.verified_peer
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Publish a complete context before the `Verified` state becomes visible.
+    ///
+    /// The context write lock serializes rekey publication. If the state CAS
+    /// loses to a concurrent terminal transition, the previous context/state is
+    /// retained and no readiness notification is emitted. Strict cells cannot
+    /// reach `Verified` through `set_state_validated`.
+    pub(crate) fn publish_verified(
+        &self,
+        from: SecureChannelState,
+        context: VerifiedPeerContext,
+    ) -> bool {
+        if !self.verified_only
+            || !matches!(
+                from,
+                SecureChannelState::Handshaking | SecureChannelState::Rekeying
+            )
+            || !SecureChannelState::is_legal_transition(from, SecureChannelState::Verified)
+        {
+            return false;
+        }
+
+        let mut slot = self
+            .verified_peer
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = slot.replace(Arc::new(context));
+        if self
+            .state
+            .compare_exchange(
+                from.as_u8(),
+                SecureChannelState::Verified.as_u8(),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            *slot = previous;
+            return false;
+        }
+        drop(slot);
+        self.secure_epoch.fetch_add(1, Ordering::AcqRel);
+        self.changed.notify_waiters();
+        true
+    }
+
+    pub(crate) fn is_io_sendable(&self) -> bool {
+        if !self.verified_only {
+            return self.state().is_sendable();
+        }
+        self.state() == SecureChannelState::Verified && self.verified_peer().is_some()
+    }
+
     /// Validated compare-and-set: applies `to` only if the current state is
     /// `from` AND `(from, to)` is a legal transition. On success bumps the
     /// epoch (AcqRel) and wakes waiters; returns `true`. Returns `false`
@@ -176,7 +297,9 @@ impl SecureCell {
         from: SecureChannelState,
         to: SecureChannelState,
     ) -> bool {
-        if !SecureChannelState::is_legal_transition(from, to) {
+        if !SecureChannelState::is_legal_transition(from, to)
+            || (self.verified_only && to == SecureChannelState::Verified)
+        {
             return false;
         }
         let prev = self.state.compare_exchange(
@@ -287,9 +410,10 @@ impl SecureDataLane {
                 "secure epoch rotated; lane no longer valid".to_string(),
             ));
         }
-        if !state.is_sendable() {
+        if !self.cell.is_io_sendable() {
             return Err(NetworkError::SecureChannelNotReady(format!(
-                "secure channel not sendable ({state:?})"
+                "secure channel not sendable ({state:?}, verified context: {})",
+                self.cell.verified_peer().is_some()
             )));
         }
         Ok(())
@@ -364,7 +488,7 @@ impl DataLane for SecureDataLane {
     }
 
     fn is_healthy(&self) -> bool {
-        self.cell.state().is_sendable()
+        self.cell.is_io_sendable()
             && self.cell.epoch() == self.epoch_at_wrap
             && self.inner.is_healthy()
     }
@@ -373,6 +497,36 @@ impl DataLane for SecureDataLane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn verified_context(channel_generation: u64) -> VerifiedPeerContext {
+        VerifiedPeerContext {
+            local_actor_id: ActrId {
+                realm: "local@example.com".into(),
+                serial_number: 1,
+            },
+            peer_actor_id: ActrId {
+                realm: "peer@example.com".into(),
+                serial_number: 2,
+            },
+            peer_actor_type: ActrType {
+                publisher: "acme".into(),
+                name: "front".into(),
+                version: "1.0.0".into(),
+            },
+            peer_member: "member-1".into(),
+            peer_client_key: "client-1".into(),
+            peer_role: "opaque-verified-role".into(),
+            peer_actor_public_key: vec![7; 32],
+            channel_id: "channel-1".into(),
+            channel_generation,
+            transcript_digest: vec![8; 32],
+            local_runtime_instance_id: "runtime-local".into(),
+            peer_runtime_instance_id: "runtime-peer".into(),
+            peer_credential_expires_at_epoch_secs: 4_000_000_000,
+            current_policy_binding: vec![9; 32],
+            current_state_binding: vec![10; 32],
+        }
+    }
 
     /// Inner lane whose send fails after an ambiguous partial write.
     #[derive(Debug)]
@@ -398,7 +552,7 @@ mod tests {
 
     #[tokio::test]
     async fn secure_lane_preserves_inner_uncertain_progress() {
-        let cell = SecureCell::new(SecureChannelState::Verified);
+        let cell = SecureCell::new_actrium_verified(verified_context(1));
         let lane = SecureDataLane::new(Arc::new(AmbiguousInnerLane), cell);
 
         let attempt = lane
@@ -432,5 +586,88 @@ mod tests {
             Err(NetworkError::SecureChannelNotReady(_))
         ));
         assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
+    }
+
+    #[tokio::test]
+    async fn actrium_cell_allows_io_only_after_context_and_verified_publication() {
+        let cell = SecureCell::new_actrium(SecureChannelState::Handshaking);
+        let lane = SecureDataLane::new(Arc::new(AmbiguousInnerLane), cell.clone());
+
+        let before = lane
+            .send_with_progress(Bytes::from_static(b"payload"))
+            .await;
+        assert!(matches!(
+            before.result,
+            Err(NetworkError::SecureChannelNotReady(_))
+        ));
+        assert_eq!(before.progress, DeliveryProgress::NotAttempted);
+        assert!(matches!(
+            lane.recv().await,
+            Err(NetworkError::SecureChannelNotReady(_))
+        ));
+        assert!(cell.verified_peer().is_none());
+
+        assert!(
+            !cell.set_state_validated(
+                SecureChannelState::Handshaking,
+                SecureChannelState::Verified,
+            ),
+            "strict cells cannot publish Verified without a context"
+        );
+        let context = verified_context(7);
+        assert!(cell.publish_verified(SecureChannelState::Handshaking, context.clone()));
+        assert_eq!(cell.verified_peer().as_deref(), Some(&context));
+
+        // Lanes wrap an epoch, so acquire a fresh lane after publication just
+        // as the production readiness/reacquisition path does.
+        let lane = SecureDataLane::new(Arc::new(AmbiguousInnerLane), cell);
+        let after = lane
+            .send_with_progress(Bytes::from_static(b"payload"))
+            .await;
+        assert!(
+            matches!(after.result, Err(NetworkError::SendError(_))),
+            "the verified lane must reach the inner transport: {after:?}"
+        );
+        assert_eq!(after.progress, DeliveryProgress::Unknown);
+        assert!(
+            matches!(lane.recv().await, Err(NetworkError::InvalidOperation(_))),
+            "a verified receive must reach the inner lane rather than stop at the secure gate"
+        );
+    }
+
+    #[test]
+    fn actrium_cell_never_treats_legacy_bypass_as_io_ready() {
+        let cell = SecureCell::new_actrium(SecureChannelState::LegacyBypass);
+        assert!(!cell.is_io_sendable());
+        assert_eq!(cell.state(), SecureChannelState::LegacyBypass);
+        assert!(cell.verified_peer().is_none());
+    }
+
+    #[test]
+    fn actrium_rekey_requires_a_new_generation_context() {
+        let cell = SecureCell::new_actrium_verified(verified_context(1));
+        assert!(
+            cell.set_state_validated(SecureChannelState::Verified, SecureChannelState::Rekeying,)
+        );
+        assert!(!cell.is_io_sendable());
+        assert!(
+            !cell.set_state_validated(SecureChannelState::Rekeying, SecureChannelState::Verified,),
+            "rekey cannot silently reuse generation 1"
+        );
+
+        let generation_two = verified_context(2);
+        assert!(cell.publish_verified(SecureChannelState::Rekeying, generation_two.clone()));
+        assert_eq!(cell.verified_peer().as_deref(), Some(&generation_two));
+        assert!(cell.is_io_sendable());
+    }
+
+    #[test]
+    fn failed_verified_publication_preserves_previous_context_and_state() {
+        let cell = SecureCell::new_actrium_verified(verified_context(3));
+        let before = cell.verified_peer();
+        assert!(!cell.publish_verified(SecureChannelState::Verified, verified_context(4)));
+        assert_eq!(cell.state(), SecureChannelState::Verified);
+        assert_eq!(cell.verified_peer(), before);
+        assert_eq!(cell.epoch(), 1);
     }
 }

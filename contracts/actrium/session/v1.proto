@@ -1,0 +1,351 @@
+// Protocol Buffers schema for actrium.session.v1
+//
+// Front–Service Attach, lease, and system protocol messages.
+// See docs/product/actrium-v1/16-mutual-authentication-and-attach-flow.md
+
+syntax = "proto3";
+
+package actrium.session.v1;
+
+// ---------------------------------------------------------------------------
+// Attach
+// ---------------------------------------------------------------------------
+
+// AttachRequest — Front requests a business session from a verified Service.
+//
+// Preconditions (see 16-mutual-authentication-and-attach-flow.md):
+//   1. Realm Profile and package verified
+//   2. Exact serviceActorId resolved and fixed (no rediscovery fallback)
+//   3. Front credential obtained (Realm membership)
+//   4. VerifiedChannel established (mutual authentication complete)
+//   5. Guest NOT yet running
+//
+// The Front Host constructs the request; Guest fields are never authoritative.
+message AttachRequest {
+  // ---- Session identity ----
+  string attach_id                           = 1;   // Idempotency key
+  string front_actor_id                      = 2;   // Caller ActorId
+  string service_actor_id                    = 3;   // Exact target Service
+
+  // ---- Channel binding ----
+  string channel_id                          = 4;   // Current VerifiedChannel
+  bytes  channel_transcript_digest           = 5;   // SHA-256 canonical transcript
+
+  // ---- Compatibility (declarations, not remote-code proof) ----
+  ProgramRelease program                     = 6;
+  bytes           package_digest             = 7;   // Full .actr SHA-256
+  bytes           guest_digest               = 8;   // Guest entry bundle SHA-256
+  Runtime         runtime                    = 9;
+  bytes           protocol_fingerprint       = 10;  // Business contract SHA-256
+
+  // ---- Freshness ----
+  bytes  tab_session_nonce                   = 11;  // Fresh per Attach attempt
+
+  // ---- Lease ----
+  LeaseMode requested_lease                  = 12;  // v1: LEASE_MODE_EXCLUSIVE
+
+  // ---- Capabilities (optional; least-privilege request) ----
+  repeated string requested_capabilities     = 13;
+
+  // ---- Proof ----
+  bytes  challenge_response                  = 14;  // Actor signature over canonical request + transcript
+}
+
+// AttachResponse — Service grants a session with lease and capability ceiling.
+//
+// sessionCapabilityCeiling is the Service-authorized upper bound.
+// The local Front Host computes the final effective capabilities as:
+//   ceiling ∩ program-declared ∩ host-support ∩ user/org-grant ∩ platform-policy ∩ session-scope
+message AttachResponse {
+  string        session_id                   = 1;   // Unpredictable opaque id
+  uint64        lease_epoch                  = 2;   // Monotonic; increments on Takeover / Resume
+  Lease         lease                        = 3;
+  ServiceInfo   service                      = 4;
+  repeated string session_capability_ceiling = 5;
+  PrivacyState  privacy                      = 6;
+  bytes         service_challenge            = 7;   // Service proof binding response to channel
+}
+
+// ---------------------------------------------------------------------------
+// Sub-messages
+// ---------------------------------------------------------------------------
+
+message ProgramRelease {
+  string publisher = 1;
+  string name      = 2;
+  string version   = 3;
+}
+
+message Runtime {
+  string actrium_version = 1;
+  string front_host_api  = 2;
+  string keel_api        = 3;
+}
+
+enum LeaseMode {
+  LEASE_MODE_UNSPECIFIED = 0;
+  LEASE_MODE_EXCLUSIVE   = 1;  // v1: single active interactive Front
+}
+
+message Lease {
+  LeaseMode mode                  = 1;
+  uint64    expires_at            = 2;  // Unix epoch seconds
+  uint32    heartbeat_interval_ms = 3;
+}
+
+message ServiceInfo {
+  string actor_id              = 1;
+  string program               = 2;  // "publisher/name@version"
+  bytes  package_digest        = 3;
+  bytes  protocol_fingerprint  = 4;
+}
+
+message PrivacyState {
+  bytes  actor_state_digest        = 1;
+  bytes  application_state_digest  = 2;
+  bytes  assurance_digest          = 3;
+  uint64 expires_at                = 4;
+}
+
+// ---------------------------------------------------------------------------
+// System protocol messages
+// ---------------------------------------------------------------------------
+
+// Heartbeat — renews the lease only.
+// Does NOT independently extend credential expiry or refresh member role.
+// If the Front has a renewed credential, it presents it alongside the
+// heartbeat so the Service re-reads roles.
+message HeartbeatRequest {
+  string session_id   = 1;
+  uint64 lease_epoch  = 2;
+}
+
+// Resume — re-establish after transient disconnect while lease remains valid.
+// Requires a new VerifiedChannel and proof of the old session.
+message ResumeRequest {
+  string session_id                = 1;
+  uint64 lease_epoch               = 2;
+  string channel_id                = 3;
+  bytes  channel_transcript_digest = 4;
+  bytes  session_proof             = 5;
+}
+
+// Detach — Front explicitly releases the lease.
+// Does NOT delete the Service, Workspace, or ActorId.
+message DetachRequest {
+  string session_id   = 1;
+  uint64 lease_epoch  = 2;
+}
+
+// Takeover — Authorized transfer of the exclusive lease.
+// Requires independent permission and conflict-policy approval.
+// Atomically invalidates the old session, epoch, and channel.
+message TakeoverRequest {
+  string session_id                  = 1;
+  uint64 lease_epoch                 = 2;
+  string requesting_front_actor_id   = 3;
+  bytes  takeover_proof              = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
+
+message GetStatusRequest {
+  string session_id = 1;
+}
+
+message SessionStatus {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_IDLE        = 1;
+    STATE_ACTIVE      = 2;
+    STATE_GRACE       = 3;
+    STATE_SUSPENDED   = 4;
+    STATE_CLOSED      = 5;
+    STATE_TAKEOVER    = 6;
+  }
+  State  state        = 1;
+  uint64 lease_epoch  = 2;
+  uint64 expires_at   = 3;
+  string occupant     = 4;  // frontActorId of current lease holder, if any
+}
+
+// ---------------------------------------------------------------------------
+// Service policy hook
+// ---------------------------------------------------------------------------
+
+// AuthorizeAttach — Service workload decides whether the authenticated Front
+// may open a session. All identity claims have been verified by the Host
+// before the Service sees this request.
+//
+// This is NOT a lifecycle method; it is called once per Attach attempt.
+// See docs/product/actrium-v1/08-workspace-lifecycle-and-storage.md §5:
+// Tab/Front lifecycle events (create, refresh, close, crash) do not change
+// the Service lifecycle state; Attach is a Front operation, not a Service
+// on_start/on_stop hook.
+message AuthorizeAttachRequest {
+  string         front_actor_id          = 1;
+  string         member                  = 2;
+  string         client_key              = 3;
+  string         role                    = 4;
+  ProgramRelease program                 = 5;
+  repeated string requested_capabilities = 6;
+}
+
+message AuthorizeAttachResponse {
+  bool            allowed               = 1;
+  string          denial_reason         = 2;
+  repeated string allowed_capabilities  = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Error codes (non-exhaustive; stable for user-facing diagnostics)
+// ---------------------------------------------------------------------------
+
+enum AttachErrorCode {
+  ATTACH_ERROR_UNSPECIFIED                 = 0;
+  ATTACH_ERROR_CHANNEL_IDENTITY_MISMATCH   = 1;
+  ATTACH_ERROR_CHANNEL_TARGET_MISMATCH     = 2;
+  ATTACH_ERROR_CHANNEL_TRANSCRIPT_MISMATCH = 3;
+  ATTACH_ERROR_CHANNEL_EXPIRED             = 4;
+  ATTACH_ERROR_SERVICE_ACTOR_TYPE_MISMATCH = 5;
+  ATTACH_ERROR_PROGRAM_RELEASE_MISMATCH    = 6;
+  ATTACH_ERROR_PACKAGE_DIGEST_MISMATCH     = 7;
+  ATTACH_ERROR_PROTOCOL_MISMATCH           = 8;
+  ATTACH_ERROR_PERMISSION_DENIED           = 9;
+  ATTACH_ERROR_SESSION_OCCUPIED            = 10;
+  ATTACH_ERROR_PRIVACY_POLICY_UNSATISFIED  = 11;
+  ATTACH_ERROR_RATE_LIMITED                = 12;
+  ATTACH_ERROR_SESSION_EXPIRED             = 13;
+  ATTACH_ERROR_SESSION_EPOCH_MISMATCH      = 14;
+  ATTACH_ERROR_TAKEOVER_DENIED             = 15;
+  ATTACH_ERROR_SERVICE_OFFLINE             = 16;
+}
+
+// ---------------------------------------------------------------------------
+// Mutual authentication handshake
+// ---------------------------------------------------------------------------
+//
+// Four-step handshake. A = Front (initiator), B = Service (responder).
+// The Actr Host drives the state machine. These messages are carried over
+// the existing transport (WebRTC DataChannel, WebSocket, relay).
+
+// Step 1: A → B. Front initiates.
+message HandshakeStep1 {
+  NegotiationParams negotiation            = 1;
+  ActorChannelCertificate credential       = 2;
+  bytes  ephemeral_public_key              = 3;
+  bytes  nonce                             = 4;
+  uint64 exchange_id                       = 5;
+}
+
+// Step 2: B → A. Service responds with its own credential and challenge response.
+message HandshakeStep2 {
+  NegotiationParams negotiation            = 1;
+  ActorChannelCertificate credential       = 2;
+  bytes  ephemeral_public_key              = 3;
+  bytes  nonce                             = 4;
+  bytes  challenge_response                = 5;  // Sign(B_key, A_nonce + B_nonce + exchange_id)
+  uint64 exchange_id                       = 6;
+}
+
+// Step 3: A → B. Front responds to B's challenge and confirms keys.
+message HandshakeStep3 {
+  bytes  challenge_response                = 1;  // Sign(A_key, A_nonce + B_nonce + exchange_id)
+  bytes  key_confirmation                  = 2;  // MAC(frontKey, "confirm:A" || transcriptDigest)
+  uint64 exchange_id                       = 3;
+}
+
+// Step 4: B → A. Service confirms keys.
+message HandshakeStep4 {
+  bytes  key_confirmation                  = 1;  // MAC(serviceKey, "confirm:B" || transcriptDigest)
+  uint64 exchange_id                       = 2;
+}
+
+// Negotiation parameters carried in steps 1 and 2.
+message NegotiationParams {
+  uint32 protocol_version                  = 1;
+  TransportKind transport_kind             = 2;
+  string cipher_suite                      = 3;
+  bytes  negotiation_digest                = 4;  // SHA-256 of canonical transport negotiation
+}
+
+// Issuer-signed certificate binding Actor identity to Noise static key.
+// Verified using the Issuer key from the accepted Realm Profile.
+message ActorChannelCertificate {
+  string realm                             = 1;
+  string actor_id                          = 2;
+  string actor_type                        = 3;
+  string member                            = 4;
+  string client_key                        = 5;
+  string role                              = 6;
+  bytes  actor_public_key                  = 7;   // Ed25519 long-term signing key
+  bytes  noise_public_key                  = 8;   // X25519 static key
+  bytes  actor_credential_digest           = 9;
+  string issuer                            = 10;
+  string provider                          = 11;
+  string audience                          = 12;  // "actr.actor.channel"
+  uint64 expires_at_epoch_secs             = 13;
+  bytes  signature                         = 14;  // Ed25519 over canonical claims
+}
+
+// Transport kind discriminator.
+enum TransportKind {
+  TRANSPORT_KIND_UNSPECIFIED = 0;
+  TRANSPORT_KIND_WEBRTC      = 1;
+  TRANSPORT_KIND_WEBSOCKET   = 2;
+  TRANSPORT_KIND_RELAY       = 3;
+}
+
+// PeerBinding — signed binding between Actor identity and transport key material.
+// For WebRTC: binds DTLS fingerprint. For WebSocket: binds ephemeral DH key.
+message PeerBinding {
+  string source_actor_id                   = 1;
+  string target_actor_id                   = 2;
+  uint64 exchange_id                       = 3;
+  bytes  nonce                             = 4;
+  bytes  transport_key_material            = 5;
+  TransportKind transport_kind             = 6;
+  bytes  signature                         = 7;
+}
+
+// Canonical transcript for computing channelTranscriptDigest.
+// Both sides independently construct and hash this.
+message HandshakeTranscript {
+  uint32 protocol_version                  = 1;
+  string source_actor_id                   = 2;
+  string target_actor_id                   = 3;
+  uint64 exchange_id                       = 4;
+  bytes  source_nonce                      = 5;
+  bytes  target_nonce                      = 6;
+  bytes  source_ephemeral_public_key       = 7;
+  bytes  target_ephemeral_public_key       = 8;
+  bytes  source_credential_digest          = 9;
+  bytes  target_credential_digest          = 10;
+  bytes  source_negotiation_digest         = 11;
+  bytes  target_negotiation_digest         = 12;
+  string target_service_actor_id           = 13;
+  TransportKind transport_kind             = 14;
+}
+
+// Host-authenticated metadata attached to every business RPC.
+//
+// The Front Host writes these fields after validating session validity and
+// capability scope. The Guest cannot override them. The Service SessionGuard
+// resolves the current SessionRecord before accepting the values.
+message SessionMetadata {
+  string session_id                        = 1;
+  uint64 lease_epoch                       = 2;
+  string channel_id                        = 3;
+  string member                            = 4;
+  string client_key                        = 5;
+  bytes  program_digest                    = 6;
+  string request_id                        = 7;
+  string route_key                         = 8;
+  uint64 deadline_epoch_secs               = 9;
+  string idempotency_key                   = 10; // Optional; empty when not applicable
+  // HMAC(sessionSecret, sessionId || leaseEpoch || channelId || requestId ||
+  // routeKey || SHA-256(payload)). Binds the request to this exact session.
+  bytes  request_proof                     = 11;
+}

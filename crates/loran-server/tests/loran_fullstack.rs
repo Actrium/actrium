@@ -928,6 +928,7 @@ async fn relay_identity_in_realm(
         renewal_token: registration.renewal_token.expect("renewal token").to_vec(),
         public_key: identity.public,
         admission_commitment: identity.admission_commitment(),
+        actor: None,
     };
     let body = serde_json::to_vec(&request).expect("relay identity request");
     let response = reqwest::Client::new()

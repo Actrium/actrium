@@ -270,6 +270,7 @@ impl LoranTestServices {
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
             development: None,
+            actor_public_key: None,
         }
         .encode_to_vec();
         let signature = aid_signing_key().sign(&claims).to_bytes();

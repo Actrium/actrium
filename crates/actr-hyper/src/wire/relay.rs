@@ -7,12 +7,13 @@ use crate::{
     lifecycle::session_state::SessionState,
     transport::{
         ConnType, DataLane, NetworkError, NetworkResult, PeerTransport, SecureChannelState,
-        WireHandle, WireIdentity,
+        VerifiedPeerContext, WireHandle, WireIdentity,
     },
 };
-use actr_protocol::{ActrId, PayloadType, prost::Message as ProstMessage};
+use actr_protocol::{ActrId, ActrType, PayloadType, prost::Message as ProstMessage};
 use actr_relay_security::{
-    IdentityKey, IdentityRequest, IssuedIdentity, IssuerKey, LocalIdentity, SecureSession,
+    ActorChannelEnrollment, ActorChannelIdentity, ActorChannelSession, IdentityKey,
+    IdentityRequest, IssuedIdentity, IssuerKey, LocalIdentity, SecureSession, VerifiedActorChannel,
     signing_key_id,
 };
 use async_trait::async_trait;
@@ -23,6 +24,7 @@ use loran_relay_protocol::{
     ClientControl, MAX_CONTROL_BYTES, RelayDiscovery, SUBPROTOCOL, ServerControl, decode_data,
     encode_data,
 };
+use sha2::Digest as _;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
@@ -84,6 +86,9 @@ struct Transport {
     encryption_budget: Arc<Semaphore>,
     cancel: CancellationToken,
     identity: Arc<LocalIdentity>,
+    /// Optional Actrium identity. `None` preserves the legacy relay handshake;
+    /// `Some` selects the mutually authenticated Front/Service Actor protocol.
+    actor_identity: Option<Arc<ActorChannelIdentity>>,
 }
 
 impl Transport {
@@ -209,6 +214,7 @@ struct Channel {
     security: Arc<Mutex<SecureSession>>,
     receive_permits: Mutex<Vec<OwnedSemaphorePermit>>,
     connected: AtomicBool,
+    actrium: bool,
     pending_request: Mutex<Option<u64>>,
     created: tokio::time::Instant,
     peer: ActrId,
@@ -243,6 +249,10 @@ pub(crate) struct RelayClient {
     client_key: Option<crate::issuer_client::RealmClientKey>,
     issuers: RwLock<HashMap<u32, IssuerKey>>,
     local_identity: RwLock<Option<Arc<LocalIdentity>>>,
+    actor_identity: RwLock<Option<Arc<ActorChannelIdentity>>>,
+    actor_storage_root: Option<std::path::PathBuf>,
+    actor_key_namespace: Option<String>,
+    runtime_instance_id: String,
     session: SessionState,
     gate: Arc<WebSocketGate>,
     shutdown: CancellationToken,
@@ -266,6 +276,8 @@ impl RelayClient {
         session: SessionState,
         gate: Arc<WebSocketGate>,
         shutdown: CancellationToken,
+        actor_storage_root: Option<std::path::PathBuf>,
+        actor_key_namespace: Option<String>,
     ) -> Arc<Self> {
         super::ensure_tls_provider();
         let (status, _) = watch::channel(Status::Discovering);
@@ -275,6 +287,10 @@ impl RelayClient {
             client_key,
             issuers: RwLock::new(HashMap::new()),
             local_identity: RwLock::new(None),
+            actor_identity: RwLock::new(None),
+            actor_storage_root,
+            actor_key_namespace,
+            runtime_instance_id: uuid::Uuid::new_v4().to_string(),
             session,
             gate,
             shutdown,
@@ -477,7 +493,7 @@ impl RelayClient {
         let generation = snapshot.generation;
         let initial_token = snapshot.credential.encode_to_vec();
         let expires_at = snapshot.credential_expires_at.seconds;
-        let identity = self
+        let (identity, actor_identity) = self
             .certified_identity(&endpoint, &snapshot.renewal_token)
             .await?;
         let mut request = url.into_client_request()?;
@@ -547,6 +563,7 @@ impl RelayClient {
             encryption_budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             cancel: cancel.clone(),
             identity: identity.clone(),
+            actor_identity,
         };
         let writer_cancel = cancel.clone();
         let writer = tokio::spawn(async move {
@@ -621,6 +638,7 @@ impl RelayClient {
         channel: u64,
         endpoint: String,
         transport: &Transport,
+        actor_front: bool,
     ) -> NetworkResult<Arc<Channel>> {
         if let Some(entry) = self.channels.read().await.get(&channel).cloned() {
             if entry.peer.to_string_repr() != endpoint {
@@ -643,10 +661,24 @@ impl RelayClient {
                 "Relay peer identity mismatch".into(),
             ));
         }
-        let security = Arc::new(Mutex::new(
-            SecureSession::new(&transport.identity, &endpoint, channel, now_secs())
-                .map_err(secure_error)?,
-        ));
+        let (security, actrium) = if let Some(identity) = &transport.actor_identity {
+            let channel_id = channel.to_string();
+            let session = if actor_front {
+                ActorChannelSession::new_front(identity, &endpoint, &channel_id, now_secs())
+            } else {
+                ActorChannelSession::new_service(identity, &endpoint, &channel_id, now_secs())
+            }
+            .map_err(secure_error)?;
+            (Arc::new(Mutex::new(session.into_inner())), true)
+        } else {
+            (
+                Arc::new(Mutex::new(
+                    SecureSession::new(&transport.identity, &endpoint, channel, now_secs())
+                        .map_err(secure_error)?,
+                )),
+                false,
+            )
+        };
         let (tx, rx) = mpsc::channel::<Message>(16);
         let (ready, ready_rx) = watch::channel(false);
         let cancel = transport.cancel.child_token();
@@ -719,12 +751,20 @@ impl RelayClient {
             Ok::<_, WsError>(state)
         });
         let incoming = tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok);
-        let conn =
-            WebSocketConnection::from_encrypted_parts(Box::pin(sink), incoming, write_cancel);
+        let conn = if actrium {
+            WebSocketConnection::from_actrium_encrypted_parts(
+                Box::pin(sink),
+                incoming,
+                write_cancel,
+            )
+        } else {
+            WebSocketConnection::from_encrypted_parts(Box::pin(sink), incoming, write_cancel)
+        };
         let entry = Arc::new(Channel {
             security,
             receive_permits: Mutex::new(Vec::new()),
             connected: AtomicBool::new(false),
+            actrium,
             pending_request: Mutex::new(None),
             created: tokio::time::Instant::now(),
             peer: peer.clone(),
@@ -744,7 +784,7 @@ impl RelayClient {
     ) -> NetworkResult<()> {
         match control {
             ServerControl::Incoming { channel, peer, .. } => {
-                if self.install(channel, peer, transport).await.is_err() {
+                if self.install(channel, peer, transport, false).await.is_err() {
                     self.close_channel(channel).await;
                     transport.control(ClientControl::Reject { channel }).await?;
                 } else {
@@ -792,7 +832,7 @@ impl RelayClient {
                         }
                     }
                 }
-                let entry = match self.install(channel, peer.clone(), transport).await {
+                let entry = match self.install(channel, peer.clone(), transport, true).await {
                     Ok(entry) => entry,
                     Err(error) => {
                         // The untrusted channel id may refer to another live
@@ -1141,6 +1181,43 @@ fn now_secs() -> u64 {
 fn secure_error(error: actr_relay_security::SecurityError) -> NetworkError {
     NetworkError::ConnectionError(error.to_string())
 }
+
+fn actrium_peer_context(
+    local_actor_id: ActrId,
+    peer_actor_id: ActrId,
+    channel: u64,
+    verified: VerifiedActorChannel,
+) -> NetworkResult<VerifiedPeerContext> {
+    if verified.channel_id != channel.to_string()
+        || verified.peer_claims.actor_id != peer_actor_id.to_string_repr()
+        || verified.peer_claims.realm != peer_actor_id.realm
+        || !verified.is_valid_at(now_secs())
+    {
+        return Err(NetworkError::ConnectionError(
+            "Verified Actor channel context mismatch".into(),
+        ));
+    }
+    let peer_actor_type = ActrType::from_string_repr(&verified.peer_claims.actor_type)
+        .map_err(|_| NetworkError::ConnectionError("Invalid verified Actor type".into()))?;
+    Ok(VerifiedPeerContext {
+        local_actor_id,
+        peer_actor_id,
+        peer_actor_type,
+        peer_member: verified.peer_claims.member,
+        peer_client_key: verified.peer_claims.client_key,
+        peer_role: verified.peer_claims.role,
+        peer_actor_public_key: verified.peer_actor_public_key.to_vec(),
+        channel_id: verified.channel_id,
+        channel_generation: channel,
+        transcript_digest: verified.transcript_digest.to_vec(),
+        local_runtime_instance_id: verified.local_runtime_instance_id,
+        peer_runtime_instance_id: verified.peer_runtime_instance_id,
+        peer_credential_expires_at_epoch_secs: verified.expires_at,
+        current_policy_binding: verified.peer_claims.policy_digest.to_vec(),
+        current_state_binding: verified.peer_claims.actor_state_digest.to_vec(),
+    })
+}
+
 fn secure_http_client() -> NetworkResult<reqwest::Client> {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -1173,7 +1250,7 @@ impl RelayClient {
         &self,
         endpoint: &str,
         proof: &[u8],
-    ) -> NetworkResult<Arc<LocalIdentity>> {
+    ) -> NetworkResult<(Arc<LocalIdentity>, Option<Arc<ActorChannelIdentity>>)> {
         if let Some(identity) = self
             .local_identity
             .read()
@@ -1184,15 +1261,55 @@ impl RelayClient {
             })
             .cloned()
         {
-            return Ok(identity);
+            let actor = if self.actor_storage_root.is_some() {
+                self.actor_identity.read().await.clone()
+            } else {
+                None
+            };
+            return Ok((identity, actor));
         }
         let key = IdentityKey::generate().map_err(secure_error)?;
+        let noise_for_actor = key.clone();
+        let snapshot = self.session.snapshot().await;
+        let actor_material = if let Some(storage_root) = &self.actor_storage_root {
+            let claims = actr_protocol::IdentityClaims::decode(snapshot.credential.claims.as_ref())
+                .map_err(|_| closed())?;
+            let signer = crate::issuer_client::actor_signer_for_scoped(
+                storage_root,
+                &claims.realm,
+                &claims.actor_type,
+                self.actor_key_namespace.as_deref(),
+            )
+            .map_err(|_| closed())?;
+            let credential_digest = sha2::Sha256::digest(snapshot.credential.encode_to_vec());
+            let policy_digest = sha2::Sha256::digest(
+                format!(
+                    "actrium.channel.policy.v1:{}",
+                    claims.actor_type.to_string_repr()
+                )
+                .as_bytes(),
+            );
+            let mut state_input = credential_digest.to_vec();
+            state_input.extend_from_slice(&snapshot.generation.to_be_bytes());
+            let enrollment = ActorChannelEnrollment {
+                policy_digest: policy_digest.into(),
+                actor_state_digest: sha2::Sha256::digest(&state_input).into(),
+                runtime_instance_id: self.runtime_instance_id.clone(),
+                actor_credential_digest: credential_digest.into(),
+            };
+            Some((signer.actor_identity_key(), enrollment))
+        } else {
+            None
+        };
         let client = secure_http_client()?;
         let body = serde_json::to_vec(&IdentityRequest {
             endpoint: endpoint.to_owned(),
             renewal_token: proof.to_vec(),
             public_key: key.public,
             admission_commitment: key.admission_commitment(),
+            actor: actor_material
+                .as_ref()
+                .map(|(_, enrollment)| enrollment.clone()),
         })
         .map_err(|_| closed())?;
         let actor = ActrId::from_string_repr(endpoint).map_err(|_| closed())?;
@@ -1212,10 +1329,31 @@ impl RelayClient {
             request = request.header(actr_protocol::realm_membership::CLIENT_PROOF_HEADER, proof);
         }
         let issued: IssuedIdentity = bounded_json(request.body(body)).await?;
+        let actor_certificate = issued.actor_certificate.clone();
         let identity = Arc::new(
             key.certify(issued, endpoint, now_secs())
                 .map_err(secure_error)?,
         );
+        let actor_identity = match (actor_material, actor_certificate) {
+            (Some((actor_key, _)), Some(certificate)) => Some(Arc::new(
+                ActorChannelIdentity::certify(
+                    noise_for_actor,
+                    actor_key,
+                    certificate,
+                    identity.issued.issuer.clone(),
+                    &actor.realm,
+                    endpoint,
+                    now_secs(),
+                )
+                .map_err(secure_error)?,
+            )),
+            (None, _) => None,
+            (Some(_), None) => {
+                return Err(NetworkError::ConnectionError(
+                    "Issuer omitted the requested Actor channel certificate".into(),
+                ));
+            }
+        };
         {
             let mut keys = self.issuers.write().await;
             keys.retain(|_, key| key.expires_at > now_secs());
@@ -1228,7 +1366,10 @@ impl RelayClient {
             );
         }
         *self.local_identity.write().await = Some(identity.clone());
-        Ok(identity)
+        if let Some(actor_identity) = &actor_identity {
+            *self.actor_identity.write().await = Some(actor_identity.clone());
+        }
+        Ok((identity, actor_identity))
     }
     fn ais_url(&self, path: &str) -> NetworkResult<url::Url> {
         let mut url = url::Url::parse(&self.ais_endpoint).map_err(|_| closed())?;
@@ -1339,14 +1480,28 @@ impl RelayClient {
         Ok(())
     }
     async fn secure_ready(self: &Arc<Self>, id: u64, entry: &Arc<Channel>) -> NetworkResult<()> {
-        if !entry.conn.mark_relay_verified() {
-            return Err(closed());
-        }
-        let actor_type = {
+        let (actor_type, verified) = {
             let session = entry.security.lock().await;
             let value = session.peer_actor_type().ok_or_else(closed)?;
-            actr_protocol::ActrType::from_string_repr(value).map_err(|_| closed())?
+            let actor_type =
+                actr_protocol::ActrType::from_string_repr(value).map_err(|_| closed())?;
+            (actor_type, session.verified_actor().cloned())
         };
+        let published = if entry.actrium {
+            let verified = verified.ok_or_else(closed)?;
+            let context = actrium_peer_context(
+                self.session.actor_id().await,
+                entry.peer.clone(),
+                id,
+                verified,
+            )?;
+            entry.conn.publish_actrium_verified(context)
+        } else {
+            entry.conn.mark_relay_verified()
+        };
+        if !published {
+            return Err(closed());
+        }
         tokio::select! {
             _ = entry.cancel.cancelled() => return Err(closed()),
             result = self.gate.attach_relay(entry.conn.clone(), entry.peer.clone(), actor_type) => {
