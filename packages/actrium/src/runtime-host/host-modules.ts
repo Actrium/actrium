@@ -7,6 +7,7 @@ import type {
   ServiceEvent,
   ServiceTellInput,
 } from './contract';
+import type { FrontCapability } from './capabilities';
 
 export type ServiceCallRequest = ServiceCallInput;
 
@@ -75,13 +76,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 export function createHostModules(options: {
   hasServiceCapability: boolean;
   callActor: ActorCall;
-  hasClipboardCapability: boolean;
-  /**
-   * User grant for `host:clipboard.write`. Declaration alone is not
-   * authorization: the capability requires a user grant, so callers must
-   * pass the granted/effective state explicitly.
-   */
-  hasClipboardGrant: boolean;
+  authorizeCapability: (capability: FrontCapability) => Promise<void>;
   writeClipboardText: (text: string) => Promise<void>;
 }): HostModules {
   let requestSequence = 0;
@@ -124,16 +119,7 @@ export function createHostModules(options: {
     },
     'host:clipboard': {
       writeText: async (input: ClipboardWriteTextInput) => {
-        if (!options.hasClipboardCapability) {
-          throw new Error(
-            'The application does not declare the host:clipboard.write capability.'
-          );
-        }
-        if (!options.hasClipboardGrant) {
-          throw new Error(
-            'The application has not been granted the host:clipboard.write capability.'
-          );
-        }
+        await options.authorizeCapability('host:clipboard.write');
         await options.writeClipboardText(input.text);
       },
     },

@@ -22,12 +22,14 @@ import { validateServiceCapabilities } from './service-capabilities';
 
 export type CapabilityAudience = 'third_party' | 'system';
 export type CapabilityGrant = 'none' | 'user' | 'admin' | 'elevated';
+export type OsPermission = 'camera' | 'microphone' | 'location' | 'notifications';
 
 export type CapabilityDefinition = {
   name: string;
   audience: CapabilityAudience;
   requiresGrant: CapabilityGrant;
-  defaultEnabled: boolean;
+  /** OS permission this capability needs, or undefined for non-OS capabilities. */
+  osPermission?: OsPermission;
   /** Consumed at call time by the broker; not part of the effective set. */
   requiresBroker: boolean;
   /** Consumed by the sandbox at call time; not part of the effective set. */
@@ -48,7 +50,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'service.call',
     audience: 'third_party',
     requiresGrant: 'none',
-    defaultEnabled: true,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: true,
@@ -57,7 +58,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'service.tell',
     audience: 'third_party',
     requiresGrant: 'none',
-    defaultEnabled: true,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -66,7 +66,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'service.on',
     audience: 'third_party',
     requiresGrant: 'none',
-    defaultEnabled: true,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -75,7 +74,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:assets.read',
     audience: 'third_party',
     requiresGrant: 'none',
-    defaultEnabled: true,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -84,7 +82,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:clipboard.write',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: true,
@@ -93,7 +90,7 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:notifications.show',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
+    osPermission: 'notifications',
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -102,7 +99,7 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:camera.capturePhoto',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
+    osPermission: 'camera',
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -111,7 +108,7 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:microphone.record',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
+    osPermission: 'microphone',
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -120,7 +117,7 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:location.getCurrentPosition',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
+    osPermission: 'location',
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -129,7 +126,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:external-link.open',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -138,7 +134,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:navigate.navigate',
     audience: 'third_party',
     requiresGrant: 'none',
-    defaultEnabled: true,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -147,7 +142,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:file-import.pick',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -156,7 +150,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:file-export.save',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -165,7 +158,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:share.share',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -174,7 +166,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'host:net.request',
     audience: 'third_party',
     requiresGrant: 'user',
-    defaultEnabled: false,
     requiresBroker: true,
     requiresSandbox: true,
     implemented: false,
@@ -183,7 +174,6 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     name: 'system:diagnostics.view',
     audience: 'system',
     requiresGrant: 'admin',
-    defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
     implemented: false,
@@ -215,19 +205,6 @@ export const COMPONENT_WHITELIST = [
 
 export type AllowedComponent = (typeof COMPONENT_WHITELIST)[number];
 
-/**
- * Platform permissions are a separate layer from front capabilities. One OS
- * grant covers a whole module, so the keys stay module-level; the effective
- * set expands them to method capabilities when it reads `platform`.
- */
-export const PLATFORM_PERMISSION_MAP: Record<string, string> = {
-  'host:clipboard': 'os:clipboard',
-  'host:camera': 'os:camera',
-  'host:microphone': 'os:microphone',
-  'host:location': 'os:location',
-  'host:notifications': 'os:notifications',
-};
-
 export type FrontCapabilityInput = {
   declared: readonly string[];
   /**
@@ -240,9 +217,14 @@ export type FrontCapabilityInput = {
   hostSupported: ReadonlySet<string>;
   /** Reserved for native Hosts; v1 currently opens JS Guests only. */
   guestKind: 'js' | 'native';
+  /** Method-level capabilities whose required grant has been satisfied. */
   grants: ReadonlySet<string>;
-  platform: ReadonlySet<string>;
-  session: ReadonlySet<string>;
+  /** OS permissions currently granted by the platform. */
+  platform: ReadonlySet<OsPermission>;
+  session: {
+    state: 'active' | 'suspended' | 'expired' | 'detached';
+    allowedCapabilities: ReadonlySet<string>;
+  };
   audience: CapabilityAudience;
 };
 
@@ -265,9 +247,8 @@ export function computeFrontCapabilities(
   definitions: FrontCapabilityDefinitions = FRONT_CAPABILITY_DEFINITIONS
 ): FrontCapability[] {
   const supported = expandCapabilitySet(input.hostSupported);
-  const grants = expandCapabilitySet(input.grants);
-  const platform = expandCapabilitySet(input.platform);
-  const session = expandCapabilitySet(input.session);
+  const session = expandCapabilitySet(input.session.allowedCapabilities);
+  const activeSession = input.session.state === 'active';
 
   const result: FrontCapability[] = [];
   const seen = new Set<FrontCapability>();
@@ -280,13 +261,15 @@ export function computeFrontCapabilities(
       if (!definition.implemented) continue;
       if (!supported.has(capability)) continue;
       if (definition.audience === 'system' && input.audience !== 'system') continue;
-      // `grants` holds capabilities whose required grant level was satisfied.
-      // A default-off capability additionally needs an explicit grant.
-      const needsGrant =
-        definition.requiresGrant !== 'none' || !definition.defaultEnabled;
-      if (needsGrant && !grants.has(capability)) continue;
-      if (!platform.has(capability)) continue;
-      if (!session.has(capability)) continue;
+      // Grants are persisted per canonical method. Never expand a module alias
+      // here, otherwise a future method could inherit an older module grant.
+      if (definition.requiresGrant !== 'none' && !input.grants.has(capability)) {
+        continue;
+      }
+      if (definition.osPermission && !input.platform.has(definition.osPermission)) {
+        continue;
+      }
+      if (!activeSession || !session.has(capability)) continue;
       seen.add(capability);
       result.push(capability);
     }

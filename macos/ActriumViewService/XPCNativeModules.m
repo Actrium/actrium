@@ -27,6 +27,14 @@ void RCTHostCallFunction(id host, NSString *module, NSString *method, NSArray *a
     }
 }
 
+// MARK: - Capability Permission
+
+@interface RCT_EXTERN_MODULE(CapabilityPermission, NSObject)
+
+RCT_EXTERN_METHOD(requestGrant:(NSString *)tabId capability:(NSString *)capability)
+
+@end
+
 // MARK: - StartPageModule
 
 @interface RCT_EXTERN_MODULE(StartPageModule, NSObject)

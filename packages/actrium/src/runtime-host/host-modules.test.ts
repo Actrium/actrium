@@ -2,21 +2,20 @@ import { describe, expect, test } from 'bun:test';
 import { createHostModuleDispatch } from 'keel/contract';
 
 import { contract } from './contract';
+import type { FrontCapability } from './capabilities';
 import { createHostModules, type HostModules } from './host-modules';
 
 const input = { route: 'echo.EchoService.Echo', payloadBase64: 'AAEC' };
 
 function createTestHostModules(options?: {
   hasServiceCapability?: boolean;
-  hasClipboardCapability?: boolean;
-  hasClipboardGrant?: boolean;
+  authorizeCapability?: (capability: FrontCapability) => Promise<void>;
   writeClipboardText?: (text: string) => Promise<void>;
 }): HostModules {
   return createHostModules({
     hasServiceCapability: options?.hasServiceCapability ?? true,
     callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
-    hasClipboardCapability: options?.hasClipboardCapability ?? true,
-    hasClipboardGrant: options?.hasClipboardGrant ?? true,
+    authorizeCapability: options?.authorizeCapability ?? (async () => {}),
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
   });
 }
@@ -30,8 +29,7 @@ describe('host:service implementation', () => {
         called = true;
         return { success: true, payloadBase64: 'AAEC' };
       },
-      hasClipboardCapability: true,
-      hasClipboardGrant: true,
+      authorizeCapability: async () => {},
       writeClipboardText: async () => {},
     });
 
@@ -53,8 +51,7 @@ describe('host:service implementation', () => {
         captured = request;
         return { success: true, payloadBase64: 'AAEC' };
       },
-      hasClipboardCapability: true,
-      hasClipboardGrant: true,
+      authorizeCapability: async () => {},
       writeClipboardText: async () => {},
     });
 
@@ -71,8 +68,7 @@ describe('host:service implementation', () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
       callActor: async () => ({ success: false, message: 'gateway down' }),
-      hasClipboardCapability: true,
-      hasClipboardGrant: true,
+      authorizeCapability: async () => {},
       writeClipboardText: async () => {},
     });
 
@@ -85,8 +81,7 @@ describe('host:service implementation', () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
       callActor: () => new Promise(() => {}),
-      hasClipboardCapability: true,
-      hasClipboardGrant: true,
+      authorizeCapability: async () => {},
       writeClipboardText: async () => {},
     });
 
@@ -99,8 +94,7 @@ describe('host:service implementation', () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
       callActor: async () => ({ success: true }),
-      hasClipboardCapability: true,
-      hasClipboardGrant: true,
+      authorizeCapability: async () => {},
       writeClipboardText: async () => {},
     });
 
@@ -134,10 +128,12 @@ describe('host:clipboard implementation', () => {
     expect(written).toBe('hello');
   });
 
-  test('rejects writes when the capability is not declared', async () => {
+  test('rejects writes when authorization fails', async () => {
     let called = false;
     const hostModules = createTestHostModules({
-      hasClipboardCapability: false,
+      authorizeCapability: async () => {
+        throw new Error('permission_required: host:clipboard.write');
+      },
       writeClipboardText: async () => {
         called = true;
       },
@@ -145,23 +141,7 @@ describe('host:clipboard implementation', () => {
 
     await expect(
       hostModules['host:clipboard'].writeText({ text: 'hello' })
-    ).rejects.toThrow('host:clipboard.write');
-    expect(called).toBe(false);
-  });
-
-  test('rejects writes when the capability is declared but not granted', async () => {
-    let called = false;
-    const hostModules = createTestHostModules({
-      hasClipboardCapability: true,
-      hasClipboardGrant: false,
-      writeClipboardText: async () => {
-        called = true;
-      },
-    });
-
-    await expect(
-      hostModules['host:clipboard'].writeText({ text: 'hello' })
-    ).rejects.toThrow('not been granted');
+    ).rejects.toThrow('permission_required');
     expect(called).toBe(false);
   });
 

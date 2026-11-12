@@ -530,6 +530,8 @@ final class RendererProcessPool: ObservableObject {
                 localName = XPCNotificationBridge.clearHistory
             case "com.actro.openURLFromStartPage":
                 localName = XPCNotificationBridge.openURLFromStartPage
+            case "com.actrium.capabilityPermissionRequest":
+                localName = XPCNotificationBridge.capabilityPermissionRequest
             default:
                 NSLog("Renderer host event rejected: %@", name)
                 return

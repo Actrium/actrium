@@ -25,6 +25,9 @@ final class XPCNotificationBridge {
     static let restoreHistoryGroup = Notification.Name("xpc.restoreHistoryGroup")
     static let clearHistory = Notification.Name("xpc.clearHistory")
     static let openURLFromStartPage = Notification.Name("xpc.openURLFromStartPage")
+    static let capabilityPermissionRequest = Notification.Name(
+        "xpc.capabilityPermissionRequest"
+    )
     static let xpcLog = Notification.Name("xpc.log")
 
     private var observers: [NSObjectProtocol] = []
