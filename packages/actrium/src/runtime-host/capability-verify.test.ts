@@ -63,6 +63,28 @@ describe('verifyCapabilityManifest', () => {
     expect(result.code).toBe('capability_mismatch');
   });
 
+  test('enforces the service policy when contractKinds is omitted', () => {
+    const result = verifyCapabilityManifest(
+      {
+        ...manifest,
+        hostModules: {
+          service: { rpc: ['admin.DeleteAll'], events: ['admin.secrets'] },
+        },
+      },
+      {
+        hostSupportedModules: new Set(['host:service']),
+        declaredCapabilities: ['service'],
+        serviceCapabilities: {
+          rpc: new Set(['echo.EchoService.Echo']),
+          events: new Set(),
+        },
+      }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+    expect(result.details[0]).toContain('admin.DeleteAll');
+  });
+
   test('enforces the per-app component allowlist', () => {
     expect(
       verifyCapabilityManifest(manifest, {

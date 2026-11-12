@@ -135,13 +135,14 @@ export function verifyCapabilityManifest(
     }
   }
 
-  if (options.contractKinds) {
+  if (options.contractKinds || options.serviceCapabilities) {
     for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
       const moduleId = toModuleId(rawKey);
       if (moduleId === 'host:service') {
         // `host:service` entries are business routes/events, not transport
         // exports (`call`/`tell`/`on`). Validate them against the service
-        // route policy when one is supplied.
+        // route policy whenever one is supplied, independently of
+        // `contractKinds`.
         if (options.serviceCapabilities) {
           for (const route of entry.rpc ?? []) {
             if (!options.serviceCapabilities.rpc.has(route)) {
@@ -162,6 +163,7 @@ export function verifyCapabilityManifest(
         }
         continue;
       }
+      if (!options.contractKinds) continue;
       const kinds = options.contractKinds[moduleId];
       if (!kinds) {
         return fail(
