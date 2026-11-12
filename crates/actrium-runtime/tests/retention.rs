@@ -6,6 +6,15 @@ use std::time::Duration;
 use actrium_runtime::*;
 use async_trait::async_trait;
 use ed25519_dalek::SigningKey;
+use sha2::{Digest, Sha256};
+
+fn test_key(label: &str) -> SigningKey {
+    SigningKey::from_bytes(&Sha256::digest(label.as_bytes()).into())
+}
+
+fn test_digest(label: &str) -> Vec<u8> {
+    Sha256::digest(label.as_bytes()).to_vec()
+}
 
 const READ: &str = "documents.read";
 const CREDENTIAL_EXPIRY: u64 = 100_000;
@@ -102,9 +111,9 @@ impl PrivacyPolicy for TestPrivacy {
     async fn evaluate(&self, context: PrivacyContext) -> Result<PrivacyDecision, SessionError> {
         Ok(PrivacyDecision {
             state: PrivacyState {
-                actor_state_digest: vec![1; 32],
-                application_state_digest: vec![2; 32],
-                assurance_digest: vec![3; 32],
+                actor_state_digest: test_digest("actor-state"),
+                application_state_digest: test_digest("application-state"),
+                assurance_digest: test_digest("assurance"),
                 expires_at_epoch_secs: CREDENTIAL_EXPIRY,
             },
             allowed_capabilities: context.requested_capabilities,
@@ -162,14 +171,14 @@ impl Fixture {
         Self {
             service,
             clock,
-            front_key: SigningKey::from_bytes(&[11; 32]),
+            front_key: test_key("front"),
         }
     }
 
     fn channel(&self, id: &str) -> VerifiedChannel {
         VerifiedChannel {
             channel_id: id.into(),
-            channel_transcript_digest: vec![id.bytes().last().unwrap_or(0); 32],
+            channel_transcript_digest: test_digest(id),
             peer_actor_id: "front".into(),
             peer_actor_type: "actrium.front".into(),
             peer_member: "member".into(),
@@ -179,7 +188,7 @@ impl Fixture {
             peer_credential_expires_at_epoch_secs: CREDENTIAL_EXPIRY,
             local_runtime_instance_id: "runtime".into(),
             peer_runtime_instance_id: format!("front-runtime-{id}"),
-            negotiation_digest: vec![4; 32],
+            negotiation_digest: test_digest("negotiation"),
         }
     }
 
@@ -191,11 +200,11 @@ impl Fixture {
             channel_id: channel.channel_id.clone(),
             channel_transcript_digest: channel.channel_transcript_digest.clone(),
             program: program(),
-            package_digest: vec![10; 32],
-            guest_digest: vec![11; 32],
+            package_digest: test_digest("package"),
+            guest_digest: test_digest("guest"),
             runtime: runtime(),
-            protocol_fingerprint: vec![12; 32],
-            tab_session_nonce: vec![nonce; 32],
+            protocol_fingerprint: test_digest("protocol"),
+            tab_session_nonce: test_digest(&format!("attach-nonce:{nonce}")),
             requested_lease: LeaseMode::Exclusive,
             requested_capabilities: vec![READ.into()],
             challenge_response: vec![],
@@ -262,12 +271,12 @@ fn service_config() -> ServiceConfig {
     ServiceConfig {
         service_actor_id: "service".into(),
         runtime_instance_id: "runtime".into(),
-        service_signing_key: SigningKey::from_bytes(&[22; 32]),
+        service_signing_key: test_key("service"),
         allowed_front_actor_types: BTreeSet::from(["actrium.front".into()]),
         program: program(),
-        package_digest: vec![10; 32],
-        guest_digest: vec![11; 32],
-        protocol_fingerprint: vec![12; 32],
+        package_digest: test_digest("package"),
+        guest_digest: test_digest("guest"),
+        protocol_fingerprint: test_digest("protocol"),
         supported_runtimes: vec![runtime()],
         program_capabilities: BTreeSet::from([READ.into()]),
         routes: BTreeMap::from([("documents/read".into(), BTreeSet::from([READ.into()]))]),
