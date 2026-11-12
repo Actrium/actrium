@@ -1428,6 +1428,29 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             String(profile.packageSha256.prefix(12)),
                             String(digest.prefix(12)))])
                 }
+
+                // Full archive verification via actr-pack (FFI): ZIP
+                // structural safety, per-file digests and the manifest
+                // Ed25519 signature, anchored on the publisher key the
+                // profile funnel authenticated.
+                guard let activeKey = activePackageKeys.first(where: { $0.status == "active" }),
+                      let trustedKey = Data(base64Encoded: activeKey.publicKeyBase64),
+                      trustedKey.count == 32 else {
+                    throw NSError(
+                        domain: "ActrDiscovery", code: 26,
+                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                            "No active publisher key is available to verify the package.",
+                            comment: "Actr publisher key missing error")])
+                }
+                let packageBytes = try Data(contentsOf: downloadedURL)
+                let keyFingerprint = trustedKey.prefix(8).map { String(format: "%02x", $0) }.joined()
+                logger.notice("🔐 [navigateCurrentTab] actr-pack verify: archive=\(packageBytes.count)B, trusted key=\(keyFingerprint)…, profile sha256=\(profile.packageSha256.prefix(12))…")
+                let verified = try ActriumCore.verifyActrPackage(
+                    archive: packageBytes,
+                    trustedPublicKey: trustedKey
+                )
+                logger.notice("🔐 [navigateCurrentTab] actr-pack verified: manifest=\(verified.manifest.name) v\(verified.manifest.version), entry=\(verified.manifest.entry), workload profile=\(verified.workloadProfile), workload bytes=\(verified.workloadBytes.count), capabilities=\(verified.manifest.capabilities ?? "nil")")
+
                 let cachedArchiveURL = try ActrPackageCache.installArchive(
                     at: downloadedURL,
                     digest: digest
