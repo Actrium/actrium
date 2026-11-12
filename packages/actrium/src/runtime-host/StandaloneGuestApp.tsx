@@ -19,6 +19,10 @@ import {
 } from 'keel/host/preset';
 
 import { hasDeclaredCapability } from './capabilities';
+import {
+  capabilitiesFromSnapshotJSON,
+  CapabilityAuthorizer,
+} from './capability-authorization';
 import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
@@ -121,6 +125,23 @@ const writeClipboardText = async (text: string): Promise<void> => {
   clipboard.setString(text);
 };
 
+type CapabilityPermissionBridge = {
+  requestGrant?: (tabId: string, capability: string) => void;
+};
+
+const requestNativeCapabilityGrant = (
+  tabId: string,
+  capability: string
+): void => {
+  const bridge = NativeModules.CapabilityPermission as
+    | CapabilityPermissionBridge
+    | undefined;
+  if (!bridge?.requestGrant) {
+    throw new Error('The native capability permission bridge is not available.');
+  }
+  bridge.requestGrant(tabId, capability);
+};
+
 export const StandaloneGuestApp: React.FC<Props> = ({
   tab,
   containerWidth,
@@ -133,15 +154,35 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.permissions ?? [],
     'service.call'
   );
-  const hasClipboardCapability = hasDeclaredCapability(
-    tab.permissions ?? [],
-    'host:clipboard.write'
-  );
-  // The Native Permission Store is not wired into the renderer yet, so no
-  // clipboard grant exists. Keep the adapter unavailable even when the
-  // package declares the capability; the grant snapshot lands in a follow-up.
-  const hasClipboardGrant = false;
   const permissionsKey = [...(tab.permissions ?? [])].sort().join(',');
+  const capabilitySnapshot = React.useMemo(
+    () =>
+      tab.capabilitySnapshotJSON
+        ? capabilitiesFromSnapshotJSON(tab.capabilitySnapshotJSON)
+        : null,
+    [tab.capabilitySnapshotJSON]
+  );
+  const capabilitySnapshotAvailable = capabilitySnapshot !== null;
+  const authorizerRef = React.useRef<CapabilityAuthorizer | null>(null);
+  if (!authorizerRef.current && capabilitySnapshot) {
+    authorizerRef.current = new CapabilityAuthorizer(
+      capabilitySnapshot,
+      (capability) => requestNativeCapabilityGrant(tab.id, capability)
+    );
+  }
+
+  React.useEffect(() => {
+    if (capabilitySnapshot) {
+      authorizerRef.current?.update(capabilitySnapshot);
+    }
+  }, [capabilitySnapshot]);
+
+  React.useEffect(
+    () => () => {
+      authorizerRef.current?.dispose();
+    },
+    [tab.id]
+  );
 
   React.useEffect(() => {
     // A reload must start from a clean state, otherwise a previous load
@@ -168,6 +209,11 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         `[StandaloneGuestApp] capability verification failed: ${details}`
       );
       setError(`Capability manifest verification failed: ${details}`);
+      return;
+    }
+    const authorizer = authorizerRef.current;
+    if (!authorizer) {
+      setError('The Native capability authorization snapshot is unavailable.');
       return;
     }
 
@@ -225,8 +271,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     const hostModules = createHostModules({
       hasServiceCapability,
       callActor: callServiceActor,
-      hasClipboardCapability,
-      hasClipboardGrant,
+      authorizeCapability: (capability) => authorizer.authorize(capability),
       writeClipboardText,
     });
     const engine = new Engine({ debug: false, contract, hostModules });
@@ -334,10 +379,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.id,
     tab.legacyActorBridge,
     tab.serviceCallUrl,
-    hasClipboardCapability,
     tab.reloadKey,
     tab.capabilityManifestJSON,
     permissionsKey,
+    capabilitySnapshotAvailable,
   ]);
 
   if (error) {

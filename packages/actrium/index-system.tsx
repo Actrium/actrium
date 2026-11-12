@@ -102,6 +102,7 @@ interface SystemAppProps {
     rightPanelScript?: string;
     guestScript?: string;
     capabilityManifestJSON?: string;
+    capabilitySnapshotJSON?: string;
     permissions?: string[];
     backgroundColor: string;
     bookmarks?: any[];

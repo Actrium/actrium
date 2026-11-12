@@ -154,7 +154,30 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         persistBrowserPageSession()
     }
 
+    func resolveCapabilityPermission(
+        tabId: UUID,
+        capability: String,
+        choice: CapabilityPermissionChoice
+    ) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else {
+            return
+        }
+        let tab = tabs[index]
+        let stored = CapabilityPermissionStore.shared.decide(
+            tabId: tabId,
+            appId: tab.appId,
+            version: nil,
+            capability: capability,
+            choice: choice
+        )
+        guard stored else { return }
+        tabs[index].capabilityRevision += 1
+        objectWillChange.send()
+        persistBrowserPageSession()
+    }
+
     func closeTab(id: UUID) {
+        CapabilityPermissionStore.shared.clearSessionGrants(tabId: id)
         // Get the slot position of the tab being closed
         guard let closedPosition = tabSlotPositions[id] else {
             logger.warning(" Cannot find tab slot position")
@@ -864,7 +887,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
             tabs[tabIndex].title = tabTitle
             tabs[tabIndex].url = appURL
+            let previousAppId = tabs[tabIndex].appId
             tabs[tabIndex].appId = manifestInfo.appId
+            if previousAppId != manifestInfo.appId {
+                CapabilityPermissionStore.shared.clearSessionGrants(tabId: tabs[tabIndex].id)
+            }
             tabs[tabIndex].legacyActorBridge = ActriumApp.isLegacyActorBridgePackage(resolvedURL)
             tabs[tabIndex].systemTabType = nil
             tabs[tabIndex].htmlContent = nil

@@ -46,6 +46,8 @@ export type TabConfig = {
   permissions?: string[];
   /** Raw payload selected by `[workload.keel].capabilities` from the verified package. */
   capabilityManifestJSON?: string;
+  /** Native-owned authorization snapshot consumed by the Keel Host. */
+  capabilitySnapshotJSON?: string;
   // Legacy: Double Engine Structure
   guestScript?: string;
   leftPanelScript?: string;
