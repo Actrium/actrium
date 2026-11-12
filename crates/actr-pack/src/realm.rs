@@ -70,23 +70,30 @@ pub fn check_realm_pair(
             "Front service dependency does not match selected Service",
         ));
     }
-    let path = dep
+    let front_path = dep
         .contract
         .as_deref()
         .filter(|p| p.ends_with(".proto"))
         .ok_or_else(|| invalid("Front service dependency needs an RPC Proto contract"))?;
-    fn contract<'a>(m: &'a ActorPackageManifest, path: &str) -> Option<&'a str> {
-        m.files
+    let front_contract = front
+        .files
+        .iter()
+        .find(|file| file.role == "contract" && file.path == front_path)
+        .ok_or_else(|| invalid("Front does not declare its service dependency's RPC Proto"))?;
+    let matches_export = if service.workload.profile == "actr.component/1" {
+        let export = service
+            .component_rpc_contract()?
+            .ok_or_else(|| invalid("Service component has no exported RPC Proto"))?;
+        service
+            .files
             .iter()
-            .find(|f| f.path == path && f.role == "contract")
-            .map(|f| f.sha256.as_str())
-    }
-    let service_hash = contract(service, path)
-        .ok_or_else(|| invalid("Service does not declare the Front's RPC contract"))?;
-    if contract(front, path) != Some(service_hash)
-        || (service.workload.profile == "actr.component/1"
-            && service.component_rpc_contract()? != Some(path))
-    {
+            .any(|file| file.path == export && file.sha256 == front_contract.sha256)
+    } else {
+        service
+            .local_rpc_contracts()
+            .any(|file| file.sha256 == front_contract.sha256)
+    };
+    if !matches_export {
         return Err(invalid("Service and Front RPC contracts differ"));
     }
     Ok(())

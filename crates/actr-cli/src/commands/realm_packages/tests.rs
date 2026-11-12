@@ -1,5 +1,8 @@
 use super::*;
-use actr_pack::{ActorDependency, ActorPackOptions, PackageFileEntry, pack_actor_package};
+use actr_pack::{
+    ActorDependency, ActorPackOptions, KEEL_GUEST_PROFILE_V1, PackageFileEntry, pack_actor_package,
+    verify_actor_package,
+};
 use actr_protocol::realm_profile::sign_document;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::SigningKey;
@@ -9,13 +12,17 @@ use std::{cell::RefCell, collections::HashMap};
 const REALM: &str = "echo@realm.example";
 const REALM_URL: &str = "https://realm.example/realms/echo";
 const PROTO: &[u8] = b"syntax = \"proto3\"; package echo; service Echo {}";
+const OTHER_PROTO: &[u8] = b"syntax = \"proto3\"; package other; service Other {}";
+const FRONT_CONTRACT: &str = "contracts/service.proto";
+const SERVICE_EXPORT: &str = "contracts/export.proto";
 type Documents = RefCell<HashMap<String, Vec<u8>>>;
 
 fn key(id: &str, key: &SigningKey) -> Value {
     json!({"id":id,"status":"active","algorithm":"Ed25519","public_key":STANDARD.encode(key.verifying_key().as_bytes())})
 }
 
-fn package(is_front: bool, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<u8>) {
+fn package(workload: &str, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<u8>) {
+    let is_front = workload == KEEL_GUEST_PROFILE_V1;
     let template = if is_front {
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -28,9 +35,14 @@ fn package(is_front: bool, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<
         ))
     };
     let mut m = ActorPackageManifest::from_toml(template).unwrap();
+    m.workload.profile = workload.into();
     m.actor.publisher = "publisher.example".into();
     m.actor.version = "1.0.0".into();
-    let contract = "contracts/echo.proto";
+    let contract = if is_front {
+        FRONT_CONTRACT
+    } else {
+        SERVICE_EXPORT
+    };
     m.files.push(PackageFileEntry {
         path: contract.into(),
         role: "contract".into(),
@@ -57,6 +69,28 @@ fn package(is_front: bool, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<
         (contract.into(), proto.to_vec()),
     ]);
     if !is_front {
+        // A file at the Front's path is not necessarily the Service's RPC export.
+        if workload == "actr.component/1" {
+            m.workload.rpc_contract = Some(SERVICE_EXPORT.into());
+        } else {
+            m.dependencies.insert(
+                "upstream".into(),
+                ActorDependency {
+                    actor: "publisher.example/other".into(),
+                    version: "^1.0".into(),
+                    contract: Some(FRONT_CONTRACT.into()),
+                    required: false,
+                },
+            );
+        }
+        m.files.push(PackageFileEntry {
+            path: FRONT_CONTRACT.into(),
+            role: "contract".into(),
+            media_type: "text/plain".into(),
+            size: 0,
+            sha256: "0".repeat(64),
+        });
+        payloads.insert(FRONT_CONTRACT.into(), OTHER_PROTO.to_vec());
         let path = "contracts/privacy.toml";
         m.files.push(PackageFileEntry {
             path: path.into(),
@@ -86,8 +120,8 @@ fn fixture(front_proto: &[u8]) -> (Documents, SigningKey, Value) {
     let rk = SigningKey::from_bytes(&rand::random());
     let pk = SigningKey::from_bytes(&rand::random());
     let root = SigningKey::from_bytes(&rand::random());
-    let (service, sb) = package(false, PROTO, &pk);
-    let (front, fb) = package(true, front_proto, &pk);
+    let (service, sb) = package("actr.component/1", PROTO, &pk);
+    let (front, fb) = package(KEEL_GUEST_PROFILE_V1, front_proto, &pk);
     let mut realm_keys = json!({"sequence":1,"keys":[key("realm-test",&rk)]});
     sign_document(&mut realm_keys, "realm-test", &rk);
     let rd = json!({"version":1,"authority":"actr://realm.example","services":[{"rel":"realms","href":"https://realm.example/realms","protocol":"actr-realm-profile/1"}],"realm_signing_keys":realm_keys});
@@ -128,6 +162,24 @@ async fn from_fixture(args: &FetchArgs, docs: &Documents) -> Result<Value> {
         )
     })
     .await
+}
+
+#[test]
+fn native_and_linked_services_match_exports_but_not_imported_contracts() {
+    let signer = SigningKey::from_bytes(&rand::random());
+    let manifest = |workload, proto: &[u8]| {
+        let (_, bytes) = package(workload, proto, &signer);
+        verify_actor_package(&bytes, &signer.verifying_key())
+            .unwrap()
+            .manifest
+    };
+    let front = manifest(KEEL_GUEST_PROFILE_V1, PROTO);
+    let other_front = manifest(KEEL_GUEST_PROFILE_V1, OTHER_PROTO);
+    for workload in ["actr.native/1", "actr.linked/1"] {
+        let service = manifest(workload, PROTO);
+        check_realm_pair(&service, &front).unwrap();
+        assert!(check_realm_pair(&service, &other_front).is_err());
+    }
 }
 
 #[tokio::test]
@@ -176,7 +228,7 @@ async fn fetches_a_signed_pair_and_rechecks_cached_archives() {
 
 #[tokio::test]
 async fn rejects_incompatible_signed_contracts_and_altered_package_bytes() {
-    let (docs, _, profile) = fixture(b"syntax = \"proto3\"; package other; service Other {}");
+    let (docs, _, profile) = fixture(OTHER_PROTO);
     let dir = tempfile::tempdir().unwrap();
     let args = FetchArgs {
         realm: REALM.into(),

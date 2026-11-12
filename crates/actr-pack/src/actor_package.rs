@@ -222,11 +222,13 @@ impl ActorPackageManifest {
                 Ok(None)
             };
         }
-        let mut contracts = self.files.iter().filter_map(|file| {
-            (file.role == "contract" && file.path.ends_with(".proto")).then_some(file.path.as_str())
-        });
         if let Some(path) = explicit {
-            return if contracts.any(|candidate| candidate == path) {
+            return if path.ends_with(".proto")
+                && self
+                    .files
+                    .iter()
+                    .any(|file| file.role == "contract" && file.path == path)
+            {
                 Ok(Some(path))
             } else {
                 Err(PackError::InvalidPackage(format!(
@@ -234,19 +236,26 @@ impl ActorPackageManifest {
                 )))
             };
         }
-        let mut local = contracts.filter(|path| {
-            !self
-                .dependencies
-                .values()
-                .any(|dependency| dependency.contract.as_deref() == Some(*path))
-        });
-        let contract = local.next();
+        let mut local = self.local_rpc_contracts();
+        let contract = local.next().map(|file| file.path.as_str());
         if local.next().is_some() {
             return Err(PackError::InvalidPackage(
                 "multiple RPC Proto exports; set workload.rpc-contract to select one".into(),
             ));
         }
         Ok(contract)
+    }
+
+    /// RPC Proto exports inferred from files that are not dependency contracts.
+    pub(crate) fn local_rpc_contracts(&self) -> impl Iterator<Item = &PackageFileEntry> {
+        self.files.iter().filter(|file| {
+            file.role == "contract"
+                && file.path.ends_with(".proto")
+                && !self
+                    .dependencies
+                    .values()
+                    .any(|dep| dep.contract.as_deref() == Some(file.path.as_str()))
+        })
     }
 
     /// Read a declared entry from the same archive bytes that were verified.
