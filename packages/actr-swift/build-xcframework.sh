@@ -278,9 +278,8 @@ if [[ "${REUSE_HOST_MACOS_BUILD}" -eq 1 ]]; then
 else
   cargo_build_libactr aarch64-apple-darwin --features macos-oslog
 fi
-# Universal macOS cdylib (arm64 + x86_64): both slices build with the same
-# feature set so behavior does not depend on the CPU.
-cargo_build_libactr x86_64-apple-darwin --features macos-oslog
+# macOS slice is Apple Silicon only: the app targets macOS 26.1 and is built
+# arm64-only (see ARCHS in the Xcode project), so no x86_64 build is required.
 
 echo "[4/4] Creating XCFramework (macOS slice: dynamic framework)"
 rm -rf "${XCFRAMEWORK_DIR}"
@@ -321,14 +320,12 @@ framework module ${FRAMEWORK_NAME} {
 MODULEMAP
 }
 
-# Assemble a versioned ActrFFI.framework bundle around the universal macOS
+# Assemble a versioned ActrFFI.framework bundle around the arm64 macOS
 # dylib: Versions/A/{ActrFFI, Headers, Modules, Resources}, Current +
 # top-level symlinks, ad-hoc signature (Xcode re-signs on embed).
 create_macos_dylib_framework() {
   local arm64_dylib="${TARGET_DIR}/aarch64-apple-darwin/${CARGO_PROFILE_DIR}/lib${CRATE_LIB_NAME}.dylib"
-  local x86_dylib="${TARGET_DIR}/x86_64-apple-darwin/${CARGO_PROFILE_DIR}/lib${CRATE_LIB_NAME}.dylib"
   require_file "${arm64_dylib}"
-  require_file "${x86_dylib}"
 
   local staging
   staging="$(mktemp -d)"
@@ -338,7 +335,7 @@ create_macos_dylib_framework() {
     "${fw}/Versions/A/Modules" \
     "${fw}/Versions/A/Resources"
 
-  lipo -create "${arm64_dylib}" "${x86_dylib}" -output "${fw}/Versions/A/${FRAMEWORK_NAME}"
+  cp "${arm64_dylib}" "${fw}/Versions/A/${FRAMEWORK_NAME}"
   install_name_tool \
     -id "@rpath/${FRAMEWORK_NAME}.framework/Versions/A/${FRAMEWORK_NAME}" \
     "${fw}/Versions/A/${FRAMEWORK_NAME}"
