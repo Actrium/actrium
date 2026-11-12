@@ -20,6 +20,7 @@ actr-protocol.workspace = true
 
 # Protobuf support
 prost = "0.14"
+prost-build.workspace = true
 prost-types = "0.14"
 prost-reflect = { version = "0.16", features = ["derive"] }
 bytes = "1.10"

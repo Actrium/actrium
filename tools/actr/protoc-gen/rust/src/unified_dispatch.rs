@@ -213,7 +213,7 @@ impl<'a> UnifiedDispatcherGenerator<'a> {
                         String::new()
                     }
                 });
-                let module = owner.replace('.', "_");
+                let module = crate::proto_module_path(&owner);
                 if !module.is_empty() && !packages.contains(&module) {
                     packages.push(module);
                 }
@@ -603,10 +603,7 @@ impl<H: ActrDispatchHandler> Workload for ActrWorkload<H> {{
         let Some((short_type, parents)) = message_path.split_last() else {
             return Ok(cleaned.to_string());
         };
-        let module = self
-            .resolve_declaring_package(type_name)
-            .replace('.', "_")
-            .to_snake_case();
+        let module = crate::proto_module_path(&self.resolve_declaring_package(type_name));
         if module.is_empty() {
             Ok(short_type.clone())
         } else {

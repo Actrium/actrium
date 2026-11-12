@@ -3,6 +3,7 @@ use crate::commands::codegen::scaffold::ScaffoldCatalog;
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
 use crate::utils::to_snake_case;
+use actr_framework_protoc_codegen::proto_module_path;
 use async_trait::async_trait;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -382,7 +383,6 @@ impl RustGenerator {
     async fn generate_mod_rs(&self, output: &Path) -> Result<()> {
         let mod_path = output.join("mod.rs");
         let mut source_files = Vec::new();
-        let mut module_files = BTreeMap::new();
 
         use std::fs;
         for entry in fs::read_dir(output).map_err(|e| {
@@ -398,18 +398,11 @@ impl RustGenerator {
                 if file_name == "mod" {
                     continue;
                 }
-                let module = rust_proto_module_name(file_name);
-                let source_file = format!("{file_name}.rs");
-                if let Some(previous) = module_files.insert(module.clone(), source_file.clone()) {
-                    return Err(ActrCliError::config_error(format!(
-                        "Generated Rust files `{previous}` and `{source_file}` both map to module `{module}`"
-                    )));
-                }
                 source_files.push(file_name.to_string());
             }
         }
 
-        let declarations = rust_module_declarations(&source_files, &module_files)?;
+        let declarations = rust_module_declarations(&source_files)?;
         let mod_content = format!(
             "//! Automatically generated code module\n\
              //!\n\
@@ -1219,69 +1212,41 @@ impl RustModule {
     }
 }
 
-fn rust_module_declarations(
-    files: &[String],
-    module_files: &BTreeMap<String, String>,
-) -> Result<String> {
+fn rust_module_declarations(files: &[String]) -> Result<String> {
     let mut root = RustModule::default();
     let mut aliases = BTreeMap::new();
     for file in files {
-        let parts = file
-            .split('.')
-            .map(rust_module_identifier)
-            .collect::<Vec<_>>();
+        let package = prost_build::Module::from_protobuf_package_name(file);
         let mut module = &mut root;
-        for part in &parts {
-            module = module.children.entry(part.clone()).or_default();
+        for part in package.parts() {
+            module = module.children.entry(part.to_owned()).or_default();
         }
         let source = format!("{file}.rs");
         if let Some(previous) = module.source.replace(source.clone()) {
-            let path = parts.join("::");
             return Err(ActrCliError::config_error(format!(
-                "Generated Rust files `{previous}` and `{source}` both map to module `{path}`"
+                "Generated Rust files `{previous}` and `{source}` both map to module `{package}`"
             )));
         }
         if file.contains('.') {
-            aliases.insert(rust_proto_module_name(file), parts.join("::"));
+            let alias = proto_module_path(&file.replace('.', "_"));
+            aliases
+                .entry(alias)
+                .and_modify(|path| *path = None)
+                .or_insert_with(|| Some(package));
         }
     }
 
-    // Root modules also include package prefixes, which can collide with a
-    // flattened alias or an Actor framework module.
-    for (name, module) in &root.children {
-        if let Some(source) = module_files.get(name)
-            && module.source.as_ref() != Some(source)
-        {
-            return Err(ActrCliError::config_error(format!(
-                "Generated Rust file `{source}` conflicts with package module `{name}`"
-            )));
-        }
-    }
     let mut declarations = root.render(0);
-    // Framework code and user scaffolds refer to these flattened names.
-    for (alias, path) in aliases {
-        declarations.push_str(&format!("pub use self::{path} as {alias};\n"));
+    // Generated code uses the nested paths. Keep unambiguous flattened
+    // aliases available to callers of the generated modules.
+    for (alias, package) in aliases {
+        if let Some(package) = package
+            && !root.children.contains_key(&alias)
+        {
+            declarations.push_str(&format!("pub use self::{package} as {alias};\n"));
+        }
     }
     Ok(declarations)
-}
-
-fn rust_module_identifier(name: &str) -> String {
-    // Use Prost's keyword spelling for cross-package references while
-    // preserving the existing spelling of other module names.
-    let module = prost_build::Module::from_protobuf_package_name(name);
-    let ident = module.parts().next().unwrap_or(name);
-    if ident.strip_prefix("r#") == Some(name)
-        || ident.strip_suffix('_') == Some(name)
-        || name == "Self"
-    {
-        ident.to_owned()
-    } else {
-        name.to_owned()
-    }
-}
-
-fn rust_proto_module_name(package: &str) -> String {
-    package.replace('.', "_")
 }
 
 fn rust_scaffold_qualified_type(
@@ -1297,7 +1262,7 @@ fn rust_scaffold_qualified_type(
             .map(to_snake_case)
             .unwrap_or_else(|| "proto".to_string())
     } else {
-        rust_proto_module_name(&type_ref.proto_package)
+        proto_module_path(&type_ref.proto_package)
     };
     let name = rust_message_import_name(type_ref);
     if name.is_empty() {

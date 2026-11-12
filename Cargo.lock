@@ -177,6 +177,7 @@ dependencies = [
  "hex",
  "proc-macro2",
  "prost",
+ "prost-build",
  "prost-reflect",
  "prost-types",
  "protobuf",

@@ -251,24 +251,22 @@ fn output_target(path: &Path) -> Result<PathBuf> {
     Ok(parent.canonicalize()?.join(file_name))
 }
 
-fn same_output(left: &Path, right: &Path) -> Result<bool> {
-    fn identity(path: &Path) -> Result<Option<same_file::Handle>> {
-        match same_file::Handle::from_path(path) {
-            Ok(handle) => Ok(Some(handle)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => {
-                Err(error).with_context(|| format!("Failed to inspect {}", path.display()))
-            }
-        }
+fn output_identity(path: &Path) -> Result<Option<same_file::Handle>> {
+    match same_file::Handle::from_path(path) {
+        Ok(handle) => Ok(Some(handle)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("Failed to inspect {}", path.display())),
     }
+}
 
+fn same_output(left: &Path, right: &Path) -> Result<bool> {
     if left == right {
         return Ok(true);
     }
-    let Some(left) = identity(left)? else {
+    let Some(left) = output_identity(left)? else {
         return Ok(false);
     };
-    Ok(identity(right)?.is_some_and(|right| left == right))
+    Ok(output_identity(right)?.is_some_and(|right| left == right))
 }
 
 enum OutputPermissions {
@@ -325,6 +323,166 @@ fn write_atomic(
 
 // ── keygen ───────────────────────────────────────────────────────────────────
 
+struct KeygenOutput<'a> {
+    path: &'a Path,
+    staged: Option<tempfile::NamedTempFile>,
+    original: same_file::Handle,
+    reserved: bool,
+    backup: Option<tempfile::TempDir>,
+    installed: Option<same_file::Handle>,
+}
+
+impl<'a> KeygenOutput<'a> {
+    fn prepare(path: &'a Path, bytes: &[u8], overwrite: bool) -> Result<Self> {
+        let original = match std::fs::metadata(path) {
+            Ok(metadata) => {
+                ensure!(
+                    !metadata.is_dir(),
+                    "Key output path is a directory: {}\nSpecify a file name inside it.",
+                    path.display()
+                );
+                ensure!(
+                    metadata.is_file(),
+                    "Key output is not a regular file: {}",
+                    path.display()
+                );
+                ensure!(
+                    overwrite,
+                    "Key file already exists: {}\nUse --force to overwrite, or choose a different output path.",
+                    path.display()
+                );
+                Some(same_file::Handle::from_path(path)?)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(error).with_context(|| format!("Failed to inspect {}", path.display()));
+            }
+        };
+
+        let mut staged = stage_output(path, OutputPermissions::Private)?;
+        staged.write_all(bytes)?;
+        let reserved = original.is_none();
+        let original = match original {
+            Some(original) => original,
+            None => {
+                // Reserve the actual filename so the filesystem can resolve
+                // aliases, including when neither spelling existed before.
+                let reservation = stage_output(path, OutputPermissions::Private)?;
+                let identity = same_file::Handle::from_file(reservation.as_file().try_clone()?)?;
+                reservation.persist_noclobber(path)?;
+                identity
+            }
+        };
+
+        Ok(Self {
+            path,
+            staged: Some(staged),
+            original,
+            reserved,
+            backup: None,
+            installed: None,
+        })
+    }
+
+    fn publish(&mut self) -> Result<()> {
+        ensure!(
+            output_identity(self.path)?.as_ref() == Some(&self.original),
+            "Key output changed while preparing the files: {}",
+            self.path.display()
+        );
+        let staged = self.staged.take().expect("output is published only once");
+        let identity = same_file::Handle::from_file(staged.as_file().try_clone()?)?;
+        if self.reserved {
+            staged.persist(self.path)?;
+        } else {
+            let backup =
+                tempfile::tempdir_in(self.path.parent().context("missing output directory")?)?;
+            std::fs::rename(self.path, backup.path().join("previous"))?;
+            self.backup = Some(backup);
+            staged.persist_noclobber(self.path)?;
+        }
+        self.installed = Some(identity);
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        if let Some(backup) = self.backup.take() {
+            let previous = backup.path().join("previous");
+            let restored = output_identity(self.path).and_then(|current| {
+                ensure!(
+                    current == self.installed,
+                    "Key output changed during rollback: {}",
+                    self.path.display()
+                );
+                Ok(std::fs::rename(previous, self.path)?)
+            });
+            if let Err(error) = restored {
+                let saved = backup.keep().join("previous");
+                return Err(error)
+                    .with_context(|| format!("Previous file saved at {}", saved.display()));
+            }
+        } else if let Some(installed) = &self.installed
+            && output_identity(self.path)?.as_ref() == Some(installed)
+        {
+            std::fs::remove_file(self.path)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for KeygenOutput<'_> {
+    fn drop(&mut self) {
+        if self.reserved
+            && output_identity(self.path).ok().flatten().as_ref() == Some(&self.original)
+        {
+            let _ = std::fs::remove_file(self.path);
+        }
+    }
+}
+
+fn publish_keygen_outputs(outputs: &mut [KeygenOutput<'_>]) -> Result<()> {
+    // Keep the old private key available until the other outputs are ready.
+    for index in (0..outputs.len()).rev() {
+        if let Err(error) = outputs[index].publish() {
+            let mut error =
+                error.context(format!("Failed to write {}", outputs[index].path.display()));
+            for output in &mut outputs[index..] {
+                if let Err(rollback) = output.rollback() {
+                    error = error.context(format!("Rollback failed: {rollback:#}"));
+                }
+            }
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+fn write_keygen_outputs(
+    private: (&Path, &[u8]),
+    public: Option<(&Path, &[u8])>,
+    config: Option<(&Path, &[u8])>,
+    overwrite: bool,
+) -> Result<()> {
+    let mut outputs = vec![KeygenOutput::prepare(private.0, private.1, overwrite)?];
+    if let Some((path, bytes)) = public {
+        ensure!(
+            !same_output(path, private.0)?,
+            "the public and private key outputs must be different files"
+        );
+        outputs.push(KeygenOutput::prepare(path, bytes, overwrite)?);
+    }
+    if let Some((path, bytes)) = config {
+        for output in &outputs {
+            ensure!(
+                !same_output(path, output.path)?,
+                "key outputs must differ from the global CLI configuration"
+            );
+        }
+        outputs.push(KeygenOutput::prepare(path, bytes, true)?);
+    }
+    publish_keygen_outputs(&mut outputs)
+}
+
 fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
     let requested_key = match args.output {
         Some(ref path) => path.clone(),
@@ -341,37 +499,15 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         .as_deref()
         .map(output_target)
         .transpose()?;
-    if let Some(path) = &public_path {
-        ensure!(
-            !same_output(path, &key_path)?,
-            "the public and private key outputs must be different files"
-        );
-    }
-    for path in std::iter::once(&key_path).chain(public_path.iter()) {
-        ensure!(
-            !path.is_dir(),
-            "Key output path is a directory: {}\nSpecify a file name inside it.",
-            path.display()
-        );
-        ensure!(
-            !path.exists() || args.force,
-            "Key file already exists: {}\nUse --force to overwrite, or choose a different output path.",
-            path.display()
-        );
-    }
     let global = if args.no_register {
         None
     } else {
         let path = crate::config::loader::global_config_path()?;
-        let config = crate::config::loader::load_cli_config(&path)?.unwrap_or_default();
-        let target = output_target(&path)?;
-        for path in std::iter::once(&key_path).chain(public_path.iter()) {
-            ensure!(
-                !same_output(&target, path)?,
-                "key outputs must differ from the global CLI configuration"
-            );
-        }
-        Some((target, config))
+        let mut config = crate::config::loader::load_cli_config(&path)?.unwrap_or_default();
+        config.publisher.keychain = Some(key_path.display().to_string());
+        let content = toml::to_string_pretty(&config)
+            .context("Failed to serialize global CLI configuration")?;
+        Some((output_target(&path)?, content))
     };
 
     let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
@@ -394,25 +530,19 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         key_json["publisher"] = serde_json::Value::String(publisher.clone());
     }
 
-    let json_str = serde_json::to_string_pretty(&key_json)?;
-    write_atomic(
-        &key_path,
-        json_str.as_bytes(),
+    let private_json = serde_json::to_vec_pretty(&key_json)?;
+    let public_json = public_path
+        .as_ref()
+        .map(|_| serde_json::to_vec_pretty(&serde_json::json!({ "public_key": public_b64 })))
+        .transpose()?;
+    write_keygen_outputs(
+        (&key_path, &private_json),
+        public_path.as_deref().zip(public_json.as_deref()),
+        global
+            .as_ref()
+            .map(|(path, content)| (path.as_path(), content.as_bytes())),
         args.force,
-        OutputPermissions::Private,
     )?;
-    if let Some(path) = &public_path {
-        // On case-insensitive filesystems an alias of a new output only
-        // becomes observable after the private key has been written.
-        ensure!(
-            !same_output(path, &key_path)?,
-            "the public and private key outputs must be different files"
-        );
-        let public_json = serde_json::to_vec_pretty(&serde_json::json!({
-            "public_key": public_b64
-        }))?;
-        write_atomic(path, &public_json, args.force, OutputPermissions::Private)?;
-    }
 
     println!("Key pair generated: {}", key_path.display());
     println!();
@@ -431,22 +561,7 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         println!("  pubkey_file = {}", toml::Value::String(path.to_owned()));
     }
 
-    if let Some((global_path, mut global_config)) = global {
-        for path in std::iter::once(&key_path).chain(public_path.iter()) {
-            ensure!(
-                !same_output(&global_path, path)?,
-                "key outputs must differ from the global CLI configuration"
-            );
-        }
-        global_config.publisher.keychain = Some(key_path.display().to_string());
-        let content =
-            toml::to_string_pretty(&global_config).with_context(|| "Failed to serialize config")?;
-        write_atomic(
-            &global_path,
-            content.as_bytes(),
-            true,
-            OutputPermissions::Private,
-        )?;
+    if global.is_some() {
         println!(
             "\nGlobal config updated: publisher.keychain = {}",
             key_path.display()
@@ -702,9 +817,11 @@ async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> 
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        KeygenOutput, PkgKeygenArgs, execute_keygen, publish_keygen_outputs, write_keygen_outputs,
+    };
     #[cfg(unix)]
     use super::{OutputPermissions, stage_output, write_atomic};
-    use super::{PkgKeygenArgs, execute_keygen};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
@@ -745,12 +862,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn keygen_keeps_private_key_when_public_output_is_a_case_alias() {
-        let directory = tempfile::tempdir().unwrap();
-        let probe = directory.path().join("CaseProbe");
+    fn is_case_insensitive(directory: &std::path::Path) -> bool {
+        let probe = directory.join("CaseProbe");
         std::fs::write(&probe, []).unwrap();
-        if !directory.path().join("caseprobe").exists() {
+        let insensitive = directory.join("caseprobe").exists();
+        std::fs::remove_file(probe).unwrap();
+        insensitive
+    }
+
+    #[test]
+    fn keygen_rejects_case_alias_without_changing_private_output() {
+        let directory = tempfile::tempdir().unwrap();
+        if !is_case_insensitive(directory.path()) {
             return;
         }
 
@@ -766,12 +889,85 @@ mod tests {
 
         let error = execute_keygen(&args).unwrap_err().to_string();
         assert!(error.contains("outputs must be different files"), "{error}");
-        let generated = std::fs::read(&private).unwrap();
-        let key: serde_json::Value = serde_json::from_slice(&generated).unwrap();
-        assert!(key["private_key"].is_string());
+        assert!(!private.exists());
 
+        std::fs::write(&private, b"old private key").unwrap();
         let error = execute_keygen(&args).unwrap_err().to_string();
         assert!(error.contains("outputs must be different files"), "{error}");
-        assert_eq!(std::fs::read(&private).unwrap(), generated);
+        assert_eq!(std::fs::read(&private).unwrap(), b"old private key");
+    }
+
+    #[test]
+    fn keygen_rejects_case_alias_of_missing_global_config_before_publishing() {
+        let directory = tempfile::tempdir().unwrap();
+        if !is_case_insensitive(directory.path()) {
+            return;
+        }
+
+        let private = directory.path().join("key.json");
+        let public = directory.path().join("CONFIG.toml");
+        let config = directory.path().join("config.toml");
+        let error = write_keygen_outputs(
+            (&private, b"private key"),
+            Some((&public, b"public key")),
+            Some((&config, b"config")),
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("differ from the global CLI configuration")
+        );
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keygen_keeps_previous_pair_when_public_output_cannot_be_staged() {
+        let directory = tempfile::tempdir().unwrap();
+        let private = directory.path().join("private.json");
+        let public_dir = directory.path().join("public");
+        std::fs::create_dir(&public_dir).unwrap();
+        let public = public_dir.join("public.json");
+        std::fs::write(&private, b"old private key").unwrap();
+        std::fs::write(&public, b"old public key").unwrap();
+        std::fs::set_permissions(&public_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let can_write = tempfile::NamedTempFile::new_in(&public_dir).is_ok();
+        let result = execute_keygen(&PkgKeygenArgs {
+            output: Some(private.clone()),
+            force: true,
+            publisher: None,
+            no_register: true,
+            public_key_output: Some(public.clone()),
+        });
+        std::fs::set_permissions(&public_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !can_write {
+            assert!(result.is_err());
+            assert_eq!(std::fs::read(&private).unwrap(), b"old private key");
+            assert_eq!(std::fs::read(&public).unwrap(), b"old public key");
+        }
+    }
+
+    #[test]
+    fn keygen_restores_replaced_outputs_and_removes_new_ones_on_publish_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let private = directory.path().join("private.json");
+        let public = directory.path().join("public.json");
+        let config = directory.path().join("config.toml");
+        std::fs::write(&private, b"old private key").unwrap();
+        std::fs::write(&public, b"old public key").unwrap();
+        let mut outputs = [
+            KeygenOutput::prepare(&private, b"new private key", true).unwrap(),
+            KeygenOutput::prepare(&public, b"new public key", true).unwrap(),
+            KeygenOutput::prepare(&config, b"new config", true).unwrap(),
+        ];
+        let moved_private = directory.path().join("moved.json");
+        std::fs::rename(&private, &moved_private).unwrap();
+        assert!(publish_keygen_outputs(&mut outputs).is_err());
+        drop(outputs);
+        assert_eq!(std::fs::read(&moved_private).unwrap(), b"old private key");
+        assert_eq!(std::fs::read(&public).unwrap(), b"old public key");
+        assert!(!config.exists());
     }
 }
