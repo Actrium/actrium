@@ -4,6 +4,7 @@
  * Types and interfaces for the instruction receiver.
  */
 
+import type { ComponentType } from 'react';
 import type { CallbackRegistry, HostMessage } from '../types';
 
 // ============================================
@@ -53,6 +54,10 @@ export type ReceiverCallbackRegistry = Pick<CallbackRegistry, 'release'>;
 // ============================================
 
 export interface ReceiverOptions {
+  /** Reject CREATE operations for component types absent from the registry. */
+  restrictToRegisteredComponents?: boolean;
+  /** Render protocol text nodes independently of the Guest's component registry. */
+  textNodeRenderer?: ComponentType<{ children?: string }>;
   onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
   maxBatchSize?: number;
   debug?: boolean;

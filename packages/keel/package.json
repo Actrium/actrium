@@ -45,6 +45,7 @@
     "./devtools": "./src/devtools/index.ts",
     "./contract": "./src/contract/index.ts",
     "./cli": "./src/cli/index.ts",
+    "./v1": "./src/v1.ts",
     "./wire": "./src/host/wire/index.ts"
   },
   "bin": {

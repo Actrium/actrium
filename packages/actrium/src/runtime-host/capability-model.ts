@@ -1,3 +1,4 @@
+import { V1_COMPONENTS } from 'keel/v1';
 import {
   expandCapabilityName,
   expandCapabilitySet,
@@ -192,16 +193,8 @@ export const HOST_SUPPORTED_CAPABILITIES: ReadonlySet<FrontCapability> =
     )
   );
 
-export const COMPONENT_WHITELIST = [
-  'View',
-  'Text',
-  'ScrollView',
-  'TextInput',
-  'Button',
-  'FlatList',
-  'ImageAsset',
-  'Switch',
-] as const;
+// Keep the Host registry policy and the Product v1 compiler on the same list.
+export const COMPONENT_WHITELIST = V1_COMPONENTS;
 
 export type AllowedComponent = (typeof COMPONENT_WHITELIST)[number];
 
