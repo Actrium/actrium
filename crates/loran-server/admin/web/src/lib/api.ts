@@ -237,12 +237,14 @@ export const api = {
 
   listRealms: () => request<RealmsResponse>("/realms"),
 
-  /** A Realm under the Provider domain needs the package of its first Realm Profile. */
+  /** A Realm under the Provider domain needs the Service and Front selection of its first Realm Profile. */
   createRealm: (data: {
     realm: string;
     enabled?: boolean;
     display_name?: string;
-    package?: { href: string; sha256: string; type: string };
+    primary_package?: string;
+    front_package?: string;
+    packages?: Record<string, { href: string; sha256: string; type: string }>;
   }) =>
     request<RealmMutationResponse>("/realms", {
       method: "POST",

@@ -75,9 +75,8 @@ Attach 时，Service 按已接受的 `packages[front_package].type` 校验对端
 
 这些字段统一由 Actrium Host 根据已验证的包和本地会话状态构造。Service 将它们作为客户端声明用于兼容性协商。
 
-两个 Host 在配套包验证时，从已验证的 Front manifest 取得 `dependencies.service.contract`。
-各自从已验证归档读取该路径的 Proto，以路径最后一段文件名作为 `ProtoFile.name`，
-构成 `Fingerprint::calculate_service_semantic_fingerprint` 的单文件输入。
+两个 Host 各自从已验证的包读取内容匹配的 RPC Proto，并统一用 Service 导出的文件名（含 `.proto` 扩展名）作为
+`ProtoFile.name`，调用 `Fingerprint::calculate_service_semantic_fingerprint`。
 
 算法通过 `proto_fingerprint::Spec` 取得每个文件的语义指纹，按 `name` 排序，
 将 `name:semantic-fingerprint` 条目用 LF 连接，末尾不加 LF。

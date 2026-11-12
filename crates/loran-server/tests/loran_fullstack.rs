@@ -1995,24 +1995,21 @@ async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
             .json(&body)
             .send()
     };
-    let package = json!({
-        "href": "https://cdn.example/notes-1.0.actr",
-        "sha256": "ab".repeat(32),
-        "type": "acme.com/notes@1.0.0",
-    });
 
     // Under the Provider domain the first Profile needs a package; other
     // domains get no Loran-signed Profile.
     let missing = create(json!({ "realm": name })).await.expect("create");
     assert_eq!(missing.status(), reqwest::StatusCode::BAD_REQUEST);
-    let foreign = create(json!({ "realm": SECOND_REALM, "package": package }))
-        .await
-        .expect("create");
+    let foreign = create(create_body(SECOND_REALM)).await.expect("create");
     assert_eq!(foreign.status(), reqwest::StatusCode::BAD_REQUEST);
 
-    let created = create(json!({ "realm": name, "package": package, "display_name": "Notes" }))
-        .await
-        .expect("create");
+    let created = create({
+        let mut body = create_body(name);
+        body["display_name"] = json!("Notes");
+        body
+    })
+    .await
+    .expect("create");
     assert_eq!(created.status(), reqwest::StatusCode::CREATED);
     let created: Value = created.json().await.expect("create json");
     assert_eq!(created["realm"]["status"], "active");
@@ -2035,7 +2032,14 @@ async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
             .all(|endpoint| endpoint.url.starts_with("wss://"))
     );
     assert_eq!(
-        first.package.as_ref().expect("package").sha256,
+        first
+            .selection
+            .as_ref()
+            .unwrap()
+            .selected()
+            .unwrap()
+            .0
+            .sha256,
         "ab".repeat(32)
     );
 
@@ -2104,11 +2108,8 @@ async fn realm_management_requests_are_checked_before_any_state_changes() {
     let key = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
     let request = |realm: &str, provider: &str, nonce: &str| {
         let mut request = ManagementRequest::new(ManagementOp::CreateRealm, realm, provider, nonce);
-        request.package = Some(actr_protocol::realm_profile::RealmPackage {
-            href: "https://cdn.example/notes-1.0.actr".to_string(),
-            sha256: "ab".repeat(32),
-            r#type: "acme.com/notes@1.0.0".to_string(),
-        });
+        request.selection =
+            Some(serde_json::from_value(package_selection("acme.com/notes@1.0.0")).unwrap());
         request.sign("rs-1", &key)
     };
     let register = |publisher: &str, nonce: &str| {
@@ -5121,11 +5122,6 @@ async fn admin_api_manages_many_realms_by_name() {
         .await
         .expect("parse admin login response");
     let token = login["token"].as_str().expect("admin login token");
-    let package = json!({
-        "href": "https://cdn.example/notes-1.0.actr",
-        "sha256": "ab".repeat(32),
-        "type": "acme.com/notes@1.0.0",
-    });
 
     let created = create_provider_realm(&client, &base, token, MANAGED).await;
     assert_eq!(created["realm"]["status"], "active");
@@ -5189,11 +5185,8 @@ async fn admin_api_manages_many_realms_by_name() {
         assert_eq!(status, reqwest::StatusCode::OK, "{updated}");
         assert_eq!(updated["sequence"], 2);
         let mut other_program = membership_request(MembershipOp::UpdateRealm, MANAGED);
-        other_program.package = Some(actr_protocol::realm_profile::RealmPackage {
-            href: "https://cdn.example/other.actr".to_string(),
-            sha256: "cd".repeat(32),
-            r#type: "acme.com/other@1.0.0".to_string(),
-        });
+        other_program.selection =
+            Some(serde_json::from_value(package_selection("acme.com/other@1.0.0")).unwrap());
         let (status, error) = membership(&base, other_program, "second-owner").await;
         assert_eq!(status, reqwest::StatusCode::BAD_REQUEST, "{error}");
     }
@@ -5318,7 +5311,7 @@ async fn admin_api_manages_many_realms_by_name() {
         client
             .post(format!("{base}/admin/api/realms"))
             .bearer_auth(token)
-            .json(&json!({ "realm": MANAGED, "package": package }))
+            .json(&create_body(MANAGED))
             .send()
             .await
             .expect("recreate retired realm"),
@@ -5542,22 +5535,34 @@ async fn signaling_relay_cross_realm_is_denied() {
 
 /// Create a Realm under the Provider domain through the admin API. The Realm
 /// signing key is generated at startup, possibly after health.
+fn package_selection(service_type: &str) -> Value {
+    json!({
+        "primary_package": "service",
+        "front_package": "ui",
+        "packages": {
+            "service": {"href":"https://cdn.example/service.actr", "sha256":"ab".repeat(32), "type":service_type},
+            "ui": {"href":"https://cdn.example/front.actr", "sha256":"cd".repeat(32), "type":"acme.com/ui@1.0.0"}
+        }
+    })
+}
+
+fn create_body(realm: &str) -> Value {
+    let mut body = package_selection("acme.com/notes@1.0.0");
+    body["realm"] = json!(realm);
+    body
+}
+
 async fn create_provider_realm(
     client: &reqwest::Client,
     base: &str,
     token: &str,
     realm: &str,
 ) -> Value {
-    let package = json!({
-        "href": "https://cdn.example/notes-1.0.actr",
-        "sha256": "ab".repeat(32),
-        "type": "acme.com/notes@1.0.0",
-    });
     for _ in 0..50 {
         let response = client
             .post(format!("{base}/admin/api/realms"))
             .bearer_auth(token)
-            .json(&json!({ "realm": realm, "package": package }))
+            .json(&create_body(realm))
             .send()
             .await
             .expect("create realm");

@@ -10,7 +10,7 @@
 //! `active` Publisher Profile signing key.
 
 use crate::authority::{DetachedSignature, KeyStatus, RealmSigningKey};
-use crate::realm_profile::{RealmPackage, jcs, sign_document, verify_signature};
+use crate::realm_profile::{RealmPackageSelection, jcs, sign_document, verify_signature};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -42,8 +42,11 @@ pub struct ManagementRequest {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub publisher: String,
     /// `create_realm`: the package of the first Realm Profile.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package: Option<RealmPackage>,
+    #[serde(
+        flatten,
+        deserialize_with = "RealmPackageSelection::deserialize_optional"
+    )]
+    pub selection: Option<RealmPackageSelection>,
     /// `publish_profile`: the signed Realm Profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<Value>,
@@ -84,7 +87,7 @@ impl ManagementRequest {
             op,
             realm: realm.to_string(),
             publisher: String::new(),
-            package: None,
+            selection: None,
             profile: None,
             provider_id: provider_id.to_string(),
             requester: None,
@@ -106,7 +109,7 @@ impl ManagementRequest {
     /// Parse a signed envelope. Its signature is checked by [`Self::verify`]
     /// once the Realm domain's keys are known.
     pub fn parse(document: &[u8]) -> Result<Self, ManagementRequestError> {
-        let mut value: Value = serde_json::from_slice(document)
+        let mut value = crate::signed_json::parse(document)
             .map_err(|error| invalid(format!("not valid JSON: {error}")))?;
         let request: Self = serde_json::from_value(value.clone())
             .map_err(|error| invalid(format!("malformed request: {error}")))?;
@@ -195,11 +198,12 @@ mod tests {
             "p.example",
             "n-1",
         );
-        request.package = Some(RealmPackage {
-            href: "https://cdn.example/a.actr".into(),
-            sha256: "ab".repeat(32),
-            r#type: "acme.com/notes@1.0.0".into(),
-        });
+        request.selection = Some(serde_json::from_value(serde_json::json!({
+            "primary_package":"service","front_package":"front","packages":{
+                "service":{"href":"https://cdn.example/a.actr","sha256":"ab".repeat(32),"type":"acme.com/notes@1.0.0"},
+                "front":{"href":"https://cdn.example/front.actr","sha256":"cd".repeat(32),"type":"acme.com/notes-ui@1.0.0"}
+            }
+        })).unwrap());
         request
     }
 

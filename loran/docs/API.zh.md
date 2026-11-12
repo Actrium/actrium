@@ -77,8 +77,7 @@ descriptor，按 key pin 接受 `realm_signing_keys`（Actr Authority Discovery 
 `requester` 与各操作的字段，加上 `signature`（`{"key_id", "algorithm": "Ed25519", "value"}`，
 对去掉 `signature` 的请求按 JCS 规范化后的 detached 签名，与 Realm Profile 相同）：
 
-- `create_realm`：带 `package`（`href` 须为 HTTPS，`sha256` 为 64 位小写十六进制，`type` 为包
-  manifest 的 Actor 类型 `publisher/program@version`，publisher 须为域名）。建为
+- `create_realm` 携带 `primary_package`、`front_package` 和完整 `packages`。两个引用指向不同的 Service 和 Front 条目，每项给出 HTTPS `href`、整包 `sha256` 和精确 Actor `type`。建为
   `pending`，在 Signer 中生成该 Realm 的首把 issuer key `issuer:<realm>`，响应
   `{"realm", "status": "pending", "pending_expires_at", "profile"}`，`profile` 是 `sequence = 1`、
   指明本 Actr Facility Provider 的 Issuer、issuer key 与端点的未签名首份 Realm Profile。以
@@ -93,7 +92,7 @@ descriptor，按 key pin 接受 `realm_signing_keys`（Actr Authority Discovery 
 - `reissue_owner_invite`：为 `active` Realm 签发新的 owner 邀请（`{"realm", "owner_invite",
   "expires_at"}`，有效 7 天），此前未用的 owner 邀请立即失效；用于 owner 丢失全部客户端时的恢复。
 - `draft_profile`：`active` 且有已接受 Realm Profile 的 Realm，返回 `{"realm", "profile"}`：
-  下一份未签名 Realm Profile（`sequence` 为已接受值加一，`display_name`、`package`、`policy`
+  下一份未签名 Realm Profile（`sequence` 为已接受值加一，`display_name`、完整选包配置与 `policy`
   取自已接受的 Realm Profile，`issuer` 与 `provider` 为 Loran 当前值，含轮换中的 issuer key）。
   不改变 Realm；持有方签名后以 `publish_profile` 提交。
 - `register_publisher`（Actr Authority Discovery §4.5）：以 `publisher`（规范化 Publisher 域名）
@@ -136,7 +135,7 @@ nonce 不对返回 `400`（`invalid_request: …`）；key 未在该 Realm 登�
 `message` 以上述稳定错误码开头。其余规则：
 
 - 注册记下 Actor 所属的成员与 Realm 客户端 key；Actor 类型的 publisher 与程序名等于 Realm
-  Profile `package.type` 的（不论版本）时只接受 owner 的 key（`403 service_owner_only: …`）；
+  Profile `packages[primary_package].type` 的（不论版本）时只接受 owner 的 key（`403 service_owner_only: …`）；
 - 续期须用该 Actor 当前绑定的 key，重签须用同一成员的某把 key，成功后 Actor 改绑到这把 key，否则
   `403 client_unknown: …`；
 - 提交事务内重查该 key 未撤销、成员 active；撤销先提交则签发失败；
@@ -214,8 +213,8 @@ Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注
   自己与自己签发的邀请）、`revoke_client {key_id}`（owner 不能撤销自己最后一把 key）、
   `remove_member {member_id}`、`set_role {member_id, role}`、`transfer_owner {member_id,
   previous_owner_role?}`（目标须 active 且至少有一把未撤销 key）、`leave`（owner 须先转让）；
-- `update_realm {package? | display_name? | status: "retired"}`：只有 owner，只用于 Actr Facility Provider
-  域名下的 Realm，Loran 签新 Realm Profile（`package.type` 的 publisher/program 不变），响应
+- `update_realm`（完整包选择、`display_name` 或 `status: "retired"`）：只有 owner，只用于 Actr Facility Provider
+  域名下的 Realm，Loran 签新 Realm Profile（`packages[primary_package].type` 的 publisher/program 不变），响应
   `{realm, sequence}`；其他 Realm `forbidden`。
 
 检查顺序：信封格式、`provider_id`、有效期与 nonce 长度 → 签名 key（`join` 为邀请：查无
@@ -319,14 +318,13 @@ nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`k
 Realm 以 Realm 名寻址，`@` 编码为 `%40`：
 
 - `GET /admin/api/realms`、`POST /admin/api/realms`：列出；创建（body
-  `{"realm": "k7m2q9xh@provider.example", "enabled": true, "expires_at": 0, "package": {"href":
-  "https://…", "sha256": "<64 hex>", "type": "publisher.example/app@1.0.0"}}`，可选 `display_name`；
+  带 `realm`、可选的 `enabled`、`expires_at` 和 `display_name`，以及与 `create_realm` 相同的三个选包字段。
   响应一次性返回 `owner_invite` 与 `owner_invite_expires_at`，运营者经带外渠道交给 owner）。Loran
   是 Actr Facility Provider（启用 authority 与带 Signer 的 Issuer）时只创建其 Actr Facility Provider 域名下的
   Realm：先建为 `pending`（`pending_ttl_secs` 后过期），Loran 签发首份 Realm Profile 后转为
   `active`，签发失败则丢弃该 `pending` 行；其他域名的
   Realm 由持有方以 Realm 管理请求创建。Loran 不是 Actr Facility Provider 时创建没有 Realm Profile 的
-  `active` Realm，不接受 `package` 与 `display_name`；
+  `active` Realm，不接受包选择与 `display_name`；
 - `POST /admin/api/realms/{realm}/owner-invite`：为 `active` Realm 签发新的 owner 邀请（owner
   恢复），响应 `{"success", "realm", "owner_invite", "expires_at"}`，此前未用的 owner 邀请失效。只用于
   Actr Facility Provider 域名下的 Realm 与没有 Realm Profile 的 Realm，其他 Realm 由持有方
@@ -356,7 +354,7 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
 
 gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealms`/
 `RetireRealm`，同样按 Realm 名寻址；`CreateRealm` 新建的 Realm 在响应中一次性带 `owner_invite`。
-Loran 是 Actr Facility Provider 时 `CreateRealm` 不能新建 Realm（没有 `package`），只能更新已有 Realm。
+Loran 是 Actr Facility Provider 时 `CreateRealm` 不能新建 Realm（请求缺少完整包选择），只能更新已有 Realm。
 
 Actr Facility Provider 域名下的 Realm 在 v1 只由运营者创建；由用户以 Actr Facility Provider 账号自助创建属于
 后续能力。

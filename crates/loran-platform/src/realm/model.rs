@@ -2,6 +2,7 @@
 //!
 //! Defines the core data structures and database CRUD operations for the Realm entity
 
+use actr_protocol::realm_profile::RealmPackageSelection;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -111,19 +112,29 @@ impl Realm {
     /// `max_realms` bounds the number of pending and active Realms. A name that
     /// exists, retired or not, is rejected: Realm names are never reused.
     pub async fn insert(self, max_realms: Option<u32>) -> Result<Self, RealmError> {
-        self.insert_within(max_realms, None).await
+        self.insert_within(max_realms, None, None).await
     }
 
     /// Insert this realm as a pending Realm asked for by a Realm management
     /// request, within all `[realm]` limits: the instance total, and the
     /// Realms and pending Realms of its domain.
     pub async fn insert_requested(self, config: &RealmConfig) -> Result<Self, RealmError> {
+        self.insert_requested_with_selection(config, None).await
+    }
+
+    /// Atomically pins the selection for the first signed Profile.
+    pub async fn insert_requested_with_selection(
+        self,
+        config: &RealmConfig,
+        selection: Option<&RealmPackageSelection>,
+    ) -> Result<Self, RealmError> {
         self.insert_within(
             config.max_realms,
             Some((
                 config.max_realms_per_domain,
                 config.max_pending_per_domain(),
             )),
+            selection,
         )
         .await
     }
@@ -132,6 +143,7 @@ impl Realm {
         mut self,
         max_realms: Option<u32>,
         per_domain: Option<(Option<u32>, u32)>,
+        selection: Option<&RealmPackageSelection>,
     ) -> Result<Self, RealmError> {
         validate_name(&self.name)?;
         if self.status == RealmStatus::Retired {
@@ -146,6 +158,10 @@ impl Realm {
             None => (None, None),
         };
 
+        let mut tx = get_database()
+            .get_pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await?;
         let result = sqlx::query(
             "INSERT INTO realm (
                 name, status, enabled, expires_at, created_at, requester, pending_expires_at
@@ -171,20 +187,36 @@ impl Realm {
         .bind(max_per_domain.map(i64::from))
         .bind(max_pending.map(i64::from))
         .bind(domain)
-        .execute(get_database().get_pool())
+        .execute(&mut *tx)
         .await;
 
         match result {
             // A limit filtered the row out before the primary key was
             // checked; an existing name still reports as never reusable.
-            Ok(done) if done.rows_affected() == 0 => match Self::get(&self.name).await? {
-                Some(_) => Err(RealmError::AlreadyExists),
-                None => Err(RealmError::QuotaExceeded(format!(
-                    "no more Realms: max_realms = {:?}, per domain {:?}, pending per domain {:?}",
-                    max_realms, max_per_domain, max_pending
-                ))),
-            },
+            Ok(done) if done.rows_affected() == 0 => {
+                tx.rollback().await?;
+                match Self::get(&self.name).await? {
+                    Some(_) => Err(RealmError::AlreadyExists),
+                    None => Err(RealmError::QuotaExceeded(format!(
+                        "no more Realms: max_realms = {:?}, per domain {:?}, pending per domain {:?}",
+                        max_realms, max_per_domain, max_pending
+                    ))),
+                }
+            }
             Ok(_) => {
+                if let Some(selection) = selection {
+                    sqlx::query(
+                        "INSERT INTO realm_creation_selection (realm, selection) VALUES (?, ?)",
+                    )
+                    .bind(&self.name)
+                    .bind(
+                        serde_json::to_string(selection)
+                            .map_err(|e| RealmError::ValidationError(e.to_string()))?,
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                tx.commit().await?;
                 self.created_at = now as u64;
                 self.updated_at = None;
                 changes::announce(&self.name);
@@ -195,6 +227,27 @@ impl Realm {
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Older pending rows acquire their first selection on the next authenticated creation retry.
+    pub async fn pending_selection(
+        &self,
+        requested: &RealmPackageSelection,
+    ) -> Result<RealmPackageSelection, RealmError> {
+        let mut tx = get_database()
+            .get_pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await?;
+        let data = serde_json::to_string(requested)
+            .map_err(|e| RealmError::ValidationError(e.to_string()))?;
+        sqlx::query("INSERT INTO realm_creation_selection (realm,selection) SELECT name, ? FROM realm WHERE name=? AND requester=? AND status='pending' ON CONFLICT(realm) DO NOTHING")
+            .bind(data).bind(&self.name).bind(&self.requester).execute(&mut *tx).await?;
+        let stored:Option<String>=sqlx::query_scalar("SELECT c.selection FROM realm_creation_selection c JOIN realm r ON c.realm=r.name WHERE r.name=? AND r.requester=? AND r.status='pending'")
+            .bind(&self.name).bind(&self.requester).fetch_optional(&mut *tx).await?;
+        tx.commit().await?;
+        let stored = stored
+            .ok_or_else(|| RealmError::Conflict("pending Realm changed concurrently".into()))?;
+        serde_json::from_str(&stored).map_err(|e| RealmError::DatabaseError(e.to_string()))
     }
 
     /// Create or update a superv-managed realm by name. Only the enabled

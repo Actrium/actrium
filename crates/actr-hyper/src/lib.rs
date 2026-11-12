@@ -149,6 +149,7 @@ pub mod dispatch;
 // actr-service-compat/proto-fingerprint).
 #[cfg(not(target_arch = "wasm32"))]
 mod package_runtime;
+pub use package_runtime::read_v2_lock as verified_package_lock;
 #[cfg(not(target_arch = "wasm32"))]
 mod service_spec;
 

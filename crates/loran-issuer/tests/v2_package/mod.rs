@@ -92,7 +92,7 @@ async fn seed_main_service(realm: &str) {
          VALUES (?, 1, 'v2-fixture', ?, 1)",
     )
     .bind(realm)
-    .bind(serde_json::json!({"package": {"type": format!("{PUBLISHER}/echo@1.0.0")}}).to_string())
+    .bind(package_selection(&format!("{PUBLISHER}/echo@1.0.0")).to_string())
     .execute(platform::storage::db::get_database().get_pool())
     .await
     .unwrap();

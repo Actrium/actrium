@@ -12,7 +12,7 @@
 //! last credential it signed has expired.
 
 use actr_protocol::realm_profile::{
-    ActrFacilityProvider, IceEndpoint, IssuerKey, RealmIssuer, RealmPackage, RealmPolicy,
+    ActrFacilityProvider, IceEndpoint, IssuerKey, RealmIssuer, RealmPackageSelection, RealmPolicy,
     RealmProfile, RealmProfileError, RealmStatus as ProfileStatus, SignalingEndpoint, jcs,
     realm_profile_urls,
 };
@@ -138,7 +138,7 @@ pub struct ProviderEndpoints {
 /// previous values.
 #[derive(Debug, Clone, Default)]
 pub struct ProfileChange {
-    pub package: Option<RealmPackage>,
+    pub selection: Option<RealmPackageSelection>,
     pub display_name: Option<String>,
     pub retire: bool,
     /// The owner who requested the change. The Profile is stored only if,
@@ -252,43 +252,30 @@ impl RealmProfiles {
         let record = RealmProfileRecord::get(realm).await?;
         let previous = record
             .as_ref()
-            .map(|record| record.verify(keys))
+            .map(|record| record.verify_for_update(keys))
             .transpose()?;
 
-        if let Some(package) = &change.package {
-            package.check().map_err(ProfileError::Invalid)?;
-            // Another program is another instance, not an upgrade.
-            let previous_type = previous
-                .as_ref()
-                .and_then(|p| p.package.as_ref())
-                .and_then(|package| package.actr_type().ok());
-            let new_type = package.actr_type().map_err(ProfileError::Invalid)?;
-            if let Some(previous_type) = previous_type
-                && (previous_type.publisher != new_type.publisher
-                    || previous_type.name != new_type.name)
-            {
-                return Err(ProfileError::Invalid(format!(
-                    "package.type {} is another program than {}",
-                    package.r#type,
-                    previous_type.to_program_identity()
-                )));
-            }
-        }
-        let package = change
-            .package
-            .or_else(|| previous.as_ref().and_then(|p| p.package.clone()));
-        if package.is_none() && !change.retire {
-            return Err(ProfileError::Invalid(
-                "an active Realm Profile needs package {href, sha256, type}".to_string(),
-            ));
-        }
+        let selection = if change.retire {
+            None
+        } else {
+            let selection = change
+                .selection
+                .or_else(|| previous.as_ref().and_then(|p| p.selection.clone()))
+                .ok_or_else(|| {
+                    ProfileError::Invalid(
+                        "an active Realm needs a complete package selection".into(),
+                    )
+                })?;
+            selection.check().map_err(ProfileError::Invalid)?;
+            Some(selection)
+        };
         let display_name = change
             .display_name
             .or_else(|| previous.as_ref().map(|p| p.realm.display_name.clone()))
             .unwrap_or_else(|| realm.split('@').next().unwrap_or_default().to_string());
         let sequence = previous.as_ref().map_or(1, |p| p.sequence + 1);
         let mut document = self
-            .draft(realm, sequence, &display_name, package, change.retire)
+            .draft(realm, sequence, &display_name, selection, change.retire)
             .await?;
         let signature = self
             .signer
@@ -316,13 +303,13 @@ impl RealmProfiles {
 
     /// An unsigned Realm Profile of `realm` that names this Actr Facility Provider:
     /// its Issuer with the Realm's issuer key (generated in the Signer the
-    /// first time) and its endpoints. `package` is required unless `retire`.
+    /// first time) and its endpoints. A published active Profile requires a complete selection.
     pub async fn draft(
         &self,
         realm: &str,
         sequence: u64,
         display_name: &str,
-        package: Option<RealmPackage>,
+        selection: Option<RealmPackageSelection>,
         retire: bool,
     ) -> Result<Value, ProfileError> {
         current_issuer_key(&self.signer, realm).await?;
@@ -357,8 +344,10 @@ impl RealmProfiles {
             "policy": RealmPolicy { membership: MEMBERSHIP.to_string() },
             "issued_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         });
-        if let Some(package) = package {
-            document["package"] = json!(package);
+        if let Some(selection) = selection {
+            document["primary_package"] = json!(selection.primary_package);
+            document["front_package"] = json!(selection.front_package);
+            document["packages"] = json!(selection.packages);
         }
         Ok(document)
     }
@@ -442,7 +431,7 @@ impl RealmProfiles {
         let Some(record) = RealmProfileRecord::get(realm).await? else {
             return Ok(());
         };
-        let accepted = match record.verify(keys) {
+        let accepted = match record.verify_for_update(keys) {
             Ok(profile) => Some(profile),
             Err(error) => {
                 platform::recording::warn!(
