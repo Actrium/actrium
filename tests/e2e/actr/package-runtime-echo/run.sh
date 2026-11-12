@@ -382,8 +382,13 @@ for crate in ("actr-framework", "actr-protocol"):
     )
 output.write_text(manifest)
 PY
+    # Keep the disposable guest on the merged workspace's dependency versions.
+    # Metadata adds its standalone root package; the actual build stays locked.
+    cp "$REPO_ROOT/Cargo.lock" "$guest/Cargo.lock"
+    cargo metadata --manifest-path "$guest/Cargo.toml" --format-version 1 \
+        >"$RUN_DIR/v2-component-metadata.json"
     CARGO_TARGET_DIR="$TEMP_SERVICE_TARGET_DIR" CARGO_TARGET_WASM32_WASIP2_RUSTFLAGS="-Cdebuginfo=0" \
-        cargo build --manifest-path "$guest/Cargo.toml" --release --target wasm32-wasip2
+        cargo build --locked --manifest-path "$guest/Cargo.toml" --release --target wasm32-wasip2
     cp "$TEMP_SERVICE_TARGET_DIR/wasm32-wasip2/release/polyglot_echo_wasm_rust.wasm" "$payload/workload/echo.wasm"
     cp "$SCRIPT_DIR/proto/echo.proto" "$payload/contracts/echo.proto"
 

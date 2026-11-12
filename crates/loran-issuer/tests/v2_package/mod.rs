@@ -10,7 +10,8 @@ const PUBLISHER: &str = "v2-publisher.example";
 const TEMPLATE: &str = include_str!("../../../actr-pack/tests/fixtures/registration-v2.toml");
 
 /// Produce the public material a Host forwards, using the real packer/verifier.
-/// The empty Component is only a container fixture; execution belongs to #422.
+/// Normally this uses an empty container fixture. Joint acceptance supplies
+/// the exact real Component bytes already executed by the runtime scenario.
 fn v2_request(realm: &str, key: &SigningKey) -> RegisterRequest {
     v2_request_for_publisher(realm, PUBLISHER, key)
 }
@@ -18,9 +19,20 @@ fn v2_request(realm: &str, key: &SigningKey) -> RegisterRequest {
 fn v2_request_for_publisher(realm: &str, publisher: &str, key: &SigningKey) -> RegisterRequest {
     let mut manifest = ActorPackageManifest::from_toml(TEMPLATE).unwrap();
     manifest.actor.publisher = publisher.into();
+    let component = match std::env::var_os("ACTR_V2_COMPONENT_FIXTURE") {
+        Some(path) => {
+            let bytes = std::fs::read(path).expect("read the real E2E Component fixture");
+            assert!(
+                bytes.starts_with(b"\0asm\x0d\0\x01\0"),
+                "fixture must be a Component"
+            );
+            bytes
+        }
+        None => b"\0asm\x0d\0\x01\0".to_vec(),
+    };
     let package = actr_pack::pack_actor_package(&ActorPackOptions {
         manifest,
-        payloads: BTreeMap::from([("workload/echo.wasm".into(), b"\0asm\x0d\0\x01\0".to_vec())]),
+        payloads: BTreeMap::from([("workload/echo.wasm".into(), component)]),
         signing_key: key.clone(),
     })
     .unwrap();
