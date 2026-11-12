@@ -1232,11 +1232,7 @@ impl Node<Attached> {
         let actor_type = attachment
             .verified
             .as_ref()
-            .map(|verified| ActrType {
-                publisher: verified.manifest.publisher.clone(),
-                name: verified.manifest.name.clone(),
-                version: verified.manifest.version.clone(),
-            })
+            .map(|verified| verified.manifest.actor_type())
             .unwrap_or_else(|| config.actr_type().clone());
         let signer = crate::issuer_client::actor_signer_for_scoped(
             &self.hyper.config.storage_root,
@@ -1816,11 +1812,7 @@ async fn bootstrap_credential_inner(
         "registering with Issuer using publisher manifest"
     );
 
-    let actor_type = ActrType {
-        publisher: manifest.publisher.clone(),
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-    };
+    let actor_type = manifest.actor_type();
     let signer = crate::issuer_client::actor_signer_for_scoped(
         &inner.config.storage_root,
         realm,
