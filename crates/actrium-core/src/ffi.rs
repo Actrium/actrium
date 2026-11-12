@@ -2,9 +2,9 @@ use actr_protocol::authority::{
     self, AuthorityDescriptor, AuthorityDescriptorError, RealmSigningKeys,
 };
 use actr_protocol::realm_membership::RealmInvite;
-use ed25519_dalek::{PUBLIC_KEY_LENGTH, VerifyingKey};
 use actr_protocol::realm_profile::{RealmProfile, RealmProfileError, RealmStatus};
 use actr_protocol::uri::{ActrUri, ActrUriError};
+use ed25519_dalek::{PUBLIC_KEY_LENGTH, VerifyingKey};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -41,13 +41,13 @@ pub struct ActrPackageManifestInfo {
 
 impl From<ActrPackageManifest> for ActrPackageManifestInfo {
     fn from(manifest: ActrPackageManifest) -> Self {
+        let extension = manifest.extensions.actrium.as_ref();
+        let is_keel_guest = manifest.workload.profile == actr_pack::KEEL_GUEST_PROFILE_V1;
         let capabilities = manifest
             .workload
             .keel
             .as_ref()
             .and_then(|keel| keel.capabilities.clone());
-        let extension = manifest.extensions.actrium.as_ref();
-        let is_keel_guest = manifest.workload.profile == actr_pack::KEEL_GUEST_PROFILE_V1;
 
         Self {
             name: extension
@@ -73,6 +73,21 @@ impl From<ActrPackageManifest> for ActrPackageManifestInfo {
             theme_color: extension.and_then(|value| value.theme_color.clone()),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct VerifiedActrPackageInfo {
+    pub manifest: ActrPackageManifestInfo,
+    pub workload_profile: String,
+    pub workload_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Error)]
+pub enum ActrPackageVerificationError {
+    #[error("invalid Ed25519 public key: {0}")]
+    InvalidPublicKey(String),
+    #[error(transparent)]
+    InvalidPackage(#[from] actr_pack::PackError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -676,16 +691,16 @@ pub enum CoreError {
     UnknownAppSourceType(String),
     #[error("invalid Actr actor type `{0}`, expected `publisher/program@version`")]
     InvalidActrActorType(String),
-    #[error("invalid actr URI scheme")]
-    UriSchemeInvalid,
-    #[error("invalid actr URI Realm domain")]
-    UriDomainInvalid,
-    #[error("invalid actr URI RealmId or ActorId")]
-    UriLabelInvalid,
-    #[error("legacy actr URI form is not supported")]
-    UriLegacyForm,
-    #[error("local actr Realm does not belong to this installation")]
-    UriLocalRealmForeign,
+    #[error("invalid actr URI scheme: {0}")]
+    UriSchemeInvalid(String),
+    #[error("invalid actr URI Realm domain: {0}")]
+    UriDomainInvalid(String),
+    #[error("invalid actr URI RealmId or ActorId: {0}")]
+    UriLabelInvalid(String),
+    #[error("legacy actr URI form is not supported: {0}")]
+    UriLegacyForm(String),
+    #[error("local actr Realm does not belong to this installation: {0}")]
+    UriLocalRealmForeign(String),
     #[error("invalid installation id, expected 26 lowercase base32 characters")]
     InvalidInstallationId,
     #[error("authority descriptor is invalid: {0}")]
@@ -694,6 +709,27 @@ pub enum CoreError {
     RealmProfileInvalid(String),
     #[error("Realm '{0}' is retired")]
     RealmRetired(String),
+}
+
+impl From<AuthorityDescriptorError> for CoreError {
+    fn from(error: AuthorityDescriptorError) -> Self {
+        Self::AuthorityDescriptorInvalid(error.to_string())
+    }
+}
+
+impl From<ActrUriError> for CoreError {
+    fn from(error: ActrUriError) -> Self {
+        Self::AuthorityDescriptorInvalid(error.to_string())
+    }
+}
+
+impl From<RealmProfileError> for CoreError {
+    fn from(error: RealmProfileError) -> Self {
+        match error {
+            RealmProfileError::Retired(name) => Self::RealmRetired(name),
+            other => Self::RealmProfileInvalid(other.to_string()),
+        }
+    }
 }
 
 impl From<ManifestError> for CoreError {
@@ -722,111 +758,12 @@ pub fn parse_actr_package_manifest(source: String) -> Result<ActrPackageManifest
         .map_err(CoreError::from)
 }
 
-impl From<ActrUriError> for CoreError {
-    fn from(error: ActrUriError) -> Self {
-        // UDL error enums cannot carry fields, so the parse detail is dropped
-        // here; the shell renders variant-specific copy and holds the raw
-        // input for context.
-        match error {
-            ActrUriError::InvalidScheme(_) => Self::UriSchemeInvalid,
-            ActrUriError::InvalidDomain(_) => Self::UriDomainInvalid,
-            ActrUriError::InvalidLabel(_) | ActrUriError::InvalidPath(_) => Self::UriLabelInvalid,
-            ActrUriError::LegacyForm(_) => Self::UriLegacyForm,
-            ActrUriError::LocalRealmForeign(_) => Self::UriLocalRealmForeign,
-            // `ActrUriError` is `#[non_exhaustive]`; future variants surface
-            // as a label rejection until they get a dedicated mapping.
-            _ => Self::UriLabelInvalid,
-        }
-    }
+pub fn validate_actr_package_manifest(source: String) -> Result<(), CoreError> {
+    actr_package::parse_manifest_toml(&source)
+        .map(|_| ())
+        .map_err(CoreError::from)
 }
 
-/// Parsed `actr://` Realm link or Actor address.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActrUriInfo {
-    /// Lowercase IDNA A-label domain, or `<installation-id>.actr.alt`.
-    pub domain: String,
-    pub realm_id: Option<String>,
-    pub serial: Option<String>,
-    /// Whether the link targets this installation's local Realm.
-    pub is_local: bool,
-    /// `https://<domain>/.well-known/actr`; `None` for a local Realm.
-    pub discovery_url: Option<String>,
-}
-
-/// Generate a fresh installation id: 16 bytes from the OS CSPRNG encoded as
-/// 26 unpadded lowercase RFC 4648 base32 characters.
-///
-/// The shape is the one `ActrUri`'s domain parser enforces for every
-/// `<installation-id>.actr.alt` domain. Platforms call this once on first
-/// use and own the persistence; later reads should be re-checked with
-/// `validate_installation_id`.
-pub fn generate_installation_id() -> String {
-    use rand::RngCore;
-
-    let mut bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    encode_base32_lowercase(&bytes)
-}
-
-/// Validate an installation id against the `.actr.alt` domain rules.
-pub fn validate_installation_id(id: String) -> Result<(), CoreError> {
-    let valid = id.len() == 26
-        && id
-            .bytes()
-            .all(|byte| matches!(byte, b'a'..=b'z' | b'2'..=b'7'));
-    if valid {
-        Ok(())
-    } else {
-        Err(CoreError::InvalidInstallationId)
-    }
-}
-
-/// Lowercase RFC 4648 base32 without padding. 16 bytes yield exactly 26
-/// characters, matching the shape `ActrUri::normalize_domain` accepts.
-fn encode_base32_lowercase(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
-    let mut output = String::with_capacity((bytes.len() * 8).div_ceil(5));
-    let mut buffer = 0u32;
-    let mut bits = 0u32;
-    for &byte in bytes {
-        buffer = (buffer << 8) | u32::from(byte);
-        bits += 8;
-        while bits >= 5 {
-            bits -= 5;
-            output.push(ALPHABET[((buffer >> bits) & 0x1f) as usize] as char);
-        }
-    }
-    if bits > 0 {
-        output.push(ALPHABET[((buffer << (5 - bits)) & 0x1f) as usize] as char);
-    }
-    output
-}
-
-/// Parse and validate an `actr://` Realm link or Actor address.
-///
-/// Layer-0 verification-funnel step: zero network access. Delegates to
-/// `realm_link::open_realm_link`, which validates installation ownership and
-/// rejects authority-only URIs, then dispatches a matching local Realm to
-/// `open_local` and a DNS Realm to `discover_remote`. Both arms produce the
-/// same shape; `is_local` tells the shell which follow-up flow applies.
-#[derive(Debug)]
-pub struct VerifiedActrPackageInfo {
-    pub manifest: ActrPackageManifestInfo,
-    pub workload_profile: String,
-    pub workload_bytes: Vec<u8>,
-}
-
-#[derive(Debug, Error)]
-pub enum ActrPackageVerificationError {
-    #[error("invalid Ed25519 public key: {0}")]
-    InvalidPublicKey(String),
-    #[error(transparent)]
-    InvalidPackage(#[from] actr_pack::PackError),
-}
-
-/// Verify one actr-package/2 archive using a trusted public key in raw
-/// 32-byte Ed25519 form. Returns the manifest info and workload bytes read
-/// from that verified archive.
 pub fn verify_actr_package(
     archive: Vec<u8>,
     trusted_public_key: Vec<u8>,
@@ -850,47 +787,17 @@ pub fn verify_actr_package(
     })
 }
 
-pub fn parse_actr_uri(uri: String, installation_id: String) -> Result<ActrUriInfo, CoreError> {
-    realm_link::open_realm_link::<ActrUriInfo, CoreError>(
-        &uri,
-        &installation_id,
-        // Matching local Realm: resolved from local records only, never via
-        // network discovery.
-        |parsed| {
-            Ok(ActrUriInfo {
-                domain: parsed.domain().to_string(),
-                realm_id: parsed.realm_id().map(ToOwned::to_owned),
-                serial: parsed.serial().map(ToOwned::to_owned),
-                is_local: true,
-                discovery_url: parsed.discovery_url(),
-            })
-        },
-        // DNS Realm: the discovery URL feeds the next funnel step.
-        |parsed| {
-            Ok(ActrUriInfo {
-                domain: parsed.domain().to_string(),
-                realm_id: parsed.realm_id().map(ToOwned::to_owned),
-                serial: parsed.serial().map(ToOwned::to_owned),
-                is_local: false,
-                discovery_url: parsed.discovery_url(),
-            })
-        },
-    )
-}
-
-impl From<AuthorityDescriptorError> for CoreError {
-    fn from(error: AuthorityDescriptorError) -> Self {
-        Self::AuthorityDescriptorInvalid(error.to_string())
-    }
-}
-
-impl From<RealmProfileError> for CoreError {
-    fn from(error: RealmProfileError) -> Self {
-        match error {
-            RealmProfileError::Retired(name) => Self::RealmRetired(name),
-            other => Self::RealmProfileInvalid(other.to_string()),
-        }
-    }
+/// Parsed `actr://` Realm link or Actor address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActrUriInfo {
+    /// Lowercase IDNA A-label domain, or `<installation-id>.actr.alt`.
+    pub domain: String,
+    pub realm_id: Option<String>,
+    pub serial: Option<String>,
+    /// Whether the link targets this installation's local Realm.
+    pub is_local: bool,
+    /// `https://<domain>/.well-known/actr`; `None` for a local Realm.
+    pub discovery_url: Option<String>,
 }
 
 /// A trusted realm signing key from an accepted authority descriptor.
@@ -912,29 +819,144 @@ pub struct AuthorityDiscoveryInfo {
     /// Sequence of the accepted `realm_signing_keys` member.
     pub keys_sequence: u64,
     pub signing_keys: Vec<RealmSigningKeyInfo>,
-    /// The accepted `realm_signing_keys` member serialized as JSON. The
-    /// shell passes it back to `accept_realm_profile`, which rebuilds the
-    /// keys that verify the profile signature.
+    /// The accepted member serialized; pass back to `accept_realm_profile`.
     pub signing_keys_json: String,
+}
+
+/// A verified Realm Profile: the package selection and endpoints that feed
+/// package acquisition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealmProfileInfo {
+    /// Canonical Realm name `<realm_id>@<domain>`.
+    pub realm_name: String,
+    pub display_name: String,
+    /// Always `active`; retired Realms are rejected.
+    pub status: String,
+    pub sequence: u64,
+    /// Front package: the archive this shell fetches and loads.
+    pub package_href: String,
+    /// Lowercase hex SHA-256 the Front package must match.
+    pub package_sha256: String,
+    /// Actor type `publisher/program@version` of the Front package.
+    pub package_type: String,
+    /// Service package: deployed and verified by the Service Host.
+    pub service_href: String,
+    pub service_sha256: String,
+    pub service_type: String,
+    /// Issuer endpoint that serves Actor credentials.
+    pub issuer_url: String,
+    /// Actr Facility Provider ID; a membership client binds to it.
+    pub provider_id: String,
+}
+
+/// The Realm name carried by a `ri_` invite text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActrInviteInfo {
+    pub realm_name: String,
+}
+
+/// A package signing key from a verified Publisher Profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublisherPackageKeyInfo {
+    /// `actr-pub-` + 16 lowercase hex characters of the key digest.
+    pub id: String,
+    /// Base64 Ed25519 public key.
+    pub public_key_base64: String,
+    /// `active` or `retired`.
+    pub status: String,
+}
+
+/// Verified Publisher Profile for a publisher domain: the package signing
+/// keys that step 5 verifies the `.actr` package signature with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublisherProfileInfo {
+    pub domain: String,
+    pub profile_sequence: u64,
+    /// RFC 3339; past this point the profile must be re-fetched.
+    pub profile_expires_at: String,
+    pub package_signing_keys: Vec<PublisherPackageKeyInfo>,
+}
+
+/// Generate a fresh installation id: 16 bytes from the OS CSPRNG encoded as
+/// 26 unpadded lowercase RFC 4648 base32 characters.
+pub fn generate_installation_id() -> String {
+    use rand::RngCore;
+
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    encode_base32_lowercase(&bytes)
+}
+
+/// Validate an installation id against the `.actr.alt` domain rules.
+pub fn validate_installation_id(id: String) -> Result<(), CoreError> {
+    let valid = id.len() == 26
+        && id.bytes().all(|byte| matches!(byte, b'a'..=b'z' | b'2'..=b'7'));
+    if valid { Ok(()) } else { Err(CoreError::InvalidInstallationId) }
+}
+
+/// Lowercase RFC 4648 base32 without padding. 16 bytes yield exactly 26
+/// characters, matching the shape `ActrUri::normalize_domain` accepts.
+fn encode_base32_lowercase(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let mut output = String::with_capacity((bytes.len() * 8 + 4) / 5);
+    let mut buffer = 0u32;
+    let mut bits = 0u32;
+    for &byte in bytes {
+        buffer = (buffer << 8) | u32::from(byte);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            output.push(ALPHABET[((buffer >> bits) & 0x1f) as usize] as char);
+        }
+    }
+    if bits > 0 {
+        output.push(ALPHABET[((buffer << (5 - bits)) & 0x1f) as usize] as char);
+    }
+    output
+}
+
+/// Parse and validate an `actr://` Realm link or Actor address.
+///
+/// Layer-0 verification-funnel step: zero network access. Delegates to
+/// `realm_link::open_realm_link`, which validates installation ownership
+/// and rejects authority-only URIs, then dispatches a matching local Realm
+/// to `open_local` and a DNS Realm to `discover_remote`.
+pub fn parse_actr_uri(
+    uri: String,
+    installation_id: String,
+) -> Result<ActrUriInfo, CoreError> {
+    realm_link::open_realm_link::<ActrUriInfo, CoreError>(
+        &uri,
+        &installation_id,
+        |parsed| {
+            Ok(ActrUriInfo {
+                domain: parsed.domain().to_string(),
+                realm_id: parsed.realm_id().map(ToOwned::to_owned),
+                serial: parsed.serial().map(ToOwned::to_owned),
+                is_local: parsed.is_local(),
+                discovery_url: parsed.discovery_url(),
+            })
+        },
+        |parsed| {
+            Ok(ActrUriInfo {
+                domain: parsed.domain().to_string(),
+                realm_id: parsed.realm_id().map(ToOwned::to_owned),
+                serial: parsed.serial().map(ToOwned::to_owned),
+                is_local: false,
+                discovery_url: parsed.discovery_url(),
+            })
+        },
+    )
 }
 
 /// Validate an authority descriptor response for `domain` and extract the
 /// trusted realm signing keys plus the realms service href.
-///
-/// Layer-1 verification-funnel step. `body` must be the raw JSON text as
-/// received over HTTPS (Web PKI is the first-accept trust root). The check
-/// covers the descriptor structure, the `authority` binding to `domain`,
-/// and the `realm_signing_keys` member including its detached Ed25519
-/// signature; key pinning across visits is the caller's concern and is not
-/// applied here yet.
 pub fn accept_authority_descriptor(
     body: String,
     domain: String,
 ) -> Result<AuthorityDiscoveryInfo, CoreError> {
     let invalid = CoreError::AuthorityDescriptorInvalid;
 
-    // Keep the raw member value: the signing payload is its JCS form, so it
-    // must not round-trip through a typed struct before verification.
     let value: serde_json::Value =
         serde_json::from_str(&body).map_err(|error| invalid(format!("not valid JSON: {error}")))?;
     let descriptor: AuthorityDescriptor = serde_json::from_value(value.clone())
@@ -973,54 +995,20 @@ pub fn accept_authority_descriptor(
     })
 }
 
-/// A verified Realm Profile: the package target and endpoints that feed
-/// package acquisition.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RealmProfileInfo {
-    /// Canonical Realm name `<realm_id>@<domain>`.
-    pub realm_name: String,
-    pub display_name: String,
-    /// Always `active`; retired Realms are rejected.
-    pub status: String,
-    pub sequence: u64,
-    /// HTTPS download URL of the signed `.actr` package.
-    pub package_href: String,
-    /// Lowercase hex SHA-256 the package must match.
-    pub package_sha256: String,
-    /// Actor type `publisher/program@version`.
-    pub package_type: String,
-    /// Service package: deployed and verified by the Service Host.
-    pub service_href: String,
-    pub service_sha256: String,
-    pub service_type: String,
-    /// Issuer endpoint that serves Actor credentials.
-    pub issuer_url: String,
-    /// Actr Facility Provider ID; a membership client binds to it.
-    pub provider_id: String,
-}
-
 /// Validate a Realm Profile response for `realm_name` and extract the
-/// package target.
-///
-/// Layer-2 verification-funnel step. `body` must be the raw JSON text as
-/// received; the signature is checked over the RFC 8785 JCS form of the
-/// received document without its `signature` member, using the signing keys
-/// accepted in the authority discovery step (`signing_keys_json`). A retired
-/// Realm is rejected; key pinning across visits is not applied yet.
+/// package selection.
 pub fn accept_realm_profile(
     body: String,
     realm_name: String,
     signing_keys_json: String,
 ) -> Result<RealmProfileInfo, CoreError> {
-    let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json)
-        .map_err(|error| {
-            CoreError::RealmProfileInvalid(format!("malformed signing keys: {error}"))
-        })?;
+    let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json).map_err(|error| {
+        CoreError::RealmProfileInvalid(format!("malformed signing keys: {error}"))
+    })?;
     let profile = RealmProfile::verify(body.as_bytes(), &realm_name, &keys)?;
     if profile.realm.status != RealmStatus::Active {
         return Err(CoreError::RealmRetired(profile.realm.name.clone()));
     }
-    // `RealmProfile::check` guarantees an active Realm carries a selection.
     let selection = profile.selection.as_ref().ok_or_else(|| {
         CoreError::RealmProfileInvalid("active Realm has no package selection".to_string())
     })?;
@@ -1044,76 +1032,8 @@ pub fn accept_realm_profile(
     })
 }
 
-/// The Realm name carried by a `ri_` invite text.
-///
-/// Decoding happens here so the secret never leaves Rust: the shell only
-/// learns the Realm name to show the confirmation UI and run discovery.
-/// `join` re-decodes the same text internally when it consumes the secret.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActrInviteInfo {
-    pub realm_name: String,
-}
-
-pub fn decode_actr_invite(invite_text: String) -> Result<ActrInviteInfo, CoreError> {
-    let invite = RealmInvite::decode(&invite_text).map_err(|error| {
-        CoreError::AuthorityDescriptorInvalid(format!("invalid invite: {error}"))
-    })?;
-    Ok(ActrInviteInfo {
-        realm_name: invite.realm,
-    })
-}
-
-#[cfg(test)]
-mod invite_tests {
-    use super::*;
-
-    #[test]
-    fn decode_actr_invite_extracts_realm_name() {
-        // 32 secret bytes, base64url without padding (43 characters).
-        let text = RealmInvite::new(
-            "echo@realm.example",
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-        )
-        .encode();
-        let info = decode_actr_invite(text).unwrap();
-        assert_eq!(info.realm_name, "echo@realm.example");
-    }
-
-    #[test]
-    fn decode_actr_invite_rejects_non_invite_text() {
-        let error = decode_actr_invite("https://acme.example/realm".to_string()).unwrap_err();
-        assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
-    }
-}
-
-/// A package signing key from a verified Publisher Profile.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublisherPackageKeyInfo {
-    /// `actr-pub-` + 16 lowercase hex characters of the key digest.
-    pub id: String,
-    /// Base64 Ed25519 public key.
-    pub public_key_base64: String,
-    /// `active` or `retired`.
-    pub status: String,
-}
-
-/// Verified Publisher Profile for a publisher domain: the package signing
-/// keys that step ⑤ verifies the `.actr` package signature with.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublisherProfileInfo {
-    pub domain: String,
-    pub profile_sequence: u64,
-    /// RFC 3339; past this point the profile must be re-fetched.
-    pub profile_expires_at: String,
-    pub package_signing_keys: Vec<PublisherPackageKeyInfo>,
-}
-
-/// Extract the package signing keys from the descriptor a publisher domain
-/// serves (`GET https://<domain>/.well-known/actr`).
-///
-/// Step ④ only fetches: no descriptor or profile validation happens here —
-/// digest and signature verification of the package are step ⑤. The only
-/// rejections are structural: no publisher member, or no signing keys in it.
+/// Validate the well-known document served by a publisher domain and
+/// extract its package signing keys.
 pub fn accept_publisher_profile(
     body: String,
     domain: String,
@@ -1160,10 +1080,13 @@ pub fn accept_publisher_profile(
     })
 }
 
-pub fn validate_actr_package_manifest(source: String) -> Result<(), CoreError> {
-    actr_package::parse_manifest_toml(&source)
-        .map(|_| ())
-        .map_err(CoreError::from)
+pub fn decode_actr_invite(invite_text: String) -> Result<ActrInviteInfo, CoreError> {
+    let invite = RealmInvite::decode(&invite_text).map_err(|error| {
+        CoreError::AuthorityDescriptorInvalid(format!("invalid invite: {error}"))
+    })?;
+    Ok(ActrInviteInfo {
+        realm_name: invite.realm,
+    })
 }
 
 pub fn evaluate_contract(name: Option<String>, version: u32) -> ContractGateInfo {
@@ -3350,12 +3273,12 @@ pub fn post_process_zh_asr_segments(text: String, segments: Vec<AsrSegmentInfo>)
 
 #[cfg(test)]
 mod tests {
+    use ed25519_dalek::SigningKey;
+    use std::collections::BTreeMap;
+
     use super::*;
 
-    #[test]
-    fn ffi_manifest_info_flattens_host_fields() {
-        let info = parse_actr_package_manifest(
-            r##"
+    const FFI_TEST_MANIFEST: &str = r##"
                 format = "actr-package/2"
                 [actor]
                 publisher = "demo"
@@ -3367,6 +3290,7 @@ mod tests {
                 [workload.keel]
                 runtime = "js"
                 guest-api = "keel.guest/1"
+                capabilities = "ui/capability-manifest.json"
                 [host]
                 profile = "actr.host/1"
                 api = "^1"
@@ -3383,16 +3307,80 @@ mod tests {
                 media-type = "text/javascript"
                 size = 1
                 sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            "##
-            .to_string(),
-        )
-        .unwrap();
+                [[files]]
+                path = "ui/capability-manifest.json"
+                role = "profile"
+                media-type = "application/json"
+                size = 1
+                sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            "##;
+
+    #[test]
+    fn ffi_manifest_info_flattens_host_fields() {
+        let info = parse_actr_package_manifest(FFI_TEST_MANIFEST.to_string()).unwrap();
 
         assert_eq!(info.app_id.as_deref(), Some("demo/app@1.0.0"));
         assert_eq!(info.theme_color.as_deref(), Some("#111111"));
         assert_eq!(info.contract_name.as_deref(), Some("keel.guest"));
         assert_eq!(info.contract_version, Some(1));
+        assert_eq!(
+            info.capabilities.as_deref(),
+            Some("ui/capability-manifest.json")
+        );
         assert_eq!(info.system_app_type, None);
+    }
+
+    fn signed_test_package(key: SigningKey, workload: &[u8]) -> Vec<u8> {
+        let manifest = ActrPackageManifest::from_toml(FFI_TEST_MANIFEST).unwrap();
+        actr_pack::pack_actor_package(&actr_pack::ActorPackOptions {
+            manifest,
+            payloads: BTreeMap::from([
+                ("workload/guest.js".into(), workload.to_vec()),
+                ("ui/capability-manifest.json".into(), b"{}".to_vec()),
+            ]),
+            signing_key: key,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn ffi_verify_actr_package_returns_verified_workload() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let public_key = key.verifying_key().to_bytes().to_vec();
+        let workload = b"globalThis.echo = true;";
+        let archive = signed_test_package(key, workload);
+
+        let result = verify_actr_package(archive, public_key).unwrap();
+
+        assert_eq!(result.manifest.entry, "workload/guest.js");
+        assert_eq!(
+            result.manifest.capabilities.as_deref(),
+            Some("ui/capability-manifest.json")
+        );
+        assert_eq!(result.workload_profile, "keel.guest/1");
+        assert_eq!(result.workload_bytes, workload);
+    }
+
+    #[test]
+    fn ffi_verify_actr_package_rejects_wrong_key() {
+        let archive =
+            signed_test_package(SigningKey::from_bytes(&[7; 32]), b"globalThis.echo = true;");
+        let wrong_key = SigningKey::from_bytes(&[8; 32]).verifying_key();
+
+        assert!(matches!(
+            verify_actr_package(archive, wrong_key.to_bytes().to_vec()),
+            Err(ActrPackageVerificationError::InvalidPackage(
+                actr_pack::PackError::SignatureVerificationFailed(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn ffi_verify_actr_package_rejects_invalid_key_length() {
+        assert!(matches!(
+            verify_actr_package(Vec::new(), vec![0; 31]),
+            Err(ActrPackageVerificationError::InvalidPublicKey(_))
+        ));
     }
 
     #[test]
@@ -5137,391 +5125,5 @@ mod tests {
             "b1a55027d4e0bb5d"
         );
         assert_eq!(stable_content_fingerprint("".to_string()).len(), 16);
-    }
-
-    /// A well-formed installation id: 26 lowercase base32 characters
-    /// (`a-z`, `2-7`), matching `ActrUri`'s `.actr.alt` domain rules.
-    const INSTALLATION_ID: &str = "qscmfu5tbhyeowlknav3zrij4x";
-
-    #[test]
-    fn parse_actr_uri_reads_realm_and_actor_links() {
-        let realm = parse_actr_uri(
-            "actr://Acme.COM/k7m2q9xh".to_string(),
-            INSTALLATION_ID.to_string(),
-        )
-        .unwrap();
-        assert_eq!(realm.domain, "acme.com");
-        assert_eq!(realm.realm_id.as_deref(), Some("k7m2q9xh"));
-        assert_eq!(realm.serial, None);
-        assert!(!realm.is_local);
-        assert_eq!(
-            realm.discovery_url.as_deref(),
-            Some("https://acme.com/.well-known/actr")
-        );
-
-        let actor = parse_actr_uri(
-            "actr://acme.com/2af01.k7m2q9xh/notes?x=1#frag".to_string(),
-            INSTALLATION_ID.to_string(),
-        )
-        .unwrap();
-        assert_eq!(actor.realm_id.as_deref(), Some("k7m2q9xh"));
-        assert_eq!(actor.serial.as_deref(), Some("2af01"));
-    }
-
-    #[test]
-    fn parse_actr_uri_resolves_owned_local_realm() {
-        let local = parse_actr_uri(
-            "actr://qscmfu5tbhyeowlknav3zrij4x.actr.alt/k7m2q9xh".to_string(),
-            INSTALLATION_ID.to_string(),
-        )
-        .unwrap();
-        assert!(local.is_local);
-        assert_eq!(local.discovery_url, None);
-    }
-
-    #[test]
-    fn parse_actr_uri_rejects_foreign_local_realm() {
-        let error = parse_actr_uri(
-            "actr://aaaaaaaaaaaaaaaaaaaaaaaaaa.actr.alt/k7m2q9xh".to_string(),
-            INSTALLATION_ID.to_string(),
-        )
-        .unwrap_err();
-        assert!(matches!(error, CoreError::UriLocalRealmForeign));
-    }
-
-    #[test]
-    fn parse_actr_uri_rejects_authority_only_uri_without_realm_id() {
-        // Mirrors `realm_link::open_realm_link`: a Realm link must name an
-        // instance; an authority-only URI is not openable.
-        let error =
-            parse_actr_uri("actr://acme.com".to_string(), INSTALLATION_ID.to_string()).unwrap_err();
-        assert!(matches!(error, CoreError::UriLabelInvalid));
-    }
-
-    #[test]
-    fn parse_actr_uri_rejects_bad_scheme_and_legacy_forms() {
-        let scheme = parse_actr_uri(
-            "https://acme.com/k7m2q9xh".to_string(),
-            INSTALLATION_ID.to_string(),
-        )
-        .unwrap_err();
-        assert!(matches!(scheme, CoreError::UriSchemeInvalid));
-
-        // A legacy form must be rejected, never silently normalized:
-        // `actr://<publisher>/<program>@<version>` (uri.rs `is_legacy`).
-        let legacy = parse_actr_uri(
-            "actr://acme.com/counter@1.0.0".to_string(),
-            INSTALLATION_ID.to_string(),
-        )
-        .unwrap_err();
-        assert!(matches!(legacy, CoreError::UriLegacyForm));
-
-        // Ports are not a legacy form; they are a plain domain rejection.
-        let port = parse_actr_uri(
-            "actr://acme.com:8443/k7m2q9xh".to_string(),
-            INSTALLATION_ID.to_string(),
-        )
-        .unwrap_err();
-        assert!(matches!(port, CoreError::UriDomainInvalid));
-    }
-
-    #[test]
-    fn parse_actr_uri_rejects_invalid_labels() {
-        let label = parse_actr_uri(
-            "actr://acme.com/Bad_Label".to_string(),
-            INSTALLATION_ID.to_string(),
-        )
-        .unwrap_err();
-        assert!(matches!(label, CoreError::UriLabelInvalid));
-    }
-
-    #[test]
-    fn generated_installation_id_roundtrips_through_validation_and_parsing() {
-        let id = generate_installation_id();
-        validate_installation_id(id.clone()).unwrap();
-
-        // A generated id opens its own local Realm link end to end.
-        let link = format!("actr://{id}.actr.alt/k7m2q9xh");
-        let local = parse_actr_uri(link, id).unwrap();
-        assert!(local.is_local);
-        assert_eq!(local.discovery_url, None);
-    }
-
-    #[test]
-    fn validate_installation_id_rejects_malformed_ids() {
-        assert!(validate_installation_id("short".to_string()).is_err());
-        assert!(validate_installation_id("QSCMFU5TBHYEOWLKNAV3ZRIJ4X".to_string()).is_err());
-        // `0`, `1`, `8`, `9` are outside the base32 `a-z` + `2-7` alphabet.
-        assert!(validate_installation_id("qscmfu5tbhyeowlknav3zrij08".to_string()).is_err());
-        assert!(validate_installation_id(INSTALLATION_ID.to_string()).is_ok());
-    }
-
-    /// A well-formed descriptor whose `realm_signing_keys` member is vector
-    /// `m1` of `contracts/actr/test-vectors/realm-signing-keys-rotation.json`
-    /// (single active key `rs-a`, real Ed25519 signature over its JCS form).
-    const AUTHORITY_DESCRIPTOR: &str = r#"{
-        "version": 1,
-        "authority": "actr://acme.example",
-        "services": [
-            {"rel": "realms", "href": "https://acme.example/realms", "protocol": "actr-realm-profile/1"}
-        ],
-        "realm_signing_keys": {
-            "sequence": 1,
-            "keys": [
-                {
-                    "id": "rs-a",
-                    "algorithm": "Ed25519",
-                    "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
-                    "status": "active"
-                }
-            ],
-            "signature": {
-                "key_id": "rs-a",
-                "algorithm": "Ed25519",
-                "value": "srqr147D4MEh4ZaUk2nTH/Gq6PNZt4+UdKQbSEXxRNnAzyzO0EO3L2dRJsICebI3kv64MGsgYICgExy3D67qDw=="
-            }
-        }
-    }"#;
-
-    #[test]
-    fn accept_authority_descriptor_extracts_keys_and_realms_href() {
-        let info =
-            accept_authority_descriptor(AUTHORITY_DESCRIPTOR.to_string(), "acme.example".to_string())
-                .unwrap();
-        assert_eq!(info.realms_href, "https://acme.example/realms");
-        assert_eq!(info.keys_sequence, 1);
-        assert_eq!(info.signing_keys.len(), 1);
-        assert_eq!(info.signing_keys[0].id, "rs-a");
-        assert_eq!(
-            info.signing_keys[0].public_key_base64,
-            "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
-        );
-        assert_eq!(info.signing_keys[0].status, "active");
-    }
-
-    #[test]
-    fn accept_authority_descriptor_rejects_authority_mismatch() {
-        let error = accept_authority_descriptor(
-            AUTHORITY_DESCRIPTOR.to_string(),
-            "other.example".to_string(),
-        )
-        .unwrap_err();
-        assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
-    }
-
-    #[test]
-    fn accept_authority_descriptor_rejects_tampered_key_signature() {
-        // Flip the final base64 character of the member signature.
-        let tampered = AUTHORITY_DESCRIPTOR.replacen("qDw==", "qDx==", 1);
-        let error = accept_authority_descriptor(tampered, "acme.example".to_string()).unwrap_err();
-        assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
-    }
-
-    #[test]
-    fn accept_authority_descriptor_requires_realm_signing_keys() {
-        let bare = r#"{
-            "version": 1,
-            "authority": "actr://acme.example",
-            "services": [
-                {"rel": "realms", "href": "https://acme.example/realms"}
-            ]
-        }"#;
-        let error =
-            accept_authority_descriptor(bare.to_string(), "acme.example".to_string()).unwrap_err();
-        assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
-    }
-
-    /// `key_sets.initial` of `realm-profile.json`: single active key `rs-a`.
-    const PROFILE_SIGNING_KEYS: &str = r#"{
-        "sequence": 1,
-        "keys": [
-            {
-                "id": "rs-a",
-                "algorithm": "Ed25519",
-                "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
-                "status": "active"
-            }
-        ],
-        "signature": {
-            "key_id": "rs-a",
-            "algorithm": "Ed25519",
-            "value": "55ntdTXVOE1J26OoRHLuG5GwdlSFCWSH3wJG2fYSw1kU8Icu80EgJ29sWmEiyzGCrY5Q5dFDJGpZfd7C6l7CDw=="
-        }
-    }"#;
-
-
-
-    const SELECTION_REALM: &str = "k7m2q9xh@acme.com";
-
-    fn selection_signing_key() -> ed25519_dalek::SigningKey {
-        ed25519_dalek::SigningKey::from_bytes(&[0x2A; 32])
-    }
-
-    /// Signing-keys member for the fixture signer. `RealmProfile::verify`
-    /// only checks the member's shape; the member's own signature is a
-    /// pinning concern, so the value is a structural placeholder.
-    fn selection_signing_keys_json(signing: &ed25519_dalek::SigningKey) -> String {
-        use base64::Engine as _;
-        let public = base64::prelude::BASE64_STANDARD.encode(signing.verifying_key());
-        serde_json::json!({
-            "sequence": 1,
-            "keys": [
-                {"id": "rs-a", "algorithm": "Ed25519", "public_key": public, "status": "active"}
-            ],
-            "signature": {
-                "key_id": "rs-a",
-                "algorithm": "Ed25519",
-                "value": base64::prelude::BASE64_STANDARD.encode([0u8; 64])
-            }
-        })
-        .to_string()
-    }
-
-    /// A signed Realm Profile in the #434 selection shape: a Service and a
-    /// Front package covered by the signature.
-    fn signed_selection_profile(
-        signing: &ed25519_dalek::SigningKey,
-        status: &str,
-        with_selection: bool,
-    ) -> String {
-        use actr_protocol::realm_profile::sign_document;
-        use base64::Engine as _;
-
-        let mut document = serde_json::json!({
-            "schema": "actr.realm/v1",
-            "sequence": 31,
-            "realm": {
-                "name": SELECTION_REALM,
-                "display_name": "Acme Notes",
-                "status": status,
-            },
-            "issuer": {
-                "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
-                "keys": [
-                    {"id": "7", "algorithm": "Ed25519",
-                     "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
-                     "status": "active"}
-                ]
-            },
-            "provider": {
-                "id": "provider.example",
-                "signaling": [
-                    {"url": "wss://signal.provider.example/ws", "priority": 10,
-                     "control_plane_id": "provider.example/v1",
-                     "ticket_audience": "signal-a"}
-                ],
-                "ice": [
-                    {"urls": ["stun:stun.provider.example:3478"]},
-                    {"urls": ["turns:turn.provider.example:5349"],
-                     "credential_audience": "turn-pool-1"}
-                ]
-            },
-            "policy": {"membership": "invite-only"},
-            "issued_at": "2026-07-29T00:00:00Z",
-        });
-        if with_selection {
-            // The selection members are flattened onto the document root.
-            document["primary_package"] = serde_json::json!("service");
-            document["front_package"] = serde_json::json!("front");
-            document["packages"] = serde_json::json!({
-                "service": {
-                    "href": "https://cdn.notes.example/team-notes-1.4.2-service.actr",
-                    "sha256": "a".repeat(64),
-                    "type": "notes.example/team-notes-svc@1.4.2",
-                },
-                "front": {
-                    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-                    "sha256": "b".repeat(64),
-                    "type": "notes.example/team-notes@1.4.2",
-                },
-            });
-        }
-        sign_document(&mut document, "rs-a", signing);
-        serde_json::to_string(&document).unwrap()
-    }
-
-    #[test]
-    fn accept_realm_profile_rejects_retired_realm() {
-        // A retired Realm may omit the selection; the FFI rejects it either
-        // way before the shell ever sees a package target.
-        let signing = selection_signing_key();
-        let error = accept_realm_profile(
-            signed_selection_profile(&signing, "retired", false),
-            SELECTION_REALM.to_string(),
-            selection_signing_keys_json(&signing),
-        )
-        .unwrap_err();
-        assert!(matches!(error, CoreError::RealmRetired(_)));
-    }
-
-    /// A publisher descriptor as received over HTTPS. Step ④ only extracts
-    /// the package signing keys, so the profile needs no valid signature
-    /// here; verification belongs to step ⑤.
-    const PUBLISHER_DESCRIPTOR: &str = r#"{
-        "version": 1,
-        "authority": "actr://notes.example",
-        "publisher": {
-            "schema": "actr.publisher/v1",
-            "sequence": 1,
-            "domain": "notes.example",
-            "profile_signing_keys": [
-                {
-                    "id": "profile-root",
-                    "algorithm": "Ed25519",
-                    "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
-                    "status": "active"
-                }
-            ],
-            "keys": [
-                {
-                    "id": "actr-pub-0123456789abcdef",
-                    "algorithm": "Ed25519",
-                    "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
-                    "status": "active"
-                }
-            ],
-            "profile_issued_at": "2026-11-11T00:00:00Z",
-            "profile_expires_at": "2027-11-11T00:00:00Z"
-        }
-    }"#;
-
-    #[test]
-    fn accept_publisher_profile_extracts_package_keys() {
-        let info = accept_publisher_profile(
-            PUBLISHER_DESCRIPTOR.to_string(),
-            "notes.example".to_string(),
-        )
-        .unwrap();
-        assert_eq!(info.domain, "notes.example");
-        assert_eq!(info.profile_sequence, 1);
-        assert_eq!(info.package_signing_keys.len(), 1);
-        assert_eq!(info.package_signing_keys[0].id, "actr-pub-0123456789abcdef");
-        assert_eq!(info.package_signing_keys[0].status, "active");
-    }
-
-    #[test]
-    fn accept_publisher_profile_reports_missing_publisher_member() {
-        let body = serde_json::json!({
-            "version": 1,
-            "authority": "actr://notes.example",
-            "services": []
-        })
-        .to_string();
-        let error =
-            accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
-        assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
-    }
-
-    #[test]
-    fn accept_publisher_profile_reports_missing_signing_keys() {
-        let body = serde_json::json!({
-            "version": 1,
-            "authority": "actr://notes.example",
-            "publisher": {"schema": "actr.publisher/v1", "domain": "notes.example"}
-        })
-        .to_string();
-        let error =
-            accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
-        assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
     }
 }
