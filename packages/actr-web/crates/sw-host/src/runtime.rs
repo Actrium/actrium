@@ -576,6 +576,10 @@ struct SwRuntime {
     signaling: SignalingClient,
     actor_id: Option<ActrId>,
     credential: Option<AIdCredential>,
+    /// Credential digest already tried against the Actor-key-binding heal, so
+    /// a persistent relay enrollment rejection cannot rotate credentials in a
+    /// loop.
+    actor_binding_heal_attempted: Option<[u8; 32]>,
     /// TURN credential from Issuer registration (time-limited HMAC)
     turn_credential: Option<actr_protocol::TurnCredential>,
     /// Platform provider for crypto and KV storage
@@ -684,6 +688,7 @@ impl SwRuntime {
             signaling,
             actor_id: Some(actor_id),
             credential: Some(credential),
+            actor_binding_heal_attempted: None,
             turn_credential,
             platform,
             discovered_targets: HashMap::new(),
@@ -793,6 +798,93 @@ impl SwRuntime {
         self.credential = Some(credential);
         self.turn_credential = turn_credential;
         Ok(())
+    }
+
+    /// Heal an unbound Actor key by reissuing the credential, one attempt per
+    /// credential generation. `/reissue` establishes the Actor-key binding
+    /// Issuer-side for identities registered before Actor keys existed; the
+    /// refreshed credential then carries the key claim the relay Actor-channel
+    /// enrollment requires. Returns whether the credential was replaced.
+    async fn heal_actor_binding(&mut self) -> Result<bool, JsValue> {
+        let Some(credential) = self.credential.clone() else {
+            return Ok(false);
+        };
+        let Some(actor_id) = self.actor_id.clone() else {
+            return Ok(false);
+        };
+        let digest = actr_relay_security::actor_credential_digest(&credential.encode_to_vec());
+        if self.actor_binding_heal_attempted == Some(digest) {
+            return Ok(false);
+        }
+        self.actor_binding_heal_attempted = Some(digest);
+        let actor_key =
+            Self::load_actor_key(&self.platform, &self.client_actr_type, &self.realm).await?;
+        let mut registration = RegisterRequest {
+            actr_type: self.client_actr_type.clone(),
+            realm: self.realm.clone(),
+            acl: self.acl.clone(),
+            auth_mode: Some(RegisterAuthMode::Linked as i32),
+            ..Default::default()
+        };
+        actor_key
+            .sign_reissue_request(&mut registration)
+            .map_err(|e| JsValue::from_str(&format!("Cannot sign Actor reissue proof: {e}")))?;
+        let cred_kv_ns = self.cred_kv_namespace();
+        let kv = self
+            .platform
+            .secret_store(&cred_kv_ns)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to open credential store: {e}")))?;
+        let renewal_token = kv
+            .get("renewal_token")
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to load renewal proof: {e}")))?
+            .ok_or_else(|| JsValue::from_str("Missing private renewal proof"))?;
+        let request = actr_protocol::ReissueCredentialRequest {
+            actr_id: actor_id.clone(),
+            registration,
+            renewal_proof: Some(renewal_token.into()),
+            attempt_id: js_sys::Date::now().to_be_bytes().to_vec().into(),
+        };
+        log::info!("[SW] reissuing credential to bind the Actor key (relay enrollment rejected)");
+        let response = self
+            .issuer
+            .reissue_credential(request)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Issuer reissue failed: {e}")))?;
+        let Some(actr_protocol::register_response::Result::Success(ok)) = response.result else {
+            return Ok(false);
+        };
+        if ok.actr_id != actor_id {
+            return Err(JsValue::from_str("Issuer reissue changed the ActrId"));
+        }
+        if !self.issuer.accepts_credential(&ok.credential)
+            || !actor_key.accepts_credential(&ok.credential)
+        {
+            return Err(JsValue::from_str(
+                "Issuer reissue returned a credential not bound to this Realm client and Actor key",
+            ));
+        }
+        Self::persist_credentials_static(&self.platform, &cred_kv_ns, &ok.actr_id, &ok.credential)
+            .await?;
+        Self::persist_turn_credential_static(&self.platform, &cred_kv_ns, &ok.turn_credential)
+            .await?;
+        if let (Some(token), Some(expires_at)) = (
+            ok.renewal_token.as_ref(),
+            ok.renewal_token_expires_at.as_ref(),
+        ) {
+            Self::persist_renewal_token_static(
+                &self.platform,
+                &cred_kv_ns,
+                token.as_ref(),
+                expires_at.seconds as u64,
+            )
+            .await?;
+        }
+        self.credential = Some(ok.credential);
+        self.turn_credential = Some(ok.turn_credential);
+        log::info!("[SW] credential reissued; Actor key binding established");
+        Ok(true)
     }
 
     /// Obtain a credential from Issuer via HTTP.

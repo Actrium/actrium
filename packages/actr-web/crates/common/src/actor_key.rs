@@ -65,6 +65,15 @@ impl WebActorKey {
             .map_err(|error| WebError::Protocol(format!("local Actor proof rejected: {error}")))
     }
 
+    /// Attach and locally verify a REISSUE proof. `/reissue` also establishes
+    /// the Actor-key binding Issuer-side for identities registered before
+    /// Actor keys existed.
+    pub fn sign_reissue_request(&self, request: &mut RegisterRequest) -> WebResult<()> {
+        sign_actor_key_proof(request, ActorKeyProofOperation::Reissue, &self.signing_key);
+        verify_actor_key_proof(request, ActorKeyProofOperation::Reissue)
+            .map_err(|error| WebError::Protocol(format!("local Actor proof rejected: {error}")))
+    }
+
     /// Require an Issuer credential to be bound to this exact Actor key.
     pub fn accepts_credential(&self, credential: &AIdCredential) -> bool {
         IdentityClaims::decode(credential.claims.as_ref()).is_ok_and(|claims| {
