@@ -16,8 +16,8 @@ use actr_protocol::{ActrId, ActrType, DataChunk, Direction, PayloadType, RpcEnve
 use actr_runtime_mailbox::{Mailbox, MessagePriority};
 
 use crate::lifecycle::node::PeerTypes;
-use crate::transport::correlation::PendingRequestsMap;
 use crate::transport::handover::HandoverBook;
+use crate::transport::{VerifiedPeerContext, correlation::PendingRequestsMap};
 use crate::wire::{DirectionError, direction_for_routing};
 use actr_protocol::transport_control;
 
@@ -65,6 +65,18 @@ impl InboundDispatcher {
         payload_type: PayloadType,
         mailbox: &Arc<dyn Mailbox>,
     ) {
+        self.dispatch_with_context(from_bytes, data, None, payload_type, mailbox)
+            .await;
+    }
+
+    pub(crate) async fn dispatch_with_context(
+        &self,
+        from_bytes: Vec<u8>,
+        data: Bytes,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        payload_type: PayloadType,
+        mailbox: &Arc<dyn Mailbox>,
+    ) {
         match payload_type {
             PayloadType::RpcReliable | PayloadType::RpcSignal => {
                 match RpcEnvelope::decode(&data[..]) {
@@ -82,10 +94,11 @@ impl InboundDispatcher {
                         let from_type = ActrId::decode(&from_bytes[..])
                             .ok()
                             .and_then(|from| self.peer_types.get(&from));
-                        Self::handle_envelope(
+                        Self::handle_envelope_with_context(
                             envelope,
                             from_bytes,
                             from_type,
+                            peer_context,
                             data,
                             payload_type,
                             self.pending_requests.clone(),
@@ -104,6 +117,7 @@ impl InboundDispatcher {
                     self.handover.get(),
                     &from_bytes,
                     &data,
+                    peer_context,
                     payload_type,
                 )
                 .await;
@@ -124,18 +138,33 @@ impl InboundDispatcher {
     ///   otherwise drop as an orphan late response — never enqueue (#255).
     /// * Missing/`Unspecified`/unknown: warn and drop.
     ///
-    /// Exposed pub(crate) so the 0.14 gate can create an opentelemetry span
-    /// from the decoded envelope before dispatching.
-    pub(crate) async fn handle_envelope(
+    /// The authenticated channel generation travels separately from sender metadata.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn handle_envelope_with_context(
         envelope: RpcEnvelope,
         from_bytes: Vec<u8>,
         from_type: Option<ActrType>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
         data: Bytes,
         payload_type: PayloadType,
         pending_requests: PendingRequestsMap,
         mailbox: Arc<dyn Mailbox>,
     ) {
         let request_id = envelope.request_id.clone();
+        let from_type = if let Some(context) = peer_context.as_ref() {
+            match ActrId::decode(&from_bytes[..]) {
+                Ok(peer) if peer == context.peer_actor_id => Some(context.peer_actor_type.clone()),
+                _ => {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        "inbound sender does not match its verified channel context; dropping"
+                    );
+                    return;
+                }
+            }
+        } else {
+            from_type
+        };
 
         let direction = match direction_for_routing(envelope.direction) {
             Ok(direction) => direction,
@@ -162,6 +191,7 @@ impl InboundDispatcher {
             Self::enqueue_request(
                 from_bytes,
                 from_type,
+                peer_context,
                 data,
                 payload_type,
                 mailbox,
@@ -176,7 +206,9 @@ impl InboundDispatcher {
         let caller_id = ActrId::decode(&from_bytes[..]).ok();
         let caller = caller_id.as_ref().map(|id| (id, from_type.as_ref()));
         pending_requests
-            .complete_from_envelope(envelope, caller, || Self::peer_for_log(&from_bytes))
+            .complete_from_envelope_with_context(envelope, caller, peer_context, || {
+                Self::peer_for_log(&from_bytes)
+            })
             .await;
     }
 
@@ -185,6 +217,7 @@ impl InboundDispatcher {
     async fn enqueue_request(
         from_bytes: Vec<u8>,
         from_type: Option<ActrType>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
         data: Bytes,
         payload_type: PayloadType,
         mailbox: Arc<dyn Mailbox>,
@@ -199,8 +232,15 @@ impl InboundDispatcher {
 
         tracing::info!(request_id = %request_id, "rpc.mailbox.enqueue");
         let from_type = from_type.map(|actor_type| actor_type.encode_to_vec());
+        let peer_context = match peer_context.as_deref().map(serde_json::to_vec).transpose() {
+            Ok(context) => context,
+            Err(error) => {
+                tracing::error!(%error, "failed to persist verified peer context");
+                return;
+            }
+        };
         match mailbox
-            .enqueue(from_bytes, from_type, data.to_vec(), priority)
+            .enqueue_with_context(from_bytes, from_type, peer_context, data.to_vec(), priority)
             .await
         {
             Ok(msg_id) => {
@@ -222,6 +262,7 @@ impl InboundDispatcher {
         handover: Option<&Arc<HandoverBook>>,
         from_bytes: &[u8],
         data: &[u8],
+        peer_context: Option<Arc<VerifiedPeerContext>>,
         payload_type: PayloadType,
     ) {
         let chunk = match DataChunk::decode(data) {
@@ -244,6 +285,13 @@ impl InboundDispatcher {
                 return;
             }
         };
+        if peer_context
+            .as_ref()
+            .is_some_and(|context| context.peer_actor_id != sender_id)
+        {
+            tracing::warn!("stream sender does not match its verified channel context; dropping");
+            return;
+        }
         if payload_type == PayloadType::StreamReliable
             && let Some(nonce) = transport_control::barrier_nonce(&chunk)
         {
@@ -252,7 +300,9 @@ impl InboundDispatcher {
             }
             return;
         }
-        registry.dispatch(chunk, sender_id, payload_type).await;
+        registry
+            .dispatch_with_context(chunk, sender_id, peer_context, payload_type)
+            .await;
     }
 
     fn peer_for_log(from_bytes: &[u8]) -> String {

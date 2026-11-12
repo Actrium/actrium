@@ -18,7 +18,7 @@ use tokio::sync::oneshot;
 
 use crate::lifecycle::{IncomingCaller, IncomingDispatchRequest, IncomingGuard};
 
-use super::wire_handle::WireIdentity;
+use super::{VerifiedPeerContext, wire_handle::WireIdentity};
 
 type PendingMap<M> = Arc<Mutex<HashMap<String, Entry<M>>>>;
 
@@ -218,6 +218,17 @@ impl<M> RpcCorrelation<M> {
         caller: Option<IncomingCaller<'_>>,
         peer: impl FnOnce() -> String,
     ) -> CompleteOutcome {
+        self.complete_from_envelope_with_context(envelope, caller, None, peer)
+            .await
+    }
+
+    pub(crate) async fn complete_from_envelope_with_context(
+        &self,
+        envelope: RpcEnvelope,
+        caller: Option<IncomingCaller<'_>>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        peer: impl FnOnce() -> String,
+    ) -> CompleteOutcome {
         let guard = self
             .incoming_guard
             .read()
@@ -225,7 +236,9 @@ impl<M> RpcCorrelation<M> {
             .clone();
         if let Some(guard) = guard
             && let Err(error) = guard
-                .check(IncomingDispatchRequest::new(&envelope, caller))
+                .check(
+                    IncomingDispatchRequest::new(&envelope, caller).with_peer_context(peer_context),
+                )
                 .await
         {
             // A rejected response must never release its payload to the guest.
@@ -515,6 +528,13 @@ mod tests {
                 crate::lifecycle::IncomingGuardErrorCode::Revoked,
                 "session revoked before response delivery",
             ))
+        }
+
+        async fn authenticate_response(
+            &self,
+            _response: &mut RpcEnvelope,
+        ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+            Ok(())
         }
 
         async fn check_stream(

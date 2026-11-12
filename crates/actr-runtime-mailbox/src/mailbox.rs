@@ -20,7 +20,7 @@
 //! delivery for unacknowledged persisted messages, not exactly-once business
 //! execution: handlers must tolerate repeated side effects after a crash.
 
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,10 @@ pub struct MessageRecord {
     /// checked against this, so a message dequeued after its sender
     /// disconnected, or after a restart, is judged by the type it came with.
     pub from_type: Option<Vec<u8>>,
+    /// Serialized authenticated channel generation captured with this message.
+    /// `None` denotes a legacy or in-process transport, never a verified peer.
+    #[serde(default)]
+    pub peer_context: Option<Vec<u8>>,
     /// Message content (raw bytes, not unpacked)
     pub payload: Vec<u8>,
     /// Priority
@@ -156,6 +160,25 @@ pub trait Mailbox: Send + Sync {
         payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid>;
+
+    /// Enqueue with the authenticated channel generation captured at receipt.
+    /// Backends without context persistence reject verified messages rather
+    /// than silently degrading them to unauthenticated mailbox entries.
+    async fn enqueue_with_context(
+        &self,
+        from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
+        peer_context: Option<Vec<u8>>,
+        payload: Vec<u8>,
+        priority: MessagePriority,
+    ) -> StorageResult<Uuid> {
+        if peer_context.is_some() {
+            return Err(StorageError::ConfigError(
+                "mailbox backend cannot persist an authenticated peer context".into(),
+            ));
+        }
+        self.enqueue(from, from_type, payload, priority).await
+    }
 
     /// Dequeue a batch of messages from the queue.
     ///

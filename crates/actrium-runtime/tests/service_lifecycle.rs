@@ -567,6 +567,61 @@ async fn lifecycle_purge_is_permanent() {
 }
 
 #[tokio::test]
+async fn lifecycle_interrupted_creation_retry_cannot_resurrect_purged_identity() {
+    let temp = TempDir::new().unwrap();
+    let service = LifecycleService::open(temp.path()).unwrap();
+    let key = "purge-during-interrupted-create";
+    let error = service
+        .create_with_observer(request(key), |stage| {
+            if stage == CreationStage::StorageCommitted {
+                Err(LifecycleError::Injected("crash before checkpoint".into()))
+            } else {
+                Ok(())
+            }
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, LifecycleError::Injected(_)));
+
+    let mut intent = service.creation_intent(key).unwrap().unwrap();
+    let actor_id = intent.result_actor_id.clone().unwrap();
+    intent.stage = CreationStage::IdentityAllocated;
+    let intent_path = temp
+        .path()
+        .join("creation-intents")
+        .join(format!("{}.json", actor_id_hash(key)));
+    fs::write(intent_path, serde_json::to_vec_pretty(&intent).unwrap()).unwrap();
+    drop(service);
+
+    let service = LifecycleService::open(temp.path()).unwrap();
+    service.trash(&actor_id).await.unwrap();
+    service.purge(&actor_id).await.unwrap();
+
+    assert!(matches!(
+        service.create(request(key)).await.unwrap_err(),
+        LifecycleError::Deleted(deleted) if deleted == actor_id
+    ));
+    assert!(matches!(
+        service.instance(&actor_id),
+        Err(LifecycleError::Deleted(_))
+    ));
+    assert_eq!(
+        service.tombstone(&actor_id).unwrap().unwrap().reason,
+        TombstoneReason::Purged
+    );
+    assert!(
+        !service
+            .instance_dir(&actor_id)
+            .join("instance.json")
+            .exists()
+    );
+    assert_eq!(
+        service.creation_intent(key).unwrap().unwrap().stage,
+        CreationStage::IdentityAllocated
+    );
+}
+
+#[tokio::test]
 async fn lifecycle_upgrade_archives_old_identity_and_creates_new_actor() {
     let temp = TempDir::new().unwrap();
     let service = LifecycleService::open(temp.path()).unwrap();

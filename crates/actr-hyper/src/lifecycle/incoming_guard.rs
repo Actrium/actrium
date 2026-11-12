@@ -13,6 +13,9 @@ use actr_protocol::{
 };
 use async_trait::async_trait;
 use bytes::Bytes;
+use std::sync::Arc;
+
+use crate::transport::VerifiedPeerContext;
 
 /// The caller authenticated by the transport and recorded with the message.
 pub type IncomingCaller<'a> = (&'a ActrId, Option<&'a ActrType>);
@@ -159,11 +162,14 @@ impl std::fmt::Display for IncomingMetadataError {
 impl std::error::Error for IncomingMetadataError {}
 
 /// One inbound RPC presented to [`IncomingGuard`] or [`SessionRegistry`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct IncomingDispatchRequest<'a> {
     pub envelope: &'a RpcEnvelope,
     pub caller: Option<IncomingCaller<'a>>,
     pub metadata: IncomingMetadata<'a>,
+    /// Authenticated channel generation on which this message actually arrived.
+    /// `None` denotes a legacy or in-process transport, never a verified peer.
+    pub peer_context: Option<Arc<VerifiedPeerContext>>,
 }
 
 impl<'a> IncomingDispatchRequest<'a> {
@@ -172,17 +178,24 @@ impl<'a> IncomingDispatchRequest<'a> {
             envelope,
             caller,
             metadata: IncomingMetadata::new(&envelope.metadata),
+            peer_context: None,
         }
+    }
+
+    pub fn with_peer_context(mut self, context: Option<Arc<VerifiedPeerContext>>) -> Self {
+        self.peer_context = context;
+        self
     }
 }
 
 /// One inbound stream chunk presented to [`IncomingGuard`]. The sender comes
 /// from the authenticated transport record, not from chunk metadata.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct IncomingStreamChunk<'a> {
     pub chunk: &'a DataChunk,
     pub sender: &'a ActrId,
     pub metadata: IncomingMetadata<'a>,
+    pub peer_context: Option<Arc<VerifiedPeerContext>>,
 }
 
 impl<'a> IncomingStreamChunk<'a> {
@@ -191,7 +204,13 @@ impl<'a> IncomingStreamChunk<'a> {
             chunk,
             sender,
             metadata: IncomingMetadata::new(&chunk.metadata),
+            peer_context: None,
         }
+    }
+
+    pub fn with_peer_context(mut self, context: Option<Arc<VerifiedPeerContext>>) -> Self {
+        self.peer_context = context;
+        self
     }
 }
 
@@ -269,13 +288,20 @@ impl IncomingGuardError {
 /// Current-policy authorization for inbound delivery.
 ///
 /// Implementations may consult an Actrium session registry and interpret the
-/// verified peer context there. Hyper deliberately supplies only generic Actor
-/// identity and typed envelope metadata; it does not interpret member roles.
+/// verified peer context there. Hyper supplies the authenticated transport
+/// context separately from caller-declared envelope metadata.
 /// `check` covers request, tell, and response envelopes. Implementations must
 /// inspect `envelope.direction` when their proof binds the message kind.
 #[async_trait]
 pub trait IncomingGuard: Send + Sync + 'static {
     async fn check(&self, request: IncomingDispatchRequest<'_>) -> Result<(), IncomingGuardError>;
+
+    /// Authenticate an actual outbound response after the workload has returned.
+    /// This must replace, not reuse, any proof inherited from the request.
+    async fn authenticate_response(
+        &self,
+        response: &mut RpcEnvelope,
+    ) -> Result<(), IncomingGuardError>;
 
     /// Authorize a stream chunk immediately before callback delivery.
     async fn check_stream(

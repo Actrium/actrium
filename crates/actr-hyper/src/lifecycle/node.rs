@@ -23,7 +23,7 @@ use crate::lifecycle::incoming_guard::{
 use crate::lifecycle::recovery_policy::translate::LifecycleProfile;
 use crate::lifecycle::session_state::{SessionSnapshot, SessionState};
 use crate::outbound::Gate;
-use crate::transport::HostTransport;
+use crate::transport::{HostTransport, VerifiedPeerContext};
 use crate::wire::webrtc::SignalingClient;
 #[cfg(feature = "opentelemetry")]
 use crate::wire::webrtc::trace::{inject_span_context_to_rpc, set_parent_from_rpc_envelope};
@@ -74,6 +74,16 @@ fn error_response_for_wire(error: &ActrError) -> actr_protocol::ErrorResponse {
         code: protocol_error_to_code(error),
         message: encode_delivery_uncertain_for_wire(error),
     }
+}
+
+async fn authenticate_response(
+    guard: Option<Arc<dyn IncomingGuard>>,
+    response: &mut RpcEnvelope,
+) -> Result<(), crate::lifecycle::IncomingGuardError> {
+    if let Some(guard) = guard {
+        guard.authenticate_response(response).await?;
+    }
+    Ok(())
 }
 
 /// Verified Actor types of connected peers, keyed by `ActrId`.
@@ -294,6 +304,7 @@ pub(crate) async fn inproc_send_reply(
     request_id: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    incoming_guard: Option<Arc<dyn IncomingGuard>>,
     metadata: Vec<actr_protocol::MetadataEntry>,
     expects_response: bool,
     result: ActorResult<Bytes>,
@@ -313,6 +324,16 @@ pub(crate) async fn inproc_send_reply(
                     None,
                     metadata,
                 );
+                if let Err(error) =
+                    authenticate_response(incoming_guard.clone(), &mut response_envelope).await
+                {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        guard_code = error.code.as_str(),
+                        "outbound response authentication failed; dropping response"
+                    );
+                    return;
+                }
                 #[cfg(feature = "opentelemetry")]
                 inject_span_context_to_rpc(&span, &mut response_envelope);
 
@@ -354,6 +375,16 @@ pub(crate) async fn inproc_send_reply(
                     tracestate,
                     metadata,
                 );
+                if let Err(error) =
+                    authenticate_response(incoming_guard.clone(), &mut error_envelope).await
+                {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        guard_code = error.code.as_str(),
+                        "outbound error response authentication failed; dropping response"
+                    );
+                    return;
+                }
                 #[cfg(feature = "opentelemetry")]
                 inject_span_context_to_rpc(&span, &mut error_envelope);
 
@@ -667,6 +698,7 @@ pub(crate) async fn mailbox_send_reply(
     route_key: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    incoming_guard: Option<Arc<dyn IncomingGuard>>,
     metadata: Vec<actr_protocol::MetadataEntry>,
     expects_response: bool,
     result: ActorResult<Bytes>,
@@ -686,6 +718,16 @@ pub(crate) async fn mailbox_send_reply(
                     tracestate,
                     metadata,
                 );
+                if let Err(error) =
+                    authenticate_response(incoming_guard.clone(), &mut response_envelope).await
+                {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        guard_code = error.code.as_str(),
+                        "outbound response authentication failed; dropping response"
+                    );
+                    return;
+                }
                 #[cfg(feature = "opentelemetry")]
                 inject_span_context_to_rpc(&span, &mut response_envelope);
 
@@ -747,6 +789,16 @@ pub(crate) async fn mailbox_send_reply(
                     tracestate,
                     metadata,
                 );
+                if let Err(error) =
+                    authenticate_response(incoming_guard.clone(), &mut error_envelope).await
+                {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        guard_code = error.code.as_str(),
+                        "outbound error response authentication failed; dropping response"
+                    );
+                    return;
+                }
                 #[cfg(feature = "opentelemetry")]
                 inject_span_context_to_rpc(&span, &mut error_envelope);
 
@@ -793,6 +845,7 @@ pub(crate) async fn mailbox_reply_and_ack(
     route_key: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    incoming_guard: Option<Arc<dyn IncomingGuard>>,
     metadata: Vec<actr_protocol::MetadataEntry>,
     expects_response: bool,
     msg_id: uuid::Uuid,
@@ -807,6 +860,7 @@ pub(crate) async fn mailbox_reply_and_ack(
         route_key,
         traceparent,
         tracestate,
+        incoming_guard,
         metadata,
         expects_response,
         result,
@@ -1943,9 +1997,10 @@ impl Inner {
 
     /// Build a RESPONSE envelope for a handled request.
     ///
-    /// Host authorization metadata (including the original request proof) is
-    /// inherited so the caller's IncomingGuard can authenticate the response
-    /// as part of the same session/channel generation.
+    /// Host authorization metadata is inherited only as the response signer's
+    /// session/routing input. Before transmission, `authenticate_response`
+    /// replaces the request proof with a proof of the actual response kind and
+    /// success payload or encoded error.
     ///
     /// `timeout_ms` is always 0: per the `package.proto` wire contract only
     /// `DIRECTION_REQUEST` carries a positive deadline — RESPONSE (and TELL)
@@ -2038,12 +2093,24 @@ impl Inner {
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingOutcome {
+        self.handle_incoming_with_context(envelope, caller, None, reply_sink, scope)
+            .await
+    }
+
+    pub async fn handle_incoming_with_context(
+        &self,
+        envelope: RpcEnvelope,
+        caller: Option<IncomingCaller<'_>>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
+        scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
+    ) -> IncomingOutcome {
         // Thin wrapper preserving the original flow: run synchronous
         // admission, then await the continuation to completion inline. This is
         // bit-for-bit the pre-B2 path (ACL → dedup → ctx → dispatch → dedup
         // complete), used directly by the mailbox lane and by the in-proc lane
         // when the dispatch gate is off.
-        self.admit_incoming(envelope, caller, reply_sink, scope)
+        self.admit_incoming_with_context(envelope, caller, peer_context, reply_sink, scope)
             .await
             .await
     }
@@ -2087,13 +2154,36 @@ impl Inner {
     /// aside and release the slot first.
     pub(crate) async fn admit_incoming(
         &self,
-        mut envelope: RpcEnvelope,
+        envelope: RpcEnvelope,
         caller: Option<IncomingCaller<'_>>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingContinuation {
+        self.admit_incoming_with_context(envelope, caller, None, reply_sink, scope)
+            .await
+    }
+
+    pub(crate) async fn admit_incoming_with_context(
+        &self,
+        mut envelope: RpcEnvelope,
+        caller: Option<IncomingCaller<'_>>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
+        scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
+    ) -> IncomingContinuation {
         let caller_id = caller.map(|(id, _)| id);
-        let caller_type = caller.and_then(|(_, actor_type)| actor_type);
+        if peer_context
+            .as_ref()
+            .is_some_and(|context| caller_id != Some(&context.peer_actor_id))
+        {
+            return ready_continuation(Err(ActrError::PermissionDenied(
+                "caller identity does not match the verified channel context".to_string(),
+            )));
+        }
+        let caller_type = peer_context
+            .as_ref()
+            .map(|context| &context.peer_actor_type)
+            .or_else(|| caller.and_then(|(_, actor_type)| actor_type));
         // Package-less routes emitted by older generators had one leading
         // dot (`.Service.Method`). Normalize it before every admission-stage
         // consumer (reply-mode lookup, scheduler, and all runner variants)
@@ -2181,7 +2271,11 @@ impl Inner {
                 )));
             };
             let result = registry
-                .dispatch(method, IncomingDispatchRequest::new(&envelope, caller))
+                .dispatch(
+                    method,
+                    IncomingDispatchRequest::new(&envelope, caller)
+                        .with_peer_context(peer_context.clone()),
+                )
                 .await;
             return ready_continuation(result);
         }
@@ -2195,7 +2289,8 @@ impl Inner {
         if route_requires_incoming_guard(&envelope.route_key)
             && let Some(guard) = self.incoming_guard.as_ref()
         {
-            let request = IncomingDispatchRequest::new(&envelope, caller);
+            let request = IncomingDispatchRequest::new(&envelope, caller)
+                .with_peer_context(peer_context.clone());
             if let Err(error) = guard.check(request).await {
                 tracing::warn!(
                     severity = 5,
@@ -2373,6 +2468,7 @@ impl Inner {
                             envelope.route_key.clone(),
                             envelope.traceparent.clone(),
                             envelope.tracestate.clone(),
+                            self.incoming_guard.clone(),
                             envelope.metadata.clone(),
                             sink,
                             expects_response,
@@ -4281,6 +4377,7 @@ impl Inner {
                                         let traceparent = envelope.traceparent.clone();
                                         let tracestate = envelope.tracestate.clone();
                                         let metadata = envelope.metadata.clone();
+                                        let incoming_guard = node.incoming_guard.clone();
 
                                         if scheduler_on {
                                             // Synchronous admission preserves arrival
@@ -4298,7 +4395,7 @@ impl Inner {
                                                     IncomingOutcome::Replied(result) => {
                                                         inproc_send_reply(
                                                             response_tx, route_key, request_id,
-                                                            traceparent, tracestate, metadata, expects_response,
+                                                            traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                             result, span,
                                                         ).await;
                                                     }
@@ -4318,7 +4415,7 @@ impl Inner {
                                                 IncomingOutcome::Replied(result) => {
                                                     inproc_send_reply(
                                                         response_tx.clone(), route_key, request_id,
-                                                        traceparent, tracestate, metadata, expects_response,
+                                                        traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                         result, span,
                                                     ).await;
                                                 }
@@ -4757,6 +4854,25 @@ impl Inner {
                                                 // Decode caller_id from MessageRecord.from (transport layer)
                                                 let caller_id_result = ActrId::decode(&msg_record.from[..]);
                                                 let caller_type = recorded_caller_type(&msg_record);
+                                                let peer_context = match msg_record
+                                                    .peer_context
+                                                    .as_deref()
+                                                    .map(serde_json::from_slice::<VerifiedPeerContext>)
+                                                    .transpose()
+                                                {
+                                                    Ok(context) => context.map(Arc::new),
+                                                    Err(error) => {
+                                                        tracing::warn!(
+                                                            request_id = %request_id,
+                                                            %error,
+                                                            "mailbox verified peer context is invalid; dropping"
+                                                        );
+                                                        if let Err(ack_error) = mailbox.ack(msg_record.id).await {
+                                                            tracing::error!(%ack_error, "failed to ACK invalid mailbox context");
+                                                        }
+                                                        continue;
+                                                    }
+                                                };
                                                 let caller_ref = caller_id_result
                                                     .as_ref()
                                                     .ok()
@@ -4777,6 +4893,7 @@ impl Inner {
                                                 let ws_gate = ws_gate.clone();
                                                 let rtc_route = rtc_route.clone();
                                                 let mailbox_c = mailbox.clone();
+                                                let incoming_guard = node.incoming_guard.clone();
                                                 #[cfg(not(feature = "opentelemetry"))]
                                                 let span = tracing::Span::none();
 
@@ -4794,7 +4911,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let cont = node
-                                                        .admit_incoming(envelope.clone(), caller_ref, Some(reply_sink), None)
+                                                        .admit_incoming_with_context(envelope.clone(), caller_ref, peer_context.clone(), Some(reply_sink), None)
                                                         .await;
                                                     inflight.push(Box::pin(async move {
                                                         match cont.await {
@@ -4802,7 +4919,7 @@ impl Inner {
                                                                 mailbox_reply_and_ack(
                                                                     ws_gate, rtc_route, mailbox_c,
                                                                     caller_owned, request_id, route_key,
-                                                                    traceparent, tracestate, metadata, expects_response,
+                                                                    traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                                     msg_id, result, span,
                                                                 )
                                                                 .await;
@@ -4821,7 +4938,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let handle_incoming_fut =
-                                                        node.handle_incoming(envelope.clone(), caller_ref, Some(reply_sink), None);
+                                                        node.handle_incoming_with_context(envelope.clone(), caller_ref, peer_context.clone(), Some(reply_sink), None);
                                                     #[cfg(feature = "opentelemetry")]
                                                     let handle_incoming_fut =
                                                         handle_incoming_fut.instrument(span.clone());
@@ -4830,7 +4947,7 @@ impl Inner {
                                                             mailbox_reply_and_ack(
                                                                 ws_gate, rtc_route, mailbox_c,
                                                                 caller_owned, request_id, route_key,
-                                                                traceparent, tracestate, metadata, expects_response,
+                                                                traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                                 msg_id, result, span,
                                                             )
                                                             .await;

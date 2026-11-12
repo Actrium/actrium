@@ -37,9 +37,10 @@ impl Default for SqliteConfig {
 
 /// Current on-disk schema version, stored in `PRAGMA user_version`.
 ///
-/// Version 1 added `from_actr_type`. Older mailbox databases are refused
-/// rather than migrated: delete the file to start with an empty mailbox.
-pub const MAILBOX_SCHEMA_VERSION: i64 = 1;
+/// Version 1 added `from_actr_type`; version 2 added the authenticated channel
+/// context. Older mailbox databases are refused rather than migrated: delete
+/// the file to start with an empty mailbox.
+pub const MAILBOX_SCHEMA_VERSION: i64 = 2;
 
 /// SQLite connection wrapper
 struct SqliteConnection {
@@ -119,6 +120,7 @@ impl SqliteConnection {
                 id TEXT PRIMARY KEY,
                 from_actr_id BLOB NOT NULL,  -- ActrId Protobuf bytes (all messages must have a sender)
                 from_actr_type BLOB,         -- verified ActrType Protobuf bytes, NULL when unknown
+                peer_context BLOB,           -- authenticated channel context, NULL for legacy transport
                 payload BLOB NOT NULL,
                 priority INTEGER NOT NULL,
                 status INTEGER NOT NULL DEFAULT 0, -- 0: Queued, 1: Inflight
@@ -195,6 +197,18 @@ impl Mailbox for SqliteMailbox {
         payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid> {
+        self.enqueue_with_context(from, from_type, None, payload, priority)
+            .await
+    }
+
+    async fn enqueue_with_context(
+        &self,
+        from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
+        peer_context: Option<Vec<u8>>,
+        payload: Vec<u8>,
+        priority: MessagePriority,
+    ) -> StorageResult<Uuid> {
         let id = Uuid::new_v4();
         let observer = self.current_depth_observer();
 
@@ -207,11 +221,12 @@ impl Mailbox for SqliteMailbox {
         let depth = {
             let conn = self.connection.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO messages (id, from_actr_id, from_actr_type, payload, priority, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+                "INSERT INTO messages (id, from_actr_id, from_actr_type, peer_context, payload, priority, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
                 params![
                     id.to_string(),
                     from,
                     from_type,
+                    peer_context,
                     payload,
                     priority as i64,
                     Utc::now().to_rfc3339(),
@@ -251,7 +266,7 @@ impl Mailbox for SqliteMailbox {
                 ORDER BY priority DESC, created_at ASC
                 LIMIT ?1
             )
-            RETURNING id, from_actr_id, payload, priority, created_at, status, from_actr_type;
+            RETURNING id, from_actr_id, payload, priority, created_at, status, from_actr_type, peer_context;
             "#,
         )?;
 
@@ -283,6 +298,7 @@ impl Mailbox for SqliteMailbox {
                     id,
                     from,
                     from_type: row.get(6)?,
+                    peer_context: row.get(7)?,
                     payload: row.get(2)?,
                     priority: if priority_val == 1 {
                         MessagePriority::High
@@ -595,6 +611,31 @@ mod tests {
         let untyped = messages.iter().find(|m| m.payload == b"untyped").unwrap();
         assert_eq!(typed.from_type.as_deref(), Some(&from_type[..]));
         assert_eq!(untyped.from_type, None);
+    }
+
+    #[tokio::test]
+    async fn authenticated_peer_context_survives_a_reopen() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mailbox.db");
+        let peer_context = b"verified-channel-generation".to_vec();
+        {
+            let mailbox = SqliteMailbox::new(&path).await.unwrap();
+            mailbox
+                .enqueue_with_context(
+                    dummy_actr_id_bytes(),
+                    None,
+                    Some(peer_context.clone()),
+                    b"authenticated".to_vec(),
+                    MessagePriority::Normal,
+                )
+                .await
+                .unwrap();
+        }
+
+        let mailbox = SqliteMailbox::new(&path).await.unwrap();
+        let messages = mailbox.dequeue().await.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].peer_context, Some(peer_context));
     }
 
     #[tokio::test]

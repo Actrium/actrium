@@ -206,6 +206,7 @@ dependencies = [
  "actr-runtime",
  "actr-runtime-mailbox",
  "actr-service-compat",
+ "actrium-runtime",
  "anyhow",
  "async-trait",
  "axum",

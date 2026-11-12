@@ -393,6 +393,7 @@ struct CapturingMailbox {
     enqueue_count: AtomicUsize,
     last_priority: std::sync::Mutex<Option<MessagePriority>>,
     last_from_type: std::sync::Mutex<Option<Vec<u8>>>,
+    last_peer_context: std::sync::Mutex<Option<Vec<u8>>>,
 }
 
 impl CapturingMailbox {
@@ -401,6 +402,7 @@ impl CapturingMailbox {
             enqueue_count: AtomicUsize::new(0),
             last_priority: std::sync::Mutex::new(None),
             last_from_type: std::sync::Mutex::new(None),
+            last_peer_context: std::sync::Mutex::new(None),
         })
     }
 }
@@ -409,14 +411,27 @@ impl CapturingMailbox {
 impl Mailbox for CapturingMailbox {
     async fn enqueue(
         &self,
+        from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
+        payload: Vec<u8>,
+        priority: MessagePriority,
+    ) -> StorageResult<Uuid> {
+        self.enqueue_with_context(from, from_type, None, payload, priority)
+            .await
+    }
+
+    async fn enqueue_with_context(
+        &self,
         _from: Vec<u8>,
         from_type: Option<Vec<u8>>,
+        peer_context: Option<Vec<u8>>,
         _payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid> {
         self.enqueue_count.fetch_add(1, Ordering::SeqCst);
         *self.last_priority.lock().unwrap() = Some(priority);
         *self.last_from_type.lock().unwrap() = from_type;
+        *self.last_peer_context.lock().unwrap() = peer_context;
         Ok(Uuid::new_v4())
     }
     async fn dequeue(&self) -> StorageResult<Vec<MessageRecord>> {
@@ -589,6 +604,49 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
         None,
         "the closed connection no longer holds the peer's type"
     );
+}
+
+#[tokio::test]
+async fn verified_websocket_request_persists_its_actual_channel_context() {
+    let mailbox = CapturingMailbox::new();
+    let peer = test_actor_id(401);
+    let context = Arc::new(VerifiedPeerContext {
+        local_actor_id: test_actor_id(999),
+        peer_actor_id: peer.clone(),
+        peer_actor_type: test_actor_type(),
+        peer_member: "member".into(),
+        peer_client_key: "client-key".into(),
+        peer_role: "owner".into(),
+        peer_actor_public_key: vec![1],
+        channel_id: "channel-2".into(),
+        channel_generation: 2,
+        transcript_digest: vec![2],
+        local_runtime_instance_id: "local-runtime".into(),
+        peer_runtime_instance_id: "peer-runtime".into(),
+        peer_credential_expires_at_epoch_secs: u64::MAX,
+        current_policy_binding: vec![3],
+        current_state_binding: vec![4],
+    });
+    let envelope = make_rpc_envelope("verified-context");
+    let data = bytes::Bytes::from(actr_protocol::prost::Message::encode_to_vec(&envelope));
+
+    WebSocketGate::handle_envelope_with_context(
+        envelope,
+        actr_protocol::prost::Message::encode_to_vec(&peer),
+        None,
+        Some(context.clone()),
+        data,
+        PayloadType::RpcReliable,
+        empty_pending(),
+        mailbox.clone(),
+    )
+    .await;
+
+    assert_eq!(mailbox.enqueue_count.load(Ordering::SeqCst), 1);
+    let stored = mailbox.last_peer_context.lock().unwrap().clone().unwrap();
+    let stored: VerifiedPeerContext = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(&stored, context.as_ref());
+    assert_eq!(stored.channel_generation, 2);
 }
 
 /// RPC request with no pending entry should go to the mailbox with normal priority.

@@ -178,6 +178,7 @@ name = "recovery_latency"
 harness = false
 
 [dev-dependencies]
+actrium-runtime = { path = "../actrium-runtime" }
 rcgen = "0.14.8"
 tokio = { workspace = true }
 rand.workspace = true

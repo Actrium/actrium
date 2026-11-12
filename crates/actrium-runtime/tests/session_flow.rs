@@ -1080,6 +1080,90 @@ async fn guard_checks_route_scope_proof_and_replay_before_dispatch() {
 }
 
 #[tokio::test]
+async fn response_proofs_cover_the_actual_kind_and_success_or_error_payload() {
+    let front = Front::new("alice");
+    let fixture = Fixture::new(std::slice::from_ref(&front));
+    let channel = make_channel(&front, "a", 2_000);
+    let outcome = fixture
+        .service
+        .attach(attach_request(&front, &channel, "a1"), &channel)
+        .await
+        .unwrap();
+
+    let mut request = business(&outcome, &channel, "response-request", READ);
+    request.idempotency_key = None;
+    request.sign(&outcome.session_secret);
+    let mut inherited = request.clone();
+    inherited.request_id = "inherited-response-proof".into();
+    inherited.kind = MessageKind::Response;
+    inherited.payload = b"ok".to_vec();
+    assert_code(
+        fixture.service.guard().authorize(inherited, &channel).await,
+        AttachErrorCode::PermissionDenied,
+    );
+
+    let mut success = request.clone();
+    success.request_id = "success-response".into();
+    success.kind = MessageKind::Response;
+    success.payload = b"ok".to_vec();
+    success.sign(&outcome.session_secret);
+    assert_ne!(success.proof, request.proof);
+
+    let mut tampered_kind = success.clone();
+    tampered_kind.request_id = "tampered-response-kind".into();
+    tampered_kind.kind = MessageKind::Tell;
+    assert_code(
+        fixture
+            .service
+            .guard()
+            .authorize(tampered_kind, &channel)
+            .await,
+        AttachErrorCode::PermissionDenied,
+    );
+    let mut tampered_payload = success.clone();
+    tampered_payload.request_id = "tampered-response-payload".into();
+    tampered_payload.payload = b"OK".to_vec();
+    assert_code(
+        fixture
+            .service
+            .guard()
+            .authorize(tampered_payload, &channel)
+            .await,
+        AttachErrorCode::PermissionDenied,
+    );
+    fixture
+        .service
+        .guard()
+        .authorize(success, &channel)
+        .await
+        .unwrap();
+
+    let error_payload = vec![0x08, 0x07, 0x12, 0x06, b'd', b'e', b'n', b'i', b'e', b'd'];
+    let mut error = request;
+    error.request_id = "error-response".into();
+    error.kind = MessageKind::Response;
+    error.payload = error_payload;
+    error.sign(&outcome.session_secret);
+    let mut tampered_error = error.clone();
+    tampered_error.request_id = "tampered-error-response".into();
+    tampered_error.payload = vec![0x08, 0x08, 0x12, 0x06, b'd', b'e', b'n', b'i', b'e', b'd'];
+    assert_code(
+        fixture
+            .service
+            .guard()
+            .authorize(tampered_error, &channel)
+            .await,
+        AttachErrorCode::PermissionDenied,
+    );
+    fixture
+        .service
+        .guard()
+        .authorize(error, &channel)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn detach_releases_lease_without_stopping_service() {
     let alice = Front::new("alice");
     let bob = Front::new("bob");

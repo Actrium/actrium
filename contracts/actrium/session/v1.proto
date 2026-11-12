@@ -359,12 +359,15 @@ message SessionMetadata {
   string service_actor_id                  = 12;
   string capability                        = 13;
   MessageKind kind                         = 14;
+  uint64 issued_at_epoch_secs              = 15;
 
   // Canonical request_proof input (must match actrium-runtime crypto.rs):
+  // Shared language-neutral vectors: business_proof_test_vectors.json.
   //
   //   "actrium.business.request.v1\0" ||
   //   LP(session_id) || BE64(lease_epoch) || LP(service_actor_id) ||
   //   LP(channel_id) || LP(route_key) || LP(capability) || LP(request_id) ||
+  //   BE64(issued_at_epoch_secs) || BE64(deadline_epoch_secs) ||
   //   KIND || IDEMPOTENCY || LP(SHA-256(payload))
   //
   // The domain separator is the 28 ASCII bytes ending in one NUL byte. LP(x)
@@ -372,13 +375,15 @@ message SessionMetadata {
   // used verbatim. BE64 is an unsigned 64-bit big-endian integer. KIND is one
   // byte containing the MessageKind numeric value (1 through 4). IDEMPOTENCY
   // is 0x00 when idempotency_key is absent, or 0x01 || LP(idempotency_key)
-  // when present. The payload is the exact business RPC payload, not its
-  // protobuf framing. All lengths and integers use fixed-width big-endian
-  // encoding, never protobuf varints or serialized protobuf messages.
+  // when present. For success responses the payload is the exact business RPC
+  // payload; for error responses it is the exact protobuf ErrorResponse bytes.
+  // It does not include the RpcEnvelope framing. All lengths and integers use
+  // fixed-width big-endian encoding, never protobuf varints or serialized
+  // protobuf messages.
   //
   // request_proof = HMAC-SHA-256(sessionSecret, canonical_input), where
   // sessionSecret is the 32-byte secret established for this session. The
-  // member, client_key, program_digest, deadline_epoch_secs, and request_proof
-  // fields are not canonical_input fields. This proof binds the payload and
-  // all authority-bearing routing fields to the exact session and lease.
+  // member, client_key, program_digest, and request_proof fields are not
+  // canonical_input fields. This proof binds the payload and all
+  // authority-bearing routing fields to the exact session and lease.
 }

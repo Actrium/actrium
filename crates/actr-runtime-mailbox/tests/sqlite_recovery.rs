@@ -222,20 +222,20 @@ async fn current_schema_database_recovers_without_ownership_metadata() {
         if wal {
             conn.execute_batch("PRAGMA journal_mode = WAL").unwrap();
         }
-        // Current sender-type schema, with no ownership metadata. Old schema
-        // versions are intentionally refused (covered by the schema unit test).
-        // Fixed timestamps also verify ordering across recovery.
+        // Current authenticated-channel schema, with no ownership metadata. Old
+        // schema versions are intentionally refused (covered by the schema unit
+        // test). Fixed timestamps also verify ordering across recovery.
         conn.execute_batch(
-            "PRAGMA user_version = 1;
+            "PRAGMA user_version = 2;
              CREATE TABLE messages (
                  id TEXT PRIMARY KEY, from_actr_id BLOB NOT NULL,
-                 from_actr_type BLOB,
+                 from_actr_type BLOB, peer_context BLOB,
                  payload BLOB NOT NULL, priority INTEGER NOT NULL,
                  status INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
              );
              INSERT INTO messages VALUES
-                 ('00000000-0000-0000-0000-000000000001', X'01', X'02', X'41', 0, 1, '2026-01-01T00:00:00Z'),
-                 ('00000000-0000-0000-0000-000000000002', X'01', NULL, X'42', 0, 0, '2026-01-01T00:00:01Z');",
+                 ('00000000-0000-0000-0000-000000000001', X'01', X'02', X'03', X'41', 0, 1, '2026-01-01T00:00:00Z'),
+                 ('00000000-0000-0000-0000-000000000002', X'01', NULL, NULL, X'42', 0, 0, '2026-01-01T00:00:01Z');",
         ).unwrap();
         drop(conn);
         let cfg = config(&path, wal);
@@ -248,6 +248,8 @@ async fn current_schema_database_recovers_without_ownership_metadata() {
             assert_eq!(records[1].payload, b"B");
             assert_eq!(records[0].from_type, Some(vec![2]));
             assert_eq!(records[1].from_type, None);
+            assert_eq!(records[0].peer_context, Some(vec![3]));
+            assert_eq!(records[1].peer_context, None);
             assert_eq!(
                 records[0].id.to_string(),
                 "00000000-0000-0000-0000-000000000001"

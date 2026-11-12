@@ -72,6 +72,7 @@ use tokio::task::{AbortHandle, JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use crate::lifecycle::{IncomingGuard, IncomingStreamChunk};
+use crate::transport::VerifiedPeerContext;
 
 /// Default per-stream bounded queue depth.
 ///
@@ -107,6 +108,7 @@ pub(crate) type DataChunkCallback =
 struct QueuedChunk {
     chunk: DataChunk,
     sender_id: ActrId,
+    peer_context: Option<Arc<VerifiedPeerContext>>,
     callback: DataChunkCallback,
 }
 
@@ -273,7 +275,12 @@ impl DataChunkRegistry {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = guard;
     }
 
-    async fn authorize_chunk(inner: &RegistryInner, chunk: &DataChunk, sender_id: &ActrId) -> bool {
+    async fn authorize_chunk(
+        inner: &RegistryInner,
+        chunk: &DataChunk,
+        sender_id: &ActrId,
+        peer_context: &Option<Arc<VerifiedPeerContext>>,
+    ) -> bool {
         let guard = inner
             .incoming_guard
             .read()
@@ -283,7 +290,9 @@ impl DataChunkRegistry {
             return true;
         };
         if let Err(error) = guard
-            .check_stream(IncomingStreamChunk::new(chunk, sender_id))
+            .check_stream(
+                IncomingStreamChunk::new(chunk, sender_id).with_peer_context(peer_context.clone()),
+            )
             .await
         {
             tracing::warn!(
@@ -457,10 +466,22 @@ impl DataChunkRegistry {
     ///   (`StreamReliable` = backpressure, `StreamLatencyFirst` = drop-newest)
     ///
     /// Same-stream chunks are delivered in arrival order, run-to-completion.
+    #[cfg(test)]
     pub(crate) async fn dispatch(
         &self,
         chunk: DataChunk,
         sender_id: ActrId,
+        payload_type: PayloadType,
+    ) {
+        self.dispatch_with_context(chunk, sender_id, None, payload_type)
+            .await;
+    }
+
+    pub(crate) async fn dispatch_with_context(
+        &self,
+        chunk: DataChunk,
+        sender_id: ActrId,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
         payload_type: PayloadType,
     ) {
         let stream_id = chunk.stream_id.clone();
@@ -472,6 +493,7 @@ impl DataChunkRegistry {
         let queued = QueuedChunk {
             chunk,
             sender_id,
+            peer_context,
             callback,
         };
 
@@ -728,7 +750,14 @@ impl DataChunkRegistry {
                         let Some(current) = registry.upgrade() else {
                             return;
                         };
-                        if !Self::authorize_chunk(&current, &queued.chunk, &queued.sender_id).await {
+                        if !Self::authorize_chunk(
+                            &current,
+                            &queued.chunk,
+                            &queued.sender_id,
+                            &queued.peer_context,
+                        )
+                        .await
+                        {
                             continue;
                         }
                         Self::run_callback(&stream_id, queued, &panic_count).await;
@@ -771,6 +800,7 @@ impl DataChunkRegistry {
             chunk,
             sender_id,
             callback,
+            ..
         } = queued;
         let sequence = chunk.sequence;
         let fut = match std::panic::catch_unwind(AssertUnwindSafe(|| callback(chunk, sender_id))) {

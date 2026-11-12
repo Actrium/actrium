@@ -498,15 +498,20 @@ impl LifecycleService {
     }
 
     pub fn instance(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
+        self.ensure_not_purged(actor_id)?;
         if let Some(instance) = read_optional_json(&self.instance_path(actor_id))? {
             return self.validate_instance(actor_id, instance);
         }
+        Err(LifecycleError::NotFound(actor_id.into()))
+    }
+
+    fn ensure_not_purged(&self, actor_id: &str) -> Result<(), LifecycleError> {
         if read_optional_json::<InstanceTombstone>(&self.tombstone_path(actor_id))?
             .is_some_and(|tombstone| tombstone.reason == TombstoneReason::Purged)
         {
             return Err(LifecycleError::Deleted(actor_id.into()));
         }
-        Err(LifecycleError::NotFound(actor_id.into()))
+        Ok(())
     }
 
     pub fn tombstone(&self, actor_id: &str) -> Result<Option<InstanceTombstone>, LifecycleError> {
@@ -565,6 +570,9 @@ impl LifecycleService {
         };
 
         while let Some(next) = intent.stage.next() {
+            if let Some(actor_id) = intent.result_actor_id.as_deref() {
+                self.ensure_not_purged(actor_id)?;
+            }
             match next {
                 CreationStage::Prepared => unreachable!("Prepared has no predecessor"),
                 CreationStage::PackageVerified | CreationStage::UserApproved => {
@@ -640,6 +648,7 @@ impl LifecycleService {
 
     fn persist_allocated_identity(&self, intent: &CreationIntent) -> Result<(), LifecycleError> {
         let actor_id = required_actor_id(intent)?;
+        self.ensure_not_purged(actor_id)?;
         let dir = self.instance_dir(actor_id);
         fs::create_dir_all(&dir)?;
         let tombstone = InstanceTombstone {
@@ -667,6 +676,7 @@ impl LifecycleService {
 
     fn commit_storage(&self, intent: &CreationIntent) -> Result<(), LifecycleError> {
         let actor_id = required_actor_id(intent)?;
+        self.ensure_not_purged(actor_id)?;
         let dir = self.instance_dir(actor_id);
         fs::create_dir_all(&dir)?;
         for private_dir in PRIVATE_DIRECTORIES {

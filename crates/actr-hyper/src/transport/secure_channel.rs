@@ -37,7 +37,7 @@ use std::sync::{Arc, RwLock};
 /// [`SecureCell::publish_verified`] to expose application I/O. In particular,
 /// a new channel generation must publish a new value rather than inheriting
 /// the preceding generation's identity or policy/state binding.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VerifiedPeerContext {
     pub local_actor_id: ActrId,
     pub peer_actor_id: ActrId,
