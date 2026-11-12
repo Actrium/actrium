@@ -24,7 +24,12 @@ pub(crate) fn validate_workload(
 ) -> Result<(), PackError> {
     let workload = &manifest.workload;
     match workload.profile.as_str() {
-        "actr.component/1" => validate_component(&read(&workload.entry)?),
+        "actr.component/1" => {
+            if let Some(path) = manifest.component_rpc_contract()? {
+                validate_rpc_proto(path, &read(path)?)?;
+            }
+            validate_component(&read(&workload.entry)?)
+        }
         KEEL_GUEST_PROFILE_V1 => {
             let keel = workload.keel.as_ref().ok_or_else(|| {
                 PackError::InvalidPackage("keel.guest/1 requires [workload.keel]".into())
@@ -79,11 +84,7 @@ fn validate_js_guest(
         )?;
         VersionReq::parse(&dependency.version)
             .map_err(|error| invalid("dependencies.service.version", error))?;
-        let contract = read(contract_path)?;
-        let source =
-            std::str::from_utf8(&contract).map_err(|error| invalid("Service Proto", error))?;
-        actr_service_compat::validate_self_contained_rpc_proto(source)
-            .map_err(|error| invalid(&format!("Service Proto `{contract_path}`"), error))?;
+        validate_rpc_proto(contract_path, &read(contract_path)?)?;
     }
     let Some(path) = &keel.capabilities else {
         return Ok(());
@@ -108,6 +109,13 @@ fn validate_js_guest(
         )?;
     }
     Ok(())
+}
+
+fn validate_rpc_proto(path: &str, contract: &[u8]) -> Result<(), PackError> {
+    let field = format!("Service Proto `{path}`");
+    let source = std::str::from_utf8(contract).map_err(|error| invalid(&field, error))?;
+    actr_service_compat::validate_self_contained_rpc_proto(source)
+        .map_err(|error| invalid(&field, error))
 }
 
 fn require(condition: bool, message: impl Into<String>) -> Result<(), PackError> {

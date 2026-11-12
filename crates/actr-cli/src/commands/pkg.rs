@@ -185,7 +185,7 @@ fn execute_pack(args: &PkgPackArgs, config_keychain: Option<&str>) -> Result<()>
     ensure_publisher_matches(keychain_publisher.as_deref(), &manifest.actor.publisher)?;
     let output = output_target(&args.output)?;
     ensure!(
-        output != key_path.canonicalize()? && output != args.manifest_path.canonicalize()?,
+        !same_output(&output, &key_path)? && !same_output(&output, &args.manifest_path)?,
         "package output must differ from the signing key and manifest paths"
     );
 
@@ -209,7 +209,7 @@ fn execute_pack(args: &PkgPackArgs, config_keychain: Option<&str>) -> Result<()>
             canonical_root.display()
         );
         ensure!(
-            output != canonical_path,
+            !same_output(&output, &canonical_path)?,
             "package output must differ from payload {path}"
         );
         let mut bytes = Vec::new();
@@ -251,9 +251,59 @@ fn output_target(path: &Path) -> Result<PathBuf> {
     Ok(parent.canonicalize()?.join(file_name))
 }
 
+fn same_output(left: &Path, right: &Path) -> Result<bool> {
+    fn identity(path: &Path) -> Result<Option<same_file::Handle>> {
+        match same_file::Handle::from_path(path) {
+            Ok(handle) => Ok(Some(handle)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => {
+                Err(error).with_context(|| format!("Failed to inspect {}", path.display()))
+            }
+        }
+    }
+
+    if left == right {
+        return Ok(true);
+    }
+    let Some(left) = identity(left)? else {
+        return Ok(false);
+    };
+    Ok(identity(right)?.is_some_and(|right| left == right))
+}
+
 enum OutputPermissions {
     Private,
     Package,
+}
+
+fn stage_output(path: &Path, permissions: OutputPermissions) -> Result<tempfile::NamedTempFile> {
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut builder = tempfile::Builder::new();
+    let existing_permissions = if matches!(permissions, OutputPermissions::Package) {
+        match std::fs::metadata(path) {
+            Ok(metadata) => Some(metadata.permissions()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // New packages use ordinary file permissions, restricted by the umask.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    builder.permissions(std::fs::Permissions::from_mode(0o666));
+                }
+                None
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("Failed to inspect {}", path.display()));
+            }
+        }
+    } else {
+        None
+    };
+    let file = builder.tempfile_in(path.parent().context("missing output directory")?)?;
+    if let Some(permissions) = existing_permissions {
+        // Apply the replacement mode before any package bytes are written.
+        file.as_file().set_permissions(permissions)?;
+    }
+    Ok(file)
 }
 
 fn write_atomic(
@@ -262,30 +312,8 @@ fn write_atomic(
     overwrite: bool,
     permissions: OutputPermissions,
 ) -> Result<()> {
-    #[cfg_attr(not(unix), allow(unused_mut))]
-    let mut builder = tempfile::Builder::new();
-    let existing_permissions = if matches!(permissions, OutputPermissions::Package) {
-        // New packages use ordinary file permissions, restricted by the umask.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            builder.permissions(std::fs::Permissions::from_mode(0o666));
-        }
-        match std::fs::metadata(path) {
-            Ok(metadata) => Some(metadata.permissions()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => {
-                return Err(error).with_context(|| format!("Failed to inspect {}", path.display()));
-            }
-        }
-    } else {
-        None
-    };
-    let mut file = builder.tempfile_in(path.parent().context("missing output directory")?)?;
+    let mut file = stage_output(path, permissions)?;
     file.write_all(bytes)?;
-    if let Some(permissions) = existing_permissions {
-        file.as_file().set_permissions(permissions)?;
-    }
     let result = if overwrite {
         file.persist(path)
     } else {
@@ -313,10 +341,12 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         .as_deref()
         .map(output_target)
         .transpose()?;
-    ensure!(
-        public_path.as_ref() != Some(&key_path),
-        "the public and private key outputs must be different files"
-    );
+    if let Some(path) = &public_path {
+        ensure!(
+            !same_output(path, &key_path)?,
+            "the public and private key outputs must be different files"
+        );
+    }
     for path in std::iter::once(&key_path).chain(public_path.iter()) {
         ensure!(
             !path.is_dir(),
@@ -335,10 +365,12 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         let path = crate::config::loader::global_config_path()?;
         let config = crate::config::loader::load_cli_config(&path)?.unwrap_or_default();
         let target = output_target(&path)?;
-        ensure!(
-            target != key_path && public_path.as_ref() != Some(&target),
-            "key outputs must differ from the global CLI configuration"
-        );
+        for path in std::iter::once(&key_path).chain(public_path.iter()) {
+            ensure!(
+                !same_output(&target, path)?,
+                "key outputs must differ from the global CLI configuration"
+            );
+        }
         Some((target, config))
     };
 
@@ -370,6 +402,12 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         OutputPermissions::Private,
     )?;
     if let Some(path) = &public_path {
+        // On case-insensitive filesystems an alias of a new output only
+        // becomes observable after the private key has been written.
+        ensure!(
+            !same_output(path, &key_path)?,
+            "the public and private key outputs must be different files"
+        );
         let public_json = serde_json::to_vec_pretty(&serde_json::json!({
             "public_key": public_b64
         }))?;
@@ -394,6 +432,12 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
     }
 
     if let Some((global_path, mut global_config)) = global {
+        for path in std::iter::once(&key_path).chain(public_path.iter()) {
+            ensure!(
+                !same_output(&global_path, path)?,
+                "key outputs must differ from the global CLI configuration"
+            );
+        }
         global_config.publisher.keychain = Some(key_path.display().to_string());
         let content =
             toml::to_string_pretty(&global_config).with_context(|| "Failed to serialize config")?;
@@ -656,11 +700,15 @@ async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> 
     Ok(())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
-    use super::{OutputPermissions, write_atomic};
+    #[cfg(unix)]
+    use super::{OutputPermissions, stage_output, write_atomic};
+    use super::{PkgKeygenArgs, execute_keygen};
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
+    #[cfg(unix)]
     #[test]
     fn atomic_package_output_uses_regular_modes_and_preserves_existing_permissions() {
         let directory = tempfile::tempdir().unwrap();
@@ -672,8 +720,13 @@ mod tests {
             std::fs::metadata(&package).unwrap().permissions().mode(),
             std::fs::metadata(&ordinary).unwrap().permissions().mode()
         );
-        for mode in [0o640, 0o644] {
+        for mode in [0o600, 0o640, 0o644] {
             std::fs::set_permissions(&package, std::fs::Permissions::from_mode(mode)).unwrap();
+            let staged = stage_output(&package, OutputPermissions::Package).unwrap();
+            let metadata = staged.as_file().metadata().unwrap();
+            assert_eq!(metadata.len(), 0);
+            assert_eq!(metadata.permissions().mode() & 0o777, mode);
+
             write_atomic(&package, b"replacement", true, OutputPermissions::Package).unwrap();
             assert_eq!(std::fs::read(&package).unwrap(), b"replacement");
             assert_eq!(
@@ -690,5 +743,35 @@ mod tests {
             std::fs::metadata(&key).unwrap().permissions().mode() & 0o077,
             0
         );
+    }
+
+    #[test]
+    fn keygen_keeps_private_key_when_public_output_is_a_case_alias() {
+        let directory = tempfile::tempdir().unwrap();
+        let probe = directory.path().join("CaseProbe");
+        std::fs::write(&probe, []).unwrap();
+        if !directory.path().join("caseprobe").exists() {
+            return;
+        }
+
+        let private = directory.path().join("Key.json");
+        let public = directory.path().join("key.json");
+        let args = PkgKeygenArgs {
+            output: Some(private.clone()),
+            force: true,
+            publisher: None,
+            no_register: true,
+            public_key_output: Some(public),
+        };
+
+        let error = execute_keygen(&args).unwrap_err().to_string();
+        assert!(error.contains("outputs must be different files"), "{error}");
+        let generated = std::fs::read(&private).unwrap();
+        let key: serde_json::Value = serde_json::from_slice(&generated).unwrap();
+        assert!(key["private_key"].is_string());
+
+        let error = execute_keygen(&args).unwrap_err().to_string();
+        assert!(error.contains("outputs must be different files"), "{error}");
+        assert_eq!(std::fs::read(&private).unwrap(), generated);
     }
 }

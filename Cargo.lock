@@ -81,6 +81,7 @@ dependencies = [
  "rusqlite",
  "rust-embed",
  "rustls",
+ "same-file",
  "serde",
  "serde_json",
  "serde_yaml",
