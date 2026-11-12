@@ -27,6 +27,39 @@ describe('verifyCapabilityManifest', () => {
     });
   });
 
+  test('accepts v1 business service routes with a service policy', () => {
+    const result = verifyCapabilityManifest(
+      {
+        ...manifest,
+        hostModules: {
+          service: { rpc: ['echo.EchoService.Echo'], events: [] },
+        },
+      },
+      {
+        ...options,
+        serviceCapabilities: { rpc: new Set(['echo.EchoService.Echo']) },
+      }
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  test('rejects a service route outside the service policy', () => {
+    const result = verifyCapabilityManifest(
+      {
+        ...manifest,
+        hostModules: {
+          service: { rpc: ['echo.EchoService.Echo'], events: [] },
+        },
+      },
+      {
+        ...options,
+        serviceCapabilities: { rpc: new Set(['other.Route']) },
+      }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+  });
+
   test('enforces the per-app component allowlist', () => {
     expect(
       verifyCapabilityManifest(manifest, {
@@ -105,9 +138,21 @@ describe('verifyCapabilityManifest', () => {
     const result = verifyCapabilityManifest(
       {
         ...manifest,
-        hostModules: { service: { rpc: ['tell'] } },
+        imports: ['host:service', 'host:clipboard'],
+        hostModules: {
+          ...manifest.hostModules,
+          clipboard: { rpc: ['unknown'] },
+        },
       },
-      options
+      {
+        ...options,
+        hostSupportedModules: new Set(['host:service', 'host:clipboard']),
+        contractKinds: {
+          'host:service': { call: 'rpc' },
+          'host:clipboard': { read: 'rpc' },
+        },
+        declaredCapabilities: ['service', 'host:clipboard'],
+      }
     );
     expect(result.ok).toBe(false);
     expect(result.code).toBe('capability_mismatch');

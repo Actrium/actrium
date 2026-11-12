@@ -36,6 +36,11 @@ export function verifyCapabilityManifest(
     allowedImports?: ReadonlySet<string>;
     hostSupportedModules?: ReadonlySet<string>;
     contractKinds?: Record<string, Record<string, 'rpc' | 'subscription'>>;
+    /** Allowed business routes/events for `host:service`. */
+    serviceCapabilities?: {
+      rpc?: ReadonlySet<string>;
+      events?: ReadonlySet<string>;
+    };
     declaredCapabilities?: readonly string[];
   } = {}
 ): CapabilityVerificationResult {
@@ -128,6 +133,36 @@ export function verifyCapabilityManifest(
   if (options.contractKinds) {
     for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
       const moduleId = toModuleId(rawKey);
+      if (moduleId === 'host:service') {
+        // `host:service` entries are business routes/events, not transport
+        // exports (`call`/`tell`/`on`). Validate them against the service
+        // route policy when one is supplied.
+        if (options.serviceCapabilities) {
+          for (const route of entry.rpc ?? []) {
+            if (
+              options.serviceCapabilities.rpc &&
+              !options.serviceCapabilities.rpc.has(route)
+            ) {
+              return fail(
+                'capability_mismatch',
+                `Service route "${route}" is not allowed.`
+              );
+            }
+          }
+          for (const event of entry.events ?? []) {
+            if (
+              options.serviceCapabilities.events &&
+              !options.serviceCapabilities.events.has(event)
+            ) {
+              return fail(
+                'capability_mismatch',
+                `Service event "${event}" is not allowed.`
+              );
+            }
+          }
+        }
+        continue;
+      }
       const kinds = options.contractKinds[moduleId];
       if (!kinds) {
         return fail(

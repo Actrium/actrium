@@ -22,6 +22,7 @@ import { hasDeclaredCapability } from './capabilities';
 import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
+import { isLegacyEchoTab } from './legacy-echo';
 import type { TabConfig } from './types';
 
 type GuestButtonProps = {
@@ -194,9 +195,11 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setContent(next as React.ReactElement | null);
     };
     const unsubscribeUpdate = engine.on('update', update);
-    // Legacy event-bridge path kept for the echo demo. New Guests use
-    // host:service.call; remove this handler after the echo demo migrates.
-    const unsubscribeEvents = EventHandler.setup(engine, {
+    // The legacy bridge is confined to the echo demo. Every other package must
+    // use the per-tab host:service path.
+    const legacyEchoTab = isLegacyEchoTab(tab.appId);
+    const unsubscribeEvents = legacyEchoTab
+      ? EventHandler.setup(engine, {
       tabId: tab.id,
       onLog: (direction, event) => {
         logToNative(`[StandaloneGuestApp] ${direction}: ${event}`);
@@ -252,7 +255,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
           },
         },
       },
-    });
+    })
+      : () => {};
 
     void engine
       .loadBundle(guestScript, { containerHeight, containerWidth })
@@ -282,6 +286,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     // reloadKey still forces a clean reload when the package changes.
     guestScript,
     hasServiceCapability,
+    tab.appId,
     tab.id,
     tab.serviceCallUrl,
     tab.reloadKey,
