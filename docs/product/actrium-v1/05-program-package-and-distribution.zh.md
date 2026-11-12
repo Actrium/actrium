@@ -191,12 +191,8 @@ Actr 基础清单提供以下表。
 - `[[files]]` 记录包内文件的角色、大小和 SHA-256，也包含随包分发的依赖锁。
 - Service manifest 的 `[workspace]` 声明静态的 `requirement`、`access` 和 `providers`。
 
-对 Product v1 的配套包，`dependencies.service.contract` 以包内相对路径选定 RPC Proto。
-两个 Host 在配套包验证时，从已验证的 Front manifest 读取此路径。
-Service Host 从 `front_package` 对应的包取得 Front 清单，保存验证后的路径用于 Attach，
-再从自身已验证的 Service 归档读取选定的 Proto。
-两个清单必须在该路径登记角色为 `contract` 且 SHA-256 相同的文件。包中包含其他契约文件时，
-也按此路径选择 RPC 契约。Actr Host 按[第 06 章 §2.2](06-runtime-and-protocol.zh.md#22-front-actor-类型)计算 Attach 指纹。
+Front 按 `dependencies.service.contract` 读取自己包内的 RPC Proto，Service 按自身清单选取导出的 Proto。
+两个文件的角色必须为 `contract`，SHA-256 必须一致，包内路径和文件名可以不同。Attach 指纹见[第 06 章 §2.2](06-runtime-and-protocol.zh.md#22-front-actor-类型)。
 
 Service 节点使用现有 Actr `actr.toml` 格式配置 Realm、信令和信任等部署参数。字段见
 [节点配置定义](../../../crates/actr-config/src/actr_raw.rs)。Workspace 要求来自签名 Service manifest 的

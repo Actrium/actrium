@@ -23,7 +23,7 @@ cargo test -p actr-protocol --lib uri::tests::actor_serial_contract_is_consisten
 `actr.realm/v1` document from
 [`realm-profile.md`](../../actr/protocols/realm-profile.md), sections 4-6.
 Use a JSON Schema Draft 2020-12 validator with format assertions enabled.
-Active Profiles require a package; retired Profiles may omit it or use `null`.
+Active Profiles require `primary_package`, `front_package` and a map of 2–32 packages. Retired Profiles may omit all three. The verifier resolves the two distinct keys, checks their Actor types, and enforces the 64 KiB document limit and unique JSON members.
 Unknown members are allowed, including inside known objects. Preserve them
 when constructing the signed payload.
 

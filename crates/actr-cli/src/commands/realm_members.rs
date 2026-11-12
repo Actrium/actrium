@@ -239,11 +239,28 @@ async fn fetch_public(client: &reqwest::Client, url: String) -> Result<Vec<u8>> 
 /// them. `embedded`, an invite's Realm Profile, counts only if it verifies
 /// with the same keys; if both do, the higher sequence is taken, and it must
 /// be a valid successor of the other.
-async fn realm_profile<F, Fut>(
+pub(super) async fn realm_profile<F, Fut>(
     realm: &str,
     embedded: Option<&Value>,
     fetch: F,
 ) -> Result<RealmProfile>
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Result<Vec<u8>>>,
+{
+    let (profile, _, _) = resolve_profile(realm, embedded, fetch, None).await?;
+    if profile.realm.status == RealmStatus::Retired {
+        bail!("Realm {realm} is retired");
+    }
+    Ok(profile)
+}
+
+pub(super) async fn resolve_profile<F, Fut>(
+    realm: &str,
+    embedded: Option<&Value>,
+    fetch: F,
+    pins: Option<&actr_protocol::KeyPins>,
+) -> Result<(RealmProfile, RealmSigningKeys, actr_protocol::KeyPins)>
 where
     F: Fn(String) -> Fut,
     Fut: Future<Output = Result<Vec<u8>>>,
@@ -265,9 +282,12 @@ where
         .get_mut("realm_signing_keys")
         .map(Value::take)
         .with_context(|| format!("{url} lists no realm_signing_keys"))?;
-    let (keys, _) = RealmSigningKeys::accept(&member, None)
+    let (keys, outcome) = RealmSigningKeys::accept(&member, pins)
         .with_context(|| format!("{url}: realm_signing_keys"))?;
 
+    let actr_protocol::KeyPinOutcome::Accepted(pins) = outcome else {
+        bail!("Realm signing identity changed for {realm}");
+    };
     let mut failures = Vec::new();
     let mut fetched = None;
     for url in realm_profile_urls(&descriptor, realm)? {
@@ -316,10 +336,7 @@ where
             bail!("No verified Realm Profile for {realm} ({HINT}): {failures}");
         }
     };
-    if profile.realm.status == RealmStatus::Retired {
-        bail!("Realm {realm} is retired");
-    }
-    Ok(profile)
+    Ok((profile, keys, pins))
 }
 
 /// POST `document` to `<issuer>/membership`; the reply, or its error.
@@ -537,6 +554,31 @@ pub async fn invite(args: &InviteArgs) -> Result<Value> {
     member.send(request).await
 }
 
+#[derive(Args, Debug)]
+pub struct UpdateArgs {
+    #[command(flatten)]
+    pub key: KeyArgs,
+    /// JSON containing both references and the complete packages map
+    #[arg(long, value_name = "FILE")]
+    pub selection: PathBuf,
+}
+
+pub async fn update(args: &UpdateArgs) -> Result<Value> {
+    let member = Member::load(&args.key)?;
+    let selection = super::realm::read_selection(&args.selection)?;
+    let mut request = member.request(MembershipOp::UpdateRealm);
+    request.selection = Some(selection.clone());
+    let reply = member.send(request).await?;
+    let client = discovery_client()?;
+    let profile = realm_profile(&member.file.realm, None, |url| fetch_public(&client, url)).await?;
+    anyhow::ensure!(
+        reply["sequence"].as_u64() == Some(profile.sequence)
+            && profile.selection.as_ref() == Some(&selection),
+        "update was submitted but the published Profile does not match the requested selection and sequence"
+    );
+    Ok(reply)
+}
+
 pub async fn members(args: &KeyArgs) -> Result<Value> {
     let member = Member::load(args)?;
     member.send(member.request(MembershipOp::ListMembers)).await
@@ -606,7 +648,13 @@ mod tests {
         use sha2::{Digest, Sha256};
         use std::io::Write as _;
 
-        let package = profile.package.as_ref().context("active Realm package")?;
+        let package = profile
+            .selection
+            .as_ref()
+            .context("active Realm selection")?
+            .selected()
+            .map_err(anyhow::Error::msg)?
+            .0;
         let bytes = e2e_documents::fetch_https(&package.href, 64 * 1024 * 1024).await?;
         anyhow::ensure!(
             hex::encode(Sha256::digest(&bytes)) == package.sha256,
@@ -664,6 +712,24 @@ mod tests {
             realm_profile(&invite.realm, invite.profile.as_ref(), e2e_documents::fetch).await?;
         if let Some(output) = request["package_file"].as_str() {
             download_realm_package(&profile, output).await?;
+            if request["verify_pair"] == true {
+                let cache = tempfile::tempdir()?;
+                let args = crate::commands::realm_packages::FetchArgs {
+                    realm: invite.realm.clone(),
+                    additional: vec![],
+                    output: cache.path().into(),
+                };
+                let pair =
+                    crate::commands::realm_packages::fetch_with(&args, |url, limit| async move {
+                        e2e_documents::fetch_https(&url, limit).await
+                    })
+                    .await?;
+                anyhow::ensure!(
+                    std::path::Path::new(pair["front"].as_str().context("verified Front")?)
+                        .is_file(),
+                    "verified Front missing"
+                );
+            }
         }
         let args = JoinArgs {
             invite: invite_text,
@@ -998,9 +1064,14 @@ mod tests {
             "schema": "actr.realm/v1",
             "sequence": sequence,
             "realm": { "name": REALM, "display_name": "Notes", "status": "active" },
-            "package": {
+            "primary_package": "service",
+            "front_package": "ui",
+            "packages": {
+                "service": {
                 "href": "https://cdn.example/a.actr", "sha256": "ab".repeat(32),
                 "type": "acme.com/notes@1.0.0",
+            },
+                "ui": {"href":"https://cdn.example/front.actr", "sha256":"cd".repeat(32), "type":"acme.com/ui@1.0.0"}
             },
             "issuer": { "url": issuer, "keys": [{
                 "id": "7", "algorithm": "Ed25519", "status": "active",

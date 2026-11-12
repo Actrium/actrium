@@ -313,7 +313,12 @@ async fn credentials_are_signed_with_the_realm_issuer_key() {
     let mut document = serde_json::json!({
         "schema": "actr.realm/v1", "sequence": 1,
         "realm": { "name": TEST_REALM, "display_name": "Keys", "status": "active" },
-        "package": { "href": "https://example.com/keys.actr", "sha256": "ab".repeat(32), "type": "example.com/source-workload@1.0.0" },
+        "primary_package": "service",
+            "front_package": "ui",
+            "packages": {
+                "service": { "href": "https://example.com/keys.actr", "sha256": "ab".repeat(32), "type": "example.com/source-workload@1.0.0" },
+                "ui": {"href":"https://cdn.example/front.actr", "sha256":"cd".repeat(32), "type":"acme.com/ui@1.0.0"}
+            },
         "issuer": { "url": "https://provider.example/issuer", "keys": [
             { "id": realm_key_id.to_string(), "algorithm": "Ed25519", "status": "active", "public_key": public(realm_key.as_bytes()) },
             { "id": next_id.to_string(), "algorithm": "Ed25519", "status": "active", "public_key": public(&next_public) },

@@ -157,35 +157,81 @@
             "viewer"
           ]
         },
-        "package": {
-          "type": "object",
-          "required": [
-            "href",
-            "sha256",
-            "type"
-          ],
-          "properties": {
-            "href": {
-              "type": "string",
-              "pattern": "^https://"
-            },
-            "sha256": {
-              "type": "string",
-              "pattern": "^[0-9a-f]{64}$"
-            },
-            "type": {
-              "type": "string"
-            }
-          }
-        },
         "display_name": {
           "type": "string"
         },
         "status": {
           "const": "retired"
+        },
+        "primary_package": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "not": {
+            "pattern": "[^a-z0-9-]"
+          }
+        },
+        "front_package": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "not": {
+            "pattern": "[^a-z0-9-]"
+          }
+        },
+        "packages": {
+          "type": "object",
+          "minProperties": 2,
+          "maxProperties": 32,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+            "not": {
+              "pattern": "[^a-z0-9-]"
+            }
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "href",
+              "sha256",
+              "type"
+            ],
+            "properties": {
+              "href": {
+                "type": "string",
+                "pattern": "^https://"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
         }
       },
-      "additionalProperties": true
+      "additionalProperties": true,
+      "dependentRequired": {
+        "primary_package": [
+          "front_package",
+          "packages"
+        ],
+        "front_package": [
+          "primary_package",
+          "packages"
+        ],
+        "packages": [
+          "primary_package",
+          "front_package"
+        ]
+      }
     },
     "clientProof": {
       "type": "object",

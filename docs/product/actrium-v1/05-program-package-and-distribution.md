@@ -191,13 +191,9 @@ The Actr base manifest provides the following tables.
 - `[[files]]` for payload roles, sizes, and SHA-256 hashes, including any lock file.
 - `[workspace]` in the Service manifest for static `requirement`, `access`, and `providers` declarations.
 
-For a Product v1 pair, `dependencies.service.contract` selects the RPC Proto by package-relative path.
-During pair verification, both Hosts read this selector from the verified Front manifest.
-The Service Host reads the Front selected by `front_package` and retains
-the verified selector for Attach, then reads the selected Proto from its own verified Service archive.
-Both manifests must declare the file at that path with role `contract` and the same SHA-256.
-The explicit path selects the RPC contract when the archives carry other contract files. Actr Host
-derives the Attach fingerprint as described in [06 §2.2](06-runtime-and-protocol.md#22-front-actor-type).
+The Front reads its RPC Proto from `dependencies.service.contract` in its own archive. The Service
+uses its own manifest to select its exported Proto. Both files must have role `contract` and the
+same SHA-256. Their paths and filenames may differ. See [06 §2.2](06-runtime-and-protocol.md#22-front-actor-type) for the Attach fingerprint.
 
 Service nodes use the existing Actr `actr.toml` schema for deployment settings such as Realm,
 signaling, and trust. The [node configuration definition](../../../crates/actr-config/src/actr_raw.rs)

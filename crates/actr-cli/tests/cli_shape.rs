@@ -116,6 +116,7 @@ fn realm_group_exposes_the_signing_and_membership_tools() {
         [
             "create-request",
             "draft-request",
+            "fetch-packages",
             "invite",
             "join",
             "keygen",
@@ -130,6 +131,7 @@ fn realm_group_exposes_the_signing_and_membership_tools() {
             "set-role",
             "sign-profile",
             "transfer-owner",
+            "update",
         ]
     );
 }

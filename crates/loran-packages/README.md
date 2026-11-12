@@ -2,7 +2,7 @@
 
 `loran-packages` is Loran's content-addressed hosting for `.actr` files. It is
 a plain static download service: each configured file is served by its
-SHA-256 digest, so a Realm Profile's `package.href` may point at it.
+SHA-256 digest, so a Realm Profile's `packages[ref].href` may point at it.
 
 The component does not resolve URI targets and is not advertised in the
 authority descriptor. It is independent of authority discovery and of the

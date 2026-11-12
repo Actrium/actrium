@@ -4,7 +4,8 @@
 
 use actr_protocol::realm_membership::{RealmInvite, Role, client_key_id, invite_secret_hash};
 use actr_protocol::realm_profile::{
-    IceEndpoint, RealmPackage, RealmProfile, RealmStatus as ProfileStatus, SignalingEndpoint, jcs,
+    IceEndpoint, RealmPackageSelection, RealmProfile, RealmStatus as ProfileStatus,
+    SignalingEndpoint, jcs,
 };
 use actr_protocol::{KeyStatus, RealmSigningKeys};
 use base64::Engine as _;
@@ -28,12 +29,15 @@ use tonic::transport::Server;
 
 const PROVIDER: &str = "provider.example";
 
-fn package() -> RealmPackage {
-    RealmPackage {
-        href: "https://cdn.example/notes-1.0.actr".to_string(),
-        sha256: "ab".repeat(32),
-        r#type: "acme.com/notes@1.0.0".to_string(),
-    }
+fn selection() -> RealmPackageSelection {
+    serde_json::from_value(json!({
+        "primary_package":"service",
+        "front_package":"ui",
+        "packages":{
+            "service":{"href":"https://cdn.example/notes-1.0.actr","sha256":"ab".repeat(32),"type":"acme.com/notes@1.0.0"},
+            "ui":{"href":"https://cdn.example/front.actr","sha256":"cd".repeat(32),"type":"acme.com/ui@1.0.0"}
+        }
+    })).unwrap()
 }
 
 /// An embedded Signer, the global database, and `RealmProfiles` for
@@ -148,7 +152,7 @@ async fn signs_verifiable_profiles_for_the_provider_domain() {
         .issue(
             &name,
             ProfileChange {
-                package: Some(package()),
+                selection: Some(selection()),
                 ..Default::default()
             },
         )
@@ -160,7 +164,7 @@ async fn signs_verifiable_profiles_for_the_provider_domain() {
     let first = RealmProfile::verify(record.document.as_bytes(), &name, &keys).unwrap();
     assert_eq!(first.sequence, 1);
     assert_eq!(first.realm.display_name, "k7m2q9xh");
-    assert_eq!(first.package, Some(package()));
+    assert_eq!(first.selection, Some(selection()));
     assert_eq!(first.provider.id, PROVIDER);
     assert_eq!(
         first.provider.signaling[0].control_plane_id,
@@ -195,7 +199,7 @@ async fn signs_verifiable_profiles_for_the_provider_domain() {
         (second.sequence, second.realm.display_name.as_str()),
         (2, "Notes")
     );
-    assert_eq!(second.package, Some(package()));
+    assert_eq!(second.selection, Some(selection()));
     assert_eq!(second.issuer.keys, first.issuer.keys);
 
     let realm = profiles
@@ -225,7 +229,7 @@ async fn signs_verifiable_profiles_for_the_provider_domain() {
             .issue(
                 "other@acme.com",
                 ProfileChange {
-                    package: Some(package()),
+                    selection: Some(selection()),
                     ..Default::default()
                 }
             )
@@ -284,7 +288,7 @@ async fn stores_an_owner_update_only_for_the_current_owner() {
         .issue(
             &name,
             ProfileChange {
-                package: Some(package()),
+                selection: Some(selection()),
                 ..Default::default()
             },
         )
@@ -417,7 +421,10 @@ impl Domain {
             "issued_at": "2026-09-25T00:00:00Z",
         });
         if status == "active" {
-            profile["package"] = json!(package());
+            profile
+                .as_object_mut()
+                .unwrap()
+                .extend(json!(selection()).as_object().unwrap().clone());
         }
         serde_json::to_vec(&self.sign(profile, key_id)).unwrap()
     }
@@ -484,7 +491,7 @@ async fn rotates_the_issuer_keys_of_provider_domain_realms() {
         .issue(
             &name,
             ProfileChange {
-                package: Some(package()),
+                selection: Some(selection()),
                 ..Default::default()
             },
         )
@@ -580,7 +587,7 @@ async fn lists_a_next_issuer_key_whose_profile_was_not_signed() {
         .issue(
             &name,
             ProfileChange {
-                package: Some(package()),
+                selection: Some(selection()),
                 ..Default::default()
             },
         )
@@ -871,7 +878,7 @@ mod management {
 
     fn create(realm: &str, nonce: &str, requester: Option<&str>) -> ManagementRequest {
         let mut request = request(ManagementOp::CreateRealm, realm, nonce);
-        request.package = Some(package());
+        request.selection = Some(selection());
         request.requester = requester.map(str::to_string);
         request
     }
@@ -1035,7 +1042,10 @@ mod management {
             .unwrap();
         assert_eq!(draft["issuer"]["keys"][0]["id"], current.key_id.to_string());
         assert_eq!(draft["provider"]["id"], PROVIDER);
-        assert_eq!(draft["package"], json!(package()));
+        assert_eq!(
+            serde_json::from_value::<RealmPackageSelection>(draft.clone()).unwrap(),
+            selection()
+        );
         assert_eq!(
             Realm::get(name).await.unwrap().unwrap().status,
             RealmStatus::Pending
@@ -1045,11 +1055,26 @@ mod management {
         // requester returns the state, another requester conflicts.
         let replay = send(signed(&create(name, "n-1", Some("m-1")), &acme, "rs-1")).await;
         assert!(matches!(replay, Err(ManagementError::Invalid(_))));
-        let retry = send(signed(&create(name, "n-2", Some("m-1")), &acme, "rs-1"))
-            .await
-            .unwrap();
+        let mut retry_request = create(name, "n-2", Some("m-1"));
+        retry_request
+            .selection
+            .as_mut()
+            .unwrap()
+            .packages
+            .get_mut("ui")
+            .unwrap()
+            .href = "https://cdn.example/alternate-ui.actr".into();
+        let retry = send(signed(&retry_request, &acme, "rs-1")).await.unwrap();
         assert_eq!(retry["status"], "pending");
         assert_eq!(retry["profile"]["issuer"], draft["issuer"]);
+        assert_eq!(retry["profile"]["packages"], draft["packages"]);
+        let mut mismatched = draft.clone();
+        mismatched["packages"]["ui"]["href"] = "https://cdn.example/alternate-ui.actr".into();
+        assert!(
+            send(publish(name, "wrong-initial-selection", mismatched, &acme))
+                .await
+                .is_err()
+        );
         let other = send(signed(&create(name, "n-3", Some("m-2")), &acme, "rs-1")).await;
         assert!(matches!(other, Err(ManagementError::Conflict(_))));
 
@@ -1073,6 +1098,8 @@ mod management {
         // Updates need a higher sequence and never return an invite.
         let mut second = profile.clone();
         second["sequence"] = 2.into();
+        second["packages"]["ui"]["type"] = "acme.com/notes-ui@2.0.0".into();
+        second["packages"]["ui"]["sha256"] = "de".repeat(32).into();
         let updated = send(publish(name, "n-7", second, &acme)).await.unwrap();
         assert_eq!(updated["sequence"], 2);
         assert!(updated.get("owner_invite").is_none());
@@ -1096,6 +1123,8 @@ mod management {
         .unwrap();
         let rotated = drafted["profile"].clone();
         assert_eq!(rotated["sequence"], 3);
+        assert_eq!(rotated["packages"]["ui"]["type"], "acme.com/notes-ui@2.0.0");
+        assert_eq!(rotated["front_package"], "ui");
         assert_eq!(rotated["realm"]["display_name"], "Team notes");
         assert_eq!(rotated["issuer"]["keys"].as_array().unwrap().len(), 2);
         let now = chrono::Utc::now().timestamp();
@@ -1383,7 +1412,7 @@ async fn rotation_republishes_after_interrupted_switch() {
         .issue(
             &name,
             ProfileChange {
-                package: Some(package()),
+                selection: Some(selection()),
                 ..Default::default()
             },
         )
@@ -1446,7 +1475,7 @@ async fn rotation_republishes_after_interrupted_removal() {
         .issue(
             &name,
             ProfileChange {
-                package: Some(package()),
+                selection: Some(selection()),
                 ..Default::default()
             },
         )
