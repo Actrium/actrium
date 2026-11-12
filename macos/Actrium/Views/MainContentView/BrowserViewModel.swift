@@ -525,6 +525,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 leftPanelScript: leftPanelScript,
                 rightPanelScript: rightPanelScript,
                 unifiedScript: unifiedScript,
+                capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                 contractName: manifestInfo.contractName,
                 contractVersion: manifestInfo.contractVersion,
                 permissions: manifestInfo.permissions,
@@ -792,11 +793,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 tabs[index].title = systemType.title
                 // Clear web/RN content
                 tabs[index].unifiedScript = nil
+                tabs[index].capabilityManifestJSON = nil
                 tabs[index].leftPanelScript = nil
                 tabs[index].rightPanelScript = nil
                 tabs[index].guestScript = nil
                 tabs[index].htmlContent = nil
                 tabs[index].contractName = nil
+                tabs[index].legacyActorBridge = false
                 objectWillChange.send()
                 persistBrowserPageSession()
                 return
@@ -860,11 +863,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].title = url.host ?? url.absoluteString
             // Clear RN Relevant
             tabs[index].unifiedScript = nil
+            tabs[index].capabilityManifestJSON = nil
             tabs[index].leftPanelScript = nil
             tabs[index].rightPanelScript = nil
             tabs[index].guestScript = nil
             tabs[index].systemTabType = nil
             tabs[index].contractName = nil
+            tabs[index].legacyActorBridge = false
             objectWillChange.send()
             persistBrowserPageSession()
         } else {
@@ -1131,6 +1136,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].title = tabTitle
             tabs[tabIndex].url = appURL
             tabs[tabIndex].appId = manifestInfo.appId
+            tabs[tabIndex].legacyActorBridge = ActriumApp.isLegacyActorBridgePackage(resolvedURL)
             tabs[tabIndex].systemTabType = nil
             tabs[tabIndex].htmlContent = nil
 
@@ -1155,6 +1161,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].contractName = manifestInfo.contractName
             tabs[tabIndex].contractVersion = manifestInfo.contractVersion
             tabs[tabIndex].permissions = manifestInfo.permissions
+            tabs[tabIndex].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
             tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
 
@@ -1681,6 +1688,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].contractName = manifestInfo.contractName
             tabs[index].contractVersion = manifestInfo.contractVersion
             tabs[index].permissions = manifestInfo.permissions
+            tabs[index].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
             tabs[index].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[index].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
             leftPanelVisibility[tabs[index].id] = manifestInfo.leftPanelDefaultVisible
@@ -1856,6 +1864,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
+                    capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                     rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                     themeColor: manifestInfo.themeColor,
@@ -1891,6 +1900,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
+                    capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                     rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                     themeColor: manifestInfo.themeColor,
@@ -1907,6 +1917,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
+                    capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                     themeColor: manifestInfo.themeColor,
                     replacingTabId: replacingTabId
                 )
@@ -2220,6 +2231,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                         themeColor: manifestInfo.themeColor
@@ -2234,6 +2246,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                         themeColor: manifestInfo.themeColor
@@ -2247,6 +2260,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
+                        capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         themeColor: manifestInfo.themeColor
                     )
                 } else {
@@ -2332,6 +2346,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         contractName: String? = nil,
         contractVersion: Int? = nil,
         permissions: [String] = [],
+        capabilityManifestJSON: String? = nil,
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
         themeColor: String? = nil,
@@ -2349,6 +2364,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].title = title
             tabs[index].url = appURL
             tabs[index].appId = appId
+            tabs[index].legacyActorBridge = ActriumApp.isLegacyActorBridgePackage(sourceURL)
             tabs[index].htmlContent = htmlContent
             tabs[index].systemTabType = nil
             tabs[index].guestScript = guestScript
@@ -2360,6 +2376,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].contractName = contractName
             tabs[index].contractVersion = contractVersion
             tabs[index].permissions = permissions
+            tabs[index].capabilityManifestJSON = capabilityManifestJSON
             tabs[index].leftPanelDefaultVisible = leftPanelDefaultVisible
             tabs[index].rightPanelDefaultVisible = rightPanelDefaultVisible
             if let themeColor { tabs[index].backgroundColor = themeColor }
@@ -2381,6 +2398,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             title: title,
             url: appURL,
             appId: appId,
+            legacyActorBridge: ActriumApp.isLegacyActorBridgePackage(sourceURL),
             htmlContent: htmlContent,
             guestScript: guestScript,
             leftPanelScript: leftPanelScript,
@@ -2388,6 +2406,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             unifiedScript: unifiedScript,
             guestExtractedPath: guestExtractedPath,
             guestEntry: guestEntry,
+            capabilityManifestJSON: capabilityManifestJSON,
             contractName: contractName,
             contractVersion: contractVersion,
             permissions: permissions,

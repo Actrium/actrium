@@ -17,6 +17,7 @@ struct ActrPackageManifestInfo {
     let leftPanelScript: String?
     let rightPanelScript: String?
     let unifiedScript: String?
+    let capabilityManifestJSON: String?
     let systemAppType: SystemTabType?
     let themeColor: String?
 }
@@ -69,6 +70,7 @@ enum ActrPackageManifestReader {
             leftPanelScript: manifest.leftPanelScript,
             rightPanelScript: manifest.rightPanelScript,
             unifiedScript: manifest.unifiedScript,
+            capabilityManifestJSON: manifest.capabilityManifestJSON,
             systemAppType: manifest.systemAppType.flatMap(SystemTabType.init(rawValue:)),
             themeColor: manifest.themeColor
         )
