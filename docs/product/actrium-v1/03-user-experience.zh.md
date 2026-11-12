@@ -95,7 +95,7 @@ Actrium 首次启动完成以下配置：
 
 ### 4.2 打开链接时
 
-包尚未安装时按 [04 §3](04-uri-and-resolution.zh.md) 处理。用户确认后，验证 Realm Profile 和选定的两个归档，再创建 Actor。
+用户确认后，按 [04 §3](04-uri-and-resolution.zh.md) 验证 Realm Profile 并取得选定的 Front。
 
 ### 4.3 本地导入
 
@@ -200,8 +200,8 @@ Host 按实例保存选定的 Provider、位置、实际授权和租约。
 
 1. 解析 Realm 链接，得到 Realm 名；
 2. 获取该域名的 Realm 签名 key 与 Realm Profile 并验证签名；
-3. 验证 Realm Profile 选定的 Service 和 Front 包。
-4. 经 Realm Profile 指定的 Actr Facility Provider，在该 Realm 内找到 Actor 类型与 Service 包匹配的 Service。
+3. 获取或复用选定的 Front 归档并验证，按已签名的 Service 引用检查 Front 的必需依赖。
+4. 经 Realm Profile 指定的 Actr Facility Provider，在该 Realm 内找到 Actor 类型与已签名引用匹配的 Service。
 5. 完成双方身份和 challenge 验证；
 6. 协商 Front–Service contract；
 7. 获取独占 lease；

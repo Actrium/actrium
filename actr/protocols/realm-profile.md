@@ -191,9 +191,17 @@ it, an Actr Host **MUST** stop using the Realm.
 
 ## 6. Using a Realm
 
-Resolve the Service from `packages[primary_package]` and the Front from `packages[front_package]`.
+Resolve the Service reference from `packages[primary_package]` and the Front reference from
+`packages[front_package]`. The client opening an existing Realm fetches only the Front archive. It
+checks the Front's required Service dependency against the Service reference's exact Actor type
+and confirms the RPC contract with the authenticated Service during Attach, before running the Guest.
+The Service Host verifies the Service archive and checks the selected Front's dependency and RPC
+contract against it before admitting the Front.
+
 Downloads **MUST** use the selected `href` and a credential-free HTTPS GET. Before loading any archive,
-check its whole-archive `sha256` and verify its `manifest.sig` over the raw `manifest.toml` with the trusted key of the Publisher named in `type`. Check the manifest's exact Actor type, signed payloads, workload, Host requirements, platform policy and dependency locks. The selected Front's required Service dependency and RPC contract must match the selected Service before loading. See [Actor Package](actor-package.zh.md).
+check its whole-archive `sha256` and verify its `manifest.sig` over the raw `manifest.toml` with the
+trusted key of the Publisher named in `type`. Check the manifest's exact Actor type, signed payloads,
+Workload, Host requirements, platform policy and dependency locks. See [Actor Package](actor-package.zh.md).
 
 The primary Actor type identifies the instance's Service. Finding zero or multiple Actors of that
 type in the Realm is an error. Authorized deployment configuration determines which other packages to

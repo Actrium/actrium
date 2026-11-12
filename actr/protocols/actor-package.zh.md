@@ -19,7 +19,7 @@ Workload 所需的可信运行环境；运行时结合包、部署配置和新�
 本规范有以下目标：
 
 - 所有可分发 Actor 使用同一种 `.actr` 包；
-- 一个包精确发布一个 Actor 类型和一个主 Workload；
+- 一个包精确发布一个 Actor 类型和一个 Workload；
 - Workload Profile 只表达装载和执行方式，不表达 Actor 的网络角色；
 - Actr Host 依赖与远端 Actor 依赖分开声明；
 - Actrium 可以直接从 `.actr` 中识别并装载 Keel Guest Workload；
@@ -87,7 +87,7 @@ Workload 的可信软件。Actr Host 是运行环境，不是远端 Actor。
 ```text
 Actor Package
 ├── Package format 与 Actor 类型
-├── 一个主 Workload
+├── 一个 Workload
 ├── Host 要求
 ├── 导入、导出与 Actor 依赖
 ├── 可选依赖锁
@@ -111,11 +111,11 @@ Package **MUST NOT** 声明当前 Actor 是 client、server、frontend、backend
 
 ## 4. 一包一个 Actor
 
-一个 `.actr` **MUST** 只声明一个 Actor 类型和一个主 Workload。
+一个 `.actr` **MUST** 只声明一个 Actor 类型和一个 Workload。
 
 需要多个可独立寻址、独立升级或独立授权的 Actor 时，发布者 **MUST** 为它们分别生成
 `.actr`，再通过依赖和锁文件组成有限 package graph。实现不得在一个 Package 中用多个
-主 Workload 模拟多个 Actor，因为那会混淆：
+Workload 模拟多个 Actor，因为那会混淆：
 
 - Actor identity；
 - version 与升级边界；
@@ -240,10 +240,10 @@ STUN/TURN credential、用户 credential 或安装设备信息。
 | 字段 | 含义 |
 | --- | --- |
 | `profile` | 带 major version 的 Workload Profile 标识。 |
-| `entry` | Package 内的主入口；仅当 profile 明确定义无文件入口时可以省略。 |
+| `entry` | 包内的 Workload 入口。仅当 Profile 明确定义无文件入口时可以省略。 |
 
 Profile 可以定义额外的 `[workload.<profile-section>]` 字段，但不能改变基础字段含义。
-Workload entry 必须由 `files` 列表绑定，并且其 role 必须为 `workload`。
+Workload 入口必须由 `files` 列表绑定，并且其 role 必须为 `workload`。
 
 `actr.component/1` 可通过 `workload.rpc-contract` 指定对外发布的自包含 RPC Proto。
 该路径必须在签名的 `files` 中声明为 role `contract`，并以 `.proto` 结尾。
@@ -357,11 +357,11 @@ sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 | Role | 含义 |
 | --- | --- |
-| `workload` | Workload 主入口或 Profile 明确声明的执行模块。 |
+| `workload` | Workload 入口或其 Profile 明确声明的附属执行模块。 |
 | `contract` | Proto、schema、WIT 或其他 interface description。 |
 | `resource` | 图标、静态内容和非执行资源。 |
 | `lock` | `manifest.lock.toml`。 |
-| `profile` | Workload Profile 要求但不直接作为主入口的受控文件。 |
+| `profile` | Workload Profile 要求的受控文件，例如能力清单。 |
 
 未知 role 必须使用由扩展规范控制的 namespace。验证器必须验证每个条目的 path、size 和
 SHA-256，并拒绝缺失、重复、摘要不匹配或未在 manifest 声明的文件。
@@ -731,7 +731,7 @@ contract 通信。
 合规 Packager 必须：
 
 - 生成符合本文的 ZIP STORE archive；
-- 只声明一个 Actor 与一个主 Workload；
+- 只声明一个 Actor 类型和一个 Workload；
 - 为所有 payload 生成 size 和 SHA-256；
 - 生成可验证的 manifest signature；
 - 验证依赖锁与 manifest 声明一致；

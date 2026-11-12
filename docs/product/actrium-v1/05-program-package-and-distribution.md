@@ -90,7 +90,7 @@ Each `actr-package/2` archive declares one Actor type and one Workload. The Host
   Product v1 reserves the `service` dependency alias in the Front manifest. It must declare
   `required = true`. Its `actor` and `version` constraint must match the Service selected by the Realm.
 
-Each package's entry has role `workload`. The Guest capability manifest has role `profile`,
+Each Product v1 manifest lists exactly one `workload` entry in `[[files]]`. The Guest capability manifest has role `profile`,
 the Keel and Proto contract files have role `contract`, and icons and static assets have role `resource`.
 
 ### 4.2 Recommended layout
@@ -191,9 +191,11 @@ The Actr base manifest provides the following tables.
 - `[[files]]` for payload roles, sizes, and SHA-256 hashes, including any lock file.
 - `[workspace]` in the Service manifest for static `requirement`, `access`, and `providers` declarations.
 
-The Front reads its RPC Proto from `dependencies.service.contract` in its own archive. The Service
-uses its own manifest to select its exported Proto. Both files must have role `contract` and the
-same SHA-256. Their paths and filenames may differ. See [06 §2.2](06-runtime-and-protocol.md#22-front-actor-type) for the Attach fingerprint.
+For a Product v1 pair, the Front reads the RPC Proto at `dependencies.service.contract` in its
+verified archive. The Service uses its own manifest to select its exported Proto.
+Both files must have role `contract` and the same SHA-256. Their paths and filenames may differ.
+The RPC Proto must define all referenced messages and enums in one file without imports.
+See [06 §2.2](06-runtime-and-protocol.md#22-front-actor-type) for the Attach fingerprint.
 
 Service nodes use the existing Actr `actr.toml` schema for deployment settings such as Realm,
 signaling, and trust. The [node configuration definition](../../../crates/actr-config/src/actr_raw.rs)
@@ -201,6 +203,24 @@ describes these fields. Workspace requirements come from the signed Service mani
 table. The deployment or creation flow selects `provisioning`, and the Host stores the binding and grant per instance.
 
 See both manifests in the [Reference Specification](12-reference-spec.md#4-actr-manifest).
+
+### 6.1 CLI packaging and verification
+
+`actr pkg pack` reads built payloads and a complete `actr-package/2` package manifest. The input
+must contain the `[signature]` table and sizes and SHA-256 hashes in `[[files]]`. Packing recomputes
+the sizes, hashes and `signature.key-id`. `actr pkg sign` reads a Workload project manifest with
+`[package]` and writes a signed flat manifest.
+
+Each `actr pkg pack` or `actr pkg verify` operation checks one archive. The CLI checks the
+`actr.component/1` export interface. For JS `keel.guest/1`, it checks that the entry is nonempty
+UTF-8 and validates the fields of any referenced capability manifest. When the Front declares
+`[dependencies.service]`, the CLI checks that declaration and the selected self-contained RPC Proto.
+Service manifests supported by the current CLI omit `[workspace]`. The Host checks cross-package
+compatibility and enforces Workspace requirements at runtime.
+
+With a Keel version that supports `--v1-capability-manifest`, use it with `--contract` to generate
+the V1 manifest. The generated `guestEntry` must match `workload.entry`. See the format in
+[Chapter 12 §5](12-reference-spec.md#5-keel-capability-manifest).
 
 ## 7. Capability declarations and runtime policy
 
@@ -242,18 +262,16 @@ The Privacy Declaration is a static allowlist and installation notice, not the a
 
 ## 8. Download and verification pipeline
 
-```text
-Realm Profile selection / locally selected packages
-  → verify the Service package
-  → verify the Front package and its Service dependency
-  → policy + permission review
-  → content-addressed cache
-  → Service Runtime / verified Guest bytes
-```
-
 ### 8.1 Check order
 
-Verify the Realm Profile, then apply these checks to each selected archive. Its type and whole-archive SHA-256 must match the corresponding entry. Resolve the Front's `dependencies.service` against the verified Service.
+When opening an existing Realm, the client verifies the Realm Profile and fetches and verifies
+the selected Front archive. It checks the Front's `dependencies.service` against the signed Service
+reference and confirms the RPC contract with the authenticated Service during Attach. Deploying
+the Service or importing local packages requires verification of the selected archives and their
+compatibility.
+
+Apply these checks to each archive obtained. If a reference is supplied, the exact Actor type and
+whole-archive SHA-256 must match it.
 
 1. verify the Publisher's DNS/IDNA;
 2. TLS and hostname;

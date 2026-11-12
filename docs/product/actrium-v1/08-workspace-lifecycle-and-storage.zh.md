@@ -426,7 +426,7 @@ Old Service ActorId + v1 Workspace
 - 新旧 contract 可以并存；
 - 旧 ActorId 不会被说成已变成新类型。
 
-升级会更换 Service 的 ActorId，并延续原有 Realm 链接、成员和应用权限。其他设备打开该链接时，根据更新后的 Profile 验证 Service 和 Front，再 Attach 到新 Service。
+升级会更换 Service 的 ActorId，并延续原有 Realm 链接、成员和应用权限。其他设备打开该链接时，验证更新后的 Profile 和选定的 Front，再 Attach 到新 Service。
 
 更换 Service、Front 或辅助包时，须提交两个引用与完整包表，递增 `sequence` 并重新签名。
 身份与 Workspace 迁移、停止进程和删除状态均由部署流程单独执行。

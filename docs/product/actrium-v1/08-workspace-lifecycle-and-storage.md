@@ -427,7 +427,7 @@ Advantages:
 - the old ActorId is never said to have become the new type.
 
 The upgrade changes the Service's ActorId and carries over the Realm link, membership, and
-application permissions. On another device, the Host verifies both archives selected by the updated Profile before attaching to the new Service.
+application permissions. On another device, the Host verifies the updated Profile and selected Front before attaching to the new Service.
 
 To change any package selection, submit both references and the complete map, increase `sequence` and sign again. Identity and Workspace migration,
 process shutdown and state removal require separate deployment actions.

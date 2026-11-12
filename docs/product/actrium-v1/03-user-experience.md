@@ -95,7 +95,7 @@ The download address is not the trust source; Actrium relies on the package sign
 
 ### 4.2 When opening a link
 
-For an uninstalled package, follow [04 §3](04-uri-and-resolution.md). After confirmation, verify the Realm Profile and both selected archives before creating either Actor.
+After confirmation, verify the Realm Profile and obtain the selected Front as in [04 §3](04-uri-and-resolution.md).
 
 ### 4.3 Local import
 
@@ -200,8 +200,8 @@ Creation proceeds in the order "holder authorization → pending Realm → sign 
 
 1. Resolve the Realm link to get the Realm name;
 2. Fetch that domain's Realm signing key and Realm Profile and verify the signature;
-3. Verify the Service and Front archives selected by the Realm Profile.
-4. Via the Actr Facility Provider in the Realm Profile, find the Service in that Realm whose Actor type matches the Service package.
+3. Fetch or reuse the selected Front archive and verify it. Check its required Service dependency against the signed Service reference.
+4. Via the Actr Facility Provider in the Realm Profile, find the Service in that Realm whose Actor type matches the signed reference.
 5. Complete mutual identity and challenge verification;
 6. Negotiate the Front–Service contract;
 7. Obtain the exclusive lease;
