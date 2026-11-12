@@ -43,7 +43,8 @@ pub(crate) fn parse_lock(bytes: &[u8]) -> HyperResult<LockFile> {
     })
 }
 
-pub(crate) fn read_v2_lock(
+/// Verify a v2 archive’s signed dependency lock against its manifest and RPC contracts.
+pub fn read_v2_lock(
     bytes: &[u8],
     manifest: &ActorPackageManifest,
     max_bytes: usize,

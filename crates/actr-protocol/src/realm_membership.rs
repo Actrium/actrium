@@ -9,7 +9,7 @@
 
 use crate::authority::{DetachedSignature, KeyStatus, RealmSigningKey, SIGNATURE_ALGORITHM};
 use crate::realm_management::check_window;
-use crate::realm_profile::{RealmPackage, jcs, sign_document, verify_signature};
+use crate::realm_profile::{RealmPackageSelection, jcs, sign_document, verify_signature};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
@@ -121,7 +121,8 @@ impl RealmInvite {
         let json = URL_SAFE_NO_PAD
             .decode(encoded)
             .map_err(|error| invalid(format!("invite is not base64url: {error}")))?;
-        let invite: Self = serde_json::from_slice(&json)
+        let invite: Self = crate::signed_json::parse(&json)
+            .and_then(serde_json::from_value)
             .map_err(|error| invalid(format!("malformed invite: {error}")))?;
         if invite.schema != REALM_INVITE_SCHEMA {
             return Err(invalid(format!(
@@ -241,8 +242,11 @@ pub struct MembershipRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_owner_role: Option<Role>,
     /// `update_realm`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package: Option<RealmPackage>,
+    #[serde(
+        flatten,
+        deserialize_with = "RealmPackageSelection::deserialize_optional"
+    )]
+    pub selection: Option<RealmPackageSelection>,
     /// `update_realm`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
@@ -271,7 +275,7 @@ fn rfc3339(time: DateTime<Utc>) -> String {
 fn parse_envelope<T: serde::de::DeserializeOwned>(
     document: &[u8],
 ) -> Result<(T, String), MembershipError> {
-    let mut value: Value = serde_json::from_slice(document)
+    let mut value = crate::signed_json::parse(document)
         .map_err(|error| invalid(format!("not valid JSON: {error}")))?;
     let parsed: T = serde_json::from_value(value.clone())
         .map_err(|error| invalid(format!("malformed request: {error}")))?;
@@ -350,7 +354,7 @@ impl MembershipRequest {
             invite_id: None,
             key_id: None,
             previous_owner_role: None,
-            package: None,
+            selection: None,
             display_name: None,
             status: None,
             nonce: nonce.to_string(),

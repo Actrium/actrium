@@ -81,10 +81,8 @@ The Actr Host supplies these values during Attach.
 The Actrium Host alone constructs these values from the verified packages and local session state.
 The Service treats them as client declarations for compatibility negotiation.
 
-During pair verification, both Hosts obtain `dependencies.service.contract` from the verified
-Front manifest. Each reads the selected Proto from its own verified archive and uses the path's
-basename as `ProtoFile.name`. This defines the single-file input to
-`Fingerprint::calculate_service_semantic_fingerprint`.
+Each Host reads the matching RPC Proto from its own verified archive. Both use the basename of the
+Service's exported Proto, including `.proto`, as `ProtoFile.name` for `Fingerprint::calculate_service_semantic_fingerprint`.
 
 The algorithm obtains each file's semantic fingerprint from `proto_fingerprint::Spec`,
 sorts files by `name`, and joins the `name:semantic-fingerprint` entries with LF, without a trailing LF.

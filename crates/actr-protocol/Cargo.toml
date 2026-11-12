@@ -21,6 +21,9 @@ workspace = true
 prost = "0.14.1"
 prost-types = "0.14.1"
 
+# Exact version pins in Realm package references.
+semver = "1"
+
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 # float_roundtrip: exact float parsing, needed for JCS signature input

@@ -25,16 +25,6 @@
     "realm": {
       "$ref": "#/$defs/realm"
     },
-    "package": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/package"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "issuer": {
       "$ref": "#/$defs/issuer"
     },
@@ -60,6 +50,41 @@
     },
     "signature": {
       "$ref": "#/$defs/signature"
+    },
+    "primary_package": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+      "not": {
+        "pattern": "[^a-z0-9-]"
+      }
+    },
+    "front_package": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+      "not": {
+        "pattern": "[^a-z0-9-]"
+      }
+    },
+    "packages": {
+      "type": "object",
+      "minProperties": 2,
+      "maxProperties": 32,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 63,
+        "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+        "not": {
+          "pattern": "[^a-z0-9-]"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/package"
+      }
     }
   },
   "allOf": [
@@ -77,13 +102,10 @@
       },
       "then": {
         "required": [
-          "package"
-        ],
-        "properties": {
-          "package": {
-            "$ref": "#/$defs/package"
-          }
-        }
+          "primary_package",
+          "front_package",
+          "packages"
+        ]
       }
     }
   ],
@@ -336,5 +358,19 @@
         "pattern": "\\s|^stuns?:[^?]*\\?"
       }
     }
+  },
+  "dependentRequired": {
+    "primary_package": [
+      "front_package",
+      "packages"
+    ],
+    "front_package": [
+      "primary_package",
+      "packages"
+    ],
+    "packages": [
+      "primary_package",
+      "front_package"
+    ]
   }
 }

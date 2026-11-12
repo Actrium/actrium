@@ -335,38 +335,45 @@ async fn authenticate_client(
 }
 
 /// Only the owner registers the Realm's Service: an Actor whose publisher
-/// and program are those of the Realm Profile `package.type`, any version.
+/// and program are those of the selected primary package, any version.
 /// Reads the Profile on `db`, which may be the registration transaction.
 async fn check_service_owner<'e>(
     db: impl sqlx::SqliteExecutor<'e>,
     request: &RegisterRequest,
     signer: &Signer,
 ) -> Result<(), ErrorResponse> {
-    if signer.role == Role::Owner {
-        return Ok(());
-    }
     let document: Option<String> =
         sqlx::query_scalar("SELECT document FROM realm_profile WHERE realm = ?")
             .bind(&request.realm)
             .fetch_optional(db)
             .await
             .map_err(|error| membership_error("unavailable", error))?;
-    let service = document
-        .and_then(|document| serde_json::from_str::<Value>(&document).ok())
-        .and_then(|profile| profile["package"]["type"].as_str().map(str::to_string))
-        .and_then(|text| actr_protocol::ActrType::from_program_identity(&text).ok());
-    match service {
-        Some(service)
-            if service.publisher == request.actr_type.publisher
-                && service.name == request.actr_type.name =>
-        {
-            Err(membership_error(
-                "service_owner_only",
-                "only the Realm owner registers the Realm's Service",
-            ))
-        }
-        _ => Ok(()),
+    // Realms without a Profile have no selected Service.
+    let Some(document) = document else {
+        return Ok(());
+    };
+    let invalid = |message: String| membership_error("realm_unavailable", message);
+    let selection: actr_protocol::realm_profile::RealmPackageSelection =
+        actr_protocol::signed_json::parse(document.as_bytes())
+            .and_then(serde_json::from_value)
+            .map_err(|e| invalid(format!("invalid stored Realm selection: {e}")))?;
+    selection.check().map_err(invalid)?;
+    let service = selection
+        .selected()
+        .map_err(invalid)?
+        .0
+        .actr_type()
+        .map_err(invalid)?;
+    if signer.role != Role::Owner
+        && service.publisher == request.actr_type.publisher
+        && service.name == request.actr_type.name
+    {
+        return Err(membership_error(
+            "service_owner_only",
+            "only the Realm owner registers the Realm's Service",
+        ));
     }
+    Ok(())
 }
 
 /// The actor must be bound to `signer`'s member (reissue) or to exactly its
@@ -1368,7 +1375,10 @@ mod tests {
         let owner = crate::test_support::owner_of(realm, 1).await;
         let editor = crate::test_support::member_of(&owner, Role::Editor, 2).await;
         let pool = platform::storage::db::get_database().get_pool();
-        let profile = json!({ "package": { "type": "acme.com/notes@1.0.0" } });
+        let profile = json!({ "primary_package": "service",
+            "front_package": "ui",
+            "packages": {
+                "service": {"type":"acme.com/notes@1.0.0","href":"https://cdn.example/service.actr","sha256":"ab".repeat(32)},"ui":{"href":"https://cdn.example/front.actr","sha256":"cd".repeat(32),"type":"acme.com/ui@1.0.0"}} });
         sqlx::query(
             "INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at)
              VALUES (?, 1, 'd', ?, 0)",

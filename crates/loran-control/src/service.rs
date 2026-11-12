@@ -722,9 +722,9 @@ impl AdminApiService {
         let signer = self.signs_profiles_for(&req.realm);
         match signer {
             Some(profiles) => {
-                if profile.package.is_none() {
+                if profile.selection.is_none() {
                     return failed(format!(
-                        "Realms under {} need package {{href, sha256}} for their Realm Profile",
+                        "Realms under {} need primary_package, front_package and packages for their Realm Profile",
                         profiles.provider_id()
                     ));
                 }
@@ -743,9 +743,9 @@ impl AdminApiService {
                         .unwrap_or_default()
                 ));
             }
-            None if profile.package.is_some() || profile.display_name.is_some() => {
+            None if profile.selection.is_some() || profile.display_name.is_some() => {
                 return failed(
-                    "package and display_name belong to a Loran-signed Realm Profile, \
+                    "package selection and display_name belong to a Loran-signed Realm Profile, \
                      which only Realms under the Provider domain have"
                         .to_string(),
                 );
