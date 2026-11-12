@@ -22,7 +22,7 @@ Actrium must guarantee:
 ### 1.1 Package-selection trust boundaries
 
 The Realm signature authenticates the instance's package selection. The Host verifies each loaded
-archive against its Publisher signature, release, dependency locks and local policy. Registration
+archive against its pinned digest, Publisher signature, dependency locks and local policy. Registration
 of the primary program requires a valid primary reference and an owner client. Capability grants
 and identity revocation follow their own authorization rules.
 
@@ -93,7 +93,7 @@ A trusted Actr Host can still have vulnerabilities; "trusted" means it sits insi
 
 | Threat | Control |
 |---|---|
-| Different package content under the same version | The Realm Profile pins the Service digest, and the signed release record pins both digests. Reject either mismatch. |
+| Different package content under the same version | Reject any archive that differs from the digest pinned for its exact Actor type or from the Realm selection. |
 | CDN/cache tampering | HTTPS + package digest + Ed25519 |
 | Zip slip/zip bomb | Path rejection, limits on file count/total size/compression ratio, atomic extraction |
 | Guest requiring an arbitrary module | Dual allowlist at build and install time, fail-closed runtime resolver |

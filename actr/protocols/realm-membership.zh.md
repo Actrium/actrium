@@ -74,9 +74,9 @@ Actr Host 以 HTTPS `POST <issuer.url>/membership` 发送 membership 请求（pr
 | `set_role` | `member_id`、`role`（`editor`/`viewer`） | owner（不能是自己） | 只改角色 |
 | `transfer_owner` | `member_id`、可选 `previous_owner_role`（缺省 `editor`） | owner | 原子地把 owner 交给另一 active 且至少有一把未撤销客户端 key 的成员，原 owner 改为指定角色 |
 | `leave` | 无 | 非 owner 成员 | 移除自己，效果同 `remove_member` |
-| `update_realm` | 按需提交完整包选择（`primary_package` 和 `packages`）、`display_name` 或 `status: "retired"` | owner，仅限 AFP 域名下的 Realm | AFP 校验并签署更高 sequence 的 Profile，返回 `{realm, sequence}`（Realm Profile §7.2、§7.4）。 |
+| `update_realm` | 按需提交完整包选择（`primary_package`、`front_package` 和 `packages`）、`display_name` 或 `status: "retired"` | owner，仅限 AFP 域名下的 Realm | AFP 校验并签署更高 sequence 的 Profile，返回 `{realm, sequence}`（Realm Profile §7.2、§7.4）。 |
 
-提交包选择后，调用方验证 AFP 签发的 Profile，并核对主包引用和完整包映射。见 [Realm Profile §7.2](realm-profile.zh.md#72-更新)。
+提交包选择后，调用方验证 AFP 签发的 Profile，并核对两个引用和完整包表。见 [Realm Profile §7.2](realm-profile.zh.md#72-更新)。
 
 `join` 请求中 `signature.key_id` **MUST** 等于由 `public_key` 算出的 `key_id`，签名即持有证明。其他请求的签名
 key **MUST** 是该 Realm 已登记、未撤销、属于 `active` 成员的 Realm 客户端 key。

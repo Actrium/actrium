@@ -21,7 +21,7 @@ Actrium 必须保证：
 
 ### 1.1 包选择的信任边界
 
-Realm 签名确认实例选用的包。Host 对每个加载的包验证 Publisher 签名，并核对发布记录、依赖锁和本地策略。
+Realm 签名确认实例选用的包。Host 对每个加载的包验证 Publisher 签名，并核对整包摘要、依赖锁和本地策略。
 注册主程序须有有效的主包引用和 owner 客户端身份。能力授予与身份撤销按各自的授权规则执行。
 
 ## 2. 信任边界
@@ -91,7 +91,7 @@ flowchart LR
 
 | 威胁 | 控制 |
 |---|---|
-| 同版本异包 | Realm Profile 固定 Service 包摘要，签名发布记录固定两个包的摘要。任一不匹配时拒绝。 |
+| 同版本异包 | 归档与该精确 Actor 类型已固定的摘要或 Realm 所选条目不符时拒绝。 |
 | CDN/缓存篡改 | HTTPS + package digest + Ed25519 |
 | Zip slip/zip bomb | 路径拒绝、文件数/总量/压缩比限制、原子解压 |
 | Guest require 任意模块 | 构建与安装双重白名单、runtime resolver fail-closed |

@@ -186,7 +186,7 @@ Deleted 是彻底清除后的终态，不可恢复。恢复窗口只属于 Trash
 CreationIntent
 ├── idempotency_key
 ├── package_sources
-├── program_release
+├── primary_package, front_package, packages
 ├── service_package_digest
 ├── front_package_digest
 ├── privacy_contract_digest (when declared)
@@ -261,12 +261,11 @@ actrium-data/
 
 ```text
 program_release
-  publisher, program, version, service_package_digest, front_package_digest,
-  privacy_contract_digest, release_record, trust_state
+  publisher, program, version, package_digest, trust_state
 
 service
   realm_name, actor_id, actor_id_hash, publisher, program, version, service_package_digest,
-  workspace_id, runtime_location,
+  primary_package, front_package, packages, privacy_contract_digest, workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
 
@@ -427,10 +426,9 @@ Old Service ActorId + v1 Workspace
 - 新旧 contract 可以并存；
 - 旧 ActorId 不会被说成已变成新类型。
 
-升级会更换 Service 的 ActorId，并延续原有 Realm 链接、成员和应用权限。其他设备打开该链接时，
-验证 Realm Profile 固定的新 Service 包，通过匹配的发布记录取得 Front 包，再按 Actor 类型 Attach 到新 Service。
+升级会更换 Service 的 ActorId，并延续原有 Realm 链接、成员和应用权限。其他设备打开该链接时，根据更新后的 Profile 验证 Service 和 Front，再 Attach 到新 Service。
 
-升级 Service 或调整辅助包时，须提交 `primary_package` 和完整的 `packages`，递增 `sequence` 并重新签名。
+更换 Service、Front 或辅助包时，须提交两个引用与完整包表，递增 `sequence` 并重新签名。
 身份与 Workspace 迁移、停止进程和删除状态均由部署流程单独执行。
 
 ## 12. Service 迁移设备

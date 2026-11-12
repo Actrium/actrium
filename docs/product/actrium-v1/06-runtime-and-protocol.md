@@ -67,7 +67,7 @@ The verified Front package declares the Front's Actor type. The Team Notes Front
 notes.example/team-notes-front@1.4.2
 ```
 
-The Service checks the Front's type against the Front package type in the verified Program Release record.
+During Attach, the Service checks the peer Front type against `packages[front_package].type` in its accepted selection.
 The Actr Host supplies these values during Attach.
 
 - the Program Release;

@@ -97,9 +97,9 @@ no `requester`.
 | `set_role` | `member_id`, `role` (`editor`/`viewer`) | The owner (not for itself) | Changes only the role |
 | `transfer_owner` | `member_id`, optional `previous_owner_role` (default `editor`) | The owner | Atomically hands ownership to another active member that has at least one unrevoked client key; the previous owner takes the given role |
 | `leave` | none | A member other than the owner | Removes itself, with the effect of `remove_member` |
-| `update_realm` | optional complete selection (`primary_package` and `packages`), `display_name`, or `status: "retired"` | Owner of a Realm under the AFP domain | The AFP validates and signs a higher-sequence Profile and returns `{realm, sequence}` (Realm Profile Sections 7.2 and 7.4). |
+| `update_realm` | optional complete selection (`primary_package`, `front_package` and `packages`), `display_name`, or `status: "retired"` | Owner of a Realm under the AFP domain | The AFP validates and signs a higher-sequence Profile and returns `{realm, sequence}` (Realm Profile Sections 7.2 and 7.4). |
 
-After a selection update, the caller verifies the signed Profile and compares the primary reference and complete map with its request. See [Realm Profile Section 7.2](realm-profile.md#72-updates).
+After a selection update, the caller verifies the signed Profile and compares both selectors and the complete map with its request. See [Realm Profile Section 7.2](realm-profile.md#72-updates).
 
 In a `join` request, `signature.key_id` **MUST** equal the `key_id` computed
 from `public_key`; the signature is the proof of possession. For every other
