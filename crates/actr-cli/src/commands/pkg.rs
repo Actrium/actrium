@@ -277,9 +277,9 @@ enum OutputPermissions {
 fn stage_output(path: &Path, permissions: OutputPermissions) -> Result<tempfile::NamedTempFile> {
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = tempfile::Builder::new();
-    let existing_permissions = if matches!(permissions, OutputPermissions::Package) {
+    let existing_metadata = if matches!(permissions, OutputPermissions::Package) {
         match std::fs::metadata(path) {
-            Ok(metadata) => Some(metadata.permissions()),
+            Ok(metadata) => Some(metadata),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 // New packages use ordinary file permissions, restricted by the umask.
                 #[cfg(unix)]
@@ -297,9 +297,22 @@ fn stage_output(path: &Path, permissions: OutputPermissions) -> Result<tempfile:
         None
     };
     let file = builder.tempfile_in(path.parent().context("missing output directory")?)?;
-    if let Some(permissions) = existing_permissions {
+    if let Some(existing) = existing_metadata {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, fchown};
+
+            let staged = file.as_file().metadata()?;
+            let uid = (staged.uid() != existing.uid()).then(|| existing.uid());
+            let gid = (staged.gid() != existing.gid()).then(|| existing.gid());
+            if uid.is_some() || gid.is_some() {
+                fchown(file.as_file(), uid, gid).with_context(|| {
+                    format!("Failed to preserve ownership of {}", path.display())
+                })?;
+            }
+        }
         // Apply the replacement mode before any package bytes are written.
-        file.as_file().set_permissions(permissions)?;
+        file.as_file().set_permissions(existing.permissions())?;
     }
     Ok(file)
 }
@@ -823,7 +836,7 @@ mod tests {
     #[cfg(unix)]
     use super::{OutputPermissions, stage_output, write_atomic};
     #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt, fchown};
 
     #[cfg(unix)]
     #[test]
@@ -860,6 +873,42 @@ mod tests {
             std::fs::metadata(&key).unwrap().permissions().mode() & 0o077,
             0
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_package_output_preserves_group_before_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        let package = directory.path().join("package.actr");
+        write_atomic(&package, b"first", true, OutputPermissions::Package).unwrap();
+        let original = std::fs::File::open(&package).unwrap();
+        let default_gid = original.metadata().unwrap().gid();
+        let groups = std::process::Command::new("id").arg("-G").output().unwrap();
+        assert!(groups.status.success());
+        let groups = String::from_utf8(groups.stdout).unwrap();
+        let Some(gid) = groups
+            .split_whitespace()
+            .map(|group| group.parse::<u32>().unwrap())
+            .find(|&gid| gid != default_gid && fchown(&original, None, Some(gid)).is_ok())
+        else {
+            // A process with only one writable group cannot set up this fixture.
+            return;
+        };
+        original
+            .set_permissions(std::fs::Permissions::from_mode(0o640))
+            .unwrap();
+
+        let staged = stage_output(&package, OutputPermissions::Package).unwrap();
+        let metadata = staged.as_file().metadata().unwrap();
+        assert_eq!(metadata.len(), 0);
+        assert_eq!(metadata.gid(), gid);
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o640);
+
+        write_atomic(&package, b"replacement", true, OutputPermissions::Package).unwrap();
+        let metadata = std::fs::metadata(&package).unwrap();
+        assert_eq!(metadata.gid(), gid);
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o640);
+        assert_eq!(std::fs::read(&package).unwrap(), b"replacement");
     }
 
     fn is_case_insensitive(directory: &std::path::Path) -> bool {
