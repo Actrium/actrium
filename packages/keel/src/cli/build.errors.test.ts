@@ -277,14 +277,13 @@ describe('CLI Build - Error Handling', () => {
       fs.writeFileSync(
         path.join(srcDir, 'component.tsx'),
         `
-        import { View, Text, TouchableOpacity } from 'keel/guest';
+        import { View, Text, Button } from 'keel/guest';
         export default function Component() {
           const handlePress = () => console.log('pressed');
           return (
             <View>
-              <TouchableOpacity onPress={handlePress}>
-                <Text>Press Me</Text>
-              </TouchableOpacity>
+              <Button title="Press Me" onPress={handlePress} />
+              <Text>Press Me</Text>
             </View>
           );
         }

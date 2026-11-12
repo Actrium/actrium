@@ -60,6 +60,8 @@ export type PropHint = {
 
 export type JSXAnalysisResult = {
   propHints: PropHint[];
+  /** JSX element names used by the bundle, sorted and deduplicated. */
+  components: string[];
   stats: {
     totalElements: number;
     jsiSafeProps: number;
@@ -102,4 +104,54 @@ export function analyzeJSXProps(code: string): JSXAnalysisResult {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const impl = require('./oxc-adapter.js');
   return impl.analyzeJSXProps(code);
+}
+
+/**
+ * Extract component names from a transpiled bundle (JSX is already lowered
+ * to `jsx(...)`/`createElement(...)` calls at this point).
+ */
+export function analyzeBundleComponents(
+  code: string,
+  options?: { failClosed?: boolean }
+): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxc-adapter.js');
+  return impl.analyzeBundleComponents(code, options);
+}
+
+export type ServiceUsage = {
+  /** Literal `host:service.call` / `tell` routes. */
+  rpc: string[];
+  /** Literal `host:service.on` event names. */
+  events: string[];
+};
+
+/**
+ * Collect literal `host:service` routes and events from a lowered bundle.
+ * Throws when a route or event cannot be determined statically.
+ */
+export function analyzeServiceUsage(code: string): ServiceUsage {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxc-adapter.js');
+  return impl.analyzeServiceUsage(code);
+}
+
+/**
+ * Component names imported from `keel/guest` and used in JSX. Local components
+ * are excluded; this analysis runs on source and survives minification.
+ */
+export function analyzeSourceComponents(code: string): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxc-adapter.js');
+  return impl.analyzeSourceComponents(code);
+}
+
+/**
+ * Static import specifiers from a source module. Uses the full parser so
+ * JSX/TSX sources are handled consistently.
+ */
+export function analyzeSourceImports(code: string): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const impl = require('./oxc-adapter.js');
+  return impl.analyzeSourceImports(code);
 }

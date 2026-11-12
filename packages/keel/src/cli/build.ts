@@ -71,6 +71,12 @@ export interface BuildOptions {
   capabilityManifest?: string;
 
   /**
+   * Output the v1 12 §5 capability manifest
+   * (`schemaVersion/keelApi/guestEntry/imports/hostModules/components`).
+   */
+  v1CapabilityManifest?: string;
+
+  /**
    * Custom footer file path (replaces default auto-render footer)
    * Used for custom render logic (e.g., a host-specific layout hook)
    */
@@ -713,6 +719,106 @@ function createGuestCapabilitiesManifest(
   };
 }
 
+/** Keel components a Guest may render (v1 12 §4). `Image` maps to `ImageAsset`. */
+export const KEEL_COMPONENT_WHITELIST = [
+  'View',
+  'Text',
+  'ScrollView',
+  'TextInput',
+  'Button',
+  'FlatList',
+  'ImageAsset',
+  'Switch',
+] as const;
+
+function normalizeComponentName(name: string): string {
+  return name === 'Image' ? 'ImageAsset' : name;
+}
+
+export function assertAllowedComponents(components: readonly string[]): void {
+  const allowed = new Set<string>(KEEL_COMPONENT_WHITELIST);
+  const disallowed = components.map(normalizeComponentName).filter((name) => !allowed.has(name));
+  if (disallowed.length > 0) {
+    throw new Error(`Keel component violations: ${disallowed.join(', ')}`);
+  }
+}
+
+export type CapabilityManifestV1 = {
+  schemaVersion: 1;
+  keelApi: string;
+  guestEntry: string;
+  imports: string[];
+  hostModules: Record<string, { rpc: string[]; events: string[] }>;
+  components: string[];
+};
+
+/**
+ * Shape the collected host boundary into the v1 12 §5 capability manifest.
+ *
+ * Non-host imports and component usage require bundle analysis and are filled
+ * by the static-analysis step (R4); this function only emits what the build
+ * already knows.
+ */
+export function createV1CapabilityManifest(
+  boundary: { hostModuleIds: string[]; hostCapabilities: string[] },
+  options: {
+    keelApi: string;
+    guestEntry: string;
+    imports?: string[];
+    components?: string[];
+    service?: { rpc: string[]; events: string[] };
+  },
+  contract?: KeelContractShape
+): CapabilityManifestV1 {
+  if (!contract) {
+    throw new Error('v1 capability manifests require a contract');
+  }
+
+  const hostModules: Record<string, { rpc: string[]; events: string[] }> = {};
+
+  for (const capability of boundary.hostCapabilities) {
+    const separator = capability.indexOf('.');
+    if (separator < 0) continue;
+    const moduleId = capability.slice(0, separator);
+    const exportName = capability.slice(separator + 1);
+    const descriptor =
+      contract?.hostModules[moduleId as keyof typeof contract.hostModules]?.[exportName];
+    // v1 12 §5 keys hostModules by capability name (`service`), not by the
+    // contract module id (`host:service`); imports keep the `host:` form.
+    const moduleKey = moduleId.replace(/^host:/, '');
+    const entry = hostModules[moduleKey] ?? { rpc: [], events: [] };
+    if (descriptor?.kind === 'subscription') {
+      entry.events.push(exportName);
+    } else {
+      entry.rpc.push(exportName);
+    }
+    hostModules[moduleKey] = entry;
+  }
+
+  for (const entry of Object.values(hostModules)) {
+    entry.rpc.sort();
+    entry.events.sort();
+  }
+
+  if (options.service && hostModules.service) {
+    // `host:service` is a generic transport module; the v1 manifest must list
+    // the business routes/events the Guest actually invokes.
+    hostModules.service = {
+      rpc: Array.from(new Set(options.service.rpc)).sort(),
+      events: Array.from(new Set(options.service.events)).sort(),
+    };
+  }
+
+  return {
+    schemaVersion: 1,
+    keelApi: options.keelApi,
+    guestEntry: options.guestEntry,
+    imports: [...boundary.hostModuleIds, ...(options.imports ?? [])].sort(),
+    hostModules,
+    components: (options.components ?? []).map(normalizeComponentName),
+  };
+}
+
 // Reason: JSON artifact writer accepts arbitrary serializable manifest-like values.
 function writeJsonFile(filePath: string, value: unknown): void {
   const fullPath = path.resolve(process.cwd(), filePath);
@@ -733,8 +839,17 @@ function escapeRegExp(value: string): string {
 export async function build(options: BuildOptions): Promise<void> {
   const startTime = Date.now();
 
-  const { entry, outfile, minify, sourcemap, watch, metafile, footer, capabilityManifest } =
-    options;
+  const {
+    entry,
+    outfile,
+    minify,
+    sourcemap,
+    watch,
+    metafile,
+    footer,
+    capabilityManifest,
+    v1CapabilityManifest,
+  } = options;
   const strict = options.strict ?? true;
   const contract = await resolveContract(options);
 
@@ -813,6 +928,7 @@ export async function build(options: BuildOptions): Promise<void> {
   console.log('\nAnalyzing JSX props for JSI optimization...');
   let jsxAnalysis: import('./oxc-adapter').JSXAnalysisResult = {
     propHints: [],
+    components: [],
     stats: {
       totalElements: 0,
       jsiSafeProps: 0,
@@ -837,6 +953,65 @@ export async function build(options: BuildOptions): Promise<void> {
   } catch (err) {
     console.warn('  ⚠ JSX analysis failed:', (err as Error).message);
     console.warn('  ℹ Continuing without type hints');
+  }
+
+  // Collect non-host imports and component usage before the externals rewrite.
+  // The entry is analyzed after bundling, so JSX is already lowered to
+  // jsx(...) calls; component names come from analyzeBundleComponents.
+  let bundleImports: string[] = [];
+  let bundleComponents = jsxAnalysis.components;
+  let serviceUsage: { rpc: string[]; events: string[] } | undefined;
+  try {
+    const { analyzeModuleIDs, analyzeBundleComponents, analyzeServiceUsage } = await import(
+      './oxc-adapter'
+    );
+    bundleImports = analyzeModuleIDs(bundleCode).static.filter(
+      (moduleId) => !moduleId.startsWith('.') && !moduleId.startsWith('host:')
+    );
+    // A separate unminified build lets the bundler resolve aliases, barrel
+    // re-exports and dynamic imports. The lowered pass alone cannot recover
+    // renamed guest bindings in a minified bundle.
+    let analysisComponents: string[] = [];
+    if (v1CapabilityManifest) {
+      const analysisResult = await Bun.build({
+        entrypoints: [entryPath],
+        target: 'browser',
+        format: 'cjs',
+        minify: false,
+        sourcemap: 'none',
+        external: [...Object.keys(EXTERNALS), HOST_MODULE_EXTERNAL],
+        plugins: [await createBabelPlugin({ dev: options.dev ?? false })],
+        define: {
+          'process.env.NODE_ENV': '"production"',
+          __DEV__: 'false',
+        },
+        write: false,
+      });
+      if (!analysisResult.success) {
+        throw new Error('Component analysis build failed');
+      }
+      const jsOutputs = analysisResult.outputs.filter((output) => output.path.endsWith('.js'));
+      if (jsOutputs.length === 0) {
+        throw new Error('Component analysis build produced no output');
+      }
+      const analysisCode = (await Promise.all(jsOutputs.map((output) => output.text()))).join('\n');
+      analysisComponents = analyzeBundleComponents(analysisCode, {
+        failClosed: true,
+      });
+      serviceUsage = analyzeServiceUsage(analysisCode);
+      if (!/import_guest\d*/.test(analysisCode) && analysisCode.includes('keel/guest')) {
+        console.warn('  ⚠ Component analysis could not resolve keel/guest bindings');
+      }
+    }
+    const loweredComponents = analyzeBundleComponents(bundleCode);
+    bundleComponents = [
+      ...new Set([...bundleComponents, ...loweredComponents, ...analysisComponents]),
+    ].sort();
+  } catch (error) {
+    if (v1CapabilityManifest) {
+      throw error;
+    }
+    // Best-effort: generic builds do not depend on component analysis.
   }
 
   // Transform external imports to global variable references
@@ -992,6 +1167,40 @@ ${footerCode}
   if (capabilityManifest) {
     writeJsonFile(capabilityManifest, createGuestCapabilitiesManifest(hostBoundary, contract));
     console.log(`   Capability manifest: ${capabilityManifest}`);
+  }
+
+  if (v1CapabilityManifest) {
+    if (!contract) {
+      throw new Error('--v1-capability-manifest requires --contract');
+    }
+    // The component allowlist belongs to the v1 contract. Generic Keel builds
+    // keep the full preset component set.
+    assertAllowedComponents(bundleComponents);
+    // v1's `keelApi` is the Keel API version, not the business contract
+    // version. Keep it pinned until keel exposes an explicit constant.
+    const keelApi = '1.0';
+    // v1 expects the package-relative guest entry. Convert absolute paths
+    // only when they stay inside the build directory; keep other paths as-is.
+    const cwdPrefix = process.cwd() + path.sep;
+    const guestEntry =
+      path.isAbsolute(outfile) && outfile.startsWith(cwdPrefix)
+        ? path.relative(process.cwd(), outfile)
+        : outfile;
+    writeJsonFile(
+      v1CapabilityManifest,
+      createV1CapabilityManifest(
+        hostBoundary,
+        {
+          keelApi,
+          guestEntry,
+          imports: bundleImports,
+          components: bundleComponents,
+          service: serviceUsage,
+        },
+        contract
+      )
+    );
+    console.log(`   V1 capability manifest: ${v1CapabilityManifest}`);
   }
 }
 
