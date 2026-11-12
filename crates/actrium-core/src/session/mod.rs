@@ -1,7 +1,6 @@
 //! Front–Service session domain types and protocol contract.
 //!
-//! Corresponds to `contracts/actrium/session/v1.proto` and
-//! `docs/product/actrium-v1/16-mutual-authentication-and-attach-flow.md`.
+//! Corresponds to `contracts/actrium/session/v1.proto`.
 //!
 //! # Relationship to Tab and Service lifecycles
 //!

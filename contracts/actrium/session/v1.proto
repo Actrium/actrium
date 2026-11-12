@@ -1,7 +1,6 @@
 // Protocol Buffers schema for actrium.session.v1
 //
 // Front–Service Attach, lease, and system protocol messages.
-// See docs/product/actrium-v1/16-mutual-authentication-and-attach-flow.md
 
 syntax = "proto3";
 
@@ -13,7 +12,7 @@ package actrium.session.v1;
 
 // AttachRequest — Front requests a business session from a verified Service.
 //
-// Preconditions (see 16-mutual-authentication-and-attach-flow.md):
+// Preconditions:
 //   1. Realm Profile and package verified
 //   2. Exact serviceActorId resolved and fixed (no rediscovery fallback)
 //   3. Front credential obtained (Realm membership)

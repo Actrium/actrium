@@ -104,7 +104,6 @@ Recommended reading order:
 12. [Reference protocol and samples](12-reference-spec.md): the manifest, Publisher/Realm Profile, handshake messages and terminology.
 13. [Actrium privacy marks and graph aggregation](13-privacy-state-and-aggregation.md): grounding the current security model in Tab / Front / Actr Host.
 14. [Privacy primitives, remote attestation and trusted compute](14-privacy-primitives-and-attestation.md): end-to-end encryption, the WASM/CC division of labor, RATS, key release and combined CPU/GPU/NPU attestation.
-15. [Mutual authentication and Front–Service Attach](16-mutual-authentication-and-attach-flow.md): peer authentication, Attach validation, exclusive leases, Guest gating and session-protected RPC.
 
 There is also non-normative [application development guidance](app-development-guidance.md): authorization and trust advice for writing a Service; it is not a platform rule.
 
