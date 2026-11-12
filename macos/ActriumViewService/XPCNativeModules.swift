@@ -23,6 +23,31 @@ private enum NativeHostTransport {
     }
 }
 
+// MARK: - Capability Permission Module
+
+/// Requests a user decision from the trusted Native Front Host. The renderer
+/// never persists authorization state itself.
+@objc(CapabilityPermission)
+class CapabilityPermission: NSObject {
+    @objc
+    func requestGrant(_ tabId: String, capability: String) {
+        NativeHostTransport.post(
+            name: "com.actrium.capabilityPermissionRequest",
+            userInfo: ["tabId": tabId, "capability": capability]
+        )
+    }
+
+    @objc
+    static func requiresMainQueueSetup() -> Bool {
+        return false
+    }
+
+    @objc
+    static func moduleName() -> String! {
+        return "CapabilityPermission"
+    }
+}
+
 // MARK: - StartPage Module
 
 /// Native module for Start Page actions from React Native (XPC Service version)
