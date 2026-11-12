@@ -51,6 +51,7 @@ web-sys = { workspace = true, features = [
 actr-protocol.workspace = true
 ed25519-dalek = "2"
 uuid.workspace = true
+getrandom.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]

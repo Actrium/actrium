@@ -786,7 +786,11 @@ impl Node {
     /// construction (custom trust chain, injected platform provider, etc.)
     /// and cannot drive the whole flow through
     /// [`Node::from_config_file`].
-    pub fn from_hyper(hyper: Hyper, runtime_config: actr_config::RuntimeConfig) -> Node<Init> {
+    pub fn from_hyper(hyper: Hyper, mut runtime_config: actr_config::RuntimeConfig) -> Node<Init> {
+        // HyperConfig has already resolved defaults and relative paths. Make its
+        // result authoritative everywhere so initial REGISTER, REISSUE and Relay
+        // cannot silently select different Actor keys.
+        runtime_config.storage_root = Some(hyper.inner.config.storage_root.clone());
         Node {
             hyper: hyper.inner,
             attachment: None,
@@ -1126,17 +1130,31 @@ impl Node<Attached> {
         self
     }
 
-    /// Install current-policy authorization for inbound business RPC.
+    /// Install current-policy authorization for inbound delivery.
     ///
-    /// The guard runs after ACL and before dedup for immediate ingress and again
-    /// when durable-mailbox records are dequeued. `actrium.session.v1.` system
-    /// routes bypass it so the Actrium session registry can handle them.
+    /// Requests and tells run after ACL and before dedup, responses run before
+    /// caller completion, and stream chunks run immediately before callback
+    /// delivery. Exact session protocol methods belong to [`Self::with_session_registry`].
     pub fn with_incoming_guard(mut self, guard: Arc<dyn crate::lifecycle::IncomingGuard>) -> Self {
         self.attachment
             .as_mut()
             .expect("Node<Attached> without attachment")
             .node
-            .incoming_guard = Some(guard);
+            .set_incoming_guard(Some(guard));
+        self
+    }
+
+    /// Install the exclusive handler for protocol-defined session methods.
+    /// Without it, exact session routes fail closed instead of entering the workload.
+    pub fn with_session_registry(
+        mut self,
+        registry: Arc<dyn crate::lifecycle::SessionRegistry>,
+    ) -> Self {
+        self.attachment
+            .as_mut()
+            .expect("Node<Attached> without attachment")
+            .node
+            .session_registry = Some(registry);
         self
     }
 
@@ -1371,13 +1389,26 @@ impl Node<Attached> {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Node<Registered> {
-    /// Install or replace the business-RPC incoming guard before startup.
+    /// Install or replace the inbound delivery guard before startup.
     pub fn with_incoming_guard(mut self, guard: Arc<dyn crate::lifecycle::IncomingGuard>) -> Self {
         self.attachment
             .as_mut()
             .expect("Node<Registered> without attachment")
             .node
-            .incoming_guard = Some(guard);
+            .set_incoming_guard(Some(guard));
+        self
+    }
+
+    /// Install or replace the exclusive session protocol dispatcher before startup.
+    pub fn with_session_registry(
+        mut self,
+        registry: Arc<dyn crate::lifecycle::SessionRegistry>,
+    ) -> Self {
+        self.attachment
+            .as_mut()
+            .expect("Node<Registered> without attachment")
+            .node
+            .session_registry = Some(registry);
         self
     }
 
@@ -2225,6 +2256,103 @@ async fn load_or_create_instance_uid_local(data_dir: &std::path::Path) -> HyperR
 #[cfg(all(not(target_arch = "wasm32"), test))]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(all(not(target_arch = "wasm32"), test))]
+mod storage_root_resolution_tests {
+    use super::*;
+
+    struct StorageTestWorkload;
+
+    #[async_trait::async_trait]
+    impl crate::workload::LinkedWorkloadHandle for StorageTestWorkload {}
+
+    #[tokio::test]
+    async fn from_hyper_makes_resolved_storage_root_authoritative() {
+        for use_custom_root in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let data_dir = root.path().join("hyper-data");
+            let config_dir = root.path().join("config");
+            let signing_key = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
+            let trust = Arc::new(
+                crate::verify::StaticTrust::new(signing_key.verifying_key().to_bytes()).unwrap(),
+            );
+            let mut hyper_config = HyperConfig::new(&data_dir, trust);
+            if use_custom_root {
+                hyper_config = hyper_config.with_storage_root(data_dir.join("resolved-storage"));
+            }
+            let expected = hyper_config.storage_root.clone();
+            let hyper = Hyper::new(hyper_config).await.unwrap();
+            let raw: actr_config::RuntimeRawConfig = toml::from_str(
+                r#"
+[signaling]
+url = "ws://localhost:8081/signaling/ws"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
+[deployment]
+realm = "test7@example.com"
+"#,
+            )
+            .unwrap();
+            let package = actr_config::PackageInfo {
+                name: "storage-test".into(),
+                actr_type: ActrType {
+                    publisher: "example.com".into(),
+                    name: "storage-test".into(),
+                    version: "1.0.0".into(),
+                },
+                description: None,
+                authors: Vec::new(),
+                license: None,
+            };
+            let mut runtime = actr_config::ConfigParser::parse_runtime(
+                raw,
+                config_dir.join("actr.toml"),
+                package,
+            )
+            .unwrap();
+            if use_custom_root {
+                runtime.storage_root = Some(config_dir.join("wrong-storage"));
+            }
+            assert_ne!(runtime.storage_root.as_deref(), Some(expected.as_path()));
+            let node = Node::from_hyper(hyper, runtime);
+            assert_eq!(
+                node.runtime_config().storage_root.as_deref(),
+                Some(expected.as_path())
+            );
+
+            let node = node
+                .link_handle(Arc::new(StorageTestWorkload))
+                .await
+                .unwrap();
+            let recovery = node.registration_context(None).unwrap();
+            let config = &node.attachment.as_ref().unwrap().node.config;
+            let initial_signer = crate::issuer_client::actor_signer_for_scoped(
+                config.storage_root.as_deref().unwrap(),
+                &config.realm,
+                config.actr_type(),
+                None,
+            )
+            .unwrap();
+            let initial =
+                build_linked_register_request(config, None, initial_signer.as_ref()).unwrap();
+            let crate::lifecycle::credential_manager::RegistrationContext::Linked {
+                request: recovery,
+                ..
+            } = recovery
+            else {
+                panic!("linked node recovered a package registration context");
+            };
+            assert_eq!(initial, recovery);
+            assert!(expected.join("actor-keys").is_dir());
+            let divergent_root = if use_custom_root {
+                config_dir.join("wrong-storage")
+            } else {
+                config_dir.join("storage")
+            };
+            assert!(!divergent_root.join("actor-keys").exists());
+        }
+    }
+}
 
 // The connection-governance suites exercise private production seams (for
 // example, physical-session retirement) and therefore run as in-crate tests.

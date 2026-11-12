@@ -65,11 +65,13 @@ use futures_util::future::BoxFuture;
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio_util::sync::CancellationToken;
+
+use crate::lifecycle::{IncomingGuard, IncomingStreamChunk};
 
 /// Default per-stream bounded queue depth.
 ///
@@ -204,6 +206,7 @@ struct RegistryInner {
     queue_depth: usize,
     panic_count: Arc<AtomicU64>,
     dropped_count: Arc<AtomicU64>,
+    incoming_guard: RwLock<Option<Arc<dyn IncomingGuard>>>,
 }
 
 /// DataChunkRegistry - Stream chunk callback manager
@@ -257,8 +260,41 @@ impl DataChunkRegistry {
                 queue_depth,
                 panic_count: Arc::new(AtomicU64::new(0)),
                 dropped_count: Arc::new(AtomicU64::new(0)),
+                incoming_guard: RwLock::new(None),
             }),
         }
+    }
+
+    pub(crate) fn set_incoming_guard(&self, guard: Option<Arc<dyn IncomingGuard>>) {
+        *self
+            .inner
+            .incoming_guard
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = guard;
+    }
+
+    async fn authorize_chunk(inner: &RegistryInner, chunk: &DataChunk, sender_id: &ActrId) -> bool {
+        let guard = inner
+            .incoming_guard
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let Some(guard) = guard else {
+            return true;
+        };
+        if let Err(error) = guard
+            .check_stream(IncomingStreamChunk::new(chunk, sender_id))
+            .await
+        {
+            tracing::warn!(
+                stream_id = %chunk.stream_id,
+                sequence = chunk.sequence,
+                guard_code = error.code.as_str(),
+                "incoming stream chunk rejected by current policy"
+            );
+            return false;
+        }
+        true
     }
 
     /// Number of callback panics isolated so far (observability / metric hook).
@@ -689,6 +725,12 @@ impl DataChunkRegistry {
                 }
                 maybe = rx.recv() => match maybe {
                     Some(queued) => {
+                        let Some(current) = registry.upgrade() else {
+                            return;
+                        };
+                        if !Self::authorize_chunk(&current, &queued.chunk, &queued.sender_id).await {
+                            continue;
+                        }
                         Self::run_callback(&stream_id, queued, &panic_count).await;
                     }
                     // All senders dropped (unregister): queue drained, exit.

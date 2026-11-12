@@ -171,9 +171,13 @@ impl InboundDispatcher {
             return;
         }
 
-        // Direction::Response: complete the waiting caller via the shared
-        // correlation map (orphan late replies warn and drop).
-        pending_requests.complete_from_envelope(envelope, || Self::peer_for_log(&from_bytes));
+        // Direction::Response: authorize current policy before completing the
+        // waiting caller (orphan late replies still warn and drop).
+        let caller_id = ActrId::decode(&from_bytes[..]).ok();
+        let caller = caller_id.as_ref().map(|id| (id, from_type.as_ref()));
+        pending_requests
+            .complete_from_envelope(envelope, caller, || Self::peer_for_log(&from_bytes))
+            .await;
     }
 
     /// Enqueue an explicit inbound RPC request or tell to the Mailbox with

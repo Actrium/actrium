@@ -302,6 +302,10 @@ fn service_config(service_signing_key: SigningKey) -> ServiceConfig {
         lease_duration: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(10),
         grace_period: Duration::from_secs(5),
+        replay_retention: ServiceConfig::DEFAULT_REPLAY_RETENTION,
+        max_replay_entries: ServiceConfig::DEFAULT_MAX_REPLAY_ENTRIES,
+        max_completed_sessions: ServiceConfig::DEFAULT_MAX_COMPLETED_SESSIONS,
+        max_channel_generations: ServiceConfig::DEFAULT_MAX_CHANNEL_GENERATIONS,
     }
 }
 
@@ -400,6 +404,8 @@ fn business(
         route: route.into(),
         capability: capability.into(),
         request_id: request_id.into(),
+        issued_at: 1_000,
+        deadline: 2_000,
         kind: MessageKind::Request,
         idempotency_key: Some(format!("idem-{request_id}")),
         payload: format!("payload-{request_id}").into_bytes(),
@@ -420,6 +426,8 @@ fn resume_request(outcome: &AttachOutcome, channel: &VerifiedChannel) -> ResumeR
     request.session_proof = resume_proof(outcome.session_secret.as_bytes(), &request);
     request
 }
+
+type ChannelMutation = fn(&mut VerifiedChannel);
 
 fn assert_code<T>(result: Result<T, SessionError>, code: AttachErrorCode) {
     match result {
@@ -614,7 +622,10 @@ async fn unauthorized_takeover_leaves_old_session_usable() {
     fixture
         .service
         .guard()
-        .authorize(business(&old, &alice_channel, "old-still-valid", READ))
+        .authorize(
+            business(&old, &alice_channel, "old-still-valid", READ),
+            &alice_channel,
+        )
         .await
         .unwrap();
 }
@@ -647,14 +658,20 @@ async fn authorized_takeover_invalidates_old_session_and_channel() {
         fixture
             .service
             .guard()
-            .authorize(business(&old, &alice_channel, "old-revoked", READ))
+            .authorize(
+                business(&old, &alice_channel, "old-revoked", READ),
+                &alice_channel,
+            )
             .await,
         AttachErrorCode::SessionExpired,
     );
     fixture
         .service
         .guard()
-        .authorize(business(&new, &bob_channel, "new-active", WRITE))
+        .authorize(
+            business(&new, &bob_channel, "new-active", WRITE),
+            &bob_channel,
+        )
         .await
         .unwrap();
 }
@@ -756,7 +773,12 @@ async fn renewed_credential_rereads_role_and_advances_channel_epoch() {
     let mut current = business(&outcome, &new_channel, "new-epoch", READ);
     current.lease_epoch = renewed.lease_epoch;
     current.sign(&outcome.session_secret);
-    fixture.service.guard().authorize(current).await.unwrap();
+    fixture
+        .service
+        .guard()
+        .authorize(current, &new_channel)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -794,18 +816,162 @@ async fn resume_requires_new_channel_and_old_session_proof_and_rejects_old_epoch
     stale.lease_epoch = 1;
     stale.sign(&resumed.session_secret);
     assert_code(
-        fixture.service.guard().authorize(stale).await,
+        fixture.service.guard().authorize(stale, &new_channel).await,
         AttachErrorCode::SessionEpochMismatch,
     );
     fixture
         .service
         .guard()
-        .authorize(business(&resumed, &new_channel, "resumed", READ))
+        .authorize(
+            business(&resumed, &new_channel, "resumed", READ),
+            &new_channel,
+        )
         .await
         .unwrap();
     assert_code(
         fixture.service.resume(resume, &new_channel).await,
         AttachErrorCode::SessionEpochMismatch,
+    );
+}
+
+#[tokio::test]
+async fn old_channel_cannot_impersonate_the_resumed_channel_or_dequeue() {
+    let front = Front::new("alice");
+    let fixture = Fixture::new(std::slice::from_ref(&front));
+    let channel_c1 = make_channel(&front, "c1", 2_000);
+    let attached = fixture
+        .service
+        .attach(
+            attach_request(&front, &channel_c1, "attach-c1", 1),
+            &channel_c1,
+        )
+        .await
+        .unwrap();
+    let queued_on_c1 = fixture
+        .service
+        .guard()
+        .authorize(
+            business(&attached, &channel_c1, "queued-on-c1", READ),
+            &channel_c1,
+        )
+        .await
+        .unwrap();
+
+    fixture
+        .service
+        .handle_disconnect(&attached.response.session_id, 1)
+        .await
+        .unwrap();
+    let channel_c2 = make_channel(&front, "c2", 2_000);
+    let resumed = fixture
+        .service
+        .resume(resume_request(&attached, &channel_c2), &channel_c2)
+        .await
+        .unwrap();
+
+    // C1 has the resumed session secret and can sign a request that claims C2.
+    // The trusted arrival channel still says C1, so the forged id must fail.
+    let forged = business(&resumed, &channel_c2, "c1-forges-c2", READ);
+    assert_code(
+        fixture.service.guard().authorize(forged, &channel_c1).await,
+        AttachErrorCode::ChannelIdentityMismatch,
+    );
+
+    // Even rewriting the old context's public id to C2 leaves its transcript
+    // and generation bound to C1 and cannot make it current.
+    let mut renamed_c1 = channel_c1.clone();
+    renamed_c1.channel_id = channel_c2.channel_id.clone();
+    let forged = business(&resumed, &channel_c2, "renamed-c1", READ);
+    assert_code(
+        fixture.service.guard().authorize(forged, &renamed_c1).await,
+        AttachErrorCode::ChannelIdentityMismatch,
+    );
+
+    assert_code(
+        fixture
+            .service
+            .guard()
+            .dequeue(queued_on_c1, &channel_c2)
+            .await,
+        AttachErrorCode::ChannelIdentityMismatch,
+    );
+    fixture
+        .service
+        .guard()
+        .authorize(
+            business(&resumed, &channel_c2, "actual-c2", READ),
+            &channel_c2,
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn guard_rejects_transcript_runtime_and_expiry_forgery() {
+    let front = Front::new("alice");
+    let fixture = Fixture::new(std::slice::from_ref(&front));
+    let channel = make_channel(&front, "c1", 2_000);
+    let outcome = fixture
+        .service
+        .attach(attach_request(&front, &channel, "attach-c1", 1), &channel)
+        .await
+        .unwrap();
+
+    let cases: Vec<(&str, AttachErrorCode, ChannelMutation)> = vec![
+        (
+            "transcript",
+            AttachErrorCode::ChannelIdentityMismatch,
+            |channel| {
+                channel.channel_transcript_digest[0] ^= 1;
+            },
+        ),
+        (
+            "local-runtime",
+            AttachErrorCode::ChannelTargetMismatch,
+            |channel| {
+                channel.local_runtime_instance_id = "new-runtime".into();
+            },
+        ),
+        (
+            "peer-runtime",
+            AttachErrorCode::ChannelIdentityMismatch,
+            |channel| {
+                channel.peer_runtime_instance_id = "new-front-runtime".into();
+            },
+        ),
+        (
+            "expiry",
+            AttachErrorCode::ChannelIdentityMismatch,
+            |channel| {
+                channel.peer_credential_expires_at_epoch_secs += 1;
+            },
+        ),
+    ];
+    for (name, expected, mutate) in cases {
+        let mut forged_channel = channel.clone();
+        mutate(&mut forged_channel);
+        let request = business(&outcome, &channel, name, READ);
+        assert_code(
+            fixture
+                .service
+                .guard()
+                .authorize(request, &forged_channel)
+                .await,
+            expected,
+        );
+    }
+
+    fixture.clock.set(2_000);
+    assert_code(
+        fixture
+            .service
+            .guard()
+            .authorize(
+                business(&outcome, &channel, "expired-channel", READ),
+                &channel,
+            )
+            .await,
+        AttachErrorCode::ChannelExpired,
     );
 }
 
@@ -822,12 +988,15 @@ async fn expiry_and_queued_dequeue_recheck_prevent_execution() {
     let queued = fixture
         .service
         .guard()
-        .authorize(business(&outcome, &channel, "queued-before-expiry", READ))
+        .authorize(
+            business(&outcome, &channel, "queued-before-expiry", READ),
+            &channel,
+        )
         .await
         .unwrap();
     fixture.clock.set(1_030);
     assert_code(
-        fixture.service.guard().dequeue(queued).await,
+        fixture.service.guard().dequeue(queued, &channel).await,
         AttachErrorCode::SessionExpired,
     );
 }
@@ -845,19 +1014,25 @@ async fn guard_revocation_and_dequeue_recheck_are_enforced() {
     let queued = fixture
         .service
         .guard()
-        .authorize(business(&outcome, &channel, "queued-revoked", WRITE))
+        .authorize(
+            business(&outcome, &channel, "queued-revoked", WRITE),
+            &channel,
+        )
         .await
         .unwrap();
     fixture.policies.request.0.store(false, Ordering::SeqCst);
     assert_code(
-        fixture.service.guard().dequeue(queued).await,
+        fixture.service.guard().dequeue(queued, &channel).await,
         AttachErrorCode::PermissionDenied,
     );
     assert_code(
         fixture
             .service
             .guard()
-            .authorize(business(&outcome, &channel, "dispatch-revoked", READ))
+            .authorize(
+                business(&outcome, &channel, "dispatch-revoked", READ),
+                &channel,
+            )
             .await,
         AttachErrorCode::PermissionDenied,
     );
@@ -878,7 +1053,11 @@ async fn guard_checks_route_scope_proof_and_replay_before_dispatch() {
     wrong_route.route = "admin/write".into();
     wrong_route.sign(&outcome.session_secret);
     assert_code(
-        fixture.service.guard().authorize(wrong_route).await,
+        fixture
+            .service
+            .guard()
+            .authorize(wrong_route, &channel)
+            .await,
         AttachErrorCode::PermissionDenied,
     );
 
@@ -886,14 +1065,18 @@ async fn guard_checks_route_scope_proof_and_replay_before_dispatch() {
     wrong_scope.capability = READ.into();
     wrong_scope.sign(&outcome.session_secret);
     assert_code(
-        fixture.service.guard().authorize(wrong_scope).await,
+        fixture
+            .service
+            .guard()
+            .authorize(wrong_scope, &channel)
+            .await,
         AttachErrorCode::PermissionDenied,
     );
 
     let mut bad_proof = business(&outcome, &channel, "bad-proof", READ);
     bad_proof.proof[0] ^= 1;
     assert_code(
-        fixture.service.guard().authorize(bad_proof).await,
+        fixture.service.guard().authorize(bad_proof, &channel).await,
         AttachErrorCode::PermissionDenied,
     );
 
@@ -901,11 +1084,11 @@ async fn guard_checks_route_scope_proof_and_replay_before_dispatch() {
     fixture
         .service
         .guard()
-        .authorize(replay.clone())
+        .authorize(replay.clone(), &channel)
         .await
         .unwrap();
     assert_code(
-        fixture.service.guard().authorize(replay).await,
+        fixture.service.guard().authorize(replay, &channel).await,
         AttachErrorCode::PermissionDenied,
     );
 }
@@ -947,6 +1130,45 @@ async fn detach_releases_lease_without_stopping_service() {
         .attach(attach_request(&bob, &bob_channel, "b1", 2), &bob_channel)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn delayed_heartbeat_cannot_resurrect_a_grace_session() {
+    let front = Front::new("alice");
+    let fixture = Fixture::new(std::slice::from_ref(&front));
+    let channel = make_channel(&front, "a", 2_000);
+    let outcome = fixture
+        .service
+        .attach(attach_request(&front, &channel, "a1", 1), &channel)
+        .await
+        .unwrap();
+    fixture
+        .service
+        .handle_disconnect(&outcome.response.session_id, 1)
+        .await
+        .unwrap();
+    let error = fixture
+        .service
+        .heartbeat(
+            HeartbeatRequest {
+                session_id: outcome.response.session_id.clone(),
+                lease_epoch: 1,
+            },
+            &channel,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, AttachErrorCode::SessionExpired);
+    assert_eq!(
+        fixture
+            .service
+            .status(&outcome.response.session_id)
+            .await
+            .unwrap()
+            .state,
+        SessionState::Grace
+    );
 }
 
 #[tokio::test]
@@ -1005,7 +1227,10 @@ async fn service_restart_invalidates_all_sessions_and_requires_new_runtime_chann
     fixture
         .service
         .guard()
-        .authorize(business(&outcome, &channel, "same-runtime-restart", READ))
+        .authorize(
+            business(&outcome, &channel, "same-runtime-restart", READ),
+            &channel,
+        )
         .await
         .unwrap();
     fixture.service.restart("runtime-2").await.unwrap();
@@ -1022,9 +1247,12 @@ async fn service_restart_invalidates_all_sessions_and_requires_new_runtime_chann
         fixture
             .service
             .guard()
-            .authorize(business(&outcome, &channel, "before-restart", READ))
+            .authorize(
+                business(&outcome, &channel, "before-restart", READ),
+                &channel,
+            )
             .await,
-        AttachErrorCode::SessionExpired,
+        AttachErrorCode::ChannelTargetMismatch,
     );
     assert_code(
         fixture
@@ -1046,12 +1274,10 @@ async fn service_restart_invalidates_all_sessions_and_requires_new_runtime_chann
     fixture
         .service
         .guard()
-        .authorize(business(
-            &current,
+        .authorize(
+            business(&current, &new_channel, "runtime-reuse-rejected", READ),
             &new_channel,
-            "runtime-reuse-rejected",
-            READ,
-        ))
+        )
         .await
         .unwrap();
 }
@@ -1263,7 +1489,10 @@ async fn renewal_and_resume_reject_historical_channels_without_consuming_failed_
     fixture
         .service
         .guard()
-        .authorize(business(&resumed, &channel_d, "fresh-resume", READ))
+        .authorize(
+            business(&resumed, &channel_d, "fresh-resume", READ),
+            &channel_d,
+        )
         .await
         .unwrap();
 }
@@ -1327,7 +1556,10 @@ async fn empty_capability_ceiling_stays_empty_across_renewal_and_resume() {
         fixture
             .service
             .guard()
-            .authorize(business(&resumed, &channel_d, "still-no-capability", READ))
+            .authorize(
+                business(&resumed, &channel_d, "still-no-capability", READ),
+                &channel_d,
+            )
             .await,
         AttachErrorCode::PermissionDenied,
     );
@@ -1347,7 +1579,7 @@ async fn guard_rejects_idempotency_key_reuse_but_allows_original_dequeue() {
     let queued = fixture
         .service
         .guard()
-        .authorize(first.clone())
+        .authorize(first.clone(), &channel)
         .await
         .unwrap();
 
@@ -1355,12 +1587,21 @@ async fn guard_rejects_idempotency_key_reuse_but_allows_original_dequeue() {
     duplicate.idempotency_key = first.idempotency_key.clone();
     duplicate.sign(&outcome.session_secret);
     assert_code(
-        fixture.service.guard().authorize(duplicate.clone()).await,
+        fixture
+            .service
+            .guard()
+            .authorize(duplicate.clone(), &channel)
+            .await,
         AttachErrorCode::PermissionDenied,
     );
-    fixture.service.guard().dequeue(queued).await.unwrap();
+    fixture
+        .service
+        .guard()
+        .dequeue(queued, &channel)
+        .await
+        .unwrap();
     assert_code(
-        fixture.service.guard().authorize(duplicate).await,
+        fixture.service.guard().authorize(duplicate, &channel).await,
         AttachErrorCode::PermissionDenied,
     );
 
@@ -1368,7 +1609,7 @@ async fn guard_rejects_idempotency_key_reuse_but_allows_original_dequeue() {
     empty_key.idempotency_key = Some(String::new());
     empty_key.sign(&outcome.session_secret);
     assert_code(
-        fixture.service.guard().authorize(empty_key).await,
+        fixture.service.guard().authorize(empty_key, &channel).await,
         AttachErrorCode::PermissionDenied,
     );
 }
@@ -1543,12 +1784,10 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
     fixture
         .service
         .guard()
-        .authorize(business(
-            &outcome,
+        .authorize(
+            business(&outcome, &channel, "validation-failures-no-lease", READ),
             &channel,
-            "validation-failures-no-lease",
-            READ,
-        ))
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -1640,7 +1879,10 @@ async fn dequeue_rechecks_reduced_role_capability() {
     let queued = fixture
         .service
         .guard()
-        .authorize(business(&outcome, &channel, "queued-write", WRITE))
+        .authorize(
+            business(&outcome, &channel, "queued-write", WRITE),
+            &channel,
+        )
         .await
         .unwrap();
 
@@ -1649,20 +1891,26 @@ async fn dequeue_rechecks_reduced_role_capability() {
         .membership
         .set_role(&front, MemberRole::Viewer);
     assert_code(
-        fixture.service.guard().dequeue(queued).await,
+        fixture.service.guard().dequeue(queued, &channel).await,
         AttachErrorCode::PermissionDenied,
     );
     fixture
         .service
         .guard()
-        .authorize(business(&outcome, &channel, "read-after-reduction", READ))
+        .authorize(
+            business(&outcome, &channel, "read-after-reduction", READ),
+            &channel,
+        )
         .await
         .unwrap();
     assert_code(
         fixture
             .service
             .guard()
-            .authorize(business(&outcome, &channel, "write-after-reduction", WRITE))
+            .authorize(
+                business(&outcome, &channel, "write-after-reduction", WRITE),
+                &channel,
+            )
             .await,
         AttachErrorCode::PermissionDenied,
     );

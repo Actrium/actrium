@@ -2,10 +2,13 @@
 
 use super::*;
 use crate::server::SignalingServerHandle;
+use actr_protocol::actor_key_proof::{
+    ActorKeyProofOperation, sign_actor_key_proof, verify_actor_key_proof,
+};
 use actr_protocol::realm_membership::{Role, client_key_id};
 use actr_protocol::{
-    ActrToSignaling, Ping, SignalingEnvelope, actr_to_signaling, signaling_envelope,
-    signaling_to_actr,
+    ActrToSignaling, Ping, RegisterRequest, SignalingEnvelope, actr_to_signaling,
+    signaling_envelope, signaling_to_actr,
 };
 use ed25519_dalek::{Signer as _, SigningKey};
 use futures_util::{SinkExt, StreamExt};
@@ -36,6 +39,18 @@ async fn fixture(serial: u64, signing: &SigningKey) -> (ActrId, AIdCredential, m
     };
     sqlx::query("INSERT INTO issued_actor_identity (realm, serial_number, actor_type, member_id, client_key_id, issued_at) VALUES (?, ?, ?, ?, ?, unixepoch())")
         .bind(REALM).bind(serial as i64).bind(actor_type.to_string_repr()).bind(&member).bind(&key_id).execute(pool).await.unwrap();
+    let actor_key = SigningKey::from_bytes(&[(serial as u8) ^ 0xa5; 32]);
+    let mut registration = RegisterRequest {
+        realm: REALM.into(),
+        actr_type: actor_type.clone(),
+        ..Default::default()
+    };
+    sign_actor_key_proof(
+        &mut registration,
+        ActorKeyProofOperation::Register,
+        &actor_key,
+    );
+    verify_actor_key_proof(&registration, ActorKeyProofOperation::Register).unwrap();
     let claims = IdentityClaims {
         realm: REALM.into(),
         actor_id: actor.to_string_repr(),
@@ -49,6 +64,7 @@ async fn fixture(serial: u64, signing: &SigningKey) -> (ActrId, AIdCredential, m
         client_key: key_id.clone(),
         role: actr_protocol::MemberRole::Editor as i32,
         development: None,
+        actor_public_key: registration.actor_public_key.clone(),
     }
     .encode_to_vec();
     let credential = AIdCredential {

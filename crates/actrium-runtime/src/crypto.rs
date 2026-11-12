@@ -249,6 +249,8 @@ pub fn request_signing_bytes(request: &BusinessRequest) -> Vec<u8> {
     string(&mut output, &request.route);
     string(&mut output, &request.capability);
     string(&mut output, &request.request_id);
+    u64_value(&mut output, request.issued_at);
+    u64_value(&mut output, request.deadline);
     output.push(match request.kind {
         MessageKind::Request => 1,
         MessageKind::Response => 2,

@@ -118,6 +118,13 @@ pub struct FileActorKeySigner {
     key: ed25519_dalek::SigningKey,
 }
 
+#[cfg(test)]
+fn actor_key_crash_test_after_fsync() {
+    if std::env::var_os("ACTR_HYPER_TEST_CRASH_AFTER_ACTOR_KEY_FSYNC").is_some() {
+        std::process::exit(97);
+    }
+}
+
 impl FileActorKeySigner {
     fn load(path: &Path, identity: &str) -> HyperResult<Self> {
         use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -153,21 +160,39 @@ impl FileActorKeySigner {
         };
         let bytes = serde_json::to_vec(&file)
             .map_err(|error| HyperError::Config(format!("cannot encode Actor key: {error}")))?;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut output = options
-            .open(path)
+        let parent = path.parent().ok_or_else(|| {
+            HyperError::Config("Actor key path must have a parent directory".into())
+        })?;
+        // NamedTempFile is owner-only on Unix. The final path is never opened
+        // for writing: readers see either no key or a completely fsynced key.
+        let mut output = tempfile::NamedTempFile::new_in(parent)
             .map_err(|error| HyperError::Config(format!("cannot create Actor key: {error}")))?;
         output
             .write_all(&bytes)
-            .and_then(|_| output.sync_all())
+            .and_then(|_| output.as_file().sync_all())
             .map_err(|error| HyperError::Config(format!("cannot persist Actor key: {error}")))?;
-        Ok(Self { key })
+        #[cfg(test)]
+        actor_key_crash_test_after_fsync();
+        match output.persist_noclobber(path) {
+            Ok(_) => {
+                #[cfg(unix)]
+                std::fs::File::open(parent)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|error| {
+                        HyperError::Config(format!("cannot sync Actor key directory: {error}"))
+                    })?;
+                Ok(Self { key })
+            }
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // A concurrent creator won after publishing a complete file.
+                // Never return the losing, un-published key generated above.
+                Self::load(path, identity)
+            }
+            Err(error) => Err(HyperError::Config(format!(
+                "cannot publish Actor key: {}",
+                error.error
+            ))),
+        }
     }
 }
 
@@ -839,3 +864,97 @@ fn classify_renew_status(status: u16, retry_after: Option<Duration>) -> RenewErr
 #[cfg(test)]
 #[path = "issuer_client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod actor_key_atomicity_tests {
+    use super::*;
+
+    fn actor_type() -> actr_protocol::ActrType {
+        actr_protocol::ActrType {
+            publisher: "example.com".into(),
+            name: "atomic-key".into(),
+            version: "1.0.0".into(),
+        }
+    }
+
+    fn final_key_files(root: &Path) -> Vec<std::path::PathBuf> {
+        let Ok(entries) = std::fs::read_dir(root.join("actor-keys")) else {
+            return Vec::new();
+        };
+        entries
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn concurrent_actor_key_creation_publishes_one_complete_key() {
+        let root = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let root = root.path().to_path_buf();
+                let barrier = barrier.clone();
+                let actor_type = actor_type();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    actor_signer_for(&root, "atomic@example.com", &actor_type)
+                })
+            })
+            .collect();
+        let signers: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap().unwrap())
+            .collect();
+        let expected = signers[0].public_key();
+        assert!(
+            signers.iter().all(|signer| signer.public_key() == expected),
+            "a losing creator returned its unpublished private key"
+        );
+        let files = final_key_files(root.path());
+        assert_eq!(files.len(), 1);
+        let reloaded = actor_signer_for(root.path(), "atomic@example.com", &actor_type()).unwrap();
+        assert_eq!(reloaded.public_key(), expected);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(&files[0]).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn crash_after_fsync_leaves_no_partial_final_actor_key() {
+        const CRASH_ENV: &str = "ACTR_HYPER_TEST_CRASH_AFTER_ACTOR_KEY_FSYNC";
+        const ROOT_ENV: &str = "ACTR_HYPER_TEST_ACTOR_KEY_ROOT";
+        if std::env::var_os(CRASH_ENV).is_some() {
+            let root = std::env::var_os(ROOT_ENV).expect("child Actor key root");
+            let _ = actor_signer_for(Path::new(&root), "atomic@example.com", &actor_type());
+            panic!("the test crash point did not terminate the child");
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let test_name = "issuer_client::actor_key_atomicity_tests::crash_after_fsync_leaves_no_partial_final_actor_key";
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test_name, "--nocapture"])
+            .env(CRASH_ENV, "1")
+            .env(ROOT_ENV, root.path())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(97));
+        assert!(
+            final_key_files(root.path()).is_empty(),
+            "a crashed writer exposed a partial final Actor key"
+        );
+
+        let recovered = actor_signer_for(root.path(), "atomic@example.com", &actor_type()).unwrap();
+        let reloaded = actor_signer_for(root.path(), "atomic@example.com", &actor_type()).unwrap();
+        assert_eq!(recovered.public_key(), reloaded.public_key());
+        assert_eq!(final_key_files(root.path()).len(), 1);
+    }
+}

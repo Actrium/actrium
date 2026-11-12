@@ -3,6 +3,7 @@
 //! Shared code used by both the Service Worker runtime and the DOM runtime.
 //! Includes common types, error definitions, and message protocols.
 
+pub mod actor_key;
 pub mod backoff;
 pub mod error;
 pub mod events;
@@ -12,6 +13,7 @@ pub mod types;
 pub mod wire;
 pub mod zero_copy;
 
+pub use actor_key::{ACTOR_SIGNING_KEY_STORAGE_KEY, WebActorKey};
 pub use backoff::ExponentialBackoff;
 pub use error::{WebError, WebResult};
 pub use events::{

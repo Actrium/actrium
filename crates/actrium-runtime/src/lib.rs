@@ -8,6 +8,7 @@ mod config;
 mod crypto;
 mod error;
 mod guard;
+mod lifecycle;
 mod policy;
 mod registry;
 mod service;
@@ -21,13 +22,21 @@ pub use crypto::{
 };
 pub use error::{ConfigError, SessionError};
 pub use guard::{BusinessRequest, GuardedRequest, MessageKind, SessionGuard};
+pub use lifecycle::{
+    AttachmentState, CreateInstanceRequest, CreationIntent, CreationStage, CredentialState,
+    DesiredState, Health, InstanceTombstone, LifecycleError, LifecycleService, LifecycleState,
+    Placement, Reachability, ServiceInstance, TombstoneReason, UpgradeOutcome, WorkspaceBinding,
+    actor_id_hash,
+};
 pub use policy::{
     AttachQuotaContext, AuthorizeAttach, AuthorizeRequest, AuthorizeTakeover, Clock,
     MembershipProvider, Principal, PrivacyContext, PrivacyDecision, PrivacyPolicy, QuotaDecision,
     RequestAuthorizationDecision, RequestContext, RequestQuotaContext, ResourceQuota,
     ServicePolicies, SystemClock, TakeoverContext,
 };
-pub use registry::{AttachOutcome, HeartbeatOutcome, InMemorySessionRegistry, SessionSecret};
+pub use registry::{
+    AttachOutcome, HeartbeatOutcome, InMemorySessionRegistry, RetentionStats, SessionSecret,
+};
 pub use service::InMemorySessionService;
 
 pub use actrium_core::session::{

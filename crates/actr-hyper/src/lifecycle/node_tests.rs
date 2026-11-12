@@ -1154,6 +1154,10 @@ fn envelope_is_tell_matches_only_explicit_tell_label() {
 fn build_response_envelope_pins_zero_timeout_per_contract() {
     use actr_protocol::Direction;
 
+    let metadata = vec![actr_protocol::MetadataEntry {
+        key: "actrium.request.proof".to_string(),
+        value: "host-signed-proof".to_string(),
+    }];
     // Success RESPONSE.
     let ok_env = Inner::build_response_envelope(
         "req-ok".to_string(),
@@ -1162,12 +1166,17 @@ fn build_response_envelope_pins_zero_timeout_per_contract() {
         None,
         None,
         None,
+        metadata.clone(),
     );
     assert_eq!(ok_env.direction, Some(Direction::Response as i32));
     assert_eq!(
         ok_env.timeout_ms, 0,
         "RESPONSE envelopes must carry timeout_ms=0 per package.proto contract"
     );
+
+    assert_eq!(ok_env.metadata.len(), 1);
+    assert_eq!(ok_env.metadata[0].key, "actrium.request.proof");
+    assert_eq!(ok_env.metadata[0].value, "host-signed-proof");
 
     // Error RESPONSE also uses 0; payload/error are mutually exclusive.
     let err_env = Inner::build_response_envelope(
@@ -1180,6 +1189,7 @@ fn build_response_envelope_pins_zero_timeout_per_contract() {
         }),
         None,
         None,
+        metadata,
     );
     assert_eq!(err_env.timeout_ms, 0);
     assert!(err_env.payload.is_none());
@@ -3202,6 +3212,20 @@ impl crate::lifecycle::IncomingGuard for SwitchableIncomingGuard {
             ))
         }
     }
+    async fn check_stream(
+        &self,
+        _request: crate::lifecycle::IncomingStreamChunk<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.allowed.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::Revoked,
+                "session revoked",
+            ))
+        }
+    }
 }
 
 fn install_incoming_guard(
@@ -3210,7 +3234,7 @@ fn install_incoming_guard(
 ) {
     Arc::get_mut(&mut harness.inner)
         .expect("the not-yet-started test node must be uniquely owned")
-        .incoming_guard = Some(guard);
+        .set_incoming_guard(Some(guard));
 }
 
 async fn admit_test_envelope(inner: &Inner, envelope: RpcEnvelope) -> ActorResult<FrameworkBytes> {
@@ -3312,6 +3336,29 @@ impl crate::lifecycle::IncomingGuard for ChannelGenerationGuard {
         }
         Ok(())
     }
+    async fn check_stream(
+        &self,
+        request: crate::lifecycle::IncomingStreamChunk<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        let generation = request
+            .metadata
+            .get_u64("actrium.channel.generation")
+            .map_err(crate::lifecycle::IncomingGuardError::invalid_metadata)?
+            .ok_or_else(|| {
+                crate::lifecycle::IncomingGuardError::new(
+                    crate::lifecycle::IncomingGuardErrorCode::InvalidMetadata,
+                    "missing channel generation",
+                )
+            })?;
+        let current = self.current_generation.load(Ordering::SeqCst);
+        if generation != current {
+            return Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::StaleChannelGeneration,
+                format!("message generation {generation}, current generation {current}"),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -3353,24 +3400,109 @@ async fn incoming_guard_rejects_an_old_channel_generation() {
     assert_eq!(h.runs.load(Ordering::SeqCst), 1);
 }
 
+struct RecordingSessionRegistry {
+    methods: std::sync::Mutex<Vec<crate::lifecycle::SessionMethod>>,
+}
+
+#[async_trait::async_trait]
+impl crate::lifecycle::SessionRegistry for RecordingSessionRegistry {
+    async fn dispatch(
+        &self,
+        method: crate::lifecycle::SessionMethod,
+        _request: crate::lifecycle::IncomingDispatchRequest<'_>,
+    ) -> ActorResult<FrameworkBytes> {
+        self.methods.lock().unwrap().push(method);
+        Ok(FrameworkBytes::from_static(b"session-registry"))
+    }
+}
+
 #[tokio::test]
-async fn actrium_session_system_route_bypasses_business_guard() {
-    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"ok"))).await;
+async fn exact_session_route_reaches_registry_not_business_guard_or_workload() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"workload"))).await;
     h.release_tx.send(true).unwrap();
     let guard = Arc::new(SwitchableIncomingGuard::new(false));
     install_incoming_guard(&mut h, guard.clone());
+    let registry = Arc::new(RecordingSessionRegistry {
+        methods: std::sync::Mutex::new(Vec::new()),
+    });
+    Arc::get_mut(&mut h.inner)
+        .expect("the not-yet-started test node must be uniquely owned")
+        .session_registry = Some(registry.clone());
 
     let mut envelope = tell_envelope("session-system-route");
+    envelope.direction = Some(actr_protocol::Direction::Request as i32);
     envelope.route_key = "actrium.session.v1.SessionRegistry.Heartbeat".to_string();
     assert_eq!(
         admit_test_envelope(&h.inner, envelope)
             .await
-            .expect("the session registry route is not business RPC"),
-        FrameworkBytes::from_static(b"ok")
+            .expect("the exact session route enters its registry"),
+        FrameworkBytes::from_static(b"session-registry")
     );
+    assert_eq!(guard.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(h.runs.load(Ordering::SeqCst), 0);
     assert_eq!(
-        guard.calls.load(Ordering::SeqCst),
-        0,
-        "the business guard must not interpret the session protocol"
+        registry.methods.lock().unwrap().as_slice(),
+        &[crate::lifecycle::SessionMethod::Heartbeat]
     );
+}
+
+#[tokio::test]
+async fn session_route_without_registry_never_falls_back_to_workload() {
+    let h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"workload"))).await;
+    h.release_tx.send(true).unwrap();
+    let mut envelope = tell_envelope("session-without-registry");
+    envelope.direction = Some(actr_protocol::Direction::Request as i32);
+    envelope.route_key = "actrium.session.v1.Attach".to_string();
+    assert!(matches!(
+        admit_test_envelope(&h.inner, envelope).await,
+        Err(ActrError::Unavailable(_))
+    ));
+    assert_eq!(h.runs.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn unknown_session_namespace_route_is_guarded_and_never_dispatched() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"workload"))).await;
+    h.release_tx.send(true).unwrap();
+    let guard = Arc::new(SwitchableIncomingGuard::new(true));
+    install_incoming_guard(&mut h, guard.clone());
+    let mut envelope = tell_envelope("unknown-session-route");
+    envelope.route_key = "actrium.session.v1.SessionRegistry.HeartbeatExtra".to_string();
+    assert!(matches!(
+        admit_test_envelope(&h.inner, envelope).await,
+        Err(ActrError::NotFound(_))
+    ));
+    assert_eq!(guard.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(h.runs.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn session_route_matcher_is_exact() {
+    use crate::lifecycle::{SessionMethod, actrium_session_v1_method};
+    for (suffix, method) in [
+        ("Attach", SessionMethod::Attach),
+        ("Resume", SessionMethod::Resume),
+        ("Detach", SessionMethod::Detach),
+        ("Heartbeat", SessionMethod::Heartbeat),
+        ("Takeover", SessionMethod::Takeover),
+        ("GetStatus", SessionMethod::GetStatus),
+    ] {
+        assert_eq!(
+            actrium_session_v1_method(&format!("actrium.session.v1.{suffix}")),
+            Some(method)
+        );
+        assert_eq!(
+            actrium_session_v1_method(&format!("actrium.session.v1.SessionRegistry.{suffix}")),
+            Some(method)
+        );
+    }
+    for route in [
+        "actrium.session.v1.",
+        "actrium.session.v1.AttachExtra",
+        "actrium.session.v1.SessionRegistry.Attach.Extra",
+        "actrium.session.v10.Attach",
+        "workload.actrium.session.v1.Attach",
+    ] {
+        assert_eq!(actrium_session_v1_method(route), None, "route: {route}");
+    }
 }

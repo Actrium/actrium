@@ -118,6 +118,7 @@ pub(super) async fn ensure_identity(ctx: &Rc<ClientContext>) -> Result<(u64, Str
         renewal_token: proof,
         public_key: key.public,
         admission_commitment: key.admission_commitment(),
+        actor: None,
     })
     .map_err(error)?;
     let issued: IssuedIdentity = request(ctx, "relay-identity", JsValue::from_str(&body)).await?;

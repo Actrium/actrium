@@ -5423,6 +5423,7 @@ async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
             policy_digest: [21; 32],
             actor_state_digest: [22; 32],
             runtime_instance_id: "runtime-integration".into(),
+            actor_credential: ok.credential.encode_to_vec(),
             actor_credential_digest: <sha2::Sha256 as sha2::Digest>::digest(
                 ok.credential.encode_to_vec(),
             )
@@ -5499,6 +5500,99 @@ async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
             .0,
         StatusCode::BAD_REQUEST
     );
+
+    let with_actor = |actor| actr_relay_security::IdentityRequest {
+        endpoint: enrollment.endpoint.clone(),
+        renewal_token: enrollment.renewal_token.clone(),
+        public_key: enrollment.public_key,
+        admission_commitment: enrollment.admission_commitment,
+        actor: Some(actor),
+    };
+    let mut digest_mismatch = enrollment.actor.clone().unwrap();
+    digest_mismatch.actor_credential_digest[0] ^= 1;
+    assert_eq!(
+        request(
+            app.clone(),
+            &with_actor(digest_mismatch),
+            Some(DEFAULT_KEY_LABEL),
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+
+    let mut bad_signature = enrollment.actor.clone().unwrap();
+    let mut bad_signature_credential = ok.credential.clone();
+    let mut invalid_signature = bad_signature_credential.signature.to_vec();
+    invalid_signature[0] ^= 1;
+    bad_signature_credential.signature = invalid_signature.into();
+    bad_signature.actor_credential = bad_signature_credential.encode_to_vec();
+    bad_signature.actor_credential_digest =
+        actr_relay_security::actor_credential_digest(&bad_signature.actor_credential);
+    assert_eq!(
+        request(
+            app.clone(),
+            &with_actor(bad_signature),
+            Some(DEFAULT_KEY_LABEL),
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    async fn resign(
+        signer: &issuer::signer_client_wrapper::SignerClientWrapper,
+        template: &actr_protocol::AIdCredential,
+        claims: actr_protocol::IdentityClaims,
+    ) -> actr_protocol::AIdCredential {
+        let claims = claims.encode_to_vec();
+        let signature = signer.sign(template.key_id, &claims).await.unwrap();
+        actr_protocol::AIdCredential {
+            key_id: template.key_id,
+            claims: claims.into(),
+            signature: signature.into(),
+        }
+    }
+    let signer_client = create_signer_client(&env.signer_config, &env.shared_key)
+        .await
+        .unwrap();
+    let original_claims =
+        actr_protocol::IdentityClaims::decode(ok.credential.claims.as_ref()).unwrap();
+    let mut expired_claims = original_claims.clone();
+    expired_claims.expires_at = issuer::renewal::now_secs() as u64;
+    let expired_credential = resign(&signer_client, &ok.credential, expired_claims).await;
+    let mut expired = enrollment.actor.clone().unwrap();
+    expired.actor_credential = expired_credential.encode_to_vec();
+    expired.actor_credential_digest =
+        actr_relay_security::actor_credential_digest(&expired.actor_credential);
+    assert_eq!(
+        request(app.clone(), &with_actor(expired), Some(DEFAULT_KEY_LABEL))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED,
+        "a correctly signed but expired Actor credential must not be issued a channel certificate"
+    );
+
+    let mut other_actor_claims = original_claims;
+    let mut other_actor = ok.actr_id.clone();
+    other_actor.serial_number += 1;
+    other_actor_claims.actor_id = other_actor.to_string_repr();
+    let other_actor_credential = resign(&signer_client, &ok.credential, other_actor_claims).await;
+    let mut other_actor_enrollment = enrollment.actor.clone().unwrap();
+    other_actor_enrollment.actor_credential = other_actor_credential.encode_to_vec();
+    other_actor_enrollment.actor_credential_digest =
+        actr_relay_security::actor_credential_digest(&other_actor_enrollment.actor_credential);
+    assert_eq!(
+        request(
+            app.clone(),
+            &with_actor(other_actor_enrollment),
+            Some(DEFAULT_KEY_LABEL),
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+
     let (status, body) = request(app.clone(), &enrollment, Some(DEFAULT_KEY_LABEL)).await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let issued: actr_relay_security::IssuedIdentity = serde_json::from_slice(&body).unwrap();
@@ -5527,6 +5621,17 @@ async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
     assert_eq!(actor_claims.runtime_instance_id, "runtime-integration");
     assert_eq!(actor_claims.policy_digest, [21; 32]);
     assert_eq!(actor_claims.actor_state_digest, [22; 32]);
+    assert_eq!(
+        actor_claims.actor_credential_digest,
+        actr_relay_security::actor_credential_digest(&ok.credential.encode_to_vec())
+    );
+    let credential_claims =
+        actr_protocol::IdentityClaims::decode(ok.credential.claims.as_ref()).unwrap();
+    assert!(actor_claims.expires_at <= claims.expires_at);
+    assert!(actor_claims.expires_at <= credential_claims.expires_at);
+    if let Some(renewal_expiry) = ok.renewal_token_expires_at {
+        assert!(actor_claims.expires_at <= renewal_expiry.seconds as u64);
+    }
     let actor_key = actr_relay_security::ActorIdentityKey::from_bytes(
         test_actor_key(&linked_register_request()).to_bytes(),
     );
@@ -5547,6 +5652,30 @@ async fn relay_enrollment_requires_bound_client_and_private_renewal_proof() {
             issuer::renewal::now_secs() as u64,
         )
         .unwrap();
+
+    // Use a genuine signature with a lifetime shorter than both the renewal
+    // token and the normal certificate TTL to prove which expiry wins.
+    let mut short_lived_claims =
+        actr_protocol::IdentityClaims::decode(ok.credential.claims.as_ref()).unwrap();
+    short_lived_claims.expires_at = issuer::renewal::now_secs() as u64 + 60;
+    let short_expiry = short_lived_claims.expires_at;
+    let short_credential = resign(&signer_client, &ok.credential, short_lived_claims).await;
+    let mut short_enrollment = enrollment.actor.clone().unwrap();
+    short_enrollment.actor_credential = short_credential.encode_to_vec();
+    short_enrollment.actor_credential_digest =
+        actr_relay_security::actor_credential_digest(&short_enrollment.actor_credential);
+    let (status, body) = request(
+        app.clone(),
+        &with_actor(short_enrollment),
+        Some(DEFAULT_KEY_LABEL),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let short_issued: actr_relay_security::IssuedIdentity = serde_json::from_slice(&body).unwrap();
+    let short_actor_claims: actr_relay_security::ActorChannelClaims =
+        serde_json::from_slice(&short_issued.actor_certificate.unwrap().claims).unwrap();
+    assert_eq!(short_actor_claims.expires_at, short_expiry);
+
     sqlx::query("UPDATE realm SET enabled = 0 WHERE name = ?")
         .bind(TEST_REALM)
         .execute(platform::storage::db::get_database().get_pool())

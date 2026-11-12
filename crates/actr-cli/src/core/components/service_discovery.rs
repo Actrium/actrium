@@ -5,16 +5,21 @@ use crate::core::{
 use actr_hyper::IssuerClient;
 use actr_protocol::{
     AIdCredential, ActrId, ActrToSignaling, ActrType, DiscoveryRequest, ErrorResponse,
-    GetServiceSpecRequest, RegisterAuthMode, RegisterRequest, SIGNALING_ENVELOPE_VERSION,
-    SignalingEnvelope, actr_to_signaling, discovery_response, get_service_spec_response,
-    register_response, signaling_envelope, signaling_to_actr,
+    GetServiceSpecRequest, IdentityClaims, RegisterAuthMode, RegisterRequest,
+    SIGNALING_ENVELOPE_VERSION, SignalingEnvelope,
+    actor_key_proof::{ActorKeyProofOperation, sign_actor_key_proof, verify_actor_key_proof},
+    actr_to_signaling, discovery_response, get_service_spec_response, register_response,
+    signaling_envelope, signaling_to_actr,
 };
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use base64::Engine as _;
+use ed25519_dalek::SigningKey;
 use futures_util::{SinkExt, StreamExt};
 use prost::Message;
-use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tokio::{
     sync::Mutex,
@@ -61,6 +66,120 @@ pub struct DiscoveryContext {
 pub struct NetworkServiceDiscovery {
     context: DiscoveryContext,
     state: Mutex<Option<SignalingState>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ActorKeyFile {
+    identity: String,
+    public_key: String,
+    private_key: String,
+}
+
+fn actor_key_identity(realm: &str, actr_type: &ActrType) -> String {
+    format!(
+        "actr-cli.service-discovery\0{realm}\0{}\0{}\0{}",
+        actr_type.publisher, actr_type.name, actr_type.version
+    )
+}
+
+fn actor_key_path(storage_root: &Path, identity: &str) -> PathBuf {
+    storage_root.join(format!(
+        "{}.json",
+        hex::encode(Sha256::digest(identity.as_bytes()))
+    ))
+}
+
+fn load_actor_key(path: &Path, identity: &str) -> Result<SigningKey> {
+    let text = actr_protocol::realm_membership::read_private_key_file(path, "CLI Actor key")
+        .map_err(anyhow::Error::msg)?;
+    let file: ActorKeyFile = serde_json::from_str(&text)
+        .with_context(|| format!("Invalid CLI Actor key file: {}", path.display()))?;
+    let private = base64::engine::general_purpose::STANDARD
+        .decode(&file.private_key)
+        .context("Invalid CLI Actor private key encoding")?;
+    let private: [u8; 32] = private
+        .try_into()
+        .map_err(|_| anyhow!("CLI Actor private key must be 32 bytes"))?;
+    let key = SigningKey::from_bytes(&private);
+    if file.identity != identity
+        || file.public_key
+            != base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes())
+    {
+        anyhow::bail!(
+            "CLI Actor key identity or public key mismatch: {}",
+            path.display()
+        );
+    }
+    Ok(key)
+}
+
+fn create_actor_key(path: &Path, identity: &str) -> Result<SigningKey> {
+    use std::io::Write as _;
+
+    let key = SigningKey::generate(&mut rand::rngs::OsRng);
+    let file = ActorKeyFile {
+        identity: identity.to_string(),
+        public_key: base64::engine::general_purpose::STANDARD
+            .encode(key.verifying_key().to_bytes()),
+        private_key: base64::engine::general_purpose::STANDARD.encode(key.to_bytes()),
+    };
+    let bytes = serde_json::to_vec(&file).context("Failed to encode CLI Actor key")?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut output = options
+        .open(path)
+        .with_context(|| format!("Failed to create CLI Actor key: {}", path.display()))?;
+    output
+        .write_all(&bytes)
+        .and_then(|_| output.sync_all())
+        .with_context(|| format!("Failed to persist CLI Actor key: {}", path.display()))?;
+    Ok(key)
+}
+
+fn load_or_create_actor_key(
+    storage_root: &Path,
+    realm: &str,
+    actr_type: &ActrType,
+) -> Result<SigningKey> {
+    let identity = actor_key_identity(realm, actr_type);
+    std::fs::create_dir_all(storage_root).with_context(|| {
+        format!(
+            "Failed to create CLI Actor key directory: {}",
+            storage_root.display()
+        )
+    })?;
+    let path = actor_key_path(storage_root, &identity);
+    if path.exists() {
+        return load_actor_key(&path, &identity);
+    }
+    match create_actor_key(&path, &identity) {
+        Ok(key) => Ok(key),
+        Err(_) if path.exists() => load_actor_key(&path, &identity),
+        Err(error) => Err(error),
+    }
+}
+
+fn default_actor_key_root() -> Result<PathBuf> {
+    Ok(dirs::home_dir()
+        .context("Unable to determine home directory for CLI Actor key storage")?
+        .join(".actr")
+        .join("actor-keys")
+        .join("service-discovery"))
+}
+
+fn verify_credential_actor_key(credential: &AIdCredential, actor_key: &SigningKey) -> Result<()> {
+    let claims = IdentityClaims::decode(credential.claims.as_ref())
+        .context("Issuer returned malformed Actor identity claims")?;
+    let expected = actor_key.verifying_key();
+    if claims.actor_public_key.as_deref() != Some(expected.as_bytes().as_slice()) {
+        anyhow::bail!("Issuer credential is not bound to the persistent CLI Actor key");
+    }
+    Ok(())
 }
 
 impl NetworkServiceDiscovery {
@@ -155,7 +274,12 @@ impl NetworkServiceDiscovery {
     async fn connect_and_register(&self) -> Result<SignalingState> {
         let realm = self.required_realm()?;
         let client_key = self.required_client_key(realm)?;
-        let register_request = self.build_linked_register_request(realm);
+        let actor_key = load_or_create_actor_key(
+            &default_actor_key_root()?,
+            realm,
+            &self.context.package_actr_type,
+        )?;
+        let register_request = self.build_linked_register_request(realm, &actor_key)?;
 
         let issuer_client =
             IssuerClient::new(&self.context.issuer_endpoint).with_client_key(client_key);
@@ -174,6 +298,7 @@ impl NetworkServiceDiscovery {
             }
             None => return Err(anyhow!("Issuer registration response is missing result")),
         };
+        verify_credential_actor_key(&credential, &actor_key)?;
 
         let signaling_request = Self::build_signaling_request_with_identity(
             &self.context.signaling_url,
@@ -424,8 +549,12 @@ impl NetworkServiceDiscovery {
             })
     }
 
-    fn build_linked_register_request(&self, realm: &str) -> RegisterRequest {
-        RegisterRequest {
+    fn build_linked_register_request(
+        &self,
+        realm: &str,
+        actor_key: &SigningKey,
+    ) -> Result<RegisterRequest> {
+        let mut request = RegisterRequest {
             actr_type: self.context.package_actr_type.clone(),
             realm: realm.to_string(),
             service_spec: None,
@@ -437,7 +566,12 @@ impl NetworkServiceDiscovery {
             target: None,
             auth_mode: Some(RegisterAuthMode::Linked as i32),
             signing_public_key: None,
-        }
+            ..Default::default()
+        };
+        sign_actor_key_proof(&mut request, ActorKeyProofOperation::Register, actor_key);
+        verify_actor_key_proof(&request, ActorKeyProofOperation::Register)
+            .map_err(|error| anyhow!("CLI Actor key proof self-verification failed: {error}"))?;
+        Ok(request)
     }
 }
 

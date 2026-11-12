@@ -166,6 +166,72 @@ fn clear_removes_all_streams_and_closes_registry() {
     assert_eq!(reg.callback_len(), 0);
 }
 
+struct SwitchableStreamGuard {
+    allowed: AtomicBool,
+    denied_tx: tokio_mpsc::UnboundedSender<u64>,
+}
+
+#[async_trait::async_trait]
+impl crate::lifecycle::IncomingGuard for SwitchableStreamGuard {
+    async fn check(
+        &self,
+        _request: crate::lifecycle::IncomingDispatchRequest<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        unreachable!("stream guard test does not dispatch RPC")
+    }
+
+    async fn check_stream(
+        &self,
+        request: crate::lifecycle::IncomingStreamChunk<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        if self.allowed.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            let _ = self.denied_tx.send(request.chunk.sequence);
+            Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::Revoked,
+                "stream session revoked",
+            ))
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn queued_stream_chunks_are_rechecked_before_callback() {
+    let reg = DataChunkRegistry::new();
+    let (cb, harness, mut probe) = Harness::new();
+    reg.register("s1".into(), cb);
+    let release_first = harness.gate(1);
+    let (denied_tx, mut denied_rx) = tokio_mpsc::unbounded_channel();
+    let guard = Arc::new(SwitchableStreamGuard {
+        allowed: AtomicBool::new(true),
+        denied_tx,
+    });
+    reg.set_incoming_guard(Some(guard.clone()));
+
+    reg.dispatch(chunk_seq("s1", 1), ActrId::default(), RELIABLE)
+        .await;
+    assert_eq!(probe.wait_started().await, 1);
+    reg.dispatch(chunk_seq("s1", 2), ActrId::default(), RELIABLE)
+        .await;
+
+    guard.allowed.store(false, Ordering::SeqCst);
+    release_first.send(()).unwrap();
+    assert_eq!(probe.wait_done().await, 1);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), denied_rx.recv())
+            .await
+            .unwrap(),
+        Some(2),
+        "the queued chunk must be rejected at callback time"
+    );
+
+    reg.dispatch(chunk_seq("s1", 3), ActrId::default(), RELIABLE)
+        .await;
+    assert_eq!(denied_rx.recv().await, Some(3));
+    assert_eq!(probe.completions(), vec![1]);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dispatch_invokes_registered_callback() {
     let reg = DataChunkRegistry::new();

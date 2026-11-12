@@ -13,7 +13,7 @@ pub mod actor;
 pub use actor::{
     ACTOR_CHANNEL_AUDIENCE, ACTOR_CHANNEL_CERTIFICATE_DOMAIN, ActorChannelCertificate,
     ActorChannelClaims, ActorChannelEnrollment, ActorChannelIdentity, ActorChannelSession,
-    ActorIdentityKey, VerifiedActorChannel, actor_channel_signing_bytes,
+    ActorIdentityKey, VerifiedActorChannel, actor_channel_signing_bytes, actor_credential_digest,
     verify_actor_channel_certificate,
 };
 

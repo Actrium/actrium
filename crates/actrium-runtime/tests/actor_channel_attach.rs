@@ -259,6 +259,10 @@ fn service_config(service_key: SigningKey) -> ServiceConfig {
         lease_duration: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(10),
         grace_period: Duration::from_secs(5),
+        replay_retention: ServiceConfig::DEFAULT_REPLAY_RETENTION,
+        max_replay_entries: ServiceConfig::DEFAULT_MAX_REPLAY_ENTRIES,
+        max_completed_sessions: ServiceConfig::DEFAULT_MAX_COMPLETED_SESSIONS,
+        max_channel_generations: ServiceConfig::DEFAULT_MAX_CHANNEL_GENERATIONS,
     }
 }
 
@@ -311,6 +315,8 @@ fn business_request(
         route: "documents/read".into(),
         capability: READ.into(),
         request_id: request_id.into(),
+        issued_at: NOW,
+        deadline: 2_000,
         kind: MessageKind::Request,
         idempotency_key: None,
         payload: b"list documents".to_vec(),
@@ -390,8 +396,8 @@ async fn noise_authenticated_front_attaches_and_uses_session_guarded_rpc() {
         "request-1",
         &outcome.session_secret,
     );
-    let queued = guard.authorize(rpc).await.unwrap();
-    let delivered = guard.dequeue(queued).await.unwrap();
+    let queued = guard.authorize(rpc, &channel).await.unwrap();
+    let delivered = guard.dequeue(queued, &channel).await.unwrap();
     assert_eq!(delivered.payload, b"list documents");
 
     let occupied = match service
@@ -430,7 +436,7 @@ async fn noise_authenticated_front_attaches_and_uses_session_guarded_rpc() {
         "request-stale",
         &outcome.session_secret,
     );
-    assert!(guard.authorize(stale).await.is_err());
+    assert!(guard.authorize(stale, &channel).await.is_err());
 
     let current = business_request(
         &taken.response.session_id,
@@ -439,5 +445,5 @@ async fn noise_authenticated_front_attaches_and_uses_session_guarded_rpc() {
         "request-current",
         &taken.session_secret,
     );
-    assert!(guard.authorize(current).await.is_ok());
+    assert!(guard.authorize(current, &channel).await.is_ok());
 }

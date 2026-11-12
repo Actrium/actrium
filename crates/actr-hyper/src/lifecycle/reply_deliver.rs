@@ -60,6 +60,7 @@ struct ReplyShared {
     route_key: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    metadata: Vec<actr_protocol::MetadataEntry>,
     emit_response: bool,
     /// Runtime captured at admission so a movable Reply can be completed
     /// from a non-Tokio callback thread without losing its outcome.
@@ -106,6 +107,7 @@ impl ReplyDeliver {
         route_key: String,
         traceparent: Option<String>,
         tracestate: Option<String>,
+        metadata: Vec<actr_protocol::MetadataEntry>,
         sink: ReplySink,
         emit_response: bool,
     ) -> (Self, Arc<AtomicBool>) {
@@ -142,6 +144,7 @@ impl ReplyDeliver {
                     route_key,
                     traceparent,
                     tracestate,
+                    metadata,
                     emit_response,
                     runtime_handle,
                 },
@@ -297,6 +300,7 @@ impl ReplyDeliver {
                 self.shared.route_key.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
+                self.shared.metadata.clone(),
                 emit_response,
                 result,
                 self.sink.span.clone(),
@@ -310,6 +314,7 @@ impl ReplyDeliver {
                 self.shared.request_id.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
+                self.shared.metadata.clone(),
                 emit_response,
                 result,
                 self.sink.span.clone(),

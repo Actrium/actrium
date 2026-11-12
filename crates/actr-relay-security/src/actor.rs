@@ -30,7 +30,15 @@ pub struct ActorChannelEnrollment {
     pub policy_digest: [u8; 32],
     pub actor_state_digest: [u8; 32],
     pub runtime_instance_id: String,
+    /// Canonical protobuf encoding of the Actor's current `AIdCredential`.
+    /// The Issuer verifies these bytes instead of trusting the supplied digest.
+    pub actor_credential: Vec<u8>,
     pub actor_credential_digest: [u8; 32],
+}
+
+/// Digest of the exact credential bytes presented during Actor enrollment.
+pub fn actor_credential_digest(credential: &[u8]) -> [u8; 32] {
+    Sha256::digest(credential).into()
 }
 
 /// Claims signed by the realm Issuer for an Actor channel endpoint.

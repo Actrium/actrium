@@ -35,7 +35,8 @@ pub use recovery_supervisor::ConnectionFact;
 pub use incoming_guard::{
     ACTRIUM_SESSION_V1_ROUTE_PREFIX, IncomingCaller, IncomingDispatchRequest, IncomingGuard,
     IncomingGuardError, IncomingGuardErrorCode, IncomingMetadata, IncomingMetadataError,
-    IncomingMetadataErrorKind, route_requires_incoming_guard,
+    IncomingMetadataErrorKind, IncomingStreamChunk, SessionMethod, SessionRegistry,
+    actrium_session_v1_method, route_requires_incoming_guard,
 };
 pub(crate) use network_event::LONG_BACKGROUND_RECONNECT_THRESHOLD_MS;
 #[cfg(feature = "test-utils")]

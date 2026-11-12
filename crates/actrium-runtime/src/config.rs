@@ -32,9 +32,23 @@ pub struct ServiceConfig {
     pub lease_duration: Duration,
     pub heartbeat_interval: Duration,
     pub grace_period: Duration,
+    /// How long replay protection and closed-session records are retained.
+    pub replay_retention: Duration,
+    /// Maximum entries in each replay-record collection.
+    pub max_replay_entries: usize,
+    /// Maximum closed sessions retained for status and idempotency checks.
+    /// Active and Grace sessions are never counted against this limit.
+    pub max_completed_sessions: usize,
+    /// Maximum channel generations retained per session, including the current one.
+    pub max_channel_generations: usize,
 }
 
 impl ServiceConfig {
+    pub const DEFAULT_REPLAY_RETENTION: Duration = Duration::from_secs(5 * 60);
+    pub const DEFAULT_MAX_REPLAY_ENTRIES: usize = 65_536;
+    pub const DEFAULT_MAX_COMPLETED_SESSIONS: usize = 1_024;
+    pub const DEFAULT_MAX_CHANNEL_GENERATIONS: usize = 64;
+
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.service_actor_id.is_empty() || self.runtime_instance_id.is_empty() {
             return Err(ConfigError(
@@ -90,6 +104,15 @@ impl ServiceConfig {
         if self.heartbeat_interval.as_millis() > u128::from(u32::MAX) {
             return Err(ConfigError(
                 "heartbeat interval must fit the protocol's u32 milliseconds field".into(),
+            ));
+        }
+        if self.replay_retention.as_secs() == 0
+            || self.max_replay_entries == 0
+            || self.max_completed_sessions == 0
+            || self.max_channel_generations == 0
+        {
+            return Err(ConfigError(
+                "replay retention and all retention capacities must be positive".into(),
             ));
         }
         Ok(())

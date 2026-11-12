@@ -50,6 +50,13 @@ const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_DESIRED_PEERS: usize = 1024;
 
+fn runtime_instance_id() -> &'static str {
+    static RUNTIME_INSTANCE_ID: OnceLock<String> = OnceLock::new();
+    RUNTIME_INSTANCE_ID
+        .get_or_init(|| uuid::Uuid::new_v4().to_string())
+        .as_str()
+}
+
 fn closed() -> NetworkError {
     NetworkError::WebSocketClosed("Relay channel closed".into())
 }
@@ -290,7 +297,7 @@ impl RelayClient {
             actor_identity: RwLock::new(None),
             actor_storage_root,
             actor_key_namespace,
-            runtime_instance_id: uuid::Uuid::new_v4().to_string(),
+            runtime_instance_id: runtime_instance_id().to_owned(),
             session,
             gate,
             shutdown,
@@ -1249,8 +1256,20 @@ impl RelayClient {
     async fn certified_identity(
         &self,
         endpoint: &str,
-        proof: &[u8],
+        _proof: &[u8],
     ) -> NetworkResult<(Arc<LocalIdentity>, Option<Arc<ActorChannelIdentity>>)> {
+        // Bind the cache to the exact credential and generation. A hard rebind
+        // may retain the endpoint and actor key, but must never reuse the Actor
+        // certificate issued for the previous credential generation.
+        let snapshot = self.session.snapshot().await;
+        let actor_binding = self.actor_storage_root.as_ref().map(|_| {
+            let credential = snapshot.credential.encode_to_vec();
+            let credential_digest = actr_relay_security::actor_credential_digest(&credential);
+            let mut state_input = credential_digest.to_vec();
+            state_input.extend_from_slice(&snapshot.generation.to_be_bytes());
+            let state_digest = sha2::Sha256::digest(&state_input).into();
+            (credential, credential_digest, state_digest)
+        });
         if let Some(identity) = self
             .local_identity
             .read()
@@ -1261,50 +1280,62 @@ impl RelayClient {
             })
             .cloned()
         {
-            let actor = if self.actor_storage_root.is_some() {
-                self.actor_identity.read().await.clone()
+            let actor = if let Some((_, credential_digest, state_digest)) = &actor_binding {
+                self.actor_identity
+                    .read()
+                    .await
+                    .as_ref()
+                    .filter(|actor| {
+                        actor.claims().actor_credential_digest == *credential_digest
+                            && actor.claims().actor_state_digest == *state_digest
+                            && actor.expires_at() > now_secs() + 30
+                    })
+                    .cloned()
             } else {
                 None
             };
-            return Ok((identity, actor));
+            if actor_binding.is_none() || actor.is_some() {
+                return Ok((identity, actor));
+            }
         }
         let key = IdentityKey::generate().map_err(secure_error)?;
         let noise_for_actor = key.clone();
-        let snapshot = self.session.snapshot().await;
-        let actor_material = if let Some(storage_root) = &self.actor_storage_root {
-            let claims = actr_protocol::IdentityClaims::decode(snapshot.credential.claims.as_ref())
-                .map_err(|_| closed())?;
-            let signer = crate::issuer_client::actor_signer_for_scoped(
-                storage_root,
-                &claims.realm,
-                &claims.actor_type,
-                self.actor_key_namespace.as_deref(),
-            )
-            .map_err(|_| closed())?;
-            let credential_digest = sha2::Sha256::digest(snapshot.credential.encode_to_vec());
-            let policy_digest = sha2::Sha256::digest(
-                format!(
-                    "actrium.channel.policy.v1:{}",
-                    claims.actor_type.to_string_repr()
+        let actor_material =
+            if let (Some(storage_root), Some((credential, credential_digest, state_digest))) =
+                (&self.actor_storage_root, &actor_binding)
+            {
+                let claims =
+                    actr_protocol::IdentityClaims::decode(snapshot.credential.claims.as_ref())
+                        .map_err(|_| closed())?;
+                let signer = crate::issuer_client::actor_signer_for_scoped(
+                    storage_root,
+                    &claims.realm,
+                    &claims.actor_type,
+                    self.actor_key_namespace.as_deref(),
                 )
-                .as_bytes(),
-            );
-            let mut state_input = credential_digest.to_vec();
-            state_input.extend_from_slice(&snapshot.generation.to_be_bytes());
-            let enrollment = ActorChannelEnrollment {
-                policy_digest: policy_digest.into(),
-                actor_state_digest: sha2::Sha256::digest(&state_input).into(),
-                runtime_instance_id: self.runtime_instance_id.clone(),
-                actor_credential_digest: credential_digest.into(),
+                .map_err(|_| closed())?;
+                let policy_digest = sha2::Sha256::digest(
+                    format!(
+                        "actrium.channel.policy.v1:{}",
+                        claims.actor_type.to_string_repr()
+                    )
+                    .as_bytes(),
+                );
+                let enrollment = ActorChannelEnrollment {
+                    policy_digest: policy_digest.into(),
+                    actor_state_digest: *state_digest,
+                    runtime_instance_id: self.runtime_instance_id.clone(),
+                    actor_credential: credential.clone(),
+                    actor_credential_digest: *credential_digest,
+                };
+                Some((signer.actor_identity_key(), enrollment))
+            } else {
+                None
             };
-            Some((signer.actor_identity_key(), enrollment))
-        } else {
-            None
-        };
         let client = secure_http_client()?;
         let body = serde_json::to_vec(&IdentityRequest {
             endpoint: endpoint.to_owned(),
-            renewal_token: proof.to_vec(),
+            renewal_token: snapshot.renewal_token.to_vec(),
             public_key: key.public,
             admission_commitment: key.admission_commitment(),
             actor: actor_material
@@ -1366,9 +1397,7 @@ impl RelayClient {
             );
         }
         *self.local_identity.write().await = Some(identity.clone());
-        if let Some(actor_identity) = &actor_identity {
-            *self.actor_identity.write().await = Some(actor_identity.clone());
-        }
+        *self.actor_identity.write().await = actor_identity.clone();
         Ok((identity, actor_identity))
     }
     fn ais_url(&self, path: &str) -> NetworkResult<url::Url> {
@@ -1540,3 +1569,245 @@ impl RelayClient {
 #[cfg(test)]
 #[path = "relay_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod identity_cache_review_tests {
+    use super::*;
+    use crate::inbound::DataChunkRegistry;
+    use crate::issuer_client::ActorKeySigner as _;
+    use crate::lifecycle::{node::PeerTypes, session_state::SessionSnapshot};
+    use crate::transport::correlation::RpcCorrelation;
+    use actr_relay_security::{
+        ACTOR_CHANNEL_AUDIENCE, ActorChannelCertificate, ActorChannelClaims, CERTIFICATE_DOMAIN,
+        Certificate, IdentityClaims as RelayIdentityClaims, signing_bytes,
+    };
+    use ed25519_dalek::{Signature, Signer, SigningKey, Verifier};
+
+    fn credential(
+        claims: &actr_protocol::IdentityClaims,
+        issuer: &SigningKey,
+    ) -> actr_protocol::AIdCredential {
+        let claims = claims.encode_to_vec();
+        actr_protocol::AIdCredential {
+            key_id: 1,
+            signature: issuer.sign(&claims).to_bytes().to_vec().into(),
+            claims: claims.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn actor_identity_cache_tracks_credential_and_generation() {
+        let root = tempfile::tempdir().unwrap();
+        let actor_type = ActrType::from_string_repr("actrium/actrium-front@1.0.0").unwrap();
+        let realm = "test@example.com".to_string();
+        let signer = crate::issuer_client::actor_signer_for_scoped(
+            root.path(),
+            &realm,
+            &actor_type,
+            Some("tab-cache"),
+        )
+        .unwrap();
+        let local = ActrId::from_string_repr("2.test@example.com").unwrap();
+        let endpoint = local.to_string_repr();
+        let now = now_secs();
+        let issuer_signing = SigningKey::from_bytes(&[7; 32]);
+        let issuer_public = IssuerKey {
+            key_id: 1,
+            public_key: issuer_signing.verifying_key().to_bytes(),
+            expires_at: now + 600,
+        };
+        let mut server = mockito::Server::new_async().await;
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let response_requests = requests.clone();
+        let response_issuer = issuer_public.clone();
+        let response_type = actor_type.clone();
+        let response_signer = signer.clone();
+        let response_realm = realm.clone();
+        let response_issuer_signing = issuer_signing.clone();
+        let mock = server
+            .mock("POST", "/relay-identity")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body_from_request(move |request| {
+                let enrollment: IdentityRequest =
+                    serde_json::from_slice(&request.body().unwrap()).unwrap();
+                let actor_enrollment = enrollment.actor.clone().expect("Actor enrollment");
+                assert_eq!(
+                    actor_enrollment.actor_credential_digest,
+                    actr_relay_security::actor_credential_digest(
+                        &actor_enrollment.actor_credential
+                    )
+                );
+                let credential = actr_protocol::AIdCredential::decode(
+                    actor_enrollment.actor_credential.as_slice(),
+                )
+                .unwrap();
+                let signature = Signature::from_slice(&credential.signature).unwrap();
+                response_issuer_signing
+                    .verifying_key()
+                    .verify(&credential.claims, &signature)
+                    .unwrap();
+                response_requests
+                    .lock()
+                    .unwrap()
+                    .push(actor_enrollment.clone());
+                let relay_claims = serde_json::to_vec(&RelayIdentityClaims {
+                    domain: CERTIFICATE_DOMAIN.into(),
+                    endpoint: enrollment.endpoint.clone(),
+                    actor_type: response_type.to_string_repr(),
+                    client_key: "fixture-client".into(),
+                    public_key: enrollment.public_key,
+                    admission_commitment: enrollment.admission_commitment,
+                    expires_at: now + 120,
+                })
+                .unwrap();
+                let signature = response_issuer_signing
+                    .sign(&signing_bytes(&relay_claims))
+                    .to_bytes()
+                    .to_vec();
+                let actor_claims = ActorChannelClaims {
+                    realm: response_realm.clone(),
+                    actor_id: enrollment.endpoint.clone(),
+                    actor_type: response_type.to_string_repr(),
+                    member: "member-1".into(),
+                    client_key: "fixture-client".into(),
+                    role: "owner".into(),
+                    actor_public_key: response_signer.public_key(),
+                    noise_public_key: enrollment.public_key,
+                    actor_credential_digest: actor_enrollment.actor_credential_digest,
+                    policy_digest: actor_enrollment.policy_digest,
+                    actor_state_digest: actor_enrollment.actor_state_digest,
+                    issuer: response_realm.clone(),
+                    provider: "provider.example".into(),
+                    audience: ACTOR_CHANNEL_AUDIENCE.into(),
+                    expires_at: now + 120,
+                    runtime_instance_id: actor_enrollment.runtime_instance_id,
+                };
+                let actor_certificate =
+                    ActorChannelCertificate::issue(&actor_claims, 1, &response_issuer_signing)
+                        .unwrap();
+                serde_json::to_vec(&IssuedIdentity {
+                    certificate: Certificate {
+                        key_id: 1,
+                        claims: relay_claims,
+                        signature,
+                    },
+                    issuer: response_issuer.clone(),
+                    actor_certificate: Some(actor_certificate),
+                })
+                .unwrap()
+            })
+            .expect(3)
+            .create_async()
+            .await;
+
+        let mut claims = actr_protocol::IdentityClaims {
+            realm: realm.clone(),
+            actor_id: endpoint.clone(),
+            expires_at: now + 600,
+            protocol_version: 1,
+            issuer: realm.clone(),
+            provider: "provider.example".into(),
+            audience: "actr.signaling".into(),
+            actor_type: actor_type.clone(),
+            member: "member-1".into(),
+            client_key: "fixture-client".into(),
+            role: actr_protocol::MemberRole::Owner as i32,
+            development: Some(false),
+            actor_public_key: Some(signer.public_key().to_vec().into()),
+        };
+        let mut snapshot = SessionSnapshot::empty_with_id(local.clone(), 1);
+        snapshot.credential = credential(&claims, &issuer_signing);
+        snapshot.credential_expires_at = prost_types::Timestamp {
+            seconds: claims.expires_at as i64,
+            nanos: 0,
+        };
+        snapshot.renewal_token = bytes::Bytes::from_static(&[3; 32]);
+        let session = SessionState::new(snapshot);
+        let gate = Arc::new(WebSocketGate::new_relay(
+            Arc::new(RpcCorrelation::new()),
+            Arc::new(DataChunkRegistry::new()),
+            PeerTypes::default(),
+        ));
+        let client = RelayClient::new(
+            "ws://unused".into(),
+            server.url(),
+            None,
+            session.clone(),
+            gate.clone(),
+            CancellationToken::new(),
+            Some(root.path().to_path_buf()),
+            Some("tab-cache".into()),
+        );
+        let another_client = RelayClient::new(
+            "ws://unused".into(),
+            server.url(),
+            None,
+            session.clone(),
+            gate,
+            CancellationToken::new(),
+            Some(root.path().to_path_buf()),
+            Some("tab-cache".into()),
+        );
+        assert!(!client.runtime_instance_id.is_empty());
+        assert_eq!(
+            client.runtime_instance_id,
+            another_client.runtime_instance_id
+        );
+        uuid::Uuid::parse_str(&client.runtime_instance_id).unwrap();
+
+        let (_, first) = client
+            .certified_identity(&endpoint, &[3; 32])
+            .await
+            .unwrap();
+        let first = first.unwrap();
+        let first_digest = first.claims().actor_credential_digest;
+        let first_state = first.claims().actor_state_digest;
+
+        claims.expires_at += 1;
+        let mut renewed = session.snapshot().await;
+        renewed.credential = credential(&claims, &issuer_signing);
+        renewed.renewal_token = bytes::Bytes::from_static(&[4; 32]);
+        session
+            .update_credentials(
+                renewed.credential.clone(),
+                renewed.credential_expires_at,
+                renewed.turn_credential.clone(),
+                renewed.renewal_token.clone(),
+                renewed.renewal_token_expires_at,
+            )
+            .await;
+        let (_, second) = client
+            .certified_identity(&endpoint, &[4; 32])
+            .await
+            .unwrap();
+        let second = second.unwrap();
+        assert_ne!(second.claims().actor_credential_digest, first_digest);
+        assert_ne!(second.claims().actor_state_digest, first_state);
+
+        let mut rebound = session.snapshot().await;
+        rebound.generation = 2;
+        session.commit_hard_rebind(rebound).await;
+        let (_, third) = client
+            .certified_identity(&endpoint, &[4; 32])
+            .await
+            .unwrap();
+        let third = third.unwrap();
+        assert_eq!(
+            third.claims().actor_credential_digest,
+            second.claims().actor_credential_digest
+        );
+        assert_ne!(
+            third.claims().actor_state_digest,
+            second.claims().actor_state_digest
+        );
+
+        let (_, cached) = client
+            .certified_identity(&endpoint, &[4; 32])
+            .await
+            .unwrap();
+        assert!(cached.is_some());
+        assert_eq!(requests.lock().unwrap().len(), 3);
+        mock.assert_async().await;
+    }
+}

@@ -1,26 +1,78 @@
-//! Generic authorization hook for inbound business RPC dispatch.
+//! Generic authorization hook for inbound RPC and stream delivery.
 //!
-//! The hook runs after the existing ACL and before request deduplication. The
-//! durable mailbox calls the same admission path when a record is dequeued, so
-//! a decision is based on current policy rather than only on enqueue-time state.
-//! Actrium session system routes are deliberately excluded: their registry owns
-//! the session protocol, while this hook authorizes business RPC only.
+//! Request and tell admission runs after the existing ACL and before request
+//! deduplication. Responses pass through the same hook before waking a waiting
+//! caller, and stream chunks are checked immediately before their callback runs.
+//! The durable mailbox rechecks requests at dequeue time, so all decisions use
+//! decisions use current policy rather than only arrival-time state.
+//! Exact Actrium session system routes are dispatched to a configured
+//! [`SessionRegistry`]; unknown protocol routes never inherit that exemption.
 
-use actr_protocol::{ActrError, ActrId, ActrType, MetadataEntry, RpcEnvelope};
+use actr_protocol::{
+    ActorResult, ActrError, ActrId, ActrType, DataChunk, MetadataEntry, RpcEnvelope,
+};
 use async_trait::async_trait;
+use bytes::Bytes;
 
 /// The caller authenticated by the transport and recorded with the message.
 pub type IncomingCaller<'a> = (&'a ActrId, Option<&'a ActrType>);
 
-/// Routes handled by the Actrium session registry, not business dispatch.
+/// Namespace reserved for the Actrium session registry, not workload methods.
 pub const ACTRIUM_SESSION_V1_ROUTE_PREFIX: &str = "actrium.session.v1.";
 
-/// Whether the generic incoming guard applies to `route_key`.
-///
-/// The trailing dot is significant: `actrium.session.v10.*` is not a v1 system
-/// route and must not bypass business authorization.
+/// Protocol-defined Front–Service session methods.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionMethod {
+    Attach,
+    Resume,
+    Detach,
+    Heartbeat,
+    Takeover,
+    GetStatus,
+}
+
+impl SessionMethod {
+    fn from_suffix(suffix: &str) -> Option<Self> {
+        match suffix {
+            "Attach" => Some(Self::Attach),
+            "Resume" => Some(Self::Resume),
+            "Detach" => Some(Self::Detach),
+            "Heartbeat" => Some(Self::Heartbeat),
+            "Takeover" => Some(Self::Takeover),
+            "GetStatus" => Some(Self::GetStatus),
+            _ => None,
+        }
+    }
+}
+
+/// Match only protocol-defined session routes. Both the documented package
+/// form and the generated `SessionRegistry` service form name the same registry;
+/// arbitrary descendants of the reserved namespace are not system methods.
+pub fn actrium_session_v1_method(route_key: &str) -> Option<SessionMethod> {
+    let suffix = route_key
+        .strip_prefix("actrium.session.v1.SessionRegistry.")
+        .or_else(|| route_key.strip_prefix(ACTRIUM_SESSION_V1_ROUTE_PREFIX))?;
+    SessionMethod::from_suffix(suffix)
+}
+
+/// Whether the generic incoming guard applies to a request/tell `route_key`.
+/// Exact session methods are authorized by [`SessionRegistry`] instead. Every
+/// other route, including unknown names beneath the reserved prefix, requires
+/// the guard. Responses always use the guard regardless of their route.
 pub fn route_requires_incoming_guard(route_key: &str) -> bool {
-    !route_key.starts_with(ACTRIUM_SESSION_V1_ROUTE_PREFIX)
+    actrium_session_v1_method(route_key).is_none()
+}
+
+/// Trusted dispatch boundary for session protocol methods. Hyper never falls
+/// back to a workload handler for these routes: no configured registry is a
+/// fail-closed configuration error.
+#[async_trait]
+pub trait SessionRegistry: Send + Sync + 'static {
+    async fn dispatch(
+        &self,
+        method: SessionMethod,
+        request: IncomingDispatchRequest<'_>,
+    ) -> ActorResult<Bytes>;
 }
 
 /// Typed, read-only access to the metadata carried by an RPC envelope.
@@ -106,7 +158,7 @@ impl std::fmt::Display for IncomingMetadataError {
 
 impl std::error::Error for IncomingMetadataError {}
 
-/// One business RPC presented to [`IncomingGuard`].
+/// One inbound RPC presented to [`IncomingGuard`] or [`SessionRegistry`].
 #[derive(Clone, Copy, Debug)]
 pub struct IncomingDispatchRequest<'a> {
     pub envelope: &'a RpcEnvelope,
@@ -120,6 +172,25 @@ impl<'a> IncomingDispatchRequest<'a> {
             envelope,
             caller,
             metadata: IncomingMetadata::new(&envelope.metadata),
+        }
+    }
+}
+
+/// One inbound stream chunk presented to [`IncomingGuard`]. The sender comes
+/// from the authenticated transport record, not from chunk metadata.
+#[derive(Clone, Copy, Debug)]
+pub struct IncomingStreamChunk<'a> {
+    pub chunk: &'a DataChunk,
+    pub sender: &'a ActrId,
+    pub metadata: IncomingMetadata<'a>,
+}
+
+impl<'a> IncomingStreamChunk<'a> {
+    pub fn new(chunk: &'a DataChunk, sender: &'a ActrId) -> Self {
+        Self {
+            chunk,
+            sender,
+            metadata: IncomingMetadata::new(&chunk.metadata),
         }
     }
 }
@@ -195,12 +266,20 @@ impl IncomingGuardError {
     }
 }
 
-/// Current-policy authorization for business RPC dispatch.
+/// Current-policy authorization for inbound delivery.
 ///
 /// Implementations may consult an Actrium session registry and interpret the
 /// verified peer context there. Hyper deliberately supplies only generic Actor
 /// identity and typed envelope metadata; it does not interpret member roles.
+/// `check` covers request, tell, and response envelopes. Implementations must
+/// inspect `envelope.direction` when their proof binds the message kind.
 #[async_trait]
 pub trait IncomingGuard: Send + Sync + 'static {
     async fn check(&self, request: IncomingDispatchRequest<'_>) -> Result<(), IncomingGuardError>;
+
+    /// Authorize a stream chunk immediately before callback delivery.
+    async fn check_stream(
+        &self,
+        request: IncomingStreamChunk<'_>,
+    ) -> Result<(), IncomingGuardError>;
 }

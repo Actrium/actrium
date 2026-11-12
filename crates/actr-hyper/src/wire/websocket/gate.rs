@@ -360,9 +360,13 @@ impl WebSocketGate {
             return;
         }
 
-        // Direction::Response: complete the waiting caller via the shared
-        // correlation map (orphan late replies warn and drop).
-        pending_requests.complete_from_envelope(envelope, || Self::peer_for_log(&from_bytes));
+        // Direction::Response: authorize current policy before completing the
+        // waiting caller (orphan late replies still warn and drop).
+        let caller_id = ActrId::decode(&from_bytes[..]).ok();
+        let caller = caller_id.as_ref().map(|id| (id, from_type.as_ref()));
+        pending_requests
+            .complete_from_envelope(envelope, caller, || Self::peer_for_log(&from_bytes))
+            .await;
     }
     fn peer_for_log(from_bytes: &[u8]) -> String {
         if from_bytes.is_empty() {

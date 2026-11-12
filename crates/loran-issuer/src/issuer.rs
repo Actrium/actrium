@@ -1550,6 +1550,8 @@ impl AIdIssuer {
     pub(crate) async fn mint_actor_channel_certificate(
         &self,
         enrollment: &actr_relay_security::ActorChannelEnrollment,
+        actor_credential_digest: [u8; 32],
+        credential_expires_at: u64,
         actor: &ActrId,
         actor_type: &ActrType,
         signer: &Signer,
@@ -1561,7 +1563,8 @@ impl AIdIssuer {
         let now = crate::renewal::now_secs() as u64;
         let expires_at = now
             .saturating_add(actr_relay_security::CERTIFICATE_TTL)
-            .min(proof_expires_at);
+            .min(proof_expires_at)
+            .min(credential_expires_at);
         if expires_at <= now {
             return Err(AidError::InvalidFormat);
         }
@@ -1574,7 +1577,7 @@ impl AIdIssuer {
             role: format!("{:?}", signer.role).to_lowercase(),
             actor_public_key,
             noise_public_key,
-            actor_credential_digest: enrollment.actor_credential_digest,
+            actor_credential_digest,
             policy_digest: enrollment.policy_digest,
             actor_state_digest: enrollment.actor_state_digest,
             issuer: actor.realm.clone(),

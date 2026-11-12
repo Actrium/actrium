@@ -293,6 +293,14 @@ mod tests {
                 provider: "other.example".to_string(),
                 ..claims()
             },
+            IdentityClaims {
+                audience: "actr.other".to_string(),
+                ..claims()
+            },
+            IdentityClaims {
+                expires_at: now().saturating_sub(1),
+                ..claims()
+            },
         ];
         for bad in mismatches {
             let result =

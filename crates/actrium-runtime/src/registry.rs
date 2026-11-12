@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::hash::Hash;
 use std::sync::Arc;
 
 use actrium_core::session::{
@@ -16,7 +17,7 @@ use crate::crypto::{
     resume_digest, resume_signing_bytes, sign_attach_response, verify_attach_request, verify_hmac,
     verify_takeover, verifying_key,
 };
-use crate::guard::BusinessRequest;
+use crate::guard::{BusinessRequest, same_channel_generation};
 use crate::policy::{
     AttachQuotaContext, Clock, PrivacyContext, QuotaDecision, RequestContext, RequestQuotaContext,
     ServicePolicies, SystemClock, TakeoverContext,
@@ -58,6 +59,37 @@ pub struct HeartbeatOutcome {
     pub session_capability_ceiling: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RetentionStats {
+    pub sessions: usize,
+    pub closed_sessions: usize,
+    pub completed: usize,
+    pub used_nonces: usize,
+    pub requests: usize,
+    pub idempotency_keys: usize,
+    pub used_channel_ids: usize,
+}
+
+#[derive(Clone, Copy)]
+struct ReplayTiming {
+    issued_at: u64,
+    deadline: u64,
+}
+
+impl ReplayTiming {
+    fn new(issued_at: u64, retention: u64) -> Self {
+        Self {
+            issued_at,
+            deadline: issued_at.saturating_add(retention),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ChannelUse {
+    timing: ReplayTiming,
+}
+
 #[derive(Clone)]
 struct SessionEntry {
     record: FrontServiceSession,
@@ -69,9 +101,13 @@ struct SessionEntry {
     privacy: PrivacyState,
     secret: SessionSecret,
     grace_expires_at: Option<u64>,
+    closed_at: Option<u64>,
+    /// Oldest request issuance times displaced by capacity pressure are rejected
+    /// even when their replay entries no longer fit in memory.
+    replay_floor: Option<u64>,
     /// Channel IDs are single-use within a session. Renewal and Resume must
     /// authenticate a fresh generation rather than reactivate an old channel.
-    used_channel_ids: HashSet<String>,
+    used_channel_ids: HashMap<String, ChannelUse>,
 }
 
 impl SessionEntry {
@@ -102,11 +138,22 @@ struct CompletedAttach {
     fingerprint: Vec<u8>,
     session_id: String,
     response: AttachResponse,
+    timing: ReplayTiming,
 }
 
 struct RequestUse {
     fingerprint: Vec<u8>,
     dequeued: bool,
+    timing: ReplayTiming,
+}
+
+struct IdempotencyUse {
+    request_id: String,
+    timing: ReplayTiming,
+}
+
+struct NonceUse {
+    timing: ReplayTiming,
 }
 
 #[derive(Default)]
@@ -115,9 +162,9 @@ struct State {
     sessions: HashMap<String, SessionEntry>,
     active: Option<String>,
     completed: HashMap<String, CompletedAttach>,
-    used_nonces: HashSet<Vec<u8>>,
+    used_nonces: HashMap<Vec<u8>, NonceUse>,
     requests: HashMap<(String, String), RequestUse>,
-    idempotency_keys: HashMap<(String, String), String>,
+    idempotency_keys: HashMap<(String, String), IdempotencyUse>,
     runtime_instance_ids: HashSet<String>,
     next_epoch: u64,
 }
@@ -167,6 +214,185 @@ impl InMemorySessionRegistry {
 
     fn now(&self) -> u64 {
         self.clock.now_epoch_secs()
+    }
+
+    fn retention_secs(&self) -> u64 {
+        self.config.replay_retention.as_secs()
+    }
+
+    fn remove_session_records(state: &mut State, session_ids: &HashSet<String>) {
+        if session_ids.is_empty() {
+            return;
+        }
+        state
+            .sessions
+            .retain(|session_id, _| !session_ids.contains(session_id));
+        state
+            .completed
+            .retain(|_, completed| !session_ids.contains(&completed.session_id));
+        state
+            .requests
+            .retain(|(session_id, _), _| !session_ids.contains(session_id));
+        state
+            .idempotency_keys
+            .retain(|(session_id, _), _| !session_ids.contains(session_id));
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|active| session_ids.contains(active))
+        {
+            state.active = None;
+        }
+    }
+
+    fn advance_replay_floor(state: &mut State, session_id: &str, timing: ReplayTiming, now: u64) {
+        if timing.deadline <= now {
+            return;
+        }
+        if let Some(session) = state.sessions.get_mut(session_id) {
+            session.replay_floor = Some(
+                session
+                    .replay_floor
+                    .map_or(timing.issued_at, |floor| floor.max(timing.issued_at)),
+            );
+        }
+    }
+
+    fn enforce_request_capacity(state: &mut State, now: u64, capacity: usize) {
+        while state.requests.len() > capacity {
+            let key = oldest_key(&state.requests, |entry| entry.timing)
+                .expect("an over-capacity map is not empty");
+            if let Some((key, entry)) = state.requests.remove_entry(&key) {
+                Self::advance_replay_floor(state, &key.0, entry.timing, now);
+            }
+        }
+        while state.idempotency_keys.len() > capacity {
+            let key = oldest_key(&state.idempotency_keys, |entry| entry.timing)
+                .expect("an over-capacity map is not empty");
+            if let Some((key, entry)) = state.idempotency_keys.remove_entry(&key) {
+                Self::advance_replay_floor(state, &key.0, entry.timing, now);
+            }
+        }
+    }
+
+    fn prune(&self, state: &mut State, now: u64) {
+        let retention = self.retention_secs();
+        let expired_sessions: Vec<String> = state
+            .sessions
+            .iter()
+            .filter(|(_, entry)| {
+                matches!(
+                    entry.record.state,
+                    SessionState::Active | SessionState::Grace
+                ) && entry.hard_expiry() <= now
+            })
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+        for session_id in expired_sessions {
+            if let Some(entry) = state.sessions.get_mut(&session_id) {
+                entry.record.state = SessionState::Closed;
+                entry.grace_expires_at = None;
+                entry.closed_at = Some(now);
+            }
+            if state.active.as_deref() == Some(session_id.as_str()) {
+                state.active = None;
+            }
+        }
+
+        retain_unexpired(&mut state.completed, now, |entry| entry.timing);
+        retain_unexpired(&mut state.used_nonces, now, |entry| entry.timing);
+        retain_unexpired(&mut state.requests, now, |entry| entry.timing);
+        retain_unexpired(&mut state.idempotency_keys, now, |entry| entry.timing);
+
+        for entry in state.sessions.values_mut() {
+            let current_channel = entry.record.channel_id.clone();
+            entry.used_channel_ids.retain(|channel_id, used| {
+                *channel_id == current_channel || used.timing.deadline > now
+            });
+            while entry.used_channel_ids.len() > self.config.max_channel_generations {
+                let oldest = entry
+                    .used_channel_ids
+                    .iter()
+                    .filter(|(channel_id, _)| **channel_id != current_channel)
+                    .min_by_key(|(_, used)| used.timing.issued_at)
+                    .map(|(channel_id, _)| channel_id.clone());
+                match oldest {
+                    Some(channel_id) => {
+                        entry.used_channel_ids.remove(&channel_id);
+                    }
+                    None => break,
+                }
+            }
+        }
+
+        let expired_closed: HashSet<String> = state
+            .sessions
+            .iter()
+            .filter(|(_, entry)| {
+                entry.record.state == SessionState::Closed
+                    && entry
+                        .closed_at
+                        .is_none_or(|closed_at| closed_at.saturating_add(retention) <= now)
+            })
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+        Self::remove_session_records(state, &expired_closed);
+
+        while state
+            .sessions
+            .values()
+            .filter(|entry| entry.record.state == SessionState::Closed)
+            .count()
+            > self.config.max_completed_sessions
+        {
+            let oldest = state
+                .sessions
+                .iter()
+                .filter(|(_, entry)| entry.record.state == SessionState::Closed)
+                .min_by_key(|(_, entry)| entry.closed_at.unwrap_or(0))
+                .map(|(session_id, _)| session_id.clone());
+            if let Some(session_id) = oldest {
+                Self::remove_session_records(state, &HashSet::from([session_id]));
+            } else {
+                break;
+            }
+        }
+
+        enforce_capacity(
+            &mut state.completed,
+            self.config.max_replay_entries,
+            |entry| entry.timing,
+        );
+        enforce_capacity(
+            &mut state.used_nonces,
+            self.config.max_replay_entries,
+            |entry| entry.timing,
+        );
+        Self::enforce_request_capacity(state, now, self.config.max_replay_entries);
+    }
+
+    /// Number of retained records, exposed so hosts can monitor memory bounds.
+    pub async fn retention_stats(&self) -> RetentionStats {
+        let mut state = self.state.lock().await;
+        let now = self.now();
+        self.prune(&mut state, now);
+        RetentionStats {
+            sessions: state.sessions.len(),
+            closed_sessions: state
+                .sessions
+                .values()
+                .filter(|entry| entry.record.state == SessionState::Closed)
+                .count(),
+            completed: state.completed.len(),
+            used_nonces: state.used_nonces.len(),
+            requests: state.requests.len(),
+            idempotency_keys: state.idempotency_keys.len(),
+            used_channel_ids: state
+                .sessions
+                .values()
+                .map(|entry| entry.used_channel_ids.len())
+                .sum(),
+        }
     }
 
     fn validate_channel(
@@ -413,6 +639,7 @@ impl InMemorySessionRegistry {
     ) -> Result<AttachOutcome, SessionError> {
         let mut state = self.state.lock().await;
         let now = self.now();
+        self.prune(&mut state, now);
 
         // Steps 1-2: authenticated credential and exact caller identity.
         self.validate_channel(channel, &state, now)?;
@@ -461,7 +688,7 @@ impl InMemorySessionRegistry {
             return Err(SessionError::denied("tabSessionNonce is too short"));
         }
         verify_attach_request(&request, &channel.peer_actor_public_key)?;
-        if state.used_nonces.contains(&request.tab_session_nonce) && !idempotent {
+        if state.used_nonces.contains_key(&request.tab_session_nonce) && !idempotent {
             return Err(SessionError::denied(
                 "tabSessionNonce has already been used",
             ));
@@ -637,6 +864,7 @@ impl InMemorySessionRegistry {
         {
             previous.record.state = SessionState::Closed;
             previous.grace_expires_at = None;
+            previous.closed_at = Some(now);
         }
         let session_id = Uuid::new_v4().to_string();
         let secret = SessionSecret::random();
@@ -682,19 +910,33 @@ impl InMemorySessionRegistry {
                 privacy,
                 secret: secret.clone(),
                 grace_expires_at: None,
-                used_channel_ids: HashSet::from([channel.channel_id.clone()]),
+                closed_at: None,
+                replay_floor: None,
+                used_channel_ids: HashMap::from([(
+                    channel.channel_id.clone(),
+                    ChannelUse {
+                        timing: ReplayTiming::new(now, self.retention_secs()),
+                    },
+                )]),
             },
         );
         state.active = Some(session_id.clone());
-        state.used_nonces.insert(request.tab_session_nonce.clone());
+        state.used_nonces.insert(
+            request.tab_session_nonce.clone(),
+            NonceUse {
+                timing: ReplayTiming::new(now, self.retention_secs()),
+            },
+        );
         state.completed.insert(
             request.attach_id.clone(),
             CompletedAttach {
                 fingerprint,
                 session_id,
                 response: response.clone(),
+                timing: ReplayTiming::new(now, self.retention_secs()),
             },
         );
+        self.prune(&mut state, now);
         Ok(AttachOutcome {
             response,
             session_secret: secret,
@@ -720,6 +962,28 @@ impl InMemorySessionRegistry {
         Ok(())
     }
 
+    fn request_timing(
+        &self,
+        request: &BusinessRequest,
+        now: u64,
+    ) -> Result<ReplayTiming, SessionError> {
+        if request.issued_at > now || request.deadline <= request.issued_at {
+            return Err(SessionError::denied(
+                "request issuance time or deadline is invalid",
+            ));
+        }
+        let replay_deadline = request.issued_at.saturating_add(self.retention_secs());
+        if request.deadline <= now || replay_deadline <= now {
+            return Err(SessionError::expired(
+                "the request is outside its replay retention window",
+            ));
+        }
+        Ok(ReplayTiming {
+            issued_at: request.issued_at,
+            deadline: request.deadline.min(replay_deadline),
+        })
+    }
+
     /// Heartbeat extends only the lease. Without a newly authenticated channel
     /// it never changes credential expiry, role, capabilities, or channel epoch.
     pub async fn heartbeat(
@@ -730,13 +994,14 @@ impl InMemorySessionRegistry {
     ) -> Result<HeartbeatOutcome, SessionError> {
         let mut state = self.state.lock().await;
         let now = self.now();
+        self.prune(&mut state, now);
         self.validate_channel(channel, &state, now)?;
         let old = state
             .sessions
             .get(&request.session_id)
             .cloned()
             .ok_or_else(|| SessionError::expired("unknown session"))?;
-        Self::ensure_live(&old, now, true)?;
+        Self::ensure_live(&old, now, false)?;
         if old.record.lease_epoch != request.lease_epoch {
             return Err(SessionError::epoch());
         }
@@ -756,7 +1021,7 @@ impl InMemorySessionRegistry {
                         "credential renewal requires reauthentication on a new channel",
                     ));
                 }
-                if old.used_channel_ids.contains(&new_channel.channel_id) {
+                if old.used_channel_ids.contains_key(&new_channel.channel_id) {
                     return Err(SessionError::new(
                         AttachErrorCode::ChannelIdentityMismatch,
                         "credential renewal cannot reuse an old channel generation",
@@ -812,7 +1077,7 @@ impl InMemorySessionRegistry {
                 )
             };
         let now = self.now();
-        Self::ensure_live(&old, now, true)?;
+        Self::ensure_live(&old, now, false)?;
         self.validate_channel(&new_channel, &state, now)?;
         let credential_expiry = new_channel.peer_credential_expires_at_epoch_secs;
         let lease_expiry = now
@@ -841,14 +1106,18 @@ impl InMemorySessionRegistry {
             entry.record.member = principal.member;
             entry.record.client_key = principal.client_key;
         }
-        entry
-            .used_channel_ids
-            .insert(new_channel.channel_id.clone());
+        entry.used_channel_ids.insert(
+            new_channel.channel_id.clone(),
+            ChannelUse {
+                timing: ReplayTiming::new(now, self.retention_secs()),
+            },
+        );
         entry.channel = new_channel;
         entry.privacy = privacy;
         entry.grace_expires_at = None;
         let final_capabilities = entry.record.session_capability_ceiling.clone();
         state.next_epoch = state.next_epoch.max(epoch + 1);
+        self.prune(&mut state, now);
         Ok(HeartbeatOutcome {
             lease_epoch: epoch,
             lease_expires_at_epoch_secs: lease_expiry,
@@ -868,6 +1137,7 @@ impl InMemorySessionRegistry {
     ) -> Result<AttachOutcome, SessionError> {
         let mut state = self.state.lock().await;
         let now = self.now();
+        self.prune(&mut state, now);
         self.validate_channel(new_channel, &state, now)?;
         self.validate_front_type(new_channel)?;
         let old = state
@@ -885,7 +1155,7 @@ impl InMemorySessionRegistry {
                 "Resume requires a new VerifiedChannel generation",
             ));
         }
-        if old.used_channel_ids.contains(&new_channel.channel_id) {
+        if old.used_channel_ids.contains_key(&new_channel.channel_id) {
             return Err(SessionError::new(
                 AttachErrorCode::ChannelIdentityMismatch,
                 "Resume cannot reuse an old channel generation",
@@ -967,14 +1237,18 @@ impl InMemorySessionRegistry {
         entry.record.lease = lease;
         entry.record.session_capability_ceiling = ceiling.into_iter().collect();
         entry.record.state = SessionState::Active;
-        entry
-            .used_channel_ids
-            .insert(new_channel.channel_id.clone());
+        entry.used_channel_ids.insert(
+            new_channel.channel_id.clone(),
+            ChannelUse {
+                timing: ReplayTiming::new(now, self.retention_secs()),
+            },
+        );
         entry.channel = new_channel.clone();
         entry.privacy = privacy;
         entry.grace_expires_at = None;
         state.next_epoch = state.next_epoch.max(epoch + 1);
         state.active = Some(request.session_id.clone());
+        self.prune(&mut state, now);
         Ok(AttachOutcome {
             response,
             session_secret: old.secret,
@@ -988,6 +1262,7 @@ impl InMemorySessionRegistry {
     ) -> Result<(), SessionError> {
         let mut state = self.state.lock().await;
         let now = self.now();
+        self.prune(&mut state, now);
         self.validate_channel(channel, &state, now)?;
         let entry = state
             .sessions
@@ -1011,9 +1286,11 @@ impl InMemorySessionRegistry {
             .expect("entry exists");
         entry.record.state = SessionState::Closed;
         entry.grace_expires_at = None;
+        entry.closed_at = Some(now);
         if state.active.as_deref() == Some(request.session_id.as_str()) {
             state.active = None;
         }
+        self.prune(&mut state, now);
         Ok(())
     }
 
@@ -1025,6 +1302,7 @@ impl InMemorySessionRegistry {
     ) -> Result<(), SessionError> {
         let mut state = self.state.lock().await;
         let now = self.now();
+        self.prune(&mut state, now);
         let entry = state
             .sessions
             .get_mut(session_id)
@@ -1057,6 +1335,7 @@ impl InMemorySessionRegistry {
         }
         entry.record.state = SessionState::Closed;
         entry.grace_expires_at = None;
+        entry.closed_at = Some(now);
         if state.active.as_deref() == Some(session_id) {
             state.active = None;
         }
@@ -1066,11 +1345,16 @@ impl InMemorySessionRegistry {
     /// Service stop/restart invalidates every old session and channel binding.
     pub async fn invalidate_all(&self) {
         let mut state = self.state.lock().await;
-        for entry in state.sessions.values_mut() {
-            entry.record.state = SessionState::Closed;
-            entry.grace_expires_at = None;
-        }
+        let now = self.now();
+        self.prune(&mut state, now);
+        state.sessions.clear();
         state.active = None;
+        state.completed.clear();
+        state.requests.clear();
+        state.idempotency_keys.clear();
+        // Nonces are compact Attach tombstones. Keep the unexpired ones so an
+        // invalidated Attach cannot be replayed into a fresh session.
+        self.prune(&mut state, now);
     }
 
     pub async fn restart(
@@ -1079,6 +1363,8 @@ impl InMemorySessionRegistry {
     ) -> Result<(), SessionError> {
         let new_runtime_instance_id = new_runtime_instance_id.into();
         let mut state = self.state.lock().await;
+        let now = self.now();
+        self.prune(&mut state, now);
         if new_runtime_instance_id.is_empty()
             || state
                 .runtime_instance_ids
@@ -1092,12 +1378,14 @@ impl InMemorySessionRegistry {
         for entry in state.sessions.values_mut() {
             entry.record.state = SessionState::Closed;
             entry.grace_expires_at = None;
+            entry.closed_at = Some(now);
         }
         state.active = None;
         state
             .runtime_instance_ids
             .insert(new_runtime_instance_id.clone());
         state.runtime_instance_id = new_runtime_instance_id;
+        self.prune(&mut state, now);
         Ok(())
     }
 
@@ -1114,6 +1402,7 @@ impl InMemorySessionRegistry {
         let entry = state.sessions.get_mut(session_id).expect("checked above");
         entry.record.state = SessionState::Closed;
         entry.grace_expires_at = None;
+        entry.closed_at = Some(now);
         if state.active.as_deref() == Some(session_id) {
             state.active = None;
         }
@@ -1123,6 +1412,7 @@ impl InMemorySessionRegistry {
         let mut state = self.state.lock().await;
         let now = self.now();
         Self::close_expired(&mut state, session_id, now);
+        self.prune(&mut state, now);
         state
             .sessions
             .get(session_id)
@@ -1134,6 +1424,7 @@ impl InMemorySessionRegistry {
         let mut state = self.state.lock().await;
         let now = self.now();
         Self::close_expired(&mut state, session_id, now);
+        self.prune(&mut state, now);
         state
             .sessions
             .get(session_id)
@@ -1143,10 +1434,12 @@ impl InMemorySessionRegistry {
     pub(crate) async fn check_business_request(
         &self,
         request: &BusinessRequest,
+        channel: &VerifiedChannel,
         dequeue: bool,
     ) -> Result<(), SessionError> {
         let mut state = self.state.lock().await;
         let now = self.now();
+        self.prune(&mut state, now);
 
         // Guard step 1: exact Service and explicitly allowed route.
         if request.service_actor_id != self.config.service_actor_id {
@@ -1168,13 +1461,24 @@ impl InMemorySessionRegistry {
             .get(&request.session_id)
             .cloned()
             .ok_or_else(|| SessionError::expired("unknown session"))?;
-        if entry.record.channel_id != request.channel_id {
+        self.validate_channel(channel, &state, now)?;
+        Self::ensure_live(&entry, now, false)?;
+        // The envelope's channel id is only a signed claim. Bind it to both
+        // the current session record and the trusted transport context for the
+        // physical channel on which this message actually arrived. Comparing
+        // the complete generation also prevents an old channel from borrowing
+        // a newer id, transcript, runtime identity, or credential expiry.
+        if entry.record.channel_id != request.channel_id
+            || channel.channel_id != request.channel_id
+            || entry.record.channel_transcript_digest != channel.channel_transcript_digest
+            || !same_channel_generation(&entry.channel, channel)
+        {
             return Err(Self::session_channel_error());
         }
-        Self::ensure_live(&entry, now, false)?;
         if entry.record.lease_epoch != request.lease_epoch {
             return Err(SessionError::epoch());
         }
+        let timing = self.request_timing(request, now)?;
 
         // Step 5: re-read current membership and current application permission.
         let principal = self
@@ -1239,6 +1543,15 @@ impl InMemorySessionRegistry {
         }
         let fingerprint = request_fingerprint(request);
         let key = (request.session_id.clone(), request.request_id.clone());
+        if !state.requests.contains_key(&key)
+            && entry
+                .replay_floor
+                .is_some_and(|floor| request.issued_at <= floor)
+        {
+            return Err(SessionError::denied(
+                "request issuance time is at or before an evicted replay tombstone",
+            ));
+        }
         if let Some(previous) = state.requests.get(&key) {
             if !dequeue || previous.fingerprint != fingerprint || previous.dequeued {
                 return Err(SessionError::denied("request id has already been admitted"));
@@ -1254,7 +1567,7 @@ impl InMemorySessionRegistry {
             }
             let key = (request.session_id.clone(), value.clone());
             match state.idempotency_keys.get(&key) {
-                Some(previous_request_id) if previous_request_id != &request.request_id => {
+                Some(previous) if previous.request_id != request.request_id => {
                     return Err(SessionError::denied(
                         "idempotency key was already used by another request",
                     ));
@@ -1313,6 +1626,7 @@ impl InMemorySessionRegistry {
         ensure_quota(quota)?;
         let now = self.now();
         Self::ensure_live(&entry, now, false)?;
+        self.request_timing(request, now)?;
         if privacy.expires_at_epoch_secs <= now {
             return Err(SessionError::new(
                 AttachErrorCode::PrivacyPolicyUnsatisfied,
@@ -1327,19 +1641,57 @@ impl InMemorySessionRegistry {
                 .dequeued = true;
         } else {
             if let Some(key) = idempotency_key {
-                state
-                    .idempotency_keys
-                    .insert(key, request.request_id.clone());
+                state.idempotency_keys.insert(
+                    key,
+                    IdempotencyUse {
+                        request_id: request.request_id.clone(),
+                        timing,
+                    },
+                );
             }
             state.requests.insert(
                 key,
                 RequestUse {
                     fingerprint,
                     dequeued: false,
+                    timing,
                 },
             );
+            self.prune(&mut state, now);
         }
         Ok(())
+    }
+}
+
+fn retain_unexpired<K, V>(map: &mut HashMap<K, V>, now: u64, timing: impl Fn(&V) -> ReplayTiming)
+where
+    K: Eq + Hash,
+{
+    map.retain(|_, value| timing(value).deadline > now);
+}
+
+fn oldest_key<K, V>(map: &HashMap<K, V>, timing: impl Fn(&V) -> ReplayTiming) -> Option<K>
+where
+    K: Eq + Hash + Clone,
+{
+    map.iter()
+        .min_by_key(|(_, value)| {
+            let timing = timing(value);
+            (timing.issued_at, timing.deadline)
+        })
+        .map(|(key, _)| key.clone())
+}
+
+fn enforce_capacity<K, V>(
+    map: &mut HashMap<K, V>,
+    capacity: usize,
+    timing: impl Fn(&V) -> ReplayTiming + Copy,
+) where
+    K: Eq + Hash + Clone,
+{
+    while map.len() > capacity {
+        let key = oldest_key(map, timing).expect("an over-capacity map is not empty");
+        map.remove(&key);
     }
 }
 
