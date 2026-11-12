@@ -941,6 +941,9 @@ final class ViewBridgeCoordinator {
             if let manifest = tabConfig.capabilityManifestJSON {
                 config["capabilityManifestJSON"] = manifest
             }
+            if let snapshot = tabConfig.capabilitySnapshotJSON {
+                config["capabilitySnapshotJSON"] = snapshot
+            }
             if let leftPanelScript = tabConfig.leftPanelScript { config["leftPanelScript"] = leftPanelScript }
             if let serviceCallUrl = tabConfig.serviceCallUrl { config["serviceCallUrl"] = serviceCallUrl }
             if let appId = tabConfig.appId { config["appId"] = appId }
@@ -2267,6 +2270,7 @@ struct UnifiedReactNativeLayer: View {
                 systemAppType: tab.systemTabType?.rawValue,
                 unifiedScript: tab.unifiedScript,
                 capabilityManifestJSON: tab.capabilityManifestJSON,
+                capabilitySnapshotJSON: capabilitySnapshotJSON,
                 leftPanelScript: tab.leftPanelScript,
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
@@ -2318,6 +2322,7 @@ struct UnifiedReactNativeLayer: View {
                 systemAppType: tab.systemTabType?.rawValue,
                 unifiedScript: tab.unifiedScript,
                 capabilityManifestJSON: tab.capabilityManifestJSON,
+                capabilitySnapshotJSON: capabilitySnapshotJSON,
                 leftPanelScript: tab.leftPanelScript,
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
@@ -2331,8 +2336,25 @@ struct UnifiedReactNativeLayer: View {
             coordinator.lastSentReloadKey = nil
             sendTabConfigIfReady()
         }
+        .onChange(of: tab.capabilityRevision) { _, _ in
+            guard coordinator.hasConnection && coordinator.xpcServiceReady else {
+                return
+            }
+            coordinator.lastSentConfigSize = nil
+            sendTabConfigIfReady()
+        }
         // Size changes by PersistentRendererProcessView.updateNSView Uniform
         // No more. onChange Listen, avoid multi-source competition leading to a twitch.
+    }
+
+    @MainActor
+    private var capabilitySnapshotJSON: String? {
+        CapabilityPermissionStore.shared.snapshotJSON(
+            tabId: tab.id,
+            appId: tab.appId,
+            version: nil,
+            declaredCapabilities: tab.permissions
+        )
     }
 
     private var currentRendererConfig: [String: Any] {
@@ -2367,6 +2389,9 @@ struct UnifiedReactNativeLayer: View {
         }
         if let capabilityManifestJSON = tab.capabilityManifestJSON {
             config["capabilityManifestJSON"] = capabilityManifestJSON
+        }
+        if let capabilitySnapshotJSON {
+            config["capabilitySnapshotJSON"] = capabilitySnapshotJSON
         }
         if let leftPanelScript = tab.leftPanelScript {
             config["leftPanelScript"] = leftPanelScript
@@ -2573,6 +2598,9 @@ struct UnifiedReactNativeLayer: View {
         }
         if let capabilityManifestJSON = tab.capabilityManifestJSON {
             tabConfig["capabilityManifestJSON"] = capabilityManifestJSON
+        }
+        if let capabilitySnapshotJSON {
+            tabConfig["capabilitySnapshotJSON"] = capabilitySnapshotJSON
         }
         if let systemTabType = tab.systemTabType {
             tabConfig[RuntimeBridgeContract.systemAppType] = systemTabType.rawValue

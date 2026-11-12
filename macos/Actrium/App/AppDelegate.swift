@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var focusedViewModel: BrowserViewModel?
 
     private var cancellables = Set<AnyCancellable>()
+    private var pendingCapabilityPrompts: Set<String> = []
 
     // MARK: - NSApplicationDelegate
 
@@ -104,6 +105,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                     self?.refreshFocusedViewModel()
                 }
                 .store(in: &cancellables)
+        }
+
+        NotificationCenter.default.publisher(
+            for: XPCNotificationBridge.capabilityPermissionRequest
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] notification in
+            self?.handleCapabilityPermissionRequest(notification)
+        }
+        .store(in: &cancellables)
+    }
+
+    private func handleCapabilityPermissionRequest(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tabIdString = userInfo["tabId"] as? String,
+              let tabId = UUID(uuidString: tabIdString),
+              let capability = userInfo["capability"] as? String else {
+            return
+        }
+
+        guard let controller = windowControllers.first(where: {
+            $0.viewModel.tabs.contains(where: { $0.id == tabId })
+        }), let tab = controller.viewModel.tabs.first(where: { $0.id == tabId }) else {
+            return
+        }
+        let declared = tab.permissions.contains {
+            capability == $0 || capability.hasPrefix($0 + ".")
+        }
+        guard declared else {
+            NSLog("Capability permission request rejected as undeclared: %@", capability)
+            return
+        }
+
+        let promptKey = "\(tabId.uuidString):\(capability)"
+        guard !pendingCapabilityPrompts.contains(promptKey),
+              let window = controller.window else {
+            return
+        }
+        pendingCapabilityPrompts.insert(promptKey)
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Allow \(tab.title) to use this capability?"
+        alert.informativeText = "\(capability)\n\nThe application requested access while handling a user action."
+        alert.addButton(withTitle: "Allow for This Session")
+        alert.addButton(withTitle: "Always Allow")
+        alert.addButton(withTitle: "Deny")
+
+        alert.beginSheetModal(for: window) { [weak self, weak controller] response in
+            guard let self else { return }
+            self.pendingCapabilityPrompts.remove(promptKey)
+            let choice: CapabilityPermissionChoice
+            switch response {
+            case .alertFirstButtonReturn:
+                choice = .allowForSession
+            case .alertSecondButtonReturn:
+                choice = .alwaysAllow
+            case .alertThirdButtonReturn:
+                choice = .deny
+            default:
+                // A cancelled sheet is not a user denial.
+                return
+            }
+            controller?.viewModel.resolveCapabilityPermission(
+                tabId: tabId,
+                capability: capability,
+                choice: choice
+            )
         }
     }
 

@@ -5,21 +5,27 @@ import {
   computeServiceCapabilities,
   FRONT_CAPABILITY_DEFINITIONS,
   HOST_SUPPORTED_CAPABILITIES,
-  PLATFORM_PERMISSION_MAP,
   type CapabilityDefinition,
+  type OsPermission,
   type FrontCapabilityDefinitions,
   type FrontCapabilityInput,
 } from './capability-model';
 
-const all = new Set<string>(FRONT_CAPABILITIES);
+const all = new Set<FrontCapability>(FRONT_CAPABILITIES);
+const allOsPermissions = new Set<OsPermission>([
+  'camera',
+  'microphone',
+  'location',
+  'notifications',
+]);
 
 const base: FrontCapabilityInput = {
   declared: ['service', 'host:assets'],
   hostSupported: all,
   guestKind: 'js',
   grants: new Set<string>(),
-  platform: all,
-  session: all,
+  platform: allOsPermissions,
+  session: { state: 'active', allowedCapabilities: all },
   audience: 'third_party',
 };
 
@@ -74,7 +80,7 @@ describe('computeFrontCapabilities', () => {
         definitions
       )
     ).toEqual(['host:clipboard.write']);
-    // A module grant covers its methods.
+    // Module grants are not expanded; only canonical method grants count.
     expect(
       computeFrontCapabilities(
         {
@@ -84,7 +90,7 @@ describe('computeFrontCapabilities', () => {
         },
         definitions
       )
-    ).toEqual(['host:clipboard.write']);
+    ).toEqual([]);
   });
 
   test('accepts a method grant for a module shorthand', () => {
@@ -102,7 +108,6 @@ describe('computeFrontCapabilities', () => {
       'service.tell': {
         implemented: true,
         requiresGrant: 'user',
-        defaultEnabled: false,
       },
     });
 
@@ -128,7 +133,7 @@ describe('computeFrontCapabilities', () => {
       )
     ).toEqual(['service.call', 'service.tell']);
 
-    // A module grant covers every method.
+    // A module grant must not silently cover future methods.
     expect(
       computeFrontCapabilities(
         {
@@ -138,7 +143,7 @@ describe('computeFrontCapabilities', () => {
         },
         definitions
       )
-    ).toEqual(['service.call', 'service.tell']);
+    ).toEqual(['service.call']);
   });
 
   test('drops capabilities the host does not support', () => {
@@ -151,19 +156,31 @@ describe('computeFrontCapabilities', () => {
     ).toEqual([]);
   });
 
-  test('drops capabilities the platform or session does not allow', () => {
+  test('drops capabilities the OS platform or session does not allow', () => {
+    const definitions = withImplemented('host:camera.capturePhoto');
+    expect(
+      computeFrontCapabilities(
+        {
+          ...base,
+          declared: ['host:camera.capturePhoto'],
+          grants: new Set(['host:camera.capturePhoto']),
+          platform: new Set<OsPermission>(),
+        },
+        definitions
+      )
+    ).toEqual([]);
     expect(
       computeFrontCapabilities({
         ...base,
         declared: ['service'],
-        platform: new Set(['host:assets']),
+        session: { state: 'active', allowedCapabilities: new Set(['host:assets']) },
       })
     ).toEqual([]);
     expect(
       computeFrontCapabilities({
         ...base,
         declared: ['service'],
-        session: new Set(['host:assets']),
+        session: { state: 'detached', allowedCapabilities: all },
       })
     ).toEqual([]);
   });
@@ -214,23 +231,28 @@ describe('capability model data', () => {
     }
   });
 
-  test('host:net.request is default-off and broker-mediated', () => {
-    expect(
-      FRONT_CAPABILITY_DEFINITIONS['host:net.request'].defaultEnabled
-    ).toBe(false);
+  test('host:net.request is broker-mediated and requires a user grant', () => {
+    expect(FRONT_CAPABILITY_DEFINITIONS['host:net.request'].requiresGrant).toBe(
+      'user'
+    );
     expect(FRONT_CAPABILITY_DEFINITIONS['host:net.request'].requiresBroker).toBe(
       true
     );
   });
 
-  test('clipboard has a platform permission mapping', () => {
-    expect(PLATFORM_PERMISSION_MAP['host:clipboard']).toBe('os:clipboard');
+  test('only OS-backed capabilities declare a platform permission', () => {
+    expect(
+      FRONT_CAPABILITY_DEFINITIONS['host:clipboard.write'].osPermission
+    ).toBeUndefined();
+    expect(
+      FRONT_CAPABILITY_DEFINITIONS['host:camera.capturePhoto'].osPermission
+    ).toBe('camera');
+    expect(
+      FRONT_CAPABILITY_DEFINITIONS['host:microphone.record'].osPermission
+    ).toBe('microphone');
   });
 
   test('host:navigate.navigate is available without a grant', () => {
-    expect(
-      FRONT_CAPABILITY_DEFINITIONS['host:navigate.navigate'].defaultEnabled
-    ).toBe(true);
     expect(
       computeFrontCapabilities(
         { ...base, declared: ['host:navigate.navigate'] },

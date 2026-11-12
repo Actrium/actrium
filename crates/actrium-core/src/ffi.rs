@@ -2,6 +2,7 @@ use actr_protocol::authority::{
     self, AuthorityDescriptor, AuthorityDescriptorError, RealmSigningKeys,
 };
 use actr_protocol::realm_membership::RealmInvite;
+use ed25519_dalek::{PUBLIC_KEY_LENGTH, VerifyingKey};
 use actr_protocol::realm_profile::{RealmProfile, RealmProfileError, RealmStatus};
 use actr_protocol::uri::{ActrUri, ActrUriError};
 use sha2::{Digest, Sha256};
@@ -40,13 +41,13 @@ pub struct ActrPackageManifestInfo {
 
 impl From<ActrPackageManifest> for ActrPackageManifestInfo {
     fn from(manifest: ActrPackageManifest) -> Self {
-        let extension = manifest.extensions.actrium.as_ref();
-        let is_keel_guest = manifest.workload.profile == actr_pack::KEEL_GUEST_PROFILE_V1;
         let capabilities = manifest
             .workload
             .keel
             .as_ref()
             .and_then(|keel| keel.capabilities.clone());
+        let extension = manifest.extensions.actrium.as_ref();
+        let is_keel_guest = manifest.workload.profile == actr_pack::KEEL_GUEST_PROFILE_V1;
 
         Self {
             name: extension
@@ -808,6 +809,47 @@ fn encode_base32_lowercase(bytes: &[u8]) -> String {
 /// rejects authority-only URIs, then dispatches a matching local Realm to
 /// `open_local` and a DNS Realm to `discover_remote`. Both arms produce the
 /// same shape; `is_local` tells the shell which follow-up flow applies.
+#[derive(Debug)]
+pub struct VerifiedActrPackageInfo {
+    pub manifest: ActrPackageManifestInfo,
+    pub workload_profile: String,
+    pub workload_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Error)]
+pub enum ActrPackageVerificationError {
+    #[error("invalid Ed25519 public key: {0}")]
+    InvalidPublicKey(String),
+    #[error(transparent)]
+    InvalidPackage(#[from] actr_pack::PackError),
+}
+
+/// Verify one actr-package/2 archive using a trusted public key in raw
+/// 32-byte Ed25519 form. Returns the manifest info and workload bytes read
+/// from that verified archive.
+pub fn verify_actr_package(
+    archive: Vec<u8>,
+    trusted_public_key: Vec<u8>,
+) -> Result<VerifiedActrPackageInfo, ActrPackageVerificationError> {
+    let public_key_bytes = <&[u8; PUBLIC_KEY_LENGTH]>::try_from(trusted_public_key.as_slice())
+        .map_err(|_| {
+            ActrPackageVerificationError::InvalidPublicKey(format!(
+                "expected {PUBLIC_KEY_LENGTH} bytes, got {}",
+                trusted_public_key.len()
+            ))
+        })?;
+    let public_key = VerifyingKey::from_bytes(public_key_bytes)
+        .map_err(|error| ActrPackageVerificationError::InvalidPublicKey(error.to_string()))?;
+
+    let verified = actr_pack::verify_actor_package(&archive, &public_key)?;
+    let workload_bytes = actr_pack::read_actor_workload(&archive, &verified)?;
+    Ok(VerifiedActrPackageInfo {
+        workload_profile: verified.manifest.workload.profile.clone(),
+        manifest: verified.manifest.into(),
+        workload_bytes,
+    })
+}
+
 pub fn parse_actr_uri(uri: String, installation_id: String) -> Result<ActrUriInfo, CoreError> {
     realm_link::open_realm_link::<ActrUriInfo, CoreError>(
         &uri,
@@ -908,9 +950,9 @@ pub fn accept_authority_descriptor(
         .href
         .clone();
 
-    let member = value
-        .get("realm_signing_keys")
-        .ok_or_else(|| invalid("descriptor carries no realm_signing_keys".to_string()))?;
+    let member = value.get("realm_signing_keys").ok_or_else(|| {
+        invalid("descriptor carries no realm_signing_keys".to_string())
+    })?;
     let (keys, _outcome) =
         authority::RealmSigningKeys::accept(member, None).map_err(CoreError::from)?;
 
@@ -941,11 +983,11 @@ pub struct RealmProfileInfo {
     /// Always `active`; retired Realms are rejected.
     pub status: String,
     pub sequence: u64,
-    /// Front package: the archive this shell fetches and loads.
+    /// HTTPS download URL of the signed `.actr` package.
     pub package_href: String,
-    /// Lowercase hex SHA-256 the Front package must match.
+    /// Lowercase hex SHA-256 the package must match.
     pub package_sha256: String,
-    /// Actor type `publisher/program@version` of the Front package.
+    /// Actor type `publisher/program@version`.
     pub package_type: String,
     /// Service package: deployed and verified by the Service Host.
     pub service_href: String,
@@ -958,7 +1000,7 @@ pub struct RealmProfileInfo {
 }
 
 /// Validate a Realm Profile response for `realm_name` and extract the
-/// package selection.
+/// package target.
 ///
 /// Layer-2 verification-funnel step. `body` must be the raw JSON text as
 /// received; the signature is checked over the RFC 8785 JCS form of the
@@ -970,9 +1012,10 @@ pub fn accept_realm_profile(
     realm_name: String,
     signing_keys_json: String,
 ) -> Result<RealmProfileInfo, CoreError> {
-    let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json).map_err(|error| {
-        CoreError::RealmProfileInvalid(format!("malformed signing keys: {error}"))
-    })?;
+    let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json)
+        .map_err(|error| {
+            CoreError::RealmProfileInvalid(format!("malformed signing keys: {error}"))
+        })?;
     let profile = RealmProfile::verify(body.as_bytes(), &realm_name, &keys)?;
     if profile.realm.status != RealmStatus::Active {
         return Err(CoreError::RealmRetired(profile.realm.name.clone()));
@@ -3324,7 +3367,6 @@ mod tests {
                 [workload.keel]
                 runtime = "js"
                 guest-api = "keel.guest/1"
-                capabilities = "ui/capability-manifest.json"
                 [host]
                 profile = "actr.host/1"
                 api = "^1"
@@ -3341,12 +3383,6 @@ mod tests {
                 media-type = "text/javascript"
                 size = 1
                 sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                [[files]]
-                path = "ui/capability-manifest.json"
-                role = "profile"
-                media-type = "application/json"
-                size = 1
-                sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             "##
             .to_string(),
         )
@@ -3356,10 +3392,6 @@ mod tests {
         assert_eq!(info.theme_color.as_deref(), Some("#111111"));
         assert_eq!(info.contract_name.as_deref(), Some("keel.guest"));
         assert_eq!(info.contract_version, Some(1));
-        assert_eq!(
-            info.capabilities.as_deref(),
-            Some("ui/capability-manifest.json")
-        );
         assert_eq!(info.system_app_type, None);
     }
 
@@ -5253,11 +5285,9 @@ mod tests {
 
     #[test]
     fn accept_authority_descriptor_extracts_keys_and_realms_href() {
-        let info = accept_authority_descriptor(
-            AUTHORITY_DESCRIPTOR.to_string(),
-            "acme.example".to_string(),
-        )
-        .unwrap();
+        let info =
+            accept_authority_descriptor(AUTHORITY_DESCRIPTOR.to_string(), "acme.example".to_string())
+                .unwrap();
         assert_eq!(info.realms_href, "https://acme.example/realms");
         assert_eq!(info.keys_sequence, 1);
         assert_eq!(info.signing_keys.len(), 1);
@@ -5301,169 +5331,102 @@ mod tests {
         assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
     }
 
-    const SELECTION_REALM: &str = "k7m2q9xh@acme.com";
-
-    fn selection_signing_key() -> ed25519_dalek::SigningKey {
-        ed25519_dalek::SigningKey::from_bytes(&[0x2A; 32])
-    }
-
-    /// Signing-keys member for the fixture signer. `RealmProfile::verify`
-    /// only checks the member's shape; the member's own signature is a
-    /// pinning concern, so the value is a structural placeholder.
-    fn selection_signing_keys_json(signing: &ed25519_dalek::SigningKey) -> String {
-        use base64::Engine as _;
-        let public = base64::prelude::BASE64_STANDARD.encode(signing.verifying_key());
-        serde_json::json!({
-            "sequence": 1,
-            "keys": [
-                {"id": "rs-a", "algorithm": "Ed25519", "public_key": public, "status": "active"}
-            ],
-            "signature": {
-                "key_id": "rs-a",
+    /// `key_sets.initial` of `realm-profile.json`: single active key `rs-a`.
+    const PROFILE_SIGNING_KEYS: &str = r#"{
+        "sequence": 1,
+        "keys": [
+            {
+                "id": "rs-a",
                 "algorithm": "Ed25519",
-                "value": base64::prelude::BASE64_STANDARD.encode([0u8; 64])
+                "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+                "status": "active"
             }
-        })
-        .to_string()
-    }
-
-    /// A signed Realm Profile in the #434 selection shape: a Service and a
-    /// Front package plus unknown members covered by the signature.
-    fn signed_selection_profile(
-        signing: &ed25519_dalek::SigningKey,
-        status: &str,
-        with_selection: bool,
-    ) -> String {
-        use actr_protocol::realm_profile::sign_document;
-        use base64::Engine as _;
-
-        let mut document = serde_json::json!({
-            "schema": "actr.realm/v1",
-            "sequence": 31,
-            "realm": {
-                "name": SELECTION_REALM,
-                "display_name": "Acme Notes",
-                "status": status,
-            },
-            "issuer": {
-                "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
-                "keys": [
-                    {"id": "7", "algorithm": "Ed25519",
-                     "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
-                     "status": "active"}
-                ]
-            },
-            "provider": {
-                "id": "provider.example",
-                "signaling": [
-                    {"url": "wss://signal.provider.example/ws", "priority": 10,
-                     "control_plane_id": "provider.example/v1",
-                     "ticket_audience": "signal-a"}
-                ],
-                "ice": [
-                    {"urls": ["stun:stun.provider.example:3478"]},
-                    {"urls": ["turns:turn.provider.example:5349"],
-                     "credential_audience": "turn-pool-1"}
-                ]
-            },
-            "policy": {"membership": "invite-only"},
-            "issued_at": "2026-07-29T00:00:00Z",
-        });
-        if with_selection {
-            // The selection members are flattened onto the document root.
-            document["primary_package"] = serde_json::json!("service");
-            document["front_package"] = serde_json::json!("front");
-            document["packages"] = serde_json::json!({
-                "service": {
-                    "href": "https://cdn.notes.example/team-notes-1.4.2-service.actr",
-                    "sha256": "a".repeat(64),
-                    "type": "notes.example/team-notes-svc@1.4.2",
-                },
-                "front": {
-                    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-                    "sha256": "b".repeat(64),
-                    "type": "notes.example/team-notes@1.4.2",
-                },
-            });
+        ],
+        "signature": {
+            "key_id": "rs-a",
+            "algorithm": "Ed25519",
+            "value": "55ntdTXVOE1J26OoRHLuG5GwdlSFCWSH3wJG2fYSw1kU8Icu80EgJ29sWmEiyzGCrY5Q5dFDJGpZfd7C6l7CDw=="
         }
-        sign_document(&mut document, "rs-a", signing);
-        serde_json::to_string(&document).unwrap()
-    }
+    }"#;
 
-    #[test]
-    fn accept_realm_profile_extracts_front_and_service_packages() {
-        let signing = selection_signing_key();
-        let info = accept_realm_profile(
-            signed_selection_profile(&signing, "active", true),
-            SELECTION_REALM.to_string(),
-            selection_signing_keys_json(&signing),
-        )
-        .unwrap();
-        assert_eq!(info.realm_name, SELECTION_REALM);
-        assert_eq!(info.display_name, "Acme Notes");
-        assert_eq!(info.status, "active");
-        assert_eq!(info.sequence, 31);
-        assert_eq!(
-            info.package_href,
-            "https://cdn.notes.example/team-notes-1.4.2.actr"
-        );
-        assert_eq!(info.package_type, "notes.example/team-notes@1.4.2");
-        assert_eq!(info.service_type, "notes.example/team-notes-svc@1.4.2");
-        assert_eq!(info.provider_id, "provider.example");
-    }
 
-    #[test]
-    fn accept_realm_profile_rejects_wrong_realm_name() {
-        let signing = selection_signing_key();
-        let error = accept_realm_profile(
-            signed_selection_profile(&signing, "active", true),
-            "other@acme.com".to_string(),
-            selection_signing_keys_json(&signing),
-        )
-        .unwrap_err();
-        assert!(matches!(error, CoreError::RealmProfileInvalid(_)));
-    }
-
-    #[test]
-    fn accept_realm_profile_rejects_tampered_document() {
-        // A changed display name is covered by the signature.
-        let signing = selection_signing_key();
-        let tampered = signed_selection_profile(&signing, "active", true)
-            .replacen("Acme Notes", "Evil Notes", 1);
-        let error = accept_realm_profile(
-            tampered,
-            SELECTION_REALM.to_string(),
-            selection_signing_keys_json(&signing),
-        )
-        .unwrap_err();
-        assert!(matches!(error, CoreError::RealmProfileInvalid(_)));
-    }
-
-    #[test]
-    fn accept_realm_profile_rejects_untrusted_signing_keys() {
-        // The authority keys from the descriptor test do not list the
-        // fixture signer, so the profile signature cannot verify.
-        let signing = selection_signing_key();
-        let error = accept_realm_profile(
-            signed_selection_profile(&signing, "active", true),
-            SELECTION_REALM.to_string(),
-            selection_signing_keys_json(&ed25519_dalek::SigningKey::from_bytes(
-                &[0x7B; 32]
-            )),
-        )
-        .unwrap_err();
-        assert!(matches!(error, CoreError::RealmProfileInvalid(_)));
-    }
 
     #[test]
     fn accept_realm_profile_rejects_retired_realm() {
-        // A retired Realm may omit the selection; the FFI rejects it either
-        // way before the shell ever sees a package target.
-        let signing = selection_signing_key();
+        // `profiles.retired` of `realm-profile.json`: sequence 33, retired,
+        // signed by `rs-a` while it is still listed (retired_signer set).
+        let retired = r#"{
+        "schema": "actr.realm/v1",
+        "sequence": 33,
+        "realm": {
+            "name": "k7m2q9xh@acme.com",
+            "display_name": "Acme Notes",
+            "status": "retired",
+            "x-extension": {"enabled": true}
+        },
+        "issuer": {
+            "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+            "keys": [
+                {
+                    "id": "7",
+                    "algorithm": "Ed25519",
+                    "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+                    "status": "active",
+                    "x-extension": {"enabled": true}
+                }
+            ],
+            "x-extension": {"enabled": true}
+        },
+        "provider": {
+            "id": "provider.example",
+            "signaling": [
+                {
+                    "url": "wss://signal.provider.example/ws",
+                    "priority": 10,
+                    "control_plane_id": "provider.example/v1",
+                    "ticket_audience": "signal-a",
+                    "x-extension": {"enabled": true}
+                }
+            ],
+            "ice": [
+                {"urls": ["stun:stun.provider.example:3478"], "x-extension": {"enabled": true}},
+                {"urls": ["turns:turn.provider.example:5349"], "credential_audience": "turn-pool-1"}
+            ],
+            "x-extension": {"enabled": true}
+        },
+        "policy": {"membership": "invite-only", "x-extension": {"enabled": true}},
+        "issued_at": "2026-07-29T00:00:00Z",
+        "x-extension": {
+            "": "BMP",
+            "😀": "astral",
+            "numbers": [1, 1.5],
+            "text": "café"
+        },
+        "signature": {
+            "key_id": "rs-a",
+            "algorithm": "Ed25519",
+            "value": "fLd+XcyASoIgIuwjRDAgOFMSje2SJKlekR/Gq4mb99+u1aTKPpUhohMeacxnPZN3rYXn+mYGgwGoSvULZg42CA=="
+        }
+    }"#;
+        let retired_keys = r#"{
+        "sequence": 2,
+        "keys": [
+            {"id": "rs-a", "algorithm": "Ed25519", "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=", "status": "retired"},
+            {"id": "rs-b", "algorithm": "Ed25519", "public_key": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=", "status": "active"}
+        ],
+        "rotations": [
+            {"from": "rs-a", "to": "rs-b", "sequence": 2, "signature": "ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ=="}
+        ],
+        "signature": {
+            "key_id": "rs-b",
+            "algorithm": "Ed25519",
+            "value": "OHQedaw6th8CWM0S/eHWT9cQW8XEQZiwPkVl0Gx5g4WWA1C3iE0AV41encYee2UegjpoC2VmQ0uxmxOi+PQ5Aw=="
+        }
+    }"#;
         let error = accept_realm_profile(
-            signed_selection_profile(&signing, "retired", false),
-            SELECTION_REALM.to_string(),
-            selection_signing_keys_json(&signing),
+            retired.to_string(),
+            "k7m2q9xh@acme.com".to_string(),
+            retired_keys.to_string(),
         )
         .unwrap_err();
         assert!(matches!(error, CoreError::RealmRetired(_)));
@@ -5522,7 +5485,8 @@ mod tests {
             "services": []
         })
         .to_string();
-        let error = accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
+        let error =
+            accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
         assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
     }
 
@@ -5534,7 +5498,8 @@ mod tests {
             "publisher": {"schema": "actr.publisher/v1", "domain": "notes.example"}
         })
         .to_string();
-        let error = accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
+        let error =
+            accept_publisher_profile(body, "notes.example".to_string()).unwrap_err();
         assert!(matches!(error, CoreError::AuthorityDescriptorInvalid(_)));
     }
 }

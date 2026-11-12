@@ -7,6 +7,11 @@ namespace actrium_core {
     [Throws=CoreError]
     void validate_actr_package_manifest(string source);
 
+    /// Verify one actr-package/2 archive using a trusted public key in raw 32-byte Ed25519 form.
+    /// Return the manifest info and workload bytes read from that verified archive.
+    [Throws=ActrPackageVerificationError]
+    VerifiedActrPackageInfo verify_actr_package(bytes archive, bytes trusted_public_key);
+
     /// Generate a fresh installation id: 26 lowercase base32 characters
     /// from 16 OS-CSPRNG bytes. Platforms persist the value once and own
     /// the storage.
@@ -41,11 +46,9 @@ namespace actrium_core {
     [Throws=CoreError]
     RealmProfileInfo accept_realm_profile(string body, string realm_name, string signing_keys_json);
 
-    /// Validate the well-known document served by a publisher domain and
-    /// extract its package signing keys. The document itself is not
-    /// signature-verified here; callers authenticate the keys through the
-    /// authority/Realm Profile chain and verify the `.actr` package
-    /// signature with them.
+    /// Validate the descriptor served by a publisher domain and verify its
+    /// inline Publisher Profile; extract the package signing keys that
+    /// verify the `.actr` package signature.
     [Throws=CoreError]
     PublisherProfileInfo accept_publisher_profile(string body, string domain);
 
@@ -1053,11 +1056,11 @@ dictionary RealmProfileInfo {
     /// Always `active`; retired Realms are rejected.
     string status;
     u64 sequence;
-    /// Front package: the archive this shell fetches and loads.
+    /// HTTPS download URL of the signed `.actr` package.
     string package_href;
-    /// Lowercase hex SHA-256 the Front package must match.
+    /// Lowercase hex SHA-256 the package must match.
     string package_sha256;
-    /// Actor type `publisher/program@version` of the Front package.
+    /// Actor type `publisher/program@version`.
     string package_type;
     /// Service package: deployed and verified by the Service Host.
     string service_href;
@@ -1092,6 +1095,12 @@ dictionary PublisherProfileInfo {
     /// RFC 3339; past this point the profile must be re-fetched.
     string profile_expires_at;
     sequence<PublisherPackageKeyInfo> package_signing_keys;
+};
+
+dictionary VerifiedActrPackageInfo {
+    ActrPackageManifestInfo manifest;
+    string workload_profile;
+    bytes workload_bytes;
 };
 
 enum ContractGateStatus {
@@ -1605,4 +1614,10 @@ enum CoreError {
     "AuthorityDescriptorInvalid",
     "RealmProfileInvalid",
     "RealmRetired",
+};
+
+[Error]
+enum ActrPackageVerificationError {
+    "InvalidPublicKey",
+    "InvalidPackage",
 };
