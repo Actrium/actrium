@@ -1,4 +1,4 @@
-import { resolveDeclaredCapability } from './capabilities';
+import { capabilityModule, expandCapabilityName } from './capabilities';
 import { COMPONENT_WHITELIST } from './capability-model';
 
 /**
@@ -232,22 +232,72 @@ export function verifyCapabilityManifest(
   }
 
   if (options.declaredCapabilities) {
-    const declared = new Set(
-      options.declaredCapabilities
-        .map(resolveDeclaredCapability)
-        .filter((capability): capability is NonNullable<typeof capability> =>
-          capability !== undefined
-        )
-    );
-    for (const rawKey of Object.keys(manifest.hostModules)) {
+    const declared = new Set<string>();
+    const declaredModules = new Set<string>();
+    for (const capability of options.declaredCapabilities) {
+      for (const methodCapability of expandCapabilityName(capability)) {
+        declared.add(methodCapability);
+        declaredModules.add(capabilityModule(methodCapability));
+      }
+    }
+
+    for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
       const moduleId = toModuleId(rawKey);
-      const capability = moduleId === 'host:service' ? 'service' : moduleId;
-      const resolved = resolveDeclaredCapability(capability);
-      if (!resolved || !declared.has(resolved)) {
+      if (moduleId === 'host:service') {
+        // Business route names do not map to contract exports, so require the
+        // transport method capability explicitly instead of accepting any
+        // sibling method declaration (`service.on` / `service.tell`).
+        if ((entry.rpc?.length ?? 0) > 0 && !declared.has('service.call')) {
+          return fail(
+            'capability_mismatch',
+            'Capability "service.call" is used but not declared by the package.'
+          );
+        }
+        if ((entry.events?.length ?? 0) > 0 && !declared.has('service.on')) {
+          return fail(
+            'capability_mismatch',
+            'Capability "service.on" is used but not declared by the package.'
+          );
+        }
+        // Known transport exports (`call` / `tell` / `on`) still need their
+        // exact capability; business routes do not expand to a capability.
+        for (const transportName of [
+          ...(entry.rpc ?? []),
+          ...(entry.events ?? []),
+        ]) {
+          const capabilities = expandCapabilityName(
+            `host:service.${transportName}`
+          );
+          if (capabilities.length === 0) continue;
+          if (!capabilities.some((capability) => declared.has(capability))) {
+            return fail(
+              'capability_mismatch',
+              `Capability "host:service.${transportName}" is used but not declared by the package.`
+            );
+          }
+        }
+        continue;
+      }
+      if (!declaredModules.has(moduleId)) {
         return fail(
           'capability_mismatch',
-          `Capability "${capability}" is used but not declared by the package.`
+          `Capability "${moduleId}" is used but not declared by the package.`
         );
+      }
+
+      // Method-level check when the manifest names a known contract export.
+      for (const methodName of [
+        ...(entry.rpc ?? []),
+        ...(entry.events ?? []),
+      ]) {
+        const capabilities = expandCapabilityName(`${moduleId}.${methodName}`);
+        if (capabilities.length === 0) continue;
+        if (!capabilities.some((capability) => declared.has(capability))) {
+          return fail(
+            'capability_mismatch',
+            `Capability "${moduleId}.${methodName}" is used but not declared by the package.`
+          );
+        }
       }
     }
     // Importing a host module is itself a capability acquisition, even when
@@ -256,8 +306,11 @@ export function verifyCapabilityManifest(
       if (!importName.startsWith('host:')) continue;
       const capability =
         importName === 'host:service' ? 'service' : importName;
-      const resolved = resolveDeclaredCapability(capability);
-      if (!resolved || !declared.has(resolved)) {
+      const resolved = expandCapabilityName(capability);
+      if (
+        resolved.length === 0 ||
+        !resolved.some((name) => declared.has(name))
+      ) {
         return fail(
           'capability_mismatch',
           `Capability "${capability}" is imported but not declared by the package.`
