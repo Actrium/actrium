@@ -497,6 +497,8 @@ version = "0.0.0"
 dependencies = [
  "actr-pack",
  "actr-protocol",
+ "base64",
+ "ed25519-dalek",
  "rand 0.8.6",
  "serde",
  "serde_json",

@@ -5174,17 +5174,23 @@ public struct RealmProfileInfo {
     public var status: String
     public var sequence: UInt64
     /**
-     * HTTPS download URL of the signed `.actr` package.
+     * Front package: the archive this shell fetches and loads.
      */
     public var packageHref: String
     /**
-     * Lowercase hex SHA-256 the package must match.
+     * Lowercase hex SHA-256 the Front package must match.
      */
     public var packageSha256: String
     /**
-     * Actor type `publisher/program@version`.
+     * Actor type `publisher/program@version` of the Front package.
      */
     public var packageType: String
+    /**
+     * Service package: deployed and verified by the Service Host.
+     */
+    public var serviceHref: String
+    public var serviceSha256: String
+    public var serviceType: String
     /**
      * Issuer endpoint that serves Actor credentials.
      */
@@ -5204,14 +5210,17 @@ public struct RealmProfileInfo {
          * Always `active`; retired Realms are rejected.
          */status: String, sequence: UInt64,
         /**
-         * HTTPS download URL of the signed `.actr` package.
+         * Front package: the archive this shell fetches and loads.
          */packageHref: String,
         /**
-         * Lowercase hex SHA-256 the package must match.
+         * Lowercase hex SHA-256 the Front package must match.
          */packageSha256: String,
         /**
-         * Actor type `publisher/program@version`.
+         * Actor type `publisher/program@version` of the Front package.
          */packageType: String,
+        /**
+         * Service package: deployed and verified by the Service Host.
+         */serviceHref: String, serviceSha256: String, serviceType: String,
         /**
          * Issuer endpoint that serves Actor credentials.
          */issuerUrl: String,
@@ -5225,6 +5234,9 @@ public struct RealmProfileInfo {
         self.packageHref = packageHref
         self.packageSha256 = packageSha256
         self.packageType = packageType
+        self.serviceHref = serviceHref
+        self.serviceSha256 = serviceSha256
+        self.serviceType = serviceType
         self.issuerUrl = issuerUrl
         self.providerId = providerId
     }
@@ -5258,6 +5270,15 @@ extension RealmProfileInfo: Equatable, Hashable {
         if lhs.packageType != rhs.packageType {
             return false
         }
+        if lhs.serviceHref != rhs.serviceHref {
+            return false
+        }
+        if lhs.serviceSha256 != rhs.serviceSha256 {
+            return false
+        }
+        if lhs.serviceType != rhs.serviceType {
+            return false
+        }
         if lhs.issuerUrl != rhs.issuerUrl {
             return false
         }
@@ -5275,6 +5296,9 @@ extension RealmProfileInfo: Equatable, Hashable {
         hasher.combine(packageHref)
         hasher.combine(packageSha256)
         hasher.combine(packageType)
+        hasher.combine(serviceHref)
+        hasher.combine(serviceSha256)
+        hasher.combine(serviceType)
         hasher.combine(issuerUrl)
         hasher.combine(providerId)
     }
@@ -5296,6 +5320,9 @@ public struct FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer {
                 packageHref: FfiConverterString.read(from: &buf),
                 packageSha256: FfiConverterString.read(from: &buf),
                 packageType: FfiConverterString.read(from: &buf),
+                serviceHref: FfiConverterString.read(from: &buf),
+                serviceSha256: FfiConverterString.read(from: &buf),
+                serviceType: FfiConverterString.read(from: &buf),
                 issuerUrl: FfiConverterString.read(from: &buf),
                 providerId: FfiConverterString.read(from: &buf)
         )
@@ -5309,6 +5336,9 @@ public struct FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.packageHref, into: &buf)
         FfiConverterString.write(value.packageSha256, into: &buf)
         FfiConverterString.write(value.packageType, into: &buf)
+        FfiConverterString.write(value.serviceHref, into: &buf)
+        FfiConverterString.write(value.serviceSha256, into: &buf)
+        FfiConverterString.write(value.serviceType, into: &buf)
         FfiConverterString.write(value.issuerUrl, into: &buf)
         FfiConverterString.write(value.providerId, into: &buf)
     }

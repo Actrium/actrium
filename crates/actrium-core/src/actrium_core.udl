@@ -1053,12 +1053,16 @@ dictionary RealmProfileInfo {
     /// Always `active`; retired Realms are rejected.
     string status;
     u64 sequence;
-    /// HTTPS download URL of the signed `.actr` package.
+    /// Front package: the archive this shell fetches and loads.
     string package_href;
-    /// Lowercase hex SHA-256 the package must match.
+    /// Lowercase hex SHA-256 the Front package must match.
     string package_sha256;
-    /// Actor type `publisher/program@version`.
+    /// Actor type `publisher/program@version` of the Front package.
     string package_type;
+    /// Service package: deployed and verified by the Service Host.
+    string service_href;
+    string service_sha256;
+    string service_type;
     /// Issuer endpoint that serves Actor credentials.
     string issuer_url;
     /// Actr Facility Provider ID; a membership client binds to it.
