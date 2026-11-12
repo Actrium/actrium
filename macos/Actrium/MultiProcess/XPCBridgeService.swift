@@ -32,6 +32,7 @@ struct XPCTabConfig {
     let containerSize: CGSize
     let systemAppType: String?
     let unifiedScript: String?
+    let capabilityManifestJSON: String?
     let leftPanelScript: String?
     let leftPanelVisible: Bool
     let rightPanelVisible: Bool
@@ -61,6 +62,9 @@ struct XPCTabConfig {
         }
         if let unifiedScript = unifiedScript {
             dict["unifiedScript"] = unifiedScript
+        }
+        if let capabilityManifestJSON = capabilityManifestJSON {
+            dict["capabilityManifestJSON"] = capabilityManifestJSON
         }
         if let leftPanelScript = leftPanelScript {
             dict["leftPanelScript"] = leftPanelScript

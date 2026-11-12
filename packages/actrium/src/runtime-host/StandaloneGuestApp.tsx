@@ -22,6 +22,7 @@ import { hasDeclaredCapability } from './capabilities';
 import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
+import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import type { TabConfig } from './types';
 
 type GuestButtonProps = {
@@ -106,6 +107,20 @@ const logToNative = (message: string) => {
   }
 };
 
+/**
+ * RN's Clipboard JS wrapper is deprecated; call the native module directly.
+ * RCTClipboard is part of react-native-macos and exports `setString`.
+ */
+const writeClipboardText = async (text: string): Promise<void> => {
+  const clipboard = NativeModules.Clipboard as
+    | { setString?: (value: string) => void }
+    | undefined;
+  if (!clipboard?.setString) {
+    throw new Error('The host clipboard module is not available.');
+  }
+  clipboard.setString(text);
+};
+
 export const StandaloneGuestApp: React.FC<Props> = ({
   tab,
   containerWidth,
@@ -116,8 +131,17 @@ export const StandaloneGuestApp: React.FC<Props> = ({
   const guestScript = tab.unifiedScript || tab.guestScript;
   const hasServiceCapability = hasDeclaredCapability(
     tab.permissions ?? [],
-    'service'
+    'service.call'
   );
+  const hasClipboardCapability = hasDeclaredCapability(
+    tab.permissions ?? [],
+    'host:clipboard.write'
+  );
+  // The Native Permission Store is not wired into the renderer yet, so no
+  // clipboard grant exists. Keep the adapter unavailable even when the
+  // package declares the capability; the grant snapshot lands in a follow-up.
+  const hasClipboardGrant = false;
+  const permissionsKey = [...(tab.permissions ?? [])].sort().join(',');
 
   React.useEffect(() => {
     // A reload must start from a clean state, otherwise a previous load
@@ -127,6 +151,23 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
     if (!guestScript) {
       setError('The application does not contain a Keel guest bundle.');
+      return;
+    }
+    const capabilityManifestJSON = tab.capabilityManifestJSON;
+    if (!capabilityManifestJSON) {
+      setError('The package does not contain a capability manifest.');
+      return;
+    }
+    const verification = verifyRuntimeCapabilityManifestJSON(
+      capabilityManifestJSON,
+      tab.permissions ?? []
+    );
+    if (!verification.ok) {
+      const details = verification.details.join(' ');
+      logToNative(
+        `[StandaloneGuestApp] capability verification failed: ${details}`
+      );
+      setError(`Capability manifest verification failed: ${details}`);
       return;
     }
 
@@ -184,6 +225,9 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     const hostModules = createHostModules({
       hasServiceCapability,
       callActor: callServiceActor,
+      hasClipboardCapability,
+      hasClipboardGrant,
+      writeClipboardText,
     });
     const engine = new Engine({ debug: false, contract, hostModules });
     engine.register(hostComponents);
@@ -290,7 +334,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.id,
     tab.legacyActorBridge,
     tab.serviceCallUrl,
+    hasClipboardCapability,
     tab.reloadKey,
+    tab.capabilityManifestJSON,
+    permissionsKey,
   ]);
 
   if (error) {

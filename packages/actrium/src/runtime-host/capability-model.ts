@@ -1,16 +1,16 @@
 import {
-  CAPABILITY_TO_HOST_MODULE,
+  expandCapabilityName,
+  expandCapabilitySet,
   FRONT_CAPABILITIES,
-  resolveDeclaredCapability,
   type FrontCapability,
 } from './capabilities';
-import { isValidServiceCapability } from './service-capabilities';
+import { validateServiceCapabilities } from './service-capabilities';
 
 /**
  * Capability layering and effective-set computation.
  *
  * The four layers follow v1 05 §7 / 06 §5.3:
- *   1. Front capability     — callable Host modules (`service`, `host:*`)
+ *   1. Front capability     — callable Host methods (`service.call`, `host:*`)
  *   2. Component whitelist  — Keel components a Guest may render
  *   3. Platform permission  — OS-level grants (camera/mic/location/notifications)
  *   4. Service capability   — workspace/network/actor/shell capabilities
@@ -32,117 +32,175 @@ export type CapabilityDefinition = {
   requiresBroker: boolean;
   /** Consumed by the sandbox at call time; not part of the effective set. */
   requiresSandbox: boolean;
+  /**
+   * True only once the Host has a working implementation. A capability can be
+   * declared in the contract (builds accept its import) while still being a
+   * throwing placeholder; such capabilities never enter the effective set.
+   */
+  implemented: boolean;
 };
 
 export const FRONT_CAPABILITY_DEFINITIONS: Record<
   FrontCapability,
   CapabilityDefinition
 > = {
-  service: {
-    name: 'service',
+  'service.call': {
+    name: 'service.call',
     audience: 'third_party',
     requiresGrant: 'none',
     defaultEnabled: true,
     requiresBroker: false,
     requiresSandbox: true,
+    implemented: true,
   },
-  'host:assets': {
-    name: 'host:assets',
+  'service.tell': {
+    name: 'service.tell',
     audience: 'third_party',
     requiresGrant: 'none',
     defaultEnabled: true,
     requiresBroker: false,
     requiresSandbox: true,
+    implemented: false,
   },
-  'host:clipboard': {
-    name: 'host:clipboard',
-    audience: 'third_party',
-    requiresGrant: 'user',
-    defaultEnabled: false,
-    requiresBroker: false,
-    requiresSandbox: true,
-  },
-  'host:notifications': {
-    name: 'host:notifications',
-    audience: 'third_party',
-    requiresGrant: 'user',
-    defaultEnabled: false,
-    requiresBroker: false,
-    requiresSandbox: true,
-  },
-  'host:camera': {
-    name: 'host:camera',
-    audience: 'third_party',
-    requiresGrant: 'user',
-    defaultEnabled: false,
-    requiresBroker: false,
-    requiresSandbox: true,
-  },
-  'host:microphone': {
-    name: 'host:microphone',
-    audience: 'third_party',
-    requiresGrant: 'user',
-    defaultEnabled: false,
-    requiresBroker: false,
-    requiresSandbox: true,
-  },
-  'host:location': {
-    name: 'host:location',
-    audience: 'third_party',
-    requiresGrant: 'user',
-    defaultEnabled: false,
-    requiresBroker: false,
-    requiresSandbox: true,
-  },
-  'host:external-link': {
-    name: 'host:external-link',
-    audience: 'third_party',
-    requiresGrant: 'user',
-    defaultEnabled: false,
-    requiresBroker: false,
-    requiresSandbox: true,
-  },
-  'host:navigate': {
-    name: 'host:navigate',
+  'service.on': {
+    name: 'service.on',
     audience: 'third_party',
     requiresGrant: 'none',
     defaultEnabled: true,
     requiresBroker: false,
     requiresSandbox: true,
+    implemented: false,
   },
-  'host:file-import': {
-    name: 'host:file-import',
+  'host:assets.read': {
+    name: 'host:assets.read',
+    audience: 'third_party',
+    requiresGrant: 'none',
+    defaultEnabled: true,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
+  },
+  'host:clipboard.write': {
+    name: 'host:clipboard.write',
     audience: 'third_party',
     requiresGrant: 'user',
     defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
+    implemented: true,
   },
-  'host:file-export': {
-    name: 'host:file-export',
+  'host:notifications.show': {
+    name: 'host:notifications.show',
     audience: 'third_party',
     requiresGrant: 'user',
     defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
+    implemented: false,
   },
-  'host:share': {
-    name: 'host:share',
+  'host:camera.capturePhoto': {
+    name: 'host:camera.capturePhoto',
     audience: 'third_party',
     requiresGrant: 'user',
     defaultEnabled: false,
     requiresBroker: false,
     requiresSandbox: true,
+    implemented: false,
   },
-  'host:net': {
-    name: 'host:net',
+  'host:microphone.record': {
+    name: 'host:microphone.record',
+    audience: 'third_party',
+    requiresGrant: 'user',
+    defaultEnabled: false,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
+  },
+  'host:location.getCurrentPosition': {
+    name: 'host:location.getCurrentPosition',
+    audience: 'third_party',
+    requiresGrant: 'user',
+    defaultEnabled: false,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
+  },
+  'host:external-link.open': {
+    name: 'host:external-link.open',
+    audience: 'third_party',
+    requiresGrant: 'user',
+    defaultEnabled: false,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
+  },
+  'host:navigate.navigate': {
+    name: 'host:navigate.navigate',
+    audience: 'third_party',
+    requiresGrant: 'none',
+    defaultEnabled: true,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
+  },
+  'host:file-import.pick': {
+    name: 'host:file-import.pick',
+    audience: 'third_party',
+    requiresGrant: 'user',
+    defaultEnabled: false,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
+  },
+  'host:file-export.save': {
+    name: 'host:file-export.save',
+    audience: 'third_party',
+    requiresGrant: 'user',
+    defaultEnabled: false,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
+  },
+  'host:share.share': {
+    name: 'host:share.share',
+    audience: 'third_party',
+    requiresGrant: 'user',
+    defaultEnabled: false,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
+  },
+  'host:net.request': {
+    name: 'host:net.request',
     audience: 'third_party',
     requiresGrant: 'user',
     defaultEnabled: false,
     requiresBroker: true,
     requiresSandbox: true,
+    implemented: false,
+  },
+  'system:diagnostics.view': {
+    name: 'system:diagnostics.view',
+    audience: 'system',
+    requiresGrant: 'admin',
+    defaultEnabled: false,
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: false,
   },
 };
+
+/**
+ * Capabilities the Host can actually serve. Placeholder capabilities are
+ * declared in the contract so builds accept their imports, but they stay out
+ * of the effective set until implemented (see `implemented` above).
+ */
+export const HOST_SUPPORTED_CAPABILITIES: ReadonlySet<FrontCapability> =
+  new Set(
+    FRONT_CAPABILITIES.filter(
+      (capability) => FRONT_CAPABILITY_DEFINITIONS[capability].implemented
+    )
+  );
 
 export const COMPONENT_WHITELIST = [
   'View',
@@ -157,7 +215,11 @@ export const COMPONENT_WHITELIST = [
 
 export type AllowedComponent = (typeof COMPONENT_WHITELIST)[number];
 
-/** Platform permissions are a separate layer from front capabilities. */
+/**
+ * Platform permissions are a separate layer from front capabilities. One OS
+ * grant covers a whole module, so the keys stay module-level; the effective
+ * set expands them to method capabilities when it reads `platform`.
+ */
 export const PLATFORM_PERMISSION_MAP: Record<string, string> = {
   'host:clipboard': 'os:clipboard',
   'host:camera': 'os:camera',
@@ -166,22 +228,14 @@ export const PLATFORM_PERMISSION_MAP: Record<string, string> = {
   'host:notifications': 'os:notifications',
 };
 
-function normalizeCapabilityName(name: string): FrontCapability | undefined {
-  const resolved = resolveDeclaredCapability(name);
-  if (resolved) return resolved;
-  for (const [capability, moduleId] of Object.entries(
-    CAPABILITY_TO_HOST_MODULE
-  )) {
-    if (moduleId === name) return capability as FrontCapability;
-  }
-  return undefined;
-}
-
 export type FrontCapabilityInput = {
   declared: readonly string[];
   /**
-   * Explicit capability names (`service`, `host:clipboard`, ...). Contract
-   * module ids such as `host:service` are accepted too and normalized.
+   * Method-level names (`service.call`, `host:clipboard.write`), module
+   * shorthands (`service`, `host:clipboard`) and contract ids are accepted.
+   * Placeholder capabilities are filtered by `implemented` even when they
+   * appear here; production callers should still pass a real support set such
+   * as `HOST_SUPPORTED_CAPABILITIES`.
    */
   hostSupported: ReadonlySet<string>;
   /** Reserved for native Hosts; v1 currently opens JS Guests only. */
@@ -192,38 +246,50 @@ export type FrontCapabilityInput = {
   audience: CapabilityAudience;
 };
 
+export type FrontCapabilityDefinitions = Record<
+  FrontCapability,
+  CapabilityDefinition
+>;
+
 /**
  * effective = declared ∩ host-supported ∩ audience ∩ grant ∩ platform ∩ session.
- * Parsing route names stays opaque; the result is the callable set.
+ * Parsing route names stays opaque; the result is the callable, method-level set.
+ *
+ * A throwing placeholder capability never enters the set: `definition.implemented`
+ * is enforced here rather than trusting the caller to pass a narrow
+ * `hostSupported`. `definitions` exists so policy tests can use a fixture;
+ * production callers must leave it at the Host's real capability table.
  */
 export function computeFrontCapabilities(
-  input: FrontCapabilityInput
+  input: FrontCapabilityInput,
+  definitions: FrontCapabilityDefinitions = FRONT_CAPABILITY_DEFINITIONS
 ): FrontCapability[] {
-  const supported = new Set<FrontCapability>();
-  for (const name of input.hostSupported) {
-    const capability = normalizeCapabilityName(name);
-    if (capability) supported.add(capability);
-  }
+  const supported = expandCapabilitySet(input.hostSupported);
+  const grants = expandCapabilitySet(input.grants);
+  const platform = expandCapabilitySet(input.platform);
+  const session = expandCapabilitySet(input.session);
 
   const result: FrontCapability[] = [];
   const seen = new Set<FrontCapability>();
 
-  for (const name of input.declared) {
-    const capability = normalizeCapabilityName(name);
-    if (!capability || seen.has(capability)) continue;
-    const definition = FRONT_CAPABILITY_DEFINITIONS[capability];
-    if (!definition) continue;
-    if (!supported.has(capability)) continue;
-    if (definition.audience === 'system' && input.audience !== 'system') continue;
-    // `grants` holds capabilities whose required grant level was satisfied.
-    // A default-off capability additionally needs an explicit grant.
-    const needsGrant =
-      definition.requiresGrant !== 'none' || !definition.defaultEnabled;
-    if (needsGrant && !input.grants.has(capability)) continue;
-    if (!input.platform.has(capability)) continue;
-    if (!input.session.has(capability)) continue;
-    seen.add(capability);
-    result.push(capability);
+  for (const declared of input.declared) {
+    for (const capability of expandCapabilityName(declared)) {
+      if (seen.has(capability)) continue;
+      const definition = definitions[capability];
+      if (!definition) continue;
+      if (!definition.implemented) continue;
+      if (!supported.has(capability)) continue;
+      if (definition.audience === 'system' && input.audience !== 'system') continue;
+      // `grants` holds capabilities whose required grant level was satisfied.
+      // A default-off capability additionally needs an explicit grant.
+      const needsGrant =
+        definition.requiresGrant !== 'none' || !definition.defaultEnabled;
+      if (needsGrant && !grants.has(capability)) continue;
+      if (!platform.has(capability)) continue;
+      if (!session.has(capability)) continue;
+      seen.add(capability);
+      result.push(capability);
+    }
   }
 
   return result;
@@ -244,9 +310,8 @@ export type ServiceCapabilityInput = {
 export function computeServiceCapabilities(
   input: ServiceCapabilityInput
 ): string[] {
-  return input.declared.filter(
+  return validateServiceCapabilities(input.declared).valid.filter(
     (capability) =>
-      isValidServiceCapability(capability) &&
       input.hostSupported.has(capability) &&
       input.policy.has(capability) &&
       input.session.has(capability)
