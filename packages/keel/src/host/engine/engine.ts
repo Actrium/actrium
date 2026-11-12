@@ -123,6 +123,8 @@ export class Engine implements IEngine {
     debug: boolean;
     logger: NonNullable<EngineOptions['logger']>;
     requireWhitelist: ReadonlySet<string>;
+    /** Whether the receiver rejects operations outside the component registry. */
+    restrictToRegisteredComponents: boolean;
     onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
     receiverMaxBatchSize: number;
     onSerializedBatch?: (batch: SerializedOperationBatch) => void;
@@ -236,6 +238,7 @@ export class Engine implements IEngine {
       timeout: options.timeout ?? 5000,
       debug: options.debug ?? false,
       logger: options.logger ?? defaultLogger,
+      restrictToRegisteredComponents: options.restrictToRegisteredComponents ?? false,
       requireWhitelist: new Set(options.requireWhitelist ?? Array.from(defaultWhitelist)),
       onMetric: options.onMetric,
       receiverMaxBatchSize: options.receiverMaxBatchSize ?? 5000,
@@ -1923,6 +1926,7 @@ ${assignments.join('\n')}
       {
         onMetric: this.options.onMetric,
         maxBatchSize: this.options.receiverMaxBatchSize,
+        restrictToRegisteredComponents: this.options.restrictToRegisteredComponents,
         // Use Bridge's releaseCallback for proper Host/Guest routing
         releaseCallback: (fnId) => this.bridge?.releaseCallback(fnId),
       }

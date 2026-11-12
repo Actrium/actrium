@@ -64,6 +64,8 @@ export class Receiver {
   private opts: {
     onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
     maxBatchSize: number;
+    /** Reject unknown component types before they enter the retained tree. */
+    restrictToRegisteredComponents: boolean;
     debug: boolean;
   };
 
@@ -100,6 +102,7 @@ export class Receiver {
     this.opts = {
       onMetric: options?.onMetric,
       maxBatchSize: options?.maxBatchSize ?? 5000,
+      restrictToRegisteredComponents: options?.restrictToRegisteredComponents ?? false,
       debug: options?.debug ?? false,
     };
 
@@ -315,8 +318,17 @@ export class Receiver {
    * Handle create operation
    */
   private handleCreate(op: Extract<Operation, { op: 'CREATE' }>): void {
-    // Extract fnIds from operation metadata (attached by Bridge)
+    // Extract fnIds from operation metadata (attached by Bridge).
     const fnIds = (op as Operation & { _fnIds?: Set<string> })._fnIds;
+    // Text nodes are protocol primitives; other types must exist in this Guest's registry.
+    if (
+      this.opts.restrictToRegisteredComponents &&
+      op.type !== '__TEXT__' &&
+      !this.registry.has(op.type)
+    ) {
+      for (const fnId of fnIds ?? []) this.doReleaseCallback(fnId);
+      throw new Error(`[keel] Component "${op.type}" is not available to this Guest`);
+    }
 
     const node: NodeInstance = {
       id: op.id,

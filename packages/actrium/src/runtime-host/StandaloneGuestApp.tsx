@@ -27,6 +27,7 @@ import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
+import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 import type { TabConfig } from './types';
 
 type GuestButtonProps = {
@@ -199,7 +200,12 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setError('The package does not contain a capability manifest.');
       return;
     }
-    const verification = verifyRuntimeCapabilityManifestJSON(
+    // Only the Host-designated Echo demo may use the earlier Guest bundle format.
+    const legacyEchoTab = tab.legacyActorBridge === true;
+    const v1 = legacyEchoTab
+      ? undefined
+      : verifyV1RuntimeGuest(guestScript, capabilityManifestJSON, tab.permissions ?? []);
+    const verification = v1 ?? verifyRuntimeCapabilityManifestJSON(
       capabilityManifestJSON,
       tab.permissions ?? []
     );
@@ -274,8 +280,27 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       authorizeCapability: (capability) => authorizer.authorize(capability),
       writeClipboardText,
     });
-    const engine = new Engine({ debug: false, contract, hostModules });
-    engine.register(hostComponents);
+    // Expose exactly the verified method and component set to this Guest Engine.
+    const linked = v1?.ok ? v1 : undefined;
+    const engine = linked
+      ? new Engine({
+          debug: false,
+          ...bindV1HostModules(linked.linkage, hostModules, (capability) =>
+            authorizer.authorize(capability)
+          ),
+          requireWhitelist: linked.manifest.imports.filter((id) => !id.startsWith('host:')),
+          restrictToRegisteredComponents: true,
+        })
+      : new Engine({ debug: false, contract, hostModules });
+    engine.register(
+      linked
+        ? Object.fromEntries(
+            Object.entries(hostComponents).filter(([name]) =>
+              linked.manifest.components.includes(name === 'Image' ? 'ImageAsset' : name)
+            )
+          )
+        : hostComponents
+    );
     engine.createReceiver();
 
     const update = () => {
@@ -287,7 +312,6 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     // The legacy bridge is confined to the host-designated demo package. The
     // designation comes from launch configuration, never from package data.
     // Every other package must use the per-tab host:service path.
-    const legacyEchoTab = tab.legacyActorBridge === true;
     const unsubscribeEvents = legacyEchoTab
       ? EventHandler.setup(engine, {
       tabId: tab.id,

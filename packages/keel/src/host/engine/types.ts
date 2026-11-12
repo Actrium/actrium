@@ -102,6 +102,9 @@ export interface EngineOptions {
    */
   receiverMaxBatchSize?: number;
 
+  /** Reject CREATE operations outside the per-Guest registry. */
+  restrictToRegisteredComponents?: boolean;
+
   /**
    * Diagnostics parameters (for Host-side Task Manager/Resource Monitor)
    */

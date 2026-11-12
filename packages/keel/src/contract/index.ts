@@ -354,13 +354,15 @@ export function createHostModuleDispatch(
     string,
     Record<string, HostModuleDispatchHandler>
   >;
-  const table: HostModuleDispatchTable = {};
+  // Bridge requests use Guest-provided keys; only registered own keys are dispatchable.
+  const table: HostModuleDispatchTable = Object.create(null);
 
   for (const [moduleId, moduleSpec] of Object.entries(contract.hostModules)) {
     const moduleImpl = implementationRecord[moduleId];
     if (!moduleImpl) continue;
 
-    const moduleDispatch: HostModuleDispatchModule = {};
+    // Keep inherited object methods out of each module's callable exports.
+    const moduleDispatch: HostModuleDispatchModule = Object.create(null);
 
     for (const [exportName, descriptor] of Object.entries(moduleSpec)) {
       const impl = moduleImpl[exportName];

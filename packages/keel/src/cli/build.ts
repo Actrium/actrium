@@ -9,6 +9,13 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { isHostModuleId, type KeelContractShape, validateContract } from '../contract';
+import { createV1CapabilityManifest, type V1Link, writeV1Bundle } from '../v1';
+import {
+  collectV1SourceLinks,
+  linkV1Bundle,
+  normalizedV1GuestEntry,
+  physicalV1Output,
+} from './build-v1';
 
 /**
  * Build options
@@ -69,6 +76,9 @@ export interface BuildOptions {
    * Capability manifest output path.
    */
   capabilityManifest?: string;
+
+  /** Output path for the manifest of a linked Product v1 Guest bundle. */
+  v1CapabilityManifest?: string;
 
   /**
    * Custom footer file path (replaces default auto-render footer)
@@ -531,7 +541,10 @@ async function resolveContract(options: ContractOptions): Promise<KeelContractSh
   return contract;
 }
 
-function createHostBoundaryCollector(entryPath: string): {
+function createHostBoundaryCollector(
+  entryPath: string,
+  v1Links?: Map<string, V1Link>
+): {
   plugin: BunPlugin;
   getResult: () => CollectedHostBoundary;
 } {
@@ -551,11 +564,18 @@ function createHostBoundaryCollector(entryPath: string): {
       name: 'keel-host-boundary-analysis',
       setup(build) {
         build.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async (args) => {
-          if (args.path.includes(`${path.sep}node_modules${path.sep}`)) {
+          // Product v1 must collect capabilities in bundled dependencies as well.
+          if (!v1Links && args.path.includes(`${path.sep}node_modules${path.sep}`)) {
             return undefined;
           }
 
           const contents = await Bun.file(args.path).text();
+          // Record every named v1 acquisition before bundling and tree-shaking.
+          if (v1Links) {
+            for (const link of collectV1SourceLinks(contents, args.path)) {
+              v1Links.set(JSON.stringify(link), link);
+            }
+          }
           const { analyzeHostBoundary } = await getAnalyzer();
           const scan = analyzeHostBoundary(contents);
           const isEntry = path.resolve(args.path) === entryPath;
@@ -737,6 +757,13 @@ export async function build(options: BuildOptions): Promise<void> {
     options;
   const strict = options.strict ?? true;
   const contract = await resolveContract(options);
+  // Product v1 uses a fixed runtime wrapper and an explicit capability contract.
+  const v1Path = options.v1CapabilityManifest;
+  if (v1Path && (!contract || footer || watch || !strict)) {
+    throw new Error(
+      'A v1 capability manifest requires a strict build, a contract and the default footer.'
+    );
+  }
 
   // Validate entry file
   const entryPath = path.resolve(process.cwd(), entry);
@@ -751,6 +778,19 @@ export async function build(options: BuildOptions): Promise<void> {
     fs.mkdirSync(outDir, { recursive: true });
   }
 
+  // Resolve the package entry before the bundler writes to the output path.
+  const targetPath = path.join(outDir, outFileName);
+  const v1Entry = v1Path ? normalizedV1GuestEntry(targetPath, process.cwd()) : undefined;
+  // Reject outputs that resolve to the same file, including through directory aliases.
+  if (v1Path) {
+    const manifestPath = path.resolve(v1Path);
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+    // The manifest must never overwrite the Guest bundle.
+    if (physicalV1Output(manifestPath) === physicalV1Output(targetPath)) {
+      throw new Error('The v1 capability manifest and Guest output must be different files.');
+    }
+  }
+
   console.log(`Building ${entry}...`);
 
   if (watch) {
@@ -761,7 +801,9 @@ export async function build(options: BuildOptions): Promise<void> {
 
   // Create plugins array
   const plugins: BunPlugin[] = [];
-  const hostBoundaryCollector = createHostBoundaryCollector(entryPath);
+  // Dedupe capability acquisitions across all bundled modules.
+  const v1Links = v1Entry ? new Map<string, V1Link>() : undefined;
+  const hostBoundaryCollector = createHostBoundaryCollector(entryPath, v1Links);
   plugins.push(hostBoundaryCollector.plugin);
 
   // Always-on Babel: arrow→function for Hermes sandbox compat; +source-location in dev.
@@ -774,7 +816,8 @@ export async function build(options: BuildOptions): Promise<void> {
   // Build with Bun
   const result = await Bun.build({
     entrypoints: [entryPath],
-    outdir: outDir,
+    // Keep v1 output in memory until the entire bundle has passed validation.
+    outdir: v1Entry ? undefined : outDir,
     target: 'browser',
     format: 'cjs',
     naming: `${outFileName.replace(/\.js$/, '')}.[ext]`,
@@ -803,8 +846,7 @@ export async function build(options: BuildOptions): Promise<void> {
   ]);
 
   // Post-process: wrap in IIFE with globals mapping
-  const targetPath = path.join(outDir, outFileName);
-  let bundleCode = await Bun.file(result.outputs[0]!.path).text();
+  let bundleCode = await result.outputs[0]!.text();
 
   // Note: Dev mode source location injection is now done via Bun plugin (pre-bundle)
   // This ensures __sourceFile contains original file path, not bundle path
@@ -839,14 +881,30 @@ export async function build(options: BuildOptions): Promise<void> {
     console.warn('  ℹ Continuing without type hints');
   }
 
-  // Transform external imports to global variable references
-  // Bun marks externals as require() calls, we need to map them to globals
-  for (const [mod, globalName] of Object.entries(EXTERNALS)) {
-    // Replace require("module") with global variable
-    const requirePattern = new RegExp(`require\\(["']${mod.replace('/', '\\/')}["']\\)`, 'g');
-    bundleCode = bundleCode.replace(requirePattern, globalName);
+  // Product v1 validates and links externals using the emitted AST.
+  const linked =
+    v1Links &&
+    linkV1Bundle(
+      bundleCode,
+      [...v1Links.keys()].sort().map((key) => v1Links.get(key)!),
+      EXTERNALS
+    );
+  const linkage = linked && v1Entry ? { guestEntry: v1Entry, links: linked.links } : undefined;
+  const v1Manifest =
+    linkage && contract ? createV1CapabilityManifest(linkage, contract) : undefined;
+  // Apply the v1 linkage transformation only to the Product v1 build profile.
+  if (linked) {
+    bundleCode = linked.code;
+  } else {
+    // Transform external imports to global variable references
+    // Bun marks externals as require() calls, we need to map them to globals
+    for (const [mod, globalName] of Object.entries(EXTERNALS)) {
+      // Replace require("module") with global variable
+      const requirePattern = new RegExp(`require\\(["']${mod.replace('/', '\\/')}["']\\)`, 'g');
+      bundleCode = bundleCode.replace(requirePattern, globalName);
+    }
+    bundleCode = rewriteHostModuleRequires(bundleCode, hostBoundary.hostModuleIds);
   }
-  bundleCode = rewriteHostModuleRequires(bundleCode, hostBoundary.hostModuleIds);
 
   // For CJS output, module.exports carries the default export
   // After transforming externals, capture default into globalThis.__keel.guest
@@ -876,47 +934,57 @@ try {
 
   // Wrap with runtime inject and auto-render footer
   // JSI optimization is handled directly in createElement (see RUNTIME_INJECT)
-  const wrappedCode = `/* Keel Guest Bundle - Generated by keel-cli */
+  const wrappedBody = `/* Keel Guest Bundle - Generated by keel-cli */
 ${RUNTIME_INJECT}
 ${EXTERNAL_ALIAS_SHIM}
 ${modifiedBundle}
 ${footerCode}
 /* End of Keel Guest Bundle */`;
+  const wrappedCode = linkage ? writeV1Bundle(linkage, wrappedBody) : wrappedBody;
 
-  // Write final bundle
-  await Bun.write(targetPath, wrappedCode);
+  // Preserve the generic build's existing output and asset handling.
+  if (!linkage) {
+    // Write final bundle
+    await Bun.write(targetPath, wrappedCode);
 
-  // Copy the non-JS assets (images and friends) out of bun's output into the target directory.
-  // Only needed when outDir differs from the final target; if they are the same the assets already sit there.
-  for (const output of result.outputs) {
-    if (output.path === targetPath) continue;
-    const ext = path.extname(output.path).toLowerCase();
-    if (ext !== '.js' && ext !== '.map') {
-      const destPath = path.join(outDir, path.basename(output.path));
-      if (output.path !== destPath) {
-        fs.copyFileSync(output.path, destPath);
+    // Copy the non-JS assets (images and friends) out of bun's output into the target directory.
+    // Only needed when outDir differs from the final target; if they are the same the assets already sit there.
+    for (const output of result.outputs) {
+      if (output.path === targetPath) continue;
+      const ext = path.extname(output.path).toLowerCase();
+      if (ext !== '.js' && ext !== '.map') {
+        const destPath = path.join(outDir, path.basename(output.path));
+        if (output.path !== destPath) {
+          fs.copyFileSync(output.path, destPath);
+        }
+        console.log(`   Asset: ${path.basename(output.path)}`);
       }
-      console.log(`   Asset: ${path.basename(output.path)}`);
     }
-  }
-  // Delete the JS and map files from bun's raw output (non-JS assets stay in the target directory).
-  for (const output of result.outputs) {
-    if (output.path === targetPath) continue;
-    const ext = path.extname(output.path).toLowerCase();
-    if ((ext === '.js' || ext === '.map') && fs.existsSync(output.path)) {
-      fs.unlinkSync(output.path);
+    // Delete the JS and map files from bun's raw output (non-JS assets stay in the target directory).
+    for (const output of result.outputs) {
+      if (output.path === targetPath) continue;
+      const ext = path.extname(output.path).toLowerCase();
+      if ((ext === '.js' || ext === '.map') && fs.existsSync(output.path)) {
+        fs.unlinkSync(output.path);
+      }
     }
   }
 
   // Post-build strict dependency guard
   if (strict) {
     try {
-      await analyze(targetPath, {
+      const guardOptions = {
         whitelist: ['react', 'react-native', 'react/jsx-runtime', 'keel/guest'],
         failOnViolation: true,
         treatEvalAsViolation: true,
         treatDynamicNonLiteralAsViolation: true,
-      });
+      };
+      // Validate the v1 artifact before it replaces any previously published output.
+      if (linkage) {
+        await analyzeContent(wrappedCode, guardOptions);
+      } else {
+        await analyze(targetPath, guardOptions);
+      }
       console.log('   Strict guard: PASS');
     } catch (guardErr) {
       console.error('\n❌ Strict guard failed:');
@@ -969,6 +1037,17 @@ ${footerCode}
     throw validationErr;
   }
 
+  // Emit v1 assets and the validated Guest only after all guards pass.
+  if (linkage) {
+    for (const output of result.outputs) {
+      // The entrypoint is replaced by the linked bundle below.
+      if (output.kind !== 'entry-point') {
+        await Bun.write(path.join(outDir, path.basename(output.path)), output);
+      }
+    }
+    await Bun.write(targetPath, wrappedCode);
+  }
+
   // Output build info
   const stats = fs.statSync(targetPath);
   const sizeKB = (stats.size / 1024).toFixed(2);
@@ -988,6 +1067,9 @@ ${footerCode}
     fs.writeFileSync(path.resolve(process.cwd(), metafile), JSON.stringify(metaInfo, null, 2));
     console.log(`   Metafile: ${metafile}`);
   }
+
+  // Write the v1 manifest after the final bundle passes syntax and dependency checks.
+  if (v1Path && v1Manifest) writeJsonFile(v1Path, v1Manifest);
 
   if (capabilityManifest) {
     writeJsonFile(capabilityManifest, createGuestCapabilitiesManifest(hostBoundary, contract));
@@ -1015,6 +1097,11 @@ export async function analyze(
   console.log(`  Size: ${(stats.size / 1024).toFixed(2)} KB`);
   console.log(`  Lines: ${content.split('\n').length}`);
 
+  return analyzeContent(content, options);
+}
+
+/** Validate an in-memory bundle without requiring it to be published first. */
+async function analyzeContent(content: string, options?: AnalyzeOptions): Promise<AnalyzeResult> {
   // Use oxc adapter for module analysis
   const { analyzeHostBoundary, analyzeModuleIDs } = await import('./oxc-adapter');
   const scan = await analyzeModuleIDs(content);

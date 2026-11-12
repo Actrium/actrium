@@ -53,6 +53,8 @@ export type ReceiverCallbackRegistry = Pick<CallbackRegistry, 'release'>;
 // ============================================
 
 export interface ReceiverOptions {
+  /** Reject CREATE operations for component types absent from the registry. */
+  restrictToRegisteredComponents?: boolean;
   onMetric?: (name: string, value: number, extra?: Record<string, unknown>) => void;
   maxBatchSize?: number;
   debug?: boolean;
