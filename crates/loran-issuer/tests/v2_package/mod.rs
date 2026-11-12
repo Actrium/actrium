@@ -2,6 +2,7 @@
 use super::*;
 use actr_hyper::issuer_client::{IssuerClient, RealmClientKey};
 use actr_pack::{ActorPackOptions, ActorPackageManifest, RegistrationManifest};
+use actr_protocol::actor_key_proof::{ActorKeyProofOperation, sign_actor_key_proof};
 use ed25519_dalek::{Signer as _, SigningKey};
 use rand::rngs::OsRng;
 use std::collections::BTreeMap;
@@ -14,6 +15,12 @@ const TEMPLATE: &str = include_str!("../../../actr-pack/tests/fixtures/registrat
 /// the exact real Component bytes already executed by the runtime scenario.
 fn v2_request(realm: &str, key: &SigningKey) -> RegisterRequest {
     v2_request_for_publisher(realm, PUBLISHER, key)
+}
+
+fn actor_key(publisher: &str) -> SigningKey {
+    use sha2::Digest as _;
+    let seed = sha2::Sha256::digest(format!("v2-package-actor:{publisher}"));
+    SigningKey::from_bytes(&seed.into())
 }
 
 fn v2_request_for_publisher(realm: &str, publisher: &str, key: &SigningKey) -> RegisterRequest {
@@ -38,7 +45,7 @@ fn v2_request_for_publisher(realm: &str, publisher: &str, key: &SigningKey) -> R
     .unwrap();
     let verified = actr_pack::verify_actor_package(&package, &key.verifying_key()).unwrap();
     let identity = RegistrationManifest::parse(&verified.manifest_raw).unwrap();
-    RegisterRequest {
+    let mut request = RegisterRequest {
         actr_type: identity.actor_type().clone(),
         realm: realm.into(),
         service_spec: None,
@@ -50,7 +57,15 @@ fn v2_request_for_publisher(realm: &str, publisher: &str, key: &SigningKey) -> R
         target: None,
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: Some(key.verifying_key().to_bytes().to_vec().into()),
-    }
+        actor_public_key: None,
+        actor_key_proof: None,
+    };
+    sign_actor_key_proof(
+        &mut request,
+        ActorKeyProofOperation::Register,
+        &actor_key(publisher),
+    );
+    request
 }
 
 fn success(response: RegisterResponse) -> register_response::RegisterOk {
@@ -104,6 +119,11 @@ async fn v2_package_sdk_register_renew_reissue_preserves_raw_bytes_and_identity(
         &registration,
         format!("# Publisher bytes\r\n{source}"),
         &publisher_key,
+    );
+    sign_actor_key_proof(
+        &mut registration,
+        ActorKeyProofOperation::Register,
+        &actor_key(PUBLISHER),
     );
     drop(publisher_key); // The SDK only holds public package material and its device key.
 
@@ -207,9 +227,16 @@ async fn v2_package_sdk_register_renew_reissue_preserves_raw_bytes_and_identity(
         PROVIDER_ID,
         recovery_key.clone(),
     ));
+    // Reissue is an operation-specific proof, distinct from the REGISTER proof.
+    let mut reissue_registration = registration.clone();
+    sign_actor_key_proof(
+        &mut reissue_registration,
+        ActorKeyProofOperation::Reissue,
+        &actor_key(PUBLISHER),
+    );
     let reissue_request = ReissueCredentialRequest {
         actr_id: registered.actr_id.clone(),
-        registration: registration.clone(),
+        registration: reissue_registration.clone(),
         renewal_proof: renewed.renewal_token,
         attempt_id: control_attempt_id(),
     };
@@ -234,10 +261,14 @@ async fn v2_package_sdk_register_renew_reissue_preserves_raw_bytes_and_identity(
     {
         let requests = captured.lock().unwrap();
         assert_eq!(requests.len(), 3);
-        for actual in requests.iter() {
+        assert_eq!(
+            requests[0], registration,
+            "registration keeps the original REGISTER proof"
+        );
+        for actual in &requests[1..] {
             assert_eq!(
-                actual, &registration,
-                "the wire preserves the original registration"
+                actual, &reissue_registration,
+                "reissue uses the operation-specific REISSUE proof"
             );
         }
     }

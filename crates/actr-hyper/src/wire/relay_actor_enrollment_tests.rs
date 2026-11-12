@@ -34,7 +34,7 @@ async fn certified_identity_enrolls_actor_certificate_from_issuer() {
         .with_header("content-type", "application/json")
         .with_body_from_request(move |request| {
             let enrollment: IdentityRequest =
-                serde_json::from_slice(&request.body().unwrap()).unwrap();
+                serde_json::from_slice(request.body().unwrap()).unwrap();
             let actor_enrollment = enrollment.actor.clone().expect("Actor enrollment");
             let relay_claims = serde_json::to_vec(&IdentityClaims {
                 domain: CERTIFICATE_DOMAIN.into(),

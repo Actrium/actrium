@@ -276,6 +276,7 @@ pub(crate) struct RelayClient {
 }
 
 impl RelayClient {
+    #[allow(clippy::too_many_arguments)] // One required setting per transport concern.
     pub(crate) fn new(
         signaling_url: String,
         ais_endpoint: String,
@@ -1630,7 +1631,7 @@ mod identity_cache_review_tests {
             .with_header("content-type", "application/json")
             .with_body_from_request(move |request| {
                 let enrollment: IdentityRequest =
-                    serde_json::from_slice(&request.body().unwrap()).unwrap();
+                    serde_json::from_slice(request.body().unwrap()).unwrap();
                 let actor_enrollment = enrollment.actor.clone().expect("Actor enrollment");
                 assert_eq!(
                     actor_enrollment.actor_credential_digest,

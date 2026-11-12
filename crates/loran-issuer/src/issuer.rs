@@ -1536,7 +1536,7 @@ impl AIdIssuer {
         actor: &ActrId,
         signer: &Signer,
     ) -> Result<IssuedActor, AidError> {
-        Ok(self.recheck_existing_actor(actor, signer).await?)
+        self.recheck_existing_actor(actor, signer).await
     }
 
     pub(crate) async fn relay_actor_type(
@@ -1547,6 +1547,7 @@ impl AIdIssuer {
         Ok(self.relay_actor_identity(actor, signer).await?.actor_type)
     }
 
+    #[allow(clippy::too_many_arguments)] // Certificate claims are distinct issuer inputs.
     pub(crate) async fn mint_actor_channel_certificate(
         &self,
         enrollment: &actr_relay_security::ActorChannelEnrollment,

@@ -1912,7 +1912,7 @@ async fn bootstrap_linked_credential_inner(
     let signer = crate::issuer_client::actor_signer_for_scoped(
         &storage_root,
         &config.realm,
-        &config.actr_type(),
+        config.actr_type(),
         actor_key_namespace,
     )?;
     let req = build_linked_register_request(config, service_spec, signer.as_ref())?;
