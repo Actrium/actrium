@@ -1183,4 +1183,68 @@ export default function App() {
 `);
     expect(manifest.hostModules.service.events).toEqual(['destructured.Event']);
   });
+
+  it('normalizes ./ and .. segments in the v1 guestEntry', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-entry-normalize-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+export default function App() { return <View />; }
+`
+      );
+      const manifestPath = path.join(tempDir, 'dist/capability-manifest.json');
+      await build({
+        entry: path.join(srcDir, 'entry.tsx'),
+        outfile: path.join(tempDir, 'dist/bundle.js'),
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        contract,
+        v1CapabilityManifest: manifestPath,
+        v1GuestEntry: './nested/../dist/bundle.js',
+      });
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      expect(manifest.guestEntry).toBe('dist/bundle.js');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('derives a normalized guestEntry from a relative outfile', async () => {
+    const tempDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp-v1-entry-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(path.join(tempDir, 'dist'), { recursive: true });
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+export default function App() { return <View />; }
+`
+      );
+      const outfile = path.join(tempDir, 'dist/bundle.js');
+      const relativeOutfile = `./${path.relative(process.cwd(), outfile)}`;
+      const manifestPath = path.join(tempDir, 'dist/capability-manifest.json');
+      await build({
+        entry: path.join(srcDir, 'entry.tsx'),
+        outfile: relativeOutfile,
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        contract,
+        v1CapabilityManifest: manifestPath,
+      });
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      expect(manifest.guestEntry).toBe(
+        path.relative(process.cwd(), outfile).split(path.sep).join('/')
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

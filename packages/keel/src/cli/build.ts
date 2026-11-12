@@ -1196,17 +1196,37 @@ ${footerCode}
     // v1's `keelApi` is the Keel API version, not the business contract
     // version. Keep it pinned until keel exposes an explicit constant.
     const keelApi = '1.0';
-    // v1 expects the package-relative guest entry. Convert absolute paths
-    // only when they stay inside the build directory; keep other paths as-is.
-    const cwdPrefix = process.cwd() + path.sep;
-    const guestEntry =
-      options.v1GuestEntry ??
-      (path.isAbsolute(outfile) && outfile.startsWith(cwdPrefix)
-        ? path.relative(process.cwd(), outfile)
-        : outfile);
-    if (path.isAbsolute(guestEntry)) {
+    // v1 expects a package-relative guest entry. Resolve the output through
+    // realpath so `/var` and `/private/var` (or any other equivalent spelling)
+    // produce the same entry, then normalize away `./` and separators.
+    const realpathOrResolve = (value: string) => {
+      try {
+        return fs.realpathSync(value);
+      } catch {
+        return path.resolve(value);
+      }
+    };
+    const cwdReal = realpathOrResolve(process.cwd());
+    const outfileReal = realpathOrResolve(outfile);
+    const cwdPrefix = cwdReal + path.sep;
+    const derivedGuestEntry =
+      outfileReal === cwdReal
+        ? undefined
+        : outfileReal.startsWith(cwdPrefix)
+          ? path.relative(cwdReal, outfileReal)
+          : undefined;
+    const guestEntrySource = options.v1GuestEntry ?? derivedGuestEntry ?? outfile;
+    if (path.isAbsolute(guestEntrySource)) {
       throw new Error(
         'v1 capability manifest requires a package-relative guestEntry; pass --v1-guest-entry or build inside the package root'
+      );
+    }
+    const guestEntry = path.posix
+      .normalize(guestEntrySource.replace(/\\/g, '/'))
+      .replace(/^\.\//, '');
+    if (guestEntry === '.' || guestEntry === '..' || guestEntry.startsWith('../')) {
+      throw new Error(
+        'v1 capability manifest requires a package-relative guestEntry that does not escape the package root'
       );
     }
     writeJsonFile(
