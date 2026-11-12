@@ -1424,6 +1424,10 @@ final class ServiceReactNativeHost {
             tabDict["permissions"] = permissions
         }
         if let reloadKey = config["reloadKey"] { tabDict["reloadKey"] = reloadKey }
+        if let appId = config["appId"] as? String { tabDict["appId"] = appId }
+        if let serviceCallUrl = config["serviceCallUrl"] as? String {
+            tabDict["serviceCallUrl"] = serviceCallUrl
+        }
 
         // System app data
         if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }
@@ -1915,6 +1919,10 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
         tabDict["permissions"] = permissions
     }
     if let reloadKey = config["reloadKey"] { tabDict["reloadKey"] = reloadKey }
+    if let appId = config["appId"] as? String { tabDict["appId"] = appId }
+    if let serviceCallUrl = config["serviceCallUrl"] as? String {
+        tabDict["serviceCallUrl"] = serviceCallUrl
+    }
     // Copy other tab properties
     if let historyItems = config["historyItems"] { tabDict["historyItems"] = historyItems }
     if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }

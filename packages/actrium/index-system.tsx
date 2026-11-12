@@ -91,6 +91,8 @@ interface SystemAppProps {
   singleTabMode?: boolean;
   tab?: {
     id: string;
+    appId?: string;
+    serviceCallUrl?: string;
     title?: string;
     systemAppType?: string;
     unifiedScript?: string;  // ACTR app script
@@ -207,6 +209,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
         <ErrorBoundary>
           <React.Suspense fallback={<LoadingFallback />}>
             <StandaloneGuestApp
+              key={tab.id}
               tab={tab}
               containerWidth={containerWidth}
               containerHeight={containerHeight}

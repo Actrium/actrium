@@ -938,7 +938,9 @@ final class ViewBridgeCoordinator {
                 config[RuntimeBridgeContract.systemAppType] = systemAppType
             }
             if let script = tabConfig.unifiedScript { config["unifiedScript"] = script }
-            if let script = tabConfig.leftPanelScript { config["leftPanelScript"] = script }
+            if let leftPanelScript = tabConfig.leftPanelScript { config["leftPanelScript"] = leftPanelScript }
+            if let serviceCallUrl = tabConfig.serviceCallUrl { config["serviceCallUrl"] = serviceCallUrl }
+            if let appId = tabConfig.appId { config["appId"] = appId }
             config["leftPanelVisible"] = tabConfig.leftPanelVisible
             config["rightPanelVisible"] = tabConfig.rightPanelVisible
             config["permissions"] = tabConfig.permissions
@@ -2264,7 +2266,9 @@ struct UnifiedReactNativeLayer: View {
                 permissions: tab.permissions,
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
-                reloadKey: tab.reloadNonce
+                reloadKey: tab.reloadNonce,
+                serviceCallUrl: tab.serviceCallUrl,
+                appId: tab.appId
             )
             coordinator.currentViewportSize = currentSize
             ipcLog("📱 UnifiedReactNativeLayer.onAppear: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
@@ -2311,7 +2315,9 @@ struct UnifiedReactNativeLayer: View {
                 permissions: tab.permissions,
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
-                reloadKey: tab.reloadNonce
+                reloadKey: tab.reloadNonce,
+                serviceCallUrl: tab.serviceCallUrl,
+                appId: tab.appId
             )
             coordinator.lastSentConfigSize = nil
             coordinator.lastSentReloadKey = nil
@@ -2344,6 +2350,12 @@ struct UnifiedReactNativeLayer: View {
         }
         if let leftPanelScript = tab.leftPanelScript {
             config["leftPanelScript"] = leftPanelScript
+        }
+        if let serviceCallUrl = tab.serviceCallUrl {
+            config["serviceCallUrl"] = serviceCallUrl
+        }
+        if let appId = tab.appId {
+            config["appId"] = appId
         }
         return config
     }
@@ -2534,6 +2546,12 @@ struct UnifiedReactNativeLayer: View {
         }
         if !tab.permissions.isEmpty {
             tabConfig["permissions"] = tab.permissions
+        }
+        if let serviceCallUrl = tab.serviceCallUrl {
+            tabConfig["serviceCallUrl"] = serviceCallUrl
+        }
+        if let appId = tab.appId {
+            tabConfig["appId"] = appId
         }
 
         // Add system app data (for StartPageApp)
