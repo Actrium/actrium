@@ -1247,4 +1247,88 @@ export default function App() { return <View />; }
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('rejects a guest-defined import_guest namespace', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-import-guest-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { Modal } from 'keel/guest';
+
+const import_guest = { View: Modal };
+
+export default function App() {
+  return <import_guest.View />;
+}
+`
+      );
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: false,
+          sourcemap: false,
+          watch: false,
+          contract,
+          v1CapabilityManifest: path.join(tempDir, 'dist/capability-manifest.json'),
+          v1GuestEntry: 'dist/bundle.js',
+        })
+      ).rejects.toThrow('Modal');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('records a bound service method', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const subscribe = on.bind(undefined);
+
+export default function App() {
+  return <View onLayout={() => subscribe('bound.Event', () => {})} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['bound.Event']);
+  });
+
+  it('rejects optional eval calls with --no-strict', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-optional-eval-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+
+void eval?.('return 1');
+void globalThis.eval?.('return 1');
+
+export default function App() {
+  return <View />;
+}
+`
+      );
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          strict: false,
+          contract,
+          v1CapabilityManifest: path.join(tempDir, 'dist/capability-manifest.json'),
+          v1GuestEntry: 'dist/bundle.js',
+        })
+      ).rejects.toThrow('eval call');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

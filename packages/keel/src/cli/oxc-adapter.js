@@ -322,10 +322,13 @@ function analyzeModuleIDs(code) {
         const calleeKey = memberKeyOf(callee);
         // Direct `eval(...)` is already counted by the regex; count every other
         // evaluator reference, including aliases and global-object members.
-        const isDirectEval =
-          (callee?.type === 'Identifier' && callee.name === 'eval') ||
-          (isMemberNode(callee) && isGlobalObjectNode(callee.object) && calleeKey === 'eval');
-        if (!isDirectEval && isDynamicValue(callee)) evalCount++;
+        // The regex only matches `eval(`; optional calls (`eval?.(`) must be
+        // counted by the AST instead of being excluded as already counted.
+        const regexCountedEval =
+          !node.optional &&
+          ((callee?.type === 'Identifier' && callee.name === 'eval') ||
+            (isMemberNode(callee) && isGlobalObjectNode(callee.object) && calleeKey === 'eval'));
+        if (!regexCountedEval && isDynamicValue(callee)) evalCount++;
         const reflectMethod =
           callee?.type === 'Identifier' ? reflectMethodAliases.get(callee.name) : undefined;
         if (reflectMethod && isDynamicValue(node.arguments?.[0])) evalCount++;
@@ -1197,11 +1200,14 @@ function analyzeBundleComponents(code, options = {}) {
   const bindingFromMember = (init, scope) => {
     const property = memberPropertyName(init, scope);
     if (property === undefined) return { kind: 'unknown' };
-    if (/^import_guest\d*$/.test(init.object?.name ?? '')) {
-      return { kind: 'sdk', name: property };
-    }
     const objectName = init.object?.type === 'Identifier' ? init.object.name : undefined;
     const objectBinding = objectName ? resolveBinding(scope, objectName) : undefined;
+    // Trust the bundler namespace name unless the guest defined a local
+    // object with that name; `const import_guest = { View: Modal }` must be
+    // analyzed as an object.
+    if (objectBinding?.kind !== 'object' && objectName && /^import_guest\d*$/.test(objectName)) {
+      return { kind: 'sdk', name: property };
+    }
     const isReactNamespace =
       objectBinding?.kind === 'framework' ||
       (objectBinding === undefined && /^import_react\d*$/.test(objectName ?? ''));
@@ -1451,12 +1457,14 @@ function analyzeBundleComponents(code, options = {}) {
       // from the React namespace; `<bag.Fragment />` on an unknown object must
       // still fail closed.
       const objectName = first.object?.type === 'Identifier' ? first.object.name : undefined;
-      if (objectName && /^import_guest\d*$/.test(objectName)) {
+      const objectBinding = objectName ? resolveBinding(scope, objectName) : undefined;
+      // Trust the bundler namespace name unless the guest defined a local
+      // object with that name; `const import_guest = { View: Modal }` must be
+      // analyzed as an object.
+      if (objectBinding?.kind !== 'object' && objectName && /^import_guest\d*$/.test(objectName)) {
         components.add(property);
         return;
       }
-
-      const objectBinding = objectName ? resolveBinding(scope, objectName) : undefined;
       // Trust the `import_react*` name only when the variable has no local
       // binding; a guest-defined object with that name must be analyzed.
       const isReactNamespace =
@@ -2085,6 +2093,14 @@ function analyzeServiceUsage(code) {
         if (parent.serviceSource && SERVICE_METHOD_NAMES.has(key)) {
           return { kind: 'method', name: key };
         }
+      }
+      return UNKNOWN;
+    }
+    if (node.type === 'CallExpression') {
+      // `on.bind(...)` keeps the service-method provenance.
+      if (isMemberNode(node.callee) && memberKey(node.callee, scope) === 'bind') {
+        const bound = valueFromExpression(node.callee.object, scope);
+        if (bound.kind === 'method') return bound;
       }
       return UNKNOWN;
     }
