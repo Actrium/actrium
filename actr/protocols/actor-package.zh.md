@@ -245,6 +245,11 @@ STUN/TURN credential、用户 credential 或安装设备信息。
 Profile 可以定义额外的 `[workload.<profile-section>]` 字段，但不能改变基础字段含义。
 Workload entry 必须由 `files` 列表绑定，并且其 role 必须为 `workload`。
 
+`actr.component/1` 可通过 `workload.rpc-contract` 指定对外发布的自包含 RPC Proto。
+该路径必须在签名的 `files` 中声明为 role `contract`，并以 `.proto` 结尾。
+依赖与本地导出可以引用同一文件。省略 `rpc-contract` 时，Host 从未被依赖引用的
+`contract` Proto 中选择唯一的导出。没有候选文件时不发布 RPC 契约，有多个候选文件时必须显式选择。
+
 加载器不支持声明的 Workload Profile 时 **MUST** 返回明确的 unsupported-profile 错误，
 不能将其当作普通资源运行。
 

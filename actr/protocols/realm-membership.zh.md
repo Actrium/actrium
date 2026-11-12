@@ -179,6 +179,30 @@ Actor 的验证）到期失效。改角色不撤销任何 key，
 
 Realm 客户端 key 是 Actr Host 的能力，**MUST NOT** 交给 Guest workload。
 
+### 6.1 包清单注册
+
+包模式的 `RegisterRequest` 将包内 `manifest.toml` 的原始字节放入 `manifest_raw`，将原始 64 字节
+`manifest.sig` 放入 `publisher_signature`。Host **MUST NOT** 重序列化清单、补入旧字段或替换
+Publisher 签名；Realm 客户端 proof 签署精确的 Protobuf body。相同注册材料保留给 `/issuer/reissue`。
+
+| 清单 | 身份与签名 key | 请求的 `target` |
+| --- | --- | --- |
+| `format = "actr-package/2"` | `actor.publisher/name/version`、`signature.key-id`、Ed25519 | **MUST** 省略；空字符串也拒绝 |
+| 现有无版本二进制清单 | 顶层 `publisher/name/version/signing_key_id` | 必需、非空且与已签 `binary.target` 相等 |
+
+出现 format 声明或版本化的 `actor/workload/host/signature` 表后，只走版本化 parser。不支持的版本、
+`actr-package/1`、混合 schema 和损坏的 v2 **MUST NOT** 回退到无版本或 linked 路径。清单上限为
+1 MiB。请求类型必须与已签类型完全相同，key ID 必须对应验证原始字节的 Ed25519 key。格式或 target
+形态错误按非法请求拒绝（Protobuf 错误码 400），身份或签名错误按来源未验证拒绝（403）。
+
+v2 的执行要求来自已签 Workload/Host Profile。Host 检查载荷 hash、入口、ABI 和能力；Issuer 检查
+清单 schema、签名、Publisher 来源及 Realm 授权，不接收 ZIP，也不证明远端实际执行的字节。
+携带公钥不自动取得受信 Publisher 身份。Host 使用自己的 Realm 客户端 key 和公开包材料注册，
+无需 Publisher 私钥或包发布登记。
+
+续期保留已有成员、设备、Realm 和 Publisher 状态检查。重签重新验证原始包模式请求与 Actor 的持有证明、
+成员及类型绑定，并保持 ActorId。v2 注册的旧 target 记录为空；v2 重签在提交响应的同一事务中清除此前的旧 target。
+
 ## 7. 安全与隐私考虑
 
 - 每个 Realm 使用独立的 Realm 客户端 key，不同 Realm 无法据 key 关联同一客户端；`label` 由客户端自定，

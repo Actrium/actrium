@@ -66,16 +66,16 @@ async fn verify_package_rejects_non_actr_format() {
 }
 
 /// A custom [`crate::verify::TrustProvider`] that returns a fixed
-/// [`VerifiedPackage`] without doing real verification — used to prove Hyper
+/// [`VerifiedRuntimePackage`] without doing real verification — used to prove Hyper
 /// re-validates the identity at the trust boundary regardless of the provider.
 #[derive(Debug)]
 struct FakeTrust {
-    verified: VerifiedPackage,
+    verified: VerifiedRuntimePackage,
 }
 
 #[async_trait::async_trait]
 impl crate::verify::TrustProvider for FakeTrust {
-    async fn verify_package(&self, _bytes: &[u8]) -> HyperResult<VerifiedPackage> {
+    async fn verify_package(&self, _bytes: &[u8]) -> HyperResult<VerifiedRuntimePackage> {
         Ok(self.verified.clone())
     }
 }
@@ -86,7 +86,12 @@ async fn verify_package_rejects_invalid_identity_from_custom_provider() {
     let mut bad = fake_manifest();
     // A signed-but-malicious identity: traversal attempt in the version field.
     bad.manifest.version = "../../victim".to_string();
-    let config = HyperConfig::new(dir.path(), Arc::new(FakeTrust { verified: bad }));
+    let config = HyperConfig::new(
+        dir.path(),
+        Arc::new(FakeTrust {
+            verified: bad.into(),
+        }),
+    );
     let hyper = Hyper::new(config).await.unwrap();
     let result = hyper
         .verify_package(&WorkloadPackage::new(b"anything".to_vec()))
@@ -269,7 +274,7 @@ async fn registration_test_node(dir: &TempDir, package: bool) -> Node<Attached> 
         .await
         .unwrap();
     if package {
-        node.attachment.as_mut().unwrap().verified = Some(fake_manifest());
+        node.attachment.as_mut().unwrap().verified = Some(fake_manifest().into());
     }
     node
 }
@@ -590,7 +595,7 @@ async fn bootstrap_package_uses_manifest_auth() {
     let manifest = fake_manifest();
     let result = hyper
         .bootstrap_credential(
-            &manifest,
+            &manifest.clone().into(),
             &server.url(),
             "test@example.com",
             test_service_spec(),
@@ -607,7 +612,8 @@ async fn bootstrap_package_uses_manifest_auth() {
     );
 
     // Verify no legacy PSK keys are written to ActorStore.
-    let namespace = storage_namespace_for(&manifest.manifest).unwrap();
+    let namespace =
+        storage_namespace_for(&RuntimePackageManifest::Legacy(manifest.manifest)).unwrap();
     let root = SecureStorageRoot::new(hyper.config().storage_root())
         .await
         .unwrap();
@@ -647,7 +653,7 @@ async fn bootstrap_issuer_error_propagates() {
     let manifest = fake_manifest();
     let result = hyper
         .bootstrap_credential(
-            &manifest,
+            &manifest.clone().into(),
             &server.url(),
             "test@example.com",
             test_service_spec(),
@@ -694,7 +700,7 @@ async fn bootstrap_issuer_rejection_creates_no_database() {
     let manifest = fake_manifest();
     let result = hyper
         .bootstrap_credential(
-            &manifest,
+            &manifest.clone().into(),
             &server.url(),
             "test@example.com",
             test_service_spec(),
@@ -705,7 +711,8 @@ async fn bootstrap_issuer_rejection_creates_no_database() {
     assert!(matches!(result, Err(HyperError::IssuerBootstrapFailed(_))));
 
     // The would-be database path must not exist after a rejected registration.
-    let namespace = storage_namespace_for(&manifest.manifest).unwrap();
+    let namespace =
+        storage_namespace_for(&RuntimePackageManifest::Legacy(manifest.manifest)).unwrap();
     let root = SecureStorageRoot::new(hyper.config().storage_root())
         .await
         .unwrap();
