@@ -44,11 +44,15 @@ function requireString(value: unknown, label: string, allowEmpty = false): strin
   return value;
 }
 
-const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+const BASE64_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/** Upper bound so a Guest cannot overflow the host setTimeout clamp. */
+const MAX_SERVICE_TIMEOUT_MS = 300_000;
 
 function requireBase64(value: unknown, label: string): string {
   const text = requireString(value, label, true);
-  if (text.length % 4 !== 0 || !BASE64_PATTERN.test(text)) {
+  if (!BASE64_PATTERN.test(text)) {
     throw new Error(
       `${label} must be standard base64 (RFC 4648, padded)`
     );
@@ -74,10 +78,11 @@ export const contract = defineKeelContract({
               timeoutMs !== undefined &&
               (typeof timeoutMs !== 'number' ||
                 !Number.isFinite(timeoutMs) ||
-                timeoutMs <= 0)
+                timeoutMs <= 0 ||
+                timeoutMs > MAX_SERVICE_TIMEOUT_MS)
             ) {
               throw new Error(
-                'service.call input.timeoutMs must be a positive number when present'
+                `service.call input.timeoutMs must be a positive number no greater than ${MAX_SERVICE_TIMEOUT_MS} when present`
               );
             }
             return { route, payloadBase64, timeoutMs };

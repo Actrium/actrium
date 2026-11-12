@@ -37,7 +37,10 @@ describe('verifyCapabilityManifest', () => {
       },
       {
         ...options,
-        serviceCapabilities: { rpc: new Set(['echo.EchoService.Echo']) },
+        serviceCapabilities: {
+          rpc: new Set(['echo.EchoService.Echo']),
+          events: new Set(),
+        },
       }
     );
     expect(result.ok).toBe(true);
@@ -53,7 +56,7 @@ describe('verifyCapabilityManifest', () => {
       },
       {
         ...options,
-        serviceCapabilities: { rpc: new Set(['other.Route']) },
+        serviceCapabilities: { rpc: new Set(['other.Route']), events: new Set() },
       }
     );
     expect(result.ok).toBe(false);

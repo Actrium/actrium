@@ -716,6 +716,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 tabs[index].guestScript = nil
                 tabs[index].htmlContent = nil
                 tabs[index].contractName = nil
+                tabs[index].legacyActorBridge = false
                 objectWillChange.send()
                 persistBrowserPageSession()
                 return
@@ -766,6 +767,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].guestScript = nil
             tabs[index].systemTabType = nil
             tabs[index].contractName = nil
+            tabs[index].legacyActorBridge = false
             objectWillChange.send()
             persistBrowserPageSession()
         } else {
@@ -860,6 +862,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].title = tabTitle
             tabs[tabIndex].url = appURL
             tabs[tabIndex].appId = manifestInfo.appId
+            tabs[tabIndex].legacyActorBridge = ActriumApp.isLegacyActorBridgePackage(resolvedURL)
             tabs[tabIndex].systemTabType = nil
             tabs[tabIndex].htmlContent = nil
 
@@ -1578,6 +1581,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             title: title,
             url: appURL,
             appId: appId,
+            legacyActorBridge: ActriumApp.isLegacyActorBridgePackage(sourceURL),
             htmlContent: htmlContent,
             guestScript: guestScript,
             leftPanelScript: leftPanelScript,

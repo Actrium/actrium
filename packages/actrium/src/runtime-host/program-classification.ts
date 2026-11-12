@@ -16,6 +16,9 @@ export type ProgramClassificationInput = {
  * system Host policy. `systemAppType`, `publisher = "actrium"`, the install
  * directory and a development key are self-reported or weak signals and must
  * never classify a program as system by themselves.
+ *
+ * There is no production caller yet; the native loader starts consuming this
+ * once package provenance verification lands.
  */
 export function classifyProgram(
   input: ProgramClassificationInput

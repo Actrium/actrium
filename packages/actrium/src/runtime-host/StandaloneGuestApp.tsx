@@ -22,7 +22,6 @@ import { hasDeclaredCapability } from './capabilities';
 import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
-import { isLegacyEchoTab } from './legacy-echo';
 import type { TabConfig } from './types';
 
 type GuestButtonProps = {
@@ -165,7 +164,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       if (!tab.serviceCallUrl) {
         return {
           success: false,
-          message: 'Service actor context is unavailable for this tab.',
+          message:
+            'Service actor context is unavailable for this tab (Attach has not supplied an endpoint).',
         };
       }
       logToNative(`[StandaloneGuestApp] service call ${route}`);
@@ -195,9 +195,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setContent(next as React.ReactElement | null);
     };
     const unsubscribeUpdate = engine.on('update', update);
-    // The legacy bridge is confined to the echo demo. Every other package must
-    // use the per-tab host:service path.
-    const legacyEchoTab = isLegacyEchoTab(tab.appId);
+    // The legacy bridge is confined to the host-designated demo package. The
+    // designation comes from launch configuration, never from package data.
+    // Every other package must use the per-tab host:service path.
+    const legacyEchoTab = tab.legacyActorBridge === true;
     const unsubscribeEvents = legacyEchoTab
       ? EventHandler.setup(engine, {
       tabId: tab.id,
@@ -286,8 +287,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     // reloadKey still forces a clean reload when the package changes.
     guestScript,
     hasServiceCapability,
-    tab.appId,
     tab.id,
+    tab.legacyActorBridge,
     tab.serviceCallUrl,
     tab.reloadKey,
   ]);

@@ -160,7 +160,6 @@ describe('computeServiceCapabilities', () => {
         hostSupported: new Set(declared),
         policy: new Set(declared),
         session: new Set(declared),
-        instance: { audience: 'third_party' },
       })
     ).toEqual(declared);
   });
@@ -178,7 +177,6 @@ describe('computeServiceCapabilities', () => {
         hostSupported: new Set(malformed),
         policy: new Set(malformed),
         session: new Set(malformed),
-        instance: { audience: 'third_party' },
       })
     ).toEqual([]);
   });
@@ -190,7 +188,6 @@ describe('computeServiceCapabilities', () => {
         hostSupported: new Set(declared),
         policy: new Set(['workspace:read-write']),
         session: new Set(declared),
-        instance: { audience: 'third_party' },
       })
     ).toEqual(['workspace:read-write']);
   });

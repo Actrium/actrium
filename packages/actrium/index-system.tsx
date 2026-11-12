@@ -93,6 +93,7 @@ interface SystemAppProps {
     id: string;
     appId?: string;
     serviceCallUrl?: string;
+    legacyActorBridge?: boolean;
     title?: string;
     systemAppType?: string;
     unifiedScript?: string;  // ACTR app script

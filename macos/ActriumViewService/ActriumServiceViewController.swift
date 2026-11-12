@@ -1428,6 +1428,9 @@ final class ServiceReactNativeHost {
         if let serviceCallUrl = config["serviceCallUrl"] as? String {
             tabDict["serviceCallUrl"] = serviceCallUrl
         }
+        if config["legacyActorBridge"] as? Bool == true {
+            tabDict["legacyActorBridge"] = true
+        }
 
         // System app data
         if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }
@@ -1922,6 +1925,9 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     if let appId = config["appId"] as? String { tabDict["appId"] = appId }
     if let serviceCallUrl = config["serviceCallUrl"] as? String {
         tabDict["serviceCallUrl"] = serviceCallUrl
+    }
+    if config["legacyActorBridge"] as? Bool == true {
+        tabDict["legacyActorBridge"] = true
     }
     // Copy other tab properties
     if let historyItems = config["historyItems"] { tabDict["historyItems"] = historyItems }

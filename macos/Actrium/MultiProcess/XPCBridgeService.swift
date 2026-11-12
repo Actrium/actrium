@@ -26,6 +26,7 @@ let ActriumHostProcessId = ProcessInfo.processInfo.processIdentifier
 struct XPCTabConfig {
     let tabId: UUID
     let appId: String?
+    let legacyActorBridge: Bool
     let title: String
     let backgroundColor: String
     let containerSize: CGSize
@@ -69,6 +70,9 @@ struct XPCTabConfig {
         }
         if let appId = appId {
             dict["appId"] = appId
+        }
+        if legacyActorBridge {
+            dict["legacyActorBridge"] = true
         }
         return dict
     }

@@ -234,13 +234,12 @@ export type ServiceCapabilityInput = {
   hostSupported: ReadonlySet<string>;
   policy: ReadonlySet<string>;
   session: ReadonlySet<string>;
-  /** Reserved for system instances; capability data has no audience yet. */
-  instance: { audience: CapabilityAudience };
 };
 
 /**
- * Service capabilities are per-instance. The prototype only consumes the
- * third-party audience; system instances pass `audience: 'system'`.
+ * Service capabilities are per-instance. v1 currently opens JS Guests only, so
+ * the result is the third-party set; system instances will add their own
+ * audience rule when that path exists.
  */
 export function computeServiceCapabilities(
   input: ServiceCapabilityInput

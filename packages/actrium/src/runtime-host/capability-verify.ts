@@ -5,6 +5,11 @@ import { COMPONENT_WHITELIST } from './capability-model';
  * Compare the capability manifest emitted at build time with what the Host
  * allows. Inputs are already-unpacked manifest data or keel build artifacts;
  * signature, archive and hash verification stay in the Rust side.
+ *
+ * This is the verifier half of the capability-manifest pipeline. The native
+ * package loader does not call it yet: runtime enforcement lands with the
+ * Attach/session work, and until then the loader only applies the declared
+ * `permissions` check.
  */
 
 export type CapabilityManifestV1 = {
@@ -38,8 +43,8 @@ export function verifyCapabilityManifest(
     contractKinds?: Record<string, Record<string, 'rpc' | 'subscription'>>;
     /** Allowed business routes/events for `host:service`. */
     serviceCapabilities?: {
-      rpc?: ReadonlySet<string>;
-      events?: ReadonlySet<string>;
+      rpc: ReadonlySet<string>;
+      events: ReadonlySet<string>;
     };
     declaredCapabilities?: readonly string[];
   } = {}
@@ -139,10 +144,7 @@ export function verifyCapabilityManifest(
         // route policy when one is supplied.
         if (options.serviceCapabilities) {
           for (const route of entry.rpc ?? []) {
-            if (
-              options.serviceCapabilities.rpc &&
-              !options.serviceCapabilities.rpc.has(route)
-            ) {
+            if (!options.serviceCapabilities.rpc.has(route)) {
               return fail(
                 'capability_mismatch',
                 `Service route "${route}" is not allowed.`
@@ -150,10 +152,7 @@ export function verifyCapabilityManifest(
             }
           }
           for (const event of entry.events ?? []) {
-            if (
-              options.serviceCapabilities.events &&
-              !options.serviceCapabilities.events.has(event)
-            ) {
+            if (!options.serviceCapabilities.events.has(event)) {
               return fail(
                 'capability_mismatch',
                 `Service event "${event}" is not allowed.`

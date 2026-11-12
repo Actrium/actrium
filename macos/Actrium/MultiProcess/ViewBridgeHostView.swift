@@ -941,6 +941,7 @@ final class ViewBridgeCoordinator {
             if let leftPanelScript = tabConfig.leftPanelScript { config["leftPanelScript"] = leftPanelScript }
             if let serviceCallUrl = tabConfig.serviceCallUrl { config["serviceCallUrl"] = serviceCallUrl }
             if let appId = tabConfig.appId { config["appId"] = appId }
+            if tabConfig.legacyActorBridge { config["legacyActorBridge"] = true }
             config["leftPanelVisible"] = tabConfig.leftPanelVisible
             config["rightPanelVisible"] = tabConfig.rightPanelVisible
             config["permissions"] = tabConfig.permissions
@@ -2255,6 +2256,8 @@ struct UnifiedReactNativeLayer: View {
             coordinator.isOverviewMode = !isFocused
             coordinator.tabConfig = XPCTabConfig(
                 tabId: tab.id,
+                appId: tab.appId,
+                legacyActorBridge: tab.legacyActorBridge,
                 title: tab.title,
                 backgroundColor: tab.backgroundColor,
                 containerSize: isFocused ? viewportSize : cardSize,
@@ -2267,8 +2270,7 @@ struct UnifiedReactNativeLayer: View {
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
                 reloadKey: tab.reloadNonce,
-                serviceCallUrl: tab.serviceCallUrl,
-                appId: tab.appId
+                serviceCallUrl: tab.serviceCallUrl
             )
             coordinator.currentViewportSize = currentSize
             ipcLog("📱 UnifiedReactNativeLayer.onAppear: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
@@ -2304,6 +2306,8 @@ struct UnifiedReactNativeLayer: View {
             // 🔑 Reload Trigger: Force new sending config(includes reloadKey)
             coordinator.tabConfig = XPCTabConfig(
                 tabId: tab.id,
+                appId: tab.appId,
+                legacyActorBridge: tab.legacyActorBridge,
                 title: tab.title,
                 backgroundColor: tab.backgroundColor,
                 containerSize: isFocused ? viewportSize : cardSize,
@@ -2316,8 +2320,7 @@ struct UnifiedReactNativeLayer: View {
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
                 reloadKey: tab.reloadNonce,
-                serviceCallUrl: tab.serviceCallUrl,
-                appId: tab.appId
+                serviceCallUrl: tab.serviceCallUrl
             )
             coordinator.lastSentConfigSize = nil
             coordinator.lastSentReloadKey = nil
@@ -2356,6 +2359,9 @@ struct UnifiedReactNativeLayer: View {
         }
         if let appId = tab.appId {
             config["appId"] = appId
+        }
+        if tab.legacyActorBridge {
+            config["legacyActorBridge"] = true
         }
         return config
     }
@@ -2552,6 +2558,9 @@ struct UnifiedReactNativeLayer: View {
         }
         if let appId = tab.appId {
             tabConfig["appId"] = appId
+        }
+        if tab.legacyActorBridge {
+            tabConfig["legacyActorBridge"] = true
         }
 
         // Add system app data (for StartPageApp)

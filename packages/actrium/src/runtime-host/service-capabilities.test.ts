@@ -31,6 +31,18 @@ describe('service capability grammar', () => {
     ).toBeUndefined();
     expect(classifyServiceCapability('net:https://foo bar')).toBeUndefined();
     expect(classifyServiceCapability('net:https://..')).toBeUndefined();
+    expect(
+      classifyServiceCapability('net:https://a..b.example')
+    ).toBeUndefined();
+    expect(
+      classifyServiceCapability('net:https://api.notes.example:0')
+    ).toBeUndefined();
+    expect(
+      classifyServiceCapability('net:https://api.notes.example:65536')
+    ).toBeUndefined();
+    expect(
+      classifyServiceCapability('net:https://api.notes.example:65535')
+    ).toBe('net');
     expect(classifyServiceCapability('net:https://example.com#frag')).toBeUndefined();
     expect(classifyServiceCapability('net:https://')).toBeUndefined();
   });

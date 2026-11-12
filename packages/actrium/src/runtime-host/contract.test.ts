@@ -47,6 +47,12 @@ describe('host:service contract', () => {
     expect(() =>
       call.schema?.parseInput?.({ route: 'echo.EchoService.Echo', payloadBase64: '!!!' })
     ).toThrow();
+    expect(() =>
+      call.schema?.parseInput?.({ route: 'echo.EchoService.Echo', payloadBase64: 'AB=' })
+    ).toThrow();
+    expect(() =>
+      call.schema?.parseInput?.({ route: 'echo.EchoService.Echo', payloadBase64: 'A===' })
+    ).toThrow();
   });
 
   test('call rejects a non-string payload', () => {
@@ -78,6 +84,16 @@ describe('host:service contract', () => {
         route: 'echo.EchoService.Echo',
         payloadBase64: '',
         timeoutMs: Number.POSITIVE_INFINITY,
+      })
+    ).toThrow();
+  });
+
+  test('call rejects timeouts above the host maximum', () => {
+    expect(() =>
+      call.schema?.parseInput?.({
+        route: 'echo.EchoService.Echo',
+        payloadBase64: '',
+        timeoutMs: 300_001,
       })
     ).toThrow();
   });
