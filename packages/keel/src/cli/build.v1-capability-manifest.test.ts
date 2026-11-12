@@ -672,9 +672,8 @@ export default function App() {
     });
   });
 
-  it('fails closed when a spread can override the service route', async () => {
-    await expectBuildFailure(
-      `
+  it('records the effective route when a known spread overrides it', async () => {
+    const manifest = await buildManifest(`
 import { call } from 'host:service';
 import { View } from 'keel/guest';
 
@@ -687,8 +686,25 @@ function send() {
 export default function App() {
   return <View onLayout={() => void send()} />;
 }
+`);
+    expect(manifest.hostModules.service.rpc).toEqual(['private.Route']);
+  });
+
+  it('fails closed when an unknown spread can override the service route', async () => {
+    await expectBuildFailure(
+      `
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+function send(override) {
+  return call({ route: 'allowed.Route', payloadBase64: '', ...override });
+}
+
+export default function App() {
+  return <View onLayout={() => void send({ route: 'private.Route' })} />;
+}
 `,
-      'host:service'
+      'spread/dynamic key'
     );
   });
 
@@ -1330,5 +1346,1162 @@ export default function App() {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('rejects every dynamic code evaluation shape with --no-strict', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-dynamic-eval-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+
+void Function('return 1')();
+void (0, eval)('return 1');
+void globalThis['eval']('return 1');
+void new Function('return 1')();
+void window.eval('return 1');
+
+export default function App() {
+  return <View />;
+}
+`
+      );
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          strict: false,
+          contract,
+          v1CapabilityManifest: path.join(tempDir, 'dist/capability-manifest.json'),
+          v1GuestEntry: 'dist/bundle.js',
+        })
+      ).rejects.toThrow('eval call');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('records events invoked through a .call wrapper', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+function subscribe() {
+  return on.call(on, 'call-wrapped.Event', () => {});
+}
+
+export default function App() {
+  return <View onLayout={() => void subscribe()} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['call-wrapped.Event']);
+  });
+
+  it('records events invoked through an .apply wrapper', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+function subscribe() {
+  return on.apply(on, ['apply-wrapped.Event', () => {}]);
+}
+
+export default function App() {
+  return <View onLayout={() => void subscribe()} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['apply-wrapped.Event']);
+  });
+
+  it('records events invoked through Reflect.apply', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+function subscribe() {
+  return Reflect.apply(on, undefined, ['reflect-wrapped.Event', () => {}]);
+}
+
+export default function App() {
+  return <View onLayout={() => void subscribe()} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['reflect-wrapped.Event']);
+  });
+
+  it('records events behind an on.call.bind(on) rebind', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const subscribe = on.call.bind(on);
+
+export default function App() {
+  return <View onLayout={() => subscribe('rebound.Event', () => {})} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['rebound.Event']);
+  });
+
+  it('fails closed for an .apply wrapper without a literal argument array', async () => {
+    await expectBuildFailure(
+      `
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const args = ['hidden.Event'];
+
+function subscribe() {
+  return on.apply(on, args);
+}
+
+export default function App() {
+  return <View onLayout={() => void subscribe()} />;
+}
+`,
+      'literal argument array'
+    );
+  });
+
+  it('rejects components created through a factory .call wrapper', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+export default function App() {
+  return createElement.call(createElement, Modal);
+}
+`,
+    });
+  });
+
+  it('rejects components created through a factory .apply wrapper', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+export default function App() {
+  return createElement.apply(null, [Modal]);
+}
+`,
+    });
+  });
+
+  it('rejects components created through Reflect.apply of a factory', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+export default function App() {
+  return Reflect.apply(createElement, null, [Modal]);
+}
+`,
+    });
+  });
+
+  it('rejects components behind a factory call rebind', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+const h = createElement.call.bind(createElement);
+
+export default function App() {
+  return h(Modal);
+}
+`,
+    });
+  });
+
+  it('fails closed when Object.assign mutates a tracked component bag', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+const bag = { C: View };
+Object.assign(bag, { C: Modal });
+
+export default function App() {
+  return <bag.C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('fails closed when Object.defineProperty mutates a tracked component bag', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+const bag = { C: View };
+Object.defineProperty(bag, 'C', { value: Modal });
+
+export default function App() {
+  return <bag.C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  // Note: a plain `import * as guest from 'keel/guest'` cannot reach the
+  // manifest step in this pipeline — Bun's __toESM helper for namespace
+  // imports contains a let/const loop head that the Hermes compat guard
+  // rejects — so the namespace-resolution path is covered indirectly by the
+  // mutation test below (the analyzer still recognizes the __toESM-wrapped
+  // require as the guest namespace).
+  it('fails closed when the keel/guest namespace is mutated', async () => {
+    await expectBuildFailure(
+      `
+import * as guest from 'keel/guest';
+import { Modal, View } from 'keel/guest';
+
+Object.assign(guest, { View: Modal });
+
+export default function App() {
+  return <guest.View />;
+}
+`,
+      'keel/guest namespace'
+    );
+  });
+
+  it('rejects a component bound through array destructuring', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { Modal } from 'keel/guest';
+
+const [C] = [Modal];
+
+export default function App() {
+  return <C />;
+}
+`,
+    });
+  });
+
+  it('fails closed for a component bound through a parameter default', async () => {
+    await expectBuildFailure(
+      `
+import { Modal, View } from 'keel/guest';
+
+function render(C = Modal) {
+  return <C />;
+}
+
+export default function App() {
+  return <View onLayout={() => render()} />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('resolves a component from a destructuring default value', async () => {
+    const manifest = await buildManifest(`
+import { View } from 'keel/guest';
+
+const bag = {};
+const { C = View } = bag;
+
+export default function App() {
+  return <C />;
+}
+`);
+    expect(manifest.components).toEqual(['View']);
+  });
+
+  it('fails closed when a parameter shadows the bundler guest namespace name', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { View } from 'keel/guest';
+
+function render(import_guest) {
+  return <import_guest.View />;
+}
+
+export default function App() {
+  return <View onLayout={() => render(globalThis.anything)} />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('normalizes Windows separators in the v1 guestEntry', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-entry-win-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+export default function App() { return <View />; }
+`
+      );
+      const manifestPath = path.join(tempDir, 'dist/capability-manifest.json');
+      await build({
+        entry: path.join(srcDir, 'entry.tsx'),
+        outfile: path.join(tempDir, 'dist/bundle.js'),
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        contract,
+        v1CapabilityManifest: manifestPath,
+        v1GuestEntry: 'dist\\bundle.js',
+      });
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      expect(manifest.guestEntry).toBe('dist/bundle.js');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a guestEntry whose symlink resolves outside the package root', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-entry-symlink-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.mkdirSync(path.join(tempDir, 'dist'), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, 'outside'), { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+export default function App() { return <View />; }
+`
+      );
+      // The outfile path stays inside the temp package, but it is a symlink
+      // to a file outside of it, so the realpath-derived entry must not be
+      // accepted as package-relative.
+      fs.symlinkSync(
+        path.join(tempDir, 'outside/bundle.js'),
+        path.join(tempDir, 'dist/bundle.js')
+      );
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          contract,
+          v1CapabilityManifest: path.join(tempDir, 'dist/capability-manifest.json'),
+        })
+      ).rejects.toThrow('package-relative guestEntry');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed for an alias/spread/branch/computed-key component chain', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+const base = { C: View };
+let pick = base;
+if (globalThis.flag) pick = { C: Modal };
+const merged = { ...pick };
+const key = 'C';
+const C = merged[key];
+
+export default function App() {
+  return <C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('records an event through an alias/spread/branch/computed-key service chain', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const methods = { on };
+const wrapper = { ...methods };
+const key = 'on';
+let handler = wrapper[key];
+if (globalThis.flag) handler = methods.on;
+
+export default function App() {
+  return <View onLayout={() => handler('combo.Event', () => {})} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['combo.Event']);
+  });
+
+  it('resolves a second keel/guest namespace across modules in minified builds', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { View } from 'keel/guest';
+import { Child } from './child';
+
+export default function App() {
+  return (
+    <View>
+      <Child />
+    </View>
+  );
+}
+`,
+      'src/child.tsx': `
+import { Modal as M } from 'keel/guest';
+
+export function Child() {
+  return <M />;
+}
+`,
+    });
+  });
+});
+
+describe('PR429 third-round review regressions', () => {
+  it('rejects a custom footer in v1 mode', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-footer-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+export default function App() { return <View />; }
+`
+      );
+      const footerPath = path.join(tempDir, 'custom-footer.js');
+      fs.writeFileSync(footerPath, 'void globalThis.React.createElement(globalThis.Unknown);');
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          contract,
+          v1CapabilityManifest: path.join(tempDir, 'dist/capability-manifest.json'),
+          v1GuestEntry: 'dist/bundle.js',
+          footer: footerPath,
+        })
+      ).rejects.toThrow('custom --footer');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed for a local memo that is not the React wrapper', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+function memo(C) {
+  return globalThis.Sneaky;
+}
+
+const M = memo(Modal);
+
+export default function App() {
+  return (
+    <View>
+      <M />
+    </View>
+  );
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('fails closed for a captured write in a function body that may not run', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+let C = Modal;
+
+function maybeCalled() {
+  C = View;
+}
+
+// Keep the function in the bundle: the bundler tree-shakes an unreferenced
+// declaration (and a bare void reference), which would legitimately reduce
+// the analysis to C = Modal.
+globalThis.keep = maybeCalled;
+
+export default function App() {
+  return <C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('records events behind a nested member assignment', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const api = { wrapper: {} };
+api.wrapper.subscribe = on;
+
+export default function App() {
+  return <View onLayout={() => api.wrapper.subscribe('nested.Event', () => {})} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['nested.Event']);
+  });
+
+  it('rejects components created through a factory stored in an object member', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+const factory = { make: createElement };
+
+export default function App() {
+  return factory.make(Modal);
+}
+`,
+    });
+  });
+
+  it('keeps properties installed before a known object spread', async () => {
+    const manifest = await buildManifest(`
+import { call, on } from 'host:service';
+import { View } from 'keel/guest';
+
+const both = { on, ...{ call } };
+
+export default function App() {
+  return <View onLayout={() => both.on('spread-keep.Event', () => {})} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['spread-keep.Event']);
+  });
+
+  it('records events behind a bind with pre-bound arguments', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const preset = on.bind(undefined, 'preset.Event');
+
+export default function App() {
+  return <View onLayout={() => preset()} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['preset.Event']);
+  });
+
+  it('rejects components behind a bind with pre-bound arguments', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+const preset = createElement.bind(null, Modal);
+
+export default function App() {
+  return preset({});
+}
+`,
+    });
+  });
+
+  it('fails closed for a component chosen through a conditional expression', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+let C = Modal;
+
+globalThis.flag ? (C = View) : void 0;
+
+export default function App() {
+  return <C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('fails closed for a component chosen through a short-circuit expression', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+let C = Modal;
+
+globalThis.flag && (C = View);
+
+export default function App() {
+  return <C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('rejects computed globalThis eval access with --no-strict', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-computed-eval-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+
+void globalThis['eval']('return 1');
+
+export default function App() {
+  return <View />;
+}
+`
+      );
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          strict: false,
+          contract,
+          v1CapabilityManifest: path.join(tempDir, 'dist/capability-manifest.json'),
+          v1GuestEntry: 'dist/bundle.js',
+        })
+      ).rejects.toThrow('eval call');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed for a chained service accessor call', async () => {
+    await expectBuildFailure(
+      `
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+export default function App() {
+  return <View onLayout={() => on.call.call(on, null, 'private.Event', () => {})} />;
+}
+`,
+      'chained accessor call'
+    );
+  });
+
+  it('fails closed for a destructuring default over an unknown present property', async () => {
+    await expectBuildFailure(
+      `
+import { Modal, View } from 'keel/guest';
+
+function pick() {
+  return Modal;
+}
+
+const bag = { C: pick() };
+const { C = View } = bag;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps the bound argument prefix through a rebind', async () => {
+    const manifest = await buildManifest(`
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+const a = call.bind(null, { route: 'private.Route', payloadBase64: '' });
+const b = a.bind(null, { route: 'allowed.Route', payloadBase64: '' });
+
+export default function App() {
+  return <View onLayout={() => b()} />;
+}
+`);
+    expect(manifest.hostModules.service.rpc).toEqual(['private.Route']);
+  });
+
+  it('keeps the bound argument prefix through a .call wrapper', async () => {
+    const manifest = await buildManifest(`
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+const a = call.bind(null, { route: 'private.Route', payloadBase64: '' });
+
+export default function App() {
+  return <View onLayout={() => a.call(null, { route: 'allowed.Route', payloadBase64: '' })} />;
+}
+`);
+    expect(manifest.hostModules.service.rpc).toEqual(['private.Route']);
+  });
+
+  it('keeps the bound argument prefix through Reflect.apply', async () => {
+    const manifest = await buildManifest(`
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+const a = call.bind(null, { route: 'private.Route', payloadBase64: '' });
+
+export default function App() {
+  return <View onLayout={() => Reflect.apply(a, null, [{ route: 'allowed.Route', payloadBase64: '' }])} />;
+}
+`);
+    expect(manifest.hostModules.service.rpc).toEqual(['private.Route']);
+  });
+
+  it('fails closed for Reflect.apply of a service accessor', async () => {
+    await expectBuildFailure(
+      `
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+const a = call.bind(null, { route: 'private.Route', payloadBase64: '' });
+
+export default function App() {
+  return <View onLayout={() => Reflect.apply(a.call, null, [])} />;
+}
+`,
+      'Reflect.apply of an accessor'
+    );
+  });
+
+  it('keeps the bound factory prefix through .call and .apply', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal, View } from 'keel/guest';
+
+const h = createElement.bind(null, Modal, {});
+
+export default function App() {
+  return h.call(null, View);
+}
+`,
+    });
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal, View } from 'keel/guest';
+
+const h = createElement.bind(null, Modal, {});
+
+export default function App() {
+  return h.apply(null, [View]);
+}
+`,
+    });
+  });
+
+  it('rejects a factory bound through multiple bind calls', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal, View } from 'keel/guest';
+
+const h = createElement.bind(null, Modal).bind(null, {});
+
+export default function App() {
+  return h(View);
+}
+`,
+    });
+  });
+
+  it('fails closed for a chained factory accessor call', async () => {
+    await expectBuildFailure(
+      `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+export default function App() {
+  return createElement.call.call(createElement, null, Modal, {});
+}
+`,
+      'chained JSX factory accessor call'
+    );
+  });
+
+  it('rejects a computed destructuring key with a default', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+function key() {
+  return 'x';
+}
+
+const { [key()]: C = View } = { x: Modal };
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('snapshots bound factory arguments at bind time', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal, View } from 'keel/guest';
+
+let C = Modal;
+const make = createElement.bind(null, C, {});
+C = View;
+
+export default function App() {
+  return make();
+}
+`,
+    });
+  });
+
+  it('records the factory behind a bound call accessor', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+const make = createElement.call.bind(createElement, null, Modal, {});
+
+export default function App() {
+  return make();
+}
+`,
+    });
+  });
+
+  it('records the factory behind a bound apply accessor', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+const make = createElement.apply.bind(createElement, null, [Modal, {}]);
+
+export default function App() {
+  return make();
+}
+`,
+    });
+  });
+
+  it('fails closed for a prototype-backed destructuring default', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const { C = View } = { __proto__: { C: Modal } };
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('fails closed after an indexed write to a destructured array', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View];
+arr[0] = Modal;
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('fails closed when a bound service argument can change after bind', async () => {
+    await expectBuildFailure(
+      `
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+let route = { route: 'private.Route', payloadBase64: '' };
+const send = call.bind(null, route);
+route = { route: 'allowed.Route', payloadBase64: '' };
+
+export default function App() {
+  return <View onLayout={() => send()} />;
+}
+`,
+      'bound argument provenance'
+    );
+  });
+
+  it('keeps array invalidation through branch cloning', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View];
+arr[0] = Modal;
+if (globalThis.flag) { globalThis.probe = 1; } else { globalThis.probe = 2; }
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps array invalidation through destructuring assignment', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View];
+[arr[0]] = [Modal];
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps array invalidation through Object.assign', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View];
+Object.assign(arr, { 0: Modal });
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps bind-time snapshots through an accessor rebind', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal, View } from 'keel/guest';
+
+let C = Modal;
+const a = createElement.bind(null, C, {});
+C = View;
+const b = a.call.bind(a, null);
+
+export default function App() {
+  return b();
+}
+`,
+    });
+  });
+
+  it('keeps the accessor receiver factory state through call.bind', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal, View } from 'keel/guest';
+
+const a = createElement.bind(null, Modal, {});
+const b = createElement.call.bind(a, null, View, {});
+
+export default function App() {
+  return b();
+}
+`,
+    });
+  });
+
+  it('keeps the accessor receiver factory state through apply.bind', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal, View } from 'keel/guest';
+
+const a = createElement.bind(null, Modal, {});
+const b = createElement.apply.bind(a, null, [View, {}]);
+
+export default function App() {
+  return b();
+}
+`,
+    });
+  });
+
+  it('keeps array invalidation through in-place methods', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View];
+arr.splice(0, 1, Modal);
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View, Modal];
+arr.reverse();
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps array invalidation through Array.prototype call', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View];
+Array.prototype.splice.call(arr, 0, 1, Modal);
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps the snapshot for non-mutating array methods', async () => {
+    const manifest = await buildManifest(`
+import { View } from 'keel/guest';
+
+const arr = [View];
+arr.map((item) => item);
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`);
+    expect(manifest.components).toEqual(['View']);
+  });
+
+  it('keeps array invalidation through Reflect.apply', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View, Modal];
+Reflect.apply(Array.prototype.reverse, arr, []);
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps array invalidation through a mutator alias', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View, Modal];
+const reverse = arr.reverse;
+reverse.call(arr);
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps array invalidation through a dynamic method key', async () => {
+    await expectBuildFailure(
+      `
+import { View, Modal } from 'keel/guest';
+
+const arr = [View, Modal];
+function key() { return 'reverse'; }
+arr[key()]();
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'Unable to establish component provenance'
+    );
+  });
+
+  it('keeps the snapshot for non-mutating Array.prototype methods', async () => {
+    const manifest = await buildManifest(`
+import { View } from 'keel/guest';
+
+const arr = [View];
+Array.prototype.map.call(arr, (item) => item);
+const [C] = arr;
+
+export default function App() {
+  return <C />;
+}
+`);
+    expect(manifest.components).toEqual(['View']);
   });
 });

@@ -109,6 +109,13 @@ export function analyzeJSXProps(code: string): JSXAnalysisResult {
 /**
  * Extract component names from a transpiled bundle (JSX is already lowered
  * to `jsx(...)`/`createElement(...)` calls at this point).
+ *
+ * Understands a small subset of JavaScript (lexical aliases, namespace
+ * members, object/array snapshots, destructuring and parameter defaults,
+ * memo/forwardRef/bind wrappers, and `.call`/`.apply`/`Reflect.apply`
+ * factory invocation forms). With `failClosed`, any JSX component whose
+ * provenance cannot be established throws instead of being skipped; the
+ * analysis is a development-time fail-fast, not a security boundary.
  */
 export function analyzeBundleComponents(
   code: string,
@@ -128,7 +135,10 @@ export type ServiceUsage = {
 
 /**
  * Collect literal `host:service` routes and events from a lowered bundle.
- * Throws when a route or event cannot be determined statically.
+ * Understands service aliases, wrapper objects, argument forwarding, and the
+ * `.call`/`.apply`/`Reflect.apply` invocation forms. Throws (fails closed)
+ * when a route or event cannot be determined statically; the analysis is a
+ * development-time fail-fast, not a security boundary.
  */
 export function analyzeServiceUsage(code: string): ServiceUsage {
   // eslint-disable-next-line @typescript-eslint/no-var-requires

@@ -963,6 +963,27 @@ export async function build(options: BuildOptions): Promise<void> {
     console.warn('  ℹ Continuing without type hints');
   }
 
+  // Determine footer: custom or default.
+  let footerCode = AUTO_RENDER_FOOTER;
+  if (footer) {
+    // A custom footer is arbitrary appended code the static analysis never
+    // runs on, so in a v1 build it could render components or invoke host
+    // services the capability manifest would not list. The default footer
+    // only renders the already-analyzed default export.
+    if (v1CapabilityManifest) {
+      throw new Error(
+        'v1 capability manifest builds cannot use a custom --footer: its runtime behavior is outside the static analysis scope'
+      );
+    }
+    const footerPath = path.resolve(footer);
+    if (fs.existsSync(footerPath)) {
+      footerCode = fs.readFileSync(footerPath, 'utf-8');
+      console.log(`Using custom footer: ${footerPath}`);
+    } else {
+      console.warn(`⚠ Custom footer not found: ${footerPath}, using default`);
+    }
+  }
+
   // Collect non-host imports and component usage before the externals rewrite.
   // The entry is analyzed after bundling, so JSX is already lowered to
   // jsx(...) calls; component names come from analyzeBundleComponents.
@@ -1053,18 +1074,6 @@ try {
 `;
 
   const modifiedBundle = `${bundleCode}\n${captureExports}`;
-
-  // Determine footer: custom or default
-  let footerCode = AUTO_RENDER_FOOTER;
-  if (footer) {
-    const footerPath = path.resolve(footer);
-    if (fs.existsSync(footerPath)) {
-      footerCode = fs.readFileSync(footerPath, 'utf-8');
-      console.log(`Using custom footer: ${footerPath}`);
-    } else {
-      console.warn(`⚠ Custom footer not found: ${footerPath}, using default`);
-    }
-  }
 
   // Wrap with runtime inject and auto-render footer
   // JSI optimization is handled directly in createElement (see RUNTIME_INJECT)

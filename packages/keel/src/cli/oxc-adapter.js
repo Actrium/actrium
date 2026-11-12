@@ -1,5 +1,31 @@
 // Oxc-only adapter for dependency scanning (CommonJS)
 // Hard dependency on 'oxc-parser'. If not installed, this module will throw at runtime.
+//
+// ## v1 capability manifest analysis (analyzeBundleComponents/analyzeServiceUsage)
+//
+// These analyzers run on the lowered unminified bundle inside
+// `keel build --v1-capability-manifest` and describe which host capabilities
+// the guest uses and which Keel components it renders. They understand a
+// deliberately small subset of JavaScript:
+//
+// - Lexically scoped bindings with statically analyzable initializers:
+//   literals, aliases, namespace members, object/array literals,
+//   destructuring with defaults, parameter defaults, and the wrapper calls
+//   memo/forwardRef/bind.
+// - JSX factories reached directly, through aliases, or through the
+//   `.call`/`.apply`/`Reflect.apply` invocation forms and
+//   `factory.call.bind(factory)` rebinds.
+// - `host:service` methods reached through imports, aliases, wrapper objects,
+//   and the same `.call`/`.apply`/`Reflect.apply` invocation forms.
+//
+// Anything outside that subset fails closed: in v1 mode an unresolved
+// provenance rejects the build instead of silently under-reporting the
+// manifest (`options.failClosed`, or a thrown error in analyzeServiceUsage).
+//
+// This build-time analysis is a development-time fail-fast, NOT a security
+// boundary. The v1 trust boundary is install/load-time manifest
+// re-verification plus the runtime per-call host checks; this static pass
+// only surfaces mismatches before shipping.
 
 const oxc = require('oxc-parser');
 
@@ -137,7 +163,9 @@ function analyzeModuleIDs(code) {
   }
 
   // Count eval() calls (skip those in comments or strings)
-  const evalPattern = /\beval\s*\(/g;
+  // Only a bare `eval(` spelling: the negative lookbehind excludes member
+  // access (`globalThis.eval(`), which the AST pass counts instead.
+  const evalPattern = /(?<![\w.$])eval\s*\(/g;
   let evalMatch;
   while ((evalMatch = evalPattern.exec(code)) !== null) {
     if (!isInCommentOrString(code, evalMatch.index)) {
@@ -320,14 +348,13 @@ function analyzeModuleIDs(code) {
           }
         }
         const calleeKey = memberKeyOf(callee);
-        // Direct `eval(...)` is already counted by the regex; count every other
-        // evaluator reference, including aliases and global-object members.
-        // The regex only matches `eval(`; optional calls (`eval?.(`) must be
-        // counted by the AST instead of being excluded as already counted.
+        // Only a bare non-optional `eval(` call is already counted by the
+        // regex (the pattern excludes member access via lookbehind). Every
+        // other evaluator reference — aliases, member spellings
+        // (`globalThis.eval(`), computed access (`globalThis['eval'](`), and
+        // optional calls — is counted here exactly once.
         const regexCountedEval =
-          !node.optional &&
-          ((callee?.type === 'Identifier' && callee.name === 'eval') ||
-            (isMemberNode(callee) && isGlobalObjectNode(callee.object) && calleeKey === 'eval'));
+          !node.optional && callee?.type === 'Identifier' && callee.name === 'eval';
         if (!regexCountedEval && isDynamicValue(callee)) evalCount++;
         const reflectMethod =
           callee?.type === 'Identifier' ? reflectMethodAliases.get(callee.name) : undefined;
@@ -985,14 +1012,63 @@ function isFrameworkRequire(node) {
 }
 
 /**
+ * Recognize the bundler-lowered `keel/guest` namespace expression:
+ * `require('keel/guest')` (named imports) or `__toESM(require('keel/guest'))`
+ * (namespace imports). A variable initialized with this shape is the guest
+ * SDK namespace; member reads on it resolve to SDK components. Provenance is
+ * taken from the initializer, never from the variable name, so a guest-declared
+ * or shadowed `import_guest` binding cannot inherit that trust.
+ */
+function isGuestModuleRequire(node) {
+  if (!node || node.type !== 'CallExpression') {
+    return false;
+  }
+  const callee = node.callee;
+  const calleeName =
+    callee?.type === 'Identifier'
+      ? callee.name
+      : isMemberNode(callee) && callee.property?.type === 'Identifier'
+        ? callee.property.name
+        : undefined;
+  if (calleeName === '__toESM') {
+    return isGuestModuleRequire(node.arguments?.[0]);
+  }
+  if (calleeName !== 'require') {
+    return false;
+  }
+  const arg = node.arguments?.[0];
+  return (arg?.type === 'StringLiteral' || arg?.type === 'Literal') && arg.value === 'keel/guest';
+}
+
+/**
  * Extract component names from a transpiled bundle.
  *
  * JSX is already lowered to `jsx(...)` / `jsxs(...)` / `createElement(...)`
- * calls. The component can be a string tag, an `import_guest.View` member, or
+ * calls. The component can be a string tag, a keel/guest namespace member, or
  * a local identifier aliasing an SDK component (`const M = Modal; <M />`).
  * Bindings are resolved lexically so a parameter or local variable shadows an
  * outer component with the same name. When `failClosed` is set, identifiers
  * whose provenance cannot be resolved reject the build.
+ *
+ * Binding kinds tracked by the scope analysis:
+ * - `sdk`        — a Keel SDK component (`{ kind: 'sdk', name }`).
+ * - `local`      — a guest-defined function/class; renders no capability.
+ * - `framework`  — React internals (Fragment/StrictMode/Suspense) or the
+ *                  React namespace itself.
+ * - `jsxFactory` — a React element factory (jsx/jsxs/jsxDEV/createElement),
+ *                  directly or through an alias/bound rebind.
+ * - `literal`    — a string literal (`{ kind: 'literal', value }`), used for
+ *                  computed member keys.
+ * - `object`     — an object literal snapshot (`{ props: Map, unknown }`);
+ *                  `unknown` marks an object whose contents were mutated
+ *                  through a path the analyzer cannot follow.
+ * - `array`      — an array literal snapshot (`{ elements: [] }`), used for
+ *                  destructuring like `const [C] = [Modal]`.
+ * - `guestNamespace` — a variable initialized from the lowered
+ *                  `require('keel/guest')` expression; member reads resolve
+ *                  to SDK components.
+ * - `unknown`    — provenance could not be established; use sites fail closed
+ *                  (optionally listing `candidates` after a branch join).
  */
 function analyzeBundleComponents(code, options = {}) {
   if (!oxc || !oxc.parseSync) {
@@ -1023,6 +1099,18 @@ function analyzeBundleComponents(code, options = {}) {
     scope.bindings.set(name, binding);
   };
 
+  // Whether the write path from `scope` up to the scope holding the binding
+  // crosses a function boundary: the function body may never execute, so a
+  // captured write cannot be treated as an unconditional outer assignment.
+  const crossesFunctionBoundary = (from, to) => {
+    let current = from;
+    while (current && current !== to) {
+      if (current.isFunction) return true;
+      current = current.parent;
+    }
+    return false;
+  };
+
   const assignBinding = (scope, name, binding) => {
     let current = scope;
     while (current) {
@@ -1031,6 +1119,23 @@ function analyzeBundleComponents(code, options = {}) {
     }
     const branchRoot = scope.branchRoot;
     if (current) {
+      if (crossesFunctionBoundary(scope, current)) {
+        // Captured write from inside a function body: the body may never
+        // run, so keep the function's own view (shadow in the assigning
+        // scope) but merge the outer binding conservatively instead of
+        // overwriting it.
+        scope.bindings.set(name, binding);
+        const candidates = new Set();
+        collectCandidates(current.bindings.get(name), candidates);
+        collectCandidates(binding, candidates);
+        current.bindings.set(
+          name,
+          candidates.size
+            ? { kind: 'unknown', candidates: Array.from(candidates).sort() }
+            : { kind: 'unknown' }
+        );
+        return;
+      }
       // A branch may not mutate a binding that lives outside the branch's
       // cloned scope; shadow it in the branch root so joinBranches can merge
       // the branch states.
@@ -1141,16 +1246,23 @@ function analyzeBundleComponents(code, options = {}) {
     return [];
   };
 
-  const isComponentWrapperCall = (node) => {
+  // Only the React namespace's memo/forwardRef are React wrappers. A bare
+  // name is a local function (or a ReferenceError at runtime) and a member of
+  // any other object is that object's own method — neither may inherit the
+  // wrapper semantics, or a local `function memo() { return Sneaky }` would
+  // launder component provenance.
+  const isComponentWrapperCall = (node, scope) => {
     if (node?.type !== 'CallExpression') return false;
     const callee = node.callee;
-    const name =
-      callee?.type === 'Identifier'
-        ? callee.name
-        : callee?.property?.type === 'Identifier'
-          ? callee.property.name
-          : undefined;
-    return name === 'memo' || name === 'forwardRef';
+    if (!isMemberNode(callee)) return false;
+    const name = memberPropertyName(callee, scope);
+    if (name !== 'memo' && name !== 'forwardRef') return false;
+    const objectName = callee.object?.type === 'Identifier' ? callee.object.name : undefined;
+    const objectBinding = objectName ? resolveBinding(scope, objectName) : undefined;
+    return (
+      objectBinding?.kind === 'framework' ||
+      (objectBinding === undefined && /^import_react\d*$/.test(objectName ?? ''))
+    );
   };
 
   // React element factories can be aliased (`const h = createElement`). Track
@@ -1197,15 +1309,187 @@ function analyzeBundleComponents(code, options = {}) {
     return undefined;
   };
 
+  // Whether an expression statically refers to a React element factory:
+  // a factory alias, a bare factory name with no local binding, or a member
+  // of the React namespace (`import_react.createElement`). Used to resolve
+  // the `.call`/`.apply`/`bind` wrapper forms.
+  const resolveFactoryRef = (node, scope) => {
+    if (node?.type === 'Identifier') {
+      const binding = resolveBinding(scope, node.name);
+      if (binding?.kind === 'jsxFactory') return true;
+      return !binding && isJsxFactoryName(node.name);
+    }
+    if (isMemberNode(node)) {
+      const property = memberPropertyName(node, scope);
+      const objectName = node.object?.type === 'Identifier' ? node.object.name : undefined;
+      const objectBinding = objectName ? resolveBinding(scope, objectName) : undefined;
+      const isReactNamespace =
+        objectBinding?.kind === 'framework' ||
+        (objectBinding === undefined && /^import_react\d*$/.test(objectName ?? ''));
+      return isReactNamespace && isJsxFactoryName(property);
+    }
+    return false;
+  };
+
+  // Trust a keel/guest namespace member read when the object is the lowered
+  // guest namespace (by initializer, see isGuestModuleRequire) or — as a
+  // compat fallback for bundler shapes the snapshot pass may not see — when
+  // the name matches the bundler's `import_guestN` pattern AND no binding of
+  // that name exists at all. Any resolvable non-namespace binding (a guest
+  // declared object, a parameter, an unknown expression) is analyzed for
+  // what it is and never inherits the name's trust.
+  const isGuestNamespaceObject = (objectBinding, objectName) =>
+    objectBinding?.kind === 'guestNamespace' ||
+    (objectBinding === undefined && /^import_guest\d*$/.test(objectName ?? ''));
+
+  const KEEL_RUNTIME_GLOBALS = new Set(['globalThis', 'global', 'window', 'self']);
+
+  // `<global>.__keel.guest` — the runtime slot injected by the bundle
+  // wrapper that holds the bundle's default export. Property keys are
+  // matched for both static and computed string spellings.
+  const isGuestSlotMember = (node) => {
+    const memberKey = (member) => {
+      if (!isMemberNode(member)) return undefined;
+      const keyNode =
+        member.type === 'ComputedMemberExpression' ? member.expression : member.property;
+      if (keyNode?.type === 'Identifier' && !member.computed) return keyNode.name;
+      if (
+        (keyNode?.type === 'StringLiteral' || keyNode?.type === 'Literal') &&
+        typeof keyNode.value === 'string'
+      ) {
+        return keyNode.value;
+      }
+      return undefined;
+    };
+    if (!isMemberNode(node) || memberKey(node) !== 'guest') return false;
+    const ns = node.object;
+    if (!isMemberNode(ns) || memberKey(ns) !== '__keel') return false;
+    const root = ns.object;
+    return root?.type === 'Identifier' && KEEL_RUNTIME_GLOBALS.has(root.name);
+  };
+
+  // The tracked object whose property a member expression reads, including
+  // nested paths (`api.factory.make`).
+  const resolveObjectAtPath = (node, scope) => {
+    if (!isMemberNode(node)) return undefined;
+    if (node.object?.type === 'Identifier') {
+      const binding = resolveBinding(scope, node.object.name);
+      return binding?.kind === 'object' ? binding : undefined;
+    }
+    if (isMemberNode(node.object)) {
+      const parent = resolveObjectAtPath(node.object, scope);
+      if (!parent) return undefined;
+      const key = memberPropertyName(node.object, scope);
+      if (key === undefined) return undefined;
+      const child = parent.props.get(key);
+      return child?.kind === 'object' ? child : undefined;
+    }
+    return undefined;
+  };
+
+  // The jsxFactory binding an expression refers to: an alias, an object
+  // member (`factory.make`), or a React namespace member. Used to recover
+  // pre-bound arguments from a bound factory.
+  const resolveFactoryBinding = (node, scope) => {
+    if (node?.type === 'CallExpression') {
+      // `factory.bind(thisArg, ...)` returns a bound factory; layer the
+      // pre-bound arguments on top of any already-bound prefix.
+      const callee = node.callee;
+      if (isMemberNode(callee) && memberPropertyName(callee, scope) === 'bind') {
+        const base = resolveFactoryBinding(callee.object, scope);
+        if (base) {
+          let effectiveBase = base;
+          let prefix;
+          if (base.factoryAccessor) {
+            const args = asArray(node.arguments);
+            const receiver = resolveFactoryBinding(args[0], scope);
+            if (receiver && !receiver.factoryAccessor) {
+              effectiveBase = receiver;
+            }
+            if (base.factoryAccessor === 'call') {
+              // `factory.call.bind(receiver, thisArg, ...args)`: drop the
+              // bound this value and the call's thisArg.
+              prefix = args.slice(2);
+            } else {
+              const list = args[2];
+              if (list?.type !== 'ArrayExpression') return undefined;
+              prefix = asArray(list.elements);
+            }
+          } else {
+            prefix = asArray(node.arguments).slice(1);
+          }
+          const baseArgs = effectiveBase.boundArgs ?? [];
+          // Keep the bind-time snapshots already captured by the receiver;
+          // only the newly bound arguments are resolved now.
+          const baseBindings =
+            effectiveBase.boundBindings ??
+            baseArgs.map((argument) => bindingFromInit(argument, scope));
+          const boundArgs = [...baseArgs, ...prefix];
+          const boundBindings = [
+            ...baseBindings,
+            ...prefix.map((argument) => bindingFromInit(argument, scope)),
+          ];
+          const { factoryAccessor: _accessor, ...factory } = effectiveBase;
+          return boundArgs.length ? { ...factory, boundArgs, boundBindings } : factory;
+        }
+      }
+      return undefined;
+    }
+    if (node?.type === 'Identifier') {
+      const binding = resolveBinding(scope, node.name);
+      return binding?.kind === 'jsxFactory' ? binding : undefined;
+    }
+    if (isMemberNode(node)) {
+      const property = memberPropertyName(node, scope);
+      if (node.object?.type === 'Identifier') {
+        const objectBinding = resolveBinding(scope, node.object.name);
+        if (objectBinding?.kind === 'jsxFactory') {
+          return property === 'call' || property === 'apply'
+            ? { ...objectBinding, factoryAccessor: property }
+            : objectBinding;
+        }
+        const isReactNamespace =
+          objectBinding?.kind === 'framework' ||
+          (objectBinding === undefined && /^import_react\d*$/.test(node.object.name));
+        if (isReactNamespace && property !== undefined && isJsxFactoryName(property)) {
+          return { kind: 'jsxFactory' };
+        }
+      }
+      if (property !== undefined) {
+        if (property === 'call' || property === 'apply') {
+          const inner = resolveFactoryBinding(node.object, scope);
+          if (inner && !inner.factoryAccessor) {
+            return { ...inner, factoryAccessor: property };
+          }
+        }
+        const holder = resolveObjectAtPath(node, scope);
+        const held = holder
+          ? resolveBindingValue(holder.props.get(property), new Set())
+          : undefined;
+        if (held?.kind === 'jsxFactory') {
+          return property === 'call' || property === 'apply'
+            ? { ...held, factoryAccessor: property }
+            : held;
+        }
+      }
+    }
+    return undefined;
+  };
+
   const bindingFromMember = (init, scope) => {
     const property = memberPropertyName(init, scope);
     if (property === undefined) return { kind: 'unknown' };
     const objectName = init.object?.type === 'Identifier' ? init.object.name : undefined;
     const objectBinding = objectName ? resolveBinding(scope, objectName) : undefined;
-    // Trust the bundler namespace name unless the guest defined a local
-    // object with that name; `const import_guest = { View: Modal }` must be
-    // analyzed as an object.
-    if (objectBinding?.kind !== 'object' && objectName && /^import_guest\d*$/.test(objectName)) {
+    // The runtime guest slot holds the bundle's default export — guest
+    // authored code whose component tree the bundle analysis already
+    // enumerates — and a local's `.default` points at the same export.
+    // Both are local components, not unresolved externals.
+    if (isGuestSlotMember(init)) return { kind: 'local' };
+    if (objectBinding?.kind === 'local' && property === 'default') {
+      return { kind: 'local' };
+    }
+    if (isGuestNamespaceObject(objectBinding, objectName)) {
       return { kind: 'sdk', name: property };
     }
     const isReactNamespace =
@@ -1226,7 +1510,15 @@ function analyzeBundleComponents(code, options = {}) {
   };
 
   const cloneBinding = (binding, seen = new Map()) => {
-    if (!binding || binding.kind !== 'object') return binding;
+    if (!binding) return binding;
+    if (binding.kind === 'array') {
+      if (seen.has(binding)) return seen.get(binding);
+      const clone = { kind: 'array', elements: [], unknown: Boolean(binding.unknown) };
+      seen.set(binding, clone);
+      clone.elements = binding.elements.map((element) => cloneBinding(element, seen));
+      return clone;
+    }
+    if (binding.kind !== 'object') return binding;
     if (seen.has(binding)) return seen.get(binding);
     const clone = { kind: 'object', props: new Map(), unknown: Boolean(binding.unknown) };
     seen.set(binding, clone);
@@ -1267,11 +1559,21 @@ function analyzeBundleComponents(code, options = {}) {
       }
       return true;
     }
+    if (a.kind === 'array') {
+      if (seen.has(a)) return true;
+      seen.add(a);
+      if (Boolean(a.unknown) !== Boolean(b.unknown)) return false;
+      if (a.elements.length !== b.elements.length) return false;
+      return a.elements.every((element, index) => bindingsEqual(element, b.elements[index], seen));
+    }
     if (a.kind === 'memberAlias') {
       return a.objectName === b.objectName && a.propertyName === b.propertyName;
     }
     if (a.kind === 'literal') return a.value === b.value;
     if (a.kind === 'sdk') return a.name === b.name;
+    // Two bound factories with different pre-bound arguments invoke with
+    // different leading components, so they are never equal.
+    if (a.kind === 'jsxFactory') return a.boundArgs === b.boundArgs;
     return true;
   };
 
@@ -1279,6 +1581,10 @@ function analyzeBundleComponents(code, options = {}) {
     if (!binding) return into;
     if (binding.kind === 'sdk') {
       into.add(binding.name);
+    } else if (binding.kind === 'array') {
+      if (seen.has(binding)) return into;
+      seen.add(binding);
+      for (const element of binding.elements) collectCandidates(element, into, seen);
     } else if (binding.kind === 'object' && !binding.unknown) {
       if (seen.has(binding)) return into;
       seen.add(binding);
@@ -1351,12 +1657,20 @@ function analyzeBundleComponents(code, options = {}) {
         unknown = true;
         continue;
       }
+      if (key === '__proto__') {
+        // `__proto__: value` sets the prototype; inherited lookups can
+        // provide any property, so the own-property snapshot is incomplete.
+        props.clear();
+        unknown = true;
+        continue;
+      }
       props.set(key, bindingFromInit(property.value, scope));
     }
     return { kind: 'object', props, unknown };
   };
 
   const bindingFromInit = (init, scope) => {
+    while (init?.type === 'ParenthesizedExpression') init = init.expression;
     if (!init) return { kind: 'unknown' };
     if (
       init.type === 'ArrowFunctionExpression' ||
@@ -1368,9 +1682,33 @@ function analyzeBundleComponents(code, options = {}) {
     if (isFrameworkRequire(init)) {
       return { kind: 'framework' };
     }
-    if (isComponentWrapperCall(init)) {
+    if (isGuestModuleRequire(init)) {
+      return { kind: 'guestNamespace' };
+    }
+    if (isComponentWrapperCall(init, scope)) {
       const wrapped = asArray(init.arguments)[0];
       return wrapped ? bindingFromInit(wrapped, scope) : { kind: 'unknown' };
+    }
+    if (init.type === 'CallExpression') {
+      const callee = init.callee;
+      if (isMemberNode(callee) && memberPropertyName(callee, scope) === 'bind') {
+        // `factory.bind(thisArg, ...)` keeps the factory; the pre-bound
+        // arguments prefix every invocation. The common unbound-call rebind
+        // `factory.call.bind(factory)` yields the factory as well.
+        const boundFactory = resolveFactoryBinding(init, scope);
+        if (boundFactory) return boundFactory;
+        if (isMemberNode(callee.object) && memberPropertyName(callee.object, scope) === 'call') {
+          const boundThis = asArray(init.arguments)[0];
+          if (
+            resolveFactoryRef(callee.object.object, scope) &&
+            boundThis &&
+            resolveFactoryRef(boundThis, scope)
+          ) {
+            return resolveFactoryBinding(boundThis, scope) ?? { kind: 'jsxFactory' };
+          }
+        }
+      }
+      return { kind: 'unknown' };
     }
     if (init.type === 'Identifier') {
       // A local binding wins over the React-internal name heuristic; only an
@@ -1393,29 +1731,178 @@ function analyzeBundleComponents(code, options = {}) {
     if (init.type === 'ObjectExpression') {
       return bindingFromObject(init, scope);
     }
+    if (init.type === 'ArrayExpression') {
+      return {
+        kind: 'array',
+        elements: asArray(init.elements).map((element) =>
+          element ? bindingFromInit(element, scope) : { kind: 'unknown' }
+        ),
+      };
+    }
+    if (init.type === 'ConditionalExpression' || init.type === 'LogicalExpression') {
+      // The initializer may come from either branch; the binding is usable
+      // only while every alternative agrees, otherwise it fails closed at
+      // the use site with the possible candidates.
+      const alternatives =
+        init.type === 'ConditionalExpression'
+          ? [bindingFromInit(init.consequent, scope), bindingFromInit(init.alternate, scope)]
+          : [bindingFromInit(init.left, scope), bindingFromInit(init.right, scope)];
+      const [first, second] = alternatives;
+      if (bindingsEqual(first, second)) return first ?? { kind: 'unknown' };
+      const candidates = new Set();
+      collectCandidates(first, candidates);
+      collectCandidates(second, candidates);
+      return candidates.size
+        ? { kind: 'unknown', candidates: Array.from(candidates).sort() }
+        : { kind: 'unknown' };
+    }
     return { kind: 'unknown' };
+  };
+
+  // Bare `Reflect.apply(...)` with the global Reflect name unshadowed.
+  const isReflectApplyCall = (node, scope) => {
+    const callee = node?.callee;
+    if (!isMemberNode(callee) || callee.object?.type !== 'Identifier') return false;
+    if (memberPropertyName(callee, scope) !== 'apply') return false;
+    if (resolveBinding(scope, callee.object.name) !== undefined) return false;
+    return callee.object.name === 'Reflect';
+  };
+
+  // Classify an invocation that renders through a React element factory.
+  // Returns false, 'direct', or a wrapper kind whose argument list must be
+  // adjusted: 'call' shifts off the leading this argument, 'apply' and
+  // 'reflectApply' wrap the real arguments in an array literal.
+  // A factory wrapped through more than one Function.prototype accessor
+  // (`createElement.call.call`, ...) cannot be resolved by the one-level
+  // rules. Detect the shape and fail closed instead of dropping the render.
+  const hasUnresolvedFactoryAccessorChain = (node, scope) => {
+    if (memberPropertyName(node, scope) === 'bind') return false;
+    let current = node;
+    let accessorLayers = 0;
+    let root;
+    while (current && isMemberNode(current)) {
+      const key = memberPropertyName(current, scope);
+      if (key === 'call' || key === 'apply') {
+        accessorLayers++;
+      } else if (accessorLayers > 0 && resolveFactoryBinding(current, scope)) {
+        return accessorLayers >= 2;
+      }
+      root = current.object;
+      current = current.object;
+    }
+    return accessorLayers >= 2 && Boolean(root && resolveFactoryBinding(root, scope));
   };
 
   const isJsxCall = (node, scope) => {
     if (node?.type !== 'CallExpression') return false;
     const callee = node.callee;
     if (callee?.type === 'Identifier') {
-      if (isJsxFactoryName(callee.name)) return true;
-      return resolveBinding(scope, callee.name)?.kind === 'jsxFactory';
+      if (isJsxFactoryName(callee.name)) return 'direct';
+      return resolveBinding(scope, callee.name)?.kind === 'jsxFactory' ? 'direct' : false;
     }
     if (isMemberNode(callee)) {
       const property = memberPropertyName(callee, scope);
-      if (property !== undefined && isJsxFactoryName(property)) return true;
+      const factoryBinding = resolveFactoryBinding(callee.object, scope);
+      if (
+        (property === 'call' || property === 'apply') &&
+        factoryBinding &&
+        !factoryBinding.factoryAccessor
+      ) {
+        return property;
+      }
+      if (property !== undefined && isJsxFactoryName(property)) return 'direct';
       if (callee.object?.type === 'Identifier') {
         const objectBinding = resolveBinding(scope, callee.object.name);
-        if (objectBinding?.kind === 'jsxFactory') return true;
+        if (objectBinding?.kind === 'jsxFactory') return 'direct';
       }
+      // A factory stored in an object member (`factory.make(Modal)`),
+      // possibly nested (`api.factory.make(Modal)`).
+      if (resolveFactoryBinding(callee, scope)) return 'direct';
+    }
+    if (callee?.type === 'CallExpression') {
+      // An immediately invoked `factory.bind(thisArg, ...)` calls the
+      // factory itself; handleJsx reattaches the pre-bound arguments.
+      if (
+        isMemberNode(callee.callee) &&
+        memberPropertyName(callee.callee, scope) === 'bind' &&
+        resolveFactoryBinding(callee.callee.object, scope)
+      ) {
+        return 'direct';
+      }
+    }
+    if (
+      isReflectApplyCall(node, scope) &&
+      resolveFactoryBinding(asArray(node.arguments)[0], scope)
+    ) {
+      return 'reflectApply';
     }
     return false;
   };
 
-  const handleJsx = (node, scope) => {
-    const first = asArray(node.arguments)[0];
+  // Resolve the factory binding for every supported invocation form so the
+  // pre-bound argument prefix survives direct/call/apply/Reflect.apply.
+  const jsxFactoryBindingForCall = (node, kind, scope) => {
+    const callee = node.callee;
+    if (kind === 'direct') {
+      return resolveFactoryBinding(callee, scope);
+    }
+    if (kind === 'call' || kind === 'apply') {
+      const binding = resolveFactoryBinding(callee?.object, scope);
+      return binding && !binding.factoryAccessor ? binding : undefined;
+    }
+    if (kind === 'reflectApply') {
+      return resolveFactoryBinding(asArray(node.arguments)[0], scope);
+    }
+    return undefined;
+  };
+
+  const handleJsx = (node, scope, kind) => {
+    let args = asArray(node.arguments);
+    if (kind === 'call') {
+      // `factory.call(thisArg, component, ...)` drops the this argument.
+      args = args.slice(1);
+    } else if (kind === 'apply' || kind === 'reflectApply') {
+      // `factory.apply(thisArg, [component, ...])` and
+      // `Reflect.apply(factory, thisArg, [component, ...])` carry the real
+      // arguments in an array; any other shape is not statically trackable.
+      const list = kind === 'apply' ? args[1] : args[2];
+      if (list?.type !== 'ArrayExpression') {
+        failClosed(
+          'Unable to establish component provenance for a JSX factory apply call with a non-literal argument array'
+        );
+        return;
+      }
+      args = asArray(list.elements);
+    }
+    // Pre-bound factory arguments (`createElement.bind(null, Modal)`) prefix
+    // every invocation of the bound factory, including call/apply wrappers.
+    const boundFactory = jsxFactoryBindingForCall(node, kind, scope);
+    if (boundFactory?.boundArgs?.length) {
+      args = [...boundFactory.boundArgs, ...args];
+    }
+    // Resolved at bind time so later reassignments of the source binding do
+    // not change which component the bound factory renders.
+    const boundBindings = boundFactory?.boundBindings;
+    if (boundBindings?.length) {
+      const firstBound = boundBindings[0];
+      if (firstBound?.kind === 'sdk') {
+        components.add(firstBound.name);
+        return;
+      }
+      if (firstBound?.kind === 'literal' && typeof firstBound.value === 'string') {
+        components.add(firstBound.value);
+        return;
+      }
+      if (
+        firstBound?.kind === 'local' ||
+        firstBound?.kind === 'framework' ||
+        firstBound?.kind === 'jsxFactory'
+      ) {
+        return;
+      }
+      failClosed('Unable to establish component provenance for a bound factory argument');
+    }
+    const first = args[0];
     if (!first) return;
 
     if (
@@ -1452,45 +1939,30 @@ function analyzeBundleComponents(code, options = {}) {
         failClosed('Unable to establish component provenance for a dynamic JSX component');
         return;
       }
-      // React internals (`import_react.Fragment`) stay renderable but are not
-      // SDK capability components. Only trust the internal name when it comes
-      // from the React namespace; `<bag.Fragment />` on an unknown object must
-      // still fail closed.
-      const objectName = first.object?.type === 'Identifier' ? first.object.name : undefined;
-      const objectBinding = objectName ? resolveBinding(scope, objectName) : undefined;
-      // Trust the bundler namespace name unless the guest defined a local
-      // object with that name; `const import_guest = { View: Modal }` must be
-      // analyzed as an object.
-      if (objectBinding?.kind !== 'object' && objectName && /^import_guest\d*$/.test(objectName)) {
-        components.add(property);
+      // Rendering the runtime guest slot directly is rendering the bundle's
+      // already-analyzed default export — not a new capability.
+      if (isGuestSlotMember(first)) {
         return;
       }
-      // Trust the `import_react*` name only when the variable has no local
-      // binding; a guest-defined object with that name must be analyzed.
-      const isReactNamespace =
-        objectBinding?.kind === 'framework' ||
-        (objectBinding === undefined && /^import_react\d*$/.test(objectName ?? ''));
-      if (isReactInternalName(property) && isReactNamespace) {
+      // Resolve the member with the same binding logic as alias initializers,
+      // so object snapshots, the guest namespace, React internals, and a
+      // local's `.default` read all agree with `const X = member` analysis.
+      const memberBinding = bindingFromMember(first, scope);
+      if (memberBinding?.kind === 'sdk') {
+        components.add(memberBinding.name);
         return;
       }
       if (
-        isJsxFactoryName(property) &&
-        (isReactNamespace || objectBinding?.kind === 'jsxFactory')
+        memberBinding?.kind === 'local' ||
+        memberBinding?.kind === 'framework' ||
+        memberBinding?.kind === 'jsxFactory'
       ) {
         return;
       }
-
-      if (objectBinding?.kind === 'object') {
-        const propertyBinding = resolveBindingValue(objectBinding.props.get(property), new Set());
-        if (propertyBinding?.kind === 'sdk') {
-          components.add(propertyBinding.name);
-          return;
-        }
-        if (propertyBinding?.kind === 'local') return;
-      }
-      if (objectBinding?.kind === 'framework') {
-        return;
-      }
+      // A nested member on the React namespace (`React.Native.Component`)
+      // resolves to no tracked binding; the root framework check below keeps
+      // it renderable.
+      const objectName = first.object?.type === 'Identifier' ? first.object.name : undefined;
       let root = first.object;
       while (root && isMemberNode(root)) {
         root = root.object;
@@ -1498,8 +1970,11 @@ function analyzeBundleComponents(code, options = {}) {
       if (root?.type === 'Identifier' && resolveBinding(scope, root.name)?.kind === 'framework') {
         return;
       }
+      const candidates = memberBinding?.candidates?.length
+        ? ` (possible: ${memberBinding.candidates.join(', ')})`
+        : '';
       failClosed(
-        `Unable to establish component provenance for "${objectName ?? 'member'}.${property}"`
+        `Unable to establish component provenance for "${objectName ?? 'member'}.${property}"${candidates}`
       );
       return;
     }
@@ -1507,7 +1982,9 @@ function analyzeBundleComponents(code, options = {}) {
     failClosed('Unable to establish component provenance for a dynamic JSX component');
   };
 
-  const declarePattern = (pattern, initBinding, targetScope) => {
+  const isUnknownBinding = (binding) => !binding || binding.kind === 'unknown';
+
+  const declarePattern = (pattern, initBinding, targetScope, valueScope) => {
     if (
       pattern?.type === 'ObjectPattern' &&
       initBinding?.kind === 'object' &&
@@ -1522,15 +1999,116 @@ function analyzeBundleComponents(code, options = {}) {
           continue;
         }
         const key = propertyName(property);
-        const value = key === undefined ? undefined : initBinding.props.get(key);
-        if (key === undefined || !value || property.value?.type !== 'Identifier') {
-          for (const name of patternNames(property.value ?? property)) {
+        const target = property.value;
+        if (key === undefined) {
+          // A computed or unresolved key cannot prove the property is absent,
+          // so a default must not replace a value that may be present.
+          for (const name of patternNames(target)) {
             declare(targetScope, name, { kind: 'unknown' });
           }
           continue;
         }
-        declare(targetScope, property.value.name, resolveBindingValue(value, new Set()));
+        const value = initBinding.props.get(key);
+        if (target?.type === 'AssignmentPattern') {
+          // The default only applies when the property is absent. An unknown
+          // present value must stay unknown: JavaScript will not take the
+          // default, and the actual value may be a different component.
+          let binding;
+          if (value === undefined) {
+            binding = bindingFromInit(target.right, valueScope ?? targetScope);
+          } else {
+            const resolved = resolveBindingValue(value, new Set());
+            binding = isUnknownBinding(resolved) ? { kind: 'unknown' } : resolved;
+          }
+          if (target.left?.type === 'Identifier') {
+            declare(targetScope, target.left.name, binding);
+          } else {
+            for (const name of patternNames(target.left)) {
+              declare(targetScope, name, { kind: 'unknown' });
+            }
+          }
+          continue;
+        }
+        if (key === undefined || !value || target?.type !== 'Identifier') {
+          for (const name of patternNames(target ?? property)) {
+            declare(targetScope, name, { kind: 'unknown' });
+          }
+          continue;
+        }
+        declare(targetScope, target.name, resolveBindingValue(value, new Set()));
       }
+      return;
+    }
+    if (pattern?.type === 'ArrayPattern' && initBinding?.kind === 'array' && !initBinding.unknown) {
+      // `const [C] = [Modal]`: resolve each element from the array snapshot.
+      asArray(pattern.elements).forEach((element, index) => {
+        if (!element) return;
+        if (element.type === 'RestElement') {
+          for (const name of patternNames(element)) {
+            declare(targetScope, name, { kind: 'unknown' });
+          }
+          return;
+        }
+        const elementBinding =
+          index < initBinding.elements.length ? initBinding.elements[index] : undefined;
+        if (element.type === 'AssignmentPattern') {
+          // The default only applies to a missing element. A present but
+          // unknown element must stay unknown, because JavaScript will not
+          // take the default.
+          let resolved;
+          if (elementBinding === undefined) {
+            resolved = bindingFromInit(element.right, valueScope ?? targetScope);
+          } else {
+            const value = resolveBindingValue(elementBinding, new Set());
+            resolved = isUnknownBinding(value) ? { kind: 'unknown' } : value;
+          }
+          if (element.left?.type === 'Identifier') {
+            declare(targetScope, element.left.name, resolved);
+          } else {
+            for (const name of patternNames(element.left)) {
+              declare(targetScope, name, { kind: 'unknown' });
+            }
+          }
+          return;
+        }
+        if (element.type === 'Identifier') {
+          declare(
+            targetScope,
+            element.name,
+            elementBinding === undefined
+              ? { kind: 'unknown' }
+              : resolveBindingValue(elementBinding, new Set())
+          );
+          return;
+        }
+        declarePattern(element, elementBinding, targetScope, valueScope);
+      });
+      return;
+    }
+    for (const name of patternNames(pattern)) {
+      declare(targetScope, name, { kind: 'unknown' });
+    }
+  };
+
+  // Declare a function parameter. A default value is resolved eagerly against
+  // the enclosing scope: `function f(C = Modal)` binds a statically known
+  // component, while a plain parameter stays unknown and fails closed at the
+  // use site.
+  const declareParameter = (parameter, targetScope, valueScope) => {
+    const pattern = parameter?.type === 'FormalParameter' ? parameter.pattern : parameter;
+    if (pattern?.type === 'AssignmentPattern') {
+      // A parameter default only applies when the caller passes undefined.
+      // The caller can supply any value, so the parameter remains unknown
+      // until a call site is replayed with a known argument.
+      if (pattern.left?.type === 'Identifier') {
+        declare(targetScope, pattern.left.name, { kind: 'unknown' });
+        return;
+      }
+      declarePattern(pattern.left, { kind: 'unknown' }, targetScope, valueScope);
+      return;
+    }
+    if (pattern?.type === 'Identifier') {
+      declare(targetScope, pattern.name, { kind: 'unknown' });
       return;
     }
     for (const name of patternNames(pattern)) {
@@ -1559,7 +2137,7 @@ function analyzeBundleComponents(code, options = {}) {
           if (declarator.id?.type === 'Identifier') {
             declare(targetScope, declarator.id.name, binding);
           } else {
-            declarePattern(declarator.id, binding, targetScope);
+            declarePattern(declarator.id, binding, targetScope, scope);
           }
         }
       }
@@ -1581,6 +2159,8 @@ function analyzeBundleComponents(code, options = {}) {
         if (binding?.kind === 'object') {
           binding.unknown = true;
           binding.props.clear();
+        } else if (binding?.kind === 'array') {
+          binding.unknown = true;
         }
       }
       return;
@@ -1591,6 +2171,176 @@ function analyzeBundleComponents(code, options = {}) {
       }
       const value = node[key];
       if (value && typeof value === 'object') taintMemberAssignmentTargets(value, scope);
+    }
+  };
+
+  // `Object.assign`/`Object.defineProperty`/`Object.defineProperties` and the
+  // `Reflect.set`/`Reflect.defineProperty` equivalents can add or replace
+  // properties of a tracked object without a tracked assignment, so the
+  // object snapshot is tainted and later reads fail closed. Mutating the
+  // keel/guest namespace itself cannot be tracked at all and rejects. The
+  // global helper names are trusted only while unshadowed, and a literal or
+  // complex first argument touches no tracked binding.
+  const taintObjectMutation = (node, scope) => {
+    const callee = node.callee;
+    if (!isMemberNode(callee) || callee.object?.type !== 'Identifier') return;
+    const key = memberPropertyName(callee, scope);
+    if (key === undefined) return;
+    const objectName = callee.object.name;
+    if (resolveBinding(scope, objectName) !== undefined) return;
+    const isObjectApi =
+      objectName === 'Object' &&
+      (key === 'assign' || key === 'defineProperty' || key === 'defineProperties');
+    const isReflectApi = objectName === 'Reflect' && (key === 'set' || key === 'defineProperty');
+    if (!isObjectApi && !isReflectApi) return;
+    const target = asArray(node.arguments)[0];
+    if (target?.type !== 'Identifier') return;
+    const binding = resolveBinding(scope, target.name);
+    if (binding?.kind === 'object') {
+      binding.unknown = true;
+      binding.props.clear();
+      return;
+    }
+    if (binding?.kind === 'array') {
+      binding.unknown = true;
+      return;
+    }
+    // A keel/guest namespace (by initializer, or by the bundler name when no
+    // binding exists) is trusted at member-read sites; mutating it would make
+    // that trust unsound, so reject instead of tracking.
+    if (
+      binding?.kind === 'guestNamespace' ||
+      (binding === undefined && /^import_guest\d*$/.test(target.name))
+    ) {
+      throw new Error(
+        'Mutating the keel/guest namespace cannot be analyzed for component provenance'
+      );
+    }
+  };
+
+  const ARRAY_MUTATING_METHODS = new Set([
+    'splice',
+    'reverse',
+    'sort',
+    'fill',
+    'copyWithin',
+    'push',
+    'pop',
+    'shift',
+    'unshift',
+  ]);
+
+  const isArrayPrototypeObject = (node, scope) => {
+    if (!isMemberNode(node)) return false;
+    if (memberPropertyName(node, scope) !== 'prototype') return false;
+    const root = node.object;
+    if (root?.type !== 'Identifier' || root.name !== 'Array') return false;
+    return resolveBinding(scope, 'Array') === undefined;
+  };
+
+  // A tracked array mutated in place no longer matches its initializer
+  // snapshot. Direct mutator calls and mutator `call`/`apply` forms invalidate
+  // the target array; other array methods leave the snapshot intact.
+  const isTrackedArray = (node, scope) => {
+    if (!node) return false;
+    if (node.type === 'Identifier') {
+      return resolveBinding(scope, node.name)?.kind === 'array';
+    }
+    if (isMemberNode(node)) {
+      const key = memberPropertyName(node, scope);
+      const holder = resolveObjectAtPath(node, scope);
+      return Boolean(holder && key !== undefined && holder.props.get(key)?.kind === 'array');
+    }
+    return false;
+  };
+
+  const isKnownArrayMethod = (node, scope) => {
+    if (!isMemberNode(node)) return false;
+    const method = memberPropertyName(node, scope);
+    if (!method) return false;
+    if (node.object?.type === 'Identifier') {
+      if (resolveBinding(scope, node.object.name)?.kind === 'array') return true;
+    }
+    if (isMemberNode(node.object) && isArrayPrototypeObject(node.object, scope)) return true;
+    if (isMemberNode(node.object)) {
+      const key = memberPropertyName(node.object, scope);
+      const holder = resolveObjectAtPath(node.object, scope);
+      if (holder && key !== undefined && holder.props.get(key)?.kind === 'array') {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const taintArrayMutation = (node, scope) => {
+    const callee = node.callee;
+    if (!isMemberNode(callee)) return;
+    const method = memberPropertyName(callee, scope);
+
+    const invalidate = (target) => {
+      if (!target) return;
+      if (target.type === 'Identifier') {
+        const binding = resolveBinding(scope, target.name);
+        if (binding?.kind === 'array') binding.unknown = true;
+        return;
+      }
+      if (isMemberNode(target)) {
+        const key = memberPropertyName(target, scope);
+        const holder = resolveObjectAtPath(target, scope);
+        const child = holder && key !== undefined ? holder.props.get(key) : undefined;
+        if (child?.kind === 'array') child.unknown = true;
+      }
+    };
+
+    if (method === undefined) {
+      // A dynamic method name can select any mutator (`arr[key()]()`).
+      invalidate(callee.object);
+      return;
+    }
+
+    if (ARRAY_MUTATING_METHODS.has(method)) {
+      invalidate(callee.object);
+      return;
+    }
+
+    if (
+      method === 'apply' &&
+      callee.object?.type === 'Identifier' &&
+      callee.object.name === 'Reflect' &&
+      resolveBinding(scope, 'Reflect') === undefined
+    ) {
+      // `Reflect.apply(Array.prototype.splice, arr, ...)`
+      const fn = asArray(node.arguments)[0];
+      const target = asArray(node.arguments)[1];
+      const prototypeMethod = isMemberNode(fn) ? memberPropertyName(fn, scope) : undefined;
+      if (prototypeMethod && ARRAY_MUTATING_METHODS.has(prototypeMethod)) {
+        invalidate(target);
+        return;
+      }
+      // An unresolved function applied to a tracked array may mutate it.
+      if (isTrackedArray(target, scope)) invalidate(target);
+      return;
+    }
+
+    if (method === 'call' || method === 'apply') {
+      // `Array.prototype.splice.call(arr, ...)` and `arr.splice.call(arr, ...)`.
+      const prototypeMethod = isMemberNode(callee.object)
+        ? memberPropertyName(callee.object, scope)
+        : undefined;
+      if (prototypeMethod && ARRAY_MUTATING_METHODS.has(prototypeMethod)) {
+        const receiver = callee.object?.object;
+        const receiverName = receiver?.type === 'Identifier' ? receiver.name : undefined;
+        const receiverBinding = receiverName ? resolveBinding(scope, receiverName) : undefined;
+        if (isArrayPrototypeObject(receiver, scope) || receiverBinding?.kind === 'array') {
+          invalidate(asArray(node.arguments)[0]);
+          return;
+        }
+      }
+      // An unresolved receiver can be a mutator alias (`reverse.call(arr)`).
+      if (!isKnownArrayMethod(callee.object, scope)) {
+        const target = asArray(node.arguments)[0];
+        if (isTrackedArray(target, scope)) invalidate(target);
+      }
     }
   };
 
@@ -1624,9 +2374,7 @@ function analyzeBundleComponents(code, options = {}) {
           declare(functionScope, node.id.name, { kind: 'local' });
         }
         for (const parameter of asArray(node.params)) {
-          for (const name of patternNames(parameter)) {
-            declare(functionScope, name, { kind: 'unknown' });
-          }
+          declareParameter(parameter, functionScope, scope);
         }
         if (node.body?.type === 'BlockStatement') {
           hoistDeclarations(node.body.body, functionScope);
@@ -1643,7 +2391,7 @@ function analyzeBundleComponents(code, options = {}) {
           if (declaration.id?.type === 'Identifier') {
             declare(targetScope, declaration.id.name, binding);
           } else {
-            declarePattern(declaration.id, binding, targetScope);
+            declarePattern(declaration.id, binding, targetScope, scope);
           }
           walk(declaration.init, scope);
         }
@@ -1659,6 +2407,26 @@ function analyzeBundleComponents(code, options = {}) {
         const alternateScope = node.alternate ? cloneScope(scope) : scope;
         if (node.alternate) walk(node.alternate, alternateScope);
         joinBranches(scope, [consequentScope, alternateScope]);
+        return;
+      }
+      case 'ConditionalExpression': {
+        walk(node.test, scope);
+        // The two arms are mutually exclusive; analyze each in its own
+        // cloned state and join conservatively, exactly like an if/else.
+        const consequentScope = cloneScope(scope);
+        walk(node.consequent, consequentScope);
+        const alternateScope = cloneScope(scope);
+        walk(node.alternate, alternateScope);
+        joinBranches(scope, [consequentScope, alternateScope]);
+        return;
+      }
+      case 'LogicalExpression': {
+        walk(node.left, scope);
+        // The right operand may not execute at all (`a && (C = b)`), so its
+        // state joins with the pre-expression state.
+        const rightScope = cloneScope(scope);
+        walk(node.right, rightScope);
+        joinBranches(scope, [scope, rightScope]);
         return;
       }
       case 'SwitchStatement': {
@@ -1735,6 +2503,10 @@ function analyzeBundleComponents(code, options = {}) {
               } else {
                 objectBinding.props.set(key, valueBinding);
               }
+            } else if (objectBinding?.kind === 'array') {
+              // An indexed write changes the snapshot array destructuring
+              // later reads; invalidate it instead of keeping stale elements.
+              objectBinding.unknown = true;
             }
           } else {
             // Member write on a nested object (`a.b.C = ...`): taint the root.
@@ -1756,11 +2528,19 @@ function analyzeBundleComponents(code, options = {}) {
         return;
       }
       case 'CallExpression': {
-        if (isJsxCall(node, scope)) {
-          handleJsx(node, scope);
+        if (isMemberNode(node.callee) && hasUnresolvedFactoryAccessorChain(node.callee, scope)) {
+          failClosed(
+            'Unable to establish component provenance for a chained JSX factory accessor call'
+          );
+        }
+        const jsxCallKind = isJsxCall(node, scope);
+        if (jsxCallKind) {
+          handleJsx(node, scope, jsxCallKind);
           for (const argument of node.arguments ?? []) walk(argument, scope);
           return;
         }
+        taintObjectMutation(node, scope);
+        taintArrayMutation(node, scope);
         break;
       }
       default:
@@ -1813,7 +2593,12 @@ function isHostServiceRequire(node) {
 }
 
 function propertyName(property) {
-  if (!property || (property.type !== 'Property' && property.type !== 'ObjectProperty')) {
+  if (
+    !property ||
+    (property.type !== 'Property' &&
+      property.type !== 'ObjectProperty' &&
+      property.type !== 'BindingProperty')
+  ) {
     return undefined;
   }
   const key = property.key;
@@ -1867,6 +2652,19 @@ function analyzeServiceUsage(code) {
     while (current && !current.isFunction) current = current.parent;
     return current ?? scope;
   };
+  // Whether the write path from `scope` up to the scope holding the binding
+  // crosses a function boundary: the declaration walk executes function
+  // bodies eagerly, but the body may never run at runtime, so a captured
+  // write cannot be treated as an unconditional outer assignment.
+  const crossesFunctionBoundary = (from, to) => {
+    let current = from;
+    while (current && current !== to) {
+      if (current.isFunction) return true;
+      current = current.parent;
+    }
+    return false;
+  };
+
   const assignBinding = (scope, name, value) => {
     let current = scope;
     while (current) {
@@ -1875,6 +2673,25 @@ function analyzeServiceUsage(code) {
     }
     const branchRoot = scope.branchRoot;
     if (current) {
+      if (crossesFunctionBoundary(scope, current)) {
+        // Captured write from inside a function body: keep the function's
+        // own view (shadow in the assigning scope) and merge the outer
+        // binding into the union of the possible values, so a later call
+        // records every alternative (or fails closed).
+        scope.bindings.set(name, value);
+        const alternatives = [];
+        for (const candidate of [current.bindings.get(name), value]) {
+          if (!candidate || candidate.kind === 'unknown') continue;
+          if (!alternatives.some((entry) => valuesEqual(candidate, entry))) {
+            alternatives.push(candidate);
+          }
+        }
+        current.bindings.set(
+          name,
+          alternatives.length ? { kind: 'union', values: alternatives } : UNKNOWN
+        );
+        return;
+      }
       if (branchRoot && current !== branchRoot && current.branchRoot !== branchRoot) {
         branchRoot.bindings.set(name, value);
       } else {
@@ -1891,6 +2708,18 @@ function analyzeServiceUsage(code) {
       current = current.parent;
     }
     return UNKNOWN;
+  };
+
+  // resolveBinding cannot distinguish an unknown binding from a missing one;
+  // global helper names (Object/Reflect) are trusted only when no binding
+  // with that name exists on any scope level.
+  const hasLocalBinding = (scope, name) => {
+    let current = scope;
+    while (current) {
+      if (current.bindings.has(name)) return true;
+      current = current.parent;
+    }
+    return false;
   };
 
   const patternNames = (node) => {
@@ -2016,7 +2845,12 @@ function analyzeServiceUsage(code) {
       );
     }
     if (a.kind === 'literal') return a.value === b.value;
-    if (a.kind === 'method') return a.name === b.name;
+    // Two methods with different invocation accessors (`.call` vs direct) or
+    // different pre-bound arguments shift different argument positions, so
+    // they are not equal.
+    if (a.kind === 'method') {
+      return a.name === b.name && a.accessor === b.accessor && a.boundArgs === b.boundArgs;
+    }
     if (a.kind === 'function') return a.node === b.node;
     return true;
   };
@@ -2051,7 +2885,44 @@ function analyzeServiceUsage(code) {
     }
   };
 
+  // A bound method argument is only safe to re-read at invocation time when
+  // its AST is self-contained. Any identifier, member or call can change
+  // between bind and invocation, so the manifest would otherwise describe a
+  // later value instead of the one captured by bind.
+  const isStableBindingArgument = (node) => {
+    if (!node) return true;
+    if (
+      node.type === 'StringLiteral' ||
+      node.type === 'NumericLiteral' ||
+      node.type === 'BooleanLiteral' ||
+      node.type === 'NullLiteral' ||
+      node.type === 'Literal'
+    ) {
+      return true;
+    }
+    if (node.type === 'TemplateLiteral') {
+      return (node.expressions?.length ?? 0) === 0;
+    }
+    if (node.type === 'ObjectExpression') {
+      return asArray(node.properties).every((property) => {
+        if (!property) return true;
+        if (property.type !== 'Property' && property.type !== 'ObjectProperty') {
+          return false;
+        }
+        if (property.computed) return false;
+        return isStableBindingArgument(property.value);
+      });
+    }
+    if (node.type === 'ArrayExpression') {
+      return asArray(node.elements).every(
+        (element) => element === null || isStableBindingArgument(element)
+      );
+    }
+    return false;
+  };
+
   const valueFromExpression = (node, scope) => {
+    while (node?.type === 'ParenthesizedExpression') node = node.expression;
     if (!node) return UNKNOWN;
     // Bun lowers `import { call } from 'host:service'` to
     // `__toESM(require('host:service'))`; treat the namespace expression as
@@ -2084,7 +2955,42 @@ function analyzeServiceUsage(code) {
             return { kind: 'method', name: key };
           }
         }
+        // `on.call` / `on.apply` of a resolved service method keep the method
+        // provenance with an accessor marker: invoking them shifts or
+        // array-wraps the real arguments (handled in analyzeCall).
+        if (objectValue.kind === 'method' && !objectValue.accessor) {
+          if (key === 'call') {
+            return {
+              kind: 'method',
+              name: objectValue.name,
+              accessor: 'call',
+              boundArgs: objectValue.boundArgs,
+            };
+          }
+          if (key === 'apply') {
+            return {
+              kind: 'method',
+              name: objectValue.name,
+              accessor: 'apply',
+              boundArgs: objectValue.boundArgs,
+            };
+          }
+        }
         return UNKNOWN;
+      }
+      // `<method expression>.call` / `.apply` where the object expression
+      // resolves to a method (e.g. `service.on.call`); the member chain
+      // resolver below cannot see through the accessor member.
+      if (key === 'call' || key === 'apply') {
+        const bound = valueFromExpression(node.object, scope);
+        if (bound.kind === 'method' && !bound.accessor) {
+          return {
+            kind: 'method',
+            name: bound.name,
+            accessor: key,
+            boundArgs: bound.boundArgs,
+          };
+        }
       }
       const parent = resolveMemberParent(node, scope);
       if (parent) {
@@ -2097,10 +3003,35 @@ function analyzeServiceUsage(code) {
       return UNKNOWN;
     }
     if (node.type === 'CallExpression') {
-      // `on.bind(...)` keeps the service-method provenance.
       if (isMemberNode(node.callee) && memberKey(node.callee, scope) === 'bind') {
+        // `on.bind(...)` keeps the service-method provenance.
         const bound = valueFromExpression(node.callee.object, scope);
-        if (bound.kind === 'method') return bound;
+        // `on.bind(...)` keeps the service-method provenance; pre-bound
+        // arguments (`.bind(thisArg, 'event', ...)`) prefix every invocation.
+        if (bound.kind === 'method' && !bound.accessor) {
+          const incomingArgs = asArray(node.arguments).slice(1);
+          if (incomingArgs.some((argument) => !isStableBindingArgument(argument))) {
+            throw new Error('Unable to establish host:service bound argument provenance');
+          }
+          const boundArgs = [...(bound.boundArgs ?? []), ...incomingArgs];
+          return boundArgs.length ? { kind: 'method', name: bound.name, boundArgs } : bound;
+        }
+        // `on.call.bind(on)` rebinds the unbound call; invoking the result
+        // passes the real arguments straight through, so it is the method
+        // itself (plus any pre-bound arguments after the receiver).
+        if (bound.kind === 'method' && bound.accessor === 'call') {
+          const receiver = valueFromExpression(asArray(node.arguments)[0], scope);
+          if (receiver.kind === 'method' && receiver.name === bound.name && !receiver.accessor) {
+            const incomingArgs = asArray(node.arguments).slice(1);
+            if (incomingArgs.some((argument) => !isStableBindingArgument(argument))) {
+              throw new Error('Unable to establish host:service bound argument provenance');
+            }
+            const boundArgs = [...(bound.boundArgs ?? []), ...incomingArgs];
+            return boundArgs.length
+              ? { kind: 'method', name: bound.name, boundArgs }
+              : { kind: 'method', name: bound.name };
+          }
+        }
       }
       return UNKNOWN;
     }
@@ -2127,11 +3058,13 @@ function analyzeServiceUsage(code) {
             continue;
           }
           if (spread.kind === 'object') {
-            // The spread can override every earlier property.
-            props.clear();
-            if (spread.unknown) unknown = true;
+            // A known object spread overrides exactly its own keys — a later
+            // literal key still re-establishes its value. Only an unknown
+            // spread can override every earlier property.
+            if (spread.unknown) props.clear();
             serviceSource = serviceSource || spread.serviceSource;
             for (const [key, value] of spread.props) props.set(key, value);
+            if (spread.unknown) unknown = true;
             continue;
           }
           props.clear();
@@ -2140,6 +3073,12 @@ function analyzeServiceUsage(code) {
         }
         const key = propertyName(property);
         if (key === undefined) {
+          props.clear();
+          unknown = true;
+          continue;
+        }
+        if (key === '__proto__') {
+          // Prototype setters can provide any own-property key at lookup time.
           props.clear();
           unknown = true;
           continue;
@@ -2189,19 +3128,37 @@ function analyzeServiceUsage(code) {
   };
 
   // Evaluate the final value of a string property in object-literal order.
-  // A spread or dynamic key after the last literal occurrence can override it;
-  // a later literal re-establishes a statically known value.
-  const effectiveStringProperty = (argument, key) => {
+  // A known object spread only overrides the keys it actually carries; an
+  // unknown spread or dynamic key can override anything and fails closed. A
+  // later literal re-establishes a statically known value.
+  const effectiveStringProperty = (argument, key, scope) => {
     if (!argument || argument.type !== 'ObjectExpression') return undefined;
     let value;
     let mayOverride = false;
     for (const property of asArray(argument.properties)) {
       if (property.type === 'SpreadElement' || property.type === 'SpreadProperty') {
+        const spread = valueFromExpression(property.argument, scope);
+        if (spread.kind === 'object' && !spread.unknown) {
+          if (spread.props.has(key)) {
+            const spreadValue = spread.props.get(key);
+            if (spreadValue?.kind === 'literal' && typeof spreadValue.value === 'string') {
+              value = spreadValue.value;
+            } else {
+              throw new Error(`host:service input requires a literal "${key}"`);
+            }
+          }
+          continue;
+        }
         mayOverride = true;
         continue;
       }
       const name = propertyName(property);
       if (name === undefined) {
+        mayOverride = true;
+        continue;
+      }
+      if (name === '__proto__') {
+        // An inherited property can override the key during destructuring.
         mayOverride = true;
         continue;
       }
@@ -2279,8 +3236,8 @@ function analyzeServiceUsage(code) {
     }
   });
 
-  const recordCall = (node, method) => {
-    const argument = node.arguments?.[0];
+  const recordCall = (args, method, scope) => {
+    const argument = args?.[0];
     if (method === 'on') {
       if (
         (argument?.type === 'StringLiteral' || argument?.type === 'Literal') &&
@@ -2289,7 +3246,7 @@ function analyzeServiceUsage(code) {
         events.add(argument.value);
         return;
       }
-      const event = effectiveStringProperty(argument, 'event');
+      const event = effectiveStringProperty(argument, 'event', scope);
       if (event) {
         events.add(event);
         return;
@@ -2299,11 +3256,42 @@ function analyzeServiceUsage(code) {
     if (!argument || argument.type !== 'ObjectExpression') {
       throw new Error(`host:service.${method} requires an object literal`);
     }
-    const route = effectiveStringProperty(argument, 'route');
+    const route = effectiveStringProperty(argument, 'route', scope);
     if (!route) {
       throw new Error(`host:service.${method} requires a literal "route"`);
     }
     rpc.add(route);
+  };
+
+  // Real argument list of an invocation of a resolved method value: a `.call`
+  // wrapper shifts off the leading this argument, an `.apply` wrapper carries
+  // the arguments in an array literal (anything else fails closed), and a
+  // bound method prefixes its pre-bound arguments.
+  const invocationArguments = (node, calleeValue) => {
+    let args;
+    if (calleeValue?.kind === 'method' && calleeValue.accessor === 'call') {
+      args = asArray(node.arguments).slice(1);
+    } else if (calleeValue?.kind === 'method' && calleeValue.accessor === 'apply') {
+      const list = asArray(node.arguments)[1];
+      if (!list || list.type !== 'ArrayExpression') {
+        throw new Error(`host:service.${calleeValue.name}.apply requires a literal argument array`);
+      }
+      args = asArray(list.elements);
+    } else if (calleeValue?.kind === 'method' && calleeValue.accessor === 'reflectApply') {
+      const list = asArray(node.arguments)[2];
+      if (!list || list.type !== 'ArrayExpression') {
+        throw new Error(
+          `Reflect.apply of host:service.${calleeValue.name} requires a literal argument array`
+        );
+      }
+      args = asArray(list.elements);
+    } else {
+      args = asArray(node.arguments);
+    }
+    if (calleeValue?.kind === 'method' && calleeValue.boundArgs?.length) {
+      return [...calleeValue.boundArgs, ...args];
+    }
+    return args;
   };
 
   const callStack = new Set();
@@ -2333,10 +3321,40 @@ function analyzeServiceUsage(code) {
     }
   };
 
+  // A service method wrapped through more than one Function.prototype
+  // accessor (`on.call.call`, `on.bind(x).call`, ...) cannot be resolved by
+  // the one-level accessor rules. A single `call`/`apply` member may simply
+  // be the host:service method name itself (`import_host_service.call(...)`),
+  // so only a chain with at least two accessor layers is suspicious. Detect
+  // that shape and fail closed instead of silently dropping the invocation.
+  const hasUnresolvedServiceAccessorChain = (node, scope) => {
+    if (memberKey(node, scope) === 'bind') {
+      // `on.call.bind(on)` is a bind operation, not a service invocation.
+      return false;
+    }
+    let current = node;
+    let accessorLayers = 0;
+    let root;
+    while (current && isMemberNode(current)) {
+      const key = memberKey(current, scope);
+      if (key === 'call' || key === 'apply' || key === 'bind') accessorLayers++;
+      root = current.object;
+      current = current.object;
+    }
+    if (accessorLayers < 2 || !root) return false;
+    const rootValue = valueFromExpression(root, scope);
+    return rootValue.kind === 'method' || rootValue.kind === 'service';
+  };
+
   const analyzeCall = (node, scope) => {
     let method;
     let calleeValue = UNKNOWN;
     const callee = node.callee;
+    if (isMemberNode(callee) && hasUnresolvedServiceAccessorChain(callee, scope)) {
+      throw new Error(
+        'Unable to establish host:service method provenance for a chained accessor call'
+      );
+    }
     if (callee?.type === 'Identifier') {
       calleeValue = resolveBinding(scope, callee.name);
       if (calleeValue.kind === 'method') method = calleeValue.name;
@@ -2348,6 +3366,21 @@ function analyzeServiceUsage(code) {
         method = key && SERVICE_METHOD_NAMES.has(key) ? key : undefined;
         calleeValue = method ? { kind: 'method', name: method } : UNKNOWN;
       } else {
+        // `M.call(...)` / `M.apply(...)` where M resolves to a service
+        // method: keep the method provenance with the accessor marker so the
+        // real arguments are shifted or unwrapped below.
+        if ((key === 'call' || key === 'apply') && callee.object) {
+          const bound = valueFromExpression(callee.object, scope);
+          if (bound.kind === 'method') {
+            method = bound.name;
+            calleeValue = {
+              kind: 'method',
+              name: bound.name,
+              accessor: key,
+              boundArgs: bound.boundArgs,
+            };
+          }
+        }
         const objectName = callee.object?.type === 'Identifier' ? callee.object.name : undefined;
         if (objectName && key !== undefined) {
           const objectValue = resolveBinding(scope, objectName);
@@ -2383,11 +3416,40 @@ function analyzeServiceUsage(code) {
       }
     }
 
+    // `Reflect.apply(M, thisArg, [args])` where M resolves to a service
+    // method: record the invocation with the array elements as arguments.
+    // The global Reflect name is trusted only while unshadowed.
+    if (
+      !method &&
+      isMemberNode(callee) &&
+      memberKey(callee, scope) === 'apply' &&
+      callee.object?.type === 'Identifier' &&
+      callee.object.name === 'Reflect' &&
+      !hasLocalBinding(scope, callee.object.name)
+    ) {
+      const target = valueFromExpression(asArray(node.arguments)[0], scope);
+      if (target.kind === 'method') {
+        if (target.accessor) {
+          throw new Error(
+            'Unable to establish host:service method provenance for Reflect.apply of an accessor'
+          );
+        }
+        const calleeValue = {
+          kind: 'method',
+          name: target.name,
+          accessor: 'reflectApply',
+          boundArgs: target.boundArgs,
+        };
+        recordCall(invocationArguments(node, calleeValue), target.name, scope);
+        return;
+      }
+    }
+
     if (calleeValue.kind === 'union') {
       let recorded = false;
       for (const value of calleeValue.values) {
         if (value.kind === 'method') {
-          recordCall(node, value.name);
+          recordCall(invocationArguments(node, value), value.name, scope);
           recorded = true;
         } else if (value.kind === 'function') {
           // A branch selected one of several wrappers; replay each one so the
@@ -2420,8 +3482,19 @@ function analyzeServiceUsage(code) {
       if (recorded) return;
     }
 
+    if (!method && isMemberNode(callee)) {
+      // Binding-level resolution covers `call.bind(...)`, `on.call.bind(on)`
+      // and pre-bound argument forms that the one-level callee rules above do
+      // not recognize.
+      const resolved = valueFromExpression(callee, scope);
+      if (resolved.kind === 'method') {
+        method = resolved.name;
+        calleeValue = resolved;
+      }
+    }
+
     if (method) {
-      recordCall(node, method);
+      recordCall(invocationArguments(node, calleeValue), method, scope);
       return;
     }
 
@@ -2623,6 +3696,39 @@ function analyzeServiceUsage(code) {
     for (const name of patternNames(target)) assignBinding(scope, name, UNKNOWN);
   };
 
+  // `Object.assign`/`Object.defineProperty`/`Object.defineProperties` and the
+  // `Reflect.set`/`Reflect.defineProperty` equivalents can add or replace
+  // properties of a tracked wrapper object without a tracked assignment, so
+  // the snapshot is tainted: contents unknown, and any service-method-shaped
+  // read is treated as possibly backed by the service namespace. The global
+  // helper names are trusted only while unshadowed; a literal or complex
+  // first argument touches no tracked binding.
+  const taintObjectMutation = (node, scope) => {
+    const callee = node.callee;
+    if (!isMemberNode(callee) || callee.object?.type !== 'Identifier') return;
+    const key = memberKey(callee, scope);
+    if (key === undefined) return;
+    const objectName = callee.object.name;
+    // The global Object/Reflect helper names are trusted only while no local
+    // binding shadows them.
+    if (hasLocalBinding(scope, objectName)) return;
+    const isObjectApi =
+      objectName === 'Object' &&
+      (key === 'assign' || key === 'defineProperty' || key === 'defineProperties');
+    const isReflectApi = objectName === 'Reflect' && (key === 'set' || key === 'defineProperty');
+    if (!isObjectApi && !isReflectApi) return;
+    const target = asArray(node.arguments)[0];
+    if (target?.type !== 'Identifier') return;
+    const value = resolveBinding(scope, target.name);
+    if (value.kind === 'object') {
+      value.unknown = true;
+      value.serviceSource = true;
+      value.props.clear();
+    } else if (value.kind === 'array') {
+      value.unknown = true;
+    }
+  };
+
   const walk = (node, scope) => {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -2695,6 +3801,21 @@ function analyzeServiceUsage(code) {
                 objectValue.props.set(key, value);
               }
             }
+          } else if (isMemberNode(node.left.object)) {
+            // Nested member write (`api.wrapper.subscribe = on`): write into
+            // the parent object resolved along the member chain. A chain that
+            // cannot be resolved stays unknown and already fails closed at
+            // the use site.
+            const parent = resolveMemberParent(node.left, scope);
+            if (parent) {
+              if (key === undefined) {
+                parent.unknown = true;
+                parent.serviceSource = true;
+                parent.props.clear();
+              } else {
+                parent.props.set(key, value);
+              }
+            }
           }
         } else {
           applyAssignmentTarget(node.left, value, scope);
@@ -2710,6 +3831,26 @@ function analyzeServiceUsage(code) {
         const alternateScope = node.alternate ? cloneScope(scope) : scope;
         if (node.alternate) walk(node.alternate, alternateScope);
         joinBranches(scope, [consequentScope, alternateScope]);
+        return;
+      }
+      case 'ConditionalExpression': {
+        walk(node.test, scope);
+        // The two arms are mutually exclusive; analyze each in its own
+        // cloned state and join conservatively, exactly like an if/else.
+        const consequentScope = cloneScope(scope);
+        walk(node.consequent, consequentScope);
+        const alternateScope = cloneScope(scope);
+        walk(node.alternate, alternateScope);
+        joinBranches(scope, [consequentScope, alternateScope]);
+        return;
+      }
+      case 'LogicalExpression': {
+        walk(node.left, scope);
+        // The right operand may not execute at all (`a && (w.on = b)`), so
+        // its state joins with the pre-expression state.
+        const rightScope = cloneScope(scope);
+        walk(node.right, rightScope);
+        joinBranches(scope, [scope, rightScope]);
         return;
       }
       case 'SwitchStatement': {
@@ -2748,6 +3889,7 @@ function analyzeServiceUsage(code) {
         return;
       }
       case 'CallExpression': {
+        taintObjectMutation(node, scope);
         analyzeCall(node, scope);
         if (!deferredSeen.has(node)) {
           deferredSeen.add(node);
