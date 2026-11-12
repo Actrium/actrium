@@ -166,7 +166,10 @@ export function Child() {
 }
 `;
 
-async function expectModalViolation(files: Record<string, string>) {
+async function expectModalViolation(
+  files: Record<string, string>,
+  expected: string = 'Modal'
+) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-components-'));
   try {
     for (const [relativePath, content] of Object.entries(files)) {
@@ -188,7 +191,61 @@ async function expectModalViolation(files: Record<string, string>) {
           'dist/capability-manifest.json'
         ),
       })
-    ).rejects.toThrow('Modal');
+    ).rejects.toThrow(expected);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+type V1Manifest = {
+  hostModules: Record<string, { rpc: string[]; events: string[] }>;
+};
+
+async function buildManifest(entrySource: string): Promise<V1Manifest> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-manifest-'));
+  try {
+    const srcDir = path.join(tempDir, 'src');
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, 'entry.tsx'), entrySource);
+    const manifestPath = path.join(tempDir, 'dist/capability-manifest.json');
+    await build({
+      entry: path.join(srcDir, 'entry.tsx'),
+      outfile: path.join(tempDir, 'dist/bundle.js'),
+      minify: true,
+      sourcemap: false,
+      watch: false,
+      contract,
+      v1CapabilityManifest: manifestPath,
+    });
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as V1Manifest;
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function expectBuildFailure(
+  entrySource: string,
+  expected: string
+): Promise<void> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-failure-'));
+  try {
+    const srcDir = path.join(tempDir, 'src');
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, 'entry.tsx'), entrySource);
+    await expect(
+      build({
+        entry: path.join(srcDir, 'entry.tsx'),
+        outfile: path.join(tempDir, 'dist/bundle.js'),
+        minify: true,
+        sourcemap: false,
+        watch: false,
+        contract,
+        v1CapabilityManifest: path.join(
+          tempDir,
+          'dist/capability-manifest.json'
+        ),
+      })
+    ).rejects.toThrow(expected);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -295,6 +352,29 @@ export default function App() {
     }
   });
 
+  it('rejects a shadowed parameter component', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+function C() {
+  return <View />;
+}
+
+function Wrapper(C) {
+  return <C />;
+}
+
+export default function App() {
+  return <Wrapper C={Modal} />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
   it('fails closed when component provenance is unresolved', async () => {
     const tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'keel-v1-provenance-')
@@ -379,6 +459,178 @@ export default function App() {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('records routes through a service wrapper object', async () => {
+    const manifest = await buildManifest(`
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+const service = { call };
+
+function send() {
+  return service.call({ route: 'echo.EchoService.Echo', payloadBase64: '' });
+}
+
+export default function App() {
+  return <View onLayout={() => void send()} />;
+}
+`);
+
+    expect(manifest.hostModules.service).toEqual({
+      rpc: ['echo.EchoService.Echo'],
+      events: [],
+    });
+  });
+
+  it('fails closed for service-shaped calls from unknown callees', async () => {
+    await expectBuildFailure(
+      `
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+function keep() {
+  return call({ route: 'keep.Route', payloadBase64: '' });
+}
+
+function aliased(payload: { route: string; payloadBase64: string }) {
+  return payload;
+}
+
+function send() {
+  return aliased({ route: 'sneaky.Route', payloadBase64: '' });
+}
+
+export default function App() {
+  return <View onLayout={() => { void keep(); void send(); }} />;
+}
+`,
+      'host:service provenance'
+    );
+  });
+
+  it('allows unrelated route/event payloads from local APIs', async () => {
+    const manifest = await buildManifest(`
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+function navigate(input: { route: string }) {
+  return input;
+}
+
+function track(input: { event: string }) {
+  return input;
+}
+
+function send() {
+  return call({ route: 'echo.EchoService.Echo', payloadBase64: '' });
+}
+
+export default function App() {
+  return (
+    <View
+      onLayout={() => {
+        navigate({ route: '/home' });
+        track({ event: 'click' });
+        void send();
+      }}
+    />
+  );
+}
+`);
+
+    expect(manifest.hostModules.service).toEqual({
+      rpc: ['echo.EchoService.Echo'],
+      events: [],
+    });
+  });
+
+  it('rejects Fragment members resolved through unknown objects', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal } from 'keel/guest';
+
+function identity(value: unknown) {
+  return value;
+}
+
+const bag = identity({ Fragment: Modal });
+
+export default function App() {
+  return <bag.Fragment />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('records literal subscription events', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+function subscribe() {
+  return on('demo.chat.v1.messageAdded', () => {});
+}
+
+export default function App() {
+  return <View onLayout={() => void subscribe()} />;
+}
+`);
+
+    expect(manifest.hostModules.service).toEqual({
+      rpc: [],
+      events: ['demo.chat.v1.messageAdded'],
+    });
+  });
+
+  it('fails closed for subscription handlers without a static event name', async () => {
+    await expectBuildFailure(
+      `
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+function subscribe() {
+  return on(() => {});
+}
+
+export default function App() {
+  return <View onLayout={() => void subscribe()} />;
+}
+`,
+      'statically known event name'
+    );
+  });
+
+  it('round-trips the built service manifest through the verifier', async () => {
+    const manifest = await buildManifest(`
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+function send() {
+  return call({ route: 'echo.EchoService.Echo', payloadBase64: '' });
+}
+
+export default function App() {
+  return <View onLayout={() => void send()} />;
+}
+`);
+    const { verifyCapabilityManifest } = await import(
+      '../../../actrium/src/runtime-host/capability-verify'
+    );
+
+    const result = verifyCapabilityManifest(
+      manifest as unknown as Parameters<typeof verifyCapabilityManifest>[0],
+      {
+        contractKinds: { 'host:service': { call: 'rpc' } },
+        serviceCapabilities: { rpc: new Set(['echo.EchoService.Echo']) },
+        declaredCapabilities: ['service'],
+        hostSupportedModules: new Set(['host:service']),
+      }
+    );
+    expect(result.ok).toBe(true);
   });
 
   it('rejects dynamic service routes', async () => {

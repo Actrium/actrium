@@ -747,8 +747,9 @@ function isFrameworkRequire(node) {
  * JSX is already lowered to `jsx(...)` / `jsxs(...)` / `createElement(...)`
  * calls. The component can be a string tag, an `import_guest.View` member, or
  * a local identifier aliasing an SDK component (`const M = Modal; <M />`).
- * When `failClosed` is set, identifiers whose provenance cannot be resolved
- * reject the build instead of silently widening the allowlist.
+ * Bindings are resolved lexically so a parameter or local variable shadows an
+ * outer component with the same name. When `failClosed` is set, identifiers
+ * whose provenance cannot be resolved reject the build.
  */
 function analyzeBundleComponents(code, options = {}) {
   if (!oxc || !oxc.parseSync) {
@@ -756,143 +757,345 @@ function analyzeBundleComponents(code, options = {}) {
   }
 
   const components = new Set();
-  const sdkAliases = new Map();
-  const aliasSources = new Map();
-  const localComponents = new Set();
-  const jsxIdentifiers = new Set();
-  const frameworkBindings = new Set();
-  const objectAliases = new Map();
-  const objectAliasSources = new Map();
-  const memberAliasSources = new Map();
+
+  const failClosed = (message) => {
+    if (options.failClosed) {
+      throw new Error(message);
+    }
+  };
+
+  const createScope = (parent, isFunction = false) => ({
+    parent,
+    isFunction,
+    bindings: new Map(),
+  });
+
+  // oxc emits some list nodes (for example function params) as `{ items }`
+  // wrappers instead of plain arrays.
+  const asArray = (value) =>
+    Array.isArray(value) ? value : Array.isArray(value?.items) ? value.items : [];
+
+  const declare = (scope, name, binding) => {
+    scope.bindings.set(name, binding);
+  };
+
+  const nearestFunctionScope = (scope) => {
+    let current = scope;
+    while (current && !current.isFunction) current = current.parent;
+    return current ?? scope;
+  };
+
+  const resolveBindingValue = (binding, seen) => {
+    if (!binding) return undefined;
+    if (binding.kind === 'alias') {
+      if (seen.has(binding.name)) return { kind: 'unknown' };
+      const nextSeen = new Set(seen);
+      nextSeen.add(binding.name);
+      return resolveBinding(binding.scope, binding.source, nextSeen);
+    }
+    if (binding.kind === 'memberAlias') {
+      const objectBinding = resolveBinding(binding.scope, binding.objectName, seen);
+      if (objectBinding?.kind === 'object') {
+        const property = objectBinding.props.get(binding.propertyName);
+        if (property) return resolveBindingValue(property, seen);
+      }
+      return { kind: 'unknown' };
+    }
+    return binding;
+  };
+
+  const resolveBinding = (scope, name, seen = new Set()) => {
+    let current = scope;
+    while (current) {
+      if (current.bindings.has(name)) {
+        return resolveBindingValue(current.bindings.get(name), seen);
+      }
+      current = current.parent;
+    }
+    return undefined;
+  };
+
+  const patternNames = (node) => {
+    if (!node) return [];
+    if (node.type === 'Identifier') return [node.name];
+    if (node.type === 'RestElement') return patternNames(node.argument);
+    if (node.type === 'AssignmentPattern') return patternNames(node.left);
+    if (node.type === 'ObjectPattern' || node.type === 'ArrayPattern') {
+      const names = [];
+      const items = asArray(node.properties).length
+        ? asArray(node.properties)
+        : asArray(node.elements);
+      for (const property of items) {
+        if (!property) continue;
+        if (property.type === 'Property' || property.type === 'ObjectProperty') {
+          names.push(...patternNames(property.value));
+        } else {
+          names.push(...patternNames(property));
+        }
+      }
+      return names;
+    }
+    return [];
+  };
+
+  const isComponentWrapperCall = (node) => {
+    if (node?.type !== 'CallExpression') return false;
+    const callee = node.callee;
+    const name =
+      callee?.type === 'Identifier'
+        ? callee.name
+        : callee?.property?.type === 'Identifier'
+          ? callee.property.name
+          : undefined;
+    return name === 'memo' || name === 'forwardRef';
+  };
+
+  const bindingFromInit = (init, scope) => {
+    if (!init) return { kind: 'unknown' };
+    if (
+      init.type === 'ArrowFunctionExpression' ||
+      init.type === 'FunctionExpression' ||
+      init.type === 'ClassExpression'
+    ) {
+      return { kind: 'local' };
+    }
+    if (isFrameworkRequire(init) || isComponentWrapperCall(init)) {
+      return { kind: 'framework' };
+    }
+    if (init.type === 'Identifier') {
+      return { kind: 'alias', source: init.name, scope };
+    }
+    if (init.type === 'MemberExpression' || init.type === 'StaticMemberExpression') {
+      if (init.object?.type === 'Identifier' && init.property?.type === 'Identifier') {
+        if (/^import_guest\d*$/.test(init.object.name)) {
+          return { kind: 'sdk', name: init.property.name };
+        }
+        return {
+          kind: 'memberAlias',
+          objectName: init.object.name,
+          propertyName: init.property.name,
+          scope,
+        };
+      }
+      return { kind: 'unknown' };
+    }
+    if (init.type === 'ObjectExpression') {
+      const props = new Map();
+      for (const property of asArray(init.properties)) {
+        const key = propertyName(property);
+        if (!key || !property.value) continue;
+        const value = property.value;
+        if (
+          value.type === 'ArrowFunctionExpression' ||
+          value.type === 'FunctionExpression' ||
+          isComponentWrapperCall(value)
+        ) {
+          props.set(key, { kind: 'local' });
+        } else if (value.type === 'Identifier') {
+          props.set(key, { kind: 'alias', source: value.name, scope });
+        } else if (
+          (value.type === 'MemberExpression' || value.type === 'StaticMemberExpression') &&
+          value.object?.type === 'Identifier' &&
+          /^import_guest\d*$/.test(value.object.name) &&
+          value.property?.type === 'Identifier'
+        ) {
+          props.set(key, { kind: 'sdk', name: value.property.name });
+        } else {
+          props.set(key, { kind: 'unknown' });
+        }
+      }
+      return { kind: 'object', props };
+    }
+    return { kind: 'unknown' };
+  };
+
+  const isJsxCall = (node) => {
+    const callee = node.callee;
+    const name =
+      callee?.type === 'Identifier'
+        ? callee.name
+        : callee?.type === 'MemberExpression' || callee?.type === 'StaticMemberExpression'
+          ? callee.property?.name
+          : undefined;
+    return name === 'jsx' || name === 'jsxs' || name === 'jsxDEV' || name === 'createElement';
+  };
+
+  const handleJsx = (node, scope) => {
+    const first = asArray(node.arguments)[0];
+    if (!first) return;
+
+    if (
+      (first.type === 'StringLiteral' || first.type === 'Literal') &&
+      typeof first.value === 'string'
+    ) {
+      components.add(first.value);
+      return;
+    }
+
+    if (first.type === 'Identifier') {
+      const binding = resolveBinding(scope, first.name);
+      if (binding?.kind === 'sdk') {
+        components.add(binding.name);
+      } else if (binding?.kind === 'local' || binding?.kind === 'framework') {
+        // Local components and React internals are not SDK capability components.
+      } else {
+        failClosed(`Unable to establish component provenance for "${first.name}"`);
+      }
+      return;
+    }
+
+    if (first.type === 'MemberExpression' || first.type === 'StaticMemberExpression') {
+      const property =
+        first.property?.type === 'Identifier'
+          ? first.property.name
+          : first.computed &&
+              (first.property?.type === 'StringLiteral' || first.property?.type === 'Literal') &&
+              typeof first.property.value === 'string'
+            ? first.property.value
+            : undefined;
+      if (!property) {
+        failClosed('Unable to establish component provenance for a dynamic JSX component');
+        return;
+      }
+
+      const objectName = first.object?.type === 'Identifier' ? first.object.name : undefined;
+      if (objectName && /^import_guest\d*$/.test(objectName)) {
+        components.add(property);
+        return;
+      }
+
+      const objectBinding = objectName ? resolveBinding(scope, objectName) : undefined;
+      if (objectBinding?.kind === 'object') {
+        const propertyBinding = resolveBindingValue(objectBinding.props.get(property), new Set());
+        if (propertyBinding?.kind === 'sdk') {
+          components.add(propertyBinding.name);
+          return;
+        }
+        if (propertyBinding?.kind === 'local') return;
+      }
+      if (objectBinding?.kind === 'framework') {
+        return;
+      }
+      let root = first.object;
+      while (root && (root.type === 'MemberExpression' || root.type === 'StaticMemberExpression')) {
+        root = root.object;
+      }
+      if (root?.type === 'Identifier' && resolveBinding(scope, root.name)?.kind === 'framework') {
+        return;
+      }
+      failClosed(
+        `Unable to establish component provenance for "${objectName ?? 'member'}.${property}"`
+      );
+      return;
+    }
+
+    failClosed('Unable to establish component provenance for a dynamic JSX component');
+  };
+
+  const hoistFunctions = (statements, scope) => {
+    for (const statement of asArray(statements)) {
+      if (statement?.type === 'FunctionDeclaration' && statement.id?.name) {
+        declare(scope, statement.id.name, { kind: 'local' });
+      }
+      if (
+        (statement?.type === 'ExportNamedDeclaration' ||
+          statement?.type === 'ExportDefaultDeclaration') &&
+        statement.declaration?.type === 'FunctionDeclaration' &&
+        statement.declaration.id?.name
+      ) {
+        declare(scope, statement.declaration.id.name, { kind: 'local' });
+      }
+    }
+  };
+
+  const walk = (node, scope) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, scope);
+      return;
+    }
+
+    switch (node.type) {
+      case 'Program': {
+        const programScope = createScope(scope);
+        hoistFunctions(node.body, programScope);
+        for (const statement of asArray(node.body)) walk(statement, programScope);
+        return;
+      }
+      case 'BlockStatement': {
+        const blockScope = createScope(scope);
+        hoistFunctions(node.body, blockScope);
+        for (const statement of asArray(node.body)) walk(statement, blockScope);
+        return;
+      }
+      case 'FunctionDeclaration':
+      case 'FunctionExpression':
+      case 'ArrowFunctionExpression': {
+        const functionScope = createScope(scope, true);
+        if (node.type === 'FunctionDeclaration' && node.id?.name) {
+          declare(scope, node.id.name, { kind: 'local' });
+        } else if (node.type === 'FunctionExpression' && node.id?.name) {
+          declare(functionScope, node.id.name, { kind: 'local' });
+        }
+        for (const parameter of asArray(node.params)) {
+          for (const name of patternNames(parameter)) {
+            declare(functionScope, name, { kind: 'unknown' });
+          }
+        }
+        if (node.body?.type === 'BlockStatement') {
+          hoistFunctions(node.body.body, functionScope);
+          for (const statement of asArray(node.body.body)) walk(statement, functionScope);
+        } else {
+          walk(node.body, functionScope);
+        }
+        return;
+      }
+      case 'VariableDeclaration': {
+        const targetScope = node.kind === 'var' ? nearestFunctionScope(scope) : scope;
+        for (const declaration of asArray(node.declarations)) {
+          const binding = bindingFromInit(declaration.init, scope);
+          if (declaration.id?.type === 'Identifier') {
+            declare(targetScope, declaration.id.name, binding);
+          } else {
+            for (const name of patternNames(declaration.id)) {
+              declare(targetScope, name, { kind: 'unknown' });
+            }
+          }
+          walk(declaration.init, scope);
+        }
+        return;
+      }
+      case 'ClassDeclaration': {
+        if (node.id?.name) declare(scope, node.id.name, { kind: 'local' });
+        walk(node.superClass, scope);
+        walk(node.body, scope);
+        return;
+      }
+      case 'CallExpression': {
+        if (isJsxCall(node)) {
+          handleJsx(node, scope);
+          for (const argument of node.arguments ?? []) walk(argument, scope);
+          return;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
+    for (const key of Object.keys(node)) {
+      if (key === 'type' || key === 'start' || key === 'end' || key === 'loc' || key === 'range') {
+        continue;
+      }
+      const value = node[key];
+      if (value && typeof value === 'object') walk(value, scope);
+    }
+  };
 
   try {
     const result = oxc.parseSync(code, { sourceFilename: 'bundle.js' });
     const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
-
-    traverseAST(ast, (node) => {
-      if (node.type === 'FunctionDeclaration' && node.id?.name) {
-        localComponents.add(node.id.name);
-      } else if (node.type === 'ClassDeclaration' && node.id?.name) {
-        localComponents.add(node.id.name);
-      } else if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') {
-        const name = node.id.name;
-        const init = node.init;
-        if (init?.type === 'ArrowFunctionExpression' || init?.type === 'FunctionExpression') {
-          localComponents.add(name);
-        } else if (isFrameworkRequire(init)) {
-          frameworkBindings.add(name);
-        } else if (init?.type === 'Identifier') {
-          aliasSources.set(name, init.name);
-        } else if (init?.type === 'ObjectExpression') {
-          for (const property of init.properties ?? []) {
-            const key = propertyName(property);
-            if (!key || !property.value) continue;
-            const value = property.value;
-            if (
-              (value.type === 'MemberExpression' || value.type === 'StaticMemberExpression') &&
-              value.object?.type === 'Identifier' &&
-              /^import_guest\d*$/.test(value.object.name) &&
-              value.property?.type === 'Identifier'
-            ) {
-              objectAliases.set(`${name}.${key}`, value.property.name);
-            } else if (value.type === 'Identifier') {
-              objectAliasSources.set(`${name}.${key}`, value.name);
-            }
-          }
-        } else if (
-          (init?.type === 'MemberExpression' || init?.type === 'StaticMemberExpression') &&
-          init.object?.type === 'Identifier' &&
-          init.property?.type === 'Identifier'
-        ) {
-          if (/^import_guest\d*$/.test(init.object.name)) {
-            sdkAliases.set(name, init.property.name);
-          } else {
-            memberAliasSources.set(name, `${init.object.name}.${init.property.name}`);
-          }
-        }
-      }
-
-      if (node.type !== 'CallExpression') return;
-      const callee = node.callee;
-      const calleeName =
-        callee?.type === 'Identifier'
-          ? callee.name
-          : callee?.type === 'MemberExpression' || callee?.type === 'StaticMemberExpression'
-            ? callee.property?.name
-            : undefined;
-      if (
-        calleeName !== 'jsx' &&
-        calleeName !== 'jsxs' &&
-        calleeName !== 'jsxDEV' &&
-        calleeName !== 'createElement'
-      ) {
-        return;
-      }
-
-      const first = node.arguments?.[0];
-      if (!first) return;
-      if (
-        (first.type === 'StringLiteral' || first.type === 'Literal') &&
-        typeof first.value === 'string'
-      ) {
-        components.add(first.value);
-      } else if (
-        (first.type === 'MemberExpression' || first.type === 'StaticMemberExpression') &&
-        first.property?.type === 'Identifier'
-      ) {
-        const objectName = first.object?.type === 'Identifier' ? first.object.name : undefined;
-        const property = first.property.name;
-        if (objectName && /^import_guest\d*$/.test(objectName)) {
-          components.add(property);
-        } else if (objectName && objectAliases.has(`${objectName}.${property}`)) {
-          components.add(objectAliases.get(`${objectName}.${property}`));
-        } else if ((objectName && frameworkBindings.has(objectName)) || property === 'Fragment') {
-          // React runtime components are not Guest capability components.
-        } else if (options.failClosed) {
-          throw new Error(
-            `Unable to establish component provenance for "${objectName ?? 'member'}.${property}"`
-          );
-        }
-      } else if (first.type === 'Identifier') {
-        jsxIdentifiers.add(first.name);
-      } else if (options.failClosed) {
-        throw new Error('Unable to establish component provenance for a dynamic JSX component');
-      }
-    });
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const [key, source] of objectAliasSources) {
-        if (!objectAliases.has(key) && sdkAliases.has(source)) {
-          objectAliases.set(key, sdkAliases.get(source));
-          changed = true;
-        }
-      }
-      for (const [name, memberKey] of memberAliasSources) {
-        if (!sdkAliases.has(name) && objectAliases.has(memberKey)) {
-          sdkAliases.set(name, objectAliases.get(memberKey));
-          changed = true;
-        }
-      }
-      for (const [name, source] of aliasSources) {
-        if (!sdkAliases.has(name) && sdkAliases.has(source)) {
-          sdkAliases.set(name, sdkAliases.get(source));
-          changed = true;
-        }
-      }
-    }
-
-    for (const name of jsxIdentifiers) {
-      const sdkName = sdkAliases.get(name);
-      if (sdkName) {
-        components.add(sdkName);
-      } else if (localComponents.has(name) || frameworkBindings.has(name)) {
-        continue;
-      } else if (options.failClosed) {
-        throw new Error(`Unable to establish component provenance for "${name}"`);
-      }
-    }
+    walk(ast, createScope(null));
   } catch (err) {
     if (options.failClosed) throw err;
     console.error('[oxc-adapter] analyzeBundleComponents failed:', err.message);
@@ -931,8 +1134,8 @@ function propertyName(property) {
 
 /**
  * Collect literal `host:service` routes and events from a lowered bundle.
- * Dynamic route/event values reject the build because the manifest cannot
- * describe which operation the Guest actually invokes.
+ * Calls whose provenance cannot be established and dynamic route/event values
+ * reject the build because the manifest cannot describe the operation.
  */
 function analyzeServiceUsage(code) {
   if (!oxc || !oxc.parseSync) {
@@ -941,20 +1144,65 @@ function analyzeServiceUsage(code) {
 
   const serviceBindings = new Set();
   const serviceMethods = new Map();
+  const serviceObjects = new Map();
   const rpc = new Set();
   const events = new Set();
+
+  const memberName = (node) => {
+    const property = node?.property;
+    if (!property) return undefined;
+    if (property.type === 'Identifier') return property.name;
+    if (
+      (property.type === 'StringLiteral' || property.type === 'Literal') &&
+      typeof property.value === 'string'
+    ) {
+      return property.value;
+    }
+    return undefined;
+  };
+
+  const firstProperty = (argument, key) => {
+    if (!argument || argument.type !== 'ObjectExpression') return undefined;
+    return (argument.properties ?? []).find((property) => propertyName(property) === key);
+  };
 
   const result = oxc.parseSync(code, { sourceFilename: 'bundle.js' });
   const ast = typeof result.program === 'string' ? JSON.parse(result.program) : result.program;
 
   traverseAST(ast, (node) => {
-    if (
-      node.type === 'VariableDeclarator' &&
-      node.id?.type === 'Identifier' &&
-      isHostServiceRequire(node.init)
-    ) {
-      serviceBindings.add(node.id.name);
+    if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') {
+      const name = node.id.name;
+      const init = node.init;
+      if (isHostServiceRequire(init)) {
+        serviceBindings.add(name);
+      } else if (init?.type === 'Identifier' && serviceBindings.has(init.name)) {
+        serviceBindings.add(name);
+      } else if (init?.type === 'ObjectExpression') {
+        for (const property of init.properties ?? []) {
+          const key = propertyName(property);
+          if (!key || !property.value) continue;
+          const value = property.value;
+          if (value.type === 'Identifier' && serviceMethods.has(value.name)) {
+            serviceObjects.set(`${name}.${key}`, serviceMethods.get(value.name));
+          } else if (
+            (value.type === 'MemberExpression' || value.type === 'StaticMemberExpression') &&
+            value.object?.type === 'Identifier' &&
+            serviceBindings.has(value.object.name) &&
+            value.property?.type === 'Identifier'
+          ) {
+            serviceObjects.set(`${name}.${key}`, value.property.name);
+          }
+        }
+      } else if (
+        (init?.type === 'MemberExpression' || init?.type === 'StaticMemberExpression') &&
+        init.object?.type === 'Identifier' &&
+        serviceBindings.has(init.object.name)
+      ) {
+        const method = memberName(init);
+        if (method) serviceMethods.set(name, method);
+      }
     }
+
     if (
       node.type === 'VariableDeclarator' &&
       node.id?.type === 'ObjectPattern' &&
@@ -967,79 +1215,83 @@ function analyzeServiceUsage(code) {
         }
       }
     }
-    if (
-      node.type === 'VariableDeclarator' &&
-      node.id?.type === 'Identifier' &&
-      (node.init?.type === 'MemberExpression' || node.init?.type === 'StaticMemberExpression') &&
-      node.init.object?.type === 'Identifier' &&
-      serviceBindings.has(node.init.object.name) &&
-      node.init.property?.type === 'Identifier'
-    ) {
-      serviceMethods.set(node.id.name, node.init.property.name);
-    }
 
     if (node.type !== 'CallExpression') return;
+
     let method;
-    if (
+    if (node.callee?.type === 'Identifier') {
+      method = serviceMethods.get(node.callee.name);
+    } else if (
       (node.callee?.type === 'MemberExpression' ||
         node.callee?.type === 'StaticMemberExpression') &&
-      node.callee.object?.type === 'Identifier' &&
-      serviceBindings.has(node.callee.object.name) &&
-      node.callee.property?.type === 'Identifier'
+      node.callee.object?.type === 'Identifier'
     ) {
-      method = node.callee.property.name;
-    } else if (node.callee?.type === 'Identifier') {
-      method = serviceMethods.get(node.callee.name);
+      const objectName = node.callee.object.name;
+      const property = memberName(node.callee);
+      if (property) {
+        if (serviceBindings.has(objectName)) {
+          method = property;
+        } else if (serviceObjects.has(`${objectName}.${property}`)) {
+          method = serviceObjects.get(`${objectName}.${property}`);
+        }
+      }
     }
-    if (method !== 'call' && method !== 'tell' && method !== 'on') return;
+
+    if (method !== 'call' && method !== 'tell' && method !== 'on') {
+      const argument = node.arguments?.[0];
+      if (serviceBindings.size > 0 || serviceMethods.size > 0 || serviceObjects.size > 0) {
+        const route = firstProperty(argument, 'route');
+        const event = firstProperty(argument, 'event');
+        const payload = firstProperty(argument, 'payloadBase64');
+        // Only the full host:service input shape is suspicious; unrelated
+        // local APIs may legitimately use `route` or `event` keys.
+        if ((route && payload) || (event && payload)) {
+          throw new Error('Unable to establish host:service provenance for this call');
+        }
+      }
+      return;
+    }
 
     const argument = node.arguments?.[0];
     if (method === 'on') {
-      // The host contract exposes `on(handler)`; only an explicit object
-      // literal with a literal event can be recorded at build time.
-      if (argument?.type !== 'ObjectExpression') return;
-      const eventProperty = (argument.properties ?? []).find(
-        (candidate) => propertyName(candidate) === 'event'
-      );
+      if (
+        (argument?.type === 'StringLiteral' || argument?.type === 'Literal') &&
+        typeof argument.value === 'string'
+      ) {
+        events.add(argument.value);
+        return;
+      }
+      const eventProperty = firstProperty(argument, 'event');
       const eventValue = eventProperty?.value;
       if (
-        !eventProperty ||
-        !(eventValue?.type === 'StringLiteral' || eventValue?.type === 'Literal') ||
-        typeof eventValue.value !== 'string'
+        eventProperty &&
+        (eventValue?.type === 'StringLiteral' || eventValue?.type === 'Literal') &&
+        typeof eventValue.value === 'string'
       ) {
-        throw new Error('host:service.on requires a literal "event"');
+        events.add(eventValue.value);
+        return;
       }
-      events.add(eventValue.value);
-      return;
+      throw new Error('host:service.on requires a statically known event name');
     }
 
     if (!argument || argument.type !== 'ObjectExpression') {
       throw new Error(`host:service.${method} requires an object literal`);
     }
-    const property = (argument.properties ?? []).find(
-      (candidate) => propertyName(candidate) === 'route'
-    );
-    const value = property?.value;
+    const routeProperty = firstProperty(argument, 'route');
+    const routeValue = routeProperty?.value;
     if (
-      !property ||
-      !(value?.type === 'StringLiteral' || value?.type === 'Literal') ||
-      typeof value.value !== 'string'
+      !routeProperty ||
+      !(routeValue?.type === 'StringLiteral' || routeValue?.type === 'Literal') ||
+      typeof routeValue.value !== 'string'
     ) {
       throw new Error(`host:service.${method} requires a literal "route"`);
     }
-    rpc.add(value.value);
+    rpc.add(routeValue.value);
   });
 
   return { rpc: Array.from(rpc).sort(), events: Array.from(events).sort() };
 }
 
-/**
- * Component names imported from `keel/guest` and used in JSX.
- *
- * Local components (`<Panel/>`) are not capability components and must not be
- * validated against the Guest component allowlist. This analysis runs on the
- * entry source, so minification cannot hide the names.
- */
 /**
  * Static import specifiers from a source module.
  *
