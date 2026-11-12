@@ -15,6 +15,14 @@ const NOW: u64 = 1_000;
 const READ: &str = "documents.read";
 const WRITE: &str = "documents.write";
 
+fn test_key(label: &str) -> SigningKey {
+    SigningKey::from_bytes(&Sha256::digest(label.as_bytes()).into())
+}
+
+fn test_digest(label: &str) -> Vec<u8> {
+    Sha256::digest(label.as_bytes()).to_vec()
+}
+
 struct TestClock;
 impl Clock for TestClock {
     fn now_epoch_secs(&self) -> u64 {
@@ -87,9 +95,9 @@ impl PrivacyPolicy for TestPrivacy {
     async fn evaluate(&self, context: PrivacyContext) -> Result<PrivacyDecision, SessionError> {
         Ok(PrivacyDecision {
             state: PrivacyState {
-                actor_state_digest: vec![1; 32],
-                application_state_digest: vec![2; 32],
-                assurance_digest: vec![3; 32],
+                actor_state_digest: test_digest("actor-state"),
+                application_state_digest: test_digest("application-state"),
+                assurance_digest: test_digest("assurance"),
                 expires_at_epoch_secs: 10_000,
             },
             allowed_capabilities: context.requested_capabilities,
@@ -151,9 +159,9 @@ fn actor_identity(
         role: role.into(),
         actor_public_key: actor.public,
         noise_public_key: noise.public,
-        actor_credential_digest: Sha256::digest(actor_id.as_bytes()).into(),
-        policy_digest: Sha256::digest(b"test-policy").into(),
-        actor_state_digest: Sha256::digest(actor_id.as_bytes()).into(),
+        actor_credential_digest: test_digest(actor_id).try_into().unwrap(),
+        policy_digest: test_digest("test-policy").try_into().unwrap(),
+        actor_state_digest: test_digest(actor_id).try_into().unwrap(),
         issuer: "realm-issuer".into(),
         provider: "provider.example".into(),
         audience: ACTOR_CHANNEL_AUDIENCE.into(),
@@ -242,9 +250,9 @@ fn service_config(service_key: SigningKey) -> ServiceConfig {
             name: "documents".into(),
             version: "1.0.0".into(),
         },
-        package_digest: vec![10; 32],
-        guest_digest: vec![11; 32],
-        protocol_fingerprint: vec![12; 32],
+        package_digest: test_digest("package"),
+        guest_digest: test_digest("guest"),
+        protocol_fingerprint: test_digest("protocol"),
         supported_runtimes: vec![Runtime {
             actrium_version: "0.11".into(),
             front_host_api: "1".into(),
@@ -283,15 +291,15 @@ fn attach_request(
             name: "documents".into(),
             version: "1.0.0".into(),
         },
-        package_digest: vec![10; 32],
-        guest_digest: vec![11; 32],
+        package_digest: test_digest("package"),
+        guest_digest: test_digest("guest"),
         runtime: Runtime {
             actrium_version: "0.11".into(),
             front_host_api: "1".into(),
             keel_api: "1".into(),
         },
-        protocol_fingerprint: vec![12; 32],
-        tab_session_nonce: vec![nonce; 32],
+        protocol_fingerprint: test_digest("protocol"),
+        tab_session_nonce: test_digest(&format!("attach-nonce:{nonce}")),
         requested_lease: LeaseMode::Exclusive,
         requested_capabilities: vec![READ.into(), WRITE.into()],
         challenge_response: vec![],
@@ -328,19 +336,19 @@ fn business_request(
 
 #[tokio::test]
 async fn noise_authenticated_front_attaches_and_uses_session_guarded_rpc() {
-    let issuer = SigningKey::from_bytes(&[7; 32]);
+    let issuer = test_key("issuer");
     let issuer_public = IssuerKey {
         key_id: 11,
         public_key: issuer.verifying_key().to_bytes(),
         expires_at: 20_000,
     };
-    let front_key = SigningKey::from_bytes(&[11; 32]);
-    let service_key = SigningKey::from_bytes(&[22; 32]);
+    let front_key = test_key("front");
+    let service_key = test_key("service");
     let front_identity = actor_identity(
         "front",
         "actrium.front",
         "owner",
-        [11; 32],
+        front_key.to_bytes(),
         &issuer,
         &issuer_public,
     );
@@ -348,7 +356,7 @@ async fn noise_authenticated_front_attaches_and_uses_session_guarded_rpc() {
         "service",
         "actrium.service",
         "service",
-        [22; 32],
+        service_key.to_bytes(),
         &issuer,
         &issuer_public,
     );

@@ -6,9 +6,18 @@ use std::time::Duration;
 use actrium_runtime::*;
 use async_trait::async_trait;
 use ed25519_dalek::{Signer, SigningKey};
+use sha2::{Digest, Sha256};
 
 const READ: &str = "documents.read";
 const WRITE: &str = "documents.write";
+
+fn test_key(label: &str) -> SigningKey {
+    SigningKey::from_bytes(&Sha256::digest(label.as_bytes()).into())
+}
+
+fn test_digest(label: &str) -> Vec<u8> {
+    Sha256::digest(label.as_bytes()).to_vec()
+}
 
 #[derive(Debug)]
 struct ManualClock(AtomicU64);
@@ -125,9 +134,9 @@ impl PrivacyPolicy for Privacy {
         let allowed = self.allowed.load(Ordering::SeqCst);
         Ok(PrivacyDecision {
             state: PrivacyState {
-                actor_state_digest: vec![1; 32],
-                application_state_digest: vec![2; 32],
-                assurance_digest: vec![3; 32],
+                actor_state_digest: test_digest("actor-state"),
+                application_state_digest: test_digest("application-state"),
+                assurance_digest: test_digest("assurance"),
                 expires_at_epoch_secs: self.expires_at.load(Ordering::SeqCst),
             },
             allowed_capabilities: if allowed {
@@ -241,16 +250,12 @@ struct Front {
 
 impl Front {
     fn new(name: &str) -> Self {
-        let mut seed = [0_u8; 32];
-        for (index, byte) in seed.iter_mut().enumerate() {
-            *byte = name.as_bytes().first().copied().unwrap_or(b'f');
-            *byte = byte.wrapping_add(index as u8);
-        }
+        let key = test_key(name);
         Self {
             actor_id: format!("front:{name}"),
             member: format!("member:{name}"),
             client_key: format!("client:{name}"),
-            key: SigningKey::from_bytes(&seed),
+            key,
         }
     }
 }
@@ -266,7 +271,7 @@ impl Fixture {
     fn new(fronts: &[Front]) -> Self {
         let policies = Policies::new(fronts);
         let clock = Arc::new(ManualClock::new(1_000));
-        let service_key = SigningKey::from_bytes(&[9; 32]);
+        let service_key = test_key("service");
         let service = InMemorySessionService::new_with_clock(
             service_config(service_key.clone()),
             policies.erased(),
@@ -289,9 +294,9 @@ fn service_config(service_signing_key: SigningKey) -> ServiceConfig {
         service_signing_key,
         allowed_front_actor_types: BTreeSet::from(["actrium.front".into()]),
         program: program(),
-        package_digest: vec![10; 32],
-        guest_digest: vec![11; 32],
-        protocol_fingerprint: vec![12; 32],
+        package_digest: test_digest("package"),
+        guest_digest: test_digest("guest"),
+        protocol_fingerprint: test_digest("protocol"),
         supported_runtimes: vec![runtime()],
         program_capabilities: BTreeSet::from([READ.into(), WRITE.into()]),
         routes: BTreeMap::from([
@@ -345,7 +350,7 @@ fn channel_with_runtime(
 ) -> VerifiedChannel {
     VerifiedChannel {
         channel_id: id.into(),
-        channel_transcript_digest: vec![id.as_bytes()[0]; 32],
+        channel_transcript_digest: test_digest(id),
         peer_actor_id: front.actor_id.clone(),
         peer_actor_type: "actrium.front".into(),
         peer_member: front.member.clone(),
@@ -355,7 +360,7 @@ fn channel_with_runtime(
         peer_credential_expires_at_epoch_secs: credential_expiry,
         local_runtime_instance_id: runtime_instance.into(),
         peer_runtime_instance_id: format!("{id}-front-runtime"),
-        negotiation_digest: vec![4; 32],
+        negotiation_digest: test_digest("negotiation"),
     }
 }
 
@@ -372,11 +377,11 @@ fn attach_request(
         channel_id: channel.channel_id.clone(),
         channel_transcript_digest: channel.channel_transcript_digest.clone(),
         program: program(),
-        package_digest: vec![10; 32],
-        guest_digest: vec![11; 32],
+        package_digest: test_digest("package"),
+        guest_digest: test_digest("guest"),
         runtime: runtime(),
-        protocol_fingerprint: vec![12; 32],
-        tab_session_nonce: vec![nonce; 32],
+        protocol_fingerprint: test_digest("protocol"),
+        tab_session_nonce: test_digest(&format!("attach-nonce:{nonce}")),
         requested_lease: LeaseMode::Exclusive,
         requested_capabilities: vec![READ.into(), WRITE.into()],
         challenge_response: Vec::new(),
@@ -1656,7 +1661,7 @@ async fn expired_status_closes_session_and_releases_exclusive_lease() {
 async fn attach_rechecks_credential_expiry_at_commit() {
     let front = Front::new("alice");
     let policies = Policies::new(std::slice::from_ref(&front));
-    let service_key = SigningKey::from_bytes(&[9; 32]);
+    let service_key = test_key("service");
     let service = InMemorySessionService::new_with_clock(
         service_config(service_key),
         policies.erased(),
@@ -1712,7 +1717,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
     );
 
     let mut wrong_transcript = attach_request(&front, &channel, "wrong-transcript", 4);
-    wrong_transcript.channel_transcript_digest = vec![8; 32];
+    wrong_transcript.channel_transcript_digest = test_digest("wrong-transcript");
     sign_attach_request(&mut wrong_transcript, &front.key);
     assert_code(
         fixture.service.attach(wrong_transcript, &channel).await,
@@ -1720,7 +1725,7 @@ async fn identity_type_nonce_and_compatibility_checks_fail_before_lease() {
     );
 
     let mut short_nonce = attach_request(&front, &channel, "short-nonce", 5);
-    short_nonce.tab_session_nonce = vec![5; 8];
+    short_nonce.tab_session_nonce = test_digest("short-nonce")[..8].to_vec();
     sign_attach_request(&mut short_nonce, &front.key);
     assert_code(
         fixture.service.attach(short_nonce, &channel).await,
