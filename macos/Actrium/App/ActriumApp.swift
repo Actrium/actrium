@@ -252,7 +252,7 @@ struct ActriumApp: App {
         }
         let path = URL(fileURLWithPath: args[packageIndex + 1])
             .standardizedFileURL.path
-        NSLog("🚀 Actro: Legacy actor bridge package: \(path)")
+        NSLog("🚀 Actrium: Legacy actor bridge package: \(path)")
         return path
     }()
 
