@@ -33,6 +33,10 @@ export type TabConfig = {
   id: string;
   title: string;
   url?: string;
+  /** Per-tab Service actor endpoint supplied by the Host after Attach. */
+  serviceCallUrl?: string;
+  /** Host-designated permission to use the legacy ACTR_CALL bridge. */
+  legacyActorBridge?: boolean;
   htmlContent?: string;
   reloadKey?: number;
   contract?: {
