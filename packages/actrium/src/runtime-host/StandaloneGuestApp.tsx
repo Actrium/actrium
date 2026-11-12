@@ -22,6 +22,7 @@ import { hasDeclaredCapability } from './capabilities';
 import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
+import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import type { TabConfig } from './types';
 
 type GuestButtonProps = {
@@ -118,6 +119,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.permissions ?? [],
     'service'
   );
+  const permissionsKey = [...(tab.permissions ?? [])].sort().join(',');
 
   React.useEffect(() => {
     // A reload must start from a clean state, otherwise a previous load
@@ -127,6 +129,23 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
     if (!guestScript) {
       setError('The application does not contain a Keel guest bundle.');
+      return;
+    }
+    const capabilityManifestJSON = tab.capabilityManifestJSON;
+    if (!capabilityManifestJSON) {
+      setError('The package does not contain a capability manifest.');
+      return;
+    }
+    const verification = verifyRuntimeCapabilityManifestJSON(
+      capabilityManifestJSON,
+      tab.permissions ?? []
+    );
+    if (!verification.ok) {
+      const details = verification.details.join(' ');
+      logToNative(
+        `[StandaloneGuestApp] capability verification failed: ${details}`
+      );
+      setError(`Capability manifest verification failed: ${details}`);
       return;
     }
 
@@ -291,6 +310,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.legacyActorBridge,
     tab.serviceCallUrl,
     tab.reloadKey,
+    tab.capabilityManifestJSON,
+    permissionsKey,
   ]);
 
   if (error) {

@@ -226,6 +226,7 @@ private struct ContentAreaView: View {
                 leftPanelScript: tabData["leftPanelScript"] as? String,
                 rightPanelScript: tabData["rightPanelScript"] as? String,
                 unifiedScript: tabData["unifiedScript"] as? String,
+                capabilityManifestJSON: tabData["capabilityManifestJSON"] as? String,
                 contractName: tabData["contractName"] as? String,
                 contractVersion: tabData["contractVersion"] as? Int,
                 permissions: tabData["permissions"] as? [String] ?? [],

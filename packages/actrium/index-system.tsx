@@ -30,6 +30,7 @@ try {
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
 import { StandaloneGuestApp } from './src/runtime-host/StandaloneGuestApp';
+import type { SystemAppType } from './src/runtime-host/types';
 
 // System apps share one Renderer runtime and are already present in this
 // bundle. Resolve them synchronously on first use: React.lazy's Promise state
@@ -94,14 +95,15 @@ interface SystemAppProps {
     appId?: string;
     serviceCallUrl?: string;
     legacyActorBridge?: boolean;
-    title?: string;
-    systemAppType?: string;
+    title: string;
+    systemAppType?: SystemAppType;
     unifiedScript?: string;  // ACTR app script
     leftPanelScript?: string;
     rightPanelScript?: string;
     guestScript?: string;
+    capabilityManifestJSON?: string;
     permissions?: string[];
-    backgroundColor?: string;
+    backgroundColor: string;
     bookmarks?: any[];
     recentHistory?: any[];
     historyItems?: any[];

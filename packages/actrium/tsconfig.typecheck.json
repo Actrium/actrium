@@ -16,7 +16,7 @@
       "keel/host/preset": ["../keel/src/host/preset/index.ts"]
     }
   },
-  "include": ["index.ts", "src"],
+  "include": ["index.ts", "index-system.tsx", "src"],
   "exclude": [
     "node_modules",
     "../keel/src/guest",
