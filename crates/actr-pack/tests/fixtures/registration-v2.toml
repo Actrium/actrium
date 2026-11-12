@@ -14,7 +14,7 @@ entry = "workload/echo.wasm"
 [host]
 profile = "actr.host/1"
 api = "^1.0.0"
-required-capabilities = ["actor.call"]
+required-capabilities = []
 
 [signature]
 algorithm = "ed25519"

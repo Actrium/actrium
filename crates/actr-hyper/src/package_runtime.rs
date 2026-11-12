@@ -166,6 +166,32 @@ message Request { string message = 1; }
 service Echo { rpc Echo(Request) returns (Request); }
 "#;
 
+    #[test]
+    fn issuer_fixture_matches_the_supported_native_profile() {
+        let source = include_str!("../../actr-pack/tests/fixtures/registration-v2.toml");
+        let manifest = ActorPackageManifest::from_toml(source).unwrap();
+        let registration = actr_pack::RegistrationManifest::parse(source.as_bytes()).unwrap();
+        validate_component_host(&manifest).unwrap();
+        assert_eq!(registration.target(), None);
+        assert_eq!(
+            registration.actor_type().to_program_identity(),
+            manifest.actor_type()
+        );
+
+        let mut unsupported = manifest.clone();
+        unsupported
+            .host
+            .required_capabilities
+            .push("unsupported.permission".into());
+        assert!(validate_component_host(&unsupported).is_err());
+        unsupported = manifest.clone();
+        unsupported.host.api = ">=2.0.0".into();
+        assert!(validate_component_host(&unsupported).is_err());
+        unsupported = manifest;
+        unsupported.workload.profile = "keel.guest/1".into();
+        assert!(validate_component_host(&unsupported).is_err());
+    }
+
     fn fixture_lock() -> LockFile {
         let spec = build_self_contained_service_spec(
             "Echo",
