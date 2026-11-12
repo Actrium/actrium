@@ -412,7 +412,7 @@ async fn v2_registration_preserves_original_material_for_credential_recovery() {
     let registered = attached.register(&server.url()).await.unwrap();
     mock.assert_async().await;
     let node = registered.attachment.unwrap().node;
-    let Some(RegistrationContext::Package { request: saved }) =
+    let Some(RegistrationContext::Package { request: saved, .. }) =
         node.preregistered_registration_context
     else {
         panic!("v2 package must retain package-mode recovery context");

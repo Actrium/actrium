@@ -1,4 +1,5 @@
 use actr_protocol::acl_rule::{Permission, SourceRealm};
+use actr_protocol::actor_key_proof::{ActorKeyProofOperation, sign_actor_key_proof};
 use actr_protocol::{
     Acl, AclRule, ActrRelay, ActrType, RegisterAuthMode, RegisterRequest, RegisterResponse,
     RelayDeliveryContext, RelayDeliveryStatus, RoleNegotiation, SIGNALING_ENVELOPE_VERSION,
@@ -551,6 +552,10 @@ fn client_key(label: &str) -> ed25519_dalek::SigningKey {
     ed25519_dalek::SigningKey::from_bytes(&seed)
 }
 
+fn actor_key(label: &str) -> ed25519_dalek::SigningKey {
+    client_key(&format!("actor-key:{label}"))
+}
+
 /// An `x-actr-client-proof` for `body`, signed by the key `label`.
 fn client_proof(
     op: actr_protocol::realm_membership::ProofOp,
@@ -710,7 +715,7 @@ async fn issuer_register_result(
     acl: Option<Acl>,
     key_label: Option<&str>,
 ) -> register_response::Result {
-    let register_req = RegisterRequest {
+    let mut register_req = RegisterRequest {
         actr_type: ActrType {
             publisher: publisher.to_string(),
             name: name.to_string(),
@@ -726,7 +731,14 @@ async fn issuer_register_result(
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_actor_key_proof(
+        &mut register_req,
+        ActorKeyProofOperation::Register,
+        &actor_key(&format!("{publisher}/{name}")),
+    );
     let client = test_http_client();
     let register_url = format!("{base_url}/issuer/register");
     let body = register_req.encode_to_vec();
@@ -1520,7 +1532,7 @@ async fn loran_end_to_end_register_and_health() {
     );
 
     // Register an actor via Issuer HTTP (protobuf body)
-    let register_req = RegisterRequest {
+    let mut register_req = RegisterRequest {
         actr_type: ActrType {
             publisher: "acme".to_string(),
             name: "device".to_string(),
@@ -1536,7 +1548,14 @@ async fn loran_end_to_end_register_and_health() {
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_actor_key_proof(
+        &mut register_req,
+        ActorKeyProofOperation::Register,
+        &actor_key("acme/device"),
+    );
     let body = register_req.encode_to_vec();
     let register_url = format!("{base}/issuer/register");
     let rsp_bytes = client
@@ -1787,7 +1806,7 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
     let client = reqwest::Client::new();
     let register_url = format!("{}/issuer/register", harness.base_url());
 
-    let register_req = RegisterRequest {
+    let mut register_req = RegisterRequest {
         actr_type: ActrType {
             publisher: "acme".to_string(),
             name: "realm-device".to_string(),
@@ -1803,7 +1822,14 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_actor_key_proof(
+        &mut register_req,
+        ActorKeyProofOperation::Register,
+        &actor_key("acme/realm-device"),
+    );
 
     let body = register_req.encode_to_vec();
     let rsp_bytes = client
@@ -2484,7 +2510,7 @@ async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachab
     );
     assert_eq!(body["signer_service"], "failed");
 
-    let register_req = RegisterRequest {
+    let mut register_req = RegisterRequest {
         actr_type: ActrType {
             publisher: "acme".to_string(),
             name: "svc".to_string(),
@@ -2500,7 +2526,14 @@ async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachab
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
+    sign_actor_key_proof(
+        &mut register_req,
+        ActorKeyProofOperation::Register,
+        &actor_key("acme/svc"),
+    );
     let body = register_req.encode_to_vec();
     let register_resp = client
         .post(format!("{base}/issuer/register"))
@@ -4139,6 +4172,8 @@ async fn signaling_rejects_register_request_via_ws() {
         target: None,
         auth_mode: None,
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     };
     let env = make_envelope(signaling_envelope::Flow::PeerToServer(
         actr_protocol::PeerToSignaling {
