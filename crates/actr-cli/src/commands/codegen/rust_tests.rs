@@ -605,3 +605,102 @@ fn qualified_scaffold_types_use_nested_parent_modules() {
         "crate::generated::ask::outer::InnerResponse"
     );
 }
+
+#[test]
+fn dotted_proto_modules_compile_cross_package_references_and_flat_aliases() {
+    let directory = TempDir::new().unwrap();
+    let output = directory.path().join("generated");
+    std::fs::create_dir(&output).unwrap();
+    for (name, source) in [
+        ("demo.rs", "pub struct Root;"),
+        ("common.rs", "pub struct External;"),
+        ("crate.rs", "pub struct RootKeyword;"),
+        (
+            "demo.types.rs",
+            "pub struct Payload { pub root: super::Root }",
+        ),
+        (
+            "demo.api.rs",
+            "pub struct Request {
+                pub payload: super::types::Payload,
+                pub external: super::super::common::External,
+                pub keyword: super::r#type::KeywordPayload,
+                pub keyword_prefix: super::super::r#gen::api::KeywordPrefix,
+                pub path_keyword: super::self_::PathKeyword,
+                pub root_keyword: super::super::crate_::RootKeyword,
+            }",
+        ),
+        ("demo.type.rs", "pub struct KeywordPayload;"),
+        ("gen.api.rs", "pub struct KeywordPrefix;"),
+        ("demo.self.rs", "pub struct PathKeyword;"),
+        ("demo.api.nested.rs", "pub type Request = super::Request;"),
+        (
+            "demo.types_actor.rs",
+            "pub type Payload = super::types::Payload;",
+        ),
+        ("common_client.rs", "pub struct Root;"),
+        ("common_client.nested.rs", "pub type Root = super::Root;"),
+    ] {
+        std::fs::write(output.join(name), source).unwrap();
+    }
+    tokio_test::block_on(RustGenerator.generate_mod_rs(&output)).unwrap();
+    let entry = directory.path().join("lib.rs");
+    std::fs::write(
+        &entry,
+        r#"
+mod generated;
+pub use generated::crate_::RootKeyword;
+pub use generated::demo_api::Request;
+pub use generated::demo_api_nested::Request as NestedRequest;
+pub use generated::demo_self::PathKeyword;
+pub use generated::demo_type::KeywordPayload;
+pub use generated::demo_types::Payload;
+pub use generated::demo_types_actor::Payload as ActorPayload;
+pub use generated::common_client_nested::Root;
+pub use generated::gen_api::KeywordPrefix;
+"#,
+    )
+    .unwrap();
+    let result = std::process::Command::new("rustc")
+        .args(["--edition=2024", "--crate-type=lib", "--emit=metadata"])
+        .arg(&entry)
+        .arg("--out-dir")
+        .arg(directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn dotted_proto_modules_reject_alias_collisions_with_package_prefixes() {
+    let directory = TempDir::new().unwrap();
+    for name in ["demo.api.rs", "demo_api.child.rs"] {
+        std::fs::write(directory.path().join(name), "").unwrap();
+    }
+    let error = tokio_test::block_on(RustGenerator.generate_mod_rs(directory.path())).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("conflicts with package module `demo_api`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn dotted_proto_modules_reject_collisions_after_keyword_escaping() {
+    let directory = TempDir::new().unwrap();
+    for name in ["demo.self.rs", "demo.self_.rs"] {
+        std::fs::write(directory.path().join(name), "").unwrap();
+    }
+    let error = tokio_test::block_on(RustGenerator.generate_mod_rs(directory.path())).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("both map to module `demo::self_`"),
+        "{error}"
+    );
+}
