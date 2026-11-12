@@ -53,6 +53,12 @@ pub struct ActorDescriptor {
 pub struct WorkloadDescriptor {
     pub profile: String,
     pub entry: String,
+    #[serde(
+        default,
+        rename = "rpc-contract",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rpc_contract: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keel: Option<KeelGuestDescriptor>,
 }
@@ -204,6 +210,45 @@ impl ActorPackageManifest {
             })
     }
 
+    /// Select the signed RPC Proto exported by a native Component.
+    pub fn component_rpc_contract(&self) -> Result<Option<&str>, PackError> {
+        let explicit = self.workload.rpc_contract.as_deref();
+        if self.workload.profile != "actr.component/1" {
+            return if explicit.is_some() {
+                Err(PackError::InvalidPackage(
+                    "workload.rpc-contract requires the actr.component/1 profile".into(),
+                ))
+            } else {
+                Ok(None)
+            };
+        }
+        let mut contracts = self.files.iter().filter_map(|file| {
+            (file.role == "contract" && file.path.ends_with(".proto")).then_some(file.path.as_str())
+        });
+        if let Some(path) = explicit {
+            return if contracts.any(|candidate| candidate == path) {
+                Ok(Some(path))
+            } else {
+                Err(PackError::InvalidPackage(format!(
+                    "workload.rpc-contract `{path}` must name a declared .proto with role `contract`"
+                )))
+            };
+        }
+        let mut local = contracts.filter(|path| {
+            !self
+                .dependencies
+                .values()
+                .any(|dependency| dependency.contract.as_deref() == Some(*path))
+        });
+        let contract = local.next();
+        if local.next().is_some() {
+            return Err(PackError::InvalidPackage(
+                "multiple RPC Proto exports; set workload.rpc-contract to select one".into(),
+            ));
+        }
+        Ok(contract)
+    }
+
     /// Read a declared entry from the same archive bytes that were verified.
     pub fn read_declared_file(
         &self,
@@ -331,6 +376,7 @@ impl ActorPackageManifest {
         for dependency in self.dependencies.values() {
             require_role(dependency.contract.as_deref(), "contract")?;
         }
+        self.component_rpc_contract()?;
         Ok(())
     }
 }
@@ -646,6 +692,7 @@ mod tests {
             workload: WorkloadDescriptor {
                 profile: KEEL_GUEST_PROFILE_V1.to_string(),
                 entry: "workload/guest.js".to_string(),
+                rpc_contract: None,
                 keel: Some(KeelGuestDescriptor {
                     runtime: "js".to_string(),
                     guest_api: KEEL_GUEST_PROFILE_V1.to_string(),

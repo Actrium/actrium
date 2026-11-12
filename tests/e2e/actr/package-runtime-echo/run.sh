@@ -401,6 +401,7 @@ version = "$SERVICE_VERSION"
 [workload]
 profile = "actr.component/1"
 entry = "workload/echo.wasm"
+rpc-contract = "contracts/echo.proto"
 
 [host]
 profile = "actr.host/1"

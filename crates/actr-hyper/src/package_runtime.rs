@@ -194,7 +194,10 @@ files = [{{ path = "echo/echo.proto", fingerprint = "{}" }}]
         .unwrap()
     }
 
-    fn verify_lock(lock: LockFile) -> HyperResult<Option<LockFile>> {
+    fn signed_fixture(
+        lock: LockFile,
+        rpc_contract: Option<&str>,
+    ) -> (Vec<u8>, ActorPackageManifest) {
         let payloads = BTreeMap::from([
             ("workload/main.wasm".to_owned(), Vec::new()),
             (
@@ -216,6 +219,7 @@ files = [{{ path = "echo/echo.proto", fingerprint = "{}" }}]
             workload: WorkloadDescriptor {
                 profile: "actr.component/1".into(),
                 entry: "workload/main.wasm".into(),
+                rpc_contract: rpc_contract.map(str::to_owned),
                 keel: None,
             },
             host: actr_pack::HostRequirements {
@@ -261,9 +265,14 @@ files = [{{ path = "echo/echo.proto", fingerprint = "{}" }}]
         })
         .unwrap();
         let verified = actr_pack::verify_actor_package(&bytes, &key.verifying_key()).unwrap();
+        (bytes, verified.manifest)
+    }
+
+    fn verify_lock(lock: LockFile) -> HyperResult<Option<LockFile>> {
+        let (bytes, manifest) = signed_fixture(lock, None);
         read_v2_lock(
             &bytes,
-            &verified.manifest,
+            &manifest,
             actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
         )
     }
@@ -280,5 +289,26 @@ files = [{{ path = "echo/echo.proto", fingerprint = "{}" }}]
         let mut lock = fixture_lock();
         lock.dependencies[0].files[0].fingerprint = "semantic:stale".into();
         assert!(verify_lock(lock).is_err());
+    }
+
+    #[test]
+    fn exports_an_explicit_rpc_contract_shared_with_a_dependency() {
+        use crate::service_spec::calculate_v2_service_spec;
+
+        let limit = actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES;
+        let (bytes, manifest) = signed_fixture(fixture_lock(), Some("contracts/dependency.proto"));
+        assert!(read_v2_lock(&bytes, &manifest, limit).unwrap().is_some());
+        let spec = calculate_v2_service_spec(&bytes, &manifest, limit)
+            .unwrap()
+            .unwrap();
+        assert_eq!(spec.name, "Caller");
+        assert_eq!(spec.protobufs[0].content, CONTRACT);
+
+        let (bytes, manifest) = signed_fixture(fixture_lock(), None);
+        assert!(
+            calculate_v2_service_spec(&bytes, &manifest, limit)
+                .unwrap()
+                .is_none()
+        );
     }
 }

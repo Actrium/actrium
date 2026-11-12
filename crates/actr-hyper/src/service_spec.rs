@@ -18,44 +18,27 @@ use std::io::Read;
 
 use crate::error::{HyperError, HyperResult};
 
-/// The native v2 profile exports at most one self-contained RPC Proto. Signed
-/// contract references for dependencies describe imports, never local exports.
+/// Build the v2 spec from the selected signed RPC Proto, if present.
 pub(crate) fn calculate_v2_service_spec(
     bytes: &[u8],
     manifest: &ActorPackageManifest,
     max_bytes: usize,
 ) -> HyperResult<Option<ServiceSpec>> {
-    let mut exports = manifest.files.iter().filter(|file| {
-        file.role == "contract"
-            && file.path.ends_with(".proto")
-            && !manifest
-                .dependencies
-                .values()
-                .any(|dependency| dependency.contract.as_deref() == Some(file.path.as_str()))
-    });
-    let Some(entry) = exports.next() else {
+    let Some(path) = manifest
+        .component_rpc_contract()
+        .map_err(|e| HyperError::InvalidManifest(e.to_string()))?
+    else {
         return Ok(None);
     };
-    if exports.next().is_some() {
-        return Err(HyperError::InvalidManifest(
-            "native v2 package must identify a single RPC Proto export".into(),
-        ));
-    }
     let content = manifest
-        .read_declared_file(bytes, &entry.path, max_bytes)
+        .read_declared_file(bytes, path, max_bytes)
         .map_err(|e| HyperError::InvalidManifest(e.to_string()))?;
-    let content = String::from_utf8(content).map_err(|e| {
-        HyperError::InvalidManifest(format!("read Proto `{}` as UTF-8: {e}", entry.path))
-    })?;
+    let content = String::from_utf8(content)
+        .map_err(|e| HyperError::InvalidManifest(format!("read Proto `{path}` as UTF-8: {e}")))?;
     build_self_contained_service_spec(
         &manifest.actor.name,
         ProtoFile {
-            name: entry
-                .path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&entry.path)
-                .to_owned(),
+            name: path.rsplit('/').next().unwrap_or(path).to_owned(),
             content,
             path: None,
         },
