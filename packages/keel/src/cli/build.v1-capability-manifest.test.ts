@@ -190,6 +190,7 @@ async function expectModalViolation(
           tempDir,
           'dist/capability-manifest.json'
         ),
+        v1GuestEntry: 'dist/bundle.js',
       })
     ).rejects.toThrow(expected);
   } finally {
@@ -217,6 +218,7 @@ async function buildManifest(entrySource: string): Promise<V1Manifest> {
       watch: false,
       contract,
       v1CapabilityManifest: manifestPath,
+      v1GuestEntry: 'dist/bundle.js',
     });
     return JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as V1Manifest;
   } finally {
@@ -245,6 +247,7 @@ async function expectBuildFailure(
           tempDir,
           'dist/capability-manifest.json'
         ),
+        v1GuestEntry: 'dist/bundle.js',
       })
     ).rejects.toThrow(expected);
   } finally {
@@ -347,6 +350,7 @@ export default function App() {
           tempDir,
           'dist/capability-manifest.json'
         ),
+        v1GuestEntry: 'dist/bundle.js',
       });
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -487,6 +491,7 @@ export default function App() {
             tempDir,
             'dist/capability-manifest.json'
           ),
+        v1GuestEntry: 'dist/bundle.js',
         })
       ).rejects.toThrow('provenance');
     } finally {
@@ -527,6 +532,7 @@ export default function App() {
         watch: false,
         contract,
         v1CapabilityManifest: manifestPath,
+      v1GuestEntry: 'dist/bundle.js',
       });
 
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -571,9 +577,7 @@ function keep() {
   return call({ route: 'keep.Route', payloadBase64: '' });
 }
 
-function aliased(payload: { route: string; payloadBase64: string }) {
-  return payload;
-}
+const aliased = globalThis.aliased;
 
 function send() {
   return aliased({ route: 'sneaky.Route', payloadBase64: '' });
@@ -761,6 +765,7 @@ export default function App() {
             tempDir,
             'dist/capability-manifest.json'
           ),
+        v1GuestEntry: 'dist/bundle.js',
         })
       ).rejects.toThrow('literal "route"');
     } finally {
@@ -781,5 +786,401 @@ export default function App() {
 `,
       'src/child.tsx': DIRECT_CHILD,
     });
+  });
+});
+
+describe('PR429 review regressions', () => {
+  it('rejects a computed key that can override a literal route', async () => {
+    await expectBuildFailure(
+      `
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+function send(key: string) {
+  return call({ route: 'allowed.Route', [key]: 'private.Route', payloadBase64: '' });
+}
+
+export default function App() {
+  return <View onLayout={() => void send('route')} />;
+}
+`,
+      'host:service'
+    );
+  });
+
+  it('rejects a component selected by an if/else branch', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+let C = View;
+if (globalThis.pickModal) C = Modal;
+else C = View;
+
+export default function App() {
+  return <C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('rejects a component selected by a switch branch', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+let C = View;
+switch (globalThis.pick) {
+  case 1: C = Modal; break;
+  default: C = View;
+}
+
+export default function App() {
+  return <C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('resolves a multi-hop alias to the SDK component', async () => {
+    const manifest = await buildManifest(`
+import { View } from 'keel/guest';
+
+const A = View;
+const B = A;
+const C = B;
+
+export default function App() {
+  return <C />;
+}
+`);
+    expect(manifest.components).toEqual(['View']);
+  });
+
+  it('resolves component factories reached through an alias', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { createElement } from 'react';
+import { Modal } from 'keel/guest';
+
+const h = createElement;
+
+export default function App() {
+  return h(Modal);
+}
+`,
+    });
+  });
+
+  it('rejects an object spread that overrides a component binding', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+const override = { C: Modal };
+const bag = { C: View, ...override };
+
+export default function App() {
+  return <bag.C />;
+}
+`,
+    });
+  });
+
+  it('rejects a dynamic member write on a component bag', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+const bag = { C: View };
+bag[globalThis.key] = Modal;
+
+export default function App() {
+  return <bag.C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('rejects a destructuring write to a component member', async () => {
+    await expectModalViolation(
+      {
+        'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+const bag = { C: View };
+({ C: bag.C } = { C: Modal });
+
+export default function App() {
+  return <bag.C />;
+}
+`,
+      },
+      'provenance'
+    );
+  });
+
+  it('records service events behind multi-hop aliases', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const listen = on;
+const subscribe = listen;
+
+export default function App() {
+  return <View onLayout={() => subscribe('private.Event', () => {})} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['private.Event']);
+  });
+
+  it('records service events behind argument forwarding', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+function wrap(fn) {
+  return fn('private.Event', () => {});
+}
+
+export default function App() {
+  return <View onLayout={() => wrap(on)} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['private.Event']);
+  });
+
+  it('records service events behind a wrapper spread', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const base = { on };
+const wrapper = { ...base };
+
+export default function App() {
+  return <View onLayout={() => wrapper.on('private.Event', () => {})} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['private.Event']);
+  });
+
+  it('records a route that is re-established after a spread', async () => {
+    const manifest = await buildManifest(`
+import { call } from 'host:service';
+import { View } from 'keel/guest';
+
+const middle = { route: 'middle.Route' };
+
+function send() {
+  return call({ route: 'allowed.Route', ...middle, route: 'final.Route', payloadBase64: '' });
+}
+
+export default function App() {
+  return <View onLayout={() => void send()} />;
+}
+`);
+    expect(manifest.hostModules.service.rpc).toEqual(['final.Route']);
+  });
+
+  it('allows React Fragment aliases', async () => {
+    const manifest = await buildManifest(`
+import { Fragment } from 'react';
+import { View } from 'keel/guest';
+
+const F = Fragment;
+
+export default function App() {
+  return (
+    <F>
+      <View />
+    </F>
+  );
+}
+`);
+    expect(manifest.components).toEqual(['View']);
+  });
+
+  it('rejects non-literal dynamic imports with --no-strict', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-dynamic-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+
+void import(globalThis.target);
+
+export default function App() {
+  return <View />;
+}
+`
+      );
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          strict: false,
+          contract,
+          v1CapabilityManifest: path.join(tempDir, 'dist/capability-manifest.json'),
+          v1GuestEntry: 'dist/bundle.js',
+        })
+      ).rejects.toThrow('non-literal dynamic import');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an absolute guestEntry', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-v1-entry-'));
+    try {
+      const srcDir = path.join(tempDir, 'src');
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, 'entry.tsx'),
+        `
+import { View } from 'keel/guest';
+export default function App() { return <View />; }
+`
+      );
+      await expect(
+        build({
+          entry: path.join(srcDir, 'entry.tsx'),
+          outfile: path.join(tempDir, 'dist/bundle.js'),
+          minify: true,
+          sourcemap: false,
+          watch: false,
+          contract,
+          v1CapabilityManifest: path.join(tempDir, 'dist/capability-manifest.json'),
+        })
+      ).rejects.toThrow('package-relative guestEntry');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('snapshots a member alias before the source object changes', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { Modal, View } from 'keel/guest';
+
+const bag = { C: Modal };
+const C = bag.C;
+bag.C = View;
+
+export default function App() {
+  return <C />;
+}
+`,
+    });
+  });
+
+  it('keeps a member alias when the source object changes later', async () => {
+    const manifest = await buildManifest(`
+import { Modal, View } from 'keel/guest';
+
+const bag = { C: View };
+const C = bag.C;
+bag.C = Modal;
+
+export default function App() {
+  return <C />;
+}
+`);
+    expect(manifest.components).toEqual(['View']);
+  });
+
+  it('rejects a component chosen through a member alias in a branch', async () => {
+    await expectBuildFailure(
+      `
+import { Modal, View } from 'keel/guest';
+
+const first = { C: View };
+const second = { C: Modal };
+let C = first.C;
+if (globalThis.pick) C = first.C;
+else C = second.C;
+
+export default function App() {
+  return <C />;
+}
+`,
+      'provenance'
+    );
+  });
+
+  it('rejects a non-React Fragment member on an arbitrary object', async () => {
+    await expectModalViolation({
+      'src/entry.tsx': `
+import { Modal } from 'keel/guest';
+
+const bag = { Fragment: Modal };
+const F = bag.Fragment;
+
+export default function App() {
+  return <F />;
+}
+`,
+    });
+  });
+
+  it('resolves a service wrapper declared after the caller', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+export default function App() {
+  return <View onLayout={() => wrap(on)} />;
+}
+
+function wrap(fn) {
+  return fn('hoisted.Event', () => {});
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['hoisted.Event']);
+  });
+
+  it('resolves a service alias declared after the caller', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+export default function App() {
+  return <View onLayout={() => subscribe('late-alias.Event', () => {})} />;
+}
+
+const subscribe = on;
+`);
+    expect(manifest.hostModules.service.events).toEqual(['late-alias.Event']);
+  });
+
+  it('resolves a service method assigned through a destructuring member target', async () => {
+    const manifest = await buildManifest(`
+import { on } from 'host:service';
+import { View } from 'keel/guest';
+
+const wrapper = { on: function () {} };
+({ on: wrapper.on } = { on });
+
+export default function App() {
+  return <View onLayout={() => wrapper.on('destructured.Event', () => {})} />;
+}
+`);
+    expect(manifest.hostModules.service.events).toEqual(['destructured.Event']);
   });
 });

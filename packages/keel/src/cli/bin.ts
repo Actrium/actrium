@@ -38,6 +38,10 @@ program
     '--v1-capability-manifest <path>',
     'Output the v1-shaped capability manifest (schemaVersion/keelApi/guestEntry/imports/hostModules/components)'
   )
+  .option(
+    '--v1-guest-entry <path>',
+    'Package-relative guest entry for the v1 capability manifest (required when --outfile is outside the package root)'
+  )
   .option('--no-strict', 'Disable strict post-build dependency guard (not recommended)')
   .option(
     '--strict-peer-versions',
@@ -67,6 +71,9 @@ program
       }
       if (options.v1CapabilityManifest !== undefined) {
         buildOpts.v1CapabilityManifest = options.v1CapabilityManifest;
+      }
+      if (options.v1GuestEntry !== undefined) {
+        buildOpts.v1GuestEntry = options.v1GuestEntry;
       }
       if (options.footer !== undefined) {
         buildOpts.footer = options.footer;

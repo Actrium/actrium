@@ -77,6 +77,14 @@ export interface BuildOptions {
   v1CapabilityManifest?: string;
 
   /**
+   * Package-relative guest entry written to the v1 capability manifest.
+   * v1 packages address the entry inside the package, so an absolute build
+   * path must be mapped explicitly (or the build must run inside the package
+   * root).
+   */
+  v1GuestEntry?: string;
+
+  /**
    * Custom footer file path (replaces default auto-render footer)
    * Used for custom render logic (e.g., a host-specific layout hook)
    */
@@ -965,9 +973,18 @@ export async function build(options: BuildOptions): Promise<void> {
     const { analyzeModuleIDs, analyzeBundleComponents, analyzeServiceUsage } = await import(
       './oxc-adapter'
     );
-    bundleImports = analyzeModuleIDs(bundleCode).static.filter(
+    const moduleScan = analyzeModuleIDs(bundleCode);
+    bundleImports = [...moduleScan.static, ...moduleScan.dynamicLiteral].filter(
       (moduleId) => !moduleId.startsWith('.') && !moduleId.startsWith('host:')
     );
+    // A non-literal dynamic import cannot be listed in the v1 manifest, so the
+    // manifest would silently under-report the guest's dependencies. Reject it
+    // even when the generic strict guard is disabled.
+    if (v1CapabilityManifest && (moduleScan.dynamicNonLiteral > 0 || moduleScan.evalCount > 0)) {
+      throw new Error(
+        `v1 capability manifest cannot describe ${moduleScan.dynamicNonLiteral} non-literal dynamic import(s) or ${moduleScan.evalCount} eval call(s)`
+      );
+    }
     // A separate unminified build lets the bundler resolve aliases, barrel
     // re-exports and dynamic imports. The lowered pass alone cannot recover
     // renamed guest bindings in a minified bundle.
@@ -1183,9 +1200,15 @@ ${footerCode}
     // only when they stay inside the build directory; keep other paths as-is.
     const cwdPrefix = process.cwd() + path.sep;
     const guestEntry =
-      path.isAbsolute(outfile) && outfile.startsWith(cwdPrefix)
+      options.v1GuestEntry ??
+      (path.isAbsolute(outfile) && outfile.startsWith(cwdPrefix)
         ? path.relative(process.cwd(), outfile)
-        : outfile;
+        : outfile);
+    if (path.isAbsolute(guestEntry)) {
+      throw new Error(
+        'v1 capability manifest requires a package-relative guestEntry; pass --v1-guest-entry or build inside the package root'
+      );
+    }
     writeJsonFile(
       v1CapabilityManifest,
       createV1CapabilityManifest(
